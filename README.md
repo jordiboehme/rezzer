@@ -25,6 +25,7 @@ Rezzer replaces that with one tool that knows the formats. The agent asks for a 
 - **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder.
 - **Provenance:** every result says where it came from: original path, checksum, source date and how it was read. If Rezzer couldn't read a part, the result says that too.
 - **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version. Your knowledge keeps its source, even after the original file is moved or deleted.
+- **Evidence on demand:** the frontmatter cites the archived source as `rezzer://sha256/<hash>/<name>`. Ask Rezzer for that reference and it hands out the original: its place in the archive, a copy in a folder of your choice, or the file itself. Every piece of knowledge links back to its evidence, and Rezzer can check that the evidence is unchanged.
 
 A spreadsheet could come out like this (the format is not final yet):
 
