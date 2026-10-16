@@ -23,6 +23,8 @@ Rezzer replaces that with one tool that knows the formats. The agent asks for a 
 - **Diagrams as Mermaid:** charts, SmartArt, draw.io and Visio drawings become Mermaid blocks an agent can read and reason about.
 - **Pictures:** images are extracted to files and marked in the text with their caption and position. A multimodal agent can look at them and describe them.
 - **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder.
+- **Provenance:** every result says where it came from: original path, checksum, source date and how it was read. If Rezzer couldn't read a part, the result says that too.
+- **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version. Your knowledge keeps its source, even after the original file is moved or deleted.
 
 A spreadsheet could come out like this (the format is not final yet):
 
