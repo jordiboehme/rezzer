@@ -1,3 +1,6 @@
 /target/
 /spike/
 .DS_Store
+/AGENTS.md
+/docs/superpowers/
+/.superpowers/
