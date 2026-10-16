@@ -83,6 +83,16 @@ Planned after that:
 
 For engineering files the agent gets what matters to an engineer: units, layers, parts lists, assembly and feature trees, sketch constraints, parameters, materials and print settings. Assembly and feature trees come out as Mermaid. Closed formats like Creo or SolidWorks only give up their metadata, so Rezzer asks for a STEP export instead.
 
+## Sending files to a remote Rezzer
+
+Locally, the agent just passes a file path. When Rezzer runs on another machine (server mode), the agent sends the file in three steps:
+
+1. The agent tells Rezzer the file name (and what it knows about the file). Rezzer answers with a one-time upload address that expires after a few minutes, and the exact `curl` command to use.
+2. The agent uploads the file. Rezzer archives it and starts the conversion as a job. The answer holds the job id, the source reference and what to do next.
+3. The agent asks for the job. When it's done, it gets the Markdown inline, as a download or written to a folder.
+
+Clients that support MCP tasks can follow the job natively. All others use the job id. MCP has no standard file upload yet. When it gets one, Rezzer will support it next to this.
+
 ## Optional extras
 
 These come as opt-in features or as a prebuilt image. The core stays small.
