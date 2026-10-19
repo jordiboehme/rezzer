@@ -1,0 +1,115 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Wednesdays 03:41 UTC.
+    - cron: '41 3 * * 3'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to run each fuzz target
+        type: string
+        default: '300'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The fuzz targets are the files in fuzz/fuzz_targets/, one target per
+  # file (the cargo-fuzz layout). No fuzz/ directory or no target means an
+  # empty list, and the run job is skipped: a matrix over an empty list is an
+  # error, not a skip.
+  list:
+    name: list fuzz targets
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    outputs:
+      has: ${{ steps.list.outputs.has }}
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List the targets
+        id: list
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          names=()
+          for f in fuzz/fuzz_targets/*.rs; do
+            name="$(basename "$f" .rs)"
+            # A target name ends up in a command line and an artifact name.
+            case "$name" in
+              *[!A-Za-z0-9_-]*) echo "::error::unexpected fuzz target name '$name'"; exit 1 ;;
+            esac
+            names+=("$name")
+          done
+          if [ "${#names[@]}" -eq 0 ]; then
+            echo "list: no fuzz targets, so the fuzz job is skipped."
+            echo "has=false" >>"$GITHUB_OUTPUT"
+            echo "targets=[]" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          targets="$(printf '%s\n' "${names[@]}" | jq -R . | jq -cs .)"
+          echo "list: $targets"
+          echo "has=true" >>"$GITHUB_OUTPUT"
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    needs: list
+    if: ${{ needs.list.outputs.has == 'true' }}
+    # Build time plus the run time per target.
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.list.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      SECONDS_INPUT: ${{ inputs.seconds }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cargo-fuzz needs nightly for the sanitizer flags. The fuzz crate is
+      # outside the workspace, and `cargo +nightly` overrides the stable pin
+      # in rust-toolchain.toml.
+      - name: Install nightly
+        run: rustup toolchain install nightly --profile minimal
+
+      # cargo-fuzz is not in install-action's manifests. --locked builds it
+      # from its own Cargo.lock.
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Run the target
+        run: |
+          set -euo pipefail
+          seconds="${SECONDS_INPUT:-300}"
+          case "$seconds" in
+            ''|*[!0-9]*) echo "::error::seconds must be a whole number, got '$seconds'"; exit 1 ;;
+          esac
+          # -max_total_time ends the run after that many seconds; a crash or
+          # a leak ends it earlier with a non-zero exit and writes the input
+          # to fuzz/artifacts/<target>/.
+          cargo +nightly fuzz run "$TARGET" -- -max_total_time="$seconds"
+
+      - name: Upload crash inputs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: warn
