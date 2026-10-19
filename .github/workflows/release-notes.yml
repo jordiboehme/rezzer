@@ -1,0 +1,86 @@
+name: Release notes sync
+
+# release-notes/<tag>.md is the one source of truth for a release page's
+# body. A correction to old notes is a commit to the file: once it lands on
+# main, this workflow re-applies the file to its published release.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release-notes/v*.md'
+  # Syncs every file rather than a diff, so a run after a missed push always
+  # brings the pages back to what is in the tree.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-notes
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: sync
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release edit rewrites a release's notes
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The push diff below needs github.event.before, which the default
+          # shallow clone does not have.
+          fetch-depth: 0
+
+      - name: Sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          files=()
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            case "$BEFORE" in
+              ''|0000000000000000000000000000000000000000)
+                echo "no usable base commit, syncing every file"
+                ;;
+              *)
+                # --diff-filter=d drops deletions: a removed file has
+                # nothing left to sync.
+                mapfile -t files < <(git diff --name-only --diff-filter=d \
+                  "$BEFORE" "$GITHUB_SHA" -- 'release-notes/v*.md')
+                if [ "${#files[@]}" -eq 0 ]; then
+                  echo "no release notes files changed"
+                  exit 0
+                fi
+                ;;
+            esac
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            shopt -s nullglob
+            files=(release-notes/v*.md)
+            shopt -u nullglob
+          fi
+
+          for file in "${files[@]}"; do
+            [ -f "$file" ] || continue
+            tag="$(basename "$file" .md)"
+            # No release for the tag yet is the normal case for notes that
+            # landed before the tag was pushed.
+            if ! remote="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+                  --json body --jq .body 2>/dev/null)"; then
+              echo "no release yet: $tag"
+              continue
+            fi
+            # Command substitution trims trailing newlines on both sides.
+            local_body="$(cat "$file")"
+            if [ "$remote" = "$local_body" ]; then
+              echo "unchanged: $tag"
+              continue
+            fi
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$file"
+            echo "updated: $tag"
+          done

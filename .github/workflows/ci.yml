@@ -26,7 +26,7 @@ jobs:
   # 1. There is no Cargo.toml at the root yet. main held only documentation
   #    before the workspace landed.
   # 2. The change touches documentation only: root-level *.md, docs/**,
-  #    LICENSE, .github/*.md, .github/badges/** and .github/FUNDING.yml.
+  #    release-notes/**, LICENSE, .github/*.md, .github/badges/** and .github/FUNDING.yml.
   #
   # Everything else counts as code, including .github/workflows/** (a
   # workflow change has to exercise itself) and markdown deeper in the tree.
@@ -112,7 +112,7 @@ jobs:
             [ -n "$f" ] || continue
             case "$f" in
               .github/workflows/*) verdict=code ;;
-              docs/*)              verdict=docs ;;
+              docs/*|release-notes/*) verdict=docs ;;
               LICENSE|LICENSE.md|LICENSE.txt) verdict=docs ;;
               .github/badges/*|.github/FUNDING.yml|.github/*.md) verdict=docs ;;
               */*)                 verdict=code ;;
