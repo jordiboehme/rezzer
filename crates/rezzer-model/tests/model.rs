@@ -180,6 +180,7 @@ fn full_document() -> Document {
         role: Some(Role::Result),
         pattern: Some("g1".into()),
         latex: Some("\\sum C".into()),
+        note: Some("holds 11 of 11 rows".into()),
     });
     doc.facets.graphs.push(Graph {
         id: "deps".into(),
@@ -525,4 +526,19 @@ fn images_rules_and_alignment_round_trip() {
     );
     let s: Inline = serde_json::from_str(r#"{"type":"text","text":"x","strike":true}"#).unwrap();
     assert!(matches!(s, Inline::Text { strike: true, .. }));
+}
+
+#[test]
+fn formula_note_is_optional() {
+    let json = r#"{"anchor":"A1","expression":"=1","dialect":"excel"}"#;
+    let f: Formula = serde_json::from_str(json).expect("formula without note");
+    assert_eq!(f.note, None);
+    let back = serde_json::to_string(&f).unwrap();
+    assert!(!back.contains("note"), "{back}");
+    let with = Formula {
+        note: Some("seen in data".into()),
+        ..f
+    };
+    let back = serde_json::to_string(&with).unwrap();
+    assert!(back.contains(r#""note":"seen in data""#), "{back}");
 }

@@ -99,6 +99,7 @@ fn formula(anchor: &str, expr: &str, refs: &[&str], pattern: Option<&str>) -> Fo
         role: Some(Role::Result),
         pattern: pattern.map(Into::into),
         latex: None,
+        note: None,
     }
 }
 

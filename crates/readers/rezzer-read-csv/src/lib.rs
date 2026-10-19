@@ -313,6 +313,7 @@ impl Reader for CsvReader {
                 role: Some(Role::Result),
                 pattern: Some(format!("holds {} of {} rows", d.holds, d.checked)),
                 latex: None,
+                note: None,
             });
         }
 
