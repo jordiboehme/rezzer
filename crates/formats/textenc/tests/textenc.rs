@@ -114,3 +114,20 @@ fn iso_2022_jp() {
     assert_eq!(d.encoding, "ISO-2022-JP");
     assert_eq!(d.text, "こんにちは\n");
 }
+
+#[test]
+fn non_ascii_only_in_the_middle_of_a_large_input_decodes() {
+    let ascii = b"plain ascii line\n".repeat(90_000);
+    let mut bytes = ascii.clone();
+    let sjis = [0x82, 0xB1, 0x82, 0xF1, 0x82, 0xC9, 0x82, 0xBF, 0x82, 0xCD];
+    for _ in 0..50 {
+        bytes.extend_from_slice(&sjis);
+        bytes.push(b'\n');
+    }
+    bytes.extend_from_slice(&ascii);
+    bytes.extend_from_slice(&ascii);
+    assert!(bytes.len() > 3 * 1024 * 1024 / 2 * 2 - 100_000);
+    let d = decode(&bytes);
+    assert_eq!(d.encoding, "Shift_JIS");
+    assert!(d.confident);
+}

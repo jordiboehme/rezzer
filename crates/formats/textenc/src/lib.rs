@@ -13,8 +13,11 @@
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::{Encoding, ISO_2022_JP, UTF_8};
 
-/// How much of the input is shown to the statistical detector.
-const DETECT_BYTES: usize = 1024 * 1024;
+/// Inputs up to this size are shown whole to the statistical detector.
+const DETECT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Size of each sample (start, middle, end) of a larger input.
+const SAMPLE_BYTES: usize = 8 * 1024 * 1024;
 
 /// The line ending style found in a text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +54,8 @@ pub struct Decoded {
 ///
 /// Order: byte order mark, strict UTF-8, then `chardetng` (no top-level domain hint, UTF-8 not
 /// allowed as a guess because strict UTF-8 already failed). Input that is valid UTF-8 but holds
-/// ISO-2022-JP escape sequences is decoded as ISO-2022-JP. Inputs over 1 MiB are sampled at
-/// the start and the end for detection; the whole input is decoded.
+/// ISO-2022-JP escape sequences is decoded as ISO-2022-JP. Inputs up to 64 MiB are shown whole to
+/// the detector, larger ones are sampled (start, middle, end); the whole input is decoded.
 pub fn decode(bytes: &[u8]) -> Decoded {
     if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
         return finish(enc, &bytes[bom_len..], true);
@@ -73,16 +76,18 @@ pub fn decode(bytes: &[u8]) -> Decoded {
     finish(guess(bytes), bytes, false)
 }
 
-/// Asks the statistical detector. Inputs up to 1 MiB are shown whole; larger ones as the first
-/// and the last half MiB, so text that is plain ASCII at the start is still detected.
+/// Asks the statistical detector. The detector is streaming and linear, so inputs up to
+/// 64 MiB are fed whole; larger ones as 8 MiB from the start, the middle and the end.
 fn guess(bytes: &[u8]) -> &'static Encoding {
     let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
     if bytes.len() <= DETECT_BYTES {
         detector.feed(bytes, true);
     } else {
-        let half = DETECT_BYTES / 2;
-        detector.feed(&bytes[..half], false);
-        detector.feed(&bytes[bytes.len() - half..], true);
+        let len = bytes.len();
+        let mid = len / 2 - SAMPLE_BYTES / 2;
+        detector.feed(&bytes[..SAMPLE_BYTES], false);
+        detector.feed(&bytes[mid..mid + SAMPLE_BYTES], false);
+        detector.feed(&bytes[len - SAMPLE_BYTES..], true);
     }
     detector.guess(None, Utf8Detection::Deny)
 }
