@@ -1488,3 +1488,11 @@ fn zip_after_a_stub_is_zip_likely() {
     noise.extend_from_slice(&[0u8; 18]);
     assert_eq!(detect("x", &noise).0, FormatId::Unknown);
 }
+
+#[test]
+fn multi_document_yaml_with_comment_and_list_is_not_markdown() {
+    let k8s =
+        b"---\napiVersion: v1\nkind: Pod\n---\n# second resource\nkind: List\nitems:\n- a\n- b\n";
+    let (f, d) = detect("k8s.yaml", k8s);
+    assert_eq!(f, FormatId::Text, "{}", d.evidence);
+}

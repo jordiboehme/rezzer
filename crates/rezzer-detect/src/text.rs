@@ -593,12 +593,15 @@ fn markdown_frontmatter(lines: &[&str]) -> Option<Found> {
 fn markdown_syntax(lines: &[&str]) -> Option<Found> {
     let mut kinds = Vec::new();
     let is_hash = |l: &str| l.starts_with('#');
-    let fence = frontmatter_end(lines).map(|(end, _)| end);
+    // The closing frontmatter fence counts as a blank line before a heading, but only when
+    // the body has no `key:` lines: there a `#` line is a comment in a later YAML document.
+    let fence = frontmatter_end(lines)
+        .map(|(end, _)| end)
+        .filter(|&end| !lines[end + 1..].iter().any(|l| yaml_key_line(l.trim_end())));
     let heading = lines.iter().enumerate().any(|(i, l)| {
         let level = l.bytes().take_while(|&b| b == b'#').count();
         let atx = (1..=6).contains(&level) && l[level..].starts_with(' ');
-        // Shell and Python comments come in runs; a heading stands alone. The closing fence
-        // of frontmatter counts as a blank line before it.
+        // Shell and Python comments come in runs; a heading stands alone.
         let after_fence = i > 0 && fence == Some(i - 1);
         let alone = (i == 0 || lines[i - 1].trim().is_empty() || after_fence)
             && lines.get(i + 1).is_none_or(|n| !is_hash(n));
