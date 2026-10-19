@@ -22,6 +22,9 @@ const CENTRAL: &[u8] = b"PK\x01\x02";
 const LOCAL: &[u8] = b"PK\x03\x04";
 /// How far before the ZIP64 locator the ZIP64 end record is searched.
 const EOCD64_SEARCH: usize = 64 * 1024;
+/// Most deflate input read for one entry. Real data that inflates to the 64 KiB budget is
+/// far smaller; only padding such as empty blocks gets this long.
+const MAX_INFLATE_INPUT: usize = 1024 * 1024;
 
 /// One entry of interest, as found in the central directory.
 #[derive(Debug, Clone, Copy)]
@@ -61,6 +64,12 @@ struct Directory {
     shift: u64,
 }
 
+/// True when a consistent end record with at least one entry sits in the tail of `bytes`,
+/// for archives behind a stub (self-extracting archives).
+pub(crate) fn has_directory(bytes: &[u8]) -> bool {
+    locate(bytes).is_ok_and(|d| d.size > 0 && d.count != Some(0))
+}
+
 /// Walks the central directory. Markers are compared without regard to ASCII case. The walk
 /// stops early once the marker at `stop_marker` is found.
 pub(crate) fn walk(bytes: &[u8], markers: &[&str], stop_marker: Option<usize>) -> Walk {
@@ -89,6 +98,12 @@ pub(crate) fn walk(bytes: &[u8], markers: &[&str], stop_marker: Option<usize>) -
     loop {
         match dir.count {
             Some(n) if listing.entries == n => break,
+            Some(_) if p >= end => {
+                return Walk::Unreadable(format!(
+                    "the directory ends before entry {}",
+                    listing.entries + 1
+                ));
+            }
             None if p >= end => break,
             _ => {}
         }
@@ -150,8 +165,15 @@ fn from_eocd(bytes: &[u8], pos: usize) -> Option<Directory> {
     let locator = pos
         .checked_sub(20)
         .filter(|&l| bytes[l..].starts_with(LOCATOR));
-    if saturated && let Some(loc) = locator {
-        return from_locator(bytes, loc);
+    // A valid ZIP64 record wins even when the classic fields are not saturated, as in
+    // readers; some writers always emit one.
+    if let Some(loc) = locator {
+        if let Some(dir) = from_locator(bytes, loc) {
+            return Some(dir);
+        }
+        if saturated {
+            return None;
+        }
     }
     if size == 0xFFFF_FFFF || offset == 0xFFFF_FFFF {
         return None;
@@ -163,6 +185,13 @@ fn from_eocd(bytes: &[u8], pos: usize) -> Option<Directory> {
 
 /// ZIP64: the end record is searched from the locator's offset up to the locator, as readers
 /// do when a stub or junk shifts the archive.
+///
+/// The search covers only 64 KiB after the claimed offset, so the work stays bounded. When the
+/// record is moved further (bytes inside the archive, or a stub of more than 64 KiB in front of
+/// a self-extracting archive whose offsets were not adjusted), this returns None. That is
+/// safe: with unsaturated classic fields the caller falls back to them and the gap shift still
+/// finds the directory; only a saturated classic record then gives "not readable" (Zip,
+/// Likely, or Unknown for a file behind a stub), although full readers may open it.
 fn from_locator(bytes: &[u8], loc: usize) -> Option<Directory> {
     let claimed = usize::try_from(u64_at(bytes, loc + 8)?).ok()?;
     let from = claimed.min(loc);
@@ -182,9 +211,10 @@ fn from_locator(bytes: &[u8], loc: usize) -> Option<Directory> {
 
 /// Finds where a directory of `size` bytes at `offset` really starts, given the record after
 /// it at `anchor`. Candidate shifts, in order: the one derived from a moved ZIP64 record,
-/// the gap between the directory end and `anchor` (bytes in front of the archive), and none.
+/// none, and the gap between the directory end and `anchor` (bytes in front of the archive).
 /// The first candidate that lands on a central directory header (or an empty directory)
-/// wins.
+/// wins. No shift comes before the gap: bytes between the directory and `anchor` can make
+/// the gap land on a later header, while a stub's bytes at the raw offset are not a header.
 fn directory(
     bytes: &[u8],
     anchor: u64,
@@ -195,7 +225,7 @@ fn directory(
 ) -> Option<Directory> {
     let end = offset.checked_add(size)?;
     let gap = anchor.checked_sub(end);
-    [moved, gap, Some(0)]
+    [moved, Some(0), gap]
         .into_iter()
         .flatten()
         .find_map(|shift| {
@@ -267,9 +297,14 @@ fn central_header(bytes: &[u8], p: u64, shift: u64) -> Option<(Entry, &[u8], u64
 
 /// Reads an entry's data, stored or deflated, within `budget` (which shrinks by what was
 /// read). None when the entry is encrypted, uses another method, is larger than the budget
-/// or is broken.
+/// or is broken. Nothing larger than the budget is copied: a stored entry must declare the
+/// same compressed and uncompressed size, and deflate input stops after
+/// [`MAX_INFLATE_INPUT`] bytes.
 pub(crate) fn read(bytes: &[u8], entry: &Entry, budget: &mut u64) -> Option<Vec<u8>> {
     if entry.flags & 1 != 0 || entry.uncompressed > *budget {
+        return None;
+    }
+    if entry.method == 0 && entry.compressed != entry.uncompressed {
         return None;
     }
     let at = usize::try_from(entry.local).ok()?;
@@ -286,7 +321,8 @@ pub(crate) fn read(bytes: &[u8], entry: &Entry, budget: &mut u64) -> Option<Vec<
         8 => {
             let mut out = Vec::new();
             // One byte more than allowed tells a full read from a cut one.
-            flate2::read::DeflateDecoder::new(raw)
+            let input = &raw[..raw.len().min(MAX_INFLATE_INPUT)];
+            flate2::read::DeflateDecoder::new(input)
                 .take(*budget + 1)
                 .read_to_end(&mut out)
                 .ok()?;
@@ -312,4 +348,140 @@ pub(crate) fn u32_at(b: &[u8], at: usize) -> Option<u32> {
 
 pub(crate) fn u64_at(b: &[u8], at: usize) -> Option<u64> {
     Some(u64::from_le_bytes(b.get(at..at + 8)?.try_into().ok()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    use super::*;
+
+    /// Records the largest single allocation made by the current thread while armed.
+    struct Largest;
+
+    thread_local! {
+        static ARMED: Cell<bool> = const { Cell::new(false) };
+        static LARGEST: Cell<usize> = const { Cell::new(0) };
+    }
+
+    // SAFETY: forwards to the system allocator; only reads and writes thread-local cells.
+    unsafe impl GlobalAlloc for Largest {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let _ = ARMED.try_with(|armed| {
+                if armed.get() {
+                    let _ = LARGEST.try_with(|l| l.set(l.get().max(layout.size())));
+                }
+            });
+            // SAFETY: same layout contract as the caller's.
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            // SAFETY: `ptr` came from `System.alloc` with this layout.
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static GLOBAL: Largest = Largest;
+
+    /// Runs `f` and returns its result with the largest allocation it made.
+    fn largest_allocation<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        LARGEST.with(|l| l.set(0));
+        ARMED.with(|a| a.set(true));
+        let out = f();
+        ARMED.with(|a| a.set(false));
+        (out, LARGEST.with(Cell::get))
+    }
+
+    /// A local header for `name` followed by `data`, at offset 0.
+    fn local(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut out = LOCAL.to_vec();
+        out.extend_from_slice(&[0u8; 22]);
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        out
+    }
+
+    #[test]
+    fn stored_entry_is_not_copied_beyond_its_size() {
+        let mut data = b"application/vnd.oasis.opendocument.text".to_vec();
+        data.resize(1 << 20, b'x');
+        let bytes = local("mimetype", &data);
+        let entry = Entry {
+            flags: 0,
+            method: 0,
+            compressed: data.len() as u64,
+            uncompressed: 39,
+            local: 0,
+        };
+        let mut budget = 64 * 1024;
+        let (out, largest) = largest_allocation(|| read(&bytes, &entry, &mut budget));
+        assert!(out.is_none());
+        assert!(largest < 64 * 1024, "allocated {largest} bytes");
+        assert_eq!(budget, 64 * 1024);
+    }
+
+    #[test]
+    fn stored_entry_within_budget_is_read() {
+        let bytes = local("mimetype", b"application/epub+zip");
+        let entry = Entry {
+            flags: 0,
+            method: 0,
+            compressed: 20,
+            uncompressed: 20,
+            local: 0,
+        };
+        let mut budget = 64 * 1024;
+        assert_eq!(
+            read(&bytes, &entry, &mut budget).as_deref(),
+            Some(&b"application/epub+zip"[..])
+        );
+        assert_eq!(budget, 64 * 1024 - 20);
+    }
+
+    /// `empty` empty stored deflate blocks, then a final stored block with `data`.
+    fn deflate_with_empty_blocks(empty: usize, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(empty * 5 + data.len() + 5);
+        for _ in 0..empty {
+            out.extend_from_slice(&[0x00, 0x00, 0x00, 0xFF, 0xFF]);
+        }
+        let len = data.len() as u16;
+        out.push(0x01);
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(data);
+        out
+    }
+
+    fn deflated(stream: &[u8], uncompressed: u64) -> (Vec<u8>, Entry) {
+        let bytes = local("mimetype", stream);
+        let entry = Entry {
+            flags: 0,
+            method: 8,
+            compressed: stream.len() as u64,
+            uncompressed,
+            local: 0,
+        };
+        (bytes, entry)
+    }
+
+    #[test]
+    fn deflate_reads_at_most_one_mib_of_input() {
+        // 2 MiB of empty blocks before the data: input past 1 MiB is never read.
+        let stream = deflate_with_empty_blocks(2 * 1024 * 1024 / 5, b"hello");
+        let (bytes, entry) = deflated(&stream, 5);
+        let mut budget = 64 * 1024;
+        assert!(read(&bytes, &entry, &mut budget).is_none());
+        // A few empty blocks are fine.
+        let stream = deflate_with_empty_blocks(10, b"hello");
+        let (bytes, entry) = deflated(&stream, 5);
+        assert_eq!(
+            read(&bytes, &entry, &mut budget).as_deref(),
+            Some(&b"hello"[..])
+        );
+    }
 }

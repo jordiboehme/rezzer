@@ -1236,7 +1236,7 @@ fn zip_without_consistent_end_record_is_not_readable() {
     assert_eq!(f, FormatId::Zip);
     assert_eq!(d.confidence, Confidence::Likely);
     assert!(
-        d.evidence.contains("zip directory not readable"),
+        d.evidence.contains("the zip directory is not readable"),
         "{}",
         d.evidence
     );
@@ -1315,4 +1315,176 @@ fn max_rss_bytes() -> u64 {
     } else {
         v * 1024
     }
+}
+
+// ---- Re-review 2: bounded stored markers, zip64 shift order, markdown after frontmatter ----
+
+/// A ZIP of stored entries written by hand: `(name, data, comment)`. `between` is put
+/// between the central directory and the ZIP64 records (if `zip64`) or the end record.
+/// The end record is never saturated.
+fn stored_zip(entries: &[(&str, &[u8], &[u8])], zip64: bool, between: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data, comment) in entries {
+        let offset = out.len() as u32;
+        let len = (data.len() as u32).to_le_bytes();
+        out.extend_from_slice(b"PK\x03\x04");
+        out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&[0u8; 4]); // crc
+        out.extend_from_slice(&len);
+        out.extend_from_slice(&len);
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(b"PK\x01\x02");
+        central.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        central.extend_from_slice(&[0u8; 4]); // crc
+        central.extend_from_slice(&len);
+        central.extend_from_slice(&len);
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes()); // extra
+        central.extend_from_slice(&(comment.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0u8; 8]); // disk, attrs
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+        central.extend_from_slice(comment);
+    }
+    let n = entries.len() as u16;
+    let cd_offset = out.len() as u32;
+    let cd_size = central.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(between);
+    if zip64 {
+        let z64 = out.len() as u64;
+        out.extend_from_slice(b"PK\x06\x06");
+        out.extend_from_slice(&44u64.to_le_bytes());
+        out.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&u64::from(n).to_le_bytes());
+        out.extend_from_slice(&u64::from(n).to_le_bytes());
+        out.extend_from_slice(&u64::from(cd_size).to_le_bytes());
+        out.extend_from_slice(&u64::from(cd_offset).to_le_bytes());
+        out.extend_from_slice(b"PK\x06\x07");
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&z64.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+    }
+    out.extend_from_slice(b"PK\x05\x06");
+    out.extend_from_slice(&[0u8; 4]);
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&cd_size.to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+/// Three stored docx entries whose first central header is exactly 76 bytes long, the size
+/// of a ZIP64 end record plus locator.
+fn docx_with_76_byte_first_header(zip64: bool, between: &[u8]) -> Vec<u8> {
+    let ct = content_types(
+        r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    );
+    let comment = b"eleven byte";
+    assert_eq!(46 + "[Content_Types].xml".len() + comment.len(), 76);
+    stored_zip(
+        &[
+            ("[Content_Types].xml", &ct, comment),
+            ("word/document.xml", b"<w/>", b""),
+            ("_rels/.rels", b"<r/>", b""),
+        ],
+        zip64,
+        between,
+    )
+}
+
+#[test]
+fn zip64_records_with_unsaturated_end_record_and_76_byte_header() {
+    let (f, d) = detect("gap76.docx", &docx_with_76_byte_first_header(true, b""));
+    assert_eq!(f, FormatId::Docx, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain, "{}", d.evidence);
+}
+
+#[test]
+fn zero_shift_is_tried_before_the_gap() {
+    // No ZIP64 records, but 76 bytes of padding between the directory and the end record.
+    let (f, d) = detect("x", &docx_with_76_byte_first_header(false, &[0u8; 76]));
+    assert_eq!(f, FormatId::Docx, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain, "{}", d.evidence);
+}
+
+#[test]
+fn walk_stops_at_the_declared_directory_end() {
+    let mut bytes = raw_zip(3, false);
+    let n = bytes.len();
+    // Each header is 53 bytes; 60 covers one and a part, not three, and the gap shift does
+    // not land on a header.
+    bytes[n - 10..n - 6].copy_from_slice(&60u32.to_le_bytes());
+    let (f, d) = detect("x.zip", &bytes);
+    assert_eq!(f, FormatId::Zip);
+    assert_eq!(d.confidence, Confidence::Likely, "{}", d.evidence);
+    assert!(
+        d.evidence.contains("directory ends before entry 3"),
+        "{}",
+        d.evidence
+    );
+}
+
+#[test]
+fn stored_marker_with_huge_declared_size_is_not_read() {
+    // A stored mimetype whose central header claims a compressed size that spans the rest
+    // of the file (storedbig). The marker is unreadable, the archive is a plain zip.
+    let mime = b"application/vnd.oasis.opendocument.text";
+    let mut bytes = stored_zip(
+        &[("mimetype", mime, b""), ("pad.bin", &[7u8; 200_000], b"")],
+        false,
+        b"",
+    );
+    let cd = bytes.len() - 22 - 2 * 46 - "mimetype".len() - "pad.bin".len();
+    assert_eq!(&bytes[cd..cd + 4], b"PK\x01\x02");
+    let data = 30 + "mimetype".len();
+    bytes[cd + 20..cd + 24].copy_from_slice(&((cd - data) as u32).to_le_bytes());
+    let (f, d) = detect("storedbig.zip", &bytes);
+    assert_eq!(f, FormatId::Zip, "{}", d.evidence);
+    assert!(d.evidence.contains("2 entries"), "{}", d.evidence);
+}
+
+#[test]
+fn frontmatter_then_headings_and_lists_is_markdown() {
+    let note = b"---\ntitle: Notes\ntags: [a]\n---\n# Shopping\n\n- milk\n- bread\n";
+    let (f, d) = detect("fmlist.txt", note);
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    let (f, d) = detect("fmhead.txt", b"---\ntitle: Notes\n---\n# Shopping\n");
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    // A comment in a later YAML document, next to keys, stays YAML.
+    let yaml = b"---\nname: a\n---\n# second\nname: b\n";
+    assert_eq!(detect("x.yaml", yaml).0, FormatId::Text);
+}
+
+/// A binary stub (`MZ` or ELF) of 5,000 bytes in front of a docx.
+fn sfx(stub_magic: &[u8], zip: &[u8]) -> Vec<u8> {
+    let mut out = stub_magic.to_vec();
+    out.extend((0..5_000 - stub_magic.len()).map(|i| (i % 7) as u8));
+    out.extend_from_slice(zip);
+    out
+}
+
+#[test]
+fn zip_after_a_stub_is_zip_likely() {
+    let ct = content_types(
+        r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    );
+    let docx = zip_of(&[("[Content_Types].xml", &ct), ("word/document.xml", b"<w/>")]);
+    for magic in [&b"MZ"[..], b"\x7fELF"] {
+        let (f, d) = detect("setup.exe", &sfx(magic, &docx));
+        assert_eq!(f, FormatId::Zip, "{}", d.evidence);
+        assert_eq!(d.confidence, Confidence::Likely);
+        assert_eq!(d.evidence, "zip archive after a stub");
+    }
+    // An empty end record after binary noise is not enough.
+    let mut noise: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    noise.extend_from_slice(b"PK\x05\x06");
+    noise.extend_from_slice(&[0u8; 18]);
+    assert_eq!(detect("x", &noise).0, FormatId::Unknown);
 }

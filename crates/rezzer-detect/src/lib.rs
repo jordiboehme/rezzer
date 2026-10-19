@@ -5,8 +5,8 @@
 //! Opens a file safely, hashes it and decides its format from the bytes.
 //!
 //! Detection order: empty, magic bytes, container listing (ZIP, OLE), pattern signatures
-//! (PDF after a binary prefix, IGES, ASCII DXF, SolidWorks blocks, STL), text sniffing, else
-//! unknown. The file name's extension only breaks ties between candidates with equal
+//! (PDF after a binary prefix, IGES, ASCII DXF, SolidWorks blocks, STL), text sniffing, a ZIP
+//! after a stub, else unknown. The file name's extension only breaks ties between candidates with equal
 //! evidence (CSV or TSV when sniffing declines). Every check reads a bounded prefix, so
 //! detection stays cheap on large files.
 
@@ -66,6 +66,15 @@ pub fn detect(name: &str, bytes: &[u8]) -> (FormatId, Detection) {
     }
     if let Some(f) = text::detect(name, bytes) {
         return f;
+    }
+    // Self-extracting archives: a program stub in front of a ZIP. Only the directory is
+    // checked; the layout behind the stub is not inspected.
+    if zipwalk::has_directory(bytes) {
+        return found(
+            FormatId::Zip,
+            Confidence::Likely,
+            "zip archive after a stub",
+        );
     }
     found(
         FormatId::Unknown,

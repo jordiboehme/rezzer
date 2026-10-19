@@ -593,11 +593,14 @@ fn markdown_frontmatter(lines: &[&str]) -> Option<Found> {
 fn markdown_syntax(lines: &[&str]) -> Option<Found> {
     let mut kinds = Vec::new();
     let is_hash = |l: &str| l.starts_with('#');
+    let fence = frontmatter_end(lines).map(|(end, _)| end);
     let heading = lines.iter().enumerate().any(|(i, l)| {
         let level = l.bytes().take_while(|&b| b == b'#').count();
         let atx = (1..=6).contains(&level) && l[level..].starts_with(' ');
-        // Shell and Python comments come in runs; a heading stands alone.
-        let alone = (i == 0 || lines[i - 1].trim().is_empty())
+        // Shell and Python comments come in runs; a heading stands alone. The closing fence
+        // of frontmatter counts as a blank line before it.
+        let after_fence = i > 0 && fence == Some(i - 1);
+        let alone = (i == 0 || lines[i - 1].trim().is_empty() || after_fence)
             && lines.get(i + 1).is_none_or(|n| !is_hash(n));
         atx && alone
     });
@@ -634,8 +637,36 @@ fn ordered_item(t: &str) -> bool {
 /// YAML (`---`) or TOML (`+++`) frontmatter: a fence on line 1, a mapping (`key: value` or
 /// `key = value` lines), a closing fence and a body. A body made only of YAML lines (keys,
 /// list items, indented lines, comments, document fences) is a multi-document YAML file,
-/// not Markdown; one prose line in the body is enough for Markdown.
+/// not Markdown; one prose line in the body is enough for Markdown. A `#` line is both a
+/// YAML comment and a Markdown heading: in a body without `key:` lines it is a heading.
 fn frontmatter(lines: &[&str]) -> Option<&'static str> {
+    let (i, kind) = frontmatter_end(lines)?;
+    let body: Vec<&str> = lines[i + 1..]
+        .iter()
+        .map(|l| l.trim_end())
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    let keys = body.iter().any(|l| yaml_key_line(l));
+    let yaml_only = body.iter().all(|l| {
+        l.starts_with([' ', '\t'])
+            || l.starts_with("- ")
+            || *l == "-"
+            || (l.starts_with('#') && (keys || !atx_heading(l)))
+            || *l == "---"
+            || *l == "..."
+            || yaml_key_line(l)
+    });
+    (!body.is_empty() && !yaml_only).then_some(kind)
+}
+
+/// `#` to `######`, a space and text.
+fn atx_heading(l: &str) -> bool {
+    let level = l.bytes().take_while(|&b| b == b'#').count();
+    (1..=6).contains(&level) && l[level..].starts_with(' ') && !l[level..].trim().is_empty()
+}
+
+/// The line index of the closing fence of frontmatter that opens on line 1, and its kind.
+fn frontmatter_end(lines: &[&str]) -> Option<(usize, &'static str)> {
     let first = lines.first()?.trim_end();
     let (fence, close_alt, kind, sep) = match first {
         "---" => ("---", "...", "yaml", ':'),
@@ -646,24 +677,7 @@ fn frontmatter(lines: &[&str]) -> Option<&'static str> {
     for (i, line) in lines.iter().enumerate().skip(1) {
         let l = line.trim_end();
         if l == fence || l == close_alt {
-            if keys == 0 {
-                return None;
-            }
-            let body: Vec<&str> = lines[i + 1..]
-                .iter()
-                .map(|l| l.trim_end())
-                .filter(|l| !l.trim().is_empty())
-                .collect();
-            let yaml_only = body.iter().all(|l| {
-                l.starts_with([' ', '\t'])
-                    || l.starts_with("- ")
-                    || *l == "-"
-                    || l.starts_with('#')
-                    || *l == "---"
-                    || *l == "..."
-                    || yaml_key_line(l)
-            });
-            return (!body.is_empty() && !yaml_only).then_some(kind);
+            return (keys > 0).then_some((i, kind));
         }
         let t = l.trim_start();
         if t.is_empty() || t.starts_with('#') || l.starts_with([' ', '\t']) || t.starts_with("- ") {

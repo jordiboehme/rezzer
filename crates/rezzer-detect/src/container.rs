@@ -182,7 +182,7 @@ fn zip_inner(bytes: &[u8]) -> Found {
             return found(
                 FormatId::Zip,
                 Confidence::Likely,
-                format!("zip signature, but the zip directory not readable: {why}"),
+                format!("zip signature, but the zip directory is not readable: {why}"),
             );
         }
     };
