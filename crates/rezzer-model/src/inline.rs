@@ -32,6 +32,7 @@ pub enum Inline {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         /// True when the target is an anchor inside this document.
+        #[serde(default)]
         internal: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         inlines: Vec<Inline>,

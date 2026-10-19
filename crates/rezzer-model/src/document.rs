@@ -130,5 +130,6 @@ pub struct Asset {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt: Option<String>,
     /// True when Rezzer cannot interpret the picture and the calling agent should look at it.
+    #[serde(default)]
     pub needs_vision: bool,
 }

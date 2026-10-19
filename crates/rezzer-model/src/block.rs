@@ -37,6 +37,7 @@ pub enum Block {
         anchor: Option<Anchor>,
     },
     List {
+        #[serde(default)]
         ordered: bool,
         /// One entry per list item, each a sequence of blocks.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -47,6 +48,7 @@ pub enum Block {
     Table {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caption: Option<String>,
+        #[serde(default)]
         header_rows: usize,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows: Vec<Vec<Cell>>,

@@ -445,3 +445,21 @@ fn read_options_debug_hides_password() {
     assert!(!debug.contains("secret"));
     assert!(debug.contains("redacted"));
 }
+
+#[test]
+fn plain_fields_default_when_missing() {
+    let t: Block = serde_json::from_str(r#"{"type":"table"}"#).unwrap();
+    assert!(matches!(t, Block::Table { header_rows: 0, .. }));
+    let l: Block = serde_json::from_str(r#"{"type":"list"}"#).unwrap();
+    assert!(matches!(l, Block::List { ordered: false, .. }));
+    let a: Asset = serde_json::from_str(r#"{"id":"a","sha256":"00","mime":"image/png"}"#).unwrap();
+    assert!(!a.needs_vision);
+    let i: Inline = serde_json::from_str(r#"{"type":"link","target":"x"}"#).unwrap();
+    assert!(matches!(
+        i,
+        Inline::Link {
+            internal: false,
+            ..
+        }
+    ));
+}
