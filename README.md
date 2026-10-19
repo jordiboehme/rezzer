@@ -231,6 +231,12 @@ It works with any MCP client (Claude Code and others). Its output follows the fr
 - **Self-contained.** Every reader runs inside the one binary. No LibreOffice, no Ghostscript, no helper programs.
 - **Clean licenses.** Rezzer links only libraries with permissive or MPL licenses.
 
+## Support
+
+Rezzer is free and open source. If it earned its place in your workflow, you can support the work here:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/V7V31T6CL9)
+
 ## License
 
 [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/)
