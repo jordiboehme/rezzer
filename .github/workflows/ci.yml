@@ -1,0 +1,313 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Read only by default: every job can check out the tree and nothing more. A
+# job that needs another scope names it in its own `permissions:` block.
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the run it supersedes. A push to main
+# keeps one group per commit and never cancels.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decides whether the Rust jobs run. They are skipped (reported as skipped,
+  # not failed) in two cases:
+  #
+  # 1. There is no Cargo.toml at the root yet. main held only documentation
+  #    before the workspace landed.
+  # 2. The change touches documentation only: root-level *.md, docs/**,
+  #    LICENSE, .github/*.md, .github/badges/** and .github/FUNDING.yml.
+  #
+  # Everything else counts as code, including .github/workflows/** (a
+  # workflow change has to exercise itself) and markdown deeper in the tree.
+  #
+  # The classifier fails safe: an unknown event, a missing or zeroed base, a
+  # force push, a git error or an empty file list all set code=true. The
+  # gated jobs read `rust == 'true'`, which needs Cargo.toml to exist, so a
+  # failed classifier never makes a Rust job run on a tree without a
+  # workspace, and ci-passed reports the failure of this job itself.
+  changes:
+    name: changes
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.decide.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The classifier diffs against a base commit, which the default
+          # shallow clone does not have.
+          fetch-depth: 0
+
+      - name: Classify the changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_FORCED: ${{ github.event.forced }}
+        run: |
+          # The runner starts this shell with -e. Turn it off on purpose: every
+          # failure in here has to end in code=true, never in a non-zero exit.
+          set +e
+          set -u
+
+          run_everything() {
+            echo "changes: $1, so every job runs."
+            echo "code=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          case "$EVENT_NAME" in
+            pull_request)
+              # Three dots: what this side added since the merge base.
+              base="$PR_BASE_SHA"
+              range="${base}...HEAD"
+              ;;
+            push)
+              if [ "$PUSH_FORCED" = "true" ]; then
+                run_everything "a force push leaves no usable base"
+              fi
+              base="$PUSH_BEFORE_SHA"
+              range="${base}..HEAD"
+              ;;
+            *)
+              run_everything "the event $EVENT_NAME has no base to compare against"
+              ;;
+          esac
+
+          case "$base" in
+            '')             run_everything "there is no base commit" ;;
+            *[!0-9a-fA-F]*) run_everything "the base is not a commit sha ($base)" ;;
+            *[!0]*)         ;;
+            *)              run_everything "the base commit is all zeros (a first push or a new branch)" ;;
+          esac
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            run_everything "the base commit $base is not in this clone"
+          fi
+
+          # --no-renames so a file that moves shows up on both sides: a rename
+          # out of code into docs must not read as a documentation change.
+          if ! files=$(git diff --name-only --no-renames "$range"); then
+            run_everything "git diff $range failed"
+          fi
+          if [ -z "$files" ]; then
+            run_everything "the diff against $base is empty"
+          fi
+
+          code=false
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              .github/workflows/*) verdict=code ;;
+              docs/*)              verdict=docs ;;
+              LICENSE|LICENSE.md|LICENSE.txt) verdict=docs ;;
+              .github/badges/*|.github/FUNDING.yml|.github/*.md) verdict=docs ;;
+              */*)                 verdict=code ;;
+              *.md)                verdict=docs ;;
+              *)                   verdict=code ;;
+            esac
+            echo "  $verdict  $f"
+            if [ "$verdict" = code ]; then
+              code=true
+            fi
+          done <<<"$files"
+
+          echo "code=$code" >>"$GITHUB_OUTPUT"
+          echo "changes: code=$code"
+
+      - name: Decide whether the Rust jobs run
+        id: decide
+        env:
+          CODE: ${{ steps.classify.outputs.code }}
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.toml ]; then
+            echo "changes: there is no Cargo.toml yet, so the Rust jobs are skipped."
+            echo "rust=false" >>"$GITHUB_OUTPUT"
+          elif [ "$CODE" = "false" ]; then
+            echo "changes: documentation only, so the Rust jobs are skipped."
+            echo "rust=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "rust=true" >>"$GITHUB_OUTPUT"
+          fi
+
+  fmt:
+    name: fmt
+    timeout-minutes: 10
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml names the version and the components.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy (${{ matrix.os }})
+    timeout-minutes: 30
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      # Only main saves the cache, so a pull request cannot plant artifacts
+      # that a later run on main would restore.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # --locked: Cargo.lock is the input, and a lockfile that would need an
+      # update fails the check instead of being re-resolved on the runner.
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    timeout-minutes: 45
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple silicon.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: nextest@0.9.148
+          fallback: none
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # --no-tests=warn: a workspace whose crates have no tests yet is not an
+      # error.
+      - name: cargo nextest run
+        run: cargo nextest run --workspace --locked --no-tests=warn
+
+      # nextest does not run doctests.
+      - name: cargo test --doc
+        run: cargo test --workspace --doc --locked
+
+  # Dependency audit: advisories (RustSec), licenses (the allowlist in
+  # deny.toml), sources and bans. security.yml also checks advisories every
+  # week, since a new advisory appears without any change here.
+  cargo-deny:
+    name: cargo-deny
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # The rust-toolchain.toml pin, so the action's container does not
+          # resolve a different toolchain. Dependabot does not update this
+          # value: move it together with rust-toolchain.toml.
+          rust-version: '1.99.0'
+          # `check` without a list runs all four: advisories, bans,
+          # licenses and sources.
+          command: check
+          arguments: --all-features --locked
+
+  # Static checks of the workflows. actionlint catches expression, type and
+  # shell errors; zizmor catches the security mistakes (template injection,
+  # over-wide tokens, persisted credentials, unpinned or impostor actions).
+  # zizmor fails the job inline instead of uploading SARIF, so the job needs
+  # no write scope. An accepted finding is ignored with a
+  # `# zizmor: ignore[...]` comment next to its line and a reason above it.
+  # Runs on every change, documentation included: it needs no Cargo.toml.
+  workflow-lint:
+    name: workflow-lint
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # actionlint 1.7.12 (the image digest is in the action's settings.json).
+      - name: actionlint
+        uses: devops-actions/actionlint@ec02b36684b2f574f1d219ad0a43b082e46bf3e4 # v0.1.13
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          advanced-security: false
+          annotations: true
+
+  # The one check a branch protection rule requires. It always runs and
+  # passes when every job above passed or was skipped (a documentation-only
+  # change, or a tree without Cargo.toml). Any failure or cancellation fails
+  # it. A job `if` without always() would skip this job when a need is
+  # skipped, and a skipped required check is not a reliable signal.
+  ci-passed:
+    name: ci-passed
+    timeout-minutes: 5
+    needs: [changes, fmt, clippy, test, cargo-deny, workflow-lint]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          set -euo pipefail
+          echo "ci-passed: job results $RESULTS"
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::at least one CI job failed or was cancelled"
+            exit 1
+          fi
