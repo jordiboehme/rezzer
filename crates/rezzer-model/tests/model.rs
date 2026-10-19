@@ -7,7 +7,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
-    Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
+    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
     Detection, Document, Edge, Embedded, Event, FormatId, Formula, Graph, Inline, Loss, LossReason,
     MODEL_VERSION, Node, Properties, ReadOptions, ReaderInfo, Role, SectionKind, Severity, Source,
     SourceInfo, StatusColor, TaskState, Value,
@@ -38,6 +38,7 @@ fn text(s: &str) -> Inline {
         text: s.into(),
         emphasis: false,
         strong: true,
+        strike: false,
     }
 }
 
@@ -128,6 +129,7 @@ fn full_document() -> Document {
                 col_span: 2,
                 anchor: anchor.clone(),
             }]],
+            alignments: vec![Align::Right],
             anchor: Some(Anchor("table:1".into())),
         },
         Block::Code {
@@ -159,6 +161,7 @@ fn full_document() -> Document {
             blocks: vec![],
             anchor: None,
         },
+        Block::Rule { anchor: None },
         Block::Task {
             state: TaskState::Cancelled,
             inlines: vec![text("todo")],
@@ -380,6 +383,7 @@ fn empty_fields_are_left_out_of_json() {
         text: "a".into(),
         emphasis: false,
         strong: false,
+        strike: false,
     })
     .unwrap();
     assert_eq!(t, serde_json::json!({"type": "text", "text": "a"}));
@@ -493,4 +497,32 @@ fn source_info_copies_the_source_fields() {
     assert_eq!(info.modified.as_deref(), Some("2026-10-19T00:00:00Z"));
     assert_eq!(info.encoding, None);
     assert_eq!(info.reader, None);
+}
+
+#[test]
+fn images_rules_and_alignment_round_trip() {
+    let img = Inline::Image {
+        target: "a.png".into(),
+        alt: "A".into(),
+        title: None,
+    };
+    let j = serde_json::to_value(&img).unwrap();
+    assert_eq!(
+        j,
+        serde_json::json!({"type": "image", "target": "a.png", "alt": "A"})
+    );
+    assert_eq!(serde_json::from_value::<Inline>(j).unwrap(), img);
+    assert_eq!(
+        serde_json::to_value(Inline::LineBreak).unwrap(),
+        serde_json::json!({"type": "line_break"})
+    );
+    let r: Block = serde_json::from_str(r#"{"type":"rule"}"#).unwrap();
+    assert_eq!(r, Block::Rule { anchor: None });
+    let t: Block =
+        serde_json::from_str(r#"{"type":"table","alignments":["left","none"]}"#).unwrap();
+    assert!(
+        matches!(&t, Block::Table { alignments, .. } if alignments == &[Align::Left, Align::None])
+    );
+    let s: Inline = serde_json::from_str(r#"{"type":"text","text":"x","strike":true}"#).unwrap();
+    assert!(matches!(s, Inline::Text { strike: true, .. }));
 }

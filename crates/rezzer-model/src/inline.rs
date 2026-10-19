@@ -23,6 +23,18 @@ pub enum Inline {
         emphasis: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         strong: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        strike: bool,
+    },
+    /// A hard line break inside a paragraph. Soft breaks are a space in the text.
+    LineBreak,
+    /// A picture kept as a reference: Rezzer does not fetch it.
+    Image {
+        target: String,
+        #[serde(default)]
+        alt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     Code {
         text: String,

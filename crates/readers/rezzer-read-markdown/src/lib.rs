@@ -484,6 +484,7 @@ impl<'b> Builder<'b> {
                         caption: None,
                         header_rows: t.header_rows,
                         rows: t.rows,
+                        alignments: Vec::new(),
                         anchor: None,
                     });
                 }
@@ -556,6 +557,7 @@ impl<'b> Builder<'b> {
                     text: s.to_string(),
                     emphasis: self.emphasis > 0,
                     strong: self.strong > 0,
+                    strike: false,
                 });
             }
         }
@@ -609,6 +611,7 @@ impl<'b> Builder<'b> {
                     text,
                     emphasis: false,
                     strong: false,
+                    strike: false,
                 });
             }
             None => {}
@@ -839,6 +842,7 @@ impl<'b> Builder<'b> {
                 caption: None,
                 header_rows: t.header_rows,
                 rows: t.rows,
+                alignments: Vec::new(),
                 anchor: None,
             });
         }
@@ -977,14 +981,17 @@ fn push_merged(inlines: &mut Vec<Inline>, inline: Inline) {
         text,
         emphasis,
         strong,
+        strike,
     } = &inline
         && let Some(Inline::Text {
             text: prev,
             emphasis: pe,
             strong: ps,
+            strike: pk,
         }) = inlines.last_mut()
         && pe == emphasis
         && ps == strong
+        && pk == strike
     {
         prev.push_str(text);
         return;
@@ -1000,6 +1007,8 @@ fn plain_text(inlines: &[Inline]) -> String {
             Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
             Inline::Link { inlines, .. } => out.push_str(&plain_text(inlines)),
             Inline::Math { latex } => out.push_str(latex),
+            Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::LineBreak => out.push(' '),
             Inline::FootnoteRef { .. } | Inline::Status { .. } | Inline::AnchorMark { .. } => {}
         }
     }

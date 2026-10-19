@@ -125,6 +125,7 @@ fn paragraph(lines: &[&str]) -> Block {
             text: lines.join("\n"),
             emphasis: false,
             strong: false,
+            strike: false,
         }],
         role: None,
         anchor: None,

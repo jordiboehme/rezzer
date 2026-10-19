@@ -52,6 +52,9 @@ pub enum Block {
         header_rows: usize,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows: Vec<Vec<Cell>>,
+        /// Column alignments; empty when the source has none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        alignments: Vec<Align>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },
@@ -92,6 +95,11 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },
+    /// A thematic break.
+    Rule {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        anchor: Option<Anchor>,
+    },
     Task {
         state: TaskState,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -123,6 +131,16 @@ pub enum CalloutKind {
     Warning,
     Caution,
     Details,
+}
+
+/// Horizontal alignment of a table column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Align {
+    None,
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

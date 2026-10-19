@@ -260,6 +260,7 @@ impl Reader for CsvReader {
                 caption: None,
                 header_rows: usize::from(dialect.has_header),
                 rows,
+                alignments: Vec::new(),
                 anchor: None,
             });
         }
@@ -293,6 +294,7 @@ impl Reader for CsvReader {
             caption: Some("Columns".into()),
             header_rows: 1,
             rows: col_rows,
+            alignments: Vec::new(),
             anchor: None,
         });
         doc.body.push(sheet_of(&sheet, blocks));
@@ -383,6 +385,7 @@ fn plain(text: &str) -> Inline {
         text: text.to_string(),
         emphasis: false,
         strong: false,
+        strike: false,
     }
 }
 

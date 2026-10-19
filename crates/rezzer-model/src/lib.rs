@@ -17,7 +17,7 @@ mod reader;
 mod registry;
 mod value;
 
-pub use block::{Block, CalloutKind, Cell, SectionKind, TaskState};
+pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState};
 pub use document::{
     Asset, Confidence, Detection, Document, MODEL_VERSION, Properties, ReaderInfo, SourceInfo,
 };
