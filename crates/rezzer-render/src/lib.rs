@@ -5,8 +5,8 @@
 //! The one place that turns the document model into OKF Markdown with Crystalline's dialect,
 //! Mermaid graphs and paging. Every format's output goes through it.
 //!
-//! Output order: frontmatter, `# <title>`, `## Overview`, the content, `## Logic`,
-//! `## Annotations`, `## Changes`, `## Embedded`, `## Not read`. Empty sections are left out.
+//! Output order: frontmatter, `# <title>`, `## Overview`, `## Properties`, the content,
+//! `## Logic`, `## Annotations`, `## Changes`, `## Embedded`, `## Not read`. Empty sections are left out.
 //!
 //! Decisions:
 //! - Text from files is escaped so it never adds structure, HTML or frontmatter
@@ -31,6 +31,8 @@ use crate::blocks::{Ctx, MAX_DEPTH};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputSection {
     Overview,
+    /// Custom document properties.
+    Properties,
     Content,
     Logic,
     Annotations,
@@ -64,6 +66,9 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         && let Some(overview) = render_overview(doc)
     {
         parts.push(overview);
+    }
+    if want(OutputSection::Properties) {
+        parts.extend(facets::properties(doc));
     }
     if want(OutputSection::Content) {
         parts.push(content(doc, title));

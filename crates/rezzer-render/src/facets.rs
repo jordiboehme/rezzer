@@ -6,7 +6,7 @@
 //! Each returns `None` when it has nothing to show.
 
 use rezzer_model::{
-    Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor,
+    Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
 };
 
 use crate::blocks::{self, Ctx, MAX_DEPTH, Mode, cell_text, code_span, pipe_table};
@@ -25,7 +25,7 @@ fn role_name(role: Role) -> &'static str {
     }
 }
 
-fn formula_row(f: &Formula) -> Vec<String> {
+fn formula_row(f: &Formula, with_note: bool) -> Vec<String> {
     let mut expr = String::new();
     code_span(&f.expression, Mode::Cell, &mut expr);
     if let Some(latex) = f.latex.as_deref().filter(|l| !l.trim().is_empty()) {
@@ -38,21 +38,62 @@ fn formula_row(f: &Formula) -> Vec<String> {
         ));
     }
     let reads: Vec<String> = f.references.iter().map(|r| cell_text(&r.0)).collect();
-    vec![
+    let mut row = vec![
         cell_text(&f.anchor.0),
         expr,
         reads.join(", "),
         f.role.map(role_name).unwrap_or("").to_string(),
-    ]
+        f.cached
+            .as_ref()
+            .map(|v| cell_text(&value_text(v)))
+            .unwrap_or_default(),
+    ];
+    if with_note {
+        row.push(f.note.as_deref().map(cell_text).unwrap_or_default());
+    }
+    row
 }
 
+/// The dialect in words.
+fn dialect_words(dialect: &str) -> String {
+    match dialect {
+        "excel" => "Spreadsheet formulas".into(),
+        "openformula" => "OpenDocument formulas".into(),
+        "derived" => "Found in the data, not written as formulas in the file".into(),
+        other => blocks::line_text(other),
+    }
+}
+
+/// A line naming the dialects, then the table. The `Note` column is there only when a
+/// formula of the group has a note.
 fn formula_table(list: &[&Formula]) -> String {
-    let rows: Vec<Vec<String>> = list.iter().map(|f| formula_row(f)).collect();
-    pipe_table(&header(&["Cells", "Formula", "Reads", "Role"]), &[], &rows)
+    let mut dialects: Vec<&str> = Vec::new();
+    for f in list {
+        if !dialects.contains(&f.dialect.as_str()) {
+            dialects.push(&f.dialect);
+        }
+    }
+    let words: Vec<String> = dialects
+        .iter()
+        .filter(|d| !d.trim().is_empty())
+        .map(|d| dialect_words(d))
+        .collect();
+    let with_note = list.iter().any(|f| f.note.is_some());
+    let rows: Vec<Vec<String>> = list.iter().map(|f| formula_row(f, with_note)).collect();
+    let mut cols = vec!["Cells", "Formula", "Reads", "Role", "Value"];
+    if with_note {
+        cols.push("Note");
+    }
+    let table = pipe_table(&header(&cols), &[], &rows);
+    if words.is_empty() {
+        table
+    } else {
+        format!("{}.\n\n{table}", words.join(", "))
+    }
 }
 
-/// `## Logic`: formulas without a pattern, then one table per pattern (in order of first
-/// appearance), then the graphs.
+/// `## Logic`: formulas without a pattern (one table per dialect), then one table per
+/// pattern (in order of first appearance), then the graphs.
 pub(crate) fn logic(doc: &Document) -> Option<String> {
     let formulas = &doc.facets.formulas;
     let graphs = &doc.facets.graphs;
@@ -60,8 +101,17 @@ pub(crate) fn logic(doc: &Document) -> Option<String> {
         return None;
     }
     let mut parts = vec!["## Logic".to_string()];
-    let single: Vec<&Formula> = formulas.iter().filter(|f| f.pattern.is_none()).collect();
-    if !single.is_empty() {
+    let mut dialects: Vec<&str> = Vec::new();
+    for f in formulas.iter().filter(|f| f.pattern.is_none()) {
+        if !dialects.contains(&f.dialect.as_str()) {
+            dialects.push(&f.dialect);
+        }
+    }
+    for d in dialects {
+        let single: Vec<&Formula> = formulas
+            .iter()
+            .filter(|f| f.pattern.is_none() && f.dialect == d)
+            .collect();
         parts.push(formula_table(&single));
     }
     let mut patterns: Vec<&str> = Vec::new();
@@ -87,6 +137,63 @@ pub(crate) fn logic(doc: &Document) -> Option<String> {
         parts.push(mermaid::render(g));
     }
     Some(parts.join("\n\n"))
+}
+
+/// A value as plain text: numbers with their unit, percent as `25 %`, lists joined with
+/// `, `.
+pub(crate) fn value_text(value: &Value) -> String {
+    value_text_at(value, 0)
+}
+
+fn value_text_at(value: &Value, depth: usize) -> String {
+    match value {
+        Value::Text { value } | Value::Date { value } | Value::DateTime { value } => value.clone(),
+        Value::Number { value, unit } => match unit.as_deref().filter(|u| !u.is_empty()) {
+            Some(u) => format!("{} {u}", number(*value)),
+            None => number(*value),
+        },
+        Value::Percent { value } => format!("{} %", number(*value * 100.0)),
+        Value::Bool { value } => value.to_string(),
+        Value::List { value } => {
+            if depth >= MAX_DEPTH {
+                return "...".into();
+            }
+            value
+                .iter()
+                .map(|v| value_text_at(v, depth + 1))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
+}
+
+/// A number without float noise such as `7.000000000000001`.
+pub(crate) fn number(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let rounded = (value * 1e9).round() / 1e9;
+    if rounded.is_finite() && (rounded - value).abs() < 1e-9 * value.abs().max(1.0) {
+        rounded.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// `## Properties`: the custom document properties.
+pub(crate) fn properties(doc: &Document) -> Option<String> {
+    let custom = &doc.properties.custom;
+    if custom.is_empty() {
+        return None;
+    }
+    let rows: Vec<Vec<String>> = custom
+        .iter()
+        .map(|(k, v)| vec![cell_text(k), cell_text(&value_text(v))])
+        .collect();
+    Some(format!(
+        "## Properties\n\n{}",
+        pipe_table(&header(&["Key", "Value"]), &[], &rows)
+    ))
 }
 
 fn text(t: &str) -> Inline {

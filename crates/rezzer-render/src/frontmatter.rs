@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! OKF v0.2 frontmatter, compatible with Crystalline's engram frontmatter: OKF keys first,
-//! then Rezzer's own snake_case keys. Every value that comes from a file goes through
+//! then Rezzer's own snake_case keys (document properties last). Every value that comes from a file goes through
 //! [`quote`].
 
 use rezzer_model::{Completeness, Document, FormatId, Value};
@@ -50,6 +50,19 @@ fn token(value: &str) -> String {
         value.to_string()
     } else {
         quote(value)
+    }
+}
+
+/// A typed value: plain numbers without a unit and booleans, everything else quoted.
+fn yaml_value(value: &Value, depth: usize) -> String {
+    match value {
+        Value::Number { value, unit: None } if value.is_finite() => crate::facets::number(*value),
+        Value::Bool { value } => value.to_string(),
+        Value::List { value } if depth < crate::blocks::MAX_DEPTH => {
+            let items: Vec<String> = value.iter().map(|v| yaml_value(v, depth + 1)).collect();
+            format!("[{}]", items.join(", "))
+        }
+        other => quote(&crate::facets::value_text(other)),
     }
 }
 
@@ -178,6 +191,21 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
         completeness_name(completeness)
     ));
     out.push_str(&format!("losses: {}\n", doc.losses.len()));
+    if !p.authors.is_empty() {
+        out.push_str(&format!("authors: {}\n", quoted_list(&p.authors)));
+    }
+    if let Some(l) = p.language.as_deref().filter(|l| !l.trim().is_empty()) {
+        out.push_str(&format!("language: {}\n", quote(l)));
+    }
+    if !p.keywords.is_empty() {
+        out.push_str(&format!("keywords: {}\n", quoted_list(&p.keywords)));
+    }
+    if let Some(v) = &p.created {
+        out.push_str(&format!("created: {}\n", yaml_value(v, 0)));
+    }
+    if let Some(v) = &p.modified {
+        out.push_str(&format!("modified: {}\n", yaml_value(v, 0)));
+    }
     out.push_str("---\n");
     out
 }

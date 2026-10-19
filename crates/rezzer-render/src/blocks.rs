@@ -39,7 +39,7 @@ pub(crate) struct Ctx<'a> {
 
 /// Renders inlines. In [`Mode::Block`] the result still needs [`finish_lines`].
 pub(crate) fn inlines(list: &[Inline], mode: Mode) -> String {
-    let merged = merge_text(list);
+    let merged = fix_flanking(merge_text(list));
     let mut out = String::new();
     for inline in &merged {
         inline_into(inline, mode, 0, &mut out);
@@ -77,6 +77,152 @@ fn merge_text(list: &[Inline]) -> Vec<Inline> {
     out
 }
 
+fn is_styled(inline: &Inline) -> bool {
+    matches!(
+        inline,
+        Inline::Text { emphasis, strong, strike, .. } if *emphasis || *strong || *strike
+    )
+}
+
+/// Punctuation in CommonMark's sense (Unicode P and S), approximated as neither letter,
+/// digit nor whitespace.
+fn is_punct(c: char) -> bool {
+    !c.is_alphanumeric() && !c.is_whitespace()
+}
+
+/// The first (`first`) or last character an inline puts into the Markdown. `None` for an
+/// inline that writes nothing.
+fn edge_char(inline: &Inline, first: bool) -> Option<char> {
+    let pick = |a: char, b: char| Some(if first { a } else { b });
+    match inline {
+        Inline::Text { text, .. } => {
+            let c = if first {
+                text.chars().next()
+            } else {
+                text.chars().next_back()
+            }?;
+            if is_styled(inline) && !c.is_whitespace() {
+                // The delimiter.
+                Some('*')
+            } else {
+                Some(c)
+            }
+        }
+        Inline::LineBreak => Some('\n'),
+        Inline::Image { .. } => pick('!', ')'),
+        Inline::Code { text } if !text.is_empty() => Some('`'),
+        Inline::Math { latex } if !latex.trim().is_empty() => Some('$'),
+        Inline::Link { .. } => pick('[', ')'),
+        Inline::FootnoteRef { .. } => pick('[', ']'),
+        Inline::Status { .. } => pick(':', '}'),
+        Inline::Code { .. } | Inline::Math { .. } | Inline::AnchorMark { .. } => None,
+    }
+}
+
+/// The character before inline `i` (`None` at the start).
+fn char_before(list: &[Inline], i: usize) -> Option<char> {
+    list[..i].iter().rev().find_map(|x| edge_char(x, false))
+}
+
+fn char_after(list: &[Inline], i: usize) -> Option<char> {
+    list[i + 1..].iter().find_map(|x| edge_char(x, true))
+}
+
+/// Whether the delimiters around a styled run would open and close (CommonMark's left- and
+/// right-flanking rules; `*` and `~~` also work inside words).
+fn flanks(list: &[Inline], i: usize) -> (bool, bool) {
+    let Inline::Text { text, .. } = &list[i] else {
+        return (true, true);
+    };
+    let core = text.trim();
+    let (Some(first), Some(last)) = (core.chars().next(), core.chars().next_back()) else {
+        return (true, true);
+    };
+    let before = if text.starts_with(char::is_whitespace) {
+        Some(' ')
+    } else {
+        char_before(list, i)
+    };
+    let after = if text.ends_with(char::is_whitespace) {
+        Some(' ')
+    } else {
+        char_after(list, i)
+    };
+    let free = |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || is_punct(c));
+    let opens = !is_punct(first) || free(before);
+    let closes = !is_punct(last) || free(after);
+    (opens, closes)
+}
+
+/// Makes every styled run parse: where a delimiter would not open or close, the run takes
+/// in the rest of the word from the plain text next to it; where that does not help, the
+/// style is dropped and the text stays.
+fn fix_flanking(mut list: Vec<Inline>) -> Vec<Inline> {
+    for i in 0..list.len() {
+        if !is_styled(&list[i]) {
+            continue;
+        }
+        let (opens, closes) = flanks(&list, i);
+        if !opens
+            && i > 0
+            && let Some(word) = take_word(&mut list, i - 1, false)
+            && let Inline::Text { text, .. } = &mut list[i]
+        {
+            text.insert_str(0, &word);
+        }
+        if !closes
+            && i + 1 < list.len()
+            && let Some(word) = take_word(&mut list, i + 1, true)
+            && let Inline::Text { text, .. } = &mut list[i]
+        {
+            text.push_str(&word);
+        }
+        let (opens, closes) = flanks(&list, i);
+        if !(opens && closes)
+            && let Inline::Text {
+                emphasis,
+                strong,
+                strike,
+                ..
+            } = &mut list[i]
+        {
+            *emphasis = false;
+            *strong = false;
+            *strike = false;
+        }
+    }
+    list
+}
+
+/// Takes the word at the start (`leading`) or end of plain text inline `j`.
+fn take_word(list: &mut [Inline], j: usize, leading: bool) -> Option<String> {
+    if is_styled(&list[j]) {
+        return None;
+    }
+    let Inline::Text { text, .. } = &mut list[j] else {
+        return None;
+    };
+    if leading {
+        let end = text.find(char::is_whitespace).unwrap_or(text.len());
+        if end == 0 {
+            return None;
+        }
+        let word = text[..end].to_string();
+        text.replace_range(..end, "");
+        Some(word)
+    } else {
+        let start = text.rfind(char::is_whitespace).map_or(0, |p| {
+            p + text[p..].chars().next().map_or(1, char::len_utf8)
+        });
+        if start == text.len() {
+            return None;
+        }
+        let word = text[start..].to_string();
+        text.truncate(start);
+        Some(word)
+    }
+}
+
 fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String) {
     match inline {
         Inline::Text {
@@ -109,7 +255,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
             if link_depth > MAX_DEPTH {
                 return;
             }
-            let merged = merge_text(content);
+            let merged = fix_flanking(merge_text(content));
             if link_depth > 0 {
                 // A link inside a link text keeps only its text.
                 for inner in &merged {
@@ -674,6 +820,18 @@ fn list_block(
     if depth > MAX_DEPTH {
         return TOO_DEEP.into();
     }
+    // Loose when an item has blocks that need a blank line between them; then every item
+    // keeps blank lines, also before a nested list.
+    let loose = items.iter().any(|item| {
+        item.windows(2).any(|w| {
+            let lead = matches!(
+                w[0],
+                Block::Paragraph { .. } | Block::List { .. } | Block::Task { .. }
+            );
+            let listy = matches!(w[1], Block::List { .. } | Block::Task { .. });
+            !(lead && listy)
+        })
+    });
     let rendered: Vec<String> = items
         .iter()
         .enumerate()
@@ -685,11 +843,10 @@ fn list_block(
             } else {
                 "- ".to_string()
             };
-            let body = blocks(item, ctx, depth + 1, level, true);
+            let body = blocks(item, ctx, depth + 1, level, !loose);
             hang(&marker, &body, marker.len())
         })
         .collect();
-    let loose = rendered.iter().any(|r| r.contains("\n\n"));
     rendered.join(if loose { "\n\n" } else { "\n" })
 }
 

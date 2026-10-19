@@ -127,6 +127,11 @@ fn frontmatter_key_order() {
     d.properties.title = Some("Report".into());
     d.properties.description = Some("A test".into());
     d.properties.keywords = vec!["alpha".into(), "beta".into()];
+    d.properties.authors = vec!["Ann \"A\"".into(), "Bob".into()];
+    d.properties.language = Some("de".into());
+    d.properties.created = Some(Value::DateTime {
+        value: "2025-11-30T08:00:00Z".into(),
+    });
     d.properties.modified = Some(Value::Date {
         value: "2025-12-01".into(),
     });
@@ -157,6 +162,11 @@ encoding: \"utf-8\"\n\
 reader: \"markdown/0.1.0\"\n\
 completeness: partial\n\
 losses: 1\n\
+authors: [\"Ann \\\"A\\\"\", \"Bob\"]\n\
+language: \"de\"\n\
+keywords: [\"alpha\", \"beta\"]\n\
+created: \"2025-11-30T08:00:00Z\"\n\
+modified: \"2025-12-01\"\n\
 ---\n\
 \n\
 # Report\n";
@@ -518,12 +528,18 @@ fn hostile_text_injects_no_structure() {
 fn logic_table_and_mermaid() {
     let mut d = doc();
     d.facets.formulas = vec![
-        formula(
-            "Sheet1!D1",
-            "=SUM(C2:C3)",
-            &["Sheet1!C2", "Sheet1!C3"],
-            None,
-        ),
+        Formula {
+            cached: Some(Value::Number {
+                value: 12.0,
+                unit: Some("kg".into()),
+            }),
+            ..formula(
+                "Sheet1!D1",
+                "=SUM(C2:C3)",
+                &["Sheet1!C2", "Sheet1!C3"],
+                None,
+            )
+        },
         formula(
             "Sheet1!C2",
             "=A2*B2",
@@ -553,15 +569,17 @@ fn logic_table_and_mermaid() {
     }];
     let md = render(&d, Completeness::Complete, &opts());
     let expected = "## Logic\n\n\
-| Cells | Formula | Reads | Role |\n\
-| --- | --- | --- | --- |\n\
-| Sheet1!D1 | `=SUM(C2:C3)` | Sheet1!C2, Sheet1!C3 | result |\n\
+Spreadsheet formulas.\n\n\
+| Cells | Formula | Reads | Role | Value |\n\
+| --- | --- | --- | --- | --- |\n\
+| Sheet1!D1 | `=SUM(C2:C3)` | Sheet1!C2, Sheet1!C3 | result | 12 kg |\n\
 \n\
 ### Pattern: p1\n\n\
-| Cells | Formula | Reads | Role |\n\
-| --- | --- | --- | --- |\n\
-| Sheet1!C2 | `=A2*B2` | Sheet1!A2, Sheet1!B2 | result |\n\
-| Sheet1!C3 | `=A3*B3` | Sheet1!A3, Sheet1!B3 | result |\n\
+Spreadsheet formulas.\n\n\
+| Cells | Formula | Reads | Role | Value |\n\
+| --- | --- | --- | --- | --- |\n\
+| Sheet1!C2 | `=A2*B2` | Sheet1!A2, Sheet1!B2 | result |  |\n\
+| Sheet1!C3 | `=A3*B3` | Sheet1!A3, Sheet1!B3 | result |  |\n\
 \n\
 ### Graph: deps\n\n\
 Kind dependency, 3 nodes, 3 edges.\n\
@@ -636,6 +654,12 @@ fn rich_document() -> Document {
     d.properties.title = Some("Quarterly report".into());
     d.properties.authors = vec!["Ann".into()];
     d.properties.keywords = vec!["finance".into()];
+    d.properties.custom.insert(
+        "department".into(),
+        Value::Text {
+            value: "Sales".into(),
+        },
+    );
     d.properties.created = Some(Value::DateTime {
         value: "2025-11-30T08:00:00Z".into(),
     });
@@ -954,4 +978,164 @@ fn paginate_keeps_caption_table_and_merge_note_together() {
         assert!(!page.starts_with('|'), "{pages:#?}");
         assert!(!page.starts_with("Merged"), "{pages:#?}");
     }
+}
+
+#[test]
+fn logic_names_dialects_and_shows_notes() {
+    let mut d = doc();
+    let derived = |anchor: &str, note: Option<&str>| Formula {
+        dialect: "derived".into(),
+        note: note.map(Into::into),
+        ..formula(anchor, "Total = A + B", &["data!A:A"], None)
+    };
+    d.facets.formulas = vec![
+        derived("data!C:C", Some("holds 20 of 20 rows")),
+        derived("data!D:D", None),
+        Formula {
+            dialect: "openformula".into(),
+            cached: Some(Value::Percent { value: 0.07 }),
+            ..formula("B1", "of:=A1", &[], Some("g"))
+        },
+        Formula {
+            dialect: "mathcad".into(),
+            cached: Some(Value::Bool { value: true }),
+            ..formula("B2", "x:=1", &[], Some("g"))
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    let expected = "## Logic\n\n\
+Found in the data, not written as formulas in the file.\n\n\
+| Cells | Formula | Reads | Role | Value | Note |\n\
+| --- | --- | --- | --- | --- | --- |\n\
+| data!C:C | `Total = A + B` | data!A:A | result |  | holds 20 of 20 rows |\n\
+| data!D:D | `Total = A + B` | data!A:A | result |  |  |\n\
+\n\
+### Pattern: g\n\n\
+OpenDocument formulas, mathcad.\n\n\
+| Cells | Formula | Reads | Role | Value |\n\
+| --- | --- | --- | --- | --- |\n\
+| B1 | `of:=A1` |  | result | 7 % |\n\
+| B2 | `x:=1` |  | result | true |\n";
+    assert!(md.contains(expected), "{md}");
+}
+
+#[test]
+fn custom_properties_get_a_section_before_the_content() {
+    let mut d = doc();
+    d.properties.custom.insert(
+        "project | x".into(),
+        Value::Text {
+            value: "Apollo".into(),
+        },
+    );
+    d.properties.custom.insert(
+        "sizes".into(),
+        Value::List {
+            value: vec![
+                Value::Number {
+                    value: 1.5,
+                    unit: None,
+                },
+                Value::Date {
+                    value: "2025-01-02".into(),
+                },
+            ],
+        },
+    );
+    d.body = vec![para("Body text.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    let expected = "\n# report.md\n\n## Properties\n\n\
+| Key | Value |\n\
+| --- | --- |\n\
+| project \\| x | Apollo |\n\
+| sizes | 1.5, 2025-01-02 |\n\
+\n\
+Body text.\n";
+    assert!(md.contains(expected), "{md}");
+    let mut o = opts();
+    o.sections = Some(vec![OutputSection::Content]);
+    let only = render(&d, Completeness::Complete, &o);
+    assert!(!only.contains("## Properties"), "{only}");
+}
+
+fn styled(text: &str, emphasis: bool, strong: bool) -> Inline {
+    Inline::Text {
+        text: text.into(),
+        emphasis,
+        strong,
+        strike: false,
+    }
+}
+
+#[test]
+fn emphasis_flanks_in_common_cases() {
+    let p = |inlines: Vec<Inline>| {
+        let md = body_of(vec![Block::Paragraph {
+            inlines,
+            role: None,
+            anchor: None,
+        }]);
+        after_frontmatter(&md)
+            .trim_start_matches("\n# report.md\n\n")
+            .to_string()
+    };
+    assert_eq!(p(vec![styled("word", true, false), txt(".")]), "*word*.\n");
+    assert_eq!(
+        p(vec![txt("("), styled("word", true, false), txt(")")]),
+        "(*word*)\n"
+    );
+    assert_eq!(
+        p(vec![txt("a"), styled("b", true, false), txt("c")]),
+        "a*b*c\n"
+    );
+    // Not left-flanking: the markers move out to the whole word run.
+    assert_eq!(
+        p(vec![
+            txt("see foo"),
+            styled("(bar)", false, true),
+            txt(" now")
+        ]),
+        "see **foo(bar)** now\n"
+    );
+    assert_eq!(
+        p(vec![txt("x "), styled("(bar)", false, true), txt("baz y")]),
+        "x **(bar)baz** y\n"
+    );
+    // Punctuation on both sides flanks.
+    assert_eq!(
+        p(vec![
+            Inline::Code { text: "c".into() },
+            styled("(bar)", true, false),
+            Inline::Code { text: "d".into() },
+        ]),
+        "`c`*(bar)*`d`\n"
+    );
+    // Every case parses as emphasis where markers were written.
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![txt("see foo"), styled("(bar)", false, true), txt(" now")],
+        role: None,
+        anchor: None,
+    }]);
+    let strong = Parser::new_ext(after_frontmatter(&md), Options::empty())
+        .filter(|e| matches!(e, Event::Start(Tag::Strong)))
+        .count();
+    assert_eq!(strong, 1, "{md}");
+}
+
+#[test]
+fn loose_list_items_keep_a_blank_line_before_nested_lists() {
+    let md = body_of(vec![Block::List {
+        ordered: false,
+        items: vec![vec![
+            para("a"),
+            para("b"),
+            Block::List {
+                ordered: false,
+                items: vec![vec![para("c")]],
+                anchor: None,
+            },
+        ]],
+        anchor: None,
+    }]);
+    assert!(md.contains("\n- a\n\n  b\n\n  - c\n"), "{md}");
 }
