@@ -24,6 +24,8 @@ pub enum LossReason {
     Limit,
     Encrypted,
     NotImplemented,
+    /// A fact was guessed or inferred, not read from the file.
+    Uncertain,
 }
 
 #[derive(

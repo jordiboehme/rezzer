@@ -310,6 +310,10 @@ fn serde_shapes_are_tagged_snake_case() {
         "not_implemented"
     );
     assert_eq!(
+        serde_json::to_value(LossReason::Uncertain).unwrap(),
+        "uncertain"
+    );
+    assert_eq!(
         serde_json::to_value(Completeness::Partial).unwrap(),
         "partial"
     );
