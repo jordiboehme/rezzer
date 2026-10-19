@@ -25,6 +25,24 @@ created: "2025-11-30T08:00:00Z"
 
 # Quarterly report
 
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Numbers | sheet | 3 rows x 2 columns | input |  |
+| Sheet 1 | sheet | 1 paragraph | result | Numbers |
+
+- Formulas: 1
+- Not read: 2
+- Last changed: 2025-11-30T08:00:00Z
+
+```mermaid
+flowchart LR
+    p0["Numbers"]
+    p1["Sheet 1"]
+    p0 --> p1
+```
+
 ## Properties
 
 | Key | Value |

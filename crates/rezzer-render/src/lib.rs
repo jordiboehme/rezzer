@@ -21,6 +21,7 @@ mod blocks;
 mod facets;
 mod frontmatter;
 mod mermaid;
+mod overview;
 mod paging;
 
 use rezzer_model::{Block, Completeness, Document, Inline};
@@ -100,10 +101,11 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     out
 }
 
-/// `## Overview`: parts with roles, counts, dependencies, last change and open comments.
-/// Task 11 (enrich) fills it; until then there is none.
-pub fn render_overview(_doc: &Document) -> Option<String> {
-    None
+/// `## Overview`: the parts with kind, size, role and what they read from, the facts, and a
+/// Mermaid graph of the parts when one reads from another. `None` when the document has no
+/// overview (the enrich pass `overview` did not run) or it is empty.
+pub fn render_overview(doc: &Document) -> Option<String> {
+    overview::render(doc)
 }
 
 /// Splits rendered Markdown into pages of about `page_tokens` tokens (characters / 4).

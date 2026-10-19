@@ -19,7 +19,8 @@ mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState};
 pub use document::{
-    Asset, Confidence, Detection, Document, MODEL_VERSION, Properties, ReaderInfo, SourceInfo,
+    Asset, Confidence, Detection, Document, MODEL_VERSION, Overview, OverviewPart, Properties,
+    ReaderInfo, SourceInfo,
 };
 pub use facet::{Annotation, Edge, Embedded, Event, Facets, Formula, Graph, Node, Role};
 pub use format::{Completeness, FormatId};

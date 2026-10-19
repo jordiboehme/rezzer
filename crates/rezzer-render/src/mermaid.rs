@@ -31,7 +31,7 @@ fn sanitize(id: &str) -> String {
 }
 
 /// A label for inside `"..."`: characters Mermaid would read as markup become entity codes.
-fn label(text: &str) -> String {
+pub(crate) fn label(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         match c {

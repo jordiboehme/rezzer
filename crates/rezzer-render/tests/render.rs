@@ -6,8 +6,8 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, CalloutKind, Cell, Completeness, Confidence,
     Detection, Document, Edge, Embedded, Event as TimelineEvent, FormatId, Formula, Graph, Inline,
-    Loss, LossReason, Node, ReaderInfo, Role, SectionKind, Severity, SourceInfo, StatusColor,
-    TaskState, Value,
+    Loss, LossReason, Node, Overview, OverviewPart, ReaderInfo, Role, SectionKind, Severity,
+    SourceInfo, StatusColor, TaskState, Value,
 };
 use rezzer_render::{OutputSection, RenderOptions, paginate, render, render_overview};
 
@@ -663,6 +663,17 @@ fn rich_document() -> Document {
     d.properties.created = Some(Value::DateTime {
         value: "2025-11-30T08:00:00Z".into(),
     });
+    d.overview = Some(Overview {
+        parts: vec![
+            part("Numbers", "3 rows x 2 columns", Some(Role::Input), &[]),
+            part("Sheet 1", "1 paragraph", Some(Role::Result), &["Numbers"]),
+        ],
+        facts: vec![
+            ("Formulas".into(), "1".into()),
+            ("Not read".into(), "2".into()),
+            ("Last changed".into(), "2025-11-30T08:00:00Z".into()),
+        ],
+    });
     d.body = vec![
         Block::Heading {
             level: 1,
@@ -800,9 +811,85 @@ fn sections_filter() {
     assert!(md.contains("\n# Quarterly report\n"), "{md}");
 }
 
+fn part(name: &str, size: &str, role: Option<Role>, reads: &[&str]) -> OverviewPart {
+    OverviewPart {
+        name: name.into(),
+        kind: "sheet".into(),
+        size: size.into(),
+        role,
+        reads: reads.iter().map(|r| (*r).to_string()).collect(),
+    }
+}
+
 #[test]
-fn overview_hook_is_empty_for_now() {
-    assert_eq!(render_overview(&rich_document()), None);
+fn overview_is_none_without_data() {
+    let mut d = doc();
+    assert_eq!(render_overview(&d), None);
+    d.overview = Some(Overview::default());
+    assert_eq!(render_overview(&d), None);
+}
+
+#[test]
+fn overview_table_facts_and_graph() {
+    let mut d = doc();
+    d.overview = Some(Overview {
+        parts: vec![
+            part("Input", "10 rows x 3 columns", Some(Role::Input), &[]),
+            part("Calc", "4 rows x 2 columns", Some(Role::Result), &["Input"]),
+        ],
+        facts: vec![
+            ("Formulas".into(), "2".into()),
+            ("Last changed".into(), "2026-02-03".into()),
+        ],
+    });
+    let expected = "## Overview\n\n\
+| Part | Kind | Size | Role | Reads from |\n\
+| --- | --- | --- | --- | --- |\n\
+| Input | sheet | 10 rows x 3 columns | input |  |\n\
+| Calc | sheet | 4 rows x 2 columns | result | Input |\n\n\
+- Formulas: 2\n\
+- Last changed: 2026-02-03\n\n\
+```mermaid\n\
+flowchart LR\n    p0[\"Input\"]\n    p1[\"Calc\"]\n    p0 --> p1\n```";
+    assert_eq!(render_overview(&d).unwrap(), expected);
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\n# report.md\n\n## Overview\n"), "{md}");
+}
+
+#[test]
+fn overview_single_plain_part_has_no_table() {
+    let mut d = doc();
+    d.overview = Some(Overview {
+        parts: vec![part("Only", "3 paragraphs", None, &[])],
+        facts: vec![("Not read".into(), "1".into())],
+    });
+    assert_eq!(render_overview(&d).unwrap(), "## Overview\n\n- Not read: 1");
+}
+
+#[test]
+fn overview_text_is_escaped() {
+    let mut d = doc();
+    d.overview = Some(Overview {
+        parts: vec![
+            part("a | b <!-- x -->\n# h", "1", Some(Role::Input), &[]),
+            part(
+                "Q\"]\nend",
+                "1",
+                Some(Role::Result),
+                &["a | b <!-- x -->\n# h"],
+            ),
+        ],
+        facts: vec![("L".into(), "<script>\n# no".into())],
+    });
+    let out = render_overview(&d).unwrap();
+    assert!(!out.contains("<!--"), "{out}");
+    assert!(!out.contains("<script>"), "{out}");
+    assert!(!out.contains("\n# "), "{out}");
+    // The table has exactly header, separator and two rows.
+    let table_lines = out.lines().filter(|l| l.starts_with('|')).count();
+    assert_eq!(table_lines, 4, "{out}");
+    let graph = out.split("```mermaid").nth(1).unwrap();
+    assert!(!graph.contains("\"]\nend"), "{out}");
 }
 
 #[test]

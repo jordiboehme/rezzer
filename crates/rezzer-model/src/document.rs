@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::block::Block;
-use crate::facet::Facets;
+use crate::facet::{Facets, Role};
 use crate::format::FormatId;
 use crate::loss::Loss;
 use crate::value::Value;
@@ -32,6 +32,9 @@ pub struct Document {
     pub assets: Vec<Asset>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub losses: Vec<Loss>,
+    /// The structured overview, filled by the enrich pass `overview`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<Overview>,
 }
 
 impl Document {
@@ -45,6 +48,7 @@ impl Document {
             facets: Facets::default(),
             assets: Vec::new(),
             losses: Vec::new(),
+            overview: None,
         }
     }
 }
@@ -132,4 +136,31 @@ pub struct Asset {
     /// True when Rezzer cannot interpret the picture and the calling agent should look at it.
     #[serde(default)]
     pub needs_vision: bool,
+}
+
+/// A short map of the document: its parts and the main facts. Built by the enrich passes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Overview {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<OverviewPart>,
+    /// Label and value pairs in display order, for example `("Formulas", "12")`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<(String, String)>,
+}
+
+/// One top-level part of the document, for example a sheet or a chapter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OverviewPart {
+    pub name: String,
+    /// The kind in words, for example `sheet` or `chapter`.
+    pub kind: String,
+    /// For example `12 rows x 4 columns` or `30 paragraphs`.
+    pub size: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
+    /// Names of the parts this part reads from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<String>,
 }

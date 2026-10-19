@@ -16,7 +16,7 @@ fn header(cols: &[&str]) -> Vec<String> {
     cols.iter().map(|c| (*c).to_string()).collect()
 }
 
-fn role_name(role: Role) -> &'static str {
+pub(crate) fn role_name(role: Role) -> &'static str {
     match role {
         Role::Input => "input",
         Role::Constant => "constant",
