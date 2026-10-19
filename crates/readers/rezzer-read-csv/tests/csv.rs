@@ -162,7 +162,7 @@ fn broken_csv_is_partial_with_losses() {
     assert!(
         damaged
             .iter()
-            .any(|l| l.location == "line 3" && l.what == "row has 2 fields, expected 3")
+            .any(|l| l.location == "record 3 (line 3)" && l.what == "row has 2 fields, expected 3")
     );
 }
 
@@ -217,7 +217,124 @@ fn rows_beyond_cap_are_counted_with_info_loss() {
 #[test]
 fn tsv_without_sniffable_dialect_is_guessed() {
     let out = read_as("t.tsv", FormatId::Tsv, b"only one line\n");
-    assert!(out.document.losses.iter().any(
-        |l| l.severity == Severity::Info && l.what == "dialect guessed from the file type"
-    ));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.severity == Severity::Info
+                && l.why == LossReason::Uncertain
+                && l.what == "dialect guessed from the file type")
+    );
+}
+
+fn widths(block: &Block) -> Vec<usize> {
+    let Block::Table { rows, .. } = block else {
+        panic!()
+    };
+    rows.iter().map(Vec::len).collect()
+}
+
+#[test]
+fn ragged_table_is_rectangular() {
+    let out = read(ragged_input().as_bytes());
+    let (_, blocks) = tables(&out);
+    let w = widths(blocks[0]);
+    assert!(w.iter().all(|&x| x == 4), "{w:?}");
+    let rows = rows_of(blocks[0]);
+    assert_eq!(rows[0], ["id", "qty", "price", "Column 4"]);
+    assert_eq!(rows[3], ["3", "4", "", ""]);
+    assert_eq!(rows[4][3], "9");
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(
+        out.document
+            .losses
+            .iter()
+            .filter(|l| l.why == LossReason::Damaged)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn wide_file_is_capped_by_cells() {
+    let cols = 3000;
+    let header: Vec<String> = (0..cols).map(|i| format!("h{i}")).collect();
+    let mut csv = header.join(",");
+    csv.push('\n');
+    for r in 0..200 {
+        let row: Vec<String> = (0..cols).map(|i| (r + i).to_string()).collect();
+        csv.push_str(&row.join(","));
+        csv.push('\n');
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    // 200,000 / 3,000 = 66 data rows plus the header
+    assert_eq!(widths(blocks[0]).len(), 67);
+    let l = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit)
+        .unwrap();
+    assert_eq!(l.what, "rows 67 to 200 not shown");
+    assert_eq!(l.severity, Severity::Info);
+}
+
+#[test]
+fn single_unsniffable_record_is_a_header() {
+    let out = read(b"a,b,c\n");
+    let [Block::Section { blocks, .. }] = out.document.body.as_slice() else {
+        panic!()
+    };
+    let [Block::Paragraph { inlines, .. }] = blocks.as_slice() else {
+        panic!("{blocks:?}")
+    };
+    assert!(
+        matches!(&inlines[0], Inline::Text { text, .. } if text == "The file has a header row but no data rows.")
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Uncertain)
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn bom_is_not_part_of_the_first_header() {
+    let out = read(b"\xef\xbb\xbfname,age\nAnna,31\nBen,25\nCleo,40\n");
+    let (_, blocks) = tables(&out);
+    assert_eq!(rows_of(blocks[0])[0], ["name", "age"]);
+}
+
+#[test]
+fn tsv_happy_path() {
+    let out = read_as(
+        "t.tsv",
+        FormatId::Tsv,
+        b"name\tage\nAnna\t31\nBen\t25\nCleo\t40\n",
+    );
+    let (title, blocks) = tables(&out);
+    assert_eq!(title, "t");
+    assert_eq!(rows_of(blocks[0])[2], ["Ben", "25"]);
+    assert_eq!(
+        out.document.properties.custom["delimiter"],
+        Value::Text {
+            value: "tab".into()
+        }
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+fn ragged_input() -> String {
+    let mut csv = String::from("id,qty,price\n");
+    for i in 1..=30 {
+        match i {
+            3 => csv.push_str("3,4\n"),
+            4 => csv.push_str("4,7,8,9\n"),
+            _ => csv.push_str(&format!("{i},{},{}\n", i * 3 % 7, i * 5 % 11)),
+        }
+    }
+    csv
 }

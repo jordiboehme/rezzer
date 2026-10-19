@@ -5,6 +5,7 @@
 //! CSV and TSV reader: one sheet with the data table, a table of column facts and the sum
 //! relations between columns as formulas.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use csvsniff::{ColumnKind, Dialect};
@@ -17,6 +18,9 @@ use rezzer_model::{
 
 /// Data rows in the body table. Further rows are analyzed and counted but not shown.
 const MAX_TABLE_ROWS: usize = 10_000;
+
+/// Cells in the body table. Wide files show fewer rows so memory stays bounded.
+const MAX_TABLE_CELLS: usize = 200_000;
 
 /// Rows read between two time checks.
 const CHECK_EVERY: usize = 1000;
@@ -77,13 +81,15 @@ impl Reader for CsvReader {
             return finish(doc, partial);
         }
 
-        let dialect = match csvsniff::sniff(text) {
+        let mut guessed = false;
+        let mut dialect = match csvsniff::sniff(text) {
             Some(d) => d,
             None => {
+                guessed = true;
                 doc.losses.push(Loss {
                     location: "document".into(),
                     what: "dialect guessed from the file type".into(),
-                    why: LossReason::Unsupported,
+                    why: LossReason::Uncertain,
                     severity: Severity::Info,
                 });
                 Dialect {
@@ -98,7 +104,22 @@ impl Reader for CsvReader {
                 }
             }
         };
-        let analysis = csvsniff::analyze(text, &dialect, MAX_TABLE_ROWS);
+        let mut analysis = csvsniff::analyze(text, &dialect, MAX_TABLE_ROWS);
+        if guessed && analysis.rows == 1 {
+            // A single record is most likely a header row.
+            dialect.has_header = true;
+            analysis = csvsniff::analyze(text, &dialect, MAX_TABLE_ROWS);
+        }
+        let timed_out = budget.check_time().is_err();
+        if timed_out {
+            partial = true;
+            doc.losses.push(Loss {
+                location: "document".into(),
+                what: "time limit reached after the analysis, table not built".into(),
+                why: LossReason::Limit,
+                severity: Severity::Warning,
+            });
+        }
 
         let custom = &mut doc.properties.custom;
         let delimiter = match dialect.delimiter {
@@ -118,9 +139,14 @@ impl Reader for CsvReader {
             },
         );
 
+        let record_of_line = record_numbers(text, &dialect, &analysis);
         for r in &analysis.ragged_rows {
+            let location = match record_of_line.get(&r.line) {
+                Some(n) => format!("record {n} (line {})", r.line),
+                None => format!("line {}", r.line),
+            };
             doc.losses.push(Loss {
-                location: format!("line {}", r.line),
+                location,
                 what: format!("row has {} fields, expected {}", r.fields, r.expected),
                 why: LossReason::Damaged,
                 severity: Severity::Warning,
@@ -146,6 +172,7 @@ impl Reader for CsvReader {
             });
         }
         let damaged = doc.losses.iter().any(|l| l.why == LossReason::Damaged);
+        partial |= damaged;
 
         if analysis.rows == 0 {
             let msg = if dialect.has_header {
@@ -154,7 +181,7 @@ impl Reader for CsvReader {
                 "The file is empty."
             };
             doc.body.push(sheet_of(&sheet, vec![note(msg)]));
-            return finish(doc, partial || damaged);
+            return finish(doc, partial);
         }
 
         // The data table: header plus at most MAX_TABLE_ROWS data rows.
@@ -166,9 +193,25 @@ impl Reader for CsvReader {
             .flexible(true)
             .from_reader(text.as_bytes());
         let mut rec = csv::StringRecord::new();
-        let wanted = MAX_TABLE_ROWS + usize::from(dialect.has_header);
+        let ncols = analysis.columns.len().max(1);
+        let shown = MAX_TABLE_ROWS.min(MAX_TABLE_CELLS / ncols).max(1);
+        let wanted = shown + usize::from(dialect.has_header);
         let mut stopped_at: Option<usize> = None;
-        while rows.len() < wanted && reader.read_record(&mut rec).unwrap_or(false) {
+        while !timed_out && rows.len() < wanted {
+            match reader.read_record(&mut rec) {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(e) => {
+                    partial = true;
+                    doc.losses.push(Loss {
+                        location: format!("record {}", rows.len() + 1),
+                        what: format!("record could not be read: {e}"),
+                        why: LossReason::Damaged,
+                        severity: Severity::Warning,
+                    });
+                    break;
+                }
+            }
             if rows.len() % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
                 stopped_at = Some(rows.len() + 1);
                 break;
@@ -177,11 +220,7 @@ impl Reader for CsvReader {
             let cells = rec
                 .iter()
                 .enumerate()
-                .map(|(j, v)| {
-                    let mut c = Cell::new(vec![plain(v)]);
-                    c.anchor = Some(Anchor(format!("{sheet}!{}{row_no}", column_letter(j))));
-                    c
-                })
+                .map(|(j, v)| anchored(&sheet, j, row_no, v))
                 .collect();
             rows.push(cells);
         }
@@ -193,21 +232,37 @@ impl Reader for CsvReader {
                 why: LossReason::Limit,
                 severity: Severity::Warning,
             });
-        } else if analysis.rows > MAX_TABLE_ROWS {
+        } else if analysis.rows > shown {
             doc.losses.push(Loss {
                 location: sheet.clone(),
-                what: format!("rows {} to {} not shown", MAX_TABLE_ROWS + 1, analysis.rows),
+                what: format!("rows {} to {} not shown", shown + 1, analysis.rows),
                 why: LossReason::Limit,
                 severity: Severity::Info,
             });
         }
 
-        let mut blocks = vec![Block::Table {
-            caption: None,
-            header_rows: usize::from(dialect.has_header),
-            rows,
-            anchor: None,
-        }];
+        // Rectangular: pad short rows (and the header) to the widest row.
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        for (i, row) in rows.iter_mut().enumerate() {
+            for j in row.len()..width {
+                let label = if dialect.has_header && i == 0 {
+                    format!("Column {}", j + 1)
+                } else {
+                    String::new()
+                };
+                row.push(anchored(&sheet, j, i + 1, &label));
+            }
+        }
+
+        let mut blocks = Vec::new();
+        if !timed_out {
+            blocks.push(Block::Table {
+                caption: None,
+                header_rows: usize::from(dialect.has_header),
+                rows,
+                anchor: None,
+            });
+        }
 
         // The column facts.
         let mut col_rows = vec![
@@ -259,9 +314,48 @@ impl Reader for CsvReader {
             });
         }
 
-        let damaged = doc.losses.iter().any(|l| l.why == LossReason::Damaged);
-        finish(doc, partial || damaged)
+        finish(doc, partial)
     }
+}
+
+/// A cell with its spreadsheet-style anchor (`sheet!B3`, `row` is 1-based, header is row 1).
+fn anchored(sheet: &str, column: usize, row: usize, text: &str) -> Cell {
+    let mut cell = Cell::new(vec![plain(text)]);
+    cell.anchor = Some(Anchor(format!("{sheet}!{}{row}", column_letter(column))));
+    cell
+}
+
+/// Maps the physical start line of each listed ragged record to its 1-based record number.
+fn record_numbers(
+    text: &str,
+    dialect: &Dialect,
+    analysis: &csvsniff::Analysis,
+) -> HashMap<usize, usize> {
+    let mut map = HashMap::new();
+    if analysis.ragged_rows.is_empty() {
+        return map;
+    }
+    let wanted: HashSet<usize> = analysis.ragged_rows.iter().map(|r| r.line).collect();
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(dialect.delimiter)
+        .quote(dialect.quote)
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(text.as_bytes());
+    let mut rec = csv::StringRecord::new();
+    let mut n = 0;
+    while reader.read_record(&mut rec).unwrap_or(false) {
+        n += 1;
+        if let Some(line) = rec.position().map(|p| p.line() as usize)
+            && wanted.contains(&line)
+        {
+            map.insert(line, n);
+            if map.len() == wanted.len() {
+                break;
+            }
+        }
+    }
+    map
 }
 
 fn finish(document: Document, partial: bool) -> ReadOutcome {
