@@ -233,9 +233,12 @@ It works with any MCP client (Claude Code and others). Its output follows the fr
 
 ## Support
 
-Rezzer is free and open source. If it earned its place in your workflow, you can support the work here:
+Rezzer is free and open source. If it earned its place in your workflow, you can support or sponsor the work here:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/V7V31T6CL9)
+[![PayPal](https://img.shields.io/badge/PayPal-sponsor-blue?logo=paypal)](https://paypal.me/jordiboehmelopez)
+
+Want to sponsor a format your team needs? [Open an issue](https://github.com/jordiboehme/rezzer/issues) and let's talk.
 
 ## License
 
