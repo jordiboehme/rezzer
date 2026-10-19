@@ -480,7 +480,16 @@ pub(crate) fn ole(bytes: &[u8]) -> Found {
 /// legacy NX (`UG_PART/UG_PART`) and SolidWorks (`ISolidWorksInformation`). Format facts
 /// from the cadmpeg documentation (CC BY 4.0).
 fn ole_inner(bytes: &[u8]) -> std::io::Result<Found> {
-    let comp = cfb::CompoundFile::open(Cursor::new(bytes))?;
+    if ole_directory_too_large(bytes) {
+        return Ok(found(
+            FormatId::Ole,
+            Confidence::Likely,
+            format!(
+                "ole directory too large to list during detection (more than {MAX_OLE_ENTRIES} entries)"
+            ),
+        ));
+    }
+    let mut comp = cfb::CompoundFile::open(Cursor::new(bytes))?;
     let mut root = Vec::new();
     let mut shown = Vec::new();
     for e in comp.read_root_storage() {
@@ -527,10 +536,16 @@ fn ole_inner(bytes: &[u8]) -> std::io::Result<Found> {
     }
     if has("RSeStorage") {
         if comp.is_stream("/RSeStorage/RSeSegInfo") {
+            let mut info = Vec::new();
+            if let Ok(stream) = comp.open_stream("/RSeStorage/RSeSegInfo") {
+                // A short or broken read only weakens the part/assembly decision.
+                let _ = stream.take(READ_BUDGET).read_to_end(&mut info);
+            }
+            let (format, kind) = inventor_kind(&info);
             return Ok(found(
-                FormatId::Ipt,
+                format,
                 Confidence::Certain,
-                "ole compound file with RSeStorage/RSeSegInfo (inventor part or assembly)",
+                format!("ole compound file with RSeStorage/RSeSegInfo (inventor {kind})"),
             ));
         }
         let db = comp.read_storage("/RSeStorage").ok().and_then(|entries| {
@@ -582,4 +597,107 @@ fn ole_inner(bytes: &[u8]) -> std::io::Result<Found> {
             shown.join(", ")
         ),
     ))
+}
+
+/// Inventor document kind from the segment type names in `RSeSegInfo`: `Pm*` families mean a
+/// part, `Am*` families an assembly (format facts from the cadmpeg documentation, CC BY 4.0).
+/// Type names are u32-counted UTF-16LE strings; any counted ASCII name of the form
+/// `Am`/`Pm` + capital letter counts.
+fn inventor_kind(info: &[u8]) -> (FormatId, &'static str) {
+    let (mut part, mut assembly) = (false, false);
+    let mut i = 0;
+    while i + 10 <= info.len() && !(part && assembly) {
+        let n = u32_at(info, i).unwrap_or(0) as usize;
+        let name = info.get(i + 4..i + 4 + 2 * n);
+        let ascii = |k: usize| {
+            name.and_then(|b| b.get(2 * k..2 * k + 2))
+                .filter(|u| u[1] == 0)
+                .map(|u| u[0])
+        };
+        if (3..=64).contains(&n)
+            && (0..n).all(|k| ascii(k).is_some_and(|c| c.is_ascii_alphanumeric()))
+            && ascii(1) == Some(b'm')
+            && ascii(2).is_some_and(|c| c.is_ascii_uppercase())
+        {
+            match ascii(0) {
+                Some(b'P') => part = true,
+                Some(b'A') => assembly = true,
+                _ => {}
+            }
+            i += 4 + 2 * n;
+            continue;
+        }
+        i += 1;
+    }
+    match (part, assembly) {
+        (_, true) if part => (FormatId::Iam, "document with part and assembly segments"),
+        (_, true) => (FormatId::Iam, "assembly, Am* segments"),
+        (true, false) => (FormatId::Ipt, "part, Pm* segments"),
+        (false, false) => (FormatId::Ipt, "part or assembly, segment types not found"),
+    }
+}
+
+/// Most compound file directory entries listed during detection.
+const MAX_OLE_ENTRIES: u64 = 10_000;
+
+/// Follows the directory sector chain in the FAT, without loading the directory, and says
+/// whether it holds more than [`MAX_OLE_ENTRIES`] entries. Anything unreadable is left to the
+/// cfb crate (false).
+fn ole_directory_too_large(bytes: &[u8]) -> bool {
+    ole_directory_sectors(bytes, MAX_OLE_ENTRIES).is_some_and(|too_large| too_large)
+}
+
+fn ole_directory_sectors(bytes: &[u8], max_entries: u64) -> Option<bool> {
+    const END: u32 = 0xFFFF_FFFA; // ids from here on are markers, not sectors
+    let shift = u16_at(bytes, 0x1E)?;
+    if !(9..=12).contains(&shift) {
+        return None;
+    }
+    let ss = 1usize << shift;
+    let per_sector = (ss / 4) as u32;
+    let sector = |id: u32| -> Option<&[u8]> {
+        let start = (id as usize).checked_add(1)?.checked_mul(ss)?;
+        bytes.get(start..start.checked_add(ss)?)
+    };
+    let num_fat = u32_at(bytes, 0x2C)? as usize;
+    let max_sectors = bytes.len() / ss + 1;
+    if num_fat > max_sectors {
+        return None;
+    }
+    // FAT sector ids: 109 in the header, the rest in the DIFAT chain.
+    let mut fat_ids: Vec<u32> = (0..109.min(num_fat))
+        .map(|k| u32_at(bytes, 0x4C + 4 * k))
+        .collect::<Option<_>>()?;
+    let mut difat = u32_at(bytes, 0x44)?;
+    let mut guard = 0;
+    while fat_ids.len() < num_fat && difat < END {
+        let sec = sector(difat)?;
+        for k in 0..(per_sector as usize - 1) {
+            if fat_ids.len() == num_fat {
+                break;
+            }
+            fat_ids.push(u32_at(sec, 4 * k)?);
+        }
+        difat = u32_at(sec, ss - 4)?;
+        guard += 1;
+        if guard > max_sectors {
+            return None;
+        }
+    }
+    let next = |id: u32| -> Option<u32> {
+        let fat_sector = *fat_ids.get((id / per_sector) as usize)?;
+        u32_at(sector(fat_sector)?, 4 * (id % per_sector) as usize)
+    };
+    let entries_per_sector = (ss / 128) as u64;
+    let max_dir_sectors = max_entries.div_ceil(entries_per_sector);
+    let mut id = u32_at(bytes, 0x30)?;
+    let mut count = 0u64;
+    while id < END {
+        count += 1;
+        if count > max_dir_sectors {
+            return Some(true);
+        }
+        id = next(id)?;
+    }
+    Some(false)
 }

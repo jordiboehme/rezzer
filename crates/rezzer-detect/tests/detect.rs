@@ -932,7 +932,8 @@ fn spike_cad_corpus_sweep() {
         "3dm" => Some(FormatId::Rhino3dm),
         "catpart" => Some(FormatId::Catpart),
         "sldprt" => Some(FormatId::Sldprt),
-        "ipt" | "iam" => Some(FormatId::Ipt),
+        "ipt" => Some(FormatId::Ipt),
+        "iam" => Some(FormatId::Iam),
         "f3d" => Some(FormatId::F3d),
         "obj" => Some(FormatId::Obj),
         "scad" => Some(FormatId::Openscad),
@@ -984,6 +985,9 @@ fn spike_cad_corpus_sweep() {
             let bytes = std::fs::read(&p).unwrap();
             let (f, d) = detect(&name, &bytes);
             checked += 1;
+            if matches!(f, FormatId::Ipt | FormatId::Iam) {
+                eprintln!("{name}: {f:?} ({})", d.evidence);
+            }
             if f != want {
                 bad.push(format!("{}: {f:?} ({})", p.display(), d.evidence));
             }
@@ -992,4 +996,125 @@ fn spike_cad_corpus_sweep() {
     assert!(checked > 0, "no corpus files found");
     eprintln!("checked {checked} corpus files");
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+// ---- Fix round 3: non-blocking open, OLE cap, stricter Excellon, Inventor assemblies ----
+
+#[test]
+fn cnc_program_with_g90_and_bare_coordinates_is_gcode() {
+    let cnc = b"%\nG90\nG21\nX10.0 Y10.0\nX20.0 Y20.0\nG1 X30 F200\nM30\n%\n";
+    let (f, d) = detect("mill.nc", cnc);
+    assert_eq!(f, FormatId::Gcode, "{}", d.evidence);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_refuses_fifo_without_blocking() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pipe");
+    let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    // SAFETY: plain libc call with a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = path.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(open(&p, &Limits::default()));
+    });
+    let res = rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .expect("open blocked on a FIFO");
+    assert!(matches!(res, Err(OpenError::NotAFile(_))), "{res:?}");
+}
+
+/// A compound file whose directory chain runs over `dir_sectors` sectors (512-byte sectors).
+/// Only the header and the FAT are real; the directory sectors are zeros.
+fn cfb_with_long_directory(dir_sectors: u32) -> Vec<u8> {
+    let ss = 512usize;
+    let per_fat = (ss / 4) as u32;
+    let total = dir_sectors + dir_sectors.div_ceil(per_fat) + 1;
+    let fat_sectors = total.div_ceil(per_fat);
+    assert!(fat_sectors <= 109);
+    let mut out = vec![0u8; ss];
+    out[..8].copy_from_slice(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+    out[0x18..0x1A].copy_from_slice(&0x3Eu16.to_le_bytes());
+    out[0x1A..0x1C].copy_from_slice(&3u16.to_le_bytes());
+    out[0x1C..0x1E].copy_from_slice(&0xFFFEu16.to_le_bytes());
+    out[0x1E..0x20].copy_from_slice(&9u16.to_le_bytes());
+    out[0x20..0x22].copy_from_slice(&6u16.to_le_bytes());
+    out[0x2C..0x30].copy_from_slice(&fat_sectors.to_le_bytes());
+    out[0x30..0x34].copy_from_slice(&fat_sectors.to_le_bytes()); // directory starts after FAT
+    out[0x38..0x3C].copy_from_slice(&4096u32.to_le_bytes());
+    out[0x3C..0x40].copy_from_slice(&0xFFFF_FFFEu32.to_le_bytes());
+    out[0x44..0x48].copy_from_slice(&0xFFFF_FFFEu32.to_le_bytes());
+    for i in 0..109u32 {
+        let v = if i < fat_sectors { i } else { 0xFFFF_FFFF };
+        let at = 0x4C + 4 * i as usize;
+        out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let mut fat = vec![0xFFFF_FFFFu32; (fat_sectors * per_fat) as usize];
+    for i in 0..fat_sectors {
+        fat[i as usize] = 0xFFFF_FFFD; // FAT sector
+    }
+    let first = fat_sectors;
+    for k in 0..dir_sectors {
+        let id = first + k;
+        fat[id as usize] = if k + 1 < dir_sectors {
+            id + 1
+        } else {
+            0xFFFF_FFFE
+        };
+    }
+    for v in &fat {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.resize(ss * (1 + (first + dir_sectors) as usize), 0);
+    out
+}
+
+#[test]
+fn ole_with_huge_directory_is_not_listed() {
+    // 2,600 sectors of 4 entries each: 10,400 directory entries.
+    let bytes = cfb_with_long_directory(2_600);
+    let (f, d) = detect("x.doc", &bytes);
+    assert_eq!(f, FormatId::Ole, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(
+        d.evidence.contains("ole directory too large to list"),
+        "{}",
+        d.evidence
+    );
+}
+
+fn counted_utf16(s: &str) -> Vec<u8> {
+    let mut out = (s.encode_utf16().count() as u32).to_le_bytes().to_vec();
+    for u in s.encode_utf16() {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+fn cfb_inventor(type_names: &[&str]) -> Vec<u8> {
+    let mut info = 2u32.to_le_bytes().to_vec();
+    for t in type_names {
+        info.extend(counted_utf16("Segment"));
+        info.extend(counted_utf16(t));
+        info.extend_from_slice(&[0u8; 40]);
+    }
+    let mut comp = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    comp.create_storage("/RSeStorage").unwrap();
+    comp.create_stream("/RSeStorage/RSeSegInfo")
+        .unwrap()
+        .write_all(&info)
+        .unwrap();
+    comp.flush().unwrap();
+    comp.into_inner().into_inner()
+}
+
+#[test]
+fn inventor_assembly_vs_part() {
+    let (f, d) = detect("x", &cfb_inventor(&["AmDc", "AmGraphics"]));
+    assert_eq!(f, FormatId::Iam, "{}", d.evidence);
+    let (f, d) = detect("x", &cfb_inventor(&["PmDc", "PmBRep"]));
+    assert_eq!(f, FormatId::Ipt, "{}", d.evidence);
+    assert!(d.evidence.contains("part"), "{}", d.evidence);
 }

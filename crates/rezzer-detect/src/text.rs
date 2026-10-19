@@ -352,8 +352,8 @@ fn gerber(lines: &[&str]) -> Option<Found> {
 }
 
 /// Excellon drill files: an `M48` header, or a header with units (`METRIC`/`INCH`) and tool
-/// definitions (`T<n>C<diameter>`), or a `%` header end with `G05`/`G90` and bare
-/// coordinate lines (Allegro and other writers without `M48`).
+/// definitions (`T<n>C<diameter>`), or a `%` header end with `G05`/`G90`, a `T<n>` tool
+/// selection line and bare coordinate lines (Allegro and other writers without `M48`).
 fn excellon(lines: &[&str]) -> Option<Found> {
     let head = || lines.iter().take(HEAD_LINES).map(|l| l.trim());
     if head().take(50).any(|l| l == "M48") {
@@ -385,11 +385,13 @@ fn excellon(lines: &[&str]) -> Option<Found> {
                 && b.get(1).is_some_and(|c| c.is_ascii_digit() || *c == b'-')
         })
         .count();
-    if percent && mode && coords >= 2 {
+    let tool_select = head()
+        .any(|l| l.len() > 1 && l.starts_with('T') && l[1..].bytes().all(|b| b.is_ascii_digit()));
+    if percent && mode && tool_select && coords >= 2 {
         return Some(found(
             FormatId::Excellon,
             Confidence::Likely,
-            "excellon program: % header end, G90/G05 and coordinate lines",
+            "excellon program: % header end, G90/G05, tool selection and coordinate lines",
         ));
     }
     None

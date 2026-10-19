@@ -21,14 +21,15 @@ const IN_MEMORY_MAX: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
     let shown = path.display().to_string();
-    let meta = std::fs::metadata(path).map_err(|e| io_error(&shown, &e))?;
-    if !meta.is_file() {
-        return Err(OpenError::NotAFile(shown));
-    }
-    check_size(meta.len(), limits)?;
-    let file = File::open(path).map_err(|e| io_error(&shown, &e))?;
-    // Type and size again from the open handle: the path may have been replaced since the
-    // stat (by a device, a FIFO or a larger file).
+    let file = open_file(path).map_err(|e| {
+        if path.is_dir() {
+            OpenError::NotAFile(shown.clone())
+        } else {
+            io_error(&shown, &e)
+        }
+    })?;
+    // Type and size come from the open handle only, so a path swapped between two calls
+    // cannot slip a device, a FIFO or a larger file past the checks.
     let handle_meta = file.metadata().map_err(|e| io_error(&shown, &e))?;
     if !handle_meta.is_file() {
         return Err(OpenError::NotAFile(shown));
@@ -66,6 +67,19 @@ pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
         .unwrap_or_else(|| shown.clone());
     let modified = handle_meta.modified().ok().and_then(rfc3339);
     Ok(build(Some(path), name, bytes, modified))
+}
+
+/// Opens for reading. On Unix with `O_NONBLOCK`, so opening a FIFO returns at once instead of
+/// waiting for a writer; regular files ignore the flag.
+fn open_file(path: &Path) -> std::io::Result<File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NONBLOCK);
+    }
+    opts.open(path)
 }
 
 pub(crate) fn from_bytes(name: &str, bytes: Vec<u8>, limits: &Limits) -> Result<Source, OpenError> {

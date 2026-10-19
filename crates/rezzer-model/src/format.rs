@@ -58,6 +58,7 @@ pub enum FormatId {
     NxPrt,
     Catpart,
     Ipt,
+    Iam,
     F3d,
     Rhino3dm,
     Ole,

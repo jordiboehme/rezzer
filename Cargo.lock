@@ -398,6 +398,7 @@ dependencies = [
  "csv",
  "csvsniff",
  "hex",
+ "libc",
  "memmap2",
  "rezzer-limits",
  "rezzer-model",
