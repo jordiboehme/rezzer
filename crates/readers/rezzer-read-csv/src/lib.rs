@@ -294,7 +294,7 @@ impl Reader for CsvReader {
         blocks.push(Block::Table {
             caption: Some("Columns".into()),
             header_rows: 1,
-            role: None,
+            role: Some("summary".into()),
             rows: col_rows,
             alignments: Vec::new(),
             anchor: None,

@@ -339,3 +339,22 @@ fn ragged_input() -> String {
     }
     csv
 }
+
+#[test]
+fn columns_table_is_marked_as_summary() {
+    let out = read(b"a,b\n1,2\n3,4\n");
+    let [Block::Section { blocks, .. }] = out.document.body.as_slice() else {
+        panic!("one section");
+    };
+    let roles: Vec<(Option<&str>, Option<&str>)> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table { caption, role, .. } => Some((caption.as_deref(), role.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        roles,
+        vec![(None, None), (Some("Columns"), Some("summary"))]
+    );
+}
