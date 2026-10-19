@@ -55,7 +55,7 @@ A new format means one new reader. The rest of the pipeline stays the same.
 - **Provenance:** every result says where it came from: original path, checksum, source date and which reader was used.
 - **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version.
 - **Evidence on demand:** the frontmatter cites the archived source as `rezzer://sha256/<hash>/<name>`. Ask Rezzer for that reference and it hands out the original. Every piece of knowledge links back to its evidence.
-- **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder, in UTF-8 or optionally in UTF-16 or UTF-32.
+- **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder. Output is always UTF-8.
 
 ## Example
 
