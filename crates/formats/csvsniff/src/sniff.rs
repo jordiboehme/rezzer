@@ -334,6 +334,16 @@ fn id_like_name(name: &str) -> bool {
         .any(|w| matches!(w, "year" | "id" | "code" | "number" | "date"))
 }
 
+/// Integer values that step by exactly 1 once sorted (row ids); needs no gaps in the data.
+fn consecutive(values: &[Option<f64>]) -> bool {
+    let mut v: Vec<f64> = values.iter().flatten().copied().collect();
+    if v.len() != values.len() || v.len() < 2 {
+        return false;
+    }
+    v.sort_by(f64::total_cmp);
+    v.windows(2).all(|w| w[1] - w[0] == 1.0)
+}
+
 /// Unique Integer column with every value in 1000..=2999.
 fn year_like(c: &Column, values: &[Option<f64>]) -> bool {
     c.unique
@@ -443,7 +453,7 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
             .iter()
             .enumerate()
             .filter_map(|(j, c)| {
-                if c.key_like || id_like_name(&c.name) {
+                if (c.key_like && c.kind == ColumnKind::Text) || id_like_name(&c.name) {
                     return None;
                 }
                 let places = match c.kind {
@@ -455,7 +465,8 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
                     .iter()
                     .map(|(_, r)| r.get(j).and_then(|v| number(v.trim())).map(|n| n.1))
                     .collect::<Vec<_>>();
-                if year_like(c, &values) {
+                if year_like(c, &values) || (c.kind == ColumnKind::Integer && consecutive(&values))
+                {
                     return None;
                 }
                 Some(NumCol {

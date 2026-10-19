@@ -142,7 +142,7 @@ fn unterminated_quote_flagged() {
 fn derived_sum_found() {
     let mut t = String::from("A,B,C,Total\n");
     for i in 1..=12 {
-        let j = i % 10;
+        let j = i;
         let (a, b, c) = (j * 37 % 90 + 10, j * 53 % 70 + 20, j * 17 % 60 + 15);
         t.push_str(&format!("{a},{b},{c},{}\n", a + b + c));
     }
@@ -189,7 +189,7 @@ fn no_derived_below_10_rows() {
 fn no_derived_over_max_rows() {
     let mut t = String::from("A,B,Total\n");
     for i in 1..=20 {
-        let j = i % 10;
+        let j = i;
         let (a, b) = (j * 37 % 90 + 10, j * 53 % 70 + 20);
         t.push_str(&format!("{a},{b},{}\n", a + b));
     }
@@ -246,4 +246,14 @@ fn ragged_file_is_accepted() {
     assert!(!a.ragged_rows.is_empty());
     let prose = "Well, I think so.\nHowever, as he said, it was late, and the road, which was long, ended.\nNo.\nShe came, saw, and left, as always, quietly.\n";
     assert_eq!(sniff(prose), None);
+}
+
+#[test]
+fn consecutive_id_column_is_never_a_part() {
+    let mut t = String::from("n,A,B,Total\n");
+    for i in 0..12 {
+        let (n, a, b) = (100 + i, i * 37 % 90 + 10, i * 53 % 70 + 20);
+        t.push_str(&format!("{n},{a},{b},{}\n", n + a + b));
+    }
+    assert!(full(&t).derived.is_empty());
 }
