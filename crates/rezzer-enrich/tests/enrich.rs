@@ -153,7 +153,7 @@ fn references_resolve_through_every_anchor_place() {
             id: "n".into(),
             label: "N".into(),
             kind: None,
-            anchor: Some(a("node-anchor")),
+            anchor: Some(a("q1")),
         }],
         edges: vec![],
     });
@@ -162,7 +162,7 @@ fn references_resolve_through_every_anchor_place() {
             "Costs!B2",
             &["Costs!A1", "Costs!A:A", "Costs!A1:B2", "'Costs'!A1"],
         ),
-        formula("Costs!C9", &["deep", "q1", "node-anchor"]),
+        formula("Costs!C9", &["deep", "q1"]),
     ];
     d.facets.timeline.push(Event {
         time: None,
@@ -360,4 +360,45 @@ fn big_document_is_fast() {
     enrich(&mut d, &only(&[]));
     assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
     assert_eq!(d.losses.len(), 101);
+}
+
+#[test]
+fn dangling_node_anchor_becomes_loss() {
+    let mut d = doc();
+    d.body = vec![para("x", Some("h:intro"))];
+    d.facets.graphs.push(Graph {
+        id: "g".into(),
+        kind: "link".into(),
+        nodes: vec![
+            Node {
+                id: "a".into(),
+                label: "A".into(),
+                kind: None,
+                anchor: Some(a("h:intro")),
+            },
+            Node {
+                id: "b".into(),
+                label: "B".into(),
+                kind: None,
+                anchor: Some(a("h:gone")),
+            },
+        ],
+        edges: vec![],
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.losses.len(), 1, "{:?}", d.losses);
+    assert_eq!(d.losses[0].what, "reference to h:gone not found");
+}
+
+#[test]
+fn enrich_is_idempotent() {
+    let mut d = doc();
+    d.body = vec![para(GERMAN, Some("p1")), sheet("S", 2, 2)];
+    let refs: Vec<String> = (0..150).map(|i| format!("missing{i}")).collect();
+    let refs: Vec<&str> = refs.iter().map(String::as_str).collect();
+    d.facets.formulas = vec![formula("p1", &refs)];
+    enrich(&mut d, &only(&[]));
+    let once = d.clone();
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d, once);
 }

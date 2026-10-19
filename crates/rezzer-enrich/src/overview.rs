@@ -4,7 +4,8 @@
 
 //! Pass `overview`: builds `doc.overview` from the body and the facets.
 //!
-//! Parts are the top-level sections (footnote sections `fn:...` are not parts). A formula
+//! Parts are the top-level sections. Footnote sections (anchor `fn:...`) are definitions of
+//! the text, not parts, so they are left out. A formula
 //! belongs to the part that holds its anchor; for a spreadsheet reference such as
 //! `Costs!A1:B9` it is the sheet part. A part with formulas is a `result`; a part that other
 //! parts read from and that has no formulas is an `input`.

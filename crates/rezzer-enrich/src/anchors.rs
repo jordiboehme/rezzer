@@ -5,7 +5,9 @@
 //! Pass `anchors`: every reference to an anchor must name an anchor of the document.
 //!
 //! The anchors of a document are the anchors of its blocks (sections included), table cells,
-//! `AnchorMark` inlines and graph nodes. A reference resolves when it is one of them. A
+//! `AnchorMark` inlines. Graph node
+//! anchors are references into the body, not definitions. A reference resolves when it is one
+//! of them. A
 //! spreadsheet reference may also name a range or a whole column or row, such as `Sheet!A:A`
 //! or `Sheet!A1:C9`: it resolves when its sheet prefix (the text before the `!`, without
 //! single quotes) equals the anchor of a section. Everything else that is missing becomes a
@@ -42,6 +44,11 @@ impl Pass for Anchors {
             }
         }
         for g in &doc.facets.graphs {
+            for n in &g.nodes {
+                if let Some(a) = &n.anchor {
+                    check(format!("graph {}", g.id), a);
+                }
+            }
             for e in &g.edges {
                 if let Some(a) = &e.anchor {
                     check(format!("graph {}", g.id), a);
@@ -61,16 +68,18 @@ impl Pass for Anchors {
             }
         }
         let total = missing.len();
-        for (location, anchor) in missing.into_iter().take(MAX_LOSSES) {
-            doc.losses.push(Loss {
+        let mut new: Vec<Loss> = missing
+            .into_iter()
+            .take(MAX_LOSSES)
+            .map(|(location, anchor)| Loss {
                 location,
                 what: format!("reference to {anchor} not found"),
                 why: LossReason::Damaged,
                 severity: Severity::Warning,
-            });
-        }
+            })
+            .collect();
         if total > MAX_LOSSES {
-            doc.losses.push(Loss {
+            new.push(Loss {
                 location: "document".into(),
                 what: format!(
                     "{} more references to missing anchors are not listed",
@@ -79,6 +88,13 @@ impl Pass for Anchors {
                 why: LossReason::Damaged,
                 severity: Severity::Warning,
             });
+        }
+        // A loss equal to one already in the document is not added again, so the pass can run
+        // twice.
+        for loss in new {
+            if !doc.losses.contains(&loss) {
+                doc.losses.push(loss);
+            }
         }
     }
 }
@@ -96,13 +112,6 @@ impl<'a> AnchorSet<'a> {
             sections: HashSet::new(),
         };
         set.add_blocks(&doc.body);
-        for g in &doc.facets.graphs {
-            for n in &g.nodes {
-                if let Some(a) = &n.anchor {
-                    set.all.insert(&a.0);
-                }
-            }
-        }
         set
     }
 

@@ -7,7 +7,8 @@
 //!
 //! The passes run in a fixed order and each can be switched off by name. Each is linear in the
 //! size of the document and does not recurse, so a hostile file cannot overflow the stack.
-//! [`enrich`] is meant to run once per document: running it again adds the same losses again.
+//! Running [`enrich`] again gives the same document: a loss equal to one already present is not
+//! added again and the overview is replaced.
 
 mod anchors;
 mod language;
