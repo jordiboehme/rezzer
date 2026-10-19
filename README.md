@@ -2,32 +2,64 @@
 
 **Rez your files into knowledge.**
 
-Rezzer reads the files you give it and turns them into Markdown that an AI agent can learn from. It's not a converter that dumps plain text. Rezzer keeps what makes a document knowledge: its structure, metadata, relations and context.
+Rezzer is a knowledge extraction pipeline for AI agents. It reads your files and finds what they know: structure, metadata, facts, intent and the logic behind them. It hands that over as Markdown an agent can learn from and a person can read. Use it to understand a file better or to add it to a knowledge base.
+
+It's not a converter that dumps plain text. A spreadsheet is more than its values. A contract is more than its words. Rezzer keeps the formulas, the comments, the tracked changes and everything else that tells what a file means.
 
 One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine.
 
-> **Status: design phase.** There is no code to install yet. This README describes what Rezzer is built to do.
+> **Status: design phase.** There is no code to install yet. This README describes what Rezzer is built to do. Formats and crates were picked after tests on public files.
 
 ## Why
 
-Ask an agent to read a `.docx`, an old `.xls` or a DXF drawing and watch what happens. It writes a Python script, installs a library, tries again, and in the end gets a wall of text with the tables broken and the formulas gone. Next session it does the same thing again.
+Ask an agent to read a `.docx`, an old `.xls` or a PDF form and watch what happens. It writes a Python script, installs a library, tries again and in the end gets a wall of text. The tables are broken, the formulas are gone and the comments never made it. Next session it does the same thing again.
 
-Rezzer replaces that with one tool that knows the formats. The agent asks for a file and gets back clean Markdown with frontmatter. Every time, the same way.
+Rezzer replaces that with one tool that knows the formats. The agent asks for a file and gets back the knowledge in it. Every time, the same way.
 
-## What the agent gets
+## How it works
 
-- **Structure:** headings, lists, footnotes and cross references stay what they are. Tables become real Markdown tables.
-- **Metadata:** title, authors, dates, revisions, keywords and the source file go into the frontmatter, in the [Open Knowledge Format](https://okf.md) (OKF). Tools that read OKF can ingest the result as is.
-- **Context:** comments, tracked changes and PDF annotations (highlights, notes, free text) stay attached to the passage they belong to, with author and date.
-- **Spreadsheets:** each sheet becomes a table of values, plus a section that lists every formula with the cells it reads. Named ranges and links between sheets are kept. An agent can check a calculation, not only read its result.
-- **Diagrams as Mermaid:** charts, SmartArt, draw.io and Visio drawings become Mermaid blocks an agent can read and reason about.
-- **Pictures:** images are extracted to files and marked in the text with their caption and position. A multimodal agent can look at them and describe them.
-- **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder.
-- **Provenance:** every result says where it came from: original path, checksum, source date and how it was read. If Rezzer couldn't read a part, the result says that too.
-- **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version. Your knowledge keeps its source, even after the original file is moved or deleted.
-- **Evidence on demand:** the frontmatter cites the archived source as `rezzer://sha256/<hash>/<name>`. Ask Rezzer for that reference and it hands out the original: its place in the archive, a copy in a folder of your choice, or the file itself. Every piece of knowledge links back to its evidence, and Rezzer can check that the evidence is unchanged.
+```mermaid
+flowchart LR
+    F[File] --> D[Detect]
+    D --> R[Read]
+    R --> M[Model]
+    M --> E[Enrich]
+    E --> W[Render]
+    W --> O[OKF Markdown]
+    M -.-> J[JSON]
+```
 
-A spreadsheet could come out like this (the format is not final yet):
+1. **Detect:** Rezzer looks at the content, not at the file extension. A CSV saved as `.txt` is still a CSV.
+2. **Read:** one reader per format fills Rezzer's document model. Readers never write Markdown themselves.
+3. **Model:** the content as blocks (sections, headings, tables, lists, pictures) plus layers for what lies beneath: formulas and dependencies, graphs, timelines, comments, annotations and embedded objects. Anchors tie every comment to its passage and every formula to its cell. The model also lists what couldn't be read, and why.
+4. **Enrich:** steps that work the same for every format. Group copied formulas into patterns, tell inputs from results, build dependency graphs, write an overview.
+5. **Render:** one renderer writes Markdown with frontmatter in the [Open Knowledge Format](https://okf.md) (OKF). Graphs become Mermaid. The model is also available as JSON.
+
+A new format means one new reader. The rest of the pipeline stays the same.
+
+## What you get
+
+- **Structure:** headings, sections, lists, footnotes and cross references stay what they are. Tables become real Markdown tables, merged cells included.
+- **Metadata:** title, authors, dates, revisions, keywords and custom properties go into the frontmatter. Values keep their type: a date stays a date, 9 % stays a percentage.
+- **The logic behind the content:** every format has a layer that tells how it works. Rezzer reads it and shows it as tables and graphs:
+  - Spreadsheets: formulas with the cells they read, named ranges, number formats, validation rules, data tables
+  - PDF forms: which field is calculated from which, in what order, with what format
+  - Documents: fields, cross references, mail merge sources, embedded data
+  - Mail and web: reply threads, link graphs, structured data
+- **An overview as data:** what the file is, its parts, inputs and results, dependencies, who changed what and when. Your agent turns that into sentences if it needs them. Rezzer doesn't guess what things mean: it states what it can prove from the file.
+- **Comments and changes:** comments with their replies, tracked changes and PDF annotations stay attached to their passage, with author and date.
+- **Engineering sheets:** long formula chains, dynamic arrays, `LET` and `LAMBDA`. Hundreds of copied formulas fold into a few patterns. There's no limit on the number of formulas.
+- **Diagrams as Mermaid:** dependencies, charts, threads and trees become Mermaid blocks an agent can read and reason about.
+- **Pictures:** images are extracted to files and marked in the text with their caption and position. A multimodal agent can look at them.
+- **Honest gaps:** if Rezzer can't read a part, the output says what, where and why. No silent gaps.
+- **Provenance:** every result says where it came from: original path, checksum, source date and which reader was used.
+- **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version.
+- **Evidence on demand:** the frontmatter cites the archived source as `rezzer://sha256/<hash>/<name>`. Ask Rezzer for that reference and it hands out the original. Every piece of knowledge links back to its evidence.
+- **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder, in UTF-8 or optionally in UTF-16 or UTF-32.
+
+## Example
+
+A budget spreadsheet could come out like this (the format is not final yet):
 
 ````markdown
 ---
@@ -42,6 +74,23 @@ source_date: 2026-10-28
 
 # Budget 2026
 
+## Overview
+
+| Sheet   | Role   | Cells  | Formulas | Reads from    |
+|---------|--------|--------|----------|---------------|
+| Costs   | input  | A1:D40 | 0        |               |
+| Income  | input  | A1:C25 | 0        |               |
+| Summary | result | A1:D4  | 6        | Costs, Income |
+
+```mermaid
+flowchart LR
+    Costs --> Summary
+    Income --> Summary
+```
+
+- Last changed: 2026-10-28 by A. Meyer
+- Open comments: 2 (Costs!C12, Summary!D4)
+
 ## Sheet: Summary
 
 | Item    | 2025   | 2026   | Change |
@@ -52,36 +101,71 @@ source_date: 2026-10-28
 
 ### Formulas
 
-| Cell | Formula                    | Reads                    |
-|------|----------------------------|--------------------------|
-| C2   | `=SUM(Costs!C2:C40)`       | sheet Costs, C2:C40      |
-| C4   | `=C3-C2`                   | C3, C2                   |
-| D2   | `=C2/B2-1`                 | C2, B2                   |
+| Cells | Formula              | Reads               | Role   |
+|-------|----------------------|---------------------|--------|
+| C2    | `=SUM(Costs!C2:C40)` | sheet Costs, C2:C40 | result |
+| C4    | `=C3-C2`             | C3, C2              | result |
+| D2:D4 | `=C2/B2-1` (copied)  | B, C of each row    | result |
 ````
 
 ## Formats
 
-Planned for the first release:
+Planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
 
-| Group | Formats |
-|---|---|
-| PDF | Text in reading order, tables, outline, metadata, annotations, form fields |
-| Word processing | DOCX, DOC, RTF, ODT |
-| Spreadsheets | XLSX, XLSM, XLSB, XLS, ODS, CSV, TSV |
-| Presentations | PPTX, PPT, ODP (with speaker notes) |
-| Books and web | EPUB, HTML |
-| Print | PostScript, EPS |
-| Text | Plain text in any encoding, Markdown |
+| Format | What Rezzer gets | Built on |
+|---|---|---|
+| [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, signatures, revisions | [lopdf](https://crates.io/crates/lopdf), [pdf-inspector](https://crates.io/crates/pdf-inspector), [hayro](https://crates.io/crates/hayro) |
+| [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own reader |
+| [XLS](docs/formats/xls.md) | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
+| [ODS](docs/formats/ods.md) | Values, formulas, names, comments | [calamine](https://crates.io/crates/calamine), own reader |
+| [DOCX](docs/formats/docx.md) | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
+| [DOC](docs/formats/doc.md) | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
+| [ODT](docs/formats/odt.md) | Structure, comments, tracked changes, footnotes | own reader |
+| [RTF](docs/formats/rtf.md) | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
+| [PPTX](docs/formats/pptx.md) | Slides, speaker notes, comments, sections, chart data | own reader |
+| [PPT](docs/formats/ppt.md) | Slides and notes from PowerPoint 97-2003 | [LibreOffice](https://www.libreoffice.org/) (optional, if installed) |
+| [ODP](docs/formats/odp.md) | Slides, notes, comments | own reader |
+| [EPUB](docs/formats/epub.md) | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
+| [HTML](docs/formats/html.md) | Main content, landmarks, tables, forms, structured data, link graph | [scraper](https://crates.io/crates/scraper), [dom_smoothie](https://crates.io/crates/dom_smoothie) |
+| [PostScript, EPS](docs/formats/postscript.md) | Metadata; text with an optional sandboxed extra | own reader |
+| [CSV, TSV](docs/formats/csv.md) | Delimiter, header, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
+| [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
+| [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
+| [CAD and engineering](docs/formats/cad.md) | Units, layers, parts lists, assembly and feature trees, sketch constraints, parameters, materials, print settings | [cadmpeg](https://github.com/cadmpeg/cadmpeg) and others, being tested |
+
+"Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
+
+For CAD the exact list of formats is still being tested: DXF, STEP, IGES, FreeCAD, Fusion 360, 3MF, STL, OBJ, glTF, IFC, KiCad, Gerber, G-code and OpenSCAD are candidates. Closed formats like Creo or SolidWorks give up their structure and metadata, so Rezzer asks for a STEP export to get the geometry.
 
 Planned after that:
 
 | Group | Formats |
 |---|---|
-| CAD and engineering | DXF, 3MF (with slicer settings), FreeCAD, STEP, IGES, IFC, STL, OBJ, glTF, KiCad, Gerber, G-code, OpenSCAD |
+| [Mail](docs/formats/mail.md) | EML, MBOX, MSG |
+| [Calculation sheets](docs/formats/mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath |
 | Diagrams | draw.io, Visio |
-| Mail | EML, MBOX, MSG |
 
-For engineering files the agent gets what matters to an engineer: units, layers, parts lists, assembly and feature trees, sketch constraints, parameters, materials and print settings. Assembly and feature trees come out as Mermaid. Closed formats like Creo or SolidWorks only give up their metadata, so Rezzer asks for a STEP export instead.
+## What sets Rezzer apart
+
+There are good tools that turn files into text: [Xberg](https://github.com/xberg-io/xberg) (formerly Kreuzberg), [MarkItDown](https://github.com/microsoft/markitdown), [Docling](https://github.com/docling-project/docling) and [Apache Tika](https://tika.apache.org/). They are built for search and RAG: get the text out, fast and from many formats. Xberg reads over 100 formats. If plain text is what you need, use them.
+
+Rezzer is built for knowledge, and that changes what counts:
+
+- **The logic, not just the content.** Others give you the values of a spreadsheet. Rezzer also gives you every formula, what it reads and how the sheets depend on each other. In our tests Xberg 1.3.10 kept at most 200 formulas per sheet, as metadata only.
+- **Context stays attached.** Comments with replies, tracked changes and annotations stay tied to their passage, with author and date.
+- **Facts, not guesses.** No model guesses the meaning. What Rezzer states, it can prove from the file. What it can't read, it says.
+- **Evidence.** Every result points back to its source, and the optional archive keeps that source.
+- **One model, one renderer.** Every format goes through the same document model. The output looks the same across formats, and the model is available as JSON too.
+- **Reusable parts.** Every reader Rezzer writes is a crate of its own, usable without Rezzer.
+
+## Built from reusable crates
+
+Rezzer ships as one binary, but it's made of crates you can use on their own:
+
+- Format crates read one format each and have their own API. They don't depend on Rezzer.
+- Small adapters map each format crate into Rezzer's document model.
+- Core crates hold the model, detection, enrichment, the renderer, the archive, jobs and the MCP server.
+- The `rezzer` binary only wires them together. Formats can be switched off at build time.
 
 ## Sending files to a remote Rezzer
 
@@ -98,6 +182,7 @@ Clients that support MCP tasks can follow the job natively. All others use the j
 These come as opt-in features or as a prebuilt image. The core stays small.
 
 - **OCR in tiers.** First the PDF text layer, when there is one. Then the operating system's own text recognition, or a small local model. For hard cases (handwriting, complex tables, diagrams) a larger local vision model that you download once. Everything runs on your machine.
+- **PostScript text.** PostScript is a program. Rezzer's core never runs it and only reads its metadata. For the text, an optional interpreter runs in a sandbox with no network and no access to other files.
 - **A printer for your agent.** Rezzer can show up as a network printer (AirPrint and IPP). Print from your phone or any app and the document lands with your agent. Rezzer only accepts print jobs that keep their text, like PDF or PostScript, so a print job doesn't turn into an OCR job.
 
 ## How it fits
@@ -112,14 +197,15 @@ flowchart LR
     A --> K[Knowledge base]
 ```
 
-It works with any MCP client (Claude Code and others). Its output follows the frontmatter conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue.
+It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue.
 
 ## Principles
 
-- **Semantics first.** Structure, metadata and context are the product. Plain text alone is a bug.
+- **Knowledge first.** Structure, metadata, logic and context are the product. Plain text alone is a bug.
 - **Local first.** No cloud services, no telemetry. A server mode over HTTP comes later.
 - **One binary.** No Python environment, no JVM, nothing to install during a session.
 - **Honest output.** When Rezzer can't read something, it says so in the output: no guessing, no silent gaps.
+- **Safe by default.** Files are data, never code. Scripts and macros are listed, never run. Readers have limits on size, depth and time.
 - **Clean licenses.** Rezzer links only libraries with permissive or MPL licenses. GPL tools like Ghostscript or LibreOffice can be used if you install them, but they're never bundled.
 
 ## License
