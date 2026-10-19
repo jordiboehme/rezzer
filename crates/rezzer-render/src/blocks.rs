@@ -1,0 +1,955 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Body blocks and inlines as Markdown in Crystalline's dialect.
+//!
+//! Text from files is escaped so that it can never add structure: no headings, lists, quotes,
+//! tables, code, HTML (and so no HTML comments), math or frontmatter. Anchors are not printed:
+//! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
+
+use rezzer_model::{Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState};
+
+/// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
+/// the stack.
+pub(crate) const MAX_DEPTH: usize = 64;
+
+const TOO_DEEP: &str = "Nesting too deep: the rest of this part is not shown.";
+
+/// Where inline text goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// A paragraph: newlines stay.
+    Block,
+    /// One line: a heading, a title, link text.
+    Line,
+    /// One line inside a table cell: `|` is escaped even inside code.
+    Cell,
+}
+
+/// What the block renderer needs besides the blocks.
+pub(crate) struct Ctx<'a> {
+    pub assets: &'a [Asset],
+    /// Added to every body heading level, so body headings stay below the title.
+    pub heading_offset: u8,
+}
+
+// ---------------------------------------------------------------------------------------
+// Inlines
+
+/// Renders inlines. In [`Mode::Block`] the result still needs [`finish_lines`].
+pub(crate) fn inlines(list: &[Inline], mode: Mode) -> String {
+    let merged = merge_text(list);
+    let mut out = String::new();
+    for inline in &merged {
+        inline_into(inline, mode, 0, &mut out);
+    }
+    out
+}
+
+/// Joins neighbouring text runs with the same style, so `**a****b**` never happens.
+fn merge_text(list: &[Inline]) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::with_capacity(list.len());
+    for inline in list {
+        if let (
+            Some(Inline::Text {
+                text: last,
+                emphasis: e1,
+                strong: s1,
+                strike: k1,
+            }),
+            Inline::Text {
+                text,
+                emphasis,
+                strong,
+                strike,
+            },
+        ) = (out.last_mut(), inline)
+            && *e1 == *emphasis
+            && *s1 == *strong
+            && *k1 == *strike
+        {
+            last.push_str(text);
+            continue;
+        }
+        out.push(inline.clone());
+    }
+    out
+}
+
+fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String) {
+    match inline {
+        Inline::Text {
+            text,
+            emphasis,
+            strong,
+            strike,
+        } => styled_text(text, *emphasis, *strong, *strike, mode, out),
+        Inline::LineBreak => {
+            if mode == Mode::Block {
+                out.push_str("\\\n");
+            } else {
+                out.push(' ');
+            }
+        }
+        Inline::Image { target, alt, title } => {
+            out.push_str("![");
+            escape_text(alt, line_mode(mode), out);
+            out.push_str("](");
+            destination(target, title.as_deref(), out);
+            out.push(')');
+        }
+        Inline::Code { text } => code_span(text, mode, out),
+        Inline::Link {
+            target,
+            title,
+            inlines: content,
+            ..
+        } => {
+            if link_depth > MAX_DEPTH {
+                return;
+            }
+            let merged = merge_text(content);
+            if link_depth > 0 {
+                // A link inside a link text keeps only its text.
+                for inner in &merged {
+                    inline_into(inner, line_mode(mode), link_depth + 1, out);
+                }
+                return;
+            }
+            out.push('[');
+            for inner in &merged {
+                inline_into(inner, line_mode(mode), 1, out);
+            }
+            out.push_str("](");
+            destination(target, title.as_deref(), out);
+            out.push(')');
+        }
+        Inline::FootnoteRef { id } => {
+            out.push_str("[^");
+            out.push_str(&footnote_label(id));
+            out.push(']');
+        }
+        Inline::Math { latex } => inline_math(latex, mode, out),
+        Inline::Status { text, color } => {
+            out.push_str(":status[");
+            escape_text(text, line_mode(mode), out);
+            out.push_str("]{");
+            out.push_str(status_color(*color));
+            out.push('}');
+        }
+        // Anchors are kept in the model JSON, not in the Markdown.
+        Inline::AnchorMark { .. } => {}
+    }
+}
+
+fn line_mode(mode: Mode) -> Mode {
+    if mode == Mode::Block {
+        Mode::Line
+    } else {
+        mode
+    }
+}
+
+fn styled_text(
+    text: &str,
+    emphasis: bool,
+    strong: bool,
+    strike: bool,
+    mode: Mode,
+    out: &mut String,
+) {
+    if !(emphasis || strong || strike) {
+        escape_text(text, mode, out);
+        return;
+    }
+    // Delimiters must touch the text, so outer whitespace goes outside them.
+    let core = text.trim();
+    if core.is_empty() {
+        escape_text(text, mode, out);
+        return;
+    }
+    let start = text.len() - text.trim_start().len();
+    let end = start + core.len();
+    escape_text(&text[..start], mode, out);
+    let mut open = String::new();
+    if strike {
+        open.push_str("~~");
+    }
+    if strong {
+        open.push_str("**");
+    }
+    if emphasis {
+        open.push('*');
+    }
+    let close: String = open.chars().rev().collect();
+    out.push_str(&open);
+    escape_text(core, mode, out);
+    out.push_str(&close);
+    escape_text(&text[end..], mode, out);
+}
+
+/// Escapes text from a file so that it stays text.
+///
+/// Line-start markers (`#`, `>`, `-`, `+`, `=`, `1.`) are handled per line in
+/// [`finish_lines`]; everything that is structure anywhere in a line is handled here.
+pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut prev: Option<char> = None;
+    for (i, &c) in chars.iter().enumerate() {
+        let next = chars.get(i + 1).copied();
+        match c {
+            '\\' | '`' | '*' | '_' | '[' | ']' | '~' | '|' | '&' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '<' => out.push_str("&lt;"),
+            // `$` before a backtick or another `$` opens math in Crystalline; at the end of a
+            // run the next character is unknown (a code span may follow).
+            '$' if matches!(next, Some('`') | Some('$') | None) || prev == Some('$') => {
+                out.push_str("\\$");
+            }
+            '\r' if next == Some('\n') => {}
+            '\n' | '\r' => {
+                if mode == Mode::Block {
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+            }
+            _ => out.push(c),
+        }
+        prev = Some(c);
+    }
+}
+
+/// Escapes plain text for one line (a title, a cell).
+pub(crate) fn line_text(text: &str) -> String {
+    let mut out = String::new();
+    escape_text(text, Mode::Line, &mut out);
+    out
+}
+
+/// Escapes plain text for a table cell.
+pub(crate) fn cell_text(text: &str) -> String {
+    let mut out = String::new();
+    escape_text(text, Mode::Cell, &mut out);
+    out
+}
+
+/// The longest run of `ch` in `text`.
+fn longest_run(text: &str, ch: char) -> usize {
+    let mut best = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        if c == ch {
+            run += 1;
+            best = best.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    best
+}
+
+fn one_line(text: &str, mode: Mode) -> String {
+    let mut s: String = text
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    if mode == Mode::Cell {
+        s = s.replace('|', "\\|");
+    }
+    s
+}
+
+/// Inline code in a span delimited by more backticks than any run inside.
+pub(crate) fn code_span(text: &str, mode: Mode, out: &mut String) {
+    if text.is_empty() {
+        return;
+    }
+    let content = one_line(text, mode);
+    let delim = "`".repeat(longest_run(&content, '`') + 1);
+    let pad = content.starts_with('`')
+        || content.ends_with('`')
+        || (content.starts_with(' ') && content.ends_with(' ') && !content.trim().is_empty());
+    out.push_str(&delim);
+    if pad {
+        out.push(' ');
+    }
+    out.push_str(&content);
+    if pad {
+        out.push(' ');
+    }
+    out.push_str(&delim);
+}
+
+fn inline_math(latex: &str, mode: Mode, out: &mut String) {
+    if latex.trim().is_empty() {
+        return;
+    }
+    let content = one_line(latex, mode);
+    if !content.contains('`') {
+        out.push_str("$`");
+        out.push_str(&content);
+        out.push_str("`$");
+    } else if !content.contains('$') && !content.contains('<') {
+        out.push_str("$$");
+        out.push_str(&content);
+        out.push_str("$$");
+    } else {
+        // Neither math form can hold it; it stays readable as code.
+        code_span(&content, mode, out);
+    }
+}
+
+/// A link or image destination plus optional title, without the parentheses.
+fn destination(target: &str, title: Option<&str>, out: &mut String) {
+    if target.is_empty() {
+        out.push_str("<>");
+    }
+    for c in target.chars() {
+        match c {
+            ' ' => out.push_str("%20"),
+            '(' => out.push_str("%28"),
+            ')' => out.push_str("%29"),
+            '<' => out.push_str("%3C"),
+            '>' => out.push_str("%3E"),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => {
+                let mut buf = [0u8; 4];
+                for b in c.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    if let Some(title) = title
+        && !title.is_empty()
+    {
+        out.push_str(" \"");
+        for c in title.chars() {
+            match c {
+                '"' | '\\' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                '\n' | '\r' => out.push(' '),
+                '<' => out.push_str("&lt;"),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+}
+
+/// A footnote label without characters that would end or break `[^...]`.
+fn footnote_label(id: &str) -> String {
+    let label: String = id
+        .chars()
+        .filter(|c| !c.is_whitespace() && !matches!(c, '[' | ']' | '\\' | '^' | '<' | '>'))
+        .collect();
+    if label.is_empty() {
+        "note".into()
+    } else {
+        label
+    }
+}
+
+pub(crate) fn status_color(color: StatusColor) -> &'static str {
+    match color {
+        StatusColor::Grey => "grey",
+        StatusColor::Blue => "blue",
+        StatusColor::Green => "green",
+        StatusColor::Yellow => "yellow",
+        StatusColor::Red => "red",
+        StatusColor::Purple => "purple",
+    }
+}
+
+/// Makes a rendered paragraph safe line by line: blank lines go (they would end the
+/// paragraph), the first line loses its indent (it would become code) and every line that
+/// starts with a block marker gets it escaped.
+pub(crate) fn finish_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut first = true;
+    for line in text.split('\n') {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !first {
+            out.push('\n');
+        }
+        let line = if first { line.trim_start() } else { line };
+        first = false;
+        let indent = line.len() - line.trim_start().len();
+        out.push_str(&line[..indent]);
+        escape_line_start(&line[indent..], &mut out);
+    }
+    out
+}
+
+fn escape_line_start(line: &str, out: &mut String) {
+    match line.chars().next() {
+        Some('#' | '>' | '-' | '+' | '=') => {
+            out.push('\\');
+            out.push_str(line);
+        }
+        Some(c) if c.is_ascii_digit() => {
+            let digits = line.chars().take_while(char::is_ascii_digit).count();
+            match line[digits..].chars().next() {
+                Some('.' | ')') => {
+                    out.push_str(&line[..digits]);
+                    out.push('\\');
+                    out.push_str(&line[digits..]);
+                }
+                _ => out.push_str(line),
+            }
+        }
+        _ => out.push_str(line),
+    }
+}
+
+/// A paragraph from inlines; empty when there is no visible content.
+pub(crate) fn paragraph(list: &[Inline]) -> String {
+    let start = list
+        .iter()
+        .position(|i| !matches!(i, Inline::LineBreak))
+        .unwrap_or(list.len());
+    let end = list
+        .iter()
+        .rposition(|i| !matches!(i, Inline::LineBreak))
+        .map_or(start, |e| e + 1);
+    finish_lines(&inlines(&list[start..end.max(start)], Mode::Block))
+}
+
+// ---------------------------------------------------------------------------------------
+// Blocks
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrevKind {
+    None,
+    Bullet,
+    Ordered,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Prev {
+    kind: PrevKind,
+    alt: bool,
+    task: bool,
+    /// A paragraph, list or task: a following list may join it tightly.
+    tight_lead: bool,
+}
+
+/// Renders a block sequence. `level` is the heading level for titled sections; `tight`
+/// joins a paragraph and a following list without a blank line (inside list items).
+pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: bool) -> String {
+    if depth > MAX_DEPTH {
+        return TOO_DEEP.into();
+    }
+    let mut out = String::new();
+    let mut prev = Prev {
+        kind: PrevKind::None,
+        alt: false,
+        task: false,
+        tight_lead: false,
+    };
+    for item in list {
+        let (text, now) = match item {
+            Block::Task { state, inlines, .. } => {
+                let alt = if prev.task {
+                    prev.alt
+                } else {
+                    prev.kind == PrevKind::Bullet && !prev.alt
+                };
+                (
+                    task(*state, inlines, alt),
+                    Prev {
+                        kind: PrevKind::Bullet,
+                        alt,
+                        task: true,
+                        tight_lead: true,
+                    },
+                )
+            }
+            Block::List { ordered, items, .. } => {
+                let same = if *ordered {
+                    PrevKind::Ordered
+                } else {
+                    PrevKind::Bullet
+                };
+                let alt = prev.kind == same && !prev.alt;
+                (
+                    list_block(*ordered, items, alt, ctx, depth, level),
+                    Prev {
+                        kind: same,
+                        alt,
+                        task: false,
+                        tight_lead: true,
+                    },
+                )
+            }
+            other => (
+                block(other, ctx, depth, level),
+                Prev {
+                    kind: PrevKind::Other,
+                    alt: false,
+                    task: false,
+                    tight_lead: matches!(other, Block::Paragraph { .. }),
+                },
+            ),
+        };
+        if text.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            let joins_tight = (prev.task && now.task)
+                || (tight && prev.tight_lead && now.kind != PrevKind::Other);
+            out.push_str(if joins_tight { "\n" } else { "\n\n" });
+        }
+        out.push_str(&text);
+        prev = now;
+    }
+    out
+}
+
+fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
+    match b {
+        Block::Section {
+            title,
+            anchor,
+            blocks: inner,
+            ..
+        } => {
+            let label = anchor.as_ref().and_then(|a| a.0.strip_prefix("fn:"));
+            match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
+                (None, Some(label)) => footnote(label, inner, ctx, depth),
+                (Some(title), _) => {
+                    let head = heading_line(level.min(6), &line_text(title.trim()));
+                    let body = blocks(inner, ctx, depth + 1, level.saturating_add(1), false);
+                    join2(head, body)
+                }
+                (None, None) => blocks(inner, ctx, depth + 1, level, false),
+            }
+        }
+        Block::Heading {
+            level: l,
+            inlines: content,
+            ..
+        } => {
+            let l = l.saturating_add(ctx.heading_offset).clamp(1, 6);
+            heading_line(l, inlines(content, Mode::Line).trim())
+        }
+        Block::Paragraph {
+            inlines: content, ..
+        } => paragraph(content),
+        Block::List { ordered, items, .. } => list_block(*ordered, items, false, ctx, depth, level),
+        Block::Table {
+            caption,
+            header_rows,
+            rows,
+            alignments,
+            ..
+        } => model_table(caption.as_deref(), *header_rows, rows, alignments),
+        Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
+        Block::Quote { blocks: inner, .. } => {
+            let body = blocks(inner, ctx, depth + 1, level, false);
+            prefix_lines(&body, ">")
+        }
+        Block::Math { latex, .. } => math_block(latex),
+        Block::Media { asset, .. } => media(asset, ctx),
+        Block::Callout {
+            kind,
+            title,
+            folded,
+            blocks: inner,
+            ..
+        } => {
+            let mut head = format!("[!{}]", callout_kind(*kind));
+            match folded {
+                Some(true) => head.push('-'),
+                Some(false) => head.push('+'),
+                None => {}
+            }
+            if let Some(title) = title.as_deref().filter(|t| !t.trim().is_empty()) {
+                head.push(' ');
+                head.push_str(&line_text(title.trim()));
+            }
+            let body = blocks(inner, ctx, depth + 1, level, false);
+            prefix_lines(&join_lines(head, body), ">")
+        }
+        Block::Rule { .. } => "---".into(),
+        Block::Task { state, inlines, .. } => task(*state, inlines, false),
+    }
+}
+
+fn join2(a: String, b: String) -> String {
+    if b.is_empty() {
+        a
+    } else {
+        format!("{a}\n\n{b}")
+    }
+}
+
+fn join_lines(a: String, b: String) -> String {
+    if b.is_empty() { a } else { format!("{a}\n{b}") }
+}
+
+/// `#` times `level`, then the text with a trailing `#` run escaped (it would close the
+/// heading).
+pub(crate) fn heading_line(level: u8, text: &str) -> String {
+    let hashes = "#".repeat(usize::from(level.max(1)));
+    if text.is_empty() {
+        return hashes;
+    }
+    let trimmed = text.trim_end_matches('#');
+    if trimmed.len() == text.len() {
+        format!("{hashes} {text}")
+    } else {
+        format!("{hashes} {trimmed}\\{}", &text[trimmed.len()..])
+    }
+}
+
+fn callout_kind(kind: CalloutKind) -> &'static str {
+    match kind {
+        CalloutKind::Note => "NOTE",
+        CalloutKind::Tip => "TIP",
+        CalloutKind::Important => "IMPORTANT",
+        CalloutKind::Warning => "WARNING",
+        CalloutKind::Caution => "CAUTION",
+        CalloutKind::Details => "DETAILS",
+    }
+}
+
+/// Prefixes every line with `marker` (`>`), with a space before non-empty lines.
+fn prefix_lines(text: &str, marker: &str) -> String {
+    if text.is_empty() {
+        return marker.into();
+    }
+    text.split('\n')
+        .map(|l| {
+            if l.is_empty() {
+                marker.to_string()
+            } else {
+                format!("{marker} {l}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The first line after `first`, the rest indented by `indent` spaces.
+fn hang(first: &str, body: &str, indent: usize) -> String {
+    if body.is_empty() {
+        return first.trim_end().to_string();
+    }
+    let pad = " ".repeat(indent);
+    let mut out = String::new();
+    for (i, line) in body.split('\n').enumerate() {
+        if i == 0 {
+            out.push_str(first);
+            out.push_str(line);
+        } else {
+            out.push('\n');
+            if !line.is_empty() {
+                out.push_str(&pad);
+                out.push_str(line);
+            }
+        }
+    }
+    out
+}
+
+fn list_block(
+    ordered: bool,
+    items: &[Vec<Block>],
+    alt: bool,
+    ctx: &Ctx,
+    depth: usize,
+    level: u8,
+) -> String {
+    if depth > MAX_DEPTH {
+        return TOO_DEEP.into();
+    }
+    let rendered: Vec<String> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let marker = if ordered {
+                format!("{}{} ", i + 1, if alt { ')' } else { '.' })
+            } else if alt {
+                "* ".to_string()
+            } else {
+                "- ".to_string()
+            };
+            let body = blocks(item, ctx, depth + 1, level, true);
+            hang(&marker, &body, marker.len())
+        })
+        .collect();
+    let loose = rendered.iter().any(|r| r.contains("\n\n"));
+    rendered.join(if loose { "\n\n" } else { "\n" })
+}
+
+fn task(state: TaskState, content: &[Inline], alt: bool) -> String {
+    let mark = match state {
+        TaskState::Open => ' ',
+        TaskState::Done => 'x',
+        TaskState::Cancelled => '~',
+    };
+    let bullet = if alt { '*' } else { '-' };
+    let first = format!("{bullet} [{mark}] ");
+    hang(&first, &paragraph(content), 2)
+}
+
+fn footnote(label: &str, inner: &[Block], ctx: &Ctx, depth: usize) -> String {
+    let body = blocks(inner, ctx, depth + 1, 6, false);
+    hang(&format!("[^{}]: ", footnote_label(label)), &body, 4)
+}
+
+/// A fenced block with a fence longer than any backtick run inside.
+pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
+    let fence = "`".repeat(longest_run(text, '`').max(2) + 1);
+    let info: String = lang
+        .unwrap_or("")
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .filter(|c| *c != '`')
+        .collect();
+    let body = text.strip_suffix('\n').unwrap_or(text);
+    if body.is_empty() {
+        format!("{fence}{info}\n{fence}")
+    } else {
+        format!("{fence}{info}\n{body}\n{fence}")
+    }
+}
+
+fn math_block(latex: &str) -> String {
+    let body = latex.trim_matches('\n');
+    if body.trim().is_empty() {
+        return String::new();
+    }
+    if math_is_plain(body) {
+        format!("$$\n{body}\n$$")
+    } else {
+        fence(Some("math"), body)
+    }
+}
+
+/// True when `$$ ... $$` is safe: no blank line, no `$$`, no `<` or backtick, and no line
+/// that a plain Markdown reader would take as a block marker.
+fn math_is_plain(body: &str) -> bool {
+    if body.contains("$$") || body.contains('<') || body.contains('`') {
+        return false;
+    }
+    body.split('\n').all(|line| {
+        let t = line.trim_start();
+        let Some(c) = t.chars().next() else {
+            return false;
+        };
+        if c.is_ascii_digit() {
+            let digits = t.chars().take_while(char::is_ascii_digit).count();
+            return !matches!(t[digits..].chars().next(), Some('.' | ')'));
+        }
+        c.is_alphanumeric()
+            || matches!(
+                c,
+                '\\' | '{'
+                    | '}'
+                    | '('
+                    | ')'
+                    | '^'
+                    | '_'
+                    | '&'
+                    | ','
+                    | '.'
+                    | ';'
+                    | ':'
+                    | '\''
+                    | '!'
+                    | '?'
+                    | '%'
+                    | '/'
+                    | '"'
+            )
+    })
+}
+
+fn media(id: &str, ctx: &Ctx) -> String {
+    let mut parts: Vec<Inline> = Vec::new();
+    let text = |t: String| Inline::Text {
+        text: t,
+        emphasis: false,
+        strong: false,
+        strike: false,
+    };
+    match ctx.assets.iter().find(|a| a.id == id) {
+        None => parts.push(text(format!("Picture {id} is missing from the assets."))),
+        Some(asset) => {
+            match &asset.path {
+                Some(path) => parts.push(Inline::Image {
+                    target: path.clone(),
+                    alt: asset
+                        .alt
+                        .clone()
+                        .or_else(|| asset.caption.clone())
+                        .unwrap_or_else(|| asset.id.clone()),
+                    title: None,
+                }),
+                None => parts.push(text(format!(
+                    "Picture {} ({}) is not extracted.",
+                    asset.id, asset.mime
+                ))),
+            }
+            if let Some(caption) = asset.caption.as_ref().filter(|c| !c.trim().is_empty()) {
+                parts.push(text(" ".into()));
+                parts.push(Inline::Text {
+                    text: caption.clone(),
+                    emphasis: true,
+                    strong: false,
+                    strike: false,
+                });
+            }
+            if asset.needs_vision {
+                parts.push(text(" ".into()));
+                parts.push(Inline::Status {
+                    text: "Needs vision".into(),
+                    color: StatusColor::Yellow,
+                });
+            }
+        }
+    }
+    paragraph(&parts)
+}
+
+// ---------------------------------------------------------------------------------------
+// Tables
+
+/// A GFM table from cells that are already escaped single-line Markdown.
+pub(crate) fn pipe_table(header: &[String], aligns: &[Align], rows: &[Vec<String>]) -> String {
+    let width = rows
+        .iter()
+        .map(Vec::len)
+        .chain(std::iter::once(header.len()))
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let line = |cells: &[String]| {
+        let mut s = String::from("|");
+        for i in 0..width {
+            s.push(' ');
+            s.push_str(cells.get(i).map_or("", String::as_str));
+            s.push_str(" |");
+        }
+        s
+    };
+    let mut out = line(header);
+    out.push_str("\n|");
+    for i in 0..width {
+        out.push_str(match aligns.get(i).copied().unwrap_or(Align::None) {
+            Align::None => " --- |",
+            Align::Left => " :--- |",
+            Align::Center => " :---: |",
+            Align::Right => " ---: |",
+        });
+    }
+    for row in rows {
+        out.push('\n');
+        out.push_str(&line(row));
+    }
+    out
+}
+
+/// Spans are capped so that a hostile span cannot allocate a huge grid.
+const MAX_SPAN: usize = 16_384;
+
+/// Cells a table grid may hold, spans included.
+const MAX_GRID: usize = 4_000_000;
+
+fn model_table(
+    caption: Option<&str>,
+    header_rows: usize,
+    rows: &[Vec<Cell>],
+    aligns: &[Align],
+) -> String {
+    if rows.is_empty() {
+        return caption
+            .filter(|c| !c.trim().is_empty())
+            .map(|c| format!("**{}** (empty table)", line_text(c.trim())))
+            .unwrap_or_default();
+    }
+    // Place every cell on a grid; spanned positions repeat the text.
+    let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
+    let mut merged: Vec<String> = Vec::new();
+    let mut filled = 0usize;
+    for (r, row) in rows.iter().enumerate() {
+        let mut c = 0;
+        for cell in row {
+            while grid[r].get(c).is_some_and(Option::is_some) {
+                c += 1;
+            }
+            let text = inlines(&cell.inlines, Mode::Cell).trim().to_string();
+            let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
+            let cs = (cell.col_span.max(1) as usize).min(MAX_SPAN);
+            // Past the grid budget a span fills only its own cell; the note still names it.
+            let (fill_rows, fill_cols) = if filled.saturating_add(rs * cs) > MAX_GRID {
+                (1, 1)
+            } else {
+                (rs, cs)
+            };
+            filled += fill_rows * fill_cols;
+            for grid_row in &mut grid[r..r + fill_rows] {
+                if grid_row.len() < c + fill_cols {
+                    grid_row.resize(c + fill_cols, None);
+                }
+                for slot in &mut grid_row[c..c + fill_cols] {
+                    *slot = Some(text.clone());
+                }
+            }
+            if rs > 1 || cs > 1 {
+                merged.push(format!(
+                    "{}{}:{}{}",
+                    column_letter(c),
+                    r + 1,
+                    column_letter(c + cs - 1),
+                    r + rs
+                ));
+            }
+            c += cs;
+        }
+    }
+    let grid: Vec<Vec<String>> = grid
+        .into_iter()
+        .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
+        .collect();
+    let (header, body) = if header_rows == 0 {
+        (Vec::new(), &grid[..])
+    } else {
+        (grid[0].clone(), &grid[1..])
+    };
+    let mut out = String::new();
+    if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
+        out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
+    }
+    out.push_str(&pipe_table(&header, aligns, body));
+    if !merged.is_empty() {
+        out.push_str("\n\nMerged cells: ");
+        out.push_str(&merged.join(", "));
+    }
+    out
+}
+
+/// `A`, `B`, ..., `Z`, `AA`, ... for a 0-based column.
+fn column_letter(mut index: usize) -> String {
+    let mut letters = Vec::new();
+    loop {
+        letters.push(char::from(b'A' + (index % 26) as u8));
+        if index < 26 {
+            break;
+        }
+        index = index / 26 - 1;
+    }
+    letters.iter().rev().collect()
+}

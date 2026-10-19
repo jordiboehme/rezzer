@@ -4,3 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+rezzer-model = { path = "../rezzer-model" }
+
+[dev-dependencies]
+insta.workspace = true
+pulldown-cmark.workspace = true
+saphyr-parser.workspace = true

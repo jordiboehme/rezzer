@@ -1,0 +1,97 @@
+---
+source: crates/rezzer-render/tests/render.rs
+expression: md
+---
+---
+type: document
+title: "Quarterly report"
+resource: "/data/report.md"
+tags: ["finance"]
+generated: { by: rezzer/0.1.0, at: 2026-10-20T12:00:00Z }
+source_date: 2025-11-30
+temporal_confidence: high
+source_sha256: "abc123"
+source_size: 42
+format: markdown
+detected_by: "extension .md and text"
+encoding: "utf-8"
+reader: "markdown/0.1.0"
+completeness: partial
+losses: 1
+---
+
+# Quarterly report
+
+Intro text with &lt;!-- hidden --> and a pipe \|.
+
+## Numbers
+
+| Item | Cost |
+| --- | ---: |
+| Pen | 2 |
+
+> [!TIP] Hint
+> Check the totals.
+
+> Quoted words.
+
+- [x] Review
+
+$$
+x = y
+$$
+
+![A chart](assets/img1.png) *Figure 1* :status[Needs vision]{yellow}
+
+Picture img2 is missing from the assets.
+
+## Sheet 1
+
+Inside the sheet.
+
+## Footnotes
+
+[^1]: A note.
+
+    More of it.
+
+## Logic
+
+| Cells | Formula | Reads | Role |
+| --- | --- | --- | --- |
+| Sheet 1!B2 | `=A2*2` | Sheet 1!A2 | result |
+
+## Annotations
+
+- **comment** by Bob on 2025-12-02 at `p2` :status[Resolved]{green}
+
+  > Intro text
+
+  Please check &lt;!-- this -->.
+  - **comment** by Ann
+
+    Done.
+
+## Changes
+
+| When | Who | What | Where | Text |
+| --- | --- | --- | --- | --- |
+| 2025-12-01T09:00:00Z | Ann | insert | p2 | and a pipe |
+
+## Embedded
+
+| Kind | Name | Detail | Target |
+| --- | --- | --- | --- |
+| macro | AutoOpen | VBA | `https://example.org/x` |
+
+### Pictures that need vision
+
+| Picture | File | Caption |
+| --- | --- | --- |
+| img1 | `assets/img1.png` | Figure 1 |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| page 9 | an embedded font | unsupported | info |
