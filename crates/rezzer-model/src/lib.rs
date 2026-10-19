@@ -14,6 +14,7 @@ mod format;
 mod inline;
 mod loss;
 mod reader;
+mod registry;
 mod value;
 
 pub use block::{Block, CalloutKind, Cell, SectionKind, TaskState};
@@ -25,4 +26,5 @@ pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor};
 pub use loss::{Loss, LossReason, Severity};
 pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source};
+pub use registry::Registry;
 pub use value::Value;
