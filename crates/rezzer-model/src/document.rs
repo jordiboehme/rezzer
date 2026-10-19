@@ -1,0 +1,114 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use crate::block::Block;
+use crate::facet::Facets;
+use crate::format::FormatId;
+use crate::loss::Loss;
+use crate::value::Value;
+
+/// Version of the model JSON. Bump it on every incompatible change.
+pub const MODEL_VERSION: u32 = 1;
+
+/// One read file: where it came from, its properties, its body, facets, assets and losses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Document {
+    pub model_version: u32,
+    pub source: SourceInfo,
+    pub properties: Properties,
+    pub body: Vec<Block>,
+    pub facets: Facets,
+    pub assets: Vec<Asset>,
+    pub losses: Vec<Loss>,
+}
+
+impl Document {
+    /// An empty document of the current [`MODEL_VERSION`].
+    pub fn new(source: SourceInfo) -> Document {
+        Document {
+            model_version: MODEL_VERSION,
+            source,
+            properties: Properties::default(),
+            body: Vec::new(),
+            facets: Facets::default(),
+            assets: Vec::new(),
+            losses: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SourceInfo {
+    pub path: Option<String>,
+    pub name: String,
+    /// Lowercase hex.
+    pub sha256: String,
+    pub size: u64,
+    pub format: FormatId,
+    pub detection: Detection,
+    pub modified: Option<String>,
+    pub encoding: Option<String>,
+    pub reader: Option<ReaderInfo>,
+}
+
+/// Why the detector chose a format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Detection {
+    pub confidence: Confidence,
+    pub evidence: String,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    Guess,
+    Likely,
+    Certain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ReaderInfo {
+    pub id: String,
+    pub version: String,
+}
+
+/// Document properties as typed values.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Properties {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub authors: Vec<String>,
+    pub created: Option<Value>,
+    pub modified: Option<Value>,
+    pub language: Option<String>,
+    pub keywords: Vec<String>,
+    pub custom: BTreeMap<String, Value>,
+}
+
+/// An extracted picture or file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Asset {
+    pub id: String,
+    /// Path inside the output bundle.
+    pub path: Option<String>,
+    pub sha256: String,
+    pub mime: String,
+    pub caption: Option<String>,
+    pub alt: Option<String>,
+    /// True when Rezzer cannot interpret the picture and the calling agent should look at it.
+    pub needs_vision: bool,
+}
