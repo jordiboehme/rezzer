@@ -447,7 +447,7 @@ fn flow_nesting_bomb_in_yaml_is_fast_and_kept_as_text() {
         out.document
             .losses
             .iter()
-            .any(|l| l.why == LossReason::Damaged)
+            .any(|l| matches!(l.why, LossReason::Damaged | LossReason::Limit))
     );
     assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
     assert!(matches!(
@@ -632,4 +632,95 @@ fn depth_loss_names_the_line() {
         .find(|l| l.why == LossReason::Limit)
         .unwrap();
     assert!(loss.location.contains("line 5"), "{}", loss.location);
+}
+
+fn assert_bomb_rejected(frontmatter_value: &str) {
+    let input = format!("---\nk: {frontmatter_value}\n---\n\nBody\n");
+    let start = std::time::Instant::now();
+    let out = read(&input);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(1),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| matches!(l.why, LossReason::Damaged | LossReason::Limit))
+    );
+    assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
+}
+
+#[test]
+fn quoted_bracket_bombs_are_rejected_fast() {
+    // Over the parse size cap.
+    assert_bomb_rejected(&"[\"]\",".repeat(200_000));
+    assert_bomb_rejected(&"[']',".repeat(200_000));
+    // Under the cap: the depth scan itself must see the nesting.
+    assert_bomb_rejected(&"[\"]\",".repeat(40_000));
+    assert_bomb_rejected(&"[']',".repeat(40_000));
+    // A plain scalar with a quote character does not hide real nesting.
+    assert_bomb_rejected(&format!("[a '{}", "[".repeat(5_000)));
+    // A stray quote in a block scalar does not flip the quote parity afterwards.
+    let input = format!(
+        "---\nk: |\n  \"\nz: {}\n---\n\nBody\n",
+        "[\"]\",".repeat(40_000)
+    );
+    let out = read(&input);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged)
+    );
+}
+
+#[test]
+fn quoted_brackets_in_normal_frontmatter_still_parse() {
+    let out = read("---\ntitle: \"a ] b [ c\"\nk: ['x]', \"y[\", it's]\nnote: it's # [[[\n---\n");
+    assert_eq!(out.document.properties.title.as_deref(), Some("a ] b [ c"));
+    assert!(out.document.losses.is_empty());
+}
+
+#[test]
+fn later_dash_block_is_normal_markdown() {
+    let out = read("Para\n\n---\n- a\n- b\n\nSee [l](x.md)\n\n---\n\nAfter\n");
+    let body = &out.document.body;
+    assert!(
+        body.iter()
+            .any(|b| matches!(b, Block::List { items, .. } if items.len() == 2))
+    );
+    assert_eq!(
+        body.iter()
+            .filter(|b| matches!(b, Block::Rule { .. }))
+            .count(),
+        2
+    );
+    let g = &out.document.facets.graphs[0];
+    assert!(g.nodes.iter().any(|n| n.id == "x.md"));
+}
+
+#[test]
+fn hard_break_ends_the_callout_title() {
+    let out = read("> [!WARNING] Title  \n> body line\n> second\n");
+    match &out.document.body[0] {
+        Block::Callout { title, blocks, .. } => {
+            assert_eq!(title.as_deref(), Some("Title"));
+            assert!(
+                matches!(&blocks[..], [Block::Paragraph { inlines, .. }] if plain(inlines) == "body line second")
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn image_kind_wins_and_h_prefix_is_not_doubled() {
+    let out = read("[x](cat.png) ![c](cat.png) [y](#h:foo)\n");
+    let g = &out.document.facets.graphs[0];
+    let cat = g.nodes.iter().find(|n| n.id == "cat.png").unwrap();
+    assert_eq!(cat.kind.as_deref(), Some("image"));
+    assert!(g.nodes.iter().any(|n| n.id == "h:foo"));
+    assert!(!g.nodes.iter().any(|n| n.id == "h:h:foo"));
 }

@@ -68,50 +68,175 @@ pub(crate) fn apply(syntax: Syntax, text: &str, props: &mut Properties) -> Resul
     }
 }
 
-/// One linear pass over the text: the depth of flow brackets (`[` and `{`, quotes ignored so
-/// the count can only be too high, never too low) and of block indentation, including compact
-/// `- - - x` nesting. Returns the depth when it is over the limit.
+/// One linear pass over the text for the depth of flow brackets (`[` and `{`) and of block
+/// indentation, including compact `- - - x` nesting. Returns the depth when it is over the limit.
+///
+/// Quoted scalars (`"..."` with `\` escapes, `'...'` with `''`) and `#` comments are skipped, so
+/// brackets inside them do not count. A quote only opens where YAML starts a token (after
+/// `[`, `{`, `,`, after a `:`, `-` or `?` indicator that stands apart, or at the start of a
+/// line), so a stray quote inside a plain scalar cannot hide real nesting. The lines of a
+/// `|` or `>` block scalar are literal text and are skipped.
 fn yaml_depth_over_limit(text: &str) -> Option<usize> {
     let mut flow: usize = 0;
     let mut indents: Vec<usize> = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim_start_matches(' ');
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+    let mut quote: Option<u8> = None;
+    let mut last_sig: Option<u8> = None;
+    let mut block_scalar: Option<usize> = None;
+    for line in text.split('\n') {
+        let b = line.as_bytes();
+        let mut j = 0usize;
+        if quote.is_none() {
+            let trimmed = line.trim_start_matches(' ');
+            let indent = b.len() - trimmed.len();
+            if trimmed.trim_end().is_empty() || (flow == 0 && trimmed.starts_with('#')) {
+                continue;
+            }
+            if let Some(bi) = block_scalar {
+                if indent > bi {
+                    continue;
+                }
+                block_scalar = None;
+            }
+            j = indent;
+            if flow == 0 {
+                last_sig = None;
+                while indents.last().is_some_and(|&i| i >= indent) {
+                    indents.pop();
+                }
+                indents.push(indent);
+                // Compact nesting: `- - - x`.
+                let mut rest = trimmed;
+                let mut extra = 0usize;
+                while let Some(r) = rest
+                    .strip_prefix("- ")
+                    .or_else(|| rest.strip_prefix("? "))
+                    .map(|r| r.trim_start_matches(' '))
+                {
+                    extra += 1;
+                    rest = r;
+                }
+                if indents.len() + extra > MAX_YAML_DEPTH {
+                    return Some(indents.len() + extra);
+                }
+                if is_block_scalar_header(trimmed) {
+                    // `- |` has its content under the dash; `k: |` and `- k: |` under the key.
+                    let key_col = if rest.starts_with(['|', '>']) {
+                        indent
+                    } else {
+                        indent + (trimmed.len() - rest.len())
+                    };
+                    block_scalar = Some(key_col);
+                }
+            }
         }
-        let indent = line.len() - trimmed.len();
-        if flow == 0 {
-            while indents.last().is_some_and(|&i| i >= indent) {
-                indents.pop();
+        while j < b.len() {
+            let c = b[j];
+            if let Some(q) = quote {
+                if q == b'"' {
+                    if c == b'\\' {
+                        j += 1;
+                    } else if c == b'"' {
+                        quote = None;
+                        last_sig = Some(c);
+                    }
+                } else if c == b'\'' {
+                    if b.get(j + 1) == Some(&b'\'') {
+                        j += 1;
+                    } else {
+                        quote = None;
+                        last_sig = Some(c);
+                    }
+                }
+                j += 1;
+                continue;
             }
-            indents.push(indent);
-            // Compact nesting: `- - - x`.
-            let mut rest = trimmed;
-            let mut extra = 0usize;
-            while let Some(r) = rest
-                .strip_prefix("- ")
-                .or_else(|| rest.strip_prefix("? "))
-                .map(|r| r.trim_start_matches(' '))
-            {
-                extra += 1;
-                rest = r;
-            }
-            if indents.len() + extra > MAX_YAML_DEPTH {
-                return Some(indents.len() + extra);
-            }
-        }
-        for b in line.bytes() {
-            match b {
+            let after_space = j == 0 || matches!(b[j - 1], b' ' | b'\t');
+            match c {
+                b'#' if after_space => break,
+                b' ' | b'\t' | b'\r' => {}
+                b'"' | b'\'' => {
+                    let token_start = match last_sig {
+                        None | Some(b'[' | b'{' | b',') => true,
+                        Some(b':' | b'-' | b'?') => after_space,
+                        _ => false,
+                    };
+                    if token_start {
+                        quote = Some(c);
+                    } else {
+                        last_sig = Some(c);
+                    }
+                }
                 b'[' | b'{' => {
                     flow += 1;
                     if flow + indents.len() > MAX_YAML_DEPTH {
                         return Some(flow + indents.len());
                     }
+                    last_sig = Some(c);
                 }
-                b']' | b'}' => flow = flow.saturating_sub(1),
-                _ => {}
+                b']' | b'}' => {
+                    flow = flow.saturating_sub(1);
+                    last_sig = Some(c);
+                }
+                _ => last_sig = Some(c),
             }
+            j += 1;
         }
+    }
+    None
+}
+
+/// True when a block line ends in a `|` or `>` header, with optional indent and chomp signs and
+/// a comment.
+fn is_block_scalar_header(line: &str) -> bool {
+    let mut code = line;
+    if let Some(i) = code.find(" #") {
+        code = &code[..i];
+    }
+    let code = code
+        .trim_end()
+        .trim_end_matches(|c: char| c.is_ascii_digit() || c == '+' || c == '-');
+    match code.strip_suffix(['|', '>']) {
+        Some(before) => before.is_empty() || before.ends_with([' ', ':', '-']),
+        None => false,
+    }
+}
+
+/// Frontmatter found at the very start of a file.
+pub(crate) struct Split<'a> {
+    pub(crate) syntax: Syntax,
+    pub(crate) raw: &'a str,
+    /// Byte offset where the Markdown body starts, after the closing line.
+    pub(crate) body_start: usize,
+}
+
+/// Splits frontmatter off the start of `text`: a first line of `---` (YAML) or `+++` (TOML) and a
+/// closing line of `---` or `...` (YAML) or `+++` (TOML). Without a closing line there is none.
+pub(crate) fn split(text: &str) -> Option<Split<'_>> {
+    let (syntax, open) = if text.starts_with("---") {
+        (Syntax::Yaml, "---")
+    } else if text.starts_with("+++") {
+        (Syntax::Toml, "+++")
+    } else {
+        return None;
+    };
+    let first_end = text.find('\n').unwrap_or(text.len());
+    if text[..first_end].trim_end() != open {
+        return None;
+    }
+    let raw_start = (first_end + 1).min(text.len());
+    let mut pos = raw_start;
+    while pos < text.len() {
+        let end = text[pos..].find('\n').map_or(text.len(), |i| pos + i);
+        let line = text[pos..end].trim_end();
+        let closes = line == open || (syntax == Syntax::Yaml && line == "...");
+        if closes {
+            return Some(Split {
+                syntax,
+                raw: &text[raw_start..pos],
+                body_start: (end + 1).min(text.len()),
+            });
+        }
+        pos = end + 1;
     }
     None
 }
