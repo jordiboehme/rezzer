@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{FormatId, Reader};
 
@@ -38,9 +38,10 @@ impl Registry {
     /// registration and then by the reader's own format order.
     pub fn list(&self) -> Vec<(FormatId, &'static str, &'static str)> {
         let mut out = Vec::new();
+        let mut seen = HashSet::new();
         for (index, reader) in self.readers.iter().enumerate() {
             for format in reader.formats() {
-                if self.by_format.get(format) == Some(&index) {
+                if self.by_format.get(format) == Some(&index) && seen.insert(*format) {
                     out.push((*format, reader.id(), reader.version()));
                 }
             }

@@ -82,4 +82,17 @@ fn later_registration_wins() {
     assert_eq!(r.for_format(FormatId::Csv).unwrap().id(), "first");
     let list = r.list();
     assert_eq!(list.len(), 2);
+    assert!(list.contains(&(FormatId::Text, "second", "1.0.0")));
+    assert!(list.contains(&(FormatId::Csv, "first", "1.0.0")));
+    assert!(!list.iter().any(|e| e.0 == FormatId::Text && e.1 == "first"));
+}
+
+#[test]
+fn list_dedupes_repeated_formats() {
+    let mut r = Registry::new();
+    r.register(Box::new(Dummy {
+        id: "dup",
+        formats: &[FormatId::Text, FormatId::Text],
+    }));
+    assert_eq!(r.list(), vec![(FormatId::Text, "dup", "1.0.0")]);
 }
