@@ -4,3 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+rezzer-model = { path = "../../rezzer-model" }
+rezzer-limits = { path = "../../rezzer-limits" }
+textenc = { path = "../../formats/textenc" }
+pulldown-cmark.workspace = true
+serde_yaml_ng.workspace = true
+serde_json.workspace = true
+toml.workspace = true
