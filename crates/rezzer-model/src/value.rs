@@ -12,11 +12,13 @@ pub enum Value {
     Text {
         value: String,
     },
+    /// A finite number. JSON has no NaN or infinity; build it with [`Value::number`].
     Number {
         value: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<String>,
     },
-    /// A fraction, so 0.25 means 25 %.
+    /// A finite fraction, so 0.25 means 25 %. Build it with [`Value::percent`].
     Percent {
         value: f64,
     },
@@ -32,6 +34,33 @@ pub enum Value {
         value: bool,
     },
     List {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         value: Vec<Value>,
     },
+}
+
+impl Value {
+    /// A [`Value::Number`], or [`Value::Text`] with the printed value (`NaN`, `inf`, `-inf`)
+    /// when `value` is not finite, because JSON cannot carry it.
+    pub fn number(value: f64, unit: Option<String>) -> Value {
+        if value.is_finite() {
+            Value::Number { value, unit }
+        } else {
+            Value::Text {
+                value: value.to_string(),
+            }
+        }
+    }
+
+    /// A [`Value::Percent`], or [`Value::Text`] with the printed value when `value` is not
+    /// finite.
+    pub fn percent(value: f64) -> Value {
+        if value.is_finite() {
+            Value::Percent { value }
+        } else {
+            Value::Text {
+                value: value.to_string(),
+            }
+        }
+    }
 }

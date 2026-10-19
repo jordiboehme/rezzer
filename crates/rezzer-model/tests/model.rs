@@ -3,13 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
     Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
     Detection, Document, Edge, Embedded, Event, FormatId, Formula, Graph, Inline, Loss, LossReason,
-    MODEL_VERSION, Node, Properties, ReaderInfo, Role, SectionKind, Severity, Source, SourceInfo,
-    StatusColor, TaskState, Value,
+    MODEL_VERSION, Node, Properties, ReadOptions, ReaderInfo, Role, SectionKind, Severity, Source,
+    SourceInfo, StatusColor, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -116,6 +117,7 @@ fn full_document() -> Document {
                 role: None,
                 anchor: None,
             }]],
+            anchor: Some(Anchor("list:1".into())),
         },
         Block::Table {
             caption: Some("Totals".into()),
@@ -131,6 +133,7 @@ fn full_document() -> Document {
         Block::Code {
             lang: Some("rust".into()),
             text: "fn main() {}".into(),
+            anchor: Some(Anchor("code:1".into())),
         },
         Block::Quote {
             blocks: vec![Block::Paragraph {
@@ -138,23 +141,28 @@ fn full_document() -> Document {
                 role: None,
                 anchor: None,
             }],
+            anchor: None,
         },
         Block::Math {
             latex: "\\frac{a}{b}".into(),
             source_kind: "omml".into(),
+            anchor: Some(Anchor("eq:1".into())),
         },
         Block::Media {
             asset: "img1".into(),
+            anchor: Some(Anchor("fig:1".into())),
         },
         Block::Callout {
             kind: CalloutKind::Warning,
             title: Some("Careful".into()),
             folded: Some(true),
             blocks: vec![],
+            anchor: None,
         },
         Block::Task {
             state: TaskState::Cancelled,
             inlines: vec![text("todo")],
+            anchor: Some(Anchor("task:1".into())),
         },
     ];
     doc.facets.formulas.push(Formula {
@@ -183,6 +191,7 @@ fn full_document() -> Document {
             from: "n1".into(),
             to: "n2".into(),
             kind: "references".into(),
+            anchor: Some(Anchor("Costs!C12".into())),
         }],
     });
     doc.facets.timeline.push(Event {
@@ -284,7 +293,11 @@ fn serde_shapes_are_tagged_snake_case() {
     assert_eq!(v["value"], 2.0);
     let v = serde_json::to_value(Value::DateTime { value: "x".into() }).unwrap();
     assert_eq!(v["type"], "date_time");
-    let b = serde_json::to_value(Block::Media { asset: "a".into() }).unwrap();
+    let b = serde_json::to_value(Block::Media {
+        asset: "a".into(),
+        anchor: None,
+    })
+    .unwrap();
     assert_eq!(b["type"], "media");
     let i = serde_json::to_value(Inline::FootnoteRef { id: "1".into() }).unwrap();
     assert_eq!(i["type"], "footnote_ref");
@@ -319,4 +332,116 @@ fn source_exposes_bytes() {
     };
     assert_eq!(src.bytes(), b"hello");
     assert!(format!("{src:?}").contains("5 bytes"));
+}
+
+#[test]
+fn minimal_document_json_deserializes() {
+    let json = r#"{
+        "model_version": 1,
+        "source": {
+            "name": "a.txt",
+            "sha256": "00",
+            "size": 0,
+            "format": "text",
+            "detection": {"confidence": "guess", "evidence": "utf-8"}
+        }
+    }"#;
+    let doc: Document = serde_json::from_str(json).unwrap();
+    let expected = Document::new(SourceInfo {
+        path: None,
+        name: "a.txt".into(),
+        sha256: "00".into(),
+        size: 0,
+        format: FormatId::Text,
+        detection: Detection {
+            confidence: Confidence::Guess,
+            evidence: "utf-8".into(),
+        },
+        modified: None,
+        encoding: None,
+        reader: None,
+    });
+    assert_eq!(doc, expected);
+}
+
+#[test]
+fn empty_fields_are_left_out_of_json() {
+    let v = serde_json::to_value(Document::new(src())).unwrap();
+    let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["facets", "model_version", "properties", "source"]);
+    assert_eq!(v["properties"], serde_json::json!({}));
+    assert_eq!(v["facets"], serde_json::json!({}));
+    assert!(v["source"].get("encoding").is_none());
+    let t = serde_json::to_value(Inline::Text {
+        text: "a".into(),
+        emphasis: false,
+        strong: false,
+    })
+    .unwrap();
+    assert_eq!(t, serde_json::json!({"type": "text", "text": "a"}));
+}
+
+#[test]
+fn value_number_keeps_non_finite_as_text() {
+    assert_eq!(
+        Value::number(2.5, Some("m".into())),
+        Value::Number {
+            value: 2.5,
+            unit: Some("m".into())
+        }
+    );
+    assert_eq!(
+        Value::number(f64::NAN, None),
+        Value::Text {
+            value: "NaN".into()
+        }
+    );
+    assert_eq!(
+        Value::number(f64::INFINITY, None),
+        Value::Text {
+            value: "inf".into()
+        }
+    );
+    assert_eq!(
+        Value::number(f64::NEG_INFINITY, Some("m".into())),
+        Value::Text {
+            value: "-inf".into()
+        }
+    );
+    assert_eq!(Value::percent(0.5), Value::Percent { value: 0.5 });
+    assert_eq!(
+        Value::percent(f64::NAN),
+        Value::Text {
+            value: "NaN".into()
+        }
+    );
+}
+
+#[test]
+fn cell_spans_default_to_one() {
+    let cell: Cell = serde_json::from_str(r#"{"inlines": []}"#).unwrap();
+    assert_eq!(cell, Cell::new(vec![]));
+    assert_eq!((cell.row_span, cell.col_span, cell.anchor), (1, 1, None));
+}
+
+#[test]
+fn mapped_bytes_expose_the_file() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(b"mapped data").unwrap();
+    file.flush().unwrap();
+    // SAFETY: the temp file is private to this test and not changed while mapped.
+    let map = unsafe { memmap2::Mmap::map(file.as_file()).unwrap() };
+    let bytes = Bytes::Mapped(Arc::new(map));
+    assert_eq!(bytes.as_slice(), b"mapped data");
+    assert_eq!(format!("{bytes:?}"), "Bytes::Mapped(11 bytes)");
+}
+
+#[test]
+fn read_options_debug_hides_password() {
+    let opts = ReadOptions {
+        password: Some("secret".into()),
+    };
+    let debug = format!("{opts:?}");
+    assert!(!debug.contains("secret"));
+    assert!(debug.contains("redacted"));
 }

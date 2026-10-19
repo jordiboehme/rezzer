@@ -23,15 +23,26 @@ pub trait Reader: Send + Sync {
     fn read(&self, src: &Source, opts: &ReadOptions, budget: &Budget) -> ReadOutcome;
 }
 
+/// The result of one read. Debug and Clone only: it is not serialized, the [`Document`] is.
 #[derive(Debug, Clone)]
 pub struct ReadOutcome {
     pub document: Document,
     pub completeness: Completeness,
 }
 
-#[derive(Debug, Clone, Default)]
+/// Options for one read. Debug and Clone only: never serialized, and Debug hides the password.
+#[derive(Clone, Default)]
 pub struct ReadOptions {
     pub password: Option<String>,
+}
+
+impl fmt::Debug for ReadOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let password = self.password.as_ref().map(|_| "<redacted>");
+        f.debug_struct("ReadOptions")
+            .field("password", &password)
+            .finish()
+    }
 }
 
 /// The raw bytes of a source, memory-mapped or owned. Cheap to clone.
@@ -60,7 +71,8 @@ impl fmt::Debug for Bytes {
     }
 }
 
-/// A file to read, with its detected format.
+/// A file to read, with its detected format. Debug and Clone only: it holds the raw bytes
+/// and is never serialized; [`crate::SourceInfo`] is its serialized form.
 #[derive(Debug, Clone)]
 pub struct Source {
     pub path: Option<PathBuf>,

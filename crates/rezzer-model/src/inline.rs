@@ -19,7 +19,9 @@ pub struct Anchor(pub String);
 pub enum Inline {
     Text {
         text: String,
+        #[serde(default, skip_serializing_if = "is_false")]
         emphasis: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
         strong: bool,
     },
     Code {
@@ -27,9 +29,11 @@ pub enum Inline {
     },
     Link {
         target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         /// True when the target is an anchor inside this document.
         internal: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         inlines: Vec<Inline>,
     },
     FootnoteRef {
@@ -57,4 +61,8 @@ pub enum StatusColor {
     Yellow,
     Red,
     Purple,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }

@@ -22,10 +22,15 @@ pub const MODEL_VERSION: u32 = 1;
 pub struct Document {
     pub model_version: u32,
     pub source: SourceInfo,
+    #[serde(default)]
     pub properties: Properties,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub body: Vec<Block>,
+    #[serde(default)]
     pub facets: Facets,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assets: Vec<Asset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub losses: Vec<Loss>,
 }
 
@@ -47,6 +52,7 @@ impl Document {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SourceInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub name: String,
     /// Lowercase hex.
@@ -54,8 +60,11 @@ pub struct SourceInfo {
     pub size: u64,
     pub format: FormatId,
     pub detection: Detection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reader: Option<ReaderInfo>,
 }
 
@@ -88,13 +97,21 @@ pub struct ReaderInfo {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Properties {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keywords: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub custom: BTreeMap<String, Value>,
 }
 
@@ -104,10 +121,13 @@ pub struct Properties {
 pub struct Asset {
     pub id: String,
     /// Path inside the output bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub sha256: String,
     pub mime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt: Option<String>,
     /// True when Rezzer cannot interpret the picture and the calling agent should look at it.
     pub needs_vision: bool,
