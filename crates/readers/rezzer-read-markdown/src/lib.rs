@@ -33,8 +33,9 @@ const CHECK_EVERY: usize = 1024;
 /// Frontmatter over this size is not parsed.
 const MAX_FRONTMATTER_BYTES: usize = 1024 * 1024;
 
-/// Frontmatter over this size is kept as text but not parsed. Real frontmatter is tiny, and
-/// the YAML parser cannot be interrupted once it runs.
+/// Frontmatter over this size is kept as text but not parsed. Real frontmatter is tiny. The
+/// parser and the writing of the properties are bounded by depth, work and time budgets; this
+/// cap is defense in depth.
 const MAX_PARSE_BYTES: usize = 256 * 1024;
 
 /// Reads Markdown. The encoding is detected; existing frontmatter becomes properties, GFM
@@ -803,19 +804,19 @@ impl<'b> Builder<'b> {
             Syntax::Yaml => "yaml",
             Syntax::Toml => "toml",
         };
-        let problem = if raw.len() > MAX_PARSE_BYTES {
+        let problems = if raw.len() > MAX_PARSE_BYTES {
             let cut = if raw.len() > MAX_FRONTMATTER_BYTES {
                 ", text cut at 1 MiB"
             } else {
                 ""
             };
-            Some((
+            vec![(
                 LossReason::Limit,
                 format!("frontmatter larger than 256 KiB not parsed{cut}"),
-            ))
+            )]
         } else {
             frontmatter::apply(syntax, raw, &mut self.properties, self.budget)
-                .err()
+                .into_iter()
                 .map(|e| match e {
                     FmError::Damaged(m) => (
                         LossReason::Damaged,
@@ -825,15 +826,22 @@ impl<'b> Builder<'b> {
                         LossReason::Limit,
                         format!("frontmatter not fully read, kept as text: {m}"),
                     ),
+                    FmError::Partly(m) => (
+                        LossReason::Damaged,
+                        format!("frontmatter partly read, kept as text: {m}"),
+                    ),
                 })
+                .collect()
         };
-        if let Some((why, what)) = problem {
-            self.losses.push(Loss {
-                location: "frontmatter".into(),
-                what,
-                why,
-                severity: Severity::Warning,
-            });
+        if !problems.is_empty() {
+            for (why, what) in problems {
+                self.losses.push(Loss {
+                    location: "frontmatter".into(),
+                    what,
+                    why,
+                    severity: Severity::Warning,
+                });
+            }
             // The raw text stays visible, cut at the size cap on a character boundary.
             let mut end = raw.len().min(MAX_FRONTMATTER_BYTES);
             while !raw.is_char_boundary(end) {

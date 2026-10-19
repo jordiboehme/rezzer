@@ -814,3 +814,121 @@ fn blank_line_after_opening_dashes_is_no_frontmatter() {
         2
     );
 }
+
+/// Bytes of keys plus values in `custom`, measured as the reader caps them.
+fn custom_bytes(out: &ReadOutcome) -> usize {
+    fn value_bytes(v: &Value) -> usize {
+        match v {
+            Value::Text { value } | Value::Date { value } | Value::DateTime { value } => {
+                value.len()
+            }
+            Value::Number { unit, .. } => 8 + unit.as_ref().map_or(0, String::len),
+            Value::Percent { .. } => 8,
+            Value::Bool { .. } => 1,
+            Value::List { value } => value.iter().map(value_bytes).sum(),
+        }
+    }
+    out.document
+        .properties
+        .custom
+        .iter()
+        .map(|(k, v)| k.len() + value_bytes(v))
+        .sum()
+}
+
+fn assert_flatten_bounded(fm: &str) -> ReadOutcome {
+    let input = format!("---\n{fm}\n---\n\nBody\n");
+    let start = std::time::Instant::now();
+    let out = read(&input);
+    let took = start.elapsed();
+    assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+    assert!(custom_bytes(&out) <= 1024 * 1024, "{}", custom_bytes(&out));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.location == "frontmatter"),
+        "{:?}",
+        out.document.losses
+    );
+    assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
+    assert_eq!(out.completeness, Completeness::Partial);
+    out
+}
+
+fn b36(mut i: usize) -> String {
+    let d = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut v = vec![b'k'];
+    loop {
+        v.push(d[i % 36]);
+        i /= 36;
+        if i == 0 {
+            break;
+        }
+    }
+    String::from_utf8(v).unwrap()
+}
+
+#[test]
+fn long_key_path_times_aliased_leaves_is_bounded() {
+    // `l: &l {100 keys}`, one explicit key of 230,000 bytes, 440 aliases of `l` below it.
+    let mut fm = String::from("l: &l {");
+    for i in 0..100 {
+        fm.push_str(&format!("{}: 1,", b36(i)));
+    }
+    fm.push_str("z: 1}\n");
+    fm.push_str(&format!("? {}\n:\n", "K".repeat(230_000)));
+    for i in 0..440 {
+        fm.push_str(&format!("  {}: *l\n", b36(i)));
+    }
+    assert!(fm.len() < 256 * 1024);
+    let out = assert_flatten_bounded(&fm);
+    // What was written before the budget ran out is kept.
+    assert!(out.document.properties.custom.contains_key("l.k0"));
+}
+
+#[test]
+fn long_key_path_without_aliases_is_bounded() {
+    let mut fm = format!("? {}\n:\n", "K".repeat(128 * 1024));
+    let mut i = 0;
+    while fm.len() < 256 * 1024 - 20 {
+        fm.push_str(&format!("  {}: 1\n", b36(i)));
+        i += 1;
+    }
+    assert_flatten_bounded(&fm);
+}
+
+#[test]
+fn flattened_output_is_capped_at_one_mebibyte() {
+    // 300 leaves under a 4,000-byte key: about 1.2 MB of key paths, well inside the work budget.
+    let mut fm = format!("? {}\n:\n", "K".repeat(4000));
+    for i in 0..300 {
+        fm.push_str(&format!("  {}: 1\n", b36(i)));
+    }
+    let out = assert_flatten_bounded(&fm);
+    assert!(custom_bytes(&out) > 900 * 1024, "{}", custom_bytes(&out));
+    assert!(
+        out.document.losses.iter().any(|l| l.what.contains("1 MiB")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn second_yaml_document_is_a_loss() {
+    let out = read("---\na: 1\n--- b: 2\nc: 3\n---\n\nBody\n");
+    let p = &out.document.properties;
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged
+                && l.what.contains("extra YAML document in frontmatter")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_eq!(p.custom["a"], Value::number(1.0, None));
+    assert!(!p.custom.contains_key("b") && !p.custom.contains_key("c"));
+    assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
+    assert_eq!(out.completeness, Completeness::Partial);
+}

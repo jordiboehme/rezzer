@@ -39,10 +39,16 @@ enum Fm {
 /// The deepest nesting a YAML block may have.
 const MAX_YAML_DEPTH: usize = 128;
 
-/// The most work a YAML block may cost, counted in nodes. A node is a scalar, an alias, a
+/// The most work frontmatter may cost, counted in nodes. A node is a scalar, an alias, a
 /// sequence or a mapping; every node an alias copies is counted again, and long scalars count
-/// one more for every 32 bytes, so expanding aliases cannot take much time or memory.
+/// one more for every 32 bytes. Writing the properties is charged to the same budget: every
+/// flattened `a.b.c` key counts one unit per 32 bytes of its full path (at least one) and its
+/// value one per 32 bytes, so neither aliases nor long keys copied onto many leaves can take
+/// much time or memory.
 const MAX_YAML_NODES: usize = 100_000;
+
+/// The most bytes (keys plus values) written into `custom`.
+const MAX_CUSTOM_BYTES: usize = 1024 * 1024;
 
 /// How many YAML events are read between two time checks.
 const CHECK_EVERY: usize = 1000;
@@ -52,11 +58,48 @@ const CHECK_EVERY: usize = 1000;
 pub(crate) enum FmError {
     /// The text is not valid or is over a budget of the reader.
     Damaged(String),
-    /// The time limit ran out.
+    /// The time limit ran out, or writing the properties ran over a budget.
     Limit(String),
+    /// A part was read and mapped, the rest could not be (an extra YAML document).
+    Partly(String),
 }
 
-/// Parses `text` and fills `props`. On an error nothing is changed and the message is returned.
+/// The work spent on one frontmatter block and the bytes written into `custom`.
+#[derive(Debug, Default)]
+struct Work {
+    spent: usize,
+    custom_bytes: usize,
+}
+
+impl Work {
+    /// Charges `units`; `false` once the budget is used up.
+    fn charge(&mut self, units: usize) -> bool {
+        self.spent = self.spent.saturating_add(units);
+        self.spent <= MAX_YAML_NODES
+    }
+
+    /// Charges the YAML event builder; over budget the block counts as damaged.
+    fn charge_node(&mut self, units: usize) -> Result<(), FmError> {
+        if self.charge(units) {
+            Ok(())
+        } else {
+            Err(FmError::Damaged(format!(
+                "more than {MAX_YAML_NODES} nodes (aliases expanded)"
+            )))
+        }
+    }
+}
+
+/// Work units for `bytes` of text: one per 32 bytes.
+fn units(bytes: usize) -> usize {
+    bytes / 32
+}
+
+/// Parses `text` and fills `props`. Returns the problems found, empty when all was read.
+///
+/// When parsing fails nothing is changed. When a second YAML document follows, only the first
+/// is mapped. When writing the properties runs over the work budget or the size cap of
+/// `custom`, writing stops and what was written so far is kept.
 ///
 /// Values keep their data but not their YAML tags (`!foo bar` reads as `bar`). A key with
 /// no value is kept as an empty text.
@@ -65,26 +108,35 @@ pub(crate) fn apply(
     text: &str,
     props: &mut Properties,
     budget: &Budget,
-) -> Result<(), FmError> {
-    let root = match syntax {
-        Syntax::Yaml => parse_yaml(text, budget)?,
-        Syntax::Toml => {
-            let t: toml::Table =
-                toml::from_str(text).map_err(|e| FmError::Damaged(e.to_string()))?;
-            from_toml(toml::Value::Table(t))
+) -> Vec<FmError> {
+    let mut work = Work::default();
+    let mut problems = Vec::new();
+    let parsed = match syntax {
+        Syntax::Yaml => parse_yaml(text, budget, &mut work),
+        Syntax::Toml => toml::from_str::<toml::Table>(text)
+            .map(|t| (from_toml(toml::Value::Table(t)), None))
+            .map_err(|e| FmError::Damaged(e.to_string())),
+    };
+    let root = match parsed {
+        Ok((root, extra)) => {
+            problems.extend(extra);
+            root
         }
+        Err(e) => return vec![e],
     };
     match root {
         Fm::Map(entries) => {
-            map_properties(entries, props);
-            Ok(())
+            if let Err(e) = map_properties(entries, props, &mut work) {
+                problems.push(e);
+            }
         }
         // An empty YAML block reads as null.
-        Fm::Null => Ok(()),
-        _ => Err(FmError::Damaged(
+        Fm::Null => {}
+        _ => problems.push(FmError::Damaged(
             "frontmatter is not a mapping of keys to values".into(),
         )),
     }
+    problems
 }
 
 /// Frontmatter found at the very start of a file.
@@ -156,23 +208,19 @@ enum Open {
 /// on depth, node count (alias expansion included) and time. Reading stops at the first
 /// budget that is hit. The tree is never built by a serde deserializer, so aliases cannot
 /// replay a large value unnoticed.
-fn parse_yaml(text: &str, budget: &Budget) -> Result<Fm, FmError> {
+///
+/// A second document is not read: the first one is returned together with a damaged problem.
+fn parse_yaml(
+    text: &str,
+    budget: &Budget,
+    work: &mut Work,
+) -> Result<(Fm, Option<FmError>), FmError> {
     let damaged = |m: String| FmError::Damaged(m);
     let mut stack: Vec<Open> = Vec::new();
     let mut anchors: HashMap<usize, (Fm, usize)> = HashMap::new();
-    let mut spent = 0usize;
     let mut root: Option<Fm> = None;
     let mut in_document = false;
-    let mut charge = |units: usize| -> Result<(), FmError> {
-        spent = spent.saturating_add(units);
-        if spent > MAX_YAML_NODES {
-            Err(FmError::Damaged(format!(
-                "more than {MAX_YAML_NODES} nodes (aliases expanded)"
-            )))
-        } else {
-            Ok(())
-        }
-    };
+    let mut charge = |units: usize| work.charge_node(units);
 
     for (n, item) in Parser::new_from_str(text).enumerate() {
         if n % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
@@ -181,19 +229,13 @@ fn parse_yaml(text: &str, budget: &Budget) -> Result<Fm, FmError> {
         let (event, _) = item.map_err(|e| damaged(e.to_string()))?;
         // The finished value of a node, its weight and its anchor, when one just ended.
         let done: Option<(Fm, usize, usize)> = match event {
-            Event::Nothing | Event::StreamStart | Event::StreamEnd | Event::DocumentEnd => {
-                if matches!(event, Event::StreamEnd) {
-                    break;
-                }
-                if matches!(event, Event::DocumentEnd) {
-                    // Only the first document is read.
-                    break;
-                }
-                None
-            }
+            Event::StreamEnd => break,
+            Event::Nothing | Event::StreamStart | Event::DocumentEnd => None,
             Event::DocumentStart(_) => {
                 if in_document {
-                    return Err(damaged("more than one YAML document".into()));
+                    // Its content is not mapped; the raw text keeps it visible.
+                    let extra = FmError::Partly("extra YAML document in frontmatter".into());
+                    return Ok((root.unwrap_or(Fm::Null), Some(extra)));
                 }
                 in_document = true;
                 None
@@ -301,7 +343,7 @@ fn parse_yaml(text: &str, budget: &Budget) -> Result<Fm, FmError> {
             }
         }
     }
-    Ok(root.unwrap_or(Fm::Null))
+    Ok((root.unwrap_or(Fm::Null), None))
 }
 
 fn key_text(k: &Fm) -> String {
@@ -382,38 +424,44 @@ fn from_toml(v: toml::Value) -> Fm {
     }
 }
 
-fn map_properties(entries: Vec<(String, Fm)>, props: &mut Properties) {
+/// Maps the top-level entries. Stops at the first budget hit; what was written is kept.
+fn map_properties(
+    entries: Vec<(String, Fm)>,
+    props: &mut Properties,
+    work: &mut Work,
+) -> Result<(), FmError> {
     for (key, value) in entries {
         match key.as_str() {
             "title" if props.title.is_none() => match scalar_text(&value) {
                 Some(s) => props.title = Some(s),
-                None => put_custom(props, key, value),
+                None => put_custom(props, key, value, work)?,
             },
             "description" if props.description.is_none() => match scalar_text(&value) {
                 Some(s) => props.description = Some(s),
-                None => put_custom(props, key, value),
+                None => put_custom(props, key, value, work)?,
             },
             "lang" | "language" if props.language.is_none() => match scalar_text(&value) {
                 Some(s) => props.language = Some(s),
-                None => put_custom(props, key, value),
+                None => put_custom(props, key, value, work)?,
             },
             "date" if props.created.is_none() && matches!(value, Fm::Str(_) | Fm::Date(_)) => {
                 match to_value(&value) {
                     Some(v) => props.created = Some(v),
-                    None => put_custom(props, key, value),
+                    None => put_custom(props, key, value, work)?,
                 }
             }
             "author" | "authors" => match string_list(&value) {
                 Some(list) => props.authors.extend(list),
-                None => put_custom(props, key, value),
+                None => put_custom(props, key, value, work)?,
             },
             "tags" | "keywords" => match string_list(&value) {
                 Some(list) => props.keywords.extend(list),
-                None => put_custom(props, key, value),
+                None => put_custom(props, key, value, work)?,
             },
-            _ => put_custom(props, key, value),
+            _ => put_custom(props, key, value, work)?,
         }
     }
+    Ok(())
 }
 
 /// A string, or a number or boolean printed as text. Anything else is not a scalar text.
@@ -444,30 +492,70 @@ fn string_list(v: &Fm) -> Option<Vec<String>> {
     }
 }
 
-fn put_custom(props: &mut Properties, key: String, value: Fm) {
-    flatten(props, key, value, 0);
+fn put_custom(
+    props: &mut Properties,
+    key: String,
+    value: Fm,
+    work: &mut Work,
+) -> Result<(), FmError> {
+    flatten(props, key, value, 0, work)
 }
 
-fn flatten(props: &mut Properties, key: String, value: Fm, depth: usize) {
+/// Writes `value` under `key`, nested maps as `key.sub` keys. Every key path is charged to the
+/// work budget before it is built, every written entry also to the size cap of `custom`.
+fn flatten(
+    props: &mut Properties,
+    key: String,
+    value: Fm,
+    depth: usize,
+    work: &mut Work,
+) -> Result<(), FmError> {
+    let over_budget = || FmError::Limit("work budget used up while writing the properties".into());
     match value {
-        Fm::Null => {
-            props.custom.insert(
-                key,
-                Value::Text {
-                    value: String::new(),
-                },
-            );
-        }
         Fm::Map(entries) if depth < MAX_FLATTEN_DEPTH => {
             for (k, v) in entries {
-                flatten(props, format!("{key}.{k}"), v, depth + 1);
+                let path_len = key.len() + 1 + k.len();
+                if !work.charge(units(path_len).max(1)) {
+                    return Err(over_budget());
+                }
+                flatten(props, format!("{key}.{k}"), v, depth + 1, work)?;
             }
+            Ok(())
         }
         other => {
-            if let Some(v) = to_value(&other) {
-                props.custom.insert(key, v);
+            let Some(v) = (match other {
+                Fm::Null => Some(Value::Text {
+                    value: String::new(),
+                }),
+                other => to_value(&other),
+            }) else {
+                return Ok(());
+            };
+            let size = value_bytes(&v);
+            if !work.charge(units(size)) {
+                return Err(over_budget());
             }
+            let bytes = key.len() + size;
+            if work.custom_bytes.saturating_add(bytes) > MAX_CUSTOM_BYTES {
+                return Err(FmError::Limit(
+                    "more than 1 MiB of properties, the rest is not written".into(),
+                ));
+            }
+            work.custom_bytes += bytes;
+            props.custom.insert(key, v);
+            Ok(())
         }
+    }
+}
+
+/// The bytes a value takes in `custom`: its text, 8 for a number, 1 for a boolean.
+fn value_bytes(v: &Value) -> usize {
+    match v {
+        Value::Text { value } | Value::Date { value } | Value::DateTime { value } => value.len(),
+        Value::Number { unit, .. } => 8 + unit.as_ref().map_or(0, String::len),
+        Value::Percent { .. } => 8,
+        Value::Bool { .. } => 1,
+        Value::List { value } => value.iter().map(value_bytes).sum(),
     }
 }
 
