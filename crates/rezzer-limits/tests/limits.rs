@@ -31,7 +31,7 @@ fn depth_limit_hits_at_max() {
     let _c = b.enter().unwrap();
     let err = b.enter().unwrap_err();
     assert_eq!(err.limit, "depth");
-    assert_eq!(err.to_string(), "depth limit reached (4 > 3)");
+    assert_eq!(err.to_string(), "depth limit reached (4 levels > 3 levels)");
 }
 
 #[test]
@@ -67,6 +67,37 @@ fn unpacked_limit_hits() {
     let err = b.add_unpacked(6).unwrap_err();
     assert_eq!(err.limit, "unpacked");
     assert_eq!((err.value, err.max), (12, 10));
+    assert_eq!(
+        err.to_string(),
+        "unpacked limit reached (12 bytes > 10 bytes)"
+    );
+}
+
+#[test]
+fn unpacked_counter_saturates() {
+    let b = Budget::new(Limits::default());
+    assert!(b.add_unpacked(u64::MAX).is_err());
+    let err = b.add_unpacked(u64::MAX).unwrap_err();
+    assert_eq!((err.value, err.max), (u64::MAX, 4 * GIB));
+    assert!(b.add_unpacked(1).is_err());
+}
+
+#[test]
+fn time_hit_names_milliseconds() {
+    let b = Budget::new(Limits {
+        max_time: Duration::from_millis(0),
+        ..Limits::default()
+    });
+    std::thread::sleep(Duration::from_millis(2));
+    let err = b.check_time().unwrap_err();
+    assert_eq!(err.unit, "ms");
+    assert!(err.to_string().starts_with("time limit reached ("));
+    assert!(err.to_string().ends_with(" ms > 0 ms)"));
+}
+
+#[test]
+fn unknown_config_key_is_rejected() {
+    assert!(serde_json::from_str::<Limits>(r#"{"max_dept": 5}"#).is_err());
 }
 
 #[test]

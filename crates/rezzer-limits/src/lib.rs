@@ -15,13 +15,14 @@ const GIB: u64 = 1024 * 1024 * 1024;
 
 /// Configurable limits. Missing fields in a config file fall back to the defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_file_bytes: u64,
     pub max_unpacked_bytes: u64,
     pub max_ratio: u32,
     pub max_depth: u32,
-    /// Serialized as whole seconds.
+    /// In config files this is a whole number of seconds; sub-second parts are dropped on
+    /// serialization.
     #[serde(with = "duration_secs")]
     pub max_time: Duration,
     pub max_memory_bytes: u64,
@@ -62,14 +63,19 @@ pub struct LimitHit {
     pub limit: &'static str,
     pub value: u64,
     pub max: u64,
+    /// Unit of `value` and `max`: "bytes", "levels", "ms" or "count".
+    pub unit: &'static str,
 }
 
 impl fmt::Display for LimitHit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} limit reached ({} > {})",
-            self.limit, self.value, self.max
+            "{} limit reached ({} {unit} > {} {unit})",
+            self.limit,
+            self.value,
+            self.max,
+            unit = self.unit
         )
     }
 }
@@ -116,20 +122,25 @@ impl Budget {
             limit,
             value: millis(elapsed),
             max: millis(self.limits.max_time),
+            unit: "ms",
         })
     }
 
     /// Adds `n` unpacked bytes to the running total and checks the limit.
     pub fn add_unpacked(&self, n: u64) -> Result<(), LimitHit> {
-        let total = self
+        let previous = self
             .unpacked
-            .fetch_add(n, Ordering::Relaxed)
-            .saturating_add(n);
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |t| {
+                Some(t.saturating_add(n))
+            })
+            .unwrap_or(u64::MAX);
+        let total = previous.saturating_add(n);
         if total > self.limits.max_unpacked_bytes {
             return Err(LimitHit {
                 limit: "unpacked",
                 value: total,
                 max: self.limits.max_unpacked_bytes,
+                unit: "bytes",
             });
         }
         Ok(())
@@ -144,6 +155,7 @@ impl Budget {
                 limit: "depth",
                 value: u64::from(depth),
                 max: u64::from(self.limits.max_depth),
+                unit: "levels",
             });
         }
         Ok(DepthGuard { budget: self })
