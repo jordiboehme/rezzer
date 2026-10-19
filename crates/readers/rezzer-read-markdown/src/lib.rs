@@ -15,14 +15,14 @@ mod frontmatter;
 use std::collections::{HashMap, HashSet};
 
 use pulldown_cmark::{
-    BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, MetadataBlockKind, Options,
-    Parser, Tag, TagEnd,
+    Alignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, MetadataBlockKind,
+    Options, Parser, Tag, TagEnd,
 };
 use rezzer_limits::{Budget, DepthGuard};
 use rezzer_model::{
-    Anchor, Block, CalloutKind, Cell, Completeness, Document, Edge, FormatId, Graph, Inline, Loss,
-    LossReason, Node, ReadOptions, ReadOutcome, Reader, ReaderInfo, SectionKind, Severity, Source,
-    TaskState, source_info,
+    Align, Anchor, Block, CalloutKind, Cell, Completeness, Document, Edge, Embedded, FormatId,
+    Graph, Inline, Loss, LossReason, Node, ReadOptions, ReadOutcome, Reader, ReaderInfo,
+    SectionKind, Severity, Source, TaskState, source_info,
 };
 
 use frontmatter::Syntax;
@@ -104,6 +104,7 @@ fn options() -> Options {
         | Options::ENABLE_MATH
         | Options::ENABLE_WIKILINKS
         | Options::ENABLE_GFM
+        | Options::ENABLE_STRIKETHROUGH
 }
 
 /// An open container block.
@@ -114,6 +115,9 @@ enum Frame<'b> {
     Quote {
         kind: Option<BlockQuoteKind>,
         blocks: Vec<Block>,
+        /// Index of the first line break inside the quote's first paragraph, kept to read a
+        /// callout title (`> [!NOTE] Title`) apart from the body.
+        callout_break: Option<usize>,
         _guard: DepthGuard<'b>,
     },
     List {
@@ -149,6 +153,8 @@ enum Leaf {
     Meta {
         syntax: Syntax,
         text: String,
+        /// True when the block starts the file: only then it is frontmatter.
+        at_start: bool,
     },
 }
 
@@ -161,7 +167,6 @@ enum InlineFrame {
         inlines: Vec<Inline>,
     },
     Image {
-        marker: String,
         target: String,
         title: String,
         alt: String,
@@ -173,6 +178,7 @@ struct TableState {
     rows: Vec<Vec<Cell>>,
     header_rows: usize,
     row: Vec<Cell>,
+    alignments: Vec<Align>,
 }
 
 struct Builder<'b> {
@@ -183,22 +189,32 @@ struct Builder<'b> {
     inline_stack: Vec<InlineFrame>,
     emphasis: u32,
     strong: u32,
+    strike: u32,
     /// True when the current inlines hold a display formula from `$$ ... $$`.
     display_math: bool,
     table: Option<TableState>,
     /// Nesting counter while a subtree over the depth limit is skipped.
     skip: usize,
     skipped_subtrees: usize,
+    /// Index in `losses` of the depth loss, for the count of skipped places.
+    depth_loss: Option<usize>,
+    /// Byte offset of the event being handled.
+    offset: usize,
+    /// Set when the depth loss still needs its line number.
+    need_line: bool,
+    /// Index in `cur` of the first soft break of a possible callout header.
+    para_break: Option<usize>,
     time_stopped: bool,
     footnotes: Vec<(String, Vec<Block>)>,
     heading_slugs: HashMap<String, u32>,
     first_h1: Option<String>,
-    frontmatter_seen: bool,
     properties: rezzer_model::Properties,
     losses: Vec<Loss>,
     nodes: Vec<Node>,
     node_ids: HashSet<String>,
     edges: Vec<Edge>,
+    edge_keys: HashSet<(String, &'static str)>,
+    embedded: Vec<Embedded>,
     body: Vec<Block>,
 }
 
@@ -212,31 +228,51 @@ impl<'b> Builder<'b> {
             inline_stack: Vec::new(),
             emphasis: 0,
             strong: 0,
+            strike: 0,
             display_math: false,
             table: None,
             skip: 0,
             skipped_subtrees: 0,
+            depth_loss: None,
+            offset: 0,
+            need_line: false,
+            para_break: None,
             time_stopped: false,
             footnotes: Vec::new(),
             heading_slugs: HashMap::new(),
             first_h1: None,
-            frontmatter_seen: false,
             properties: rezzer_model::Properties::default(),
             losses: Vec::new(),
             nodes: Vec::new(),
             node_ids: HashSet::new(),
             edges: Vec::new(),
+            edge_keys: HashSet::new(),
+            embedded: Vec::new(),
             body: Vec::new(),
         }
     }
 
     fn run(&mut self, text: &str) {
-        for (n, event) in Parser::new_ext(text, options()).enumerate() {
+        let parser = Parser::new_ext(text, options());
+        for (n, (event, range)) in parser.into_offset_iter().enumerate() {
             if n % CHECK_EVERY == CHECK_EVERY - 1 && self.budget.check_time().is_err() {
                 self.time_stopped = true;
                 break;
             }
+            self.offset = range.start;
             self.event(event);
+            if self.need_line {
+                self.need_line = false;
+                let end = self.offset.min(text.len());
+                let line = text.as_bytes()[..end]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count()
+                    + 1;
+                if let Some(loss) = self.depth_loss.and_then(|i| self.losses.get_mut(i)) {
+                    loss.location = format!("line {line}");
+                }
+            }
         }
         self.unwind();
     }
@@ -268,10 +304,12 @@ impl<'b> Builder<'b> {
             }
             Event::DisplayMath(s) => {
                 self.ensure_inline_leaf();
-                self.display_math = true;
+                // Only a formula that is the whole paragraph is a display block.
+                let alone = self.cur.is_empty() && self.inline_stack.is_empty();
                 self.push_inline(Inline::Math {
                     latex: s.into_string(),
                 });
+                self.display_math = alone;
             }
             Event::Html(s) => match &mut self.leaf {
                 Leaf::Html(text) => text.push_str(&s),
@@ -284,9 +322,15 @@ impl<'b> Builder<'b> {
                     id: label.into_string(),
                 });
             }
-            Event::SoftBreak | Event::HardBreak => self.on_text("\n"),
-            // A thematic break carries no content and the model has no block for it.
-            Event::Rule => self.flush_implicit(),
+            Event::SoftBreak => self.soft_break(),
+            Event::HardBreak => {
+                self.ensure_inline_leaf();
+                self.push_inline(Inline::LineBreak);
+            }
+            Event::Rule => {
+                self.flush_implicit();
+                self.push_block(Block::Rule { anchor: None });
+            }
             Event::TaskListMarker(done) => {
                 if let Some(Frame::Item { task, .. }) = self.stack.last_mut() {
                     *task = Some(if done {
@@ -304,6 +348,8 @@ impl<'b> Builder<'b> {
             Tag::Paragraph => {
                 self.flush_implicit();
                 self.leaf = Leaf::Paragraph;
+                self.display_math = false;
+                self.para_break = None;
             }
             Tag::Heading { level, .. } => {
                 self.flush_implicit();
@@ -315,6 +361,7 @@ impl<'b> Builder<'b> {
                     self.stack.push(Frame::Quote {
                         kind,
                         blocks: Vec::new(),
+                        callout_break: None,
                         _guard,
                     });
                 }
@@ -369,9 +416,21 @@ impl<'b> Builder<'b> {
                     });
                 }
             }
-            Tag::Table(_) => {
+            Tag::Table(aligns) => {
                 self.flush_implicit();
-                self.table = Some(TableState::default());
+                let mut state = TableState::default();
+                if aligns.iter().any(|a| !matches!(a, Alignment::None)) {
+                    state.alignments = aligns
+                        .iter()
+                        .map(|a| match a {
+                            Alignment::None => Align::None,
+                            Alignment::Left => Align::Left,
+                            Alignment::Center => Align::Center,
+                            Alignment::Right => Align::Right,
+                        })
+                        .collect();
+                }
+                self.table = Some(state);
             }
             Tag::TableHead | Tag::TableRow => {
                 if let Some(t) = &mut self.table {
@@ -389,6 +448,10 @@ impl<'b> Builder<'b> {
             Tag::Strong => {
                 self.ensure_inline_leaf();
                 self.strong += 1;
+            }
+            Tag::Strikethrough => {
+                self.ensure_inline_leaf();
+                self.strike += 1;
             }
             Tag::Link {
                 link_type,
@@ -411,18 +474,10 @@ impl<'b> Builder<'b> {
                 });
             }
             Tag::Image {
-                link_type,
-                dest_url,
-                title,
-                ..
+                dest_url, title, ..
             } => {
                 self.ensure_inline_leaf();
                 self.inline_stack.push(InlineFrame::Image {
-                    marker: if matches!(link_type, LinkType::WikiLink { .. }) {
-                        "wiki".into()
-                    } else {
-                        String::new()
-                    },
                     target: dest_url.into_string(),
                     title: title.into_string(),
                     alt: String::new(),
@@ -436,11 +491,11 @@ impl<'b> Builder<'b> {
                         MetadataBlockKind::PlusesStyle => Syntax::Toml,
                     },
                     text: String::new(),
+                    at_start: self.offset == 0,
                 };
             }
             // Not enabled in `options()`; kept as plain text if they ever appear.
-            Tag::Strikethrough
-            | Tag::Superscript
+            Tag::Superscript
             | Tag::Subscript
             | Tag::DefinitionList
             | Tag::DefinitionListTitle
@@ -484,7 +539,7 @@ impl<'b> Builder<'b> {
                         caption: None,
                         header_rows: t.header_rows,
                         rows: t.rows,
-                        alignments: Vec::new(),
+                        alignments: t.alignments,
                         anchor: None,
                     });
                 }
@@ -506,6 +561,7 @@ impl<'b> Builder<'b> {
                 self.close_inline_frames();
                 let inlines = std::mem::take(&mut self.cur);
                 self.leaf = Leaf::None;
+                self.display_math = false;
                 if let Some(t) = &mut self.table {
                     t.row.push(Cell::new(inlines));
                 }
@@ -514,8 +570,8 @@ impl<'b> Builder<'b> {
             TagEnd::Strong => self.strong = self.strong.saturating_sub(1),
             TagEnd::Link | TagEnd::Image => self.end_inline_frame(),
             TagEnd::MetadataBlock(_) => self.finish_meta(),
-            TagEnd::Strikethrough
-            | TagEnd::Superscript
+            TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),
+            TagEnd::Superscript
             | TagEnd::Subscript
             | TagEnd::DefinitionList
             | TagEnd::DefinitionListTitle
@@ -531,6 +587,8 @@ impl<'b> Builder<'b> {
             Err(hit) => {
                 self.skip = 1;
                 if self.skipped_subtrees == 0 {
+                    self.depth_loss = Some(self.losses.len());
+                    self.need_line = true;
                     self.losses.push(Loss {
                         location: "nested content".into(),
                         what: format!("content nested deeper than {} levels not read", hit.max),
@@ -557,9 +615,46 @@ impl<'b> Builder<'b> {
                     text: s.to_string(),
                     emphasis: self.emphasis > 0,
                     strong: self.strong > 0,
-                    strike: false,
+                    strike: self.strike > 0,
                 });
             }
+        }
+    }
+
+    /// A soft break reads as a space. In the first paragraph of a plain quote its position is
+    /// kept as a separate inline, so a callout header (`> [!NOTE] Title`) can be told from the
+    /// body; `close_top_frame` joins it again when the quote is no callout.
+    fn soft_break(&mut self) {
+        self.ensure_inline_leaf();
+        let space = Inline::Text {
+            text: " ".into(),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        };
+        let first_para_of_quote = matches!(self.leaf, Leaf::Paragraph)
+            && matches!(
+                self.stack.last(),
+                Some(Frame::Quote { kind: None, blocks, .. }) if blocks.is_empty()
+            );
+        let marker_start = matches!(
+            self.cur.first(),
+            Some(Inline::Text { text, .. }) if text.starts_with("[!")
+        );
+        if first_para_of_quote
+            && self.para_break.is_none()
+            && self.inline_stack.is_empty()
+            && marker_start
+        {
+            self.para_break = Some(self.cur.len());
+            self.cur.push(space);
+        } else {
+            self.push_inline(Inline::Text {
+                text: " ".into(),
+                emphasis: self.emphasis > 0,
+                strong: self.strong > 0,
+                strike: self.strike > 0,
+            });
         }
     }
 
@@ -570,6 +665,7 @@ impl<'b> Builder<'b> {
     }
 
     fn push_inline(&mut self, inline: Inline) {
+        self.display_math = false;
         match self.inline_stack.last_mut() {
             Some(InlineFrame::Image { alt, .. }) => alt.push_str(&plain_text(&[inline])),
             Some(InlineFrame::Link { inlines, .. }) => push_merged(inlines, inline),
@@ -593,25 +689,12 @@ impl<'b> Builder<'b> {
                     inlines,
                 });
             }
-            Some(InlineFrame::Image {
-                marker,
-                target,
-                title,
-                alt,
-            }) => {
-                // The model has no inline picture: the reference stays as source text.
-                let text = if marker == "wiki" {
-                    format!("![[{target}]]")
-                } else if title.is_empty() {
-                    format!("![{alt}]({target})")
-                } else {
-                    format!("![{alt}]({target} \"{title}\")")
-                };
-                self.push_inline(Inline::Text {
-                    text,
-                    emphasis: false,
-                    strong: false,
-                    strike: false,
+            Some(InlineFrame::Image { target, title, alt }) => {
+                self.record_image(&target, &alt);
+                self.push_inline(Inline::Image {
+                    target,
+                    alt,
+                    title: Some(title).filter(|t| !t.is_empty()),
                 });
             }
             None => {}
@@ -658,6 +741,17 @@ impl<'b> Builder<'b> {
                 });
             }
         } else if !inlines.is_empty() {
+            let brk = self.para_break.take();
+            if let Some(Frame::Quote {
+                kind: None,
+                blocks,
+                callout_break,
+                ..
+            }) = self.stack.last_mut()
+                && blocks.is_empty()
+            {
+                *callout_break = brk;
+            }
             self.push_block(Block::Paragraph {
                 inlines,
                 role: None,
@@ -699,42 +793,77 @@ impl<'b> Builder<'b> {
     }
 
     fn finish_meta(&mut self) {
-        let Leaf::Meta { syntax, text } = std::mem::replace(&mut self.leaf, Leaf::None) else {
+        let Leaf::Meta {
+            syntax,
+            text,
+            at_start,
+        } = std::mem::replace(&mut self.leaf, Leaf::None)
+        else {
             return;
         };
-        if self.frontmatter_seen {
-            // Only the first block is the document's frontmatter; keep later ones as code.
-            self.push_block(Block::Code {
-                lang: Some(
-                    match syntax {
-                        Syntax::Yaml => "yaml",
-                        Syntax::Toml => "toml",
-                    }
-                    .into(),
-                ),
-                text: strip_one_newline(text),
-                anchor: None,
-            });
+        if !at_start {
+            // The parser reports `---` ... `---` anywhere as a metadata block; in the text it
+            // is a thematic break, then a heading made of the lines between.
+            let line = text.trim().replace('\n', " ");
+            match syntax {
+                Syntax::Yaml if line.is_empty() => {
+                    self.push_block(Block::Rule { anchor: None });
+                    self.push_block(Block::Rule { anchor: None });
+                }
+                Syntax::Yaml => {
+                    self.push_block(Block::Rule { anchor: None });
+                    let slug = self.unique_slug(&line);
+                    self.push_block(Block::Heading {
+                        level: 2,
+                        inlines: vec![plain_inline(&line)],
+                        anchor: Some(Anchor(format!("h:{slug}"))),
+                    });
+                }
+                Syntax::Toml => self.push_block(Block::Paragraph {
+                    inlines: vec![plain_inline(&format!("+++ {line} +++"))],
+                    role: None,
+                    anchor: None,
+                }),
+            }
             return;
         }
-        self.frontmatter_seen = true;
-        let result = if text.len() > MAX_FRONTMATTER_BYTES {
-            self.losses.push(Loss {
-                location: "frontmatter".into(),
-                what: format!("frontmatter over {MAX_FRONTMATTER_BYTES} bytes not read"),
-                why: LossReason::Limit,
-                severity: Severity::Warning,
-            });
-            return;
+        let lang = match syntax {
+            Syntax::Yaml => "yaml",
+            Syntax::Toml => "toml",
+        };
+        let problem = if text.len() > MAX_FRONTMATTER_BYTES {
+            Some((
+                LossReason::Limit,
+                format!(
+                    "frontmatter over {MAX_FRONTMATTER_BYTES} bytes not read, its start is kept as text"
+                ),
+            ))
         } else {
             frontmatter::apply(syntax, &text, &mut self.properties)
+                .err()
+                .map(|e| {
+                    (
+                        LossReason::Damaged,
+                        format!("frontmatter could not be read, kept as text: {e}"),
+                    )
+                })
         };
-        if let Err(e) = result {
+        if let Some((why, what)) = problem {
             self.losses.push(Loss {
                 location: "frontmatter".into(),
-                what: format!("frontmatter could not be read: {e}"),
-                why: LossReason::Damaged,
+                what,
+                why,
                 severity: Severity::Warning,
+            });
+            // The raw text stays visible, cut at the size cap on a character boundary.
+            let mut end = text.len().min(MAX_FRONTMATTER_BYTES);
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            self.push_block(Block::Code {
+                lang: Some(lang.into()),
+                text: strip_one_newline(text[..end].to_string()),
+                anchor: None,
             });
         }
     }
@@ -764,19 +893,51 @@ impl<'b> Builder<'b> {
         };
         match frame {
             Frame::Root { blocks } => self.body.extend(blocks),
-            Frame::Quote { kind, blocks, .. } => self.push_block(match kind {
-                Some(k) => Block::Callout {
-                    kind: callout_kind(k),
-                    title: None,
-                    folded: None,
-                    blocks,
-                    anchor: None,
-                },
-                None => Block::Quote {
-                    blocks,
-                    anchor: None,
-                },
-            }),
+            Frame::Quote {
+                kind,
+                mut blocks,
+                callout_break,
+                ..
+            } => {
+                let block = match kind {
+                    Some(k) => Block::Callout {
+                        kind: callout_kind(k),
+                        title: None,
+                        folded: None,
+                        blocks,
+                        anchor: None,
+                    },
+                    None => match read_callout_header(&mut blocks, callout_break) {
+                        Some((kind, folded, title)) => Block::Callout {
+                            kind,
+                            title,
+                            folded,
+                            blocks,
+                            anchor: None,
+                        },
+                        None => {
+                            // A footnote definition inside a quote leaves nothing behind.
+                            if blocks.is_empty() {
+                                return;
+                            }
+                            if callout_break.is_some()
+                                && let Some(Block::Paragraph { inlines, .. }) = blocks.first_mut()
+                            {
+                                let mut joined = Vec::with_capacity(inlines.len());
+                                for inline in std::mem::take(inlines) {
+                                    push_merged(&mut joined, inline);
+                                }
+                                *inlines = joined;
+                            }
+                            Block::Quote {
+                                blocks,
+                                anchor: None,
+                            }
+                        }
+                    },
+                };
+                self.push_block(block);
+            }
             Frame::List { ordered, items, .. } => self.push_block(Block::List {
                 ordered,
                 items,
@@ -842,7 +1003,7 @@ impl<'b> Builder<'b> {
                 caption: None,
                 header_rows: t.header_rows,
                 rows: t.rows,
-                alignments: Vec::new(),
+                alignments: t.alignments,
                 anchor: None,
             });
         }
@@ -861,10 +1022,7 @@ impl<'b> Builder<'b> {
             });
         }
         if self.skipped_subtrees > 1
-            && let Some(loss) = self
-                .losses
-                .iter_mut()
-                .find(|l| l.location == "nested content")
+            && let Some(loss) = self.depth_loss.and_then(|i| self.losses.get_mut(i))
         {
             loss.what = format!("{} (in {} places)", loss.what, self.skipped_subtrees);
         }
@@ -872,37 +1030,79 @@ impl<'b> Builder<'b> {
 
     // --- link graph -----------------------------------------------------------------------
 
+    /// Adds a node for `target` unless it exists and returns its id. A fragment-only target
+    /// (`#hello`) gets the id of the heading anchor it points to (`h:hello`).
+    fn node_for(&mut self, target: &str, internal: bool, image: bool) -> String {
+        // "self" is the document node, so a target that is literally "self" gets another id.
+        let (id, anchor) = match target.strip_prefix('#') {
+            Some(frag) if !frag.is_empty() => {
+                (format!("h:{frag}"), Some(Anchor(format!("h:{frag}"))))
+            }
+            _ if target == "self" => ("link:self".to_string(), None),
+            _ => (target.to_string(), None),
+        };
+        if self.node_ids.insert(id.clone()) {
+            let kind = if image {
+                "image"
+            } else if target.starts_with('#') {
+                "anchor"
+            } else if internal {
+                "path"
+            } else {
+                "url"
+            };
+            self.nodes.push(Node {
+                id: id.clone(),
+                label: target.to_string(),
+                kind: Some(kind.into()),
+                anchor,
+            });
+        }
+        id
+    }
+
+    fn add_edge(&mut self, id: String, kind: &'static str) {
+        if self.edge_keys.insert((id.clone(), kind)) {
+            self.edges.push(Edge {
+                from: "self".into(),
+                to: id,
+                kind: kind.into(),
+                anchor: None,
+            });
+        }
+    }
+
     fn record_link(&mut self, target: &str, internal: bool) {
         if target.is_empty() {
             return;
         }
-        // "self" is the document node, so a target that is literally "self" gets another id.
-        let id = if target == "self" {
-            "link:self".to_string()
-        } else {
-            target.to_string()
-        };
-        if !self.node_ids.insert(id.clone()) {
+        let id = self.node_for(target, internal, false);
+        self.add_edge(id, "links_to");
+    }
+
+    /// An image is a relation to another file and an embedded reference; it is not fetched.
+    fn record_image(&mut self, target: &str, alt: &str) {
+        if target.is_empty() {
             return;
         }
-        let kind = if target.starts_with('#') {
-            "anchor"
-        } else if internal {
-            "path"
+        let id = self.node_for(target, is_internal(target), true);
+        self.add_edge(id, "embeds");
+        let name = if alt.trim().is_empty() {
+            target
+                .split(['?', '#'])
+                .next()
+                .and_then(|p| p.rsplit('/').next())
+                .filter(|n| !n.is_empty())
+                .unwrap_or(target)
+                .to_string()
         } else {
-            "url"
+            alt.to_string()
         };
-        self.nodes.push(Node {
-            id: id.clone(),
-            label: target.to_string(),
-            kind: Some(kind.into()),
-            anchor: None,
-        });
-        self.edges.push(Edge {
-            from: "self".into(),
-            to: id,
-            kind: "links_to".into(),
-            anchor: None,
+        self.embedded.push(Embedded {
+            kind: "image".into(),
+            name,
+            detail: None,
+            target: Some(target.to_string()),
         });
     }
 
@@ -911,6 +1111,7 @@ impl<'b> Builder<'b> {
         doc.properties = std::mem::take(&mut self.properties);
         doc.losses.append(&mut self.losses);
         doc.body = std::mem::take(&mut self.body);
+        doc.facets.embedded = std::mem::take(&mut self.embedded);
         if !self.footnotes.is_empty() {
             let blocks = std::mem::take(&mut self.footnotes)
                 .into_iter()
@@ -952,6 +1153,75 @@ impl<'b> Builder<'b> {
             edges: std::mem::take(&mut self.edges),
         });
     }
+}
+
+fn plain_inline(text: &str) -> Inline {
+    Inline::Text {
+        text: text.to_string(),
+        emphasis: false,
+        strong: false,
+        strike: false,
+    }
+}
+
+/// Reads `[!KIND]`, an optional fold sign and a title from the first paragraph of a quote, the
+/// callout form Rezzer writes itself (and Obsidian does). On a match the header is removed from
+/// `blocks[0]`; the rest of that paragraph stays as body.
+fn read_callout_header(
+    blocks: &mut Vec<Block>,
+    brk: Option<usize>,
+) -> Option<(CalloutKind, Option<bool>, Option<String>)> {
+    let Some(Block::Paragraph { inlines, .. }) = blocks.first_mut() else {
+        return None;
+    };
+    let Some(Inline::Text { text, .. }) = inlines.first() else {
+        return None;
+    };
+    let rest = text.strip_prefix("[!")?;
+    let close = rest.find(']')?;
+    let kind = match rest[..close].to_ascii_lowercase().as_str() {
+        "note" => CalloutKind::Note,
+        "tip" => CalloutKind::Tip,
+        "important" => CalloutKind::Important,
+        "warning" => CalloutKind::Warning,
+        "caution" => CalloutKind::Caution,
+        "details" => CalloutKind::Details,
+        _ => return None,
+    };
+    let mut after = &rest[close + 1..];
+    let folded = match after.chars().next() {
+        Some('-') => Some(true),
+        Some('+') => Some(false),
+        _ => None,
+    };
+    if folded.is_some() {
+        after = &after[1..];
+    }
+    if !after.is_empty() && !after.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let split = brk.unwrap_or(inlines.len()).min(inlines.len());
+    let mut header: Vec<Inline> = inlines[..split].to_vec();
+    if let Some(Inline::Text { text, .. }) = header.first_mut() {
+        *text = after.to_string();
+    }
+    let title = plain_text(&header).trim().to_string();
+    // The break is a space inline that later text may have been joined to.
+    let mut body: Vec<Inline> = inlines.get(split..).unwrap_or_default().to_vec();
+    if brk.is_some()
+        && let Some(Inline::Text { text, .. }) = body.first_mut()
+    {
+        *text = text.strip_prefix(' ').unwrap_or(text).to_string();
+        if text.is_empty() {
+            body.remove(0);
+        }
+    }
+    if body.is_empty() {
+        blocks.remove(0);
+    } else if let Some(Block::Paragraph { inlines, .. }) = blocks.first_mut() {
+        *inlines = body;
+    }
+    Some((kind, folded, Some(title).filter(|t| !t.is_empty())))
 }
 
 fn heading_level(level: HeadingLevel) -> u8 {
@@ -1018,7 +1288,7 @@ fn plain_text(inlines: &[Inline]) -> String {
 /// A heading id the way GitHub builds it: lowercase, spaces to hyphens, punctuation dropped.
 fn slugify(text: &str) -> String {
     let mut slug = String::new();
-    for c in text.trim().chars() {
+    for c in strip_html_tags(text).trim().chars() {
         if c.is_alphanumeric() {
             slug.extend(c.to_lowercase());
         } else if c == ' ' || c == '-' {
@@ -1050,6 +1320,29 @@ fn is_internal(target: &str) -> bool {
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
     });
     !has_scheme
+}
+
+/// Removes `<tag>`, `</tag>` and `<!-- -->` spans; a lone `<` followed by a space stays.
+fn strip_html_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let is_tag = tail[1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '/' || c == '!');
+        match tail.find('>') {
+            Some(j) if is_tag => rest = &tail[j + 1..],
+            _ => {
+                out.push('<');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn strip_one_newline(mut text: String) -> String {

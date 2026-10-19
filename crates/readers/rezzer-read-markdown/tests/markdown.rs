@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Source, TaskState, Value,
+    Align, Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId,
+    Inline, LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Source, TaskState, Value,
 };
 use rezzer_read_markdown::MarkdownReader;
 
@@ -47,6 +47,8 @@ fn plain(inlines: &[Inline]) -> String {
             Inline::Link { inlines, .. } => plain(inlines),
             Inline::Math { latex } => format!("${latex}$"),
             Inline::FootnoteRef { id } => format!("[^{id}]"),
+            Inline::Image { alt, .. } => alt.clone(),
+            Inline::LineBreak => "\n".into(),
             other => panic!("unexpected inline {other:?}"),
         })
         .collect()
@@ -116,7 +118,10 @@ fn broken_frontmatter_is_loss_not_failure() {
     );
     assert!(matches!(
         &out.document.body[..],
-        [Block::Paragraph { inlines, .. }] if plain(inlines) == "Still here."
+        [
+            Block::Code { lang: Some(l), text, .. },
+            Block::Paragraph { inlines, .. }
+        ] if l == "yaml" && text.contains("unclosed") && plain(inlines) == "Still here."
     ));
 }
 
@@ -163,7 +168,7 @@ fn wikilinks_in_link_graph() {
             "self",
             "Getting Started",
             "https://example.com",
-            "#hello",
+            "h:hello",
             "../a.md"
         ]
     );
@@ -379,10 +384,252 @@ fn legacy_encoding_is_decoded_and_recorded() {
 }
 
 #[test]
-fn images_are_kept_as_text() {
-    let out = read("![a cat](cat.png \"Tom\")\n");
+fn images_are_references_with_graph_and_embedded() {
+    let out = read(
+        "![a cat](cat.png \"Tom\") and ![[pic.png]]\n\n[![badge](https://img.example/b.svg)](https://ci.example.com)\n",
+    );
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("{:?}", out.document.body);
+    };
+    assert!(inlines.contains(&Inline::Image {
+        target: "cat.png".into(),
+        alt: "a cat".into(),
+        title: Some("Tom".into()),
+    }));
+    assert!(
+        inlines
+            .iter()
+            .any(|i| matches!(i, Inline::Image { target, .. } if target == "pic.png"))
+    );
+    let g = &out.document.facets.graphs[0];
+    let node = |id: &str| {
+        g.nodes
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap_or_else(|| panic!("{id}"))
+    };
+    assert_eq!(node("cat.png").kind.as_deref(), Some("image"));
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.to == "cat.png" && e.kind == "embeds")
+    );
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.to == "https://img.example/b.svg" && e.kind == "embeds")
+    );
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.to == "https://ci.example.com" && e.kind == "links_to")
+    );
+    let emb = &out.document.facets.embedded;
+    assert_eq!(emb.len(), 3);
+    assert_eq!(emb[0].kind, "image");
+    assert_eq!(emb[0].name, "a cat");
+    assert_eq!(emb[0].target.as_deref(), Some("cat.png"));
+    assert!(out.document.losses.is_empty());
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn flow_nesting_bomb_in_yaml_is_fast_and_kept_as_text() {
+    let input = format!("---\nk: {}\n---\n\nBody\n", "[".repeat(300_000));
+    let start = std::time::Instant::now();
+    let out = read(&input);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged)
+    );
+    assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
     assert!(matches!(
-        &out.document.body[0],
-        Block::Paragraph { inlines, .. } if plain(inlines) == "![a cat](cat.png \"Tom\")"
+        out.document.body.last(),
+        Some(Block::Paragraph { .. })
     ));
+}
+
+#[test]
+fn block_nesting_bomb_in_yaml_is_rejected() {
+    let mut fm = String::new();
+    for i in 0..300 {
+        fm.push_str(&" ".repeat(i));
+        fm.push_str("a:\n");
+    }
+    let out = read(&format!("---\n{fm}---\n\nBody\n"));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged)
+    );
+}
+
+#[test]
+fn rule_block_in_the_middle_is_not_frontmatter() {
+    let out = read("Para\n\n---\nfoo: bar\ntitle: Hijack\n---\n\nAfter\n");
+    let p = &out.document.properties;
+    assert_eq!(p.title, None);
+    assert!(p.custom.is_empty());
+    assert!(
+        out.document
+            .body
+            .iter()
+            .any(|b| matches!(b, Block::Rule { .. }))
+    );
+    let all = format!("{:?}", out.document.body);
+    assert!(all.contains("Hijack"));
+    assert!(all.contains("After"));
+}
+
+#[test]
+fn unreadable_frontmatter_text_is_kept() {
+    let out = read("---\nHello world\n---\n\nBody\n");
+    assert!(format!("{:?}", out.document.body).contains("Hello world"));
+    let out = read("---\ntitle: A\ntitle: B\nother: 1\n---\n\nBody\n");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged)
+    );
+    assert!(matches!(&out.document.body[0], Block::Code { text, .. } if text.contains("other: 1")));
+}
+
+#[test]
+fn oversize_frontmatter_is_truncated_text_with_limit_loss() {
+    let big = "x".repeat(2 * 1024 * 1024);
+    let out = read(&format!("---\nk: {big}\n---\n\nBody\n"));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit)
+    );
+    let Block::Code { text, .. } = &out.document.body[0] else {
+        panic!("not code");
+    };
+    assert_eq!(text.len(), 1024 * 1024);
+}
+
+#[test]
+fn rules_breaks_strike_and_alignment() {
+    let out = read(
+        "one\n\n---\n\nline  \nbreak ~~gone~~ soft\nwrap\n\n| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n",
+    );
+    let body = &out.document.body;
+    assert!(matches!(&body[1], Block::Rule { .. }));
+    let Block::Paragraph { inlines, .. } = &body[2] else {
+        panic!("{body:?}");
+    };
+    assert!(inlines.contains(&Inline::LineBreak));
+    assert!(
+        inlines
+            .iter()
+            .any(|i| matches!(i, Inline::Text { text, strike: true, .. } if text == "gone"))
+    );
+    assert!(plain(inlines).contains("soft wrap"));
+    let Block::Table { alignments, .. } = &body[3] else {
+        panic!("{body:?}");
+    };
+    assert_eq!(alignments, &[Align::Left, Align::Center, Align::Right]);
+}
+
+#[test]
+fn display_math_flag_does_not_leak() {
+    let out = read("| $$x$$ |\n|---|\n| y |\n\n$y$\n\nText $$z$$ more\n");
+    let body = &out.document.body;
+    assert!(
+        matches!(&body[1], Block::Paragraph { inlines, .. } if matches!(inlines[0], Inline::Math { .. }))
+    );
+    assert!(matches!(&body[2], Block::Paragraph { .. }));
+}
+
+#[test]
+fn rezzer_callout_dialect_is_read_back() {
+    let out = read(
+        "> [!NOTE] My *Title*\n> body text\n\n> [!tip]- Folded\n> x\n\n> [!DETAILS]+ Open\n> y\n\n> [!unknown] Not a callout\n> z\n",
+    );
+    let body = &out.document.body;
+    match &body[0] {
+        Block::Callout {
+            kind,
+            title,
+            folded,
+            blocks,
+            ..
+        } => {
+            assert_eq!(*kind, CalloutKind::Note);
+            assert_eq!(title.as_deref(), Some("My Title"));
+            assert_eq!(*folded, None);
+            assert!(
+                matches!(&blocks[..], [Block::Paragraph { inlines, .. }] if plain(inlines) == "body text")
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        matches!(&body[1], Block::Callout { kind: CalloutKind::Tip, title: Some(t), folded: Some(true), .. } if t == "Folded")
+    );
+    assert!(matches!(
+        &body[2],
+        Block::Callout {
+            kind: CalloutKind::Details,
+            folded: Some(false),
+            ..
+        }
+    ));
+    assert!(matches!(&body[3], Block::Quote { .. }));
+}
+
+#[test]
+fn frontmatter_edge_cases() {
+    let out = read("---\ndate: true\nempty:\nn: 1\n---\n");
+    let p = &out.document.properties;
+    assert_eq!(p.created, None);
+    assert_eq!(p.custom["date"], Value::Bool { value: true });
+    assert_eq!(p.custom["empty"], text(""));
+}
+
+#[test]
+fn footnote_in_quote_leaves_no_empty_quote() {
+    let out = read("x[^1]\n\n> [^1]: in a quote\n");
+    assert!(
+        !out.document
+            .body
+            .iter()
+            .any(|b| matches!(b, Block::Quote { .. }))
+    );
+    assert!(format!("{:?}", out.document.body).contains("in a quote"));
+}
+
+#[test]
+fn slug_ignores_html_tags() {
+    let out = read("# H with <span>html</span> x\n");
+    assert!(matches!(&out.document.body[0],
+        Block::Heading { anchor: Some(a), .. } if a.0 == "h:h-with-html-x"));
+}
+
+#[test]
+fn depth_loss_names_the_line() {
+    let input = format!("a\n\nb\n\n{} deep\n", ">".repeat(300));
+    let limits = Limits {
+        max_depth: 16,
+        ..Limits::default()
+    };
+    let out = read_with(input.as_bytes(), limits);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit)
+        .unwrap();
+    assert!(loss.location.contains("line 5"), "{}", loss.location);
 }

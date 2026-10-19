@@ -32,10 +32,22 @@ enum Fm {
     Map(Vec<(String, Fm)>),
 }
 
+/// The deepest nesting a YAML block may have. This is also the recursion limit of the parser,
+/// but its running time is quadratic in flow nesting, so the depth is checked up front.
+const MAX_YAML_DEPTH: usize = 128;
+
 /// Parses `text` and fills `props`. On an error nothing is changed and the message is returned.
+///
+/// Values keep their data but not their YAML tags (`!foo bar` reads as `bar`). A key with
+/// no value is kept as an empty text.
 pub(crate) fn apply(syntax: Syntax, text: &str, props: &mut Properties) -> Result<(), String> {
     let root = match syntax {
         Syntax::Yaml => {
+            if let Some(depth) = yaml_depth_over_limit(text) {
+                return Err(format!(
+                    "nesting of {depth} levels is deeper than the {MAX_YAML_DEPTH} allowed"
+                ));
+            }
             let v: serde_yaml_ng::Value =
                 serde_yaml_ng::from_str(text).map_err(|e| e.to_string())?;
             from_yaml(v)
@@ -54,6 +66,54 @@ pub(crate) fn apply(syntax: Syntax, text: &str, props: &mut Properties) -> Resul
         Fm::Null => Ok(()),
         _ => Err("frontmatter is not a mapping of keys to values".into()),
     }
+}
+
+/// One linear pass over the text: the depth of flow brackets (`[` and `{`, quotes ignored so
+/// the count can only be too high, never too low) and of block indentation, including compact
+/// `- - - x` nesting. Returns the depth when it is over the limit.
+fn yaml_depth_over_limit(text: &str) -> Option<usize> {
+    let mut flow: usize = 0;
+    let mut indents: Vec<usize> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start_matches(' ');
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        if flow == 0 {
+            while indents.last().is_some_and(|&i| i >= indent) {
+                indents.pop();
+            }
+            indents.push(indent);
+            // Compact nesting: `- - - x`.
+            let mut rest = trimmed;
+            let mut extra = 0usize;
+            while let Some(r) = rest
+                .strip_prefix("- ")
+                .or_else(|| rest.strip_prefix("? "))
+                .map(|r| r.trim_start_matches(' '))
+            {
+                extra += 1;
+                rest = r;
+            }
+            if indents.len() + extra > MAX_YAML_DEPTH {
+                return Some(indents.len() + extra);
+            }
+        }
+        for b in line.bytes() {
+            match b {
+                b'[' | b'{' => {
+                    flow += 1;
+                    if flow + indents.len() > MAX_YAML_DEPTH {
+                        return Some(flow + indents.len());
+                    }
+                }
+                b']' | b'}' => flow = flow.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 fn from_yaml(v: serde_yaml_ng::Value) -> Fm {
@@ -129,7 +189,7 @@ fn map_properties(entries: Vec<(String, Fm)>, props: &mut Properties) {
                 Some(s) => props.language = Some(s),
                 None => put_custom(props, key, value),
             },
-            "date" if props.created.is_none() && !matches!(value, Fm::List(_) | Fm::Map(_)) => {
+            "date" if props.created.is_none() && matches!(value, Fm::Str(_) | Fm::Date(_)) => {
                 match to_value(&value) {
                     Some(v) => props.created = Some(v),
                     None => put_custom(props, key, value),
@@ -182,7 +242,14 @@ fn put_custom(props: &mut Properties, key: String, value: Fm) {
 
 fn flatten(props: &mut Properties, key: String, value: Fm, depth: usize) {
     match value {
-        Fm::Null => {}
+        Fm::Null => {
+            props.custom.insert(
+                key,
+                Value::Text {
+                    value: String::new(),
+                },
+            );
+        }
         Fm::Map(entries) if depth < MAX_FLATTEN_DEPTH => {
             for (k, v) in entries {
                 flatten(props, format!("{key}.{k}"), v, depth + 1);
