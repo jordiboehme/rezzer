@@ -48,7 +48,8 @@ pub(crate) fn inlines(list: &[Inline], mode: Mode) -> String {
     out
 }
 
-/// The `$` signs in the text runs of `list` (not in code or math), walked with a stack.
+/// The `$` signs in the text runs of `list` (not in code), each math span counted as two,
+/// walked with a stack.
 fn count_dollars(list: &[Inline]) -> usize {
     let mut n = 0;
     let mut stack: Vec<std::slice::Iter<'_, Inline>> = vec![list.iter()];
@@ -62,6 +63,8 @@ fn count_dollars(list: &[Inline]) -> usize {
             | Inline::Status { text, .. }
             | Inline::Image { alt: text, .. } => n += text.matches('$').count(),
             Inline::Link { inlines, .. } => stack.push(inlines.iter()),
+            // A math span writes two `$` that a text `$` could pair with.
+            Inline::Math { latex } if !latex.trim().is_empty() => n += 2,
             _ => {}
         }
     }
@@ -534,11 +537,21 @@ fn safe_target(target: &str) -> bool {
         .chars()
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
-    let before = cleaned.split(['/', '?', '#']).next().unwrap_or("");
-    // A reference the decoder does not know could still hide a scheme.
-    if has_reference(before) {
-        return false;
+    // With a `:` anywhere, an `&` before the first one could hide a scheme: unsafe. This is
+    // checked on the target as written and as decoded.
+    let raw: String = target
+        .trim_start_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    for text in [&raw, &cleaned] {
+        if let Some(colon) = text.find(':')
+            && text[..colon].contains('&')
+        {
+            return false;
+        }
     }
+    let before = cleaned.split(['/', '?', '#']).next().unwrap_or("");
     let Some((scheme, _)) = before.split_once(':') else {
         return true;
     };
@@ -554,6 +567,39 @@ fn safe_target(target: &str) -> bool {
         scheme.to_ascii_lowercase().as_str(),
         "http" | "https" | "mailto" | "ftp" | "file"
     )
+}
+
+/// A numeric reference after `&#`: decimal or `x` hex digits of any length, with or
+/// without the closing `;`, as browsers read them in attributes. Returns the character and
+/// the bytes used.
+fn numeric_reference(text: &str) -> Option<(char, usize)> {
+    let (digits_start, radix) = match text.as_bytes().first() {
+        Some(b'x' | b'X') => (1, 16),
+        _ => (0, 10),
+    };
+    let digits = text[digits_start..]
+        .chars()
+        .take_while(|c| c.is_digit(radix))
+        .count();
+    if digits == 0 {
+        return None;
+    }
+    let mut value: u32 = 0;
+    for c in text[digits_start..digits_start + digits].chars() {
+        // Saturates far above the last code point, so long zero runs and huge values work.
+        value = value
+            .saturating_mul(radix)
+            .saturating_add(c.to_digit(radix).unwrap_or(0))
+            .min(0x11_0000);
+    }
+    let c = char::from_u32(value)
+        .filter(|c| *c != '\0')
+        .unwrap_or('\u{fffd}');
+    let mut used = digits_start + digits;
+    if text[used..].starts_with(';') {
+        used += 1;
+    }
+    Some((c, used))
 }
 
 /// Decodes numeric character references and the named ones that could spell a scheme or
@@ -596,23 +642,22 @@ fn decode_references(text: &str) -> String {
     while let Some(pos) = rest.find('&') {
         out.push_str(&rest[..pos]);
         let after = &rest[pos + 1..];
-        let decoded = after.find(';').filter(|&end| end <= 32).and_then(|end| {
-            let name = &after[..end];
-            let c = if let Some(num) = name.strip_prefix('#') {
-                let value = match num.strip_prefix(['x', 'X']) {
-                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
-                    None => num.parse::<u32>().ok(),
-                }?;
-                char::from_u32(value).unwrap_or('\u{fffd}')
-            } else {
-                NAMED.iter().find(|(n, _)| *n == name)?.1
-            };
-            Some((c, end))
-        });
+        let decoded = if let Some(num) = after.strip_prefix('#') {
+            numeric_reference(num).map(|(c, len)| (c, len + 1))
+        } else {
+            // Named references need their `;`.
+            after.find(';').filter(|&end| end <= 32).and_then(|end| {
+                let name = &after[..end];
+                NAMED
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| (*c, end + 1))
+            })
+        };
         match decoded {
-            Some((c, end)) => {
+            Some((c, used)) => {
                 out.push(c);
-                rest = &after[end + 1..];
+                rest = &after[used..];
             }
             None => {
                 out.push('&');
@@ -622,18 +667,6 @@ fn decode_references(text: &str) -> String {
     }
     out.push_str(rest);
     out
-}
-
-/// True when `text` still holds something shaped like a character reference.
-fn has_reference(text: &str) -> bool {
-    text.match_indices('&').any(|(i, _)| {
-        let after = &text[i + 1..];
-        let name_len = after
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '#')
-            .count();
-        name_len > 0 && after[name_len..].starts_with(';')
-    })
 }
 
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {

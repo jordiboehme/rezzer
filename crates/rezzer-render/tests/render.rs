@@ -1456,15 +1456,23 @@ fn dollar_pairs_across_runs_are_escaped() {
             anchor: None,
         },
         para("only $5 here"),
+        Block::Paragraph {
+            inlines: vec![txt("e $f"), Inline::Math { latex: "x".into() }, txt("g")],
+            role: None,
+            anchor: None,
+        },
     ]);
+    assert!(md.contains("e \\$f$`x`$g\n"), "{md}");
     assert!(md.contains("a \\$x `c$` y\\$ b\n"), "{md}");
     assert!(md.contains("p \\$q **strong** r\\$ s\n"), "{md}");
     assert!(md.contains("only $5 here\n"), "{md}");
+    // The only math is the real formula; no text `$` pairs into a fake one.
     for e in Parser::new_ext(after_frontmatter(&md), Options::ENABLE_MATH) {
-        assert!(
-            !matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)),
-            "{md}"
-        );
+        match e {
+            Event::InlineMath(m) => assert!(m.contains('x') && !m.contains('f'), "{m} in {md}"),
+            Event::DisplayMath(m) => panic!("{m} in {md}"),
+            _ => {}
+        }
     }
 }
 
@@ -1500,5 +1508,35 @@ fn merge_note_names_only_shown_rows() {
         md.contains("Merged cells: A1:A200\n"),
         "{}",
         &md[md.len() - 200..]
+    );
+}
+
+#[test]
+fn scheme_check_sees_references_and_ampersands() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: false,
+        inlines: vec![txt("go")],
+    };
+    let long = format!("javascript&#{}58;x", "0".repeat(40));
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![
+            link("javascript&#58alert"),
+            txt(" "),
+            link(&long),
+            txt(" "),
+            link("javascript&sol;:x"),
+            txt(" "),
+            link("a&b;c.md"),
+        ],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(&format!(
+            "go `javascript&#58alert` go `{long}` go `javascript&sol;:x` [go](a\\&b;c.md)\n"
+        )),
+        "{md}"
     );
 }
