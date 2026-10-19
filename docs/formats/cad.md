@@ -28,7 +28,7 @@ Tested on 2026-10-19 with about 390 public test files. Most formats get Rezzer's
 | Gerber X2 and X3, Excellon, job file | Layer function, generating software, attributes, nets from copper layers, drill tools, plating, hit counts | own reader | first |
 | OpenSCAD | Customizer parameters, modules and functions, includes, call graph, checks | own reader | first |
 | DWG R13 to R2018 | Same as DXF, plus summary info and preview | own reader, written from a format specification | later |
-| Fusion 360, SolidWorks, Creo, NX, CATIA, Inventor, Rhino, ACIS | Feature trees and parameters | [cadmpeg](https://github.com/cadmpeg/cadmpeg) behind a build option | later |
+| Fusion 360, SolidWorks, Creo, NX, CATIA, Inventor, Rhino, ACIS | Feature trees, parameters and metadata | own readers, written from the [cadmpeg format documentation](https://github.com/cadmpeg/cadmpeg/tree/main/docs/formats) (CC BY 4.0) | later |
 
 ## Until the later formats arrive
 
@@ -37,7 +37,7 @@ For DWG and the closed native formats the first release detects the format and i
 ## Known limitations
 
 - stepq is young (one maintainer, first released in 2026-09). Rezzer pins it, keeps it behind its own STEP interface and uses the NIST test models as reference files
-- cadmpeg reads real feature trees and parameters from SolidWorks, Creo, NX and Fusion files, far above its own "opened" label. But design data needs a full geometry decode (44 s and 3.1 GB on a 20.6 MB FreeCAD file), it adds about 72 MB to the binary and it refuses a whole file over one unusual record. That's why it comes later, behind a build option
+- cadmpeg reads real feature trees and parameters from SolidWorks, Creo, NX and Fusion files, far above its own "opened" label. But design data needs a full geometry decode (44 s and 3.1 GB on a 20.6 MB FreeCAD file), it adds about 72 MB to the binary and it refuses a whole file over one unusual record. That's why Rezzer doesn't link it. Rezzer writes its own readers for these formats from cadmpeg's format documentation, and reads only what an agent needs, without decoding all the geometry
 - Exact volume and mass of STEP and IGES solids need a geometry kernel. Rezzer doesn't link one. Bounding boxes come from points and can be too large
 - Native assemblies (SolidWorks, Inventor, Creo) are weak in every tested reader
 - The G-code body inside `.bgcode` files is compressed and comes later; its metadata is read in the first release
