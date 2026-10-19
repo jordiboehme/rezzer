@@ -52,10 +52,14 @@ impl Pass for Language {
 /// Only words made of letters count (apostrophes and hyphens inside a word are fine, edge
 /// punctuation is dropped): numbers, dates and codes such as `A12-B7` say nothing about the
 /// language and make whatlang report a false, "reliable" answer. Code and formulas are left
-/// out too.
+/// out too, and so are tables with a role: reader-generated summaries.
 fn body_text(body: &[Block]) -> String {
     let mut text = String::new();
     walk::blocks(body, |b| {
+        // A table with a role (a summary a reader generated) is not the author's text.
+        if matches!(b, Block::Table { role: Some(_), .. }) {
+            return true;
+        }
         walk::block_inlines(b, |list| {
             walk::inlines(list, |i| match i {
                 Inline::Text { text: t, .. } | Inline::Status { text: t, .. } => {

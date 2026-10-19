@@ -483,7 +483,9 @@ dependencies = [
 name = "rezzer-enrich"
 version = "0.1.0"
 dependencies = [
+ "rezzer-limits",
  "rezzer-model",
+ "rezzer-read-csv",
  "whatlang",
 ]
 

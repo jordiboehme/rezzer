@@ -510,3 +510,70 @@ fn parts_are_linked_by_id_not_name() {
     assert_eq!(parts[1].reads, vec!["s1".to_string()]);
     assert!(parts[0].reads.is_empty());
 }
+
+fn read_csv(bytes: &[u8]) -> Document {
+    use rezzer_model::{Bytes, ReadOptions, Reader, Source};
+    let source = Source {
+        path: None,
+        name: "data.csv".into(),
+        bytes: Bytes::Owned(std::sync::Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format: FormatId::Csv,
+        detection: Detection {
+            confidence: Confidence::Likely,
+            evidence: "csv".into(),
+        },
+        modified: None,
+    };
+    rezzer_read_csv::CsvReader
+        .read(
+            &source,
+            &ReadOptions::default(),
+            &rezzer_limits::Budget::new(rezzer_limits::Limits::default()),
+        )
+        .document
+}
+
+#[test]
+fn csv_columns_summary_does_not_set_a_language() {
+    let names = [
+        "Year",
+        "Total",
+        "Gas Fuel",
+        "Liquid Fuel",
+        "Solid Fuel",
+        "Cement",
+        "Flaring",
+        "Per Capita",
+        "Bunker Fuels",
+        "Gas Flaring",
+        "Coal Burning",
+        "Oil Burning",
+    ];
+    let mut csv = names.join(",");
+    csv.push('\n');
+    for y in 1900..2100 {
+        let row: Vec<String> = (0..names.len())
+            .map(|c| format!("{}.{}", y * (c + 1), c % 7))
+            .collect();
+        csv.push_str(&row.join(","));
+        csv.push('\n');
+    }
+    let mut d = read_csv(csv.as_bytes());
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language, None);
+}
+
+#[test]
+fn csv_of_english_sentences_is_english() {
+    let mut csv = String::from("id,text\n");
+    for i in 0..12 {
+        csv.push_str(&format!(
+            "{i},\"The quick brown fox jumps over the lazy dog while the weather stays warm and everybody enjoys the long afternoon.\"\n"
+        ));
+    }
+    let mut d = read_csv(csv.as_bytes());
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language.as_deref(), Some("en"));
+}

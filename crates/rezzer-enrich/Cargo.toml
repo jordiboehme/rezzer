@@ -8,3 +8,7 @@ rust-version.workspace = true
 [dependencies]
 rezzer-model = { path = "../rezzer-model" }
 whatlang.workspace = true
+
+[dev-dependencies]
+rezzer-read-csv = { path = "../readers/rezzer-read-csv" }
+rezzer-limits = { path = "../rezzer-limits" }
