@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/rezzer-model",
+    "crates/rezzer-limits",
+    "crates/rezzer-detect",
+    "crates/rezzer-enrich",
+    "crates/rezzer-render",
+    "crates/rezzer-pipeline",
+    "crates/rezzer-cli",
+    "crates/rezzer-mcp",
+    "crates/formats/textenc",
+    "crates/formats/csvsniff",
+    "crates/readers/rezzer-read-text",
+    "crates/readers/rezzer-read-markdown",
+    "crates/readers/rezzer-read-csv",
+    "crates/rezzer",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MPL-2.0"
+rust-version = "1.99.0"
+
+[workspace.dependencies]
+rmcp = "=3.5.1"
+clap = "=4.6.7"
+serde = "=1.0.229"
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+sha2 = "=0.11.1"
+memmap2 = "=0.9.11"
+chardetng = "=1.0.0"
+encoding_rs = "=0.8.42"
+pulldown-cmark = "=0.13.4"
+csv = "=1.4.0"
+whatlang = "=0.18.0"
+tokio = "=1.54.0"
+schemars = "=1.2.3"
+toml = "=1.1.8"
+serde_yaml_ng = "=0.10.0"
+directories = "=6.0.0"
+hex = "=0.4.3"
+anyhow = "=1.0.104"
+insta = "=1.49.0"
+tempfile = "=3.27.0"
+assert_cmd = "=2.2.2"
+predicates = "=3.1.4"
+zip = "=9.0.5"
+cfb = "=0.15.0"
