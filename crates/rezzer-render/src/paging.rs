@@ -79,6 +79,7 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             // A table stays with its caption, and a merge note with its table.
             && !text.starts_with('|')
             && !text.starts_with("Merged cells: ")
+            && !text.ends_with("not shown (see the model JSON).")
         {
             Border::Blank
         } else {

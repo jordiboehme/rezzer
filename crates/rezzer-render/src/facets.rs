@@ -88,7 +88,10 @@ fn formula_table(list: &[&Formula]) -> String {
     if words.is_empty() {
         table
     } else {
-        format!("{}.\n\n{table}", words.join(", "))
+        format!(
+            "{}\n\n{table}",
+            blocks::finish_lines(&format!("{}.", words.join(", ")))
+        )
     }
 }
 

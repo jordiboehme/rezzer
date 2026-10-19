@@ -71,7 +71,8 @@ fn quoted_list(values: &[String]) -> String {
     format!("[{}]", items.join(", "))
 }
 
-/// The `YYYY-MM-DD` at the start of `value`, when it is a real calendar date shape.
+/// The `YYYY-MM-DD` at the start of `value`, when it has the shape of a date. Whether it is
+/// a real calendar date is [`is_real_date`].
 fn date_prefix(value: &str) -> Option<&str> {
     let date = value.get(..10)?;
     let b = date.as_bytes();
@@ -79,16 +80,32 @@ fn date_prefix(value: &str) -> Option<&str> {
     if !(digits(0..4) && b[4] == b'-' && digits(5..7) && b[7] == b'-' && digits(8..10)) {
         return None;
     }
-    let month: u32 = date[5..7].parse().ok()?;
-    let day: u32 = date[8..10].parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
     // Only a date, or a date followed by a time part.
     match value.as_bytes().get(10) {
         None | Some(b'T' | b't' | b' ') => Some(date),
         _ => None,
     }
+}
+
+/// True for a date that exists in the Gregorian calendar (`2024-02-29` yes, `2026-02-30`
+/// no).
+fn is_real_date(date: &str) -> bool {
+    let (Ok(year), Ok(month), Ok(day)) = (
+        date[0..4].parse::<u32>(),
+        date[5..7].parse::<u32>(),
+        date[8..10].parse::<u32>(),
+    ) else {
+        return false;
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days).contains(&day)
 }
 
 fn value_date(value: &Value) -> Option<&str> {
@@ -164,7 +181,13 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
         None => (s.modified.as_deref().and_then(date_prefix), "medium"),
     };
     if let Some(date) = date {
-        out.push_str(&format!("source_date: {date}\n"));
+        // A real date is plain; anything else stays a quoted string.
+        let shown = if is_real_date(date) {
+            date.to_string()
+        } else {
+            quote(date)
+        };
+        out.push_str(&format!("source_date: {shown}\n"));
         out.push_str(&format!("temporal_confidence: {confidence}\n"));
     }
     if let Some(archive) = &opts.archive_ref {
@@ -226,7 +249,10 @@ mod tests {
     fn date_prefix_is_strict() {
         assert_eq!(date_prefix("2025-12-01"), Some("2025-12-01"));
         assert_eq!(date_prefix("2025-12-01T10:00:00Z"), Some("2025-12-01"));
-        assert_eq!(date_prefix("2025-13-01"), None);
+        assert!(!is_real_date(date_prefix("2025-13-01").unwrap()));
+        assert!(!is_real_date("2025-00-10"));
+        assert!(!is_real_date("2025-01-00"));
+        assert!(is_real_date("2000-02-29"));
         assert_eq!(date_prefix("2025-12-011"), None);
         assert_eq!(date_prefix("yesterday"), None);
         assert_eq!(date_prefix("2025-12-0é"), None);

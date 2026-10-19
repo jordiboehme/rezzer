@@ -13,6 +13,9 @@ use crate::blocks::{heading_line, line_text};
 /// A graph with more nodes shows only its first nodes and says how many were left out.
 pub(crate) const MAX_NODES: usize = 200;
 
+/// At most this many edges are drawn; a line says how many more there are.
+pub(crate) const MAX_EDGES: usize = 1_000;
+
 /// A Mermaid id: `n_` plus the id with every character outside `[A-Za-z0-9_]` as `_`. The
 /// prefix keeps ids clear of keywords such as `end` and of leading digits.
 fn sanitize(id: &str) -> String {
@@ -80,10 +83,14 @@ pub(crate) fn render(graph: &Graph) -> String {
     }
     let known: HashSet<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();
     let mut cut_edges = 0;
+    let mut drawn = 0;
+    let mut over_edges = 0;
     let mut dangling = 0;
     for edge in &graph.edges {
         match (ids.get(edge.from.as_str()), ids.get(edge.to.as_str())) {
+            (Some(_), Some(_)) if drawn >= MAX_EDGES => over_edges += 1,
             (Some(from), Some(to)) => {
+                drawn += 1;
                 if edge.kind.trim().is_empty() {
                     lines.push(format!("    {from} --> {to}"));
                 } else {
@@ -114,6 +121,13 @@ pub(crate) fn render(graph: &Graph) -> String {
             graph.nodes.len(),
             plural(graph.nodes.len() - shown, "node", "nodes"),
             plural(cut_edges, "edge", "edges"),
+        ));
+    }
+    if over_edges > 0 {
+        out.push_str(&format!(
+            "\nOnly the first {MAX_EDGES} of {} edges are shown: {} are left out.",
+            drawn + over_edges,
+            plural(over_edges, "edge", "edges"),
         ));
     }
     if dangling == 1 {

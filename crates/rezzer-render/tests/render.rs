@@ -920,7 +920,7 @@ fn dollar_signs_never_open_math() {
         anchor: None,
     }]);
     assert!(
-        md.contains("costs $5 and \\$\\$x\\$\\$ and \\$`y`\\$\n"),
+        md.contains("costs \\$5 and \\$\\$x\\$\\$ and \\$`y`\\$\n"),
         "{md}"
     );
 }
@@ -938,7 +938,7 @@ fn hostile_spans_stay_bounded() {
         alignments: Vec::new(),
         anchor: None,
     }]);
-    assert!(md.contains("Merged cells: A2:XFD3"), "{}", &md[..300]);
+    assert!(md.contains("Merged cells: A2:B3"), "{}", &md[..300]);
     assert!(md.len() < 1_000_000, "{}", md.len());
 }
 
@@ -1138,4 +1138,243 @@ fn loose_list_items_keep_a_blank_line_before_nested_lists() {
         anchor: None,
     }]);
     assert!(md.contains("\n- a\n\n  b\n\n  - c\n"), "{md}");
+}
+
+fn cells_of_rows(md: &str) -> Vec<usize> {
+    let mut rows = Vec::new();
+    let mut n = 0;
+    for e in Parser::new_ext(md, Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES) {
+        match e {
+            Event::Start(Tag::TableRow) | Event::Start(Tag::TableHead) => n = 0,
+            Event::Start(Tag::TableCell) => n += 1,
+            Event::End(TagEnd::TableRow) | Event::End(TagEnd::TableHead) => rows.push(n),
+            _ => {}
+        }
+    }
+    rows
+}
+
+#[test]
+fn table_cells_keep_links_images_and_footnotes_intact() {
+    let link = Inline::Link {
+        target: "http://a/b|c".into(),
+        title: Some("x|y".into()),
+        internal: false,
+        inlines: vec![txt("L")],
+    };
+    let image = Inline::Image {
+        target: "i|j.png".into(),
+        alt: "p|q".into(),
+        title: Some("t|u".into()),
+    };
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows: vec![
+            vec![
+                Cell::new(vec![txt("a")]),
+                Cell::new(vec![txt("b")]),
+                Cell::new(vec![txt("c")]),
+            ],
+            vec![
+                Cell::new(vec![link]),
+                Cell::new(vec![Inline::FootnoteRef { id: "a|b".into() }]),
+                Cell::new(vec![image]),
+            ],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    let body = after_frontmatter(&md);
+    assert_eq!(cells_of_rows(body), vec![3, 3], "{body}");
+    let mut link_ok = false;
+    let mut image_ok = false;
+    for e in Parser::new_ext(body, Options::ENABLE_TABLES) {
+        match e {
+            Event::Start(Tag::Link {
+                dest_url, title, ..
+            }) => link_ok = &*dest_url == "http://a/b%7Cc" && &*title == "x|y",
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) => image_ok = &*dest_url == "i%7Cj.png" && &*title == "t|u",
+            _ => {}
+        }
+    }
+    assert!(link_ok && image_ok, "{body}");
+}
+
+#[test]
+fn wide_spans_stay_small() {
+    let mut rows: Vec<Vec<Cell>> = (0..400)
+        .map(|r| vec![Cell::new(vec![txt(&format!("r{r}"))])])
+        .collect();
+    for _ in 0..5 {
+        let mut wide = Cell::new(vec![txt("w")]);
+        wide.col_span = 16_384;
+        rows[0].push(wide);
+    }
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(md.len() < 100_000, "{}", md.len());
+    assert!(md.contains("| r399 |"), "{}", &md[md.len() - 300..]);
+}
+
+#[test]
+fn table_grid_is_capped_in_rows_and_columns() {
+    let row = |n: usize| {
+        (0..n)
+            .map(|i| Cell::new(vec![txt(&i.to_string())]))
+            .collect()
+    };
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows: (0..300).map(|_| row(1000)).collect(),
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains("100 more rows not shown (see the model JSON)."),
+        "tail"
+    );
+    assert_eq!(cells_of_rows(after_frontmatter(&md)).len(), 200);
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows: vec![row(1200), row(3)],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains("200 more columns not shown (see the model JSON)."),
+        "cols"
+    );
+    assert_eq!(cells_of_rows(after_frontmatter(&md)), vec![1000, 1000]);
+}
+
+#[test]
+fn deeply_nested_link_text_is_kept() {
+    let mut inline = txt("leaf");
+    for i in 0..70 {
+        inline = Inline::Link {
+            target: format!("u{i}"),
+            title: None,
+            internal: false,
+            inlines: vec![txt("t"), inline],
+        };
+    }
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![inline],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(&format!("[{}leaf](u69)", "t".repeat(70))),
+        "{md}"
+    );
+}
+
+#[test]
+fn dialect_line_is_escaped() {
+    let mut d = doc();
+    d.facets.formulas = vec![Formula {
+        dialect: "# x".into(),
+        ..formula("A1", "=1", &[], None)
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\n\\# x.\n"), "{md}");
+}
+
+#[test]
+fn impossible_dates_are_quoted() {
+    let date = |v: &str| {
+        let mut d = doc();
+        d.properties.modified = Some(Value::Date { value: v.into() });
+        render(&d, Completeness::Complete, &opts())
+    };
+    assert!(date("2024-02-29").contains("\nsource_date: 2024-02-29\n"));
+    assert!(date("2026-02-30").contains("\nsource_date: \"2026-02-30\"\n"));
+    assert!(date("2026-04-31").contains("\nsource_date: \"2026-04-31\"\n"));
+    assert!(date("2100-02-29").contains("\nsource_date: \"2100-02-29\"\n"));
+}
+
+#[test]
+fn only_safe_schemes_become_links() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: false,
+        inlines: vec![txt("go")],
+    };
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![
+            link("javascript:alert(1)"),
+            txt(" "),
+            link("java\tscript:x"),
+            txt(" "),
+            Inline::Image {
+                target: "data:image/png;base64,AA".into(),
+                alt: "pic".into(),
+                title: None,
+            },
+            txt(" "),
+            link("HTTPS://ok.example/a[[b]]"),
+            txt(" "),
+            link("mailto:a@b.c"),
+            txt(" "),
+            link("docs/x.md#y"),
+            txt(" "),
+            link("C:/dir/file"),
+        ],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "go `javascript:alert(1)` go `java script:x` pic `data:image/png;base64,AA` \
+[go](HTTPS://ok.example/a%5B%5Bb%5D%5D) [go](mailto:a@b.c) [go](docs/x.md#y) \
+[go](C:/dir/file)\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn single_dollar_pairs_do_not_form_math() {
+    let md = body_of(vec![para("costs $x$ y and $5")]);
+    assert!(md.contains("costs \\$x\\$ y and $5\n"), "{md}");
+    let body = after_frontmatter(&md);
+    for e in Parser::new_ext(body, Options::ENABLE_MATH) {
+        assert!(
+            !matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn mermaid_caps_edges() {
+    let mut d = doc();
+    let nodes: Vec<Node> = (0..50).map(|i| node(&format!("v{i}"), "x")).collect();
+    let edges: Vec<Edge> = (0..1500)
+        .map(|i| edge(&format!("v{}", i % 50), &format!("v{}", (i / 50) % 50), "e"))
+        .collect();
+    d.facets.graphs = vec![Graph {
+        id: "g".into(),
+        kind: "link".into(),
+        nodes,
+        edges,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(md.matches("-->").count(), 1000);
+    assert!(
+        md.contains("Only the first 1000 of 1500 edges are shown: 500 edges are left out."),
+        "{}",
+        &md[md.len() - 300..]
+    );
 }

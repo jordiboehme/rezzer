@@ -239,10 +239,16 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
             }
         }
         Inline::Image { target, alt, title } => {
+            if !safe_target(target) {
+                escape_text(alt, line_mode(mode), out);
+                out.push(' ');
+                code_span(target, line_mode(mode), out);
+                return;
+            }
             out.push_str("![");
             escape_text(alt, line_mode(mode), out);
             out.push_str("](");
-            destination(target, title.as_deref(), out);
+            destination(target, title.as_deref(), mode, out);
             out.push(')');
         }
         Inline::Code { text } => code_span(text, mode, out),
@@ -253,6 +259,8 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
             ..
         } => {
             if link_depth > MAX_DEPTH {
+                // Too deep to walk by recursion: the text stays, flattened.
+                escape_text(&flat_text(content), line_mode(mode), out);
                 return;
             }
             let merged = fix_flanking(merge_text(content));
@@ -263,17 +271,26 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
                 }
                 return;
             }
+            if !safe_target(target) {
+                // Never a live link: the text, then the target as code.
+                for inner in &merged {
+                    inline_into(inner, line_mode(mode), 1, out);
+                }
+                out.push(' ');
+                code_span(target, line_mode(mode), out);
+                return;
+            }
             out.push('[');
             for inner in &merged {
                 inline_into(inner, line_mode(mode), 1, out);
             }
             out.push_str("](");
-            destination(target, title.as_deref(), out);
+            destination(target, title.as_deref(), mode, out);
             out.push(')');
         }
         Inline::FootnoteRef { id } => {
             out.push_str("[^");
-            out.push_str(&footnote_label(id));
+            out.push_str(&footnote_label(id, mode));
             out.push(']');
         }
         Inline::Math { latex } => inline_math(latex, mode, out),
@@ -342,6 +359,8 @@ fn styled_text(
 pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
     let chars: Vec<char> = text.chars().collect();
     let mut prev: Option<char> = None;
+    // A `$` with another `$` later in the run could pair into math in GitHub's reading.
+    let last_dollar = chars.iter().rposition(|c| *c == '$');
     for (i, &c) in chars.iter().enumerate() {
         let next = chars.get(i + 1).copied();
         match c {
@@ -350,9 +369,13 @@ pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
                 out.push(c);
             }
             '<' => out.push_str("&lt;"),
-            // `$` before a backtick or another `$` opens math in Crystalline; at the end of a
-            // run the next character is unknown (a code span may follow).
-            '$' if matches!(next, Some('`') | Some('$') | None) || prev == Some('$') => {
+            // `$` before a backtick or another `$` opens math in Crystalline, a pair of single
+            // `$` does in GitHub; at the end of a run the next character is unknown (a code
+            // span may follow).
+            '$' if matches!(next, Some('`') | Some('$') | None)
+                || prev == Some('$')
+                || last_dollar.is_some_and(|l| i < l) =>
+            {
                 out.push_str("\\$");
             }
             '\r' if next == Some('\n') => {}
@@ -401,7 +424,7 @@ fn longest_run(text: &str, ch: char) -> usize {
 fn one_line(text: &str, mode: Mode) -> String {
     let mut s: String = text
         .chars()
-        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     if mode == Mode::Cell {
         s = s.replace('|', "\\|");
@@ -450,7 +473,56 @@ fn inline_math(latex: &str, mode: Mode, out: &mut String) {
 }
 
 /// A link or image destination plus optional title, without the parentheses.
-fn destination(target: &str, title: Option<&str>, out: &mut String) {
+/// The plain text of inlines, walked with a stack instead of recursion.
+fn flat_text(list: &[Inline]) -> String {
+    let mut out = String::new();
+    let mut stack: Vec<std::slice::Iter<'_, Inline>> = vec![list.iter()];
+    while let Some(top) = stack.last_mut() {
+        let Some(inline) = top.next() else {
+            stack.pop();
+            continue;
+        };
+        match inline {
+            Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
+            Inline::Link { inlines, .. } => stack.push(inlines.iter()),
+            Inline::Math { latex } => out.push_str(latex),
+            Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::Status { text, .. } => out.push_str(text),
+            Inline::LineBreak => out.push(' '),
+            Inline::FootnoteRef { .. } | Inline::AnchorMark { .. } => {}
+        }
+    }
+    out
+}
+
+/// True for a target with no scheme (a relative path or `#anchor`) or with http, https,
+/// mailto, ftp or file. Tabs and newlines are ignored and leading spaces and controls
+/// trimmed first, as browsers do.
+fn safe_target(target: &str) -> bool {
+    let cleaned: String = target
+        .trim_start_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let before = cleaned.split(['/', '?', '#']).next().unwrap_or("");
+    let Some((scheme, _)) = before.split_once(':') else {
+        return true;
+    };
+    let is_scheme = scheme.len() >= 2
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    if !is_scheme {
+        return true;
+    }
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "mailto" | "ftp" | "file"
+    )
+}
+
+fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
         out.push_str("<>");
     }
@@ -461,6 +533,9 @@ fn destination(target: &str, title: Option<&str>, out: &mut String) {
             ')' => out.push_str("%29"),
             '<' => out.push_str("%3C"),
             '>' => out.push_str("%3E"),
+            '[' => out.push_str("%5B"),
+            ']' => out.push_str("%5D"),
+            '|' => out.push_str("%7C"),
             '\\' => out.push_str("\\\\"),
             c if c.is_control() => {
                 let mut buf = [0u8; 4];
@@ -483,6 +558,7 @@ fn destination(target: &str, title: Option<&str>, out: &mut String) {
                 }
                 '\n' | '\r' => out.push(' '),
                 '<' => out.push_str("&lt;"),
+                '|' if mode == Mode::Cell => out.push_str("\\|"),
                 c => out.push(c),
             }
         }
@@ -491,11 +567,17 @@ fn destination(target: &str, title: Option<&str>, out: &mut String) {
 }
 
 /// A footnote label without characters that would end or break `[^...]`.
-fn footnote_label(id: &str) -> String {
-    let label: String = id
-        .chars()
-        .filter(|c| !c.is_whitespace() && !matches!(c, '[' | ']' | '\\' | '^' | '<' | '>'))
-        .collect();
+fn footnote_label(id: &str, mode: Mode) -> String {
+    let mut label = String::new();
+    for c in id.chars() {
+        if c.is_whitespace() || matches!(c, '[' | ']' | '\\' | '^' | '<' | '>') {
+            continue;
+        }
+        if c == '|' && mode == Mode::Cell {
+            label.push('\\');
+        }
+        label.push(c);
+    }
     if label.is_empty() {
         "note".into()
     } else {
@@ -863,7 +945,11 @@ fn task(state: TaskState, content: &[Inline], alt: bool) -> String {
 
 fn footnote(label: &str, inner: &[Block], ctx: &Ctx, depth: usize) -> String {
     let body = blocks(inner, ctx, depth + 1, 6, false);
-    hang(&format!("[^{}]: ", footnote_label(label)), &body, 4)
+    hang(
+        &format!("[^{}]: ", footnote_label(label, Mode::Block)),
+        &body,
+        4,
+    )
 }
 
 /// A fenced block with a fence longer than any backtick run inside.
@@ -1019,11 +1105,11 @@ pub(crate) fn pipe_table(header: &[String], aligns: &[Align], rows: &[Vec<String
     out
 }
 
-/// Spans are capped so that a hostile span cannot allocate a huge grid.
-const MAX_SPAN: usize = 16_384;
+/// A table shows at most this many columns.
+const MAX_COLUMNS: usize = 1_000;
 
-/// Cells a table grid may hold, spans included.
-const MAX_GRID: usize = 4_000_000;
+/// A table's rendered grid (rows times width) holds at most this many cells.
+const MAX_CELLS: usize = 200_000;
 
 fn model_table(
     caption: Option<&str>,
@@ -1037,21 +1123,46 @@ fn model_table(
             .map(|c| format!("**{}** (empty table)", line_text(c.trim())))
             .unwrap_or_default();
     }
-    // Place every cell on a grid; spanned positions repeat the text.
+    // The real column count: per row the sum of its spans where that is plausible, else
+    // its number of cells. Spans never reach past it.
+    let real = rows
+        .iter()
+        .map(|row| {
+            let sum = row
+                .iter()
+                .map(|c| c.col_span.max(1) as usize)
+                .fold(0usize, usize::saturating_add);
+            if sum <= MAX_COLUMNS { sum } else { row.len() }
+        })
+        .max()
+        .unwrap_or(1)
+        .clamp(1, MAX_COLUMNS);
+    // Place every cell on a grid; spanned positions repeat the text. Rows stop once the
+    // grid would pass MAX_CELLS; the header row is always shown.
     let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
-    let mut merged: Vec<String> = Vec::new();
+    let mut merged: Vec<(usize, String)> = Vec::new();
     let mut filled = 0usize;
+    let mut width = 0usize;
+    let mut wanted = 0usize;
+    let mut shown = rows.len();
     for (r, row) in rows.iter().enumerate() {
         let mut c = 0;
         for cell in row {
             while grid[r].get(c).is_some_and(Option::is_some) {
                 c += 1;
             }
+            if c >= MAX_COLUMNS {
+                wanted = wanted.max(c + 1);
+                c += 1;
+                continue;
+            }
             let text = inlines(&cell.inlines, Mode::Cell).trim().to_string();
             let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
-            let cs = (cell.col_span.max(1) as usize).min(MAX_SPAN);
-            // Past the grid budget a span fills only its own cell; the note still names it.
-            let (fill_rows, fill_cols) = if filled.saturating_add(rs * cs) > MAX_GRID {
+            let cs = (cell.col_span.max(1) as usize)
+                .min(real.saturating_sub(c).max(1))
+                .min(MAX_COLUMNS - c);
+            // Past the cell budget a span fills only its own cell; the note still names it.
+            let (fill_rows, fill_cols) = if filled.saturating_add(rs * cs) > MAX_CELLS {
                 (1, 1)
             } else {
                 (rs, cs)
@@ -1066,17 +1177,27 @@ fn model_table(
                 }
             }
             if rs > 1 || cs > 1 {
-                merged.push(format!(
-                    "{}{}:{}{}",
-                    column_letter(c),
-                    r + 1,
-                    column_letter(c + cs - 1),
-                    r + rs
+                merged.push((
+                    r,
+                    format!(
+                        "{}{}:{}{}",
+                        column_letter(c),
+                        r + 1,
+                        column_letter(c + cs - 1),
+                        r + rs
+                    ),
                 ));
             }
             c += cs;
+            wanted = wanted.max(c);
+        }
+        width = width.max(grid[r].len());
+        if r > 0 && (r + 1).saturating_mul(width.max(1)) > MAX_CELLS {
+            shown = r;
+            break;
         }
     }
+    grid.truncate(shown);
     let grid: Vec<Vec<String>> = grid
         .into_iter()
         .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
@@ -1091,9 +1212,30 @@ fn model_table(
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
     }
     out.push_str(&pipe_table(&header, aligns, body));
+    let mut notes: Vec<String> = Vec::new();
+    let merged: Vec<String> = merged
+        .into_iter()
+        .filter(|(r, _)| *r < shown)
+        .map(|(_, m)| m)
+        .collect();
     if !merged.is_empty() {
-        out.push_str("\n\nMerged cells: ");
-        out.push_str(&merged.join(", "));
+        notes.push(format!("Merged cells: {}", merged.join(", ")));
+    }
+    if shown < rows.len() {
+        notes.push(format!(
+            "{} more rows not shown (see the model JSON).",
+            rows.len() - shown
+        ));
+    }
+    if wanted > MAX_COLUMNS {
+        notes.push(format!(
+            "{} more columns not shown (see the model JSON).",
+            wanted - MAX_COLUMNS
+        ));
+    }
+    if !notes.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(&notes.join("\n"));
     }
     out
 }
