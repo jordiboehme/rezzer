@@ -123,6 +123,7 @@ fn full_document() -> Document {
         Block::Table {
             caption: Some("Totals".into()),
             header_rows: 1,
+            role: Some("summary".into()),
             rows: vec![vec![Cell {
                 inlines: vec![text("12")],
                 row_span: 1,

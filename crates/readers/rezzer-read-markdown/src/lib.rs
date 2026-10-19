@@ -540,6 +540,7 @@ impl<'b> Builder<'b> {
                     self.push_block(Block::Table {
                         caption: None,
                         header_rows: t.header_rows,
+                        role: None,
                         rows: t.rows,
                         alignments: t.alignments,
                         anchor: None,
@@ -989,6 +990,7 @@ impl<'b> Builder<'b> {
             self.push_block(Block::Table {
                 caption: None,
                 header_rows: t.header_rows,
+                role: None,
                 rows: t.rows,
                 alignments: t.alignments,
                 anchor: None,

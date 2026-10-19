@@ -50,6 +50,10 @@ pub enum Block {
         caption: Option<String>,
         #[serde(default)]
         header_rows: usize,
+        /// What the table is for when it is not source data, for example `summary` for a table
+        /// a reader generated. Passes that read the document's own words skip tables with a role.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows: Vec<Vec<Cell>>,
         /// Column alignments; empty when the source has none.

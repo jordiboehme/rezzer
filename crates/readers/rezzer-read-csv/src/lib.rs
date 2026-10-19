@@ -259,6 +259,7 @@ impl Reader for CsvReader {
             blocks.push(Block::Table {
                 caption: None,
                 header_rows: usize::from(dialect.has_header),
+                role: None,
                 rows,
                 alignments: Vec::new(),
                 anchor: None,
@@ -293,6 +294,7 @@ impl Reader for CsvReader {
         blocks.push(Block::Table {
             caption: Some("Columns".into()),
             header_rows: 1,
+            role: None,
             rows: col_rows,
             alignments: Vec::new(),
             anchor: None,

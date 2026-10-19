@@ -70,6 +70,7 @@ fn sheet(name: &str, rows: usize, cols: usize) -> Block {
         blocks: vec![Block::Table {
             caption: None,
             header_rows: 1,
+            role: None,
             rows: (0..rows)
                 .map(|r| {
                     (0..cols)
@@ -416,6 +417,7 @@ fn numeric_table_gets_no_language() {
     d.body = vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows,
         alignments: vec![],
         anchor: None,

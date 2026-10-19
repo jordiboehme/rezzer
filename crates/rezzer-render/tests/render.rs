@@ -423,6 +423,7 @@ fn table_alignment_merged_cells_and_pipes() {
     let md = body_of(vec![Block::Table {
         caption: Some("Costs".into()),
         header_rows: 1,
+        role: None,
         rows: vec![
             vec![
                 Cell::new(vec![txt("A")]),
@@ -689,6 +690,7 @@ fn rich_document() -> Document {
         Block::Table {
             caption: None,
             header_rows: 1,
+            role: None,
             rows: vec![
                 vec![Cell::new(vec![txt("Item")]), Cell::new(vec![txt("Cost")])],
                 vec![Cell::new(vec![txt("Pen")]), Cell::new(vec![txt("2")])],
@@ -1029,6 +1031,7 @@ fn hostile_spans_stay_bounded() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows: vec![row(), vec![huge], row()],
         alignments: Vec::new(),
         anchor: None,
@@ -1265,6 +1268,7 @@ fn table_cells_keep_links_images_and_footnotes_intact() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows: vec![
             vec![
                 Cell::new(vec![txt("a")]),
@@ -1311,6 +1315,7 @@ fn wide_spans_stay_small() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows,
         alignments: Vec::new(),
         anchor: None,
@@ -1329,6 +1334,7 @@ fn table_grid_is_capped_in_rows_and_columns() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows: (0..300).map(|_| row(1000)).collect(),
         alignments: Vec::new(),
         anchor: None,
@@ -1341,6 +1347,7 @@ fn table_grid_is_capped_in_rows_and_columns() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows: vec![row(1200), row(3)],
         alignments: Vec::new(),
         anchor: None,
@@ -1595,6 +1602,7 @@ fn merge_note_names_only_shown_rows() {
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
+        role: None,
         rows,
         alignments: Vec::new(),
         anchor: None,
