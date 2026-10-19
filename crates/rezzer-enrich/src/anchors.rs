@@ -10,7 +10,7 @@
 //! of them. A
 //! spreadsheet reference may also name a range or a whole column or row, such as `Sheet!A:A`
 //! or `Sheet!A1:C9`: it resolves when its sheet prefix (the text before the `!`, without
-//! single quotes) equals the anchor of a section. Everything else that is missing becomes a
+//! single quotes; every `!` split is tried) equals the anchor of a section. Everything else that is missing becomes a
 //! Warning loss.
 
 use std::collections::HashSet;
@@ -129,10 +129,9 @@ impl<'a> AnchorSet<'a> {
         if self.all.contains(anchor) {
             return true;
         }
-        match sheet_prefix(anchor) {
-            Some(sheet) => self.sections.contains(sheet.as_str()),
-            None => false,
-        }
+        sheet_prefixes(anchor)
+            .iter()
+            .any(|sheet| self.sections.contains(sheet.as_str()))
     }
 }
 
@@ -185,8 +184,11 @@ pub(crate) fn block_anchor(block: &Block) -> Option<&Anchor> {
     }
 }
 
-/// The sheet name of `Sheet!A1`, `'My Sheet'!A:A` and so on; quotes removed, `''` read as `'`.
-pub(crate) fn sheet_prefix(reference: &str) -> Option<String> {
+/// The possible sheet names of a reference like `Sheet!A1`, longest first. A sheet name may
+/// itself contain `!` or start with `'` (a file name), and readers write it unquoted, so every
+/// `!` split is a candidate. A quoted name (`'My Sheet'!A:A`, `''` read as `'`) is one more.
+pub(crate) fn sheet_prefixes(reference: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
     if let Some(rest) = reference.strip_prefix('\'') {
         let mut name = String::new();
         let mut chars = rest.char_indices().peekable();
@@ -196,16 +198,27 @@ pub(crate) fn sheet_prefix(reference: &str) -> Option<String> {
                     name.push('\'');
                     chars.next();
                 } else {
-                    return rest[i + 1..].starts_with('!').then_some(name);
+                    if rest[i + 1..].starts_with('!') {
+                        out.push(name.clone());
+                    }
+                    break;
                 }
             } else {
                 name.push(c);
             }
         }
-        return None;
     }
-    reference
-        .split_once('!')
-        .map(|(sheet, _)| sheet.to_string())
-        .filter(|s| !s.is_empty())
+    for (i, _) in reference
+        .match_indices('!')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        if i > 0 {
+            out.push(reference[..i].to_string());
+        }
+    }
+    out.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    out.dedup();
+    out
 }

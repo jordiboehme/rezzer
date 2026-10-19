@@ -16,7 +16,7 @@ use rezzer_model::{
     Block, Document, Inline, Overview as Model, OverviewPart, Role, SectionKind, Value,
 };
 
-use crate::anchors::{collect, sheet_prefix};
+use crate::anchors::{collect, sheet_prefixes};
 use crate::{Pass, walk};
 
 pub(crate) struct Overview;
@@ -30,11 +30,11 @@ impl Pass for Overview {
         let sections: Vec<&Block> = doc
             .body
             .iter()
-            .filter(|b| matches!(b, Block::Section { anchor, .. } if !is_footnote(anchor.as_ref().map(|a| a.0.as_str()))))
+            .filter(|b| !is_footnote_section(b))
             .collect();
         let mut parts: Vec<OverviewPart> = Vec::new();
         let mut owner: HashMap<&str, usize> = HashMap::new();
-        let mut by_name: HashMap<String, usize> = HashMap::new();
+        let mut by_id: HashMap<String, usize> = HashMap::new();
         for (i, section) in sections.iter().enumerate() {
             let Block::Section {
                 kind,
@@ -58,8 +58,13 @@ impl Pass for Overview {
             for a in found {
                 owner.entry(a.0.as_str()).or_insert(i);
             }
-            by_name.entry(name.clone()).or_insert(i);
+            let id = match anchor {
+                Some(a) if !by_id.contains_key(&a.0) => a.0.clone(),
+                _ => format!("part:{}", i + 1),
+            };
+            by_id.insert(id.clone(), i);
             parts.push(OverviewPart {
+                id,
                 name,
                 kind: kind_words(*kind).to_string(),
                 size: size(section),
@@ -70,11 +75,9 @@ impl Pass for Overview {
 
         let part_of = |reference: &str| -> Option<usize> {
             owner.get(reference).copied().or_else(|| {
-                let sheet = sheet_prefix(reference)?;
-                owner
-                    .get(sheet.as_str())
-                    .or_else(|| by_name.get(&sheet))
-                    .copied()
+                sheet_prefixes(reference)
+                    .iter()
+                    .find_map(|sheet| owner.get(sheet.as_str()).copied())
             })
         };
         let mut has_formulas = vec![false; parts.len()];
@@ -103,9 +106,9 @@ impl Pass for Overview {
                 None
             };
         }
-        let names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
+        let ids: Vec<String> = parts.iter().map(|p| p.id.clone()).collect();
         for (part, set) in parts.iter_mut().zip(&reads) {
-            part.reads = set.iter().map(|&q| names[q].clone()).collect();
+            part.reads = set.iter().map(|&q| ids[q].clone()).collect();
         }
 
         doc.overview = Some(Model {
@@ -115,8 +118,20 @@ impl Pass for Overview {
     }
 }
 
-fn is_footnote(anchor: Option<&str>) -> bool {
-    anchor.is_some_and(|a| a.starts_with("fn:"))
+fn is_footnote_anchor(block: &Block) -> bool {
+    matches!(block, Block::Section { anchor: Some(a), .. } if a.0.starts_with("fn:"))
+}
+
+/// A footnote section, or the wrapper that holds only footnote sections (the Markdown
+/// reader's "Footnotes").
+fn is_footnote_section(block: &Block) -> bool {
+    match block {
+        Block::Section { blocks, .. } => {
+            is_footnote_anchor(block)
+                || (!blocks.is_empty() && blocks.iter().all(is_footnote_anchor))
+        }
+        _ => false,
+    }
 }
 
 fn kind_words(kind: SectionKind) -> &'static str {
@@ -184,9 +199,9 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
         doc.facets
             .graphs
             .iter()
-            .filter(|g| g.kind == "link")
-            .map(|g| g.edges.len())
-            .sum(),
+            .flat_map(|g| &g.edges)
+            .filter(|e| e.kind == "links_to")
+            .count(),
     );
     count("Images", images(doc));
     count("Annotations", doc.facets.annotations.len());

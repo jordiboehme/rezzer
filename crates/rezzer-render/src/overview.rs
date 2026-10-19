@@ -27,16 +27,20 @@ pub(crate) fn render(doc: &Document) -> Option<String> {
     let mut blocks = vec!["## Overview".to_string()];
     let parts = &overview.parts;
     let any_reads = parts.iter().any(|p| !p.reads.is_empty());
-    let show_table = parts.len() > 1
-        || parts
-            .iter()
-            .any(|p| p.role.is_some() || !p.reads.is_empty());
-    if show_table {
+    if !parts.is_empty() {
         let header: Vec<String> = ["Part", "Kind", "Size", "Role", "Reads from"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let rows: Vec<Vec<String>> = parts.iter().take(MAX_PARTS).map(row).collect();
+        let names: HashMap<&str, &str> = parts
+            .iter()
+            .map(|p| (p.id.as_str(), p.name.as_str()))
+            .collect();
+        let rows: Vec<Vec<String>> = parts
+            .iter()
+            .take(MAX_PARTS)
+            .map(|p| row(p, &names))
+            .collect();
         let mut table = pipe_table(&header, &[], &rows);
         if parts.len() > MAX_PARTS {
             table.push_str(&format!(
@@ -60,12 +64,12 @@ pub(crate) fn render(doc: &Document) -> Option<String> {
     Some(blocks.join("\n\n"))
 }
 
-fn row(part: &OverviewPart) -> Vec<String> {
+fn row(part: &OverviewPart, names: &HashMap<&str, &str>) -> Vec<String> {
     let mut reads: Vec<String> = part
         .reads
         .iter()
         .take(MAX_READS)
-        .map(|r| cell_text(r))
+        .map(|r| cell_text(names.get(r.as_str()).copied().unwrap_or(r)))
         .collect();
     if part.reads.len() > MAX_READS {
         reads.push(format!("and {} more", part.reads.len() - MAX_READS));
@@ -84,7 +88,7 @@ fn graph(parts: &[OverviewPart]) -> String {
     let shown = parts.len().min(MAX_NODES);
     let mut index: HashMap<&str, usize> = HashMap::new();
     for (i, p) in parts[..shown].iter().enumerate() {
-        index.entry(p.name.as_str()).or_insert(i);
+        index.entry(p.id.as_str()).or_insert(i);
     }
     let mut lines = vec!["flowchart LR".to_string()];
     for (i, p) in parts[..shown].iter().enumerate() {
@@ -97,6 +101,9 @@ fn graph(parts: &[OverviewPart]) -> String {
             let Some(&from) = index.get(r.as_str()) else {
                 continue;
             };
+            if from == i {
+                continue;
+            }
             if drawn >= MAX_EDGES {
                 over += 1;
             } else {

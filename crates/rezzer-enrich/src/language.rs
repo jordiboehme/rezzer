@@ -31,7 +31,13 @@ impl Pass for Language {
             return;
         }
         let text = body_text(&doc.body);
-        if text.chars().take(MIN_CHARS).count() < MIN_CHARS {
+        if text
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .take(MIN_CHARS)
+            .count()
+            < MIN_CHARS
+        {
             return;
         }
         if let Some(info) = whatlang::detect(&text)
@@ -42,15 +48,24 @@ impl Pass for Language {
     }
 }
 
-/// The text of paragraphs, headings, tasks and cells, one line each, cut at [`MAX_BYTES`].
-/// Code and formulas are left out: they say nothing about the language.
+/// The words of paragraphs, headings, tasks and cells, one line each, cut at [`MAX_BYTES`].
+/// Only words made of letters count (apostrophes and hyphens inside a word are fine, edge
+/// punctuation is dropped): numbers, dates and codes such as `A12-B7` say nothing about the
+/// language and make whatlang report a false, "reliable" answer. Code and formulas are left
+/// out too.
 fn body_text(body: &[Block]) -> String {
     let mut text = String::new();
     walk::blocks(body, |b| {
         walk::block_inlines(b, |list| {
             walk::inlines(list, |i| match i {
                 Inline::Text { text: t, .. } | Inline::Status { text: t, .. } => {
-                    push_capped(&mut text, t);
+                    for word in t.split_whitespace() {
+                        let word = word.trim_matches(|c: char| !c.is_alphabetic());
+                        if is_word(word) {
+                            push_capped(&mut text, word);
+                            push_capped(&mut text, " ");
+                        }
+                    }
                 }
                 _ => {}
             });
@@ -59,6 +74,13 @@ fn body_text(body: &[Block]) -> String {
         text.len() < MAX_BYTES
     });
     text
+}
+
+fn is_word(word: &str) -> bool {
+    !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_alphabetic() || c == '\'' || c == '\u{2019}' || c == '-')
 }
 
 fn push_capped(out: &mut String, add: &str) {
@@ -158,8 +180,17 @@ mod tests {
 
     #[test]
     fn maps_codes_and_keeps_unknown() {
-        assert_eq!(iso_639_1("deu"), "de");
-        assert_eq!(iso_639_1("cmn"), "zh");
+        for (from, to) in [
+            ("deu", "de"),
+            ("eng", "en"),
+            ("jpn", "ja"),
+            ("fra", "fr"),
+            ("cmn", "zh"),
+            ("nob", "nb"),
+            ("pes", "fa"),
+        ] {
+            assert_eq!(iso_639_1(from), to);
+        }
         assert_eq!(iso_639_1("xyz"), "xyz");
     }
 
@@ -168,6 +199,16 @@ mod tests {
         for lang in whatlang::Lang::all() {
             assert_eq!(iso_639_1(lang.code()).len(), 2, "{}", lang.code());
         }
+    }
+
+    #[test]
+    fn only_letter_words_are_kept() {
+        assert!(is_word("Gas"));
+        assert!(is_word("don't"));
+        assert!(!is_word("1999"));
+        assert!(!is_word("A12-B7"));
+        assert!(!is_word("2025-01-02"));
+        assert!(!is_word("6.5e3"));
     }
 
     #[test]

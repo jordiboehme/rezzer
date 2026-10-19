@@ -153,6 +153,8 @@ pub struct Overview {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct OverviewPart {
+    /// Unique id of the part: its anchor, else `part:<n>`. `reads` refers to it.
+    pub id: String,
     pub name: String,
     /// The kind in words, for example `sheet` or `chapter`.
     pub kind: String,
@@ -160,7 +162,7 @@ pub struct OverviewPart {
     pub size: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
-    /// Names of the parts this part reads from.
+    /// Ids of the parts this part reads from.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reads: Vec<String>,
 }

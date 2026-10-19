@@ -262,7 +262,7 @@ fn overview_lists_sections_and_counts() {
         edges: vec![Edge {
             from: "a".into(),
             to: "b".into(),
-            kind: "link".into(),
+            kind: "links_to".into(),
             anchor: None,
         }],
     });
@@ -401,4 +401,110 @@ fn enrich_is_idempotent() {
     let once = d.clone();
     enrich(&mut d, &only(&[]));
     assert_eq!(d, once);
+}
+
+#[test]
+fn numeric_table_gets_no_language() {
+    let mut d = doc();
+    let rows: Vec<Vec<Cell>> = std::iter::once(vec!["Year", "Total", "Gas Fuel", "Liquid Fuel"])
+        .chain(std::iter::repeat_n(
+            vec!["1999", "6.5e3", "2025-01-02", "A12-B7"],
+            300,
+        ))
+        .map(|r| r.into_iter().map(|c| Cell::new(vec![txt(c)])).collect())
+        .collect();
+    d.body = vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows,
+        alignments: vec![],
+        anchor: None,
+    }];
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language, None);
+}
+
+#[test]
+fn links_fact_counts_only_links_to_edges() {
+    let mut d = doc();
+    d.body = vec![para("x", None)];
+    let edge = |kind: &str| Edge {
+        from: "a".into(),
+        to: "b".into(),
+        kind: kind.into(),
+        anchor: None,
+    };
+    d.facets.graphs.push(Graph {
+        id: "l".into(),
+        kind: "link".into(),
+        nodes: vec![],
+        edges: vec![edge("links_to"), edge("embeds"), edge("links_to")],
+    });
+    enrich(&mut d, &only(&[]));
+    let facts = d.overview.unwrap().facts;
+    assert!(
+        facts.contains(&("Links".to_string(), "2".to_string())),
+        "{facts:?}"
+    );
+}
+
+#[test]
+fn footnote_wrapper_is_not_a_part() {
+    let mut d = doc();
+    let note = Block::Section {
+        kind: SectionKind::Part,
+        title: None,
+        anchor: Some(a("fn:1")),
+        blocks: vec![para("note", None)],
+    };
+    d.body = vec![
+        Block::Section {
+            kind: SectionKind::Chapter,
+            title: Some("Main".into()),
+            anchor: None,
+            blocks: vec![para("x", None)],
+        },
+        Block::Section {
+            kind: SectionKind::Other,
+            title: Some("Footnotes".into()),
+            anchor: None,
+            blocks: vec![note],
+        },
+    ];
+    enrich(&mut d, &only(&[]));
+    let parts = d.overview.unwrap().parts;
+    assert_eq!(parts.len(), 1, "{parts:?}");
+    assert_eq!(parts[0].name, "Main");
+}
+
+#[test]
+fn odd_sheet_names_resolve() {
+    for name in ["a!b.csv", "'q.csv", "it's data", "my data"] {
+        let mut d = doc();
+        d.body = vec![sheet(name, 2, 2)];
+        d.facets.formulas = vec![formula(
+            &format!("{name}!B2"),
+            &[&format!("{name}!A:A"), &format!("{name}!A1:B2")],
+        )];
+        enrich(&mut d, &only(&[]));
+        assert!(d.losses.is_empty(), "{name}: {:?}", d.losses);
+    }
+}
+
+#[test]
+fn parts_are_linked_by_id_not_name() {
+    let mut d = doc();
+    let sec = |anchor: &str| Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Same".into()),
+        anchor: Some(a(anchor)),
+        blocks: vec![para("x", Some(&format!("{anchor}!A1")))],
+    };
+    d.body = vec![sec("s1"), sec("s2")];
+    d.facets.formulas = vec![formula("s2!A1", &["s1!A1"])];
+    enrich(&mut d, &only(&[]));
+    let parts = d.overview.unwrap().parts;
+    assert_eq!(parts[0].id, "s1");
+    assert_eq!(parts[1].reads, vec!["s1".to_string()]);
+    assert!(parts[0].reads.is_empty());
 }

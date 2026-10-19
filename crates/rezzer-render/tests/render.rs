@@ -813,6 +813,7 @@ fn sections_filter() {
 
 fn part(name: &str, size: &str, role: Option<Role>, reads: &[&str]) -> OverviewPart {
     OverviewPart {
+        id: name.into(),
         name: name.into(),
         kind: "sheet".into(),
         size: size.into(),
@@ -857,13 +858,20 @@ flowchart LR\n    p0[\"Input\"]\n    p1[\"Calc\"]\n    p0 --> p1\n```";
 }
 
 #[test]
-fn overview_single_plain_part_has_no_table() {
+fn overview_single_plain_part_has_a_table() {
     let mut d = doc();
     d.overview = Some(Overview {
         parts: vec![part("Only", "3 paragraphs", None, &[])],
         facts: vec![("Not read".into(), "1".into())],
     });
-    assert_eq!(render_overview(&d).unwrap(), "## Overview\n\n- Not read: 1");
+    assert_eq!(
+        render_overview(&d).unwrap(),
+        "## Overview\n\n\
+| Part | Kind | Size | Role | Reads from |\n\
+| --- | --- | --- | --- | --- |\n\
+| Only | sheet | 3 paragraphs |  |  |\n\n\
+- Not read: 1"
+    );
 }
 
 #[test]
@@ -1626,4 +1634,32 @@ fn scheme_check_sees_references_and_ampersands() {
         )),
         "{md}"
     );
+}
+
+#[test]
+fn overview_duplicate_names_get_no_self_arrow() {
+    let mut d = doc();
+    let mut first = part("Same", "1", Some(Role::Input), &[]);
+    first.id = "a".into();
+    let mut second = part("Same", "1", Some(Role::Result), &[]);
+    second.id = "b".into();
+    second.reads = vec!["a".into()];
+    d.overview = Some(Overview {
+        parts: vec![first, second],
+        facts: vec![],
+    });
+    let out = render_overview(&d).unwrap();
+    assert!(out.contains("p0 --> p1"), "{out}");
+    assert!(!out.contains("p1 --> p1"), "{out}");
+    assert!(
+        out.contains("| Same | sheet | 1 | result | Same |"),
+        "{out}"
+    );
+}
+
+#[test]
+fn overview_empty_document_has_no_heading() {
+    let d = doc();
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(!md.contains("## Overview"), "{md}");
 }
