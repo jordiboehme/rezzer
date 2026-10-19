@@ -12,7 +12,8 @@ Built on (versions as tested on 2026-10-19):
 - [anydoc](https://crates.io/crates/anydoc) 0.2.4 as a fallback
 - [cfb](https://crates.io/crates/cfb) for document properties
 - Rezzer's own reader for comment dates
-- [LibreOffice](https://www.libreoffice.org/) as an optional external program, when it is installed. It is never bundled
+
+Everything runs inside the Rezzer binary. No external program is needed.
 
 ## What Rezzer extracts
 
@@ -45,7 +46,7 @@ The same as for [DOCX](docx.md): Markdown with headings, lists and tables, comme
 - office_oxide 0.1.15 gives the comment text and author, but no date. Rezzer reads the date itself
 - anydoc 0.2.4 drops comments and has no heading levels for DOC
 - Tracked changes in DOC are not tested. Only one public test file with a comment was found. Most of the hidden logic layer of DOC is not proven on real files
-- With LibreOffice installed, Rezzer can convert a DOC to DOCX first for full detail
+- Planned for later: more detail (tracked changes, fields) from Rezzer's own reading of Microsoft's public [MS-DOC](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-doc/) specification
 
 ## Tested with
 

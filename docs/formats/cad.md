@@ -69,8 +69,8 @@ A metadata table, then tables for parts, layers, parameters or settings (dependi
 
 - Most of the Rust crates for CAD are young (many first released in 2026). They will be tested on a public test corpus before Rezzer depends on them
 - Exact volume, mass and surface area of STEP and IGES solids need a geometry kernel. Rezzer does not link one. A bounding box from points is possible, but it can be too large
-- DWG: young pure-Rust readers exist ([acadrust](https://crates.io/crates/acadrust), [cadkit](https://crates.io/crates/cadkit)). They are not tested yet. LibreDWG is GPL and can only be used as an optional external program when it is installed
-- Some CAD crates are GPL or AGPL and are not used. OpenCascade, FreeCAD, KiCad and OpenSCAD can be used as optional external programs when they are installed. They are never linked or bundled
+- DWG: young pure-Rust readers exist ([acadrust](https://crates.io/crates/acadrust), [cadkit](https://crates.io/crates/cadkit)). They are not tested yet. Rezzer plans its own DWG reader, written from a format specification, that runs inside the binary
+- Some CAD libraries are GPL or AGPL (OpenCascade, LibreDWG, some KiCad and OpenSCAD parsers). Rezzer doesn't use them. Everything runs inside the Rezzer binary, without external programs
 - Against hostile files Rezzer uses size, decompression, entity count and time limits
 
 ## Tested with

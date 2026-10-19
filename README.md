@@ -123,11 +123,11 @@ Planned for the first release. Each format has its own page with what Rezzer ext
 | [ODT](docs/formats/odt.md) | Structure, comments, tracked changes, footnotes | own reader |
 | [RTF](docs/formats/rtf.md) | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
 | [PPTX](docs/formats/pptx.md) | Slides, speaker notes, comments, sections, chart data | own reader |
-| [PPT](docs/formats/ppt.md) | Slides and notes from PowerPoint 97-2003 | [LibreOffice](https://www.libreoffice.org/) (optional, if installed) |
+| [PPT](docs/formats/ppt.md) | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
 | [ODP](docs/formats/odp.md) | Slides, notes, comments | own reader |
 | [EPUB](docs/formats/epub.md) | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
 | [HTML](docs/formats/html.md) | Main content, landmarks, tables, forms, structured data, link graph | [scraper](https://crates.io/crates/scraper), [dom_smoothie](https://crates.io/crates/dom_smoothie) |
-| [PostScript, EPS](docs/formats/postscript.md) | Metadata; text with an optional sandboxed extra | own reader |
+| [PostScript, EPS](docs/formats/postscript.md) | Document facts from the header; text later | own reader |
 | [CSV, TSV](docs/formats/csv.md) | Delimiter, header, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
 | [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
@@ -182,8 +182,7 @@ Clients that support MCP tasks can follow the job natively. All others use the j
 These come as opt-in features or as a prebuilt image. The core stays small.
 
 - **OCR in tiers.** First the PDF text layer, when there is one. Then the operating system's own text recognition, or a small local model. For hard cases (handwriting, complex tables, diagrams) a larger local vision model that you download once. Everything runs on your machine.
-- **PostScript text.** PostScript is a program. Rezzer's core never runs it and only reads its metadata. For the text, an optional interpreter runs in a sandbox with no network and no access to other files.
-- **A printer for your agent.** Rezzer can show up as a network printer (AirPrint and IPP). Print from your phone or any app and the document lands with your agent. Rezzer only accepts print jobs that keep their text, like PDF or PostScript, so a print job doesn't turn into an OCR job.
+- **A printer for your agent.** Rezzer can show up as a network printer (AirPrint and IPP). Print from your phone or any app and the document lands with your agent. Rezzer only accepts print jobs that keep their text, like PDF, so a print job doesn't turn into an OCR job.
 
 ## How it fits
 
@@ -206,7 +205,8 @@ It works with any MCP client (Claude Code and others). Its output follows the fr
 - **One binary.** No Python environment, no JVM, nothing to install during a session.
 - **Honest output.** When Rezzer can't read something, it says so in the output: no guessing, no silent gaps.
 - **Safe by default.** Files are data, never code. Scripts and macros are listed, never run. Readers have limits on size, depth and time.
-- **Clean licenses.** Rezzer links only libraries with permissive or MPL licenses. GPL tools like Ghostscript or LibreOffice can be used if you install them, but they're never bundled.
+- **Self-contained.** Every reader runs inside the one binary. No LibreOffice, no Ghostscript, no helper programs.
+- **Clean licenses.** Rezzer links only libraries with permissive or MPL licenses.
 
 ## License
 

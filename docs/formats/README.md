@@ -19,7 +19,7 @@ Rezzer is in the design phase. Nothing is implemented yet. These pages describe 
 | [ODP](odp.md) | ODP | first release |
 | [EPUB](epub.md) | EPUB 2 and 3 | first release |
 | [HTML](html.md) | HTML | first release |
-| [PostScript](postscript.md) | PostScript, EPS | first release |
+| [PostScript](postscript.md) | PostScript, EPS | first release (document facts), text later |
 | [CSV](csv.md) | CSV, TSV | first release |
 | [Plain text](text.md) | Plain text in any encoding | first release |
 | [Markdown](markdown.md) | Markdown | first release |
