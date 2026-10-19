@@ -25,7 +25,7 @@ use rezzer_model::{
     SectionKind, Severity, Source, TaskState, source_info,
 };
 
-use frontmatter::Syntax;
+use frontmatter::{FmError, Syntax};
 
 /// How many parser events are handled between two time checks.
 const CHECK_EVERY: usize = 1024;
@@ -622,9 +622,6 @@ impl<'b> Builder<'b> {
         }
     }
 
-    /// A soft break reads as a space. In the first paragraph of a plain quote its position is
-    /// kept as a separate inline, so a callout header (`> [!NOTE] Title`) can be told from the
-    /// body; `close_top_frame` joins it again when the quote is no callout.
     /// True in the first paragraph of a plain quote that starts like a callout header, before
     /// its first line break.
     fn can_mark_callout_break(&self) -> bool {
@@ -641,6 +638,9 @@ impl<'b> Builder<'b> {
             && self.inline_stack.is_empty()
     }
 
+    /// A soft break reads as a space. In the first paragraph of a plain quote its position is
+    /// kept as a separate inline, so a callout header (`> [!NOTE] Title`) can be told from the
+    /// body; `close_top_frame` joins it again when the quote is no callout.
     fn soft_break(&mut self) {
         self.ensure_inline_leaf();
         let space = Inline::Text {
@@ -814,13 +814,17 @@ impl<'b> Builder<'b> {
                 format!("frontmatter larger than 256 KiB not parsed{cut}"),
             ))
         } else {
-            frontmatter::apply(syntax, raw, &mut self.properties)
+            frontmatter::apply(syntax, raw, &mut self.properties, self.budget)
                 .err()
-                .map(|e| {
-                    (
+                .map(|e| match e {
+                    FmError::Damaged(m) => (
                         LossReason::Damaged,
-                        format!("frontmatter could not be read, kept as text: {e}"),
-                    )
+                        format!("frontmatter could not be read, kept as text: {m}"),
+                    ),
+                    FmError::Limit(m) => (
+                        LossReason::Limit,
+                        format!("frontmatter not fully read, kept as text: {m}"),
+                    ),
                 })
         };
         if let Some((why, what)) = problem {

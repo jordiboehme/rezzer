@@ -10,6 +10,6 @@ rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
 textenc = { path = "../../formats/textenc" }
 pulldown-cmark.workspace = true
-serde_yaml_ng.workspace = true
+saphyr-parser.workspace = true
 serde_json.workspace = true
 toml.workspace = true

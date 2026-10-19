@@ -724,3 +724,93 @@ fn image_kind_wins_and_h_prefix_is_not_doubled() {
     assert!(g.nodes.iter().any(|n| n.id == "h:foo"));
     assert!(!g.nodes.iter().any(|n| n.id == "h:h:foo"));
 }
+
+#[test]
+fn continuation_line_quote_does_not_hide_nesting() {
+    // YAML reads the quote on the second line as plain text of the scalar `a "`.
+    assert_bomb_rejected(&format!("a\n \"\nz: {}", "[".repeat(250_000)));
+    assert_bomb_rejected(&format!("a\n '\nz: {}", "[".repeat(250_000)));
+}
+
+#[test]
+fn wide_alias_of_a_big_map_is_cut_by_the_node_budget() {
+    let keys: Vec<String> = (0..2000).map(|i| format!("k{i}: v")).collect();
+    let mut fm = format!("a: &a {{{}}}\nb: [", keys.join(", "));
+    while fm.len() < 256 * 1024 - 10 {
+        fm.push_str("*a,");
+    }
+    fm.push(']');
+    let input = format!("---\n{fm}\n---\n\nBody\n");
+    let start = std::time::Instant::now();
+    let out = read(&input);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(1),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged)
+    );
+    assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn small_aliases_and_anchors_still_map() {
+    let out = read(
+        "---\nbase: &b\n  x: 1\n  y: [a, b]\ncopy: *b\nlist: [*b, \"q]\"]\nname: &n Jordi\nauthor: *n\nflag: yes\nn: 0x1F\nf: 1.5e2\nneg: -3\nnull_: ~\nstr: !!str 123\nd: 2024-01-02\n---\n",
+    );
+    let p = &out.document.properties;
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+    assert_eq!(p.authors, vec!["Jordi"]);
+    assert_eq!(p.custom["base.x"], Value::number(1.0, None));
+    assert_eq!(
+        p.custom["copy.y"],
+        Value::List {
+            value: vec![text("a"), text("b")]
+        }
+    );
+    assert_eq!(p.custom["copy.x"], Value::number(1.0, None));
+    assert_eq!(p.custom["flag"], text("yes"));
+    assert_eq!(p.custom["n"], Value::number(31.0, None));
+    assert_eq!(p.custom["f"], Value::number(150.0, None));
+    assert_eq!(p.custom["neg"], Value::number(-3.0, None));
+    assert_eq!(p.custom["null_"], text(""));
+    assert_eq!(p.custom["str"], text("123"));
+    assert_eq!(
+        p.custom["d"],
+        Value::Date {
+            value: "2024-01-02".into()
+        }
+    );
+}
+
+#[test]
+fn blank_line_after_opening_dashes_is_no_frontmatter() {
+    let out = read("---\n\n# Intro\n\nSome [a link](x.md)\n\n---\n\nMore\n");
+    assert!(out.document.losses.is_empty());
+    assert!(
+        out.document
+            .body
+            .iter()
+            .any(|b| matches!(b, Block::Heading { .. }))
+    );
+    assert!(
+        out.document.facets.graphs[0]
+            .nodes
+            .iter()
+            .any(|n| n.id == "x.md")
+    );
+    let out = read("---\n---\n\nText\n");
+    assert_eq!(
+        out.document
+            .body
+            .iter()
+            .filter(|b| matches!(b, Block::Rule { .. }))
+            .count(),
+        2
+    );
+}

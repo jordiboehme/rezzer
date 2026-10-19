@@ -4,7 +4,11 @@
 
 //! Frontmatter (YAML between `---`, TOML between `+++`) mapped onto document properties.
 
+use std::collections::{HashMap, HashSet};
+
+use rezzer_limits::Budget;
 use rezzer_model::{Properties, Value};
+use saphyr_parser::{Event, Parser, ScalarStyle};
 
 /// Deepest nesting that is flattened into `a.b.c` keys; deeper values are kept as JSON text.
 const MAX_FLATTEN_DEPTH: usize = 32;
@@ -32,28 +36,41 @@ enum Fm {
     Map(Vec<(String, Fm)>),
 }
 
-/// The deepest nesting a YAML block may have. This is also the recursion limit of the parser,
-/// but its running time is quadratic in flow nesting, so the depth is checked up front.
+/// The deepest nesting a YAML block may have.
 const MAX_YAML_DEPTH: usize = 128;
+
+/// The most work a YAML block may cost, counted in nodes. A node is a scalar, an alias, a
+/// sequence or a mapping; every node an alias copies is counted again, and long scalars count
+/// one more for every 32 bytes, so expanding aliases cannot take much time or memory.
+const MAX_YAML_NODES: usize = 100_000;
+
+/// How many YAML events are read between two time checks.
+const CHECK_EVERY: usize = 1000;
+
+/// Why frontmatter could not be read.
+#[derive(Debug)]
+pub(crate) enum FmError {
+    /// The text is not valid or is over a budget of the reader.
+    Damaged(String),
+    /// The time limit ran out.
+    Limit(String),
+}
 
 /// Parses `text` and fills `props`. On an error nothing is changed and the message is returned.
 ///
 /// Values keep their data but not their YAML tags (`!foo bar` reads as `bar`). A key with
 /// no value is kept as an empty text.
-pub(crate) fn apply(syntax: Syntax, text: &str, props: &mut Properties) -> Result<(), String> {
+pub(crate) fn apply(
+    syntax: Syntax,
+    text: &str,
+    props: &mut Properties,
+    budget: &Budget,
+) -> Result<(), FmError> {
     let root = match syntax {
-        Syntax::Yaml => {
-            if let Some(depth) = yaml_depth_over_limit(text) {
-                return Err(format!(
-                    "nesting of {depth} levels is deeper than the {MAX_YAML_DEPTH} allowed"
-                ));
-            }
-            let v: serde_yaml_ng::Value =
-                serde_yaml_ng::from_str(text).map_err(|e| e.to_string())?;
-            from_yaml(v)
-        }
+        Syntax::Yaml => parse_yaml(text, budget)?,
         Syntax::Toml => {
-            let t: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
+            let t: toml::Table =
+                toml::from_str(text).map_err(|e| FmError::Damaged(e.to_string()))?;
             from_toml(toml::Value::Table(t))
         }
     };
@@ -64,140 +81,9 @@ pub(crate) fn apply(syntax: Syntax, text: &str, props: &mut Properties) -> Resul
         }
         // An empty YAML block reads as null.
         Fm::Null => Ok(()),
-        _ => Err("frontmatter is not a mapping of keys to values".into()),
-    }
-}
-
-/// One linear pass over the text for the depth of flow brackets (`[` and `{`) and of block
-/// indentation, including compact `- - - x` nesting. Returns the depth when it is over the limit.
-///
-/// Quoted scalars (`"..."` with `\` escapes, `'...'` with `''`) and `#` comments are skipped, so
-/// brackets inside them do not count. A quote only opens where YAML starts a token (after
-/// `[`, `{`, `,`, after a `:`, `-` or `?` indicator that stands apart, or at the start of a
-/// line), so a stray quote inside a plain scalar cannot hide real nesting. The lines of a
-/// `|` or `>` block scalar are literal text and are skipped.
-fn yaml_depth_over_limit(text: &str) -> Option<usize> {
-    let mut flow: usize = 0;
-    let mut indents: Vec<usize> = Vec::new();
-    let mut quote: Option<u8> = None;
-    let mut last_sig: Option<u8> = None;
-    let mut block_scalar: Option<usize> = None;
-    for line in text.split('\n') {
-        let b = line.as_bytes();
-        let mut j = 0usize;
-        if quote.is_none() {
-            let trimmed = line.trim_start_matches(' ');
-            let indent = b.len() - trimmed.len();
-            if trimmed.trim_end().is_empty() || (flow == 0 && trimmed.starts_with('#')) {
-                continue;
-            }
-            if let Some(bi) = block_scalar {
-                if indent > bi {
-                    continue;
-                }
-                block_scalar = None;
-            }
-            j = indent;
-            if flow == 0 {
-                last_sig = None;
-                while indents.last().is_some_and(|&i| i >= indent) {
-                    indents.pop();
-                }
-                indents.push(indent);
-                // Compact nesting: `- - - x`.
-                let mut rest = trimmed;
-                let mut extra = 0usize;
-                while let Some(r) = rest
-                    .strip_prefix("- ")
-                    .or_else(|| rest.strip_prefix("? "))
-                    .map(|r| r.trim_start_matches(' '))
-                {
-                    extra += 1;
-                    rest = r;
-                }
-                if indents.len() + extra > MAX_YAML_DEPTH {
-                    return Some(indents.len() + extra);
-                }
-                if is_block_scalar_header(trimmed) {
-                    // `- |` has its content under the dash; `k: |` and `- k: |` under the key.
-                    let key_col = if rest.starts_with(['|', '>']) {
-                        indent
-                    } else {
-                        indent + (trimmed.len() - rest.len())
-                    };
-                    block_scalar = Some(key_col);
-                }
-            }
-        }
-        while j < b.len() {
-            let c = b[j];
-            if let Some(q) = quote {
-                if q == b'"' {
-                    if c == b'\\' {
-                        j += 1;
-                    } else if c == b'"' {
-                        quote = None;
-                        last_sig = Some(c);
-                    }
-                } else if c == b'\'' {
-                    if b.get(j + 1) == Some(&b'\'') {
-                        j += 1;
-                    } else {
-                        quote = None;
-                        last_sig = Some(c);
-                    }
-                }
-                j += 1;
-                continue;
-            }
-            let after_space = j == 0 || matches!(b[j - 1], b' ' | b'\t');
-            match c {
-                b'#' if after_space => break,
-                b' ' | b'\t' | b'\r' => {}
-                b'"' | b'\'' => {
-                    let token_start = match last_sig {
-                        None | Some(b'[' | b'{' | b',') => true,
-                        Some(b':' | b'-' | b'?') => after_space,
-                        _ => false,
-                    };
-                    if token_start {
-                        quote = Some(c);
-                    } else {
-                        last_sig = Some(c);
-                    }
-                }
-                b'[' | b'{' => {
-                    flow += 1;
-                    if flow + indents.len() > MAX_YAML_DEPTH {
-                        return Some(flow + indents.len());
-                    }
-                    last_sig = Some(c);
-                }
-                b']' | b'}' => {
-                    flow = flow.saturating_sub(1);
-                    last_sig = Some(c);
-                }
-                _ => last_sig = Some(c),
-            }
-            j += 1;
-        }
-    }
-    None
-}
-
-/// True when a block line ends in a `|` or `>` header, with optional indent and chomp signs and
-/// a comment.
-fn is_block_scalar_header(line: &str) -> bool {
-    let mut code = line;
-    if let Some(i) = code.find(" #") {
-        code = &code[..i];
-    }
-    let code = code
-        .trim_end()
-        .trim_end_matches(|c: char| c.is_ascii_digit() || c == '+' || c == '-');
-    match code.strip_suffix(['|', '>']) {
-        Some(before) => before.is_empty() || before.ends_with([' ', ':', '-']),
-        None => false,
+        _ => Err(FmError::Damaged(
+            "frontmatter is not a mapping of keys to values".into(),
+        )),
     }
 }
 
@@ -224,6 +110,15 @@ pub(crate) fn split(text: &str) -> Option<Split<'_>> {
         return None;
     }
     let raw_start = (first_end + 1).min(text.len());
+    // As in CommonMark tools: the line after the opening one may not be blank or a closer.
+    let second = text[raw_start..]
+        .split('\n')
+        .next()
+        .unwrap_or("")
+        .trim_end();
+    if second.is_empty() || second == open || (syntax == Syntax::Yaml && second == "...") {
+        return None;
+    }
     let mut pos = raw_start;
     while pos < text.len() {
         let end = text[pos..].find('\n').map_or(text.len(), |i| pos + i);
@@ -241,42 +136,230 @@ pub(crate) fn split(text: &str) -> Option<Split<'_>> {
     None
 }
 
-fn from_yaml(v: serde_yaml_ng::Value) -> Fm {
-    use serde_yaml_ng::Value as Y;
-    match v {
-        Y::Null => Fm::Null,
-        Y::Bool(b) => Fm::Bool(b),
-        Y::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Fm::Int(i128::from(i))
-            } else if let Some(u) = n.as_u64() {
-                Fm::Int(i128::from(u))
-            } else {
-                Fm::Float(n.as_f64().unwrap_or(f64::NAN))
+/// An open sequence or mapping while the events are read.
+enum Open {
+    Seq {
+        anchor: usize,
+        items: Vec<Fm>,
+        weight: usize,
+    },
+    Map {
+        anchor: usize,
+        entries: Vec<(String, Fm)>,
+        keys: HashSet<String>,
+        key: Option<Fm>,
+        weight: usize,
+    },
+}
+
+/// Builds Rezzer's own values from the events of the first YAML document, with hard budgets
+/// on depth, node count (alias expansion included) and time. Reading stops at the first
+/// budget that is hit. The tree is never built by a serde deserializer, so aliases cannot
+/// replay a large value unnoticed.
+fn parse_yaml(text: &str, budget: &Budget) -> Result<Fm, FmError> {
+    let damaged = |m: String| FmError::Damaged(m);
+    let mut stack: Vec<Open> = Vec::new();
+    let mut anchors: HashMap<usize, (Fm, usize)> = HashMap::new();
+    let mut spent = 0usize;
+    let mut root: Option<Fm> = None;
+    let mut in_document = false;
+    let mut charge = |units: usize| -> Result<(), FmError> {
+        spent = spent.saturating_add(units);
+        if spent > MAX_YAML_NODES {
+            Err(FmError::Damaged(format!(
+                "more than {MAX_YAML_NODES} nodes (aliases expanded)"
+            )))
+        } else {
+            Ok(())
+        }
+    };
+
+    for (n, item) in Parser::new_from_str(text).enumerate() {
+        if n % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
+            return Err(FmError::Limit("time limit reached".into()));
+        }
+        let (event, _) = item.map_err(|e| damaged(e.to_string()))?;
+        // The finished value of a node, its weight and its anchor, when one just ended.
+        let done: Option<(Fm, usize, usize)> = match event {
+            Event::Nothing | Event::StreamStart | Event::StreamEnd | Event::DocumentEnd => {
+                if matches!(event, Event::StreamEnd) {
+                    break;
+                }
+                if matches!(event, Event::DocumentEnd) {
+                    // Only the first document is read.
+                    break;
+                }
+                None
+            }
+            Event::DocumentStart(_) => {
+                if in_document {
+                    return Err(damaged("more than one YAML document".into()));
+                }
+                in_document = true;
+                None
+            }
+            Event::Scalar(value, style, anchor, tag) => {
+                let weight = 1 + value.len() / 32;
+                charge(weight)?;
+                let forced_str = tag.as_ref().is_some_and(|t| t.suffix == "str");
+                let fm = if forced_str || !matches!(style, ScalarStyle::Plain) {
+                    Fm::Str(value.into_owned())
+                } else {
+                    resolve_plain(&value)
+                };
+                Some((fm, weight, anchor))
+            }
+            Event::Alias(id) => {
+                let Some((value, weight)) = anchors.get(&id) else {
+                    return Err(damaged("alias without a finished anchor".into()));
+                };
+                charge(*weight)?;
+                Some((value.clone(), *weight, 0))
+            }
+            Event::SequenceStart(anchor, _) => {
+                charge(1)?;
+                if stack.len() >= MAX_YAML_DEPTH {
+                    return Err(damaged(format!(
+                        "nesting deeper than the {MAX_YAML_DEPTH} levels allowed"
+                    )));
+                }
+                stack.push(Open::Seq {
+                    anchor,
+                    items: Vec::new(),
+                    weight: 1,
+                });
+                None
+            }
+            Event::MappingStart(anchor, _) => {
+                charge(1)?;
+                if stack.len() >= MAX_YAML_DEPTH {
+                    return Err(damaged(format!(
+                        "nesting deeper than the {MAX_YAML_DEPTH} levels allowed"
+                    )));
+                }
+                stack.push(Open::Map {
+                    anchor,
+                    entries: Vec::new(),
+                    keys: HashSet::new(),
+                    key: None,
+                    weight: 1,
+                });
+                None
+            }
+            Event::SequenceEnd => match stack.pop() {
+                Some(Open::Seq {
+                    anchor,
+                    items,
+                    weight,
+                }) => Some((Fm::List(items), weight, anchor)),
+                _ => return Err(damaged("unbalanced YAML".into())),
+            },
+            Event::MappingEnd => match stack.pop() {
+                Some(Open::Map {
+                    anchor,
+                    entries,
+                    weight,
+                    ..
+                }) => Some((Fm::Map(entries), weight, anchor)),
+                _ => return Err(damaged("unbalanced YAML".into())),
+            },
+        };
+        let Some((value, weight, anchor)) = done else {
+            continue;
+        };
+        if anchor != 0 {
+            // Keeping the copy for later aliases costs as much as the value.
+            charge(weight)?;
+            anchors.insert(anchor, (value.clone(), weight));
+        }
+        match stack.last_mut() {
+            None => root = Some(value),
+            Some(Open::Seq {
+                items, weight: w, ..
+            }) => {
+                *w += weight;
+                items.push(value);
+            }
+            Some(Open::Map {
+                entries,
+                keys,
+                key,
+                weight: w,
+                ..
+            }) => {
+                *w += weight;
+                match key.take() {
+                    None => *key = Some(value),
+                    Some(k) => {
+                        let name = key_text(&k);
+                        if !keys.insert(name.clone()) {
+                            return Err(damaged(format!("duplicate key `{name}`")));
+                        }
+                        entries.push((name, value));
+                    }
+                }
             }
         }
-        Y::String(s) => Fm::Str(s),
-        Y::Sequence(items) => Fm::List(items.into_iter().map(from_yaml).collect()),
-        Y::Mapping(m) => Fm::Map(
-            m.into_iter()
-                .map(|(k, v)| (yaml_key(k), from_yaml(v)))
-                .collect(),
-        ),
-        Y::Tagged(t) => from_yaml(t.value),
+    }
+    Ok(root.unwrap_or(Fm::Null))
+}
+
+fn key_text(k: &Fm) -> String {
+    match scalar_text(k) {
+        Some(s) => s,
+        None if matches!(k, Fm::Null) => "null".into(),
+        None => to_json(k).to_string(),
     }
 }
 
-fn yaml_key(k: serde_yaml_ng::Value) -> String {
-    use serde_yaml_ng::Value as Y;
-    match k {
-        Y::String(s) => s,
-        Y::Bool(b) => b.to_string(),
-        Y::Number(n) => n.to_string(),
-        Y::Null => "null".into(),
-        other => serde_yaml_ng::to_string(&other)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default(),
+/// The type of a plain scalar by the YAML 1.2 core schema.
+fn resolve_plain(s: &str) -> Fm {
+    match s {
+        "" | "~" | "null" | "Null" | "NULL" => return Fm::Null,
+        "true" | "True" | "TRUE" => return Fm::Bool(true),
+        "false" | "False" | "FALSE" => return Fm::Bool(false),
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => return Fm::Float(f64::INFINITY),
+        "-.inf" | "-.Inf" | "-.INF" => return Fm::Float(f64::NEG_INFINITY),
+        ".nan" | ".NaN" | ".NAN" => return Fm::Float(f64::NAN),
+        _ => {}
     }
+    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        return match s.parse::<i128>() {
+            Ok(i) => Fm::Int(i),
+            Err(_) => Fm::Str(s.to_string()),
+        };
+    }
+    for (prefix, radix) in [("0x", 16), ("0o", 8)] {
+        if let Some(rest) = s.strip_prefix(prefix)
+            && !rest.is_empty()
+            && let Ok(i) = i128::from_str_radix(rest, radix)
+        {
+            return Fm::Int(i);
+        }
+    }
+    let float_like = {
+        let body = digits;
+        let (mantissa, exp) = match body.find(['e', 'E']) {
+            Some(i) => (&body[..i], Some(&body[i + 1..])),
+            None => (body, None),
+        };
+        let exp_ok = exp.is_none_or(|e| {
+            let e = e.strip_prefix(['+', '-']).unwrap_or(e);
+            !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
+        });
+        let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let digits_only = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
+        exp_ok
+            && digits_only(int)
+            && digits_only(frac)
+            && !(int.is_empty() && frac.is_empty())
+            && (mantissa.contains('.') || exp.is_some())
+    };
+    if float_like && let Ok(f) = s.parse::<f64>() {
+        return Fm::Float(f);
+    }
+    Fm::Str(s.to_string())
 }
 
 fn from_toml(v: toml::Value) -> Fm {
