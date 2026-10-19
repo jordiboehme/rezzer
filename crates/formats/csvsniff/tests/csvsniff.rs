@@ -142,7 +142,8 @@ fn unterminated_quote_flagged() {
 fn derived_sum_found() {
     let mut t = String::from("A,B,C,Total\n");
     for i in 1..=12 {
-        let (a, b, c) = (i, i * 3 % 7 + 1, i * i);
+        let j = i % 10;
+        let (a, b, c) = (j * 37 % 90 + 10, j * 53 % 70 + 20, j * 17 % 60 + 15);
         t.push_str(&format!("{a},{b},{c},{}\n", a + b + c));
     }
     let a = full(&t);
@@ -175,7 +176,7 @@ fn derived_with_decimals_and_missing() {
     assert_eq!(a.derived.len(), 1);
     let d = &a.derived[0];
     assert_eq!((d.target, d.parts.clone()), (2, vec![0, 1]));
-    assert_eq!((d.holds, d.checked), (13, 13));
+    assert_eq!((d.holds, d.checked), (13, 14));
 }
 
 #[test]
@@ -188,10 +189,61 @@ fn no_derived_below_10_rows() {
 fn no_derived_over_max_rows() {
     let mut t = String::from("A,B,Total\n");
     for i in 1..=20 {
-        t.push_str(&format!("{i},{},{}\n", i + 1, 2 * i + 1));
+        let j = i % 10;
+        let (a, b) = (j * 37 % 90 + 10, j * 53 % 70 + 20);
+        t.push_str(&format!("{a},{b},{}\n", a + b));
     }
     let d = sniff(&t).unwrap();
     assert!(analyze(&t, &d, 10).derived.is_empty());
     assert_eq!(analyze(&t, &d, 10).rows, 20);
     assert!(!analyze(&t, &d, 100).derived.is_empty());
+}
+
+#[test]
+fn derived_counts_missing_part_as_zero() {
+    let mut t = String::from("Solid,Gas,Flaring,Total\n");
+    for i in 1..=20 {
+        let (a, b) = (i % 4 * 30 + 100, i % 3 * 50 + 60);
+        let f = if i % 5 == 0 {
+            Some(i * 7 % 40 + 30)
+        } else {
+            None
+        };
+        let total = a + b + f.unwrap_or(0);
+        let f = f.map_or(String::new(), |v| v.to_string());
+        t.push_str(&format!("{a},{b},{f},{total}\n"));
+    }
+    let a = full(&t);
+    let d = a.derived.iter().find(|d| d.target == 3).expect("derived");
+    assert_eq!(d.parts, vec![0, 1, 2]);
+    assert_eq!((d.holds, d.checked), (20, 20));
+}
+
+#[test]
+fn year_like_columns_are_never_parts() {
+    let mut t = String::from("Year,A,B,Total\n");
+    for i in 1..=12 {
+        let (y, a, b) = (2000 + i % 3, i * 37 % 90 + 10, i * 53 % 70 + 20);
+        t.push_str(&format!("{y},{a},{b},{}\n", y + a + b));
+    }
+    assert!(full(&t).derived.is_empty());
+    let t = t.replace("Year", "Foo");
+    assert!(full(&t).derived.is_empty());
+}
+
+#[test]
+fn ragged_file_is_accepted() {
+    let mut t = String::from("a,b,c\n");
+    for i in 0..7 {
+        t.push_str(&format!("{i},x,y\n"));
+    }
+    t.push_str("1,2,3,4\n1,2\n1,2,3\nx,\"open,z\n");
+    let d = sniff(&t).expect("accepted");
+    assert_eq!(d.delimiter, b',');
+    assert!(d.consistent_rows < 0.8 && d.consistent_rows >= 0.6);
+    let a = analyze(&t, &d, 1000);
+    assert!(a.unterminated_quote);
+    assert!(!a.ragged_rows.is_empty());
+    let prose = "Well, I think so.\nHowever, as he said, it was late, and the road, which was long, ended.\nNo.\nShe came, saw, and left, as always, quietly.\n";
+    assert_eq!(sniff(prose), None);
 }

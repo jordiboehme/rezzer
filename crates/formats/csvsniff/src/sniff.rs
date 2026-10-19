@@ -10,6 +10,7 @@ use crate::types::{Analysis, Column, ColumnKind, Dialect, RaggedRow};
 const CANDIDATES: &[u8; 4] = b",;\t|";
 const SAMPLE_RECORDS: usize = 200;
 const MIN_CONSISTENCY: f32 = 0.8;
+const MIN_RAGGED_CONSISTENCY: f32 = 0.6;
 const KEY_TEXT_MAX_LEN: usize = 40;
 
 fn strip_bom(text: &str) -> &str {
@@ -42,8 +43,10 @@ fn modal(counts: &[usize]) -> Option<(usize, usize)> {
 /// Tries comma, semicolon, tab and pipe on the first 200 records and picks
 /// the delimiter whose most common field count (at least 2) covers the
 /// largest share of records. Returns `None` when fewer than two records
-/// exist, the best share is below 0.8, or no candidate gives two fields, so
-/// ordinary prose is not mistaken for CSV. The header flag is a heuristic:
+/// exist or no candidate gives two fields with a share of at least 0.8, so
+/// ordinary prose is not mistaken for CSV. A share between 0.6 and 0.8 is
+/// accepted when the first two records both have the modal field count
+/// (a ragged or broken file; `consistent_rows` keeps the real share). The header flag is a heuristic:
 /// see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = strip_bom(text);
@@ -66,14 +69,17 @@ pub fn sniff(text: &str) -> Option<Dialect> {
             continue;
         }
         let share = freq as f32 / counts.len() as f32;
+        // A ragged file is accepted when the header line and the first data
+        // line both have the modal field count.
+        let ragged_ok = share >= MIN_RAGGED_CONSISTENCY && counts[0] == count && counts[1] == count;
+        if share < MIN_CONSISTENCY && !ragged_ok {
+            continue;
+        }
         if best.is_none_or(|(s, c, _)| share > s || (share == s && count > c)) {
             best = Some((share, count, delimiter));
         }
     }
     let (share, _, delimiter) = best?;
-    if share < MIN_CONSISTENCY {
-        return None;
-    }
     let rows: Vec<Vec<String>> = reader(text, delimiter, quote)
         .records()
         .take(SAMPLE_RECORDS)
@@ -321,6 +327,23 @@ impl Acc {
     }
 }
 
+/// Header words that mark identifiers, never measures: year, id, code, number, date.
+fn id_like_name(name: &str) -> bool {
+    name.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| matches!(w, "year" | "id" | "code" | "number" | "date"))
+}
+
+/// Unique Integer column with every value in 1000..=2999.
+fn year_like(c: &Column, values: &[Option<f64>]) -> bool {
+    c.unique
+        && c.kind == ColumnKind::Integer
+        && values
+            .iter()
+            .flatten()
+            .all(|v| (1000.0..=2999.0).contains(v))
+}
+
 /// True when a quoted field is still open at the end of `text`.
 /// Mirrors the csv crate: a quote only opens a field at its start.
 fn has_unterminated_quote(text: &str, delimiter: u8, quote: u8) -> bool {
@@ -420,6 +443,9 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
             .iter()
             .enumerate()
             .filter_map(|(j, c)| {
+                if c.key_like || id_like_name(&c.name) {
+                    return None;
+                }
                 let places = match c.kind {
                     ColumnKind::Integer => 0,
                     ColumnKind::Decimal { places } => places,
@@ -428,7 +454,10 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
                 let values = data
                     .iter()
                     .map(|(_, r)| r.get(j).and_then(|v| number(v.trim())).map(|n| n.1))
-                    .collect();
+                    .collect::<Vec<_>>();
+                if year_like(c, &values) {
+                    return None;
+                }
                 Some(NumCol {
                     index: j,
                     places,

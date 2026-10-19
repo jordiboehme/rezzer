@@ -25,7 +25,8 @@ pub(crate) struct NumCol {
 /// matches it on the most rows. Only the first 12 numeric columns are used.
 /// Tolerance is half a unit of the target's last decimal plus half a unit of
 /// the finest place per term (rounding error of the source values).
-/// Rows with a missing value, or a target of zero, are skipped.
+/// A missing part counts as 0 when the target and at least one part are present;
+/// rows with a missing target, no part at all, or a target of zero are skipped.
 pub(crate) fn find(cols: &[NumCol], rows: usize) -> Vec<Derived> {
     let cols = &cols[..cols.len().min(MAX_NUMERIC)];
     let mut out = Vec::new();
@@ -68,17 +69,20 @@ fn score(target: &NumCol, cols: &[NumCol], subset: &[usize], rows: usize) -> (us
         + (subset.len() + 1) as f64 * 0.5 * 10f64.powi(-i32::from(max_places))
         + 1e-9;
     let (mut holds, mut checked) = (0, 0);
-    'rows: for r in 0..rows {
+    for r in 0..rows {
         let Some(t) = target.values[r] else { continue };
         if t == 0.0 {
             continue;
         }
-        let mut sum = 0.0;
+        let (mut sum, mut any) = (0.0, false);
         for &i in subset {
-            match cols[i].values[r] {
-                Some(v) => sum += v,
-                None => continue 'rows,
+            if let Some(v) = cols[i].values[r] {
+                sum += v;
+                any = true;
             }
+        }
+        if !any {
+            continue;
         }
         checked += 1;
         if (t - sum).abs() <= tol {
