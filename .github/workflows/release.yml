@@ -27,6 +27,11 @@ jobs:
     # Notarization can wait a long time in Apple's queue.
     timeout-minutes: 90
     runs-on: ${{ matrix.os }}
+    # The Apple signing secrets belong in this environment, not in the
+    # repository secrets, so only this job can read them. Restrict the
+    # environment's deployments to main (the dry run) and v* tags. Without
+    # the secrets the build still runs and ships unsigned binaries.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +40,7 @@ jobs:
             platform: macos-arm64
             os: macos-latest
           - target: x86_64-apple-darwin
-            platform: macos-x86_64
+            platform: macos-intel
             # The last Intel image GitHub ships; it retires in August 2027.
             # Before then, cross-compile this leg on macos-latest instead.
             os: macos-15-intel
@@ -43,7 +48,7 @@ jobs:
           # smoke test runs the binary that ships. The workspace has no C
           # dependencies, so musl-tools is all the linker needs.
           - target: x86_64-unknown-linux-musl
-            platform: linux-x86_64
+            platform: linux-amd64
             os: ubuntu-latest
             musl: true
           - target: aarch64-unknown-linux-musl
@@ -320,8 +325,8 @@ jobs:
           missing=0
           for f in SHA256SUMS \
             "rezzer-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
-            "rezzer-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" \
-            "rezzer-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-macos-intel.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-linux-amd64.tar.gz" \
             "rezzer-${GITHUB_REF_NAME}-linux-arm64.tar.gz"; do
             [ -f "release/$f" ] || { echo "::error::missing release asset release/$f"; missing=1; }
           done
@@ -418,8 +423,8 @@ jobs:
   #         git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/jordiboehme/homebrew-tap.git" \
   #           "$RUNNER_TEMP/homebrew-tap"
   #         # Write Formula/rezzer.rb here with VERSION and
-  #         # $(sha_for macos-arm64), $(sha_for macos-x86_64),
-  #         # $(sha_for linux-x86_64) and $(sha_for linux-arm64).
+  #         # $(sha_for macos-arm64), $(sha_for macos-intel),
+  #         # $(sha_for linux-amd64) and $(sha_for linux-arm64).
   #         cd "$RUNNER_TEMP/homebrew-tap"
   #         git config user.name "github-actions[bot]"
   #         git config user.email "github-actions[bot]@users.noreply.github.com"
