@@ -25,6 +25,6 @@ pub use facet::{Annotation, Edge, Embedded, Event, Facets, Formula, Graph, Node,
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor};
 pub use loss::{Loss, LossReason, Severity};
-pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source};
+pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
 pub use value::Value;

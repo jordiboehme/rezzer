@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use rezzer_limits::Budget;
 
-use crate::document::{Detection, Document};
+use crate::document::{Detection, Document, SourceInfo};
 use crate::format::{Completeness, FormatId};
 
 /// Reads one family of formats into a [`Document`].
@@ -89,5 +89,21 @@ pub struct Source {
 impl Source {
     pub fn bytes(&self) -> &[u8] {
         self.bytes.as_slice()
+    }
+}
+
+/// Builds the [`SourceInfo`] of a [`Source`]: name, path, hash, size, format, detection and
+/// modification time are copied. `encoding` and `reader` stay empty for the reader to fill.
+pub fn source_info(src: &Source) -> SourceInfo {
+    SourceInfo {
+        path: src.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        name: src.name.clone(),
+        sha256: src.sha256.clone(),
+        size: src.size,
+        format: src.format,
+        detection: src.detection.clone(),
+        modified: src.modified.clone(),
+        encoding: None,
+        reader: None,
     }
 }

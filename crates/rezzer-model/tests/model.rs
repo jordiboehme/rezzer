@@ -463,3 +463,30 @@ fn plain_fields_default_when_missing() {
         }
     ));
 }
+
+#[test]
+fn source_info_copies_the_source_fields() {
+    let src = Source {
+        path: Some(std::path::PathBuf::from("/data/a.txt")),
+        name: "a.txt".into(),
+        bytes: Bytes::Owned(Arc::new(b"hello".to_vec())),
+        sha256: "abc".into(),
+        size: 5,
+        format: FormatId::Text,
+        detection: Detection {
+            confidence: Confidence::Likely,
+            evidence: "utf-8".into(),
+        },
+        modified: Some("2026-10-19T00:00:00Z".into()),
+    };
+    let info = rezzer_model::source_info(&src);
+    assert_eq!(info.path.as_deref(), Some("/data/a.txt"));
+    assert_eq!(info.name, "a.txt");
+    assert_eq!(info.sha256, "abc");
+    assert_eq!(info.size, 5);
+    assert_eq!(info.format, FormatId::Text);
+    assert_eq!(info.detection.evidence, "utf-8");
+    assert_eq!(info.modified.as_deref(), Some("2026-10-19T00:00:00Z"));
+    assert_eq!(info.encoding, None);
+    assert_eq!(info.reader, None);
+}
