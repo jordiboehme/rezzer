@@ -29,8 +29,6 @@ It's not a converter that dumps plain text. A spreadsheet is more than its value
 
 One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
 
-The banner is the whole idea: files ride light cycles across the Grid, their trails merge into one and a knowledge graph rezzes in at the end. The name rezzes in too.
-
 ## Status
 
 Early. The design is done, the formats and crates are picked after tests on about 600 public files and the code is being written right now. There is nothing to install yet. This README describes what Rezzer is built to do. Star the repo if you want to see it rez.
