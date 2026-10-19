@@ -96,8 +96,10 @@ pub struct Analysis {
     pub columns: Vec<Column>,
     /// Number of data rows (the header is not counted).
     pub rows: usize,
-    /// Records with an unexpected field count.
+    /// Records with an unexpected field count; the first 1,000 only.
     pub ragged_rows: Vec<RaggedRow>,
+    /// Total number of records with an unexpected field count.
+    pub ragged_total: usize,
     /// True when a quoted field is still open at the end of the text.
     pub unterminated_quote: bool,
     /// Observed sum relations between numeric columns.

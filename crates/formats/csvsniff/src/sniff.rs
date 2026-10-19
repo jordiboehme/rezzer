@@ -3,15 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::derived::{self, NumCol};
+use crate::derived::{self, MAX_NUMERIC_COLUMNS, NumCol};
 use crate::types::{Analysis, Column, ColumnKind, Dialect, RaggedRow};
 
 const CANDIDATES: &[u8; 4] = b",;\t|";
+/// Tie-break order for equally good delimiters (index = priority, lower wins).
+const PREFERENCE: &[u8; 4] = b"\t;|,";
 const SAMPLE_RECORDS: usize = 200;
 const MIN_CONSISTENCY: f32 = 0.8;
 const MIN_RAGGED_CONSISTENCY: f32 = 0.6;
+const MIN_RECORDS: usize = 3;
+const MIN_RAGGED_RECORDS: usize = 10;
 const KEY_TEXT_MAX_LEN: usize = 40;
+const MAX_RAGGED_LISTED: usize = 1000;
+const MAX_UNIQUE_TRACKED: usize = 200_000;
 
 fn strip_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
@@ -26,66 +33,175 @@ fn reader(text: &str, delimiter: u8, quote: u8) -> csv::Reader<&[u8]> {
         .from_reader(text.as_bytes())
 }
 
-/// Modal field count of a list of counts: the most frequent one, the larger on ties.
-fn modal(counts: &[usize]) -> Option<(usize, usize)> {
-    let mut hist: HashMap<usize, usize> = HashMap::new();
-    for &c in counts {
-        *hist.entry(c).or_default() += 1;
-    }
-    hist.into_iter()
-        .map(|(count, freq)| (freq, count))
+/// Modal field count of a histogram: the most frequent one, the larger on ties.
+/// Returns (count, frequency).
+fn modal(hist: &HashMap<usize, usize>) -> Option<(usize, usize)> {
+    hist.iter()
+        .map(|(&count, &freq)| (freq, count))
         .max()
         .map(|(freq, count)| (count, freq))
 }
 
+fn histogram(counts: &[usize]) -> HashMap<usize, usize> {
+    let mut hist = HashMap::new();
+    for &c in counts {
+        *hist.entry(c).or_default() += 1;
+    }
+    hist
+}
+
+/// Text that is plainly not delimited data: JSON, source code or G-code.
+fn looks_like_other_format(text: &str) -> bool {
+    if text.trim_start().starts_with(['{', '[']) {
+        return true;
+    }
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(SAMPLE_RECORDS)
+        .collect();
+    if lines.is_empty() {
+        return false;
+    }
+    let half = |n: usize| n * 2 > lines.len();
+    // Code: lines ending in `{` or `}` or in a lone `;` (a CSV with a trailing
+    // delimiter has several `;` per line).
+    let code = lines
+        .iter()
+        .filter(|l| l.ends_with(['{', '}']) || (l.ends_with(';') && l.matches(';').count() == 1))
+        .count();
+    // G-code: comment lines starting with `;` or G/M words.
+    let gcode = lines
+        .iter()
+        .filter(|l| {
+            l.starts_with(';')
+                || (l.starts_with(['G', 'M']) && l[1..].starts_with(|c: char| c.is_ascii_digit()))
+        })
+        .count();
+    half(code) || half(gcode)
+}
+
+/// A cell that looks like a number or date, also with a decimal comma.
+fn numeric_looking(cell: &str) -> bool {
+    let t = cell.trim();
+    if number(t).is_some() || is_date(t) {
+        return true;
+    }
+    match t.split_once(',') {
+        Some((i, f)) => {
+            let digits = |x: &str| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit());
+            digits(i.trim_start_matches(['+', '-'])) && digits(f)
+        }
+        None => false,
+    }
+}
+
+/// A delimiter candidate that passed the checks, with its ranking keys.
+struct Pick {
+    share: f32,
+    count: usize,
+    numeric: f32,
+    rank: usize,
+    delimiter: u8,
+    rows: Vec<Vec<String>>,
+}
+
+impl Pick {
+    /// Higher share, then field count, then numeric-looking cells, then preference order.
+    fn beats(&self, other: &Pick) -> bool {
+        let a = (self.share, self.count, self.numeric);
+        let b = (other.share, other.count, other.numeric);
+        a > b || (a == b && self.rank < other.rank)
+    }
+}
+
 /// Detects the CSV dialect of already-decoded text.
 ///
-/// Tries comma, semicolon, tab and pipe on the first 200 records and picks
+/// Tries tab, semicolon, pipe and comma on the first 200 records and picks
 /// the delimiter whose most common field count (at least 2) covers the
-/// largest share of records. Returns `None` when fewer than two records
-/// exist or no candidate gives two fields with a share of at least 0.8, so
-/// ordinary prose is not mistaken for CSV. A share between 0.6 and 0.8 is
-/// accepted when the first two records both have the modal field count
-/// (a ragged or broken file; `consistent_rows` keeps the real share). The header flag is a heuristic:
-/// see [`Dialect::has_header`].
+/// largest share of records; on equal share and count, the delimiter whose
+/// cells more often look numeric wins, then tab, `;`, `|`, `,` in that order.
+///
+/// Returns `None` for text that is not delimited data: JSON, code lines,
+/// G-code, prose (most fields longer than four words), fewer than three
+/// records (two are enough only when both have at least three fields), or a
+/// best share below 0.8. A share between 0.6 and 0.8 is accepted when the
+/// first two records both have the modal field count and at least ten
+/// records exist (a ragged or broken file; `consistent_rows` keeps the real
+/// share). The header flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = strip_bom(text);
+    if looks_like_other_format(text) {
+        return None;
+    }
     let quote = b'"';
-    let mut best: Option<(f32, usize, u8)> = None;
+    let mut best: Option<Pick> = None;
     for &delimiter in CANDIDATES {
-        let counts: Vec<usize> = reader(text, delimiter, quote)
+        let rows: Vec<Vec<String>> = reader(text, delimiter, quote)
             .records()
             .take(SAMPLE_RECORDS)
             .map_while(Result::ok)
-            .map(|r| r.len())
+            .map(|r| r.iter().map(str::to_owned).collect())
             .collect();
-        if counts.len() < 2 {
+        let counts: Vec<usize> = rows.iter().map(Vec::len).collect();
+        let n = counts.len();
+        if n < 2 {
             continue;
         }
-        let Some((count, freq)) = modal(&counts) else {
+        let Some((count, freq)) = modal(&histogram(&counts)) else {
             continue;
         };
-        if count < 2 {
+        if count < 2 || (n < MIN_RECORDS && !(n == 2 && counts.iter().all(|&c| c >= 3))) {
             continue;
         }
-        let share = freq as f32 / counts.len() as f32;
+        let share = freq as f32 / n as f32;
         // A ragged file is accepted when the header line and the first data
         // line both have the modal field count.
-        let ragged_ok = share >= MIN_RAGGED_CONSISTENCY && counts[0] == count && counts[1] == count;
+        let ragged_ok = share >= MIN_RAGGED_CONSISTENCY
+            && n >= MIN_RAGGED_RECORDS
+            && counts[0] == count
+            && counts[1] == count;
         if share < MIN_CONSISTENCY && !ragged_ok {
             continue;
         }
-        if best.is_none_or(|(s, c, _)| share > s || (share == s && count > c)) {
-            best = Some((share, count, delimiter));
+        let cells: Vec<&str> = rows.iter().flatten().map(String::as_str).collect();
+        let filled: Vec<&&str> = cells.iter().filter(|c| !c.trim().is_empty()).collect();
+        if filled.is_empty() {
+            continue;
+        }
+        // Prose: most fields are long free text.
+        let long = filled
+            .iter()
+            .filter(|c| c.split_whitespace().count() > 4)
+            .count();
+        if long * 2 > filled.len() {
+            continue;
+        }
+        let numeric =
+            filled.iter().filter(|c| numeric_looking(c)).count() as f32 / filled.len() as f32;
+        let rank = PREFERENCE
+            .iter()
+            .position(|&d| d == delimiter)
+            .unwrap_or(usize::MAX);
+        let pick = Pick {
+            share,
+            count,
+            numeric,
+            rank,
+            delimiter,
+            rows,
+        };
+        if best.as_ref().is_none_or(|b| pick.beats(b)) {
+            best = Some(pick);
         }
     }
-    let (share, _, delimiter) = best?;
-    let rows: Vec<Vec<String>> = reader(text, delimiter, quote)
-        .records()
-        .take(SAMPLE_RECORDS)
-        .map_while(Result::ok)
-        .map(|r| r.iter().map(str::to_owned).collect())
-        .collect();
+    let Pick {
+        share,
+        delimiter,
+        rows,
+        ..
+    } = best?;
     Some(Dialect {
         delimiter,
         quote,
@@ -116,12 +232,40 @@ fn class(cell: &str) -> Class {
     }
 }
 
+/// A first row such as `Country,2019,2020`: text cells plus two or more
+/// 4-digit years that rise or fall strictly in column order and differ from
+/// the cells right below them.
+fn year_header(first: &[String], next: &[String]) -> bool {
+    let mut years = Vec::new();
+    for (j, c) in first.iter().enumerate() {
+        match class(c) {
+            Class::Other | Class::Empty => {}
+            Class::Numeric => match c.trim().parse::<u32>() {
+                Ok(y)
+                    if (1000..=2999).contains(&y)
+                        && next.get(j).is_none_or(|n| n.trim() != c.trim()) =>
+                {
+                    years.push(y)
+                }
+                _ => return false,
+            },
+            Class::Date => return false,
+        }
+    }
+    years.len() >= 2
+        && years.len() < first.len()
+        && (years.windows(2).all(|w| w[0] < w[1]) || years.windows(2).all(|w| w[0] > w[1]))
+}
+
 fn detect_header(rows: &[Vec<String>]) -> bool {
     let Some((first, rest)) = rows.split_first() else {
         return false;
     };
     if rest.is_empty() || first.iter().all(|c| c.trim().is_empty()) {
         return false;
+    }
+    if year_header(first, &rest[0]) {
+        return true;
     }
     let first_classes: Vec<Class> = first.iter().map(|c| class(c)).collect();
     if first_classes
@@ -251,7 +395,14 @@ fn is_bool(s: &str) -> bool {
         .any(|b| s.eq_ignore_ascii_case(b))
 }
 
-/// Pulls a unit out of a header: `(kg)`, `[m]` or a trailing `in %`.
+const UNITS: &[&str] = &[
+    "%", "‰", "kg", "g", "t", "mg", "m", "cm", "mm", "km", "s", "ms", "h", "min", "°C", "°F", "K",
+    "l", "ml", "W", "kW", "MW", "kWh", "MWh", "V", "A", "Hz", "Pa", "kPa", "bar", "EUR", "USD",
+    "GBP", "CHF", "Mt", "kt",
+];
+
+/// Pulls a unit out of a header: `(kg)`, `[m]` or a trailing `in %` / `in kg`
+/// (only for known unit tokens, so "Born in Rome" has no unit).
 fn unit_of(header: &str) -> Option<String> {
     for (open, close) in [('(', ')'), ('[', ']')] {
         if let (Some(s), Some(e)) = (header.rfind(open), header.rfind(close))
@@ -265,7 +416,7 @@ fn unit_of(header: &str) -> Option<String> {
     }
     let (_, tail) = header.rsplit_once(" in ")?;
     let tail = tail.trim();
-    (!tail.is_empty() && tail.chars().count() <= 4 && !tail.contains(' ')).then(|| tail.to_owned())
+    UNITS.contains(&tail).then(|| tail.to_owned())
 }
 
 #[derive(Default)]
@@ -278,8 +429,10 @@ struct Acc {
     date: usize,
     boolean: usize,
     max_len: usize,
-    seen: HashSet<String>,
-    duplicate: bool,
+    /// Hashes of the values seen so far while the column is still unique.
+    seen: HashSet<u64>,
+    /// A duplicate was seen, or more than `MAX_UNIQUE_TRACKED` distinct values.
+    not_unique: bool,
 }
 
 impl Acc {
@@ -291,9 +444,13 @@ impl Acc {
         }
         self.non_empty += 1;
         self.max_len = self.max_len.max(v.chars().count());
-        if !self.duplicate && !self.seen.insert(v.to_owned()) {
-            self.duplicate = true;
-            self.seen = HashSet::new();
+        if !self.not_unique {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            if !self.seen.insert(h.finish()) || self.seen.len() > MAX_UNIQUE_TRACKED {
+                self.not_unique = true;
+                self.seen = HashSet::new();
+            }
         }
         match number(v) {
             Some((0, _)) => self.int += 1,
@@ -327,11 +484,19 @@ impl Acc {
     }
 }
 
-/// Header words that mark identifiers, never measures: year, id, code, number, date.
+/// Headers that mark identifiers, never measures: a word `year`, `code` or
+/// `date`, or a last word `number`, `no`, `nr` or `id` ("Case number", but
+/// not "Number of cases").
 fn id_like_name(name: &str) -> bool {
-    name.to_lowercase()
+    let lower = name.to_lowercase();
+    let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphanumeric())
-        .any(|w| matches!(w, "year" | "id" | "code" | "number" | "date"))
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.iter().any(|w| matches!(*w, "year" | "code" | "date"))
+        || words
+            .last()
+            .is_some_and(|w| matches!(*w, "number" | "no" | "nr" | "id"))
 }
 
 /// Integer values that step by exactly 1 once sorted (row ids); needs no gaps in the data.
@@ -382,54 +547,72 @@ fn has_unterminated_quote(text: &str, delimiter: u8, quote: u8) -> bool {
 
 /// Analyzes the whole text with a known dialect.
 ///
-/// Reads every record (ragged rows are reported, not errors) and returns
+/// Streams the records (ragged rows are reported, not errors) and returns
 /// column names, types, units, missing counts and key candidates, ragged
-/// rows, an unterminated-quote flag and observed sum relations. The
-/// relation check (see [`Derived`]) needs at least 10 rows and is skipped
-/// when there are more than `max_rows` data rows; everything else always
-/// covers all rows.
+/// rows, an unterminated-quote flag and observed sum relations. The number
+/// of columns is the modal field count; extra cells in longer records only
+/// show up as ragged rows. Memory does not grow with the number of rows,
+/// except for a uniqueness set of at most 200,000 value hashes per column
+/// (above that a column counts as not unique).
+///
+/// `max_rows` is the number of rows used for the derived-column check (at
+/// most the first `max_rows` data rows, and the check needs at least 10);
+/// all rows are still counted and typed. The first 1,000 ragged rows are
+/// listed, `ragged_total` counts them all.
 pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     let text = strip_bom(text);
-    let mut rdr = reader(text, dialect.delimiter, dialect.quote);
-    let mut records: Vec<(usize, Vec<String>)> = Vec::new();
-    let mut counts = Vec::new();
-    for rec in rdr.records().map_while(Result::ok) {
-        let line = rec.position().map_or(0, |p| p.line() as usize);
-        counts.push(rec.len());
-        records.push((line, rec.iter().map(str::to_owned).collect()));
+    let (delimiter, quote) = (dialect.delimiter, dialect.quote);
+
+    // Pass 1: field count histogram (no per-cell allocation).
+    let mut hist: HashMap<usize, usize> = HashMap::new();
+    let mut rdr = reader(text, delimiter, quote);
+    let mut byte_rec = csv::ByteRecord::new();
+    while rdr.read_byte_record(&mut byte_rec).unwrap_or(false) {
+        *hist.entry(byte_rec.len()).or_default() += 1;
     }
-    let expected = modal(&counts).map_or(0, |(c, _)| c);
-    let ragged_rows = records
-        .iter()
-        .filter(|(_, r)| r.len() != expected)
-        .map(|(line, r)| RaggedRow {
-            line: *line,
-            fields: r.len(),
-            expected,
-        })
-        .collect();
-    let width = counts.iter().copied().max().unwrap_or(0).max(expected);
-    let (header, data) = match records.split_first() {
-        Some((h, rest)) if dialect.has_header => (Some(&h.1), rest),
-        _ => (None, &records[..]),
-    };
-    let rows = data.len();
-    let mut accs: Vec<Acc> = (0..width).map(|_| Acc::default()).collect();
-    for (_, r) in data {
-        for (j, acc) in accs.iter_mut().enumerate() {
-            acc.add(r.get(j).map(String::as_str));
+    let expected = modal(&hist).map_or(0, |(c, _)| c);
+
+    // Pass 2: column statistics and ragged rows.
+    let mut accs: Vec<Acc> = (0..expected).map(|_| Acc::default()).collect();
+    let mut header: Option<Vec<String>> = None;
+    let mut ragged_rows = Vec::new();
+    let mut ragged_total = 0;
+    let mut rows = 0;
+    let mut rdr = reader(text, delimiter, quote);
+    let mut rec = csv::StringRecord::new();
+    let mut first = true;
+    while rdr.read_record(&mut rec).unwrap_or(false) {
+        if rec.len() != expected {
+            ragged_total += 1;
+            if ragged_rows.len() < MAX_RAGGED_LISTED {
+                ragged_rows.push(RaggedRow {
+                    line: rec.position().map_or(0, |p| p.line() as usize),
+                    fields: rec.len(),
+                    expected,
+                });
+            }
         }
+        if first && dialect.has_header {
+            header = Some(rec.iter().take(expected).map(str::to_owned).collect());
+        } else {
+            rows += 1;
+            for (j, acc) in accs.iter_mut().enumerate() {
+                acc.add(rec.get(j));
+            }
+        }
+        first = false;
     }
     let columns: Vec<Column> = accs
         .iter()
         .enumerate()
         .map(|(j, a)| {
             let head = header
+                .as_ref()
                 .and_then(|h| h.get(j))
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
             let kind = a.kind();
-            let unique = !a.duplicate;
+            let unique = !a.not_unique;
             let key_like = unique
                 && a.missing == 0
                 && rows >= 2
@@ -448,36 +631,53 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
             }
         })
         .collect();
-    let derived = if (10..=max_rows).contains(&rows) {
-        let nums: Vec<NumCol> = columns
+
+    // Pass 3: numeric values of the first `max_rows` rows, for the derived check.
+    let checked_rows = rows.min(max_rows);
+    let derived = if checked_rows >= 10 {
+        let eligible: Vec<(usize, u8)> = columns
             .iter()
             .enumerate()
-            .filter_map(|(j, c)| {
-                if (c.key_like && c.kind == ColumnKind::Text) || id_like_name(&c.name) {
-                    return None;
+            .filter(|(_, c)| !id_like_name(&c.name))
+            .filter_map(|(j, c)| match c.kind {
+                ColumnKind::Integer => Some((j, 0)),
+                ColumnKind::Decimal { places } => Some((j, places)),
+                _ => None,
+            })
+            .take(MAX_NUMERIC_COLUMNS)
+            .collect();
+        if eligible.len() >= 3 {
+            let mut values: Vec<Vec<Option<f64>>> =
+                vec![Vec::with_capacity(checked_rows); eligible.len()];
+            let mut rdr = reader(text, delimiter, quote);
+            let skip = usize::from(dialect.has_header);
+            for rec in rdr
+                .records()
+                .map_while(Result::ok)
+                .skip(skip)
+                .take(checked_rows)
+            {
+                for (v, &(j, _)) in values.iter_mut().zip(&eligible) {
+                    v.push(rec.get(j).and_then(|c| number(c.trim())).map(|n| n.1));
                 }
-                let places = match c.kind {
-                    ColumnKind::Integer => 0,
-                    ColumnKind::Decimal { places } => places,
-                    _ => return None,
-                };
-                let values = data
-                    .iter()
-                    .map(|(_, r)| r.get(j).and_then(|v| number(v.trim())).map(|n| n.1))
-                    .collect::<Vec<_>>();
-                if year_like(c, &values) || (c.kind == ColumnKind::Integer && consecutive(&values))
-                {
-                    return None;
-                }
-                Some(NumCol {
-                    index: j,
+            }
+            let nums: Vec<NumCol> = eligible
+                .iter()
+                .zip(values)
+                .filter(|((j, _), v)| {
+                    let c = &columns[*j];
+                    !(year_like(c, v) || (c.kind == ColumnKind::Integer && consecutive(v)))
+                })
+                .map(|(&(index, places), values)| NumCol {
+                    index,
                     places,
                     values,
                 })
-            })
-            .take(12)
-            .collect();
-        derived::find(&nums, rows)
+                .collect();
+            derived::find(&nums, checked_rows)
+        } else {
+            Vec::new()
+        }
     } else {
         Vec::new()
     };
@@ -485,7 +685,8 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
         columns,
         rows,
         ragged_rows,
-        unterminated_quote: has_unterminated_quote(text, dialect.delimiter, dialect.quote),
+        ragged_total,
+        unterminated_quote: has_unterminated_quote(text, delimiter, quote),
         derived,
     }
 }

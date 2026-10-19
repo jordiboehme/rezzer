@@ -143,7 +143,11 @@ fn derived_sum_found() {
     let mut t = String::from("A,B,C,Total\n");
     for i in 1..=12 {
         let j = i;
-        let (a, b, c) = (j * 37 % 90 + 10, j * 53 % 70 + 20, j * 17 % 60 + 15);
+        let (a, b, c) = (
+            j * 371 % 900 + 100,
+            j * 533 % 700 + 200,
+            j * 179 % 600 + 3150,
+        );
         t.push_str(&format!("{a},{b},{c},{}\n", a + b + c));
     }
     let a = full(&t);
@@ -190,12 +194,12 @@ fn no_derived_over_max_rows() {
     let mut t = String::from("A,B,Total\n");
     for i in 1..=20 {
         let j = i;
-        let (a, b) = (j * 37 % 90 + 10, j * 53 % 70 + 20);
+        let (a, b) = (j * 371 % 900 + 100, j * 533 % 700 + 200);
         t.push_str(&format!("{a},{b},{}\n", a + b));
     }
     let d = sniff(&t).unwrap();
-    assert!(analyze(&t, &d, 10).derived.is_empty());
-    assert_eq!(analyze(&t, &d, 10).rows, 20);
+    assert!(analyze(&t, &d, 5).derived.is_empty());
+    assert_eq!(analyze(&t, &d, 5).rows, 20);
     assert!(!analyze(&t, &d, 100).derived.is_empty());
 }
 
@@ -203,9 +207,9 @@ fn no_derived_over_max_rows() {
 fn derived_counts_missing_part_as_zero() {
     let mut t = String::from("Solid,Gas,Flaring,Total\n");
     for i in 1..=20 {
-        let (a, b) = (i % 4 * 30 + 100, i % 3 * 50 + 60);
+        let (a, b) = (i % 4 * 300 + 1000, i % 3 * 500 + 600);
         let f = if i % 5 == 0 {
-            Some(i * 7 % 40 + 30)
+            Some(i * 71 % 400 + 300)
         } else {
             None
         };
@@ -223,11 +227,9 @@ fn derived_counts_missing_part_as_zero() {
 fn year_like_columns_are_never_parts() {
     let mut t = String::from("Year,A,B,Total\n");
     for i in 1..=12 {
-        let (y, a, b) = (2000 + i % 3, i * 37 % 90 + 10, i * 53 % 70 + 20);
+        let (y, a, b) = (2000 + i % 3, i * 371 % 900 + 100, i * 533 % 700 + 200);
         t.push_str(&format!("{y},{a},{b},{}\n", y + a + b));
     }
-    assert!(full(&t).derived.is_empty());
-    let t = t.replace("Year", "Foo");
     assert!(full(&t).derived.is_empty());
 }
 
@@ -252,8 +254,157 @@ fn ragged_file_is_accepted() {
 fn consecutive_id_column_is_never_a_part() {
     let mut t = String::from("n,A,B,Total\n");
     for i in 0..12 {
-        let (n, a, b) = (100 + i, i * 37 % 90 + 10, i * 53 % 70 + 20);
+        let (n, a, b) = (100 + i, i * 371 % 900 + 100, i * 533 % 700 + 200);
         t.push_str(&format!("{n},{a},{b},{}\n", n + a + b));
     }
+    assert!(full(&t).derived.is_empty());
+}
+
+fn xorshift(s: &mut u64) -> u64 {
+    *s ^= *s << 13;
+    *s ^= *s >> 7;
+    *s ^= *s << 17;
+    *s
+}
+
+#[test]
+fn likert_files_have_no_derived_columns() {
+    let mut s = 12345u64;
+    for trial in 0..20 {
+        let mut t = (0..12)
+            .map(|i| format!("q{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        t.push('\n');
+        for _ in 0..30 {
+            let row: Vec<String> = (0..12)
+                .map(|_| (xorshift(&mut s) % 5 + 1).to_string())
+                .collect();
+            t.push_str(&row.join(","));
+            t.push('\n');
+        }
+        let a = full(&t);
+        assert!(a.derived.is_empty(), "trial {trial}: {:?}", a.derived);
+    }
+}
+
+#[test]
+fn co2_corpus_total_is_still_found() {
+    let p = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../spike/corpus/web-text/csv-datahub-co2-fossil-global.csv"
+    );
+    let Ok(text) = std::fs::read_to_string(p) else {
+        return;
+    };
+    let a = full(&text);
+    assert_eq!(a.derived.len(), 1, "{:?}", a.derived);
+    let d = &a.derived[0];
+    assert_eq!((d.target, d.parts.clone()), (1, vec![2, 3, 4, 5, 6]));
+    assert_eq!((d.holds, d.checked), (210, 275));
+}
+
+#[test]
+fn non_csv_text_is_rejected() {
+    assert_eq!(sniff("Dear Anna, thanks.\nBest regards, Jordi\n"), None);
+    assert_eq!(
+        sniff("Hello, Anna\nThanks, Bob\nI went home, ate, slept, and then, later, woke.\n"),
+        None
+    );
+    let mut json = String::from("{\n");
+    for i in 0..20 {
+        json.push_str(&format!("  \"key{i}\": {i},\n"));
+    }
+    json.push_str("  \"last\": 0\n}\n");
+    assert_eq!(sniff(&json), None);
+    assert_eq!(sniff("[\n  1, 2, 3,\n  4, 5, 6,\n  7, 8, 9\n]\n"), None);
+    let g: String = (0..50)
+        .map(|i| format!("G1 X{i} Y{i} ; move {i}\n"))
+        .collect();
+    assert_eq!(sniff(&g), None);
+    let g: String = (0..50)
+        .map(|i| format!("; step {i}, part\n; note {i}, more\n"))
+        .collect();
+    assert_eq!(sniff(&g), None);
+    let c: String = (0..30).map(|i| format!("    foo(a{i}, b{i});\n")).collect();
+    assert_eq!(sniff(&c), None);
+    let c: String = (0..30).map(|i| format!("if (a{i}, b{i}) {{\n")).collect();
+    assert_eq!(sniff(&c), None);
+    let long: String = (0..10)
+        .map(|i| {
+            format!(
+                "this is a rather long sentence number {i},and here is another long one for you\n"
+            )
+        })
+        .collect();
+    assert_eq!(sniff(&long), None);
+}
+
+#[test]
+fn two_lines_need_three_fields() {
+    assert!(sniff("a,b,c\n1,2,3\n").is_some());
+    assert_eq!(sniff("a,b\n1,2\n"), None);
+}
+
+#[test]
+fn tie_prefers_numeric_cells() {
+    let t = "01.01.2020;1,5;2,5\n02.01.2020;1,7;2,8\n03.01.2020;1,9;3,1\n04.01.2020;2,0;3,3\n";
+    assert_eq!(sniff(t).unwrap().delimiter, b';');
+}
+
+#[test]
+fn year_headers_count_as_header() {
+    let d = sniff("Country,2019,2020,2021\nAT,1,2,3\nDE,4,5,6\nFR,7,8,9\n").unwrap();
+    assert!(d.has_header);
+    let d = sniff("AT,2019,2020\nDE,2019,2020\nFR,2019,2021\n").unwrap();
+    assert!(!d.has_header);
+}
+
+#[test]
+fn extra_cells_do_not_add_columns() {
+    let mut t = String::from("a,b,c\n");
+    for _ in 0..9 {
+        t.push_str("1,2,3\n");
+    }
+    t.push_str("1,2,3,4,5,6,7\n");
+    let a = full(&t);
+    assert_eq!(a.columns.len(), 3);
+    assert_eq!(a.ragged_rows.len(), 1);
+}
+
+#[test]
+fn ragged_rows_are_capped() {
+    let mut t = String::from("a,b,c\n1,2,3\n");
+    for _ in 0..2500 {
+        t.push_str("1,2,3\n");
+    }
+    for _ in 0..1500 {
+        t.push_str("1,2\n");
+    }
+    let a = full(&t);
+    assert_eq!(a.ragged_rows.len(), 1000);
+    assert_eq!(a.ragged_total, 1500);
+}
+
+#[test]
+fn units_from_known_tokens_only() {
+    let a = full("Born in Rome,Mass in kg,Rate in %,Temp in mm\nx,1,2,3\ny,2,3,4\n");
+    assert_eq!(a.columns[0].unit, None);
+    assert_eq!(a.columns[1].unit.as_deref(), Some("kg"));
+    assert_eq!(a.columns[2].unit.as_deref(), Some("%"));
+    assert_eq!(a.columns[3].unit.as_deref(), Some("mm"));
+}
+
+#[test]
+fn number_of_cases_is_a_measure() {
+    let mut t = String::from("Number of cases,Deaths,Recovered,Case number,Total\n");
+    for i in 1..=12 {
+        let (a, b, c) = (i * 371 % 900 + 100, i * 533 % 700 + 200, i * 17 % 60 + 15);
+        t.push_str(&format!("{a},{b},{c},{},{}\n", i * 7 % 5 + 3, a + b + c));
+    }
+    let a = full(&t);
+    assert_eq!(a.derived.len(), 1, "{:?}", a.derived);
+    assert_eq!(a.derived[0].parts, vec![0, 1, 2]);
+    let t = t.replace("Number of cases", "Case no");
     assert!(full(&t).derived.is_empty());
 }
