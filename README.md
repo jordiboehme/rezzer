@@ -1,20 +1,47 @@
+```
+  ·    ·    ·    ·    ·    ·    ·    ·    ·    ·    ·    ·    ·
+       ┌───────┐
+  ·    │ .xlsx │━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓      ◆───◆    ·
+       │ .pdf  │                                  ┃     ╱ ╲ ╱ ╲
+  ·    │ .dxf  │    ·    ·    ·    ·    ·         ┗━━━▶◆───◆───◆  ·
+       └───────┘                                        ╲ ╱ ╲ ╱
+  ·    ·    ·    ·    ·    ·    ·    ·    ·    ·    ·    ◆───◆    ·
+
+██████╗ ███████╗███████╗███████╗███████╗██████╗
+██╔══██╗██╔════╝╚══███╔╝╚══███╔╝██╔════╝██╔══██╗
+██████╔╝█████╗    ███╔╝   ███╔╝ █████╗  ██████╔╝
+██╔══██╗██╔══╝   ███╔╝   ███╔╝  ██╔══╝  ██╔══██╗
+██║  ██║███████╗███████╗███████╗███████╗██║  ██║
+╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
+```
+
 # Rezzer
 
 **Rez your files into knowledge.**
 
-Rezzer is a knowledge extraction pipeline for AI agents. It reads your files and finds what they know: structure, metadata, facts, intent and the logic behind them. It hands that over as Markdown an agent can learn from and a person can read. Use it to understand a file better or to add it to a knowledge base.
+[![License: MPL-2.0](https://img.shields.io/github/license/jordiboehme/rezzer)](LICENSE)
+[![Status: early](https://img.shields.io/badge/status-early-orange)](#status)
+[![Works best with Crystalline](.github/badges/works-best-with-crystalline.svg)](https://github.com/jordiboehme/crystalline)
+
+Greetings, program.
+
+Rezzer is a knowledge extraction pipeline for AI agents. It reads your files and finds what they know: structure, metadata, facts, intent and the logic behind them. It hands that over as Markdown an agent can learn from and a person can read. Use it to understand a file or to add it to a knowledge base.
 
 It's not a converter that dumps plain text. A spreadsheet is more than its values. A contract is more than its words. Rezzer keeps the formulas, the comments, the tracked changes and everything else that tells what a file means.
 
-One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine.
+One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
 
-> **Status: design phase.** There is no code to install yet. This README describes what Rezzer is built to do. Formats and crates were picked after tests on public files.
+The banner is the whole idea: a file goes into the grid, a light trail runs through it and on the other side a knowledge graph rezzes in.
+
+## Status
+
+Early. The design is done, the formats and crates are picked after tests on about 600 public files and the code is being written right now. There is nothing to install yet. This README describes what Rezzer is built to do. Star the repo if you want to see it rez.
 
 ## Why
 
-Ask an agent to read a `.docx`, an old `.xls` or a PDF form and watch what happens. It writes a Python script, installs a library, tries again and in the end gets a wall of text. The tables are broken, the formulas are gone and the comments never made it. Next session it does the same thing again.
+Ask an agent to read a `.docx`, an old `.xls` or a PDF form and watch what happens. It writes a Python script, installs a library, tries again and in the end gets a wall of text. The tables are broken, the formulas are gone and the comments never made it. Next session it does the same thing again. Groundhog Day, but with `pip install`.
 
-Rezzer replaces that with one tool that knows the formats. The agent asks for a file and gets back the knowledge in it. Every time, the same way.
+Rezzer replaces that with one tool that knows the formats. The agent asks for a file and gets back the knowledge in it. Every time, the same way. No Python environment, no JVM, no "let me try another library".
 
 ## How it works
 

@@ -2,7 +2,7 @@
 
 One page per format: what Rezzer gets out of it, which crates it builds on, how it shows up in the output and what it can't do yet.
 
-Rezzer is in the design phase. Nothing is implemented yet. These pages describe what is planned.
+Rezzer is in early development. Nothing is implemented yet. These pages describe what is planned.
 
 | Page | Formats | Status |
 |---|---|---|
