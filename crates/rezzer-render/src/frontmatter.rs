@@ -108,10 +108,11 @@ fn is_real_date(date: &str) -> bool {
     (1..=days).contains(&day)
 }
 
+/// A real calendar date from a document property; anything else is no date.
 fn value_date(value: &Value) -> Option<&str> {
     match value {
         Value::Date { value } | Value::DateTime { value } | Value::Text { value } => {
-            date_prefix(value)
+            date_prefix(value).filter(|d| is_real_date(d))
         }
         _ => None,
     }

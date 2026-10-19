@@ -1297,10 +1297,30 @@ fn impossible_dates_are_quoted() {
         d.properties.modified = Some(Value::Date { value: v.into() });
         render(&d, Completeness::Complete, &opts())
     };
-    assert!(date("2024-02-29").contains("\nsource_date: 2024-02-29\n"));
-    assert!(date("2026-02-30").contains("\nsource_date: \"2026-02-30\"\n"));
-    assert!(date("2026-04-31").contains("\nsource_date: \"2026-04-31\"\n"));
-    assert!(date("2100-02-29").contains("\nsource_date: \"2100-02-29\"\n"));
+    assert!(date("2024-02-29").contains("\nsource_date: 2024-02-29\ntemporal_confidence: high\n"));
+    // An impossible document date falls back to the file date.
+    let file_date = "\nsource_date: 2026-01-05\ntemporal_confidence: medium\n";
+    for bad in ["2026-02-30", "2025-13-01", "2026-04-31", "2100-02-29"] {
+        assert!(date(bad).contains(file_date), "{bad}");
+    }
+    // ... or to the created date when that one is real.
+    let mut d = doc();
+    d.properties.modified = Some(Value::Date {
+        value: "2026-02-30".into(),
+    });
+    d.properties.created = Some(Value::Date {
+        value: "2025-03-04".into(),
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2025-03-04\ntemporal_confidence: high\n"),
+        "{md}"
+    );
+    // An impossible file date is quoted.
+    let mut d = doc();
+    d.source.modified = Some("2026-02-30T00:00:00Z".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\nsource_date: \"2026-02-30\"\n"), "{md}");
 }
 
 #[test]
@@ -1336,7 +1356,7 @@ fn only_safe_schemes_become_links() {
     }]);
     assert!(
         md.contains(
-            "go `javascript:alert(1)` go `java script:x` pic `data:image/png;base64,AA` \
+            "go `javascript:alert(1)` go `java\tscript:x` pic `data:image/png;base64,AA` \
 [go](HTTPS://ok.example/a%5B%5Bb%5D%5D) [go](mailto:a@b.c) [go](docs/x.md#y) \
 [go](C:/dir/file)\n"
         ),
@@ -1347,7 +1367,7 @@ fn only_safe_schemes_become_links() {
 #[test]
 fn single_dollar_pairs_do_not_form_math() {
     let md = body_of(vec![para("costs $x$ y and $5")]);
-    assert!(md.contains("costs \\$x\\$ y and $5\n"), "{md}");
+    assert!(md.contains("costs \\$x\\$ y and \\$5\n"), "{md}");
     let body = after_frontmatter(&md);
     for e in Parser::new_ext(body, Options::ENABLE_MATH) {
         assert!(
@@ -1376,5 +1396,109 @@ fn mermaid_caps_edges() {
         md.contains("Only the first 1000 of 1500 edges are shown: 500 edges are left out."),
         "{}",
         &md[md.len() - 300..]
+    );
+}
+
+#[test]
+fn character_references_cannot_sneak_a_scheme_in() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: Some("see [[Target]]".into()),
+        internal: false,
+        inlines: vec![txt("go")],
+    };
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![
+            link("javascript&#58;alert(1)"),
+            txt(" "),
+            link("javascript&colon;alert(1)"),
+            txt(" "),
+            link("jav&#x61;script:alert(1)"),
+            txt(" "),
+            link("https://ok.example/?a=1&b=2"),
+        ],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "go `javascript&#58;alert(1)` go `javascript&colon;alert(1)` \
+go `jav&#x61;script:alert(1)` \
+[go](https://ok.example/?a=1\\&b=2 \"see \\[\\[Target\\]\\]\")\n"
+        ),
+        "{md}"
+    );
+    let body = after_frontmatter(&md);
+    let mut links = Vec::new();
+    for e in Parser::new_ext(body, Options::empty()) {
+        if let Event::Start(Tag::Link { dest_url, .. }) = e {
+            links.push(dest_url.to_string());
+        }
+    }
+    assert_eq!(links, ["https://ok.example/?a=1&b=2"], "{body}");
+}
+
+#[test]
+fn dollar_pairs_across_runs_are_escaped() {
+    let md = body_of(vec![
+        Block::Paragraph {
+            inlines: vec![
+                txt("a $x "),
+                Inline::Code { text: "c$".into() },
+                txt(" y$ b"),
+            ],
+            role: None,
+            anchor: None,
+        },
+        Block::Paragraph {
+            inlines: vec![txt("p $q "), styled("strong", false, true), txt(" r$ s")],
+            role: None,
+            anchor: None,
+        },
+        para("only $5 here"),
+    ]);
+    assert!(md.contains("a \\$x `c$` y\\$ b\n"), "{md}");
+    assert!(md.contains("p \\$q **strong** r\\$ s\n"), "{md}");
+    assert!(md.contains("only $5 here\n"), "{md}");
+    for e in Parser::new_ext(after_frontmatter(&md), Options::ENABLE_MATH) {
+        assert!(
+            !matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)),
+            "{md}"
+        );
+    }
+}
+
+#[test]
+fn inline_code_keeps_tabs() {
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![Inline::Code {
+            text: "a\tb".into(),
+        }],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(md.contains("\n`a\tb`\n"), "{md}");
+}
+
+#[test]
+fn merge_note_names_only_shown_rows() {
+    let row = |n: usize| -> Vec<Cell> {
+        (0..n)
+            .map(|i| Cell::new(vec![txt(&i.to_string())]))
+            .collect()
+    };
+    let mut rows: Vec<Vec<Cell>> = (0..300).map(|_| row(1000)).collect();
+    rows[0][0].row_span = 300;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains("Merged cells: A1:A200\n"),
+        "{}",
+        &md[md.len() - 200..]
     );
 }

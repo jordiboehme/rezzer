@@ -40,11 +40,32 @@ pub(crate) struct Ctx<'a> {
 /// Renders inlines. In [`Mode::Block`] the result still needs [`finish_lines`].
 pub(crate) fn inlines(list: &[Inline], mode: Mode) -> String {
     let merged = fix_flanking(merge_text(list));
+    let dollars = count_dollars(&merged) >= 2;
     let mut out = String::new();
     for inline in &merged {
-        inline_into(inline, mode, 0, &mut out);
+        inline_into(inline, mode, 0, dollars, &mut out);
     }
     out
+}
+
+/// The `$` signs in the text runs of `list` (not in code or math), walked with a stack.
+fn count_dollars(list: &[Inline]) -> usize {
+    let mut n = 0;
+    let mut stack: Vec<std::slice::Iter<'_, Inline>> = vec![list.iter()];
+    while let Some(top) = stack.last_mut() {
+        let Some(inline) = top.next() else {
+            stack.pop();
+            continue;
+        };
+        match inline {
+            Inline::Text { text, .. }
+            | Inline::Status { text, .. }
+            | Inline::Image { alt: text, .. } => n += text.matches('$').count(),
+            Inline::Link { inlines, .. } => stack.push(inlines.iter()),
+            _ => {}
+        }
+    }
+    n
 }
 
 /// Joins neighbouring text runs with the same style, so `**a****b**` never happens.
@@ -223,14 +244,14 @@ fn take_word(list: &mut [Inline], j: usize, leading: bool) -> Option<String> {
     }
 }
 
-fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String) {
+fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, out: &mut String) {
     match inline {
         Inline::Text {
             text,
             emphasis,
             strong,
             strike,
-        } => styled_text(text, *emphasis, *strong, *strike, mode, out),
+        } => styled_text(text, *emphasis, *strong, *strike, mode, dollars, out),
         Inline::LineBreak => {
             if mode == Mode::Block {
                 out.push_str("\\\n");
@@ -240,13 +261,13 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
         }
         Inline::Image { target, alt, title } => {
             if !safe_target(target) {
-                escape_text(alt, line_mode(mode), out);
+                escape_with(alt, line_mode(mode), dollars, out);
                 out.push(' ');
                 code_span(target, line_mode(mode), out);
                 return;
             }
             out.push_str("![");
-            escape_text(alt, line_mode(mode), out);
+            escape_with(alt, line_mode(mode), dollars, out);
             out.push_str("](");
             destination(target, title.as_deref(), mode, out);
             out.push(')');
@@ -260,21 +281,21 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
         } => {
             if link_depth > MAX_DEPTH {
                 // Too deep to walk by recursion: the text stays, flattened.
-                escape_text(&flat_text(content), line_mode(mode), out);
+                escape_with(&flat_text(content), line_mode(mode), dollars, out);
                 return;
             }
             let merged = fix_flanking(merge_text(content));
             if link_depth > 0 {
                 // A link inside a link text keeps only its text.
                 for inner in &merged {
-                    inline_into(inner, line_mode(mode), link_depth + 1, out);
+                    inline_into(inner, line_mode(mode), link_depth + 1, dollars, out);
                 }
                 return;
             }
             if !safe_target(target) {
                 // Never a live link: the text, then the target as code.
                 for inner in &merged {
-                    inline_into(inner, line_mode(mode), 1, out);
+                    inline_into(inner, line_mode(mode), 1, dollars, out);
                 }
                 out.push(' ');
                 code_span(target, line_mode(mode), out);
@@ -282,7 +303,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
             }
             out.push('[');
             for inner in &merged {
-                inline_into(inner, line_mode(mode), 1, out);
+                inline_into(inner, line_mode(mode), 1, dollars, out);
             }
             out.push_str("](");
             destination(target, title.as_deref(), mode, out);
@@ -296,7 +317,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, out: &mut String)
         Inline::Math { latex } => inline_math(latex, mode, out),
         Inline::Status { text, color } => {
             out.push_str(":status[");
-            escape_text(text, line_mode(mode), out);
+            escape_with(text, line_mode(mode), dollars, out);
             out.push_str("]{");
             out.push_str(status_color(*color));
             out.push('}');
@@ -320,21 +341,22 @@ fn styled_text(
     strong: bool,
     strike: bool,
     mode: Mode,
+    dollars: bool,
     out: &mut String,
 ) {
     if !(emphasis || strong || strike) {
-        escape_text(text, mode, out);
+        escape_with(text, mode, dollars, out);
         return;
     }
     // Delimiters must touch the text, so outer whitespace goes outside them.
     let core = text.trim();
     if core.is_empty() {
-        escape_text(text, mode, out);
+        escape_with(text, mode, dollars, out);
         return;
     }
     let start = text.len() - text.trim_start().len();
     let end = start + core.len();
-    escape_text(&text[..start], mode, out);
+    escape_with(&text[..start], mode, dollars, out);
     let mut open = String::new();
     if strike {
         open.push_str("~~");
@@ -347,9 +369,9 @@ fn styled_text(
     }
     let close: String = open.chars().rev().collect();
     out.push_str(&open);
-    escape_text(core, mode, out);
+    escape_with(core, mode, dollars, out);
     out.push_str(&close);
-    escape_text(&text[end..], mode, out);
+    escape_with(&text[end..], mode, dollars, out);
 }
 
 /// Escapes text from a file so that it stays text.
@@ -357,6 +379,12 @@ fn styled_text(
 /// Line-start markers (`#`, `>`, `-`, `+`, `=`, `1.`) are handled per line in
 /// [`finish_lines`]; everything that is structure anywhere in a line is handled here.
 pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
+    escape_with(text, mode, false, out);
+}
+
+/// [`escape_text`]; with `dollars` every `$` is escaped (the block has a pair of them
+/// across its runs).
+fn escape_with(text: &str, mode: Mode, dollars: bool, out: &mut String) {
     let chars: Vec<char> = text.chars().collect();
     let mut prev: Option<char> = None;
     // A `$` with another `$` later in the run could pair into math in GitHub's reading.
@@ -374,6 +402,7 @@ pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
             // span may follow).
             '$' if matches!(next, Some('`') | Some('$') | None)
                 || prev == Some('$')
+                || dollars
                 || last_dollar.is_some_and(|l| i < l) =>
             {
                 out.push_str("\\$");
@@ -424,7 +453,7 @@ fn longest_run(text: &str, ch: char) -> usize {
 fn one_line(text: &str, mode: Mode) -> String {
     let mut s: String = text
         .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if c.is_control() && c != '\t' { ' ' } else { c })
         .collect();
     if mode == Mode::Cell {
         s = s.replace('|', "\\|");
@@ -499,12 +528,17 @@ fn flat_text(list: &[Inline]) -> String {
 /// mailto, ftp or file. Tabs and newlines are ignored and leading spaces and controls
 /// trimmed first, as browsers do.
 fn safe_target(target: &str) -> bool {
-    let cleaned: String = target
+    let decoded = decode_references(target);
+    let cleaned: String = decoded
         .trim_start_matches(|c: char| c <= ' ')
         .chars()
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
     let before = cleaned.split(['/', '?', '#']).next().unwrap_or("");
+    // A reference the decoder does not know could still hide a scheme.
+    if has_reference(before) {
+        return false;
+    }
     let Some((scheme, _)) = before.split_once(':') else {
         return true;
     };
@@ -522,6 +556,86 @@ fn safe_target(target: &str) -> bool {
     )
 }
 
+/// Decodes numeric character references and the named ones that could spell a scheme or
+/// its separators (`&colon;`, `&Tab;`, ...), as a Markdown reader would before a browser
+/// sees the target.
+fn decode_references(text: &str) -> String {
+    const NAMED: &[(&str, char)] = &[
+        ("colon", ':'),
+        ("Tab", '\t'),
+        ("NewLine", '\n'),
+        ("sol", '/'),
+        ("quest", '?'),
+        ("num", '#'),
+        ("period", '.'),
+        ("comma", ','),
+        ("plus", '+'),
+        ("hyphen", '-'),
+        ("dash", '-'),
+        ("minus", '-'),
+        ("lpar", '('),
+        ("rpar", ')'),
+        ("semi", ';'),
+        ("excl", '!'),
+        ("equals", '='),
+        ("commat", '@'),
+        ("percnt", '%'),
+        ("amp", '&'),
+        ("AMP", '&'),
+        ("lt", '<'),
+        ("LT", '<'),
+        ("gt", '>'),
+        ("GT", '>'),
+        ("quot", '"'),
+        ("QUOT", '"'),
+        ("apos", '\''),
+        ("nbsp", ' '),
+    ];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let decoded = after.find(';').filter(|&end| end <= 32).and_then(|end| {
+            let name = &after[..end];
+            let c = if let Some(num) = name.strip_prefix('#') {
+                let value = match num.strip_prefix(['x', 'X']) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => num.parse::<u32>().ok(),
+                }?;
+                char::from_u32(value).unwrap_or('\u{fffd}')
+            } else {
+                NAMED.iter().find(|(n, _)| *n == name)?.1
+            };
+            Some((c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// True when `text` still holds something shaped like a character reference.
+fn has_reference(text: &str) -> bool {
+    text.match_indices('&').any(|(i, _)| {
+        let after = &text[i + 1..];
+        let name_len = after
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '#')
+            .count();
+        name_len > 0 && after[name_len..].starts_with(';')
+    })
+}
+
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
         out.push_str("<>");
@@ -536,6 +650,7 @@ fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) 
             '[' => out.push_str("%5B"),
             ']' => out.push_str("%5D"),
             '|' => out.push_str("%7C"),
+            '&' => out.push_str("\\&"),
             '\\' => out.push_str("\\\\"),
             c if c.is_control() => {
                 let mut buf = [0u8; 4];
@@ -559,6 +674,10 @@ fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) 
                 '\n' | '\r' => out.push(' '),
                 '<' => out.push_str("&lt;"),
                 '|' if mode == Mode::Cell => out.push_str("\\|"),
+                '[' | ']' => {
+                    out.push('\\');
+                    out.push(c);
+                }
                 c => out.push(c),
             }
         }
@@ -1140,7 +1259,8 @@ fn model_table(
     // Place every cell on a grid; spanned positions repeat the text. Rows stop once the
     // grid would pass MAX_CELLS; the header row is always shown.
     let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
-    let mut merged: Vec<(usize, String)> = Vec::new();
+    // (row, column, column span, row span) of every merged cell.
+    let mut merged: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut filled = 0usize;
     let mut width = 0usize;
     let mut wanted = 0usize;
@@ -1177,16 +1297,7 @@ fn model_table(
                 }
             }
             if rs > 1 || cs > 1 {
-                merged.push((
-                    r,
-                    format!(
-                        "{}{}:{}{}",
-                        column_letter(c),
-                        r + 1,
-                        column_letter(c + cs - 1),
-                        r + rs
-                    ),
-                ));
+                merged.push((r, c, cs, rs));
             }
             c += cs;
             wanted = wanted.max(c);
@@ -1213,10 +1324,19 @@ fn model_table(
     }
     out.push_str(&pipe_table(&header, aligns, body));
     let mut notes: Vec<String> = Vec::new();
+    // Only rows that are shown are named; a span into hidden rows ends at the last one.
     let merged: Vec<String> = merged
         .into_iter()
-        .filter(|(r, _)| *r < shown)
-        .map(|(_, m)| m)
+        .filter(|(r, ..)| *r < shown)
+        .map(|(r, c, cs, rs)| {
+            format!(
+                "{}{}:{}{}",
+                column_letter(c),
+                r + 1,
+                column_letter(c + cs - 1),
+                (r + rs).min(shown)
+            )
+        })
         .collect();
     if !merged.is_empty() {
         notes.push(format!("Merged cells: {}", merged.join(", ")));
