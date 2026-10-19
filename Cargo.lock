@@ -397,6 +397,7 @@ dependencies = [
  "cfb",
  "csv",
  "csvsniff",
+ "flate2",
  "hex",
  "libc",
  "memmap2",

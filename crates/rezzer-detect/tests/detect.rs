@@ -606,7 +606,7 @@ fn cfb_tree(storages: &[&str], streams: &[&str]) -> Vec<u8> {
 /// Above 65,535 entries it writes the ZIP64 end records, as conforming writers do, unless
 /// `zip64` is false.
 fn raw_zip_empty_entries(n: u32) -> Vec<u8> {
-    raw_zip(n, true)
+    raw_zip(n, n > 0xFFFF)
 }
 
 fn raw_zip(n: u32, zip64: bool) -> Vec<u8> {
@@ -632,7 +632,7 @@ fn raw_zip(n: u32, zip64: bool) -> Vec<u8> {
     let cd_offset = out.len() as u32;
     let cd_size = central.len() as u32;
     out.extend_from_slice(&central);
-    if zip64 && n > 0xFFFF {
+    if zip64 {
         let z64 = out.len() as u64;
         out.extend_from_slice(b"PK\x06\x06");
         out.extend_from_slice(&44u64.to_le_bytes());
@@ -648,11 +648,20 @@ fn raw_zip(n: u32, zip64: bool) -> Vec<u8> {
     }
     out.extend_from_slice(b"PK\x05\x06");
     out.extend_from_slice(&[0u8; 4]);
-    let count = u16::try_from(n).unwrap_or(0xFFFF);
+    let count = if zip64 {
+        0xFFFF
+    } else {
+        u16::try_from(n).unwrap_or(0xFFFF)
+    };
     out.extend_from_slice(&count.to_le_bytes());
     out.extend_from_slice(&count.to_le_bytes());
-    out.extend_from_slice(&cd_size.to_le_bytes());
-    out.extend_from_slice(&cd_offset.to_le_bytes());
+    let (size_field, offset_field) = if zip64 {
+        (0xFFFF_FFFF, 0xFFFF_FFFF)
+    } else {
+        (cd_size, cd_offset)
+    };
+    out.extend_from_slice(&size_field.to_le_bytes());
+    out.extend_from_slice(&offset_field.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out
 }
@@ -876,7 +885,13 @@ fn zip64_directory_claim_is_checked() {
     bytes.extend_from_slice(&0u16.to_le_bytes());
     let (f, d) = detect("x.zip", &bytes);
     assert_eq!(f, FormatId::Zip);
-    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    // The claim does not fit the file, so the directory is not even located.
+    assert!(
+        d.evidence.contains("too large to list") || d.evidence.contains("not readable"),
+        "{}",
+        d.evidence
+    );
 }
 
 #[test]
@@ -925,8 +940,8 @@ fn excellon_without_m48() {
 /// Sweep over the local spike corpus (not in git). Run with `--ignored` when it exists.
 #[test]
 #[ignore = "needs the local spike corpus"]
-fn spike_cad_corpus_sweep() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spike/corpus/cad");
+fn spike_corpus_sweep() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spike/corpus");
     let expect = |ext: &str| match ext {
         "dxf" => Some(FormatId::Dxf),
         "3dm" => Some(FormatId::Rhino3dm),
@@ -952,6 +967,15 @@ fn spike_cad_corpus_sweep() {
         "glb" => Some(FormatId::Glb),
         "gltf" => Some(FormatId::Gltf),
         "bgcode" => Some(FormatId::Bgcode),
+        "docx" => Some(FormatId::Docx),
+        "xlsx" => Some(FormatId::Xlsx),
+        "xlsm" => Some(FormatId::Xlsm),
+        "pptx" => Some(FormatId::Pptx),
+        "odt" => Some(FormatId::Odt),
+        "ods" => Some(FormatId::Ods),
+        "odp" => Some(FormatId::Odp),
+        "epub" => Some(FormatId::Epub),
+        "pdf" => Some(FormatId::Pdf),
         _ => None,
     };
     let mut bad = Vec::new();
@@ -979,7 +1003,14 @@ fn spike_cad_corpus_sweep() {
             let Some(want) = want else {
                 continue;
             };
-            if name.contains("synthetic") || p.to_string_lossy().contains("/synthetic/") {
+            let shown = p.to_string_lossy();
+            // Extensions shared with other formats (Eagle .sch, NetCDF .nc) are only
+            // expected under cad/; malformed samples are expected to fail.
+            let shared = matches!(ext.as_deref(), Some("sch" | "nc")) && !shown.contains("/cad/");
+            if shared || shown.contains("/malformed/") {
+                continue;
+            }
+            if name.contains("synthetic") || shown.contains("/synthetic/") {
                 continue;
             }
             let bytes = std::fs::read(&p).unwrap();
@@ -1117,4 +1148,171 @@ fn inventor_assembly_vs_part() {
     let (f, d) = detect("x", &cfb_inventor(&["PmDc", "PmBRep"]));
     assert_eq!(f, FormatId::Ipt, "{}", d.evidence);
     assert!(d.evidence.contains("part"), "{}", d.evidence);
+}
+
+// ---- Fix round 4: own bounded ZIP directory walk, stricter binary PDF prefix ----
+
+/// Appends a decoy end record: one entry, a 46-byte directory at an offset past the file.
+fn with_decoy_eocd(mut zip: Vec<u8>) -> Vec<u8> {
+    zip.extend_from_slice(b"PK\x05\x06");
+    for v in [0u16, 0, 1, 1] {
+        zip.extend_from_slice(&v.to_le_bytes());
+    }
+    zip.extend_from_slice(&46u32.to_le_bytes());
+    zip.extend_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+    zip.extend_from_slice(&0u16.to_le_bytes());
+    zip
+}
+
+/// Inserts 4 junk bytes before the ZIP64 end record (so the locator no longer points at it),
+/// lowers its directory offset by 4 and sets the classic directory size to 1000.
+fn with_shifted_zip64(zip: Vec<u8>) -> Vec<u8> {
+    let n = zip.len();
+    let (body, tail) = zip.split_at(n - 98);
+    let (e64, rest) = tail.split_at(56);
+    let (loc, eocd) = rest.split_at(20);
+    assert_eq!(&e64[..4], b"PK\x06\x06");
+    assert_eq!(&loc[..4], b"PK\x06\x07");
+    assert_eq!(&eocd[..4], b"PK\x05\x06");
+    let cd_off = u64::from_le_bytes(e64[48..56].try_into().unwrap());
+    let mut out = body.to_vec();
+    out.extend_from_slice(b"JUNK");
+    out.extend_from_slice(&e64[..48]);
+    out.extend_from_slice(&(cd_off - 4).to_le_bytes());
+    out.extend_from_slice(loc);
+    out.extend_from_slice(&eocd[..12]);
+    out.extend_from_slice(&1000u32.to_le_bytes());
+    out.extend_from_slice(&eocd[16..]);
+    out
+}
+
+#[test]
+fn latin1_prose_quoting_pdf_header_is_text() {
+    let bytes = b"Caf\xe9 notes, see header:\n%PDF-1.7\nend\n";
+    let (f, d) = detect("latin1.txt", bytes);
+    assert_eq!(f, FormatId::Text, "{}", d.evidence);
+}
+
+#[test]
+fn decoy_end_record_is_skipped() {
+    // Small archive: the decoy is skipped and the real directory is listed.
+    let ct = content_types(
+        r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    );
+    let docx = zip_of(&[("[Content_Types].xml", &ct), ("word/document.xml", b"<w/>")]);
+    let (f, d) = detect("x", &with_decoy_eocd(docx));
+    assert_eq!(f, FormatId::Docx, "{}", d.evidence);
+    // Large archive: the decoy does not hide the real entry count.
+    let (f, d) = detect(
+        "decoy.zip",
+        &with_decoy_eocd(raw_zip_empty_entries(200_000)),
+    );
+    assert_eq!(f, FormatId::Zip);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+}
+
+#[test]
+fn shifted_zip64_end_record_is_found() {
+    let (f, d) = detect("x.zip", &with_shifted_zip64(raw_zip(3, true)));
+    assert_eq!(f, FormatId::Zip, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain, "{}", d.evidence);
+    assert!(d.evidence.contains("3 entries"), "{}", d.evidence);
+    let (f, d) = detect(
+        "locshift.zip",
+        &with_shifted_zip64(raw_zip_empty_entries(200_000)),
+    );
+    assert_eq!(f, FormatId::Zip);
+    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+}
+
+#[test]
+fn zip_without_consistent_end_record_is_not_readable() {
+    let mut bytes = zip_of(&[("a.txt", b"hello")]);
+    let n = bytes.len();
+    // Point the directory past the end of the file.
+    bytes[n - 6..n - 2].copy_from_slice(&0x7FFF_FFFFu32.to_le_bytes());
+    let (f, d) = detect("x.zip", &bytes);
+    assert_eq!(f, FormatId::Zip);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(
+        d.evidence.contains("zip directory not readable"),
+        "{}",
+        d.evidence
+    );
+}
+
+#[test]
+fn frontmatter_with_key_like_first_body_line() {
+    let post = b"---\ntitle: Release\n---\nUpdate: the new version is out.\n\nIt fixes two bugs.\n";
+    let (f, d) = detect("post2.txt", post);
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+}
+
+#[test]
+fn yaml_with_list_document_is_not_markdown() {
+    assert_eq!(
+        detect("x.yaml", b"---\nname: a\n---\n- x\n- y\n").0,
+        FormatId::Text
+    );
+}
+
+/// Memory check for 1,000,000-entry archives (about 90 MB each), with a decoy end record
+/// and with a moved ZIP64 record. Run by hand:
+/// `cargo test -p rezzer-detect --release --test detect zip_million_entries_memory -- --ignored --nocapture`
+/// With `REZZER_ZIP_PROBES=<dir>` the files `decoy.zip` and `locshift.zip` from that directory
+/// are checked too.
+#[cfg(unix)]
+#[test]
+#[ignore = "builds 90 MB archives; run by hand for the memory check"]
+fn zip_million_entries_memory() {
+    let mut inputs = vec![
+        (
+            "locshift (built)",
+            with_shifted_zip64(raw_zip_empty_entries(1_000_000)),
+        ),
+        (
+            "decoy (built)",
+            with_decoy_eocd(raw_zip_empty_entries(1_000_000)),
+        ),
+    ];
+    if let Ok(dir) = std::env::var("REZZER_ZIP_PROBES") {
+        for name in ["decoy.zip", "locshift.zip"] {
+            let path = std::path::Path::new(&dir).join(name);
+            inputs.push((name, std::fs::read(&path).unwrap()));
+        }
+    }
+    let before = max_rss_bytes();
+    for (label, bytes) in &inputs {
+        let start = std::time::Instant::now();
+        let (f, d) = detect(label, bytes);
+        eprintln!(
+            "{label}: {} bytes, {:?}, {f:?} ({})",
+            bytes.len(),
+            start.elapsed(),
+            d.evidence
+        );
+        assert_eq!(f, FormatId::Zip);
+        assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+    }
+    let after = max_rss_bytes();
+    eprintln!(
+        "max RSS with all inputs in memory: {} MB before detection, {} MB after",
+        before / 1_000_000,
+        after / 1_000_000
+    );
+}
+
+#[cfg(unix)]
+fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
 }

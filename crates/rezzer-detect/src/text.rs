@@ -631,9 +631,10 @@ fn ordered_item(t: &str) -> bool {
     (1..=9).contains(&digits) && t[digits..].starts_with(". ")
 }
 
-/// YAML (`---`) or TOML (`+++`) frontmatter: a fence on line 1, `key: value` or
-/// `key = value` lines, a closing fence and a body. A body that starts with another
-/// `key: value` line or a `---` fence is a multi-document YAML file, not Markdown.
+/// YAML (`---`) or TOML (`+++`) frontmatter: a fence on line 1, a mapping (`key: value` or
+/// `key = value` lines), a closing fence and a body. A body made only of YAML lines (keys,
+/// list items, indented lines, comments, document fences) is a multi-document YAML file,
+/// not Markdown; one prose line in the body is enough for Markdown.
 fn frontmatter(lines: &[&str]) -> Option<&'static str> {
     let first = lines.first()?.trim_end();
     let (fence, close_alt, kind, sep) = match first {
@@ -648,11 +649,21 @@ fn frontmatter(lines: &[&str]) -> Option<&'static str> {
             if keys == 0 {
                 return None;
             }
-            let body = lines[i + 1..]
+            let body: Vec<&str> = lines[i + 1..]
                 .iter()
-                .map(|l| l.trim())
-                .find(|l| !l.is_empty())?;
-            return (!(body == "---" || yaml_key_line(body))).then_some(kind);
+                .map(|l| l.trim_end())
+                .filter(|l| !l.trim().is_empty())
+                .collect();
+            let yaml_only = body.iter().all(|l| {
+                l.starts_with([' ', '\t'])
+                    || l.starts_with("- ")
+                    || *l == "-"
+                    || l.starts_with('#')
+                    || *l == "---"
+                    || *l == "..."
+                    || yaml_key_line(l)
+            });
+            return (!body.is_empty() && !yaml_only).then_some(kind);
         }
         let t = l.trim_start();
         if t.is_empty() || t.starts_with('#') || l.starts_with([' ', '\t']) || t.starts_with("- ") {

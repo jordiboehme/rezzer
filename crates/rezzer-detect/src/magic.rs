@@ -131,16 +131,15 @@ pub(crate) fn detect_patterns(bytes: &[u8]) -> Option<Found> {
     ascii_stl(bytes)
 }
 
-/// PDF readers accept junk before the header. Only a binary prefix counts: when the bytes
-/// before `%PDF-` are text, the file is a text that quotes the header.
+/// PDF readers accept junk before the header. Only a binary prefix counts: it must hold a
+/// control byte (0x00 to 0x08, 0x0E to 0x1F or 0x7F). Text before `%PDF-`, in any encoding,
+/// is a text that quotes the header.
 fn pdf_after_junk(bytes: &[u8]) -> Option<Found> {
     let head = &bytes[..bytes.len().min(PDF_WINDOW)];
     let pos = find(head, b"%PDF-")?;
-    let prefix = &head[..pos];
-    let binary = std::str::from_utf8(prefix).is_err()
-        || prefix
-            .iter()
-            .any(|&b| (b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0C)) || b == 0x7F);
+    let binary = head[..pos]
+        .iter()
+        .any(|&b| matches!(b, 0x00..=0x08 | 0x0E..=0x1F | 0x7F));
     binary.then(|| {
         found(
             FormatId::Pdf,

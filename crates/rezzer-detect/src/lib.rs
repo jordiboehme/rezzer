@@ -14,6 +14,7 @@ mod container;
 mod magic;
 mod source;
 mod text;
+mod zipwalk;
 
 use std::path::Path;
 

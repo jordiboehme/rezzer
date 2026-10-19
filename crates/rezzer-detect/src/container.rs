@@ -4,7 +4,7 @@
 
 //! Looks inside ZIP and OLE (CFB) containers to tell their formats apart.
 //!
-//! Only the directory is listed, and only when the end record says it has at most
+//! ZIP: the central directory is walked by [`crate::zipwalk`], header by header, at most
 //! 100,000 entries and 64 MiB; larger directories are not listed during detection. At most
 //! [`READ_BUDGET`] bytes are decompressed in total (`[Content_Types].xml`, `mimetype` and the
 //! Fusion `Manifest.dat`). A broken container never panics: it is reported as
@@ -14,6 +14,7 @@ use std::io::{Cursor, Read};
 
 use rezzer_model::{Confidence, FormatId};
 
+use crate::zipwalk::{self, u16_at, u32_at};
 use crate::{Found, clean, found};
 
 /// Most bytes decompressed while looking inside one container.
@@ -129,12 +130,7 @@ const MIMETYPES: &[(&str, FormatId)] = &[
 /// Detects the format of a ZIP archive.
 pub(crate) fn zip(bytes: &[u8]) -> Found {
     match rezzer_limits::contain(|| zip_inner(bytes)) {
-        Ok(Ok(f)) => f,
-        Ok(Err(e)) => found(
-            FormatId::Zip,
-            Confidence::Likely,
-            format!("zip signature, but the archive directory is unreadable: {e}"),
-        ),
+        Ok(f) => f,
         Err(panic) => found(
             FormatId::Zip,
             Confidence::Likely,
@@ -142,11 +138,6 @@ pub(crate) fn zip(bytes: &[u8]) -> Found {
         ),
     }
 }
-
-/// Most entries listed during detection.
-const MAX_ENTRIES: u64 = 100_000;
-/// Largest central directory listed during detection.
-const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Entry names that identify a layout. Matched without regard to ASCII case.
 const MARKERS: &[&str] = &[
@@ -161,19 +152,15 @@ const MARKERS: &[&str] = &[
     "ppt/presentation.xml",
     "Manifest.dat",
 ];
+/// Index of `3D/3dmodel.model`: it decides on its own, so the walk stops there.
+const THREE_MF_MARKER: usize = 1;
 
-/// The entry names found for [`MARKERS`], as stored in the archive.
-struct Markers {
-    names: Vec<Option<String>>,
-    /// Some entry lies under a Fusion `*.BlobParts/` folder.
-    blob_parts: bool,
-    entries: usize,
-}
+struct Markers(zipwalk::Listing);
 
 impl Markers {
-    fn get(&self, marker: &str) -> Option<&str> {
+    fn get(&self, marker: &str) -> Option<&zipwalk::Entry> {
         let i = MARKERS.iter().position(|m| *m == marker)?;
-        self.names[i].as_deref()
+        self.0.markers[i].as_ref()
     }
 
     fn has(&self, marker: &str) -> bool {
@@ -181,46 +168,54 @@ impl Markers {
     }
 }
 
-fn zip_inner(bytes: &[u8]) -> zip::result::ZipResult<Found> {
-    if let Some(why) = directory_too_large(bytes) {
-        return Ok(found(
-            FormatId::Zip,
-            Confidence::Likely,
-            format!("zip directory too large to list during detection ({why})"),
-        ));
-    }
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+fn zip_inner(bytes: &[u8]) -> Found {
+    let markers = match zipwalk::walk(bytes, MARKERS, Some(THREE_MF_MARKER)) {
+        zipwalk::Walk::Listed(l) => Markers(l),
+        zipwalk::Walk::TooLarge(why) => {
+            return found(
+                FormatId::Zip,
+                Confidence::Likely,
+                format!("zip directory too large to list during detection ({why})"),
+            );
+        }
+        zipwalk::Walk::Unreadable(why) => {
+            return found(
+                FormatId::Zip,
+                Confidence::Likely,
+                format!("zip signature, but the zip directory not readable: {why}"),
+            );
+        }
+    };
     let mut budget = READ_BUDGET;
-    let markers = scan_markers(&archive);
 
     // 3MF is an OPC package too; its model part decides before the office main parts.
     if markers.has("3D/3dmodel.model") {
-        return Ok(found(
+        return found(
             FormatId::ThreeMf,
             Confidence::Certain,
             "zip with 3D/3dmodel.model part",
-        ));
+        );
     }
 
-    if let Some(ct_name) = markers.get("[Content_Types].xml") {
-        let ct = read_entry(&mut archive, ct_name, &mut budget);
+    if let Some(ct_entry) = markers.get("[Content_Types].xml") {
+        let ct = read_text(bytes, ct_entry, &mut budget);
         if let Some(ct) = &ct {
             if let Some((_, format, label)) = OOXML_MAIN
                 .iter()
                 .find(|(t, _, _)| content_type_present(ct, t))
             {
-                return Ok(found(
+                return found(
                     *format,
                     Confidence::Certain,
                     format!("zip with [Content_Types].xml main part {label}"),
-                ));
+                );
             }
             if content_type_present(ct, THREE_MF_TYPE) {
-                return Ok(found(
+                return found(
                     FormatId::ThreeMf,
                     Confidence::Certain,
                     "zip with [Content_Types].xml 3mf model content type",
-                ));
+                );
             }
         }
         // Content types unreadable, cut off by the budget, or without a known main part:
@@ -241,171 +236,83 @@ fn zip_inner(bytes: &[u8]) -> zip::result::ZipResult<Found> {
             } else {
                 (FormatId::Xlsx, "")
             };
-            return Ok(found(
+            return found(
                 format,
                 Confidence::Likely,
                 format!("zip with [Content_Types].xml ({reason}) and part xl/workbook.xml{extra}"),
-            ));
+            );
         }
         if let Some((part, format)) = by_part.iter().find(|(p, _)| markers.has(p)) {
-            return Ok(found(
+            return found(
                 *format,
                 Confidence::Likely,
                 format!("zip with [Content_Types].xml ({reason}) and part {part}"),
-            ));
+            );
         }
     }
 
-    if let Some(name) = markers.get("mimetype")
-        && let Some(raw) = read_entry(&mut archive, name, &mut budget)
+    if let Some(entry) = markers.get("mimetype")
+        && let Some(raw) = read_text(bytes, entry, &mut budget)
     {
         let mime = raw.trim();
         let shown = clean(mime);
         if let Some((_, format)) = MIMETYPES.iter().find(|(m, _)| *m == mime) {
-            return Ok(found(
+            return found(
                 *format,
                 Confidence::Certain,
                 format!("zip with mimetype {shown}"),
-            ));
+            );
         }
-        return Ok(found(
+        return found(
             FormatId::Zip,
             Confidence::Certain,
             format!("zip with mimetype {shown} (not a format Rezzer reads)"),
-        ));
+        );
     }
 
     if markers.has("Document.xml") {
-        return Ok(found(
+        return found(
             FormatId::Fcstd,
             Confidence::Likely,
             "zip with FreeCAD Document.xml",
-        ));
+        );
     }
 
     // Fusion 360: a top-level Manifest.dat that starts with the length-prefixed strings
     // "3-2-0-0" and "FusionDocType", next to `*.BlobParts/` folders. Format facts from the
     // cadmpeg documentation (CC BY 4.0).
-    if let Some(name) = markers.get("Manifest.dat") {
-        let manifest = read_entry_bytes(&mut archive, name, &mut budget);
+    if let Some(entry) = markers.get("Manifest.dat") {
+        let manifest = zipwalk::read(bytes, entry, &mut budget);
         let head = manifest.as_deref().map(|m| &m[..m.len().min(64)]);
         if head.is_some_and(|h| crate::magic::find(h, b"FusionDocType").is_some()) {
-            return Ok(found(
+            return found(
                 FormatId::F3d,
                 Confidence::Certain,
                 "zip with Manifest.dat of type FusionDocType",
-            ));
+            );
         }
-        if markers.blob_parts {
-            return Ok(found(
+        if markers.0.blob_parts {
+            return found(
                 FormatId::F3d,
                 Confidence::Likely,
                 "zip with Manifest.dat and *.BlobParts/ folders",
-            ));
+            );
         }
     }
 
-    Ok(found(
+    found(
         FormatId::Zip,
         Confidence::Certain,
         format!(
             "zip archive with {} entries, no known document layout",
-            markers.entries
+            markers.0.entries
         ),
-    ))
+    )
 }
 
-/// One pass over the names; only marker entries are kept.
-fn scan_markers<R: Read + std::io::Seek>(archive: &zip::ZipArchive<R>) -> Markers {
-    let mut m = Markers {
-        names: vec![None; MARKERS.len()],
-        blob_parts: false,
-        entries: archive.len(),
-    };
-    for name in archive.file_names().filter_map(Result::ok) {
-        if let Some(i) = MARKERS.iter().position(|w| w.eq_ignore_ascii_case(&name))
-            && m.names[i].is_none()
-        {
-            m.names[i] = Some(name.into_owned());
-            continue;
-        }
-        if !m.blob_parts {
-            m.blob_parts = name
-                .as_bytes()
-                .windows(11)
-                .any(|w| w.eq_ignore_ascii_case(b".BlobParts/"));
-        }
-    }
-    m
-}
-
-/// Reads the end of central directory record (and the ZIP64 one) and says why the
-/// directory is too large to list, if it is.
-fn directory_too_large(bytes: &[u8]) -> Option<String> {
-    const EOCD: &[u8] = b"PK\x05\x06";
-    let window = bytes.len().saturating_sub(22 + 65_535);
-    let tail = &bytes[window..];
-    // The last record whose comment length reaches the end of the file; else the last one.
-    let mut pos = None;
-    let mut i = tail.len().saturating_sub(22);
-    loop {
-        if tail[i..].starts_with(EOCD) && i + 22 <= tail.len() {
-            let comment = u64::from(u16_at(tail, i + 20)?);
-            if (i + 22) as u64 + comment == tail.len() as u64 {
-                pos = Some(i);
-                break;
-            }
-            pos.get_or_insert(i);
-        }
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    let p = pos?;
-    let mut entries = u64::from(u16_at(tail, p + 10)?);
-    let mut size = u64::from(u32_at(tail, p + 12)?);
-    let offset = u32_at(tail, p + 16)?;
-    if entries == 0xFFFF || size == 0xFFFF_FFFF || offset == 0xFFFF_FFFF {
-        // ZIP64: the locator sits right before the classic record.
-        let loc = (window + p).checked_sub(20);
-        let z64 = loc
-            .filter(|&l| bytes.get(l..l + 4) == Some(b"PK\x06\x07"))
-            .and_then(|l| u64_at(bytes, l + 8))
-            .and_then(|o| usize::try_from(o).ok())
-            .filter(|&o| bytes.get(o..o + 4) == Some(b"PK\x06\x06"));
-        match z64 {
-            Some(o) => {
-                entries = u64_at(bytes, o + 32)?;
-                size = u64_at(bytes, o + 40)?;
-            }
-            // A saturated count without ZIP64 records: every central directory record is
-            // at least 46 bytes, so the directory size bounds the count.
-            None if entries == 0xFFFF => entries = entries.max(size / 46),
-            None => {}
-        }
-    }
-    if entries > MAX_ENTRIES {
-        return Some(format!("{entries} entries, more than {MAX_ENTRIES}"));
-    }
-    if size > MAX_DIRECTORY_BYTES {
-        return Some(format!(
-            "{size} bytes of directory, more than {MAX_DIRECTORY_BYTES}"
-        ));
-    }
-    None
-}
-
-fn u16_at(b: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?))
-}
-
-fn u32_at(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
-}
-
-fn u64_at(b: &[u8], at: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(b.get(at..at + 8)?.try_into().ok()?))
+/// Reads one entry as text within `budget`.
+fn read_text(bytes: &[u8], entry: &zipwalk::Entry, budget: &mut u64) -> Option<String> {
+    zipwalk::read(bytes, entry, budget).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// True when `ct` holds `ContentType="<wanted>"` or `ContentType="<wanted>+xml"`.
@@ -425,38 +332,6 @@ fn content_type_present(ct: &str, wanted: &str) -> bool {
         rest = after;
     }
     false
-}
-
-/// Reads one entry as text, decompressing at most what is left of `budget`.
-/// Returns None when the entry is missing, encrypted, broken or not fully read.
-fn read_entry<R: Read + std::io::Seek>(
-    archive: &mut zip::ZipArchive<R>,
-    name: &str,
-    budget: &mut u64,
-) -> Option<String> {
-    read_entry_bytes(archive, name, budget).map(|b| String::from_utf8_lossy(&b).into_owned())
-}
-
-/// Like [`read_entry`], as bytes. `name` is the name as stored in the archive.
-fn read_entry_bytes<R: Read + std::io::Seek>(
-    archive: &mut zip::ZipArchive<R>,
-    name: &str,
-    budget: &mut u64,
-) -> Option<Vec<u8>> {
-    let index = archive.index_for_name(name)?;
-    let entry = archive.by_index(index).ok()?;
-    let declared = entry.size();
-    if declared > *budget {
-        return None;
-    }
-    let mut buf = Vec::new();
-    // One byte more than allowed tells a full read from a cut one.
-    let read = entry.take(*budget + 1).read_to_end(&mut buf).ok()? as u64;
-    *budget = budget.saturating_sub(read);
-    if read > declared {
-        return None;
-    }
-    Some(buf)
 }
 
 /// Detects the format of an OLE compound file by its root stream names.
