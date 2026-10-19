@@ -92,3 +92,25 @@ fn empty_input() {
     assert_eq!(d.encoding, "UTF-8");
     assert!(d.confident);
 }
+
+#[test]
+fn non_ascii_only_after_the_first_mib_still_decodes() {
+    let mut bytes = b"plain ascii line\n".repeat(70_000);
+    assert!(bytes.len() > 1024 * 1024);
+    let sjis = [0x82, 0xB1, 0x82, 0xF1, 0x82, 0xC9, 0x82, 0xBF, 0x82, 0xCD];
+    for _ in 0..50 {
+        bytes.extend_from_slice(&sjis);
+        bytes.push(b'\n');
+    }
+    let d = decode(&bytes);
+    assert_eq!(d.encoding, "Shift_JIS");
+    assert!(d.confident);
+    assert!(d.text.ends_with("こんにちは\n"));
+}
+
+#[test]
+fn iso_2022_jp() {
+    let d = decode(b"\x1B$B$3$s$K$A$O\x1B(B\n");
+    assert_eq!(d.encoding, "ISO-2022-JP");
+    assert_eq!(d.text, "こんにちは\n");
+}

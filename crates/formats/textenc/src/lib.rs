@@ -11,7 +11,7 @@
 //! The crate has no dependency on the rest of Rezzer.
 
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
-use encoding_rs::{Encoding, UTF_8};
+use encoding_rs::{Encoding, ISO_2022_JP, UTF_8};
 
 /// How much of the input is shown to the statistical detector.
 const DETECT_BYTES: usize = 1024 * 1024;
@@ -50,26 +50,41 @@ pub struct Decoded {
 /// Decodes `bytes` of unknown encoding into UTF-8 text.
 ///
 /// Order: byte order mark, strict UTF-8, then `chardetng` (no top-level domain hint, UTF-8 not
-/// allowed as a guess because strict UTF-8 already failed). Only the first MiB is shown to the
-/// detector; the whole input is decoded.
+/// allowed as a guess because strict UTF-8 already failed). Input that is valid UTF-8 but holds
+/// ISO-2022-JP escape sequences is decoded as ISO-2022-JP. Inputs over 1 MiB are sampled at
+/// the start and the end for detection; the whole input is decoded.
 pub fn decode(bytes: &[u8]) -> Decoded {
     if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
         return finish(enc, &bytes[bom_len..], true);
     }
     if let Ok(text) = std::str::from_utf8(bytes) {
-        return Decoded {
-            line_ending: line_ending(text),
-            text: text.to_owned(),
-            encoding: UTF_8.name(),
-            had_bom: false,
-            confident: true,
-        };
+        // ISO-2022-JP is 7-bit, so it is valid UTF-8; its escape sequences give it away.
+        let iso = bytes.contains(&0x1B) && guess(bytes) == ISO_2022_JP;
+        if !iso {
+            return Decoded {
+                line_ending: line_ending(text),
+                text: text.to_owned(),
+                encoding: UTF_8.name(),
+                had_bom: false,
+                confident: true,
+            };
+        }
     }
-    let head = &bytes[..bytes.len().min(DETECT_BYTES)];
+    finish(guess(bytes), bytes, false)
+}
+
+/// Asks the statistical detector. Inputs up to 1 MiB are shown whole; larger ones as the first
+/// and the last half MiB, so text that is plain ASCII at the start is still detected.
+fn guess(bytes: &[u8]) -> &'static Encoding {
     let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
-    detector.feed(head, head.len() == bytes.len());
-    let enc = detector.guess(None, Utf8Detection::Deny);
-    finish(enc, bytes, false)
+    if bytes.len() <= DETECT_BYTES {
+        detector.feed(bytes, true);
+    } else {
+        let half = DETECT_BYTES / 2;
+        detector.feed(&bytes[..half], false);
+        detector.feed(&bytes[bytes.len() - half..], true);
+    }
+    detector.guess(None, Utf8Detection::Deny)
 }
 
 fn finish(enc: &'static Encoding, bytes: &[u8], had_bom: bool) -> Decoded {

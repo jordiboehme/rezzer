@@ -117,3 +117,20 @@ fn time_limit_returns_partial() {
     assert_eq!(loss.why, LossReason::Limit);
     assert_eq!(loss.severity, Severity::Warning);
 }
+
+#[test]
+fn one_huge_paragraph_is_time_checked() {
+    let text = "x\n".repeat(600_000);
+    let budget = Budget::new(Limits {
+        max_time: std::time::Duration::ZERO,
+        ..Limits::default()
+    });
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let loss = out.document.losses.last().unwrap();
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(loss.location, "paragraph 1");
+    let got = paragraphs(&out);
+    assert_eq!(got.len(), 1);
+    assert!(got[0].len() < text.len());
+}

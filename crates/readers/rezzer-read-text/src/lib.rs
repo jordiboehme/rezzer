@@ -4,14 +4,20 @@
 
 //! Plain text reader: any encoding in, one section of paragraphs out.
 
+use std::borrow::Cow;
+
 use rezzer_limits::Budget;
 use rezzer_model::{
     Block, Completeness, Document, FormatId, Inline, Loss, LossReason, ReadOptions, ReadOutcome,
     Reader, ReaderInfo, SectionKind, Severity, Source, source_info,
 };
+use textenc::LineEnding;
 
 /// How many paragraphs are read between two time checks.
 const CHECK_EVERY: usize = 1000;
+
+/// How many bytes of text are read between two time checks, so one huge paragraph is covered.
+const CHECK_BYTES: usize = 1024 * 1024;
 
 /// Reads plain text. The encoding is detected, line endings are normalized to LF and the text
 /// is split into paragraphs at blank lines.
@@ -52,29 +58,51 @@ impl Reader for TextReader {
             });
         }
 
-        let text = decoded.text.replace("\r\n", "\n").replace('\r', "\n");
-        let mut blocks = Vec::new();
-        let paragraphs = split_paragraphs(&text);
-        for paragraph in paragraphs {
-            let done = blocks.len();
-            if done > 0 && done % CHECK_EVERY == 0 && budget.check_time().is_err() {
-                completeness = Completeness::Partial;
-                doc.losses.push(Loss {
-                    location: format!("paragraph {}", done + 1),
-                    what: "rest of the text not read".into(),
-                    why: LossReason::Limit,
-                    severity: Severity::Warning,
-                });
-                break;
+        let text = normalize_newlines(&decoded.text, decoded.line_ending);
+        let mut blocks: Vec<Block> = Vec::new();
+        let mut current: Vec<&str> = Vec::new();
+        let mut since_check = 0usize;
+        let mut stopped_at: Option<usize> = None;
+        for line in text.split('\n') {
+            if line.trim().is_empty() {
+                if !current.is_empty() {
+                    blocks.push(paragraph(&current));
+                    current.clear();
+                }
+                continue;
             }
-            blocks.push(Block::Paragraph {
-                inlines: vec![Inline::Text {
-                    text: paragraph,
-                    emphasis: false,
-                    strong: false,
-                }],
-                role: None,
-                anchor: None,
+            if current.is_empty() && !blocks.is_empty() && blocks.len().is_multiple_of(CHECK_EVERY)
+            {
+                // Checked lazily, only when another paragraph follows.
+                if budget.check_time().is_err() {
+                    stopped_at = Some(blocks.len() + 1);
+                    break;
+                }
+            }
+            since_check += line.len() + 1;
+            if since_check >= CHECK_BYTES {
+                since_check = 0;
+                if budget.check_time().is_err() {
+                    // Keep what is read of the current paragraph.
+                    current.push(line);
+                    blocks.push(paragraph(&current));
+                    stopped_at = Some(blocks.len());
+                    current.clear();
+                    break;
+                }
+            }
+            current.push(line);
+        }
+        if stopped_at.is_none() && !current.is_empty() {
+            blocks.push(paragraph(&current));
+        }
+        if let Some(n) = stopped_at {
+            completeness = Completeness::Partial;
+            doc.losses.push(Loss {
+                location: format!("paragraph {n}"),
+                what: "rest of the text not read".into(),
+                why: LossReason::Limit,
+                severity: Severity::Warning,
             });
         }
 
@@ -91,25 +119,35 @@ impl Reader for TextReader {
     }
 }
 
-/// Splits LF-normalized text into paragraphs. Blank lines (empty or only whitespace) separate
-/// paragraphs; the lines of one paragraph are joined with a newline.
-fn split_paragraphs(text: &str) -> impl Iterator<Item = String> + '_ {
-    let mut lines = text.split('\n');
-    std::iter::from_fn(move || {
-        let mut current: Vec<&str> = Vec::new();
-        for line in lines.by_ref() {
-            if line.trim().is_empty() {
-                if !current.is_empty() {
-                    break;
-                }
-            } else {
-                current.push(line);
+fn paragraph(lines: &[&str]) -> Block {
+    Block::Paragraph {
+        inlines: vec![Inline::Text {
+            text: lines.join("\n"),
+            emphasis: false,
+            strong: false,
+        }],
+        role: None,
+        anchor: None,
+    }
+}
+
+/// Turns CRLF and lone CR into LF in one pass. LF-only text and text without line breaks are
+/// borrowed unchanged.
+fn normalize_newlines(text: &str, ending: LineEnding) -> Cow<'_, str> {
+    if matches!(ending, LineEnding::Lf | LineEnding::None) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
             }
-        }
-        if current.is_empty() {
-            None
+            out.push('\n');
         } else {
-            Some(current.join("\n"))
+            out.push(c);
         }
-    })
+    }
+    Cow::Owned(out)
 }
