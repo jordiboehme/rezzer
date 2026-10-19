@@ -131,11 +131,11 @@ Planned for the first release. Each format has its own page with what Rezzer ext
 | [CSV, TSV](docs/formats/csv.md) | Delimiter, header, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
 | [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
-| [CAD and engineering](docs/formats/cad.md) | Units, layers, parts lists, assembly and feature trees, sketch constraints, parameters, materials, print settings | [cadmpeg](https://github.com/cadmpeg/cadmpeg) and others, being tested |
+| [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
 
-For CAD the exact list of formats is still being tested: DXF, STEP, IGES, FreeCAD, Fusion 360, 3MF, STL, OBJ, glTF, IFC, KiCad, Gerber, G-code and OpenSCAD are candidates. Closed formats like Creo or SolidWorks give up their structure and metadata, so Rezzer asks for a STEP export to get the geometry.
+DWG and closed CAD formats like SolidWorks, Creo, NX, CATIA, Inventor or Fusion 360 come later. Until then Rezzer detects them and asks for a DXF or STEP AP242 export.
 
 Planned after that:
 

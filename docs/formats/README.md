@@ -23,7 +23,7 @@ Rezzer is in the design phase. Nothing is implemented yet. These pages describe 
 | [CSV](csv.md) | CSV, TSV | first release |
 | [Plain text](text.md) | Plain text in any encoding | first release |
 | [Markdown](markdown.md) | Markdown | first release |
-| [CAD](cad.md) | DXF, 3MF, FreeCAD, STEP, IGES, IFC, STL, OBJ, glTF, KiCad, Gerber, G-code, OpenSCAD, native CAD formats | first release; the exact list of CAD formats depends on tests that are still running |
+| [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; later DWG and native CAD formats | first release; DWG and closed native formats later |
 | [Mail](mail.md) | EML, MBOX | after the first release |
 | [Mathcad](mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath | later release |
 

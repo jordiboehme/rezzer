@@ -1,78 +1,50 @@
 # CAD and engineering formats
 
-For engineering files Rezzer gives the agent what matters to an engineer: units, layers, parts lists, assembly and feature trees, sketch constraints, parameters, materials and print settings. Trees come out as Mermaid.
+For engineering files Rezzer gives the agent what matters to an engineer: units, layers, parts lists, assembly and feature trees, sketch constraints, parameters and what drives them, materials, nets and print settings. Trees and dependencies come out as Mermaid.
 
-Status: planned for the first release. The exact list of CAD formats depends on tests that are still running.
+Status: planned for the first release, except DWG and the closed native formats (see below). Nothing is implemented yet.
 
-This page is an overview. The crates below come from research done on 2026-10-16 and 2026-10-19. None of them has been run on real files yet, so they are candidates, not final choices. Versions and support levels change fast and will be checked again.
+File types: see the table. Rezzer detects the format by content, not by extension. This matters for CAD: `.prt` is used by both PTC Creo and Siemens NX. A Creo file starts with a `#UGC:` line. An NX file is an OLE compound file. A DWG file names its version in the first 6 bytes (for example `AC1032`).
 
-File types: see the table below. Rezzer detects the format by content, not by extension. This matters for CAD: `.prt` is used by both PTC Creo and Siemens NX. A Creo file starts with a `#UGC:` line. An NX file is an OLE compound file with Parasolid data inside. A DWG file names its version in the first 6 bytes (for example `AC1032`).
+Everything runs inside the Rezzer binary. No CAD program and no external tool is needed.
 
-## Formats and candidates
+## Formats
 
-| Format | What an agent gets | Candidates |
-|---|---|---|
-| DXF | Units, drawing extents, layers, blocks with attribute values (title block fields, part numbers), text, dimensions, layouts | [dxf](https://crates.io/crates/dxf), [acadrust](https://crates.io/crates/acadrust) |
-| 3MF (also Bambu Studio, OrcaSlicer and PrusaSlicer files) | Objects and parts, units, bounding box, plates, materials and colors, print settings, print time and filament use | [lib3mf-core](https://crates.io/crates/lib3mf-core), [threemf](https://crates.io/crates/threemf) or Rezzer's own reader on zip and quick-xml |
-| FreeCAD `.FCStd` | The parametric feature tree, parameters and expressions, sketches with constraints, spreadsheet cells, document metadata | Rezzer's own reader on zip and quick-xml, [cadmpeg](https://github.com/cadmpeg/cadmpeg) |
-| STEP (AP203, AP214, AP242) | Originating system, author, date, units, assembly tree and parts list with quantities, part names, colors and layers, properties, materials, PMI (tolerances, datums, dimensions) | [stepq](https://crates.io/crates/stepq), [step-io](https://crates.io/crates/step-io), [step-p21](https://crates.io/crates/step-p21), [cadmpeg](https://github.com/cadmpeg/cadmpeg) or Rezzer's own Part 21 reader |
-| IGES | Start and global sections (sender, system, units, author, date), entity counts, names, levels, notes | Rezzer's own reader, [cadmpeg](https://github.com/cadmpeg/cadmpeg) |
-| IFC | Project, site, building, storeys and spaces as a tree, element counts by type, property sets, quantities, materials, classifications | [ifc-lite-core](https://crates.io/crates/ifc-lite-core) or the same Part 21 reader as for STEP |
-| STL | Solid name or header text, triangle count, bounding box, surface area, volume, watertight check. STL stores no units, and the output says so | [stl_io](https://crates.io/crates/stl_io) |
-| OBJ | Object, group and material names, counts, bounding box, comments | [tobj](https://crates.io/crates/tobj) |
-| glTF and GLB | Generator, scene graph with names, meshes, materials, animations, user data | [gltf](https://crates.io/crates/gltf) |
-| KiCad | Schematic: title block, sheet tree, parts with value and footprint (parts list), nets. Board: size, layers, footprints, nets, design rules | Rezzer's own s-expression reader, [lexpr](https://crates.io/crates/lexpr) |
-| Gerber and Excellon | Layer function, generating software, units, apertures, board size, drill sizes and counts | [gerber_parser](https://crates.io/crates/gerber_parser), [gerberx2](https://crates.io/crates/gerberx2) |
-| G-code | Slicer and settings from the comments, print time, filament use, layer count, temperatures, tool changes, thumbnails | Rezzer's own streaming reader, [gcode](https://crates.io/crates/gcode) |
-| OpenSCAD | The source, plus modules and functions with parameters, Customizer variables, includes and a call tree | [tree-sitter-openscad-ng](https://crates.io/crates/tree-sitter-openscad-ng) |
+Tested on 2026-10-19 with about 390 public test files. Most formats get Rezzer's own reader: in the tests the crates either missed the knowledge layer, refused real files or failed on hostile files.
 
-## Native CAD formats
+| Format | What an agent gets | Built on | Release |
+|---|---|---|---|
+| FreeCAD `.FCStd` | Feature tree, expressions and spreadsheet aliases as "drives" links (also across documents), sketch constraints with values, placements, links, assembly joints, drawings, metadata | own reader on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) | first |
+| STEP (AP203, AP214, AP242) | Header, units, product structure and parts list with total quantities, placements, properties, PMI (tolerances, datums, dimensions), colors, layers, saved views | [stepq](https://crates.io/crates/stepq) and own extras | first |
+| IGES | Start text, sender, system, units, author, dates, levels, names, notes, views | own reader | first |
+| IFC 2X3, 4, 4X3, ifcZIP | Project, site, building, storeys and spaces as a tree, elements, property sets, quantities, materials, classifications, types, systems, zones, documents | own reader, schema tables from [ifc-lite-core](https://crates.io/crates/ifc-lite-core) | first |
+| DXF | Header and units, layers, blocks, attribute values (title block fields, part numbers), text, dimensions, leaders, tables, xrefs, images, groups | own reader | first |
+| 3MF (also Bambu Studio, OrcaSlicer, PrusaSlicer, Cura) | Objects and parts, units, plates, materials and colors, all slicer settings, print time and filament | own reader on zip, quick-xml and [serde_json](https://crates.io/crates/serde_json) | first |
+| STL | Header text, solids, counts, bounding box, area, volume, watertight check, colors. STL stores no units, and the output says so | own reader | first |
+| OBJ and MTL | Objects and groups, comments, materials, texture references (listed, never followed) | own reader | first |
+| glTF and GLB | Generator, node tree with names, user data, extensions, variants, external references | own reader on serde_json | first |
+| G-code, Prusa `.bgcode` | Slicer and settings, print time, filament, temperatures, tools, thumbnails, CNC tools, feeds and offsets | own reader | first |
+| KiCad 5 to 10 | Title block, sheet tree, parts with fields (parts list), not-fitted parts, notes, netlist, board stackup, footprints, design rules, holes | own reader | first |
+| Gerber X2 and X3, Excellon, job file | Layer function, generating software, attributes, nets from copper layers, drill tools, plating, hit counts | own reader | first |
+| OpenSCAD | Customizer parameters, modules and functions, includes, call graph, checks | own reader | first |
+| DWG R13 to R2018 | Same as DXF, plus summary info and preview | own reader, written from a format specification | later |
+| Fusion 360, SolidWorks, Creo, NX, CATIA, Inventor, Rhino, ACIS | Feature trees and parameters | [cadmpeg](https://github.com/cadmpeg/cadmpeg) behind a build option | later |
 
-[cadmpeg](https://github.com/cadmpeg/cadmpeg) is a clean-room Rust project (Apache-2.0) that reads native CAD formats into one data model with features, parameters, sketches, constraints, assemblies and PMI. Every construct it can't read is reported as a named loss, which fits Rezzer's rule to say what it could not read. Its own support levels on 2026-10-19 (version 0.6.2):
+## Until the later formats arrive
 
-| Format | cadmpeg's own level |
-|---|---|
-| STEP, IGES | full read and write |
-| FreeCAD `.FCStd` | shape complete |
-| Fusion 360 `.f3d` | design records: features with their operations, sketches, history |
-| Inventor, SolidWorks, Creo, NX, CATIA V5, Rhino, ACIS | opened: sections, versions, assets, external references, some parameters |
-
-These levels are cadmpeg's own scoring and still need to be checked on real files. For closed formats like Creo, SolidWorks, NX or CATIA, Rezzer reports what it can read (version, structure, external references, parameters) and asks for a STEP export (AP242 is best) for the rest.
-
-## What Rezzer extracts
-
-### Structure
-
-- Assembly trees, feature trees, sheet trees and spatial trees (IFC), as Mermaid
-- Layers, blocks, objects and parts
-
-### Metadata
-
-- Originating program and version, author, organization, dates, units
-
-### Hidden logic
-
-- Parameters and expressions, sketch constraints with their values, spreadsheet cells in FreeCAD files
-- Parts lists with quantities
-- PMI: tolerances, datums and dimensions
-- Print and slicer settings
-
-### Pictures and embedded files
-
-- Thumbnails and previews stored in the file are extracted and listed as "needs vision"
-
-## How it shows up in the output
-
-A metadata table, then tables for parts, layers, parameters or settings (depending on the format). Then a Mermaid graph for the tree.
+For DWG and the closed native formats the first release detects the format and its version, says what it can't read yet and asks for an export the agent can use: DXF for drawings, STEP AP242 for models.
 
 ## Known limitations
 
-- Most of the Rust crates for CAD are young (many first released in 2026). They will be tested on a public test corpus before Rezzer depends on them
-- Exact volume, mass and surface area of STEP and IGES solids need a geometry kernel. Rezzer does not link one. A bounding box from points is possible, but it can be too large
-- DWG: young pure-Rust readers exist ([acadrust](https://crates.io/crates/acadrust), [cadkit](https://crates.io/crates/cadkit)). They are not tested yet. Rezzer plans its own DWG reader, written from a format specification, that runs inside the binary
-- Some CAD libraries are GPL or AGPL (OpenCascade, LibreDWG, some KiCad and OpenSCAD parsers). Rezzer doesn't use them. Everything runs inside the Rezzer binary, without external programs
-- Against hostile files Rezzer uses size, decompression, entity count and time limits
+- stepq is young (one maintainer, first released in 2026-09). Rezzer pins it, keeps it behind its own STEP interface and uses the NIST test models as reference files
+- cadmpeg reads real feature trees and parameters from SolidWorks, Creo, NX and Fusion files, far above its own "opened" label. But design data needs a full geometry decode (44 s and 3.1 GB on a 20.6 MB FreeCAD file), it adds about 72 MB to the binary and it refuses a whole file over one unusual record. That's why it comes later, behind a build option
+- Exact volume and mass of STEP and IGES solids need a geometry kernel. Rezzer doesn't link one. Bounding boxes come from points and can be too large
+- Native assemblies (SolidWorks, Inventor, Creo) are weak in every tested reader
+- The G-code body inside `.bgcode` files is compressed and comes later; its metadata is read in the first release
+- Some CAD libraries are GPL or AGPL (OpenCascade, LibreDWG, some KiCad and OpenSCAD parsers). Rezzer doesn't use them
+- Against hostile files Rezzer uses limits on size, unpacking, depth, entity count and time. Referenced files (textures, buffers, xrefs) are listed and never opened outside the input folder
+- Not covered by public test files: IGES notes, Fusion user parameters, DWG and DXF xrefs, a real Cura 3MF, Gerber X3 component layers, ifcXML, native assemblies
 
 ## Tested with
 
-Not tested yet. The CAD tests are still running, and there is no test file list yet.
+About 390 public test files (168 MB) from the FreeCAD, KiCad, cadmpeg, NIST, buildingSMART, ACadSharp and other public test suites. See [MANIFEST-cad.md](../spike-2026-10-19/MANIFEST-cad.md).
