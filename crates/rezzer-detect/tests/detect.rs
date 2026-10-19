@@ -506,3 +506,76 @@ fn gcode_with_long_thumbnail_comment_block() {
     let (f, d) = detect("x", g.as_bytes());
     assert_eq!(f, FormatId::Gcode, "{}", d.evidence);
 }
+
+#[test]
+fn gltf_json_by_asset_version() {
+    let gltf = br#"{
+  "buffers": [{"byteLength": 4, "uri": "data:application/octet-stream;base64,AAAA"}],
+  "asset": {"generator": "test", "version": "2.0"},
+  "scenes": [{"nodes": [0]}]
+}"#;
+    let (f, d) = detect("model.json", gltf);
+    assert_eq!(f, FormatId::Gltf, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    // "asset" nested deeper or without a version string is plain JSON.
+    let nested = br#"{"meta": {"asset": {"version": "2.0"}}}"#;
+    assert_eq!(detect("x.gltf", nested).0, FormatId::Text);
+    let no_version = br#"{"asset": {"version": 2}}"#;
+    assert_eq!(detect("x.gltf", no_version).0, FormatId::Text);
+}
+
+#[test]
+fn markdown_by_extension_for_plain_readme() {
+    let readme = b"# Title\n\nText.\n\n## Install\n\nRun it.\n";
+    let (f, d) = detect("README.md", readme);
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Guess);
+    assert!(d.evidence.contains(".md"), "{}", d.evidence);
+    assert_eq!(
+        detect("notes.markdown", b"Just prose.\n").0,
+        FormatId::Markdown
+    );
+    assert_eq!(detect("README.txt", readme).0, FormatId::Text);
+    // Another detected format wins over the extension.
+    assert_eq!(detect("x.md", b"a,b,c\n1,2,3\n4,5,6\n").0, FormatId::Csv);
+    // Not valid UTF-8: the extension alone does not make it Markdown.
+    assert_eq!(
+        detect(
+            "x.md",
+            b"Gr\xfc\xdfe aus K\xf6ln und sch\xf6ne Stra\xdfen.\n"
+        )
+        .0,
+        FormatId::Text
+    );
+}
+
+#[test]
+fn open_small_file_is_owned() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("small.txt");
+    std::fs::write(&path, b"hello\n").unwrap();
+    let src = open(&path, &Limits::default()).unwrap();
+    assert!(
+        matches!(src.bytes, rezzer_model::Bytes::Owned(_)),
+        "{:?}",
+        src.bytes
+    );
+    assert_eq!(src.bytes(), b"hello\n");
+}
+
+#[test]
+fn pre_r13_dwg_versions() {
+    for v in [
+        "AC1.2", "AC1.40", "AC1.50", "AC2.10", "AC1001", "AC1002", "AC1003", "AC1004", "AC1005",
+        "AC1006", "AC1007", "AC1008", "AC1009", "MC0.0",
+    ] {
+        let mut bytes = v.as_bytes().to_vec();
+        bytes.extend_from_slice(&[0u8; 64]);
+        let (f, d) = detect("x.bin", &bytes);
+        assert_eq!(f, FormatId::Dwg, "{v}: {}", d.evidence);
+        assert!(d.evidence.contains(v), "{v}: {}", d.evidence);
+        assert!(d.evidence.contains("pre-R13"), "{v}: {}", d.evidence);
+    }
+    // Text that starts with the same characters stays text.
+    assert_eq!(detect("x", b"AC1.2 is a part number.\n").0, FormatId::Text);
+}

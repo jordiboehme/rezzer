@@ -5,7 +5,7 @@
 //! Opening a file or taking bytes, hashing and building the [`Source`].
 
 use std::fs::File;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,6 +15,9 @@ use rezzer_model::{Bytes, Source};
 use sha2::{Digest, Sha256};
 
 use crate::{OpenError, detect};
+
+/// Files up to this size are read into memory; larger ones are memory-mapped.
+const IN_MEMORY_MAX: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
     let shown = path.display().to_string();
@@ -27,13 +30,20 @@ pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
     // Size again from the open handle: the file may have changed since the stat.
     let size = file.metadata().map_err(|e| io_error(&shown, &e))?.len();
     check_size(size, limits)?;
-    let bytes = if size == 0 {
-        // Mapping an empty file fails on some platforms.
-        Bytes::Owned(Arc::new(Vec::new()))
+    let bytes = if size <= IN_MEMORY_MAX {
+        // Small files are read into memory: no mapping cost, and no fault if another
+        // process truncates the file while it is being read.
+        let mut buf = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+        (&file)
+            .take(limits.max_file_bytes.saturating_add(1))
+            .read_to_end(&mut buf)
+            .map_err(|e| io_error(&shown, &e))?;
+        check_size(buf.len() as u64, limits)?;
+        Bytes::Owned(Arc::new(buf))
     } else {
         // SAFETY: the map is read-only. Another process truncating the file while it is
-        // mapped can still fault the process; that is the documented cost of memmap and is
-        // accepted for files the user asked us to read.
+        // mapped can still fault the process (SIGBUS); that is the documented cost of memmap
+        // and is accepted for large files the user asked us to read.
         let map = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| io_error(&shown, &e))?;
         check_size(map.len() as u64, limits)?;
         Bytes::Mapped(Arc::new(map))
@@ -137,6 +147,17 @@ mod tests {
         assert_eq!(at(951_868_800), "2000-03-01T00:00:00Z");
         assert_eq!(at(1_709_208_000), "2024-02-29T12:00:00Z");
         assert_eq!(at(4_102_444_800), "2100-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn large_file_is_mapped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.bin");
+        let f = File::create(&path).unwrap();
+        f.set_len(IN_MEMORY_MAX + 1).unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert!(matches!(src.bytes, Bytes::Mapped(_)), "{:?}", src.bytes);
+        assert_eq!(src.size, IN_MEMORY_MAX + 1);
     }
 
     #[test]

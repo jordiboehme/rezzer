@@ -119,7 +119,30 @@ pub(crate) fn detect_patterns(bytes: &[u8]) -> Option<Found> {
     ascii_stl(bytes)
 }
 
+/// Pre-R13 version strings. These files have a different structure and are not readable;
+/// they are still named, so the output can say what the file is.
+const DWG_PRE_R13: &[&[u8]] = &[
+    b"AC1.2", b"AC1.40", b"AC1.50", b"AC2.10", b"AC1001", b"AC1002", b"AC1003", b"AC1004",
+    b"AC1005", b"AC1006", b"AC1007", b"AC1008", b"AC1009", b"MC0.0",
+];
+
 fn dwg(bytes: &[u8]) -> Option<Found> {
+    if let Some(magic) = DWG_PRE_R13.iter().find(|m| bytes.starts_with(m)) {
+        // The version string is followed by binary header bytes. Text that starts with
+        // the same characters ("AC1.2 is a part number") is left to the text checks.
+        let next = *bytes.get(magic.len())?;
+        if next.is_ascii_graphic() || next.is_ascii_whitespace() {
+            return None;
+        }
+        return Some(found(
+            FormatId::Dwg,
+            Confidence::Likely,
+            format!(
+                "dwg version string {} (pre-R13 format, not readable)",
+                String::from_utf8_lossy(magic)
+            ),
+        ));
+    }
     let magic = bytes.get(..6)?;
     if !magic.starts_with(b"AC10") || !magic[4..].iter().all(u8::is_ascii_digit) {
         return None;

@@ -70,6 +70,9 @@ fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
     let trimmed = body.trim_start();
     let lines: Vec<&str> = body.lines().take(HEAD_LINES).collect();
 
+    if let Some(f) = gltf(trimmed) {
+        return f;
+    }
     if json_like(trimmed) {
         return found(
             FormatId::Text,
@@ -133,7 +136,83 @@ fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
     if let Some(f) = csv_by_extension(name, body) {
         return f;
     }
+    // Markdown is a superset of plain text: with nothing else found, the extension decides.
+    if enc == "UTF-8"
+        && let Some(ext) = extension(name).filter(|e| e == "md" || e == "markdown")
+    {
+        return found(
+            FormatId::Markdown,
+            Confidence::Guess,
+            format!("text ({enc}) with extension .{ext}, no other format found"),
+        );
+    }
     found(FormatId::Text, base, format!("text ({enc})"))
+}
+
+/// glTF JSON: a top-level `"asset"` object holding a `"version"` string. A small scanner
+/// instead of a JSON parser, because the sample may be cut and files carry large buffers.
+fn gltf(t: &str) -> Option<Found> {
+    if !t.starts_with('{') {
+        return None;
+    }
+    let b = t.as_bytes();
+    let mut depth = 0usize;
+    let mut i = 0;
+    // Inside the top-level "asset" object (depth 2).
+    let mut in_asset = false;
+    // The last string seen, as (depth, start, end); it is a key when a colon follows.
+    let mut pending_key: Option<(usize, usize, usize)> = None;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let start = i + 1;
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                let end = i.min(b.len());
+                pending_key = Some((depth, start, end));
+            }
+            b':' => {
+                if let Some((d, s, e)) = pending_key.take() {
+                    let key = &b[s..e];
+                    let value = t[i + 1..].trim_start();
+                    if d == 1 && key == b"asset" && value.starts_with('{') {
+                        in_asset = true;
+                    } else if d == 2 && in_asset && key == b"version" && value.starts_with('"') {
+                        let v: String = value[1..]
+                            .chars()
+                            .take_while(|&c| c != '"')
+                            .take(20)
+                            .collect();
+                        return Some(found(
+                            FormatId::Gltf,
+                            Confidence::Likely,
+                            format!("json with top-level asset.version {}", crate::clean(&v)),
+                        ));
+                    }
+                }
+            }
+            b'{' | b'[' => {
+                depth += 1;
+                pending_key = None;
+            }
+            b'}' | b']' => {
+                if depth == 2 {
+                    in_asset = false;
+                }
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return None;
+                }
+                pending_key = None;
+            }
+            b',' => pending_key = None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn json_like(t: &str) -> bool {
