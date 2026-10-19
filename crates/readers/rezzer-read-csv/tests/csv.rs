@@ -142,7 +142,8 @@ fn derived_column_becomes_formula() {
     assert_eq!(f[0].expression, "Total = Gas + Liquid + Solid");
     assert_eq!(f[0].dialect, "derived");
     assert_eq!(f[0].role, Some(Role::Result));
-    assert_eq!(f[0].pattern.as_deref(), Some("holds 20 of 20 rows"));
+    assert_eq!(f[0].pattern, None);
+    assert_eq!(f[0].note.as_deref(), Some("holds 20 of 20 rows"));
     assert_eq!(f[0].anchor.0, "data!B:B");
     let refs: Vec<_> = f[0].references.iter().map(|a| a.0.as_str()).collect();
     assert_eq!(refs, ["data!C:C", "data!D:D", "data!E:E"]);

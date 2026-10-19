@@ -311,9 +311,9 @@ impl Reader for CsvReader {
                 references: d.parts.iter().map(|&j| col_anchor(j)).collect(),
                 cached: None,
                 role: Some(Role::Result),
-                pattern: Some(format!("holds {} of {} rows", d.holds, d.checked)),
+                pattern: None,
                 latex: None,
-                note: None,
+                note: Some(format!("holds {} of {} rows", d.holds, d.checked)),
             });
         }
 
