@@ -1,0 +1,223 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::sync::Arc;
+
+use rezzer_limits::{Budget, Limits};
+use rezzer_model::{
+    Block, Bytes, Cell, Completeness, Confidence, Detection, FormatId, Inline, LossReason,
+    ReadOptions, ReadOutcome, Reader, Role, SectionKind, Severity, Source, Value,
+};
+use rezzer_read_csv::CsvReader;
+
+fn source(name: &str, format: FormatId, bytes: &[u8]) -> Source {
+    Source {
+        path: None,
+        name: name.into(),
+        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format,
+        detection: Detection {
+            confidence: Confidence::Likely,
+            evidence: "csv".into(),
+        },
+        modified: None,
+    }
+}
+
+fn read_as(name: &str, format: FormatId, bytes: &[u8]) -> ReadOutcome {
+    CsvReader.read(
+        &source(name, format, bytes),
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+fn read(bytes: &[u8]) -> ReadOutcome {
+    read_as("data.csv", FormatId::Csv, bytes)
+}
+
+fn text(cell: &Cell) -> String {
+    cell.inlines
+        .iter()
+        .map(|i| match i {
+            Inline::Text { text, .. } => text.as_str(),
+            other => panic!("unexpected inline {other:?}"),
+        })
+        .collect()
+}
+
+fn tables(out: &ReadOutcome) -> (String, Vec<&Block>) {
+    let [
+        Block::Section {
+            kind,
+            title,
+            blocks,
+            ..
+        },
+    ] = out.document.body.as_slice()
+    else {
+        panic!("expected one section, got {:?}", out.document.body);
+    };
+    assert_eq!(*kind, SectionKind::Sheet);
+    (title.clone().unwrap(), blocks.iter().collect())
+}
+
+fn rows_of(block: &Block) -> Vec<Vec<String>> {
+    let Block::Table { rows, .. } = block else {
+        panic!("expected table, got {block:?}");
+    };
+    rows.iter().map(|r| r.iter().map(text).collect()).collect()
+}
+
+#[test]
+fn identity() {
+    assert_eq!(CsvReader.id(), "csv");
+    assert_eq!(CsvReader.formats(), &[FormatId::Csv, FormatId::Tsv]);
+}
+
+#[test]
+fn table_with_header() {
+    let out = read(b"name,age,city\nAnna,31,Bonn\nBen,25,Koeln\nCleo,40,Essen\n");
+    assert_eq!(out.completeness, Completeness::Complete);
+    let (title, blocks) = tables(&out);
+    assert_eq!(title, "data");
+    let Block::Table {
+        header_rows, rows, ..
+    } = blocks[0]
+    else {
+        panic!()
+    };
+    assert_eq!(*header_rows, 1);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows_of(blocks[0])[0], ["name", "age", "city"]);
+    assert_eq!(rows_of(blocks[0])[2], ["Ben", "25", "Koeln"]);
+    assert_eq!(rows[2][1].anchor.as_ref().unwrap().0, "data!B3");
+    let c = &out.document.properties.custom;
+    assert_eq!(c["delimiter"], Value::Text { value: ",".into() });
+    assert_eq!(c["rows"], Value::number(3.0, None));
+    assert_eq!(c["columns"], Value::number(3.0, None));
+    assert_eq!(c["has_header"], Value::Bool { value: true });
+    assert_eq!(out.document.source.reader.as_ref().unwrap().id, "csv");
+    assert_eq!(out.document.source.encoding.as_deref(), Some("UTF-8"));
+}
+
+#[test]
+fn columns_table_lists_kinds() {
+    let out = read(
+        b"id,price (EUR),day,ok,note\n1,1.50,2024-01-01,yes,a\n2,2.25,2024-01-02,no,\n3,3.00,2024-01-03,yes,c\n",
+    );
+    let (_, blocks) = tables(&out);
+    let cols = rows_of(blocks[1]);
+    assert_eq!(
+        cols[0],
+        ["Column", "Type", "Unit", "Missing", "Unique", "Key"]
+    );
+    assert_eq!(cols[1][..2], ["id", "integer"]);
+    assert_eq!(cols[2][..3], ["price (EUR)", "decimal (2 places)", "EUR"]);
+    assert_eq!(cols[3][1], "date");
+    assert_eq!(cols[4][1], "bool");
+    assert_eq!(cols[5][1], "text");
+    assert_eq!(cols[5][3], "1");
+    assert_eq!(cols[1][4], "yes");
+    assert_eq!(cols[1][5], "yes");
+}
+
+#[test]
+fn derived_column_becomes_formula() {
+    let mut csv = String::from("Year,Total,Gas,Liquid,Solid\n");
+    for i in 0..20 {
+        let (g, l, s) = (
+            10 + i * i % 7 * 13,
+            20 + i * 5 % 11 * 9,
+            30 + i * 3 % 13 * 17,
+        );
+        csv.push_str(&format!("{},{},{g},{l},{s}\n", 2000 + i, g + l + s));
+    }
+    let out = read(csv.as_bytes());
+    let f = &out.document.facets.formulas;
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].expression, "Total = Gas + Liquid + Solid");
+    assert_eq!(f[0].dialect, "derived");
+    assert_eq!(f[0].role, Some(Role::Result));
+    assert_eq!(f[0].pattern.as_deref(), Some("holds 20 of 20 rows"));
+    assert_eq!(f[0].anchor.0, "data!B:B");
+    let refs: Vec<_> = f[0].references.iter().map(|a| a.0.as_str()).collect();
+    assert_eq!(refs, ["data!C:C", "data!D:D", "data!E:E"]);
+}
+
+#[test]
+fn broken_csv_is_partial_with_losses() {
+    let out = read(b"a,b,c\n1,2,3\n4,5\n6,7,8\n9,10,11,12\n13,14,15\n\"open,1,2\n");
+    assert_eq!(out.completeness, Completeness::Partial);
+    let damaged: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Damaged)
+        .collect();
+    assert!(damaged.len() >= 2, "{damaged:?}");
+    assert!(
+        damaged
+            .iter()
+            .any(|l| l.location == "line 3" && l.what == "row has 2 fields, expected 3")
+    );
+}
+
+#[test]
+fn empty_csv_is_complete_and_says_empty() {
+    let out = read(b"");
+    assert_eq!(out.completeness, Completeness::Complete);
+    let [Block::Section { blocks, .. }] = out.document.body.as_slice() else {
+        panic!("{:?}", out.document.body)
+    };
+    let [Block::Paragraph { inlines, .. }] = blocks.as_slice() else {
+        panic!("{blocks:?}")
+    };
+    assert!(matches!(&inlines[0], Inline::Text { text, .. } if text == "The file is empty."));
+}
+
+#[test]
+fn latin1_semicolon_decoded() {
+    let out = read(b"Stadt;Land\nM\xfcnchen;Bayern\nK\xf6ln;NRW\nBonn;NRW\n");
+    let (_, blocks) = tables(&out);
+    assert_eq!(rows_of(blocks[0])[1][0], "M\u{fc}nchen");
+    assert_eq!(
+        out.document.properties.custom["delimiter"],
+        Value::Text { value: ";".into() }
+    );
+}
+
+#[test]
+fn rows_beyond_cap_are_counted_with_info_loss() {
+    let mut csv = String::from("n,v\n");
+    for i in 0..10_005 {
+        csv.push_str(&format!("{i},x{i}\n"));
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    assert_eq!(rows_of(blocks[0]).len(), 10_001);
+    let l = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit)
+        .unwrap();
+    assert_eq!(l.what, "rows 10001 to 10005 not shown");
+    assert_eq!(l.severity, Severity::Info);
+    assert_eq!(out.completeness, Completeness::Complete);
+    assert_eq!(
+        out.document.properties.custom["rows"],
+        Value::number(10_005.0, None)
+    );
+}
+
+#[test]
+fn tsv_without_sniffable_dialect_is_guessed() {
+    let out = read_as("t.tsv", FormatId::Tsv, b"only one line\n");
+    assert!(out.document.losses.iter().any(
+        |l| l.severity == Severity::Info && l.what == "dialect guessed from the file type"
+    ));
+}

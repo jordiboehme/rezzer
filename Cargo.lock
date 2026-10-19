@@ -445,6 +445,13 @@ version = "0.1.0"
 [[package]]
 name = "rezzer-read-csv"
 version = "0.1.0"
+dependencies = [
+ "csv",
+ "csvsniff",
+ "rezzer-limits",
+ "rezzer-model",
+ "textenc",
+]
 
 [[package]]
 name = "rezzer-read-markdown"
