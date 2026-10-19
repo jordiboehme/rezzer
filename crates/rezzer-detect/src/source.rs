@@ -14,7 +14,7 @@ use rezzer_limits::Limits;
 use rezzer_model::{Bytes, Source};
 use sha2::{Digest, Sha256};
 
-use crate::{OpenError, detect};
+use crate::{OpenError, detect_with_hints};
 
 /// Files up to this size are read into memory; larger ones are memory-mapped.
 const IN_MEMORY_MAX: u64 = 64 * 1024 * 1024;
@@ -66,7 +66,7 @@ pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| shown.clone());
     let modified = handle_meta.modified().ok().and_then(rfc3339);
-    Ok(build(Some(path), name, bytes, modified))
+    Ok(build(Some(path), name, None, bytes, modified))
 }
 
 /// Opens for reading. On Unix with `O_NONBLOCK`, so opening a FIFO returns at once instead of
@@ -82,21 +82,33 @@ fn open_file(path: &Path) -> std::io::Result<File> {
     opts.open(path)
 }
 
-pub(crate) fn from_bytes(name: &str, bytes: Vec<u8>, limits: &Limits) -> Result<Source, OpenError> {
+pub(crate) fn from_bytes(
+    name: &str,
+    mime: Option<&str>,
+    bytes: Vec<u8>,
+    limits: &Limits,
+) -> Result<Source, OpenError> {
     check_size(bytes.len() as u64, limits)?;
     Ok(build(
         None,
         name.to_string(),
+        mime,
         Bytes::Owned(Arc::new(bytes)),
         None,
     ))
 }
 
-fn build(path: Option<&Path>, name: String, bytes: Bytes, modified: Option<String>) -> Source {
+fn build(
+    path: Option<&Path>,
+    name: String,
+    mime: Option<&str>,
+    bytes: Bytes,
+    modified: Option<String>,
+) -> Source {
     let slice = bytes.as_slice();
     let sha256 = hex::encode(Sha256::digest(slice));
     let size = slice.len() as u64;
-    let (format, detection) = detect(&name, slice);
+    let (format, detection) = detect_with_hints(&name, mime, slice);
     Source {
         path: path.map(Path::to_path_buf),
         name,

@@ -4,7 +4,9 @@
 
 use std::io::{Cursor, Write};
 
-use rezzer_detect::{OpenError, detect, from_bytes, open};
+use rezzer_detect::{
+    OpenError, detect, detect_with_hints, from_bytes, from_bytes_with_hints, open,
+};
 use rezzer_limits::Limits;
 use rezzer_model::{Confidence, FormatId};
 use zip::write::SimpleFileOptions;
@@ -1495,4 +1497,106 @@ fn multi_document_yaml_with_comment_and_list_is_not_markdown() {
         b"---\napiVersion: v1\nkind: Pod\n---\n# second resource\nkind: List\nitems:\n- a\n- b\n";
     let (f, d) = detect("k8s.yaml", k8s);
     assert_eq!(f, FormatId::Text, "{}", d.evidence);
+}
+
+#[test]
+fn mime_hint_never_overrides_magic() {
+    let (f, d) = detect_with_hints("report.txt", Some("text/plain"), b"%PDF-1.7\n%\xE2\xE3\n");
+    assert_eq!(f, FormatId::Pdf, "{}", d.evidence);
+    let (f, _) = detect_with_hints("report.txt", Some("text/csv"), b"%PDF-1.7\n%\xE2\xE3\n");
+    assert_eq!(f, FormatId::Pdf);
+}
+
+#[test]
+fn mime_csv_breaks_tie_when_sniff_declines() {
+    // Two records only: sniffing declines and the name gives no tie-breaker.
+    let (f, d) = detect_with_hints("upload", Some("text/csv"), b"a,b\n1,2\n");
+    assert_eq!(f, FormatId::Csv, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(d.evidence.contains("MIME type text/csv"), "{}", d.evidence);
+    let (f, _) = detect_with_hints("upload", Some("text/tab-separated-values"), b"a\tb\n1\t2\n");
+    assert_eq!(f, FormatId::Tsv);
+}
+
+#[test]
+fn mime_with_parameters_and_case_is_normalized() {
+    let (f, d) = detect_with_hints("upload", Some(" Text/CSV ; charset=utf-8"), b"a,b\n1,2\n");
+    assert_eq!(f, FormatId::Csv, "{}", d.evidence);
+    assert!(d.evidence.contains("MIME type text/csv"), "{}", d.evidence);
+}
+
+#[test]
+fn mime_csv_keeps_the_width_check() {
+    let (f, d) = detect_with_hints("upload", Some("text/csv"), b"a,b\n1,2,3\nfree text\n");
+    assert_eq!(f, FormatId::Text, "{}", d.evidence);
+}
+
+#[test]
+fn mime_markdown_on_plain_text_gives_markdown() {
+    let (f, d) = detect_with_hints("upload", Some("text/markdown"), b"Just a line of prose.\n");
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert_eq!(
+        detect_with_hints("upload", None, b"Just a line of prose.\n").0,
+        FormatId::Text
+    );
+}
+
+#[test]
+fn mime_beats_extension_on_a_tie() {
+    // Plain prose named .md with a declared text/plain: the MIME type is no format hint,
+    // the extension still decides.
+    let (f, _) = detect_with_hints("x.md", Some("text/plain"), b"Just prose.\n");
+    assert_eq!(f, FormatId::Markdown);
+    // A declared text/markdown wins over a .csv name when the content is no table.
+    let (f, _) = detect_with_hints("x.csv", Some("text/markdown"), b"Just prose.\n");
+    assert_eq!(f, FormatId::Markdown);
+}
+
+#[test]
+fn disagreeing_mime_lowers_confidence() {
+    let csv = b"name,age,city\nann,31,Bonn\nbob,42,Koeln\n";
+    let (f, plain) = detect_with_hints("upload", None, csv);
+    assert_eq!(f, FormatId::Csv);
+    assert_eq!(plain.confidence, Confidence::Likely);
+    let (f, d) = detect_with_hints("upload", Some("text/markdown"), csv);
+    assert_eq!(f, FormatId::Csv, "content evidence stays");
+    assert_eq!(d.confidence, Confidence::Guess);
+    assert!(d.evidence.contains("text/markdown"), "{}", d.evidence);
+    // text/plain is the default of data: URIs and says nothing: no change.
+    assert_eq!(
+        detect_with_hints("upload", Some("text/plain"), csv).1,
+        plain
+    );
+}
+
+#[test]
+fn detect_is_detect_with_no_hints() {
+    let samples: [(&str, &[u8]); 4] = [
+        ("x.csv", b"a,b\n1,2\n"),
+        ("x.md", b"Just prose.\n"),
+        ("x.txt", b"%PDF-1.7\n"),
+        ("x", b""),
+    ];
+    for (name, bytes) in samples {
+        assert_eq!(detect(name, bytes), detect_with_hints(name, None, bytes));
+    }
+}
+
+#[test]
+fn from_bytes_with_hints_uses_the_mime_type() {
+    let src = from_bytes_with_hints(
+        "upload",
+        Some("text/csv"),
+        b"a,b\n1,2\n".to_vec(),
+        &Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(src.format, FormatId::Csv);
+    assert_eq!(
+        from_bytes("upload", b"a,b\n1,2\n".to_vec(), &Limits::default())
+            .unwrap()
+            .format,
+        FormatId::Text
+    );
 }

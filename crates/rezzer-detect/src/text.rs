@@ -6,7 +6,9 @@
 //!
 //! Only the first [`SNIFF_BYTES`] are decoded. Order: Markdown frontmatter, the structured
 //! formats, G-code and OpenSCAD, Markdown by syntax, then CSV (structured formats often split
-//! into equal field counts too), then the extension tie-breaks.
+//! into equal field counts too), then the tie-breaks: a declared MIME type first, then the
+//! extension. A MIME type also raises the confidence of a matching guess and lowers it when
+//! it names another table or Markdown format; it never replaces content evidence.
 
 use rezzer_model::{Confidence, FormatId};
 
@@ -19,8 +21,9 @@ const HEAD_LINES: usize = 200;
 /// Records the extension fallback for CSV and TSV looks at.
 const CSV_FALLBACK_RECORDS: usize = 200;
 
-/// Returns None when the bytes are not text.
-pub(crate) fn detect(name: &str, bytes: &[u8]) -> Option<Found> {
+/// Returns None when the bytes are not text. `mime` is a normalized MIME type (no
+/// parameters, lowercase).
+pub(crate) fn detect(name: &str, mime: Option<&str>, bytes: &[u8]) -> Option<Found> {
     let truncated = bytes.len() > SNIFF_BYTES;
     let sample = sample(bytes);
     let decoded = textenc::decode(sample);
@@ -47,7 +50,43 @@ pub(crate) fn detect(name: &str, bytes: &[u8]) -> Option<Found> {
     } else {
         Confidence::Guess
     };
-    Some(classify(name, text, enc, base))
+    let hint = mime.and_then(|m| mime_format(m).map(|f| (f, m)));
+    Some(adjust(classify(name, hint, text, enc, base), hint))
+}
+
+/// The text format a MIME type names, if it names one Rezzer sniffs for. `text/plain` names
+/// none: it is the default of data: URIs and says nothing about the content.
+fn mime_format(mime: &str) -> Option<FormatId> {
+    match mime {
+        "text/csv" | "application/csv" => Some(FormatId::Csv),
+        "text/tab-separated-values" => Some(FormatId::Tsv),
+        "text/markdown" | "text/x-markdown" => Some(FormatId::Markdown),
+        _ => None,
+    }
+}
+
+/// A MIME type that agrees with a guessed table or Markdown format raises it to likely; one
+/// that names another of these formats lowers a likely result to a guess. The format itself
+/// never changes.
+fn adjust(found: Found, hint: Option<(FormatId, &str)>) -> Found {
+    let (format, mut detection) = found;
+    let hinted = [FormatId::Csv, FormatId::Tsv, FormatId::Markdown];
+    if let Some((hint, mime)) = hint
+        && hinted.contains(&format)
+    {
+        if hint == format && detection.confidence == Confidence::Guess {
+            detection.confidence = Confidence::Likely;
+            detection
+                .evidence
+                .push_str(&format!("; MIME type {mime} agrees"));
+        } else if hint != format && detection.confidence == Confidence::Likely {
+            detection.confidence = Confidence::Guess;
+            detection
+                .evidence
+                .push_str(&format!("; MIME type {mime} disagrees"));
+        }
+    }
+    (format, detection)
 }
 
 /// Takes the first [`SNIFF_BYTES`] and trims a character cut in half at the end.
@@ -66,7 +105,13 @@ fn sample(bytes: &[u8]) -> &[u8] {
     }
 }
 
-fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
+fn classify(
+    name: &str,
+    hint: Option<(FormatId, &str)>,
+    text: &str,
+    enc: &str,
+    base: Confidence,
+) -> Found {
     let body = text.trim_start_matches('\u{FEFF}');
     let trimmed = body.trim_start();
     let lines: Vec<&str> = body.lines().take(HEAD_LINES).collect();
@@ -140,10 +185,23 @@ fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
             ),
         );
     }
+    if let Some(f) = hint.and_then(|(format, mime)| csv_by_mime(format, mime, body)) {
+        return f;
+    }
     if let Some(f) = csv_by_extension(name, body) {
         return f;
     }
-    // Markdown is a superset of plain text: with nothing else found, the extension decides.
+    // Markdown is a superset of plain text: with nothing else found, the MIME type and then
+    // the extension decide.
+    if enc == "UTF-8"
+        && let Some((FormatId::Markdown, mime)) = hint
+    {
+        return found(
+            FormatId::Markdown,
+            Confidence::Likely,
+            format!("text ({enc}) with MIME type {mime}, no other format found"),
+        );
+    }
     if enc == "UTF-8"
         && let Some(ext) = extension(name).filter(|e| e == "md" || e == "markdown")
     {
@@ -738,15 +796,44 @@ fn obj(lines: &[&str]) -> Option<Found> {
     ))
 }
 
+/// The MIME fallback: `text/csv` or `text/tab-separated-values` and every one of the first
+/// records has the same field count of at least two. Likely: the sender declared the format.
+fn csv_by_mime(format: FormatId, mime: &str, body: &str) -> Option<Found> {
+    let delimiter = match format {
+        FormatId::Csv => b',',
+        FormatId::Tsv => b'\t',
+        _ => return None,
+    };
+    let width = uniform_width(body, delimiter)?;
+    Some(found(
+        format,
+        Confidence::Likely,
+        format!("MIME type {mime} and {width} fields in every record; content sniffing declined"),
+    ))
+}
+
 /// The extension fallback: `.csv` or `.tsv` and every one of the first records has the same
 /// field count of at least two.
 fn csv_by_extension(name: &str, body: &str) -> Option<Found> {
     let ext = extension(name)?;
-    let delimiter = match ext.as_str() {
-        "csv" => b',',
-        "tsv" => b'\t',
+    let (format, delimiter) = match ext.as_str() {
+        "csv" => (FormatId::Csv, b','),
+        "tsv" => (FormatId::Tsv, b'\t'),
         _ => return None,
     };
+    let width = uniform_width(body, delimiter)?;
+    Some(found(
+        format,
+        Confidence::Guess,
+        format!(
+            "extension .{} and {width} fields in every record; content sniffing declined",
+            clean(&ext)
+        ),
+    ))
+}
+
+/// The field count shared by every one of the first records, if it is at least two.
+fn uniform_width(body: &str, delimiter: u8) -> Option<usize> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -761,18 +848,5 @@ fn csv_by_extension(name: &str, body: &str) -> Option<Found> {
             _ => return None,
         }
     }
-    let width = width?;
-    let format = if delimiter == b'\t' {
-        FormatId::Tsv
-    } else {
-        FormatId::Csv
-    };
-    Some(found(
-        format,
-        Confidence::Guess,
-        format!(
-            "extension .{} and {width} fields in every record; content sniffing declined",
-            clean(&ext)
-        ),
-    ))
+    width
 }

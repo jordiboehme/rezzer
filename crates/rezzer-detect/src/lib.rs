@@ -6,9 +6,10 @@
 //!
 //! Detection order: empty, magic bytes, container listing (ZIP, OLE), pattern signatures
 //! (PDF after a binary prefix, IGES, ASCII DXF, SolidWorks blocks, STL), text sniffing, a ZIP
-//! after a stub, else unknown. The file name's extension only breaks ties between candidates with equal
-//! evidence (CSV or TSV when sniffing declines). Every check reads a bounded prefix, so
-//! detection stays cheap on large files.
+//! after a stub, else unknown. The file name's extension and a declared MIME type are hints:
+//! they only break ties between candidates with equal evidence (CSV, TSV or Markdown when
+//! sniffing declines) and move the confidence of a text result, never override content
+//! evidence. Every check reads a bounded prefix, so detection stays cheap on large files.
 
 mod container;
 mod magic;
@@ -44,11 +45,34 @@ pub fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
 /// Builds a [`Source`] from bytes already in memory (an upload, a container member).
 /// `name` is used for display and as the extension tie-breaker.
 pub fn from_bytes(name: &str, bytes: Vec<u8>, limits: &Limits) -> Result<Source, OpenError> {
-    source::from_bytes(name, bytes, limits)
+    source::from_bytes(name, None, bytes, limits)
+}
+
+/// Like [`from_bytes`], with the MIME type the sender declared (for example the type of a
+/// data: URI) as a further hint. See [`detect_with_hints`].
+pub fn from_bytes_with_hints(
+    name: &str,
+    mime: Option<&str>,
+    bytes: Vec<u8>,
+    limits: &Limits,
+) -> Result<Source, OpenError> {
+    source::from_bytes(name, mime, bytes, limits)
 }
 
 /// Detects the format of `bytes` by content. `name` only breaks ties.
 pub fn detect(name: &str, bytes: &[u8]) -> (FormatId, Detection) {
+    detect_with_hints(name, None, bytes)
+}
+
+/// Detects the format of `bytes` by content, with the file name and a declared MIME type as
+/// hints. Hints are used after the content checks: a MIME type naming CSV, TSV or Markdown
+/// decides when sniffing declines (before the extension) and raises or lowers the confidence
+/// of a text result. Magic bytes, containers and other clear evidence always win: a PDF named
+/// `.txt` and sent as `text/plain` stays a PDF. Parameters such as `; charset=utf-8` and case
+/// are ignored.
+pub fn detect_with_hints(name: &str, mime: Option<&str>, bytes: &[u8]) -> (FormatId, Detection) {
+    let mime = mime.map(normalize_mime).filter(|m| !m.is_empty());
+    let mime = mime.as_deref();
     if bytes.is_empty() {
         return found(FormatId::Empty, Confidence::Certain, "file is empty");
     }
@@ -64,7 +88,7 @@ pub fn detect(name: &str, bytes: &[u8]) -> (FormatId, Detection) {
     if let Some(f) = magic::detect_patterns(bytes) {
         return f;
     }
-    if let Some(f) = text::detect(name, bytes) {
+    if let Some(f) = text::detect(name, mime, bytes) {
         return f;
     }
     // Self-extracting archives: a program stub in front of a ZIP. Only the directory is
@@ -81,6 +105,15 @@ pub fn detect(name: &str, bytes: &[u8]) -> (FormatId, Detection) {
         Confidence::Likely,
         "no known signature and not text (binary or control bytes)",
     )
+}
+
+/// `Text/CSV; charset=utf-8` -> `text/csv`.
+fn normalize_mime(mime: &str) -> String {
+    mime.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 pub(crate) type Found = (FormatId, Detection);
