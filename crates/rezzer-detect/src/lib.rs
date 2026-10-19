@@ -59,6 +59,12 @@ pub fn from_bytes_with_hints(
     source::from_bytes(name, mime, bytes, limits)
 }
 
+/// Formats a time as RFC 3339 in UTC with whole seconds, for example
+/// `2026-10-19T08:30:00Z`. Times before 1970 give None.
+pub fn rfc3339(t: std::time::SystemTime) -> Option<String> {
+    source::rfc3339(t)
+}
+
 /// Detects the format of `bytes` by content. `name` only breaks ties.
 pub fn detect(name: &str, bytes: &[u8]) -> (FormatId, Detection) {
     detect_with_hints(name, None, bytes)

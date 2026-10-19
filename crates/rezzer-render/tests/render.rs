@@ -1671,3 +1671,28 @@ fn overview_empty_document_has_no_heading() {
     let md = render(&d, Completeness::Complete, &opts());
     assert!(!md.contains("## Overview"), "{md}");
 }
+
+#[test]
+fn output_section_names_round_trip() {
+    use rezzer_render::OutputSection;
+    for section in OutputSection::ALL {
+        assert_eq!(section.name().parse::<OutputSection>(), Ok(section));
+    }
+    assert_eq!(
+        " Not-Read ".parse::<OutputSection>(),
+        Ok(OutputSection::NotRead)
+    );
+    let err = "body".parse::<OutputSection>().unwrap_err();
+    assert!(
+        err.contains("\"body\"") && err.contains("not_read"),
+        "{err}"
+    );
+}
+
+#[test]
+fn format_name_is_snake_case() {
+    assert_eq!(
+        rezzer_render::format_name(rezzer_model::FormatId::ThreeMf),
+        "three_mf"
+    );
+}

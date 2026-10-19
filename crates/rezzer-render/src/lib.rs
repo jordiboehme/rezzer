@@ -42,6 +42,60 @@ pub enum OutputSection {
     NotRead,
 }
 
+impl OutputSection {
+    /// Every section in output order.
+    pub const ALL: [OutputSection; 8] = [
+        OutputSection::Overview,
+        OutputSection::Properties,
+        OutputSection::Content,
+        OutputSection::Logic,
+        OutputSection::Annotations,
+        OutputSection::Changes,
+        OutputSection::Embedded,
+        OutputSection::NotRead,
+    ];
+
+    /// The snake_case name callers use, for example `not_read`.
+    pub fn name(self) -> &'static str {
+        match self {
+            OutputSection::Overview => "overview",
+            OutputSection::Properties => "properties",
+            OutputSection::Content => "content",
+            OutputSection::Logic => "logic",
+            OutputSection::Annotations => "annotations",
+            OutputSection::Changes => "changes",
+            OutputSection::Embedded => "embedded",
+            OutputSection::NotRead => "not_read",
+        }
+    }
+}
+
+impl std::str::FromStr for OutputSection {
+    type Err = String;
+
+    /// Takes the [`OutputSection::name`]; case, surrounding spaces and `-` for `_` are allowed.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let wanted = s.trim().to_ascii_lowercase().replace('-', "_");
+        OutputSection::ALL
+            .into_iter()
+            .find(|section| section.name() == wanted)
+            .ok_or_else(|| {
+                let names: Vec<&str> = OutputSection::ALL.iter().map(|s| s.name()).collect();
+                format!(
+                    "unknown section {:?}, expected one of {}",
+                    s.trim(),
+                    names.join(", ")
+                )
+            })
+    }
+}
+
+/// The snake_case name of a format, as in the model JSON and the frontmatter, for example
+/// `three_mf`.
+pub fn format_name(format: rezzer_model::FormatId) -> String {
+    frontmatter::format_name(format)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RenderOptions {
     /// The sections to write; `None` writes all. Frontmatter and title are always written.

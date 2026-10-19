@@ -18,6 +18,14 @@ fmt-csv = ["dep:rezzer-read-csv"]
 
 [dependencies]
 rezzer-cli = { path = "../rezzer-cli" }
+rezzer-model = { path = "../rezzer-model" }
 rezzer-read-text = { path = "../readers/rezzer-read-text", optional = true }
 rezzer-read-markdown = { path = "../readers/rezzer-read-markdown", optional = true }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv", optional = true }
+
+[dev-dependencies]
+rezzer-model = { path = "../rezzer-model" }
+assert_cmd.workspace = true
+predicates.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
