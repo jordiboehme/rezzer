@@ -22,6 +22,8 @@ fn uniqueness_budget_is_shared_across_columns() {
     let a = analyze(&text, &d, 1000);
     let unique = a.columns.iter().filter(|c| c.unique).count();
     assert!(unique > 0 && unique < cols, "unique columns: {unique}");
+    assert!(a.columns.iter().any(|c| c.unique_exhausted && !c.unique));
+    assert!(a.columns.iter().all(|c| !(c.unique && c.unique_exhausted)));
     // Columns that ran out of budget are not key-like either.
     assert!(a.columns.iter().all(|c| c.unique || !c.key_like));
 }

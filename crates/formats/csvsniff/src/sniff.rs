@@ -75,8 +75,30 @@ fn looks_like_other_format(text: &str) -> bool {
         .count();
     // G-code: comment lines starting with `;`, or lines of G/M/T/N words
     // (`G1 X10 Y5 ; move`) without any delimiter outside a trailing comment.
-    let gcode = lines.iter().filter(|l| is_gcode_line(l)).count();
+    let gcode = if delimited_columns(&lines) {
+        0
+    } else {
+        lines.iter().filter(|l| is_gcode_line(l)).count()
+    };
     half(code) || half(gcode)
+}
+
+/// Lines that look like a `;` table, not G-code: the first line neither starts
+/// with `;` nor with a G/M/T/N word, and all lines have the same number (at
+/// least one) of `;`.
+fn delimited_columns(lines: &[&str]) -> bool {
+    let first = lines[0];
+    let n = first.matches(';').count();
+    n >= 1
+        && !first.starts_with(';')
+        && !starts_with_gcode_word(first)
+        && lines.iter().all(|l| l.matches(';').count() == n)
+}
+
+fn starts_with_gcode_word(line: &str) -> bool {
+    let mut chars = line.chars();
+    matches!(chars.next(), Some('G' | 'M' | 'T' | 'N'))
+        && chars.next().is_some_and(|c| c.is_ascii_digit())
 }
 
 fn is_gcode_line(line: &str) -> bool {
@@ -509,10 +531,15 @@ struct Acc {
     /// Smallest and largest numeric value (valid when `int + dec > 0`).
     min: f64,
     max: f64,
+    /// Numeric values so far rise strictly in file order; `prev` is the last one.
+    increasing: bool,
+    prev: f64,
     /// Hashes of the values seen so far while the column is still unique.
     seen: HashSet<u64>,
     /// A duplicate was seen, or more than `MAX_UNIQUE_TRACKED` distinct values.
     not_unique: bool,
+    /// `not_unique` because a limit was hit, not because of a duplicate.
+    exhausted: bool,
 }
 
 impl Acc {
@@ -528,6 +555,9 @@ impl Acc {
             max_len: 0,
             min: f64::INFINITY,
             max: f64::NEG_INFINITY,
+            increasing: true,
+            prev: f64::NEG_INFINITY,
+            exhausted: false,
             seen: HashSet::new(),
             not_unique: false,
         }
@@ -545,8 +575,10 @@ impl Acc {
         if !self.not_unique {
             let mut h = DefaultHasher::new();
             v.hash(&mut h);
-            if !self.seen.insert(h.finish()) || *budget == 0 || self.seen.len() > MAX_UNIQUE_TRACKED
-            {
+            if !self.seen.insert(h.finish()) {
+                self.give_up(budget);
+            } else if *budget == 0 || self.seen.len() > MAX_UNIQUE_TRACKED {
+                self.exhausted = true;
                 self.give_up(budget);
             } else {
                 *budget -= 1;
@@ -555,6 +587,8 @@ impl Acc {
         if let Some((_, x)) = number(v) {
             self.min = self.min.min(x);
             self.max = self.max.max(x);
+            self.increasing &= x > self.prev;
+            self.prev = x;
         }
         match number(v) {
             Some((0, _)) => self.int += 1,
@@ -611,13 +645,17 @@ fn id_like_name(name: &str) -> bool {
 }
 
 /// Integer columns that are identifiers, judged over all rows: unique values
-/// in 1000..=2999 (years), or unique values without gaps (row ids).
+/// in 1000..=2999 (years), or values without gaps that are unique or strictly
+/// rising (row ids).
 fn identifier_values(acc: &Acc, c: &Column, rows: usize) -> bool {
-    if c.kind != ColumnKind::Integer || !c.unique || acc.missing > 0 || rows == 0 {
+    if c.kind != ColumnKind::Integer || acc.missing > 0 || rows == 0 {
         return false;
     }
-    let years = acc.min >= 1000.0 && acc.max <= 2999.0;
-    let gapless = rows >= 2 && acc.max - acc.min + 1.0 == acc.non_empty as f64;
+    let years = c.unique && acc.min >= 1000.0 && acc.max <= 2999.0;
+    // Past the uniqueness budget, strictly rising values prove uniqueness.
+    let gapless = rows >= 2
+        && (c.unique || acc.increasing)
+        && acc.max - acc.min + 1.0 == acc.non_empty as f64;
     years || gapless
 }
 
@@ -730,6 +768,7 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
                 unit: head.and_then(unit_of),
                 missing: a.missing,
                 unique,
+                unique_exhausted: a.exhausted,
                 key_like,
             }
         })

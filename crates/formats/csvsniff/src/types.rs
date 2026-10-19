@@ -49,8 +49,13 @@ pub struct Column {
     pub unit: Option<String>,
     /// Number of empty cells (rows too short for this column count as empty).
     pub missing: usize,
-    /// True when no non-empty value occurs twice.
+    /// True when no non-empty value occurs twice. False can also mean the
+    /// uniqueness budget ran out; see [`Column::unique_exhausted`].
     pub unique: bool,
+    /// True when `unique` is false only because the per-column (200,000) or
+    /// per-file (2,000,000) limit on tracked values was reached, not because
+    /// a duplicate was seen.
+    pub unique_exhausted: bool,
     /// Unique, no missing value, at least two rows, and Integer or short Text.
     pub key_like: bool,
 }

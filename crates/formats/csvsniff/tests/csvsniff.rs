@@ -483,3 +483,35 @@ fn identifier_columns_do_not_use_up_numeric_slots() {
         a.derived
     );
 }
+
+#[test]
+fn two_column_semicolon_exports_with_codes_are_accepted() {
+    let mut t = String::from("sku;name\n");
+    for i in 0..20 {
+        t.push_str(&format!("M{}00;Widget {i}\n", i + 1));
+    }
+    assert_eq!(sniff(&t).unwrap().delimiter, b';');
+    let mut t = String::from("name;value\n");
+    for i in 0..20 {
+        t.push_str(&format!(";{i}\n"));
+    }
+    assert_eq!(sniff(&t).unwrap().delimiter, b';');
+    // Real G-code with a comment header is still rejected.
+    let mut g = String::from("; generated\n");
+    for i in 0..30 {
+        g.push_str(&format!("G1 X{i} ; move\n"));
+    }
+    assert_eq!(sniff(&g), None);
+}
+
+#[test]
+fn long_increasing_id_column_is_not_a_part() {
+    let mut t = String::from("n,A,B,Total\n");
+    for i in 1..=250_000u64 {
+        let (a, b) = (i * 371 % 900 + 5000, i * 533 % 700 + 6000);
+        t.push_str(&format!("{i},{a},{b},{}\n", i + a + b));
+    }
+    let a = full(&t);
+    assert!(a.columns[0].unique_exhausted && !a.columns[0].unique);
+    assert!(a.derived.is_empty(), "{:?}", a.derived);
+}
