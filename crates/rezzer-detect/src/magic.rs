@@ -33,34 +33,58 @@ const DWG_VERSIONS: &[(&[u8], &str)] = &[
     (b"AC1032", "R2018"),
 ];
 
+/// Fixed prefixes: (magic, format, evidence).
+///
+/// Native MCAD signatures (CATIA `V5_CFV2`, NX `SPLMSSTR`, Creo `#UGC:`): format facts from
+/// the cadmpeg documentation (CC BY 4.0), checked against public sample files.
+const PREFIXES: &[(&[u8], FormatId, &str)] = &[
+    (b"%PDF-", FormatId::Pdf, "pdf header %PDF-"),
+    (
+        &[0xC5, 0xD0, 0xD3, 0xC6],
+        FormatId::Eps,
+        "dos eps binary header C5D0D3C6",
+    ),
+    (b"{\\rtf", FormatId::Rtf, "rtf header {\\rtf"),
+    (b"glTF", FormatId::Glb, "binary gltf magic glTF"),
+    (b"GCDE", FormatId::Bgcode, "prusa binary gcode magic GCDE"),
+    (
+        b"AutoCAD Binary DXF\r\n\x1a\x00",
+        FormatId::Dxf,
+        "binary dxf sentinel AutoCAD Binary DXF",
+    ),
+    (
+        b"3D Geometry File Format ",
+        FormatId::Rhino3dm,
+        "rhino 3dm header 3D Geometry File Format",
+    ),
+    (
+        b"V5_CFV2\x00",
+        FormatId::Catpart,
+        "catia v5 container magic V5_CFV2",
+    ),
+    (
+        b"SPLMSSTR",
+        FormatId::NxPrt,
+        "siemens nx container magic SPLMSSTR",
+    ),
+    (b"#UGC:", FormatId::CreoPrt, "creo ugc header #UGC:"),
+    (
+        b"EESchema Schematic File Version",
+        FormatId::KicadSch,
+        "kicad legacy schematic header EESchema Schematic File Version",
+    ),
+    (
+        b"PCBNEW-BOARD Version",
+        FormatId::KicadPcb,
+        "kicad legacy board header PCBNEW-BOARD Version",
+    ),
+];
+
 /// Checks the fixed magic numbers that are not containers. OLE and ZIP are handled by the
 /// caller because they need a look inside.
 pub(crate) fn detect(bytes: &[u8]) -> Option<Found> {
-    let head = &bytes[..bytes.len().min(PDF_WINDOW)];
-    if bytes.starts_with(b"%PDF-") {
-        return Some(found(
-            FormatId::Pdf,
-            Confidence::Certain,
-            "pdf header %PDF-",
-        ));
-    }
-    // Leading junk before the header is accepted by PDF readers. The header must still start
-    // a line, so a text that only mentions it mid-sentence is not taken for a PDF.
-    if let Some(pos) = find(head, b"%PDF-")
-        && matches!(head[pos - 1], b'\n' | b'\r')
-    {
-        return Some(found(
-            FormatId::Pdf,
-            Confidence::Likely,
-            format!("pdf header %PDF- at offset {pos}"),
-        ));
-    }
-    if bytes.starts_with(&[0xC5, 0xD0, 0xD3, 0xC6]) {
-        return Some(found(
-            FormatId::Eps,
-            Confidence::Certain,
-            "dos eps binary header C5D0D3C6",
-        ));
+    if let Some((_, format, evidence)) = PREFIXES.iter().find(|(m, _, _)| bytes.starts_with(m)) {
+        return Some(found(*format, Confidence::Certain, *evidence));
     }
     if bytes.starts_with(b"%!PS-Adobe") {
         let line = first_line(bytes, 256);
@@ -77,32 +101,11 @@ pub(crate) fn detect(bytes: &[u8]) -> Option<Found> {
             "postscript header %!PS-Adobe",
         ));
     }
-    if bytes.starts_with(b"{\\rtf") {
-        return Some(found(
-            FormatId::Rtf,
-            Confidence::Certain,
-            "rtf header {\\rtf",
-        ));
-    }
     if let Some(f) = dwg(bytes) {
         return Some(f);
     }
     if bytes.starts_with(b"ISO-10303-21;") {
         return Some(step(bytes));
-    }
-    if bytes.starts_with(b"glTF") {
-        return Some(found(
-            FormatId::Glb,
-            Confidence::Certain,
-            "binary gltf magic glTF",
-        ));
-    }
-    if bytes.starts_with(b"GCDE") {
-        return Some(found(
-            FormatId::Bgcode,
-            Confidence::Certain,
-            "prusa binary gcode magic GCDE",
-        ));
     }
     None
 }
@@ -110,13 +113,89 @@ pub(crate) fn detect(bytes: &[u8]) -> Option<Found> {
 /// Checks the signatures that are patterns rather than fixed magic numbers. Runs after the
 /// container check, so a ZIP or OLE file is never taken for one of these by chance.
 pub(crate) fn detect_patterns(bytes: &[u8]) -> Option<Found> {
+    if let Some(f) = pdf_after_junk(bytes) {
+        return Some(f);
+    }
     if let Some(f) = iges(bytes) {
+        return Some(f);
+    }
+    if let Some(f) = ascii_dxf(bytes) {
+        return Some(f);
+    }
+    if let Some(f) = sldprt_blocks(bytes) {
         return Some(f);
     }
     if let Some(f) = binary_stl(bytes) {
         return Some(f);
     }
     ascii_stl(bytes)
+}
+
+/// PDF readers accept junk before the header. Only a binary prefix counts: when the bytes
+/// before `%PDF-` are text, the file is a text that quotes the header.
+fn pdf_after_junk(bytes: &[u8]) -> Option<Found> {
+    let head = &bytes[..bytes.len().min(PDF_WINDOW)];
+    let pos = find(head, b"%PDF-")?;
+    let prefix = &head[..pos];
+    let binary = std::str::from_utf8(prefix).is_err()
+        || prefix
+            .iter()
+            .any(|&b| (b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0C)) || b == 0x7F);
+    binary.then(|| {
+        found(
+            FormatId::Pdf,
+            Confidence::Likely,
+            format!("pdf header %PDF- at offset {pos} after a binary prefix"),
+        )
+    })
+}
+
+/// ASCII DXF: group code / value line pairs, starting with `0`/`SECTION`/`2`/<section name>.
+/// Leading `999` comment pairs are skipped.
+fn ascii_dxf(bytes: &[u8]) -> Option<Found> {
+    let head = &bytes[..bytes.len().min(4096)];
+    // Later bytes may be cut or in a legacy code page; the first lines are ASCII.
+    let text = match std::str::from_utf8(head) {
+        Ok(t) => t,
+        Err(e) => std::str::from_utf8(&head[..e.valid_up_to()]).ok()?,
+    };
+    let mut lines = text.lines().map(str::trim);
+    let mut first = lines.next()?;
+    while first == "999" {
+        lines.next()?;
+        first = lines.next()?;
+    }
+    let pair = [first, lines.next()?, lines.next()?, lines.next()?];
+    let sections = [
+        "HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS",
+    ];
+    if pair[0] != "0" || pair[1] != "SECTION" || pair[2] != "2" || !sections.contains(&pair[3]) {
+        return None;
+    }
+    Some(found(
+        FormatId::Dxf,
+        Confidence::Certain,
+        format!("ascii dxf group codes 0 SECTION 2 {}", pair[3]),
+    ))
+}
+
+/// SolidWorks block envelope: u32 file id, u32 big-endian version 4, then blocks that start
+/// with the marker `14 00 06 00 08 00`. Format facts from the cadmpeg documentation
+/// (CC BY 4.0). The compound-file envelope is handled in the container module.
+fn sldprt_blocks(bytes: &[u8]) -> Option<Found> {
+    if bytes.get(4..8)? != [0, 0, 0, 4] {
+        return None;
+    }
+    let head = &bytes[8..bytes.len().min(4096)];
+    let pos = find(head, &[0x14, 0x00, 0x06, 0x00, 0x08, 0x00])?;
+    Some(found(
+        FormatId::Sldprt,
+        Confidence::Likely,
+        format!(
+            "solidworks block envelope (version 4, block marker at offset {})",
+            pos + 8
+        ),
+    ))
 }
 
 /// Pre-R13 version strings. These files have a different structure and are not readable;

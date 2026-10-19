@@ -579,3 +579,417 @@ fn pre_r13_dwg_versions() {
     // Text that starts with the same characters stays text.
     assert_eq!(detect("x", b"AC1.2 is a part number.\n").0, FormatId::Text);
 }
+
+// ---- Review fix round: container-first PDF, CAD formats, text order, bounded ZIP listing ----
+
+fn fixture(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+fn cfb_tree(storages: &[&str], streams: &[&str]) -> Vec<u8> {
+    let mut comp = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    for s in storages {
+        comp.create_storage(s).unwrap();
+    }
+    for name in streams {
+        let mut s = comp.create_stream(name).unwrap();
+        s.write_all(&[0u8; 600]).unwrap();
+    }
+    comp.flush().unwrap();
+    comp.into_inner().into_inner()
+}
+
+/// A ZIP of `n` empty stored entries, written by hand so it stays fast in debug builds.
+/// Above 65,535 entries it writes the ZIP64 end records, as conforming writers do, unless
+/// `zip64` is false.
+fn raw_zip_empty_entries(n: u32) -> Vec<u8> {
+    raw_zip(n, true)
+}
+
+fn raw_zip(n: u32, zip64: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for i in 0..n {
+        let name = format!("{i:07}");
+        let offset = out.len() as u32;
+        out.extend_from_slice(b"PK\x03\x04");
+        out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]); // version, flags, method, time, date
+        out.extend_from_slice(&[0u8; 12]); // crc, sizes
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        central.extend_from_slice(b"PK\x01\x02");
+        central.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        central.extend_from_slice(&[0u8; 12]);
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0u8; 12]); // extra, comment, disk, attrs
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let cd_offset = out.len() as u32;
+    let cd_size = central.len() as u32;
+    out.extend_from_slice(&central);
+    if zip64 && n > 0xFFFF {
+        let z64 = out.len() as u64;
+        out.extend_from_slice(b"PK\x06\x06");
+        out.extend_from_slice(&44u64.to_le_bytes());
+        out.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&u64::from(n).to_le_bytes());
+        out.extend_from_slice(&u64::from(n).to_le_bytes());
+        out.extend_from_slice(&u64::from(cd_size).to_le_bytes());
+        out.extend_from_slice(&u64::from(cd_offset).to_le_bytes());
+        out.extend_from_slice(b"PK\x06\x07");
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&z64.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+    }
+    out.extend_from_slice(b"PK\x05\x06");
+    out.extend_from_slice(&[0u8; 4]);
+    let count = u16::try_from(n).unwrap_or(0xFFFF);
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&cd_size.to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+#[test]
+fn pdf_stored_in_zip_is_zip() {
+    // The entry name ends in a line feed, so "\n%PDF-" appears right after the local header.
+    let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    w.start_file("a.pdf\n", stored).unwrap();
+    w.write_all(b"%PDF-1.4\n%%EOF\n").unwrap();
+    let bytes = w.finish().unwrap().into_inner();
+    let (f, d) = detect("pdfs.zip", &bytes);
+    assert_eq!(f, FormatId::Zip, "{}", d.evidence);
+}
+
+#[test]
+fn prose_quoting_pdf_header_on_its_own_line_is_text() {
+    let text = b"Notes on the format, see the reference:\n%PDF-1.7\nThe header comes first.\n";
+    assert_eq!(detect("notes.txt", text).0, FormatId::Text);
+}
+
+#[test]
+fn pdf_after_binary_junk_is_pdf_likely() {
+    let mut bytes = vec![0x00, 0x01, 0x02, 0xFF, 0x10];
+    bytes.extend_from_slice(b"%PDF-1.4\n1 0 obj\n");
+    let (f, d) = detect("x", &bytes);
+    assert_eq!(f, FormatId::Pdf, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+}
+
+#[test]
+fn markdown_about_openscad_is_markdown() {
+    let post = b"---\ntitle: \"Printing a box\"\n---\n\nA short post.\n\n    cube(10); translate([2,0,0]) sphere(3);\n\nThat is all.\n";
+    assert_eq!(detect("post.md", post).0, FormatId::Markdown);
+    let readme = b"# Box\n\nSome prose about the model.\n\n```openscad\nmodule box(s) { cube(s); }\ntranslate([1,0,0]) sphere(2);\n```\n\n## Usage\n\nRender it.\n";
+    assert_eq!(detect("readme.md", readme).0, FormatId::Markdown);
+    assert_eq!(detect("readme.txt", readme).0, FormatId::Markdown);
+}
+
+#[test]
+fn python_with_primitive_names_is_not_openscad() {
+    let py = b"import turtle\n\ndef square(t, n):\n    for _ in range(4):\n        t.forward(n)\n\ndef circle(t, r):\n    t.circle(r)\n\nsquare(turtle.Turtle(), 10)\ncircle(turtle.Turtle(), 5)\ncube(3)\nsphere(2)\n";
+    assert_eq!(detect("turtle.py", py).0, FormatId::Text);
+}
+
+#[test]
+fn corpus_openscad_files() {
+    for name in [
+        "bosl2_std.scad",
+        "bosl2_version.scad",
+        "openscad_echo.scad",
+        "openscad_recursion.scad",
+        "openscad_list_comprehensions.scad",
+    ] {
+        let (f, d) = detect("x.txt", &fixture(name));
+        assert_eq!(f, FormatId::Openscad, "{name}: {}", d.evidence);
+    }
+}
+
+#[test]
+fn gcode_with_line_numbers() {
+    let (f, d) = detect("x.txt", &fixture("syn_cnc_mill.nc"));
+    assert_eq!(f, FormatId::Gcode, "{}", d.evidence);
+    let cnc = b"%\nO1000\nN10 G21 G90\nN20 T1 M6\nN30 S8000 M3\nN40 G0 X0 Y0\nN50 G1 Z-1 F100\nN60 M30\n%\n";
+    assert_eq!(detect("cnc.nc", cnc).0, FormatId::Gcode);
+}
+
+#[test]
+fn dxf_ascii_and_binary() {
+    let ascii = b"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1009\n  0\nENDSEC\n  0\nEOF\n";
+    let (f, d) = detect("x.txt", ascii);
+    assert_eq!(f, FormatId::Dxf, "{}", d.evidence);
+    let crlf =
+        b"  0\r\nSECTION\r\n  2\r\nENTITIES\r\n  0\r\nLINE\r\n  0\r\nENDSEC\r\n  0\r\nEOF\r\n";
+    assert_eq!(detect("x", crlf).0, FormatId::Dxf);
+    let comment = b"999\ndxfrw 0.6.3\n  0\nSECTION\n  2\nHEADER\n  0\nENDSEC\n";
+    assert_eq!(detect("x", comment).0, FormatId::Dxf);
+    let mut binary = b"AutoCAD Binary DXF\r\n\x1a\x00".to_vec();
+    binary.extend_from_slice(b"\x00\x00SECTION\x00\x02HEADER\x00");
+    let (f, d) = detect("x", &binary);
+    assert_eq!(f, FormatId::Dxf, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain);
+}
+
+#[test]
+fn obj_by_keywords() {
+    let obj = b"# cube\nmtllib cube.mtl\no Cube\nv 1.0 1.0 -1.0\nv 1.0 -1.0 -1.0\nv 1.0 1.0 1.0\nvn 0 1 0\nusemtl Material\ns off\nf 1//1 2//1 3//1\n";
+    let (f, d) = detect("x.txt", obj);
+    assert_eq!(f, FormatId::Obj, "{}", d.evidence);
+    assert_eq!(
+        detect("x", b"v is a letter.\nf is another.\nSo is o.\n").0,
+        FormatId::Text
+    );
+}
+
+#[test]
+fn rhino_and_kicad_legacy() {
+    let mut rhino = b"3D Geometry File Format       60".to_vec();
+    rhino.extend_from_slice(&[1, 0, 0, 0, 0xa5, 1, 0, 0]);
+    assert_eq!(detect("x", &rhino).0, FormatId::Rhino3dm);
+    assert_eq!(
+        detect(
+            "x",
+            b"EESchema Schematic File Version 4\nEELAYER 30 0\nEELAYER END\n"
+        )
+        .0,
+        FormatId::KicadSch
+    );
+    assert_eq!(
+        detect("x", b"PCBNEW-BOARD Version 1 date 2019-01-01\n\n$GENERAL\n").0,
+        FormatId::KicadPcb
+    );
+}
+
+#[test]
+fn mcad_native_by_magic() {
+    let mut catia = b"V5_CFV2\x00".to_vec();
+    catia.extend_from_slice(&[0, 0x10, 0x67, 0xd7, 0, 0, 0x38, 0x96]);
+    catia.extend_from_slice(&[0xff; 8]);
+    let (f, d) = detect("x", &catia);
+    assert_eq!(f, FormatId::Catpart, "{}", d.evidence);
+
+    let mut nx = b"SPLMSSTR\x06\x3d\x21\x01\x00\x00\x00\x00\x00".to_vec();
+    nx.extend_from_slice(&[0x2b, 0xdd, 0x0e, 0, 0, 0, 0, 0]);
+    nx.extend_from_slice(b"\x00HEADER\x0f\x00\x00\x00");
+    assert_eq!(detect("x", &nx).0, FormatId::NxPrt);
+
+    let creo = b"#UGC:2 PART 2149 1860 800 1 1 15 4100 2023294 00\n#-END_OF_UGC_HEADER\n";
+    assert_eq!(detect("x.prt", creo).0, FormatId::CreoPrt);
+
+    // SolidWorks block envelope: file id, version 4 (big-endian), then a block marker.
+    let mut sw = vec![0x4a, 0xcb, 0xa7, 0x2b, 0, 0, 0, 4];
+    sw.extend_from_slice(&[0xae; 12]);
+    sw.extend_from_slice(&[0x14, 0, 0x06, 0, 0x08, 0]);
+    sw.extend_from_slice(&[0xdf; 40]);
+    let (f, d) = detect("x", &sw);
+    assert_eq!(f, FormatId::Sldprt, "{}", d.evidence);
+}
+
+#[test]
+fn mcad_native_by_ole_streams() {
+    let inv = cfb_tree(&["/RSeStorage"], &["/RSeStorage/RSeSegInfo"]);
+    let (f, d) = detect("x", &inv);
+    assert_eq!(f, FormatId::Ipt, "{}", d.evidence);
+    let inv_db = cfb_tree(
+        &["/RSeStorage", "/RSeStorage/V3"],
+        &["/RSeStorage/V3/RSeDb"],
+    );
+    assert_eq!(detect("x", &inv_db).0, FormatId::Ipt);
+    let nx = cfb_tree(&["/UG_PART"], &["/UG_PART/UG_PART"]);
+    assert_eq!(detect("x", &nx).0, FormatId::NxPrt);
+    let sw = cfb_tree(&[], &["/ISolidWorksInformation"]);
+    assert_eq!(detect("x", &sw).0, FormatId::Sldprt);
+}
+
+#[test]
+fn f3d_by_manifest() {
+    let mut manifest = Vec::new();
+    manifest.extend_from_slice(&7u32.to_le_bytes());
+    manifest.extend_from_slice(b"3-2-0-0");
+    manifest.extend_from_slice(&13u32.to_le_bytes());
+    manifest.extend_from_slice(b"FusionDocType");
+    let bytes = zip_of(&[
+        (
+            "FusionAssetName[Active]/Breps.BlobParts/BREP.0.smb",
+            b"\x00",
+        ),
+        ("Manifest.dat", &manifest),
+        ("Properties.dat", b"\x00"),
+    ]);
+    let (f, d) = detect("x.zip", &bytes);
+    assert_eq!(f, FormatId::F3d, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain);
+}
+
+#[test]
+fn zip_with_too_many_entries_is_not_listed() {
+    let bytes = raw_zip_empty_entries(200_000);
+    let start = std::time::Instant::now();
+    let (f, d) = detect("many.zip", &bytes);
+    assert_eq!(f, FormatId::Zip, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+    assert!(start.elapsed().as_millis() < 500, "{:?}", start.elapsed());
+    // Without the ZIP64 records the saturated 16-bit count is replaced by an estimate from
+    // the directory size.
+    let (f, d) = detect("many.zip", &raw_zip(200_000, false));
+    assert_eq!(f, FormatId::Zip);
+    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+    // A small hand-written archive still lists.
+    assert_eq!(
+        detect("few.zip", &raw_zip_empty_entries(3)).1.confidence,
+        Confidence::Certain
+    );
+}
+
+#[test]
+fn zip64_directory_claim_is_checked() {
+    // Local header, then a ZIP64 end record claiming 10^9 entries, its locator and the
+    // classic end record with the ZIP64 markers.
+    let mut bytes = b"PK\x03\x04".to_vec();
+    bytes.extend_from_slice(&[0u8; 26]);
+    let z64_offset = bytes.len() as u64;
+    bytes.extend_from_slice(b"PK\x06\x06");
+    bytes.extend_from_slice(&44u64.to_le_bytes());
+    bytes.extend_from_slice(&[45, 0, 45, 0]);
+    bytes.extend_from_slice(&[0u8; 8]); // disk numbers
+    bytes.extend_from_slice(&1_000_000_000u64.to_le_bytes());
+    bytes.extend_from_slice(&1_000_000_000u64.to_le_bytes());
+    bytes.extend_from_slice(&46_000_000_000u64.to_le_bytes());
+    bytes.extend_from_slice(&30u64.to_le_bytes());
+    bytes.extend_from_slice(b"PK\x06\x07");
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&z64_offset.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(b"PK\x05\x06");
+    bytes.extend_from_slice(&[0u8; 4]);
+    bytes.extend_from_slice(&[0xFF; 4]);
+    bytes.extend_from_slice(&[0xFF; 8]);
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    let (f, d) = detect("x.zip", &bytes);
+    assert_eq!(f, FormatId::Zip);
+    assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
+}
+
+#[test]
+fn content_types_bomb_is_not_decompressed() {
+    let mut ct = content_types(
+        r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#,
+    );
+    ct.extend(std::iter::repeat_n(b' ', 2 * 1024 * 1024));
+    let bytes = zip_of(&[("[Content_Types].xml", &ct), ("xl/workbook.xml", b"<w/>")]);
+    let (f, d) = detect("x", &bytes);
+    assert_eq!(f, FormatId::Xlsx, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+    assert!(d.evidence.contains("unreadable"), "{}", d.evidence);
+}
+
+#[test]
+fn container_names_match_case_insensitively() {
+    let ct = content_types(
+        r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+    );
+    let bytes = zip_of(&[("[content_types].xml", &ct), ("word/document.xml", b"<w/>")]);
+    let (f, d) = detect("x", &bytes);
+    assert_eq!(f, FormatId::Docx, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain);
+    assert_eq!(
+        detect("x", &zip_of(&[("document.xml", b"<D/>")])).0,
+        FormatId::Fcstd
+    );
+}
+
+#[test]
+fn multi_document_yaml_is_not_markdown() {
+    let yaml = b"---\nname: a\nvalue: 1\n---\nname: b\nvalue: 2\n";
+    assert_eq!(detect("x.yaml", yaml).0, FormatId::Text);
+}
+
+#[test]
+fn excellon_without_m48() {
+    let allegro = b";LEADER: 12\n;HEADER:\n;CODE  : ASCII\n;T01 Holesize 1. = 8.000000 PLATED MILS\n%\nG90\nT01\nX00130500Y00184500\nX00133000Y00195500\nM30\n";
+    let (f, d) = detect("x.drl", allegro);
+    assert_eq!(f, FormatId::Excellon, "{}", d.evidence);
+    let metric = b"METRIC,LZ\nT1C0.800\nT2C1.000\n%\nT1\nX1000Y1000\nM30\n";
+    assert_eq!(detect("x", metric).0, FormatId::Excellon);
+}
+
+/// Sweep over the local spike corpus (not in git). Run with `--ignored` when it exists.
+#[test]
+#[ignore = "needs the local spike corpus"]
+fn spike_cad_corpus_sweep() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spike/corpus/cad");
+    let expect = |ext: &str| match ext {
+        "dxf" => Some(FormatId::Dxf),
+        "3dm" => Some(FormatId::Rhino3dm),
+        "catpart" => Some(FormatId::Catpart),
+        "sldprt" => Some(FormatId::Sldprt),
+        "ipt" | "iam" => Some(FormatId::Ipt),
+        "f3d" => Some(FormatId::F3d),
+        "obj" => Some(FormatId::Obj),
+        "scad" => Some(FormatId::Openscad),
+        "nc" | "gcode" => Some(FormatId::Gcode),
+        "drl" | "xln" => Some(FormatId::Excellon),
+        "gbr" | "gtl" | "gbl" | "gm1" => Some(FormatId::Gerber),
+        "sch" | "kicad_sch" => Some(FormatId::KicadSch),
+        "kicad_pcb" => Some(FormatId::KicadPcb),
+        "stl" => Some(FormatId::Stl),
+        "stp" | "step" => Some(FormatId::Step),
+        "igs" | "iges" => Some(FormatId::Iges),
+        "ifc" => Some(FormatId::Ifc),
+        "3mf" => Some(FormatId::ThreeMf),
+        "fcstd" => Some(FormatId::Fcstd),
+        "dwg" => Some(FormatId::Dwg),
+        "glb" => Some(FormatId::Glb),
+        "gltf" => Some(FormatId::Gltf),
+        "bgcode" => Some(FormatId::Bgcode),
+        _ => None,
+    };
+    let mut bad = Vec::new();
+    let mut checked = 0;
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            let ext = p
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase());
+            let lower = name.to_ascii_lowercase();
+            let want = if lower.contains(".prt") && lower.contains("_nx") {
+                Some(FormatId::NxPrt)
+            } else if lower.contains(".prt.") {
+                Some(FormatId::CreoPrt)
+            } else {
+                ext.as_deref().and_then(expect)
+            };
+            let Some(want) = want else {
+                continue;
+            };
+            if name.contains("synthetic") || p.to_string_lossy().contains("/synthetic/") {
+                continue;
+            }
+            let bytes = std::fs::read(&p).unwrap();
+            let (f, d) = detect(&name, &bytes);
+            checked += 1;
+            if f != want {
+                bad.push(format!("{}: {f:?} ({})", p.display(), d.evidence));
+            }
+        }
+    }
+    assert!(checked > 0, "no corpus files found");
+    eprintln!("checked {checked} corpus files");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

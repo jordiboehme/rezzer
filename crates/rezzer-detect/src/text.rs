@@ -4,8 +4,9 @@
 
 //! Text sniffing: decide whether the bytes are text and which text format they hold.
 //!
-//! Only the first [`SNIFF_BYTES`] are decoded. Structured formats are checked before CSV,
-//! because their lines often split into equal field counts too.
+//! Only the first [`SNIFF_BYTES`] are decoded. Order: Markdown frontmatter, the structured
+//! formats, G-code and OpenSCAD, Markdown by syntax, then CSV (structured formats often split
+//! into equal field counts too), then the extension tie-breaks.
 
 use rezzer_model::{Confidence, FormatId};
 
@@ -70,6 +71,9 @@ fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
     let trimmed = body.trim_start();
     let lines: Vec<&str> = body.lines().take(HEAD_LINES).collect();
 
+    if let Some(f) = markdown_frontmatter(&lines) {
+        return f;
+    }
     if let Some(f) = gltf(trimmed) {
         return f;
     }
@@ -109,13 +113,16 @@ fn classify(name: &str, text: &str, enc: &str, base: Confidence) -> Found {
     if let Some(f) = excellon(&lines) {
         return f;
     }
+    if let Some(f) = obj(&lines) {
+        return f;
+    }
     if let Some(f) = gcode(body) {
         return f;
     }
     if let Some(f) = openscad(body) {
         return f;
     }
-    if let Some(f) = markdown(&lines) {
+    if let Some(f) = markdown_syntax(&lines) {
         return f;
     }
     if let Some(d) = csvsniff::sniff(body) {
@@ -344,31 +351,78 @@ fn gerber(lines: &[&str]) -> Option<Found> {
     ))
 }
 
+/// Excellon drill files: an `M48` header, or a header with units (`METRIC`/`INCH`) and tool
+/// definitions (`T<n>C<diameter>`), or a `%` header end with `G05`/`G90` and bare
+/// coordinate lines (Allegro and other writers without `M48`).
 fn excellon(lines: &[&str]) -> Option<Found> {
-    lines.iter().take(50).any(|l| l.trim() == "M48").then(|| {
-        found(
+    let head = || lines.iter().take(HEAD_LINES).map(|l| l.trim());
+    if head().take(50).any(|l| l == "M48") {
+        return Some(found(
             FormatId::Excellon,
             Confidence::Likely,
             "excellon header M48",
-        )
-    })
+        ));
+    }
+    let units = head().any(|l| l.starts_with("METRIC") || l.starts_with("INCH"));
+    let tool_def = head().any(|l| {
+        let b = l.as_bytes();
+        let digits = b.iter().skip(1).take_while(|c| c.is_ascii_digit()).count();
+        b.first() == Some(&b'T') && digits > 0 && l[1 + digits..].contains('C')
+    });
+    if units && tool_def {
+        return Some(found(
+            FormatId::Excellon,
+            Confidence::Likely,
+            "excellon header with units and tool definitions",
+        ));
+    }
+    let percent = head().any(|l| l == "%");
+    let mode = head().any(|l| l == "G90" || l == "G05");
+    let coords = head()
+        .filter(|l| {
+            let b = l.as_bytes();
+            matches!(b.first(), Some(b'X' | b'Y'))
+                && b.get(1).is_some_and(|c| c.is_ascii_digit() || *c == b'-')
+        })
+        .count();
+    if percent && mode && coords >= 2 {
+        return Some(found(
+            FormatId::Excellon,
+            Confidence::Likely,
+            "excellon program: % header end, G90/G05 and coordinate lines",
+        ));
+    }
+    None
 }
 
 /// Comment lines are skipped: slicers put hundreds of `;` thumbnail lines before the first
-/// command. The whole sample is scanned until enough command lines were seen.
+/// command. The whole sample is scanned until enough command lines were seen. A leading
+/// line number (`N10 G21`) is skipped and the next word decides.
 fn gcode(body: &str) -> Option<Found> {
     const ENOUGH: usize = 200;
     let (mut total, mut gm, mut other) = (0usize, 0usize, 0usize);
     for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        let b = line.as_bytes();
-        if matches!(b[0], b';' | b'(' | b'%') {
+        if matches!(line.as_bytes()[0], b';' | b'(' | b'%') {
             continue;
         }
         total += 1;
-        let numbered = b.get(1).is_some_and(u8::is_ascii_digit);
-        match b[0] {
-            b'G' | b'M' if numbered => gm += 1,
-            b'T' | b'N' if numbered => other += 1,
+        let mut words = line.split_whitespace();
+        let mut word = words.next().unwrap_or("");
+        let numbered = |w: &str| w.len() > 1 && w.as_bytes()[1].is_ascii_digit();
+        let line_number = word.starts_with('N') && numbered(word);
+        if line_number {
+            // "N10G21" is written without a space too.
+            let digits = word[1..].bytes().take_while(u8::is_ascii_digit).count();
+            word = if word.len() > 1 + digits {
+                &word[1 + digits..]
+            } else {
+                words.next().unwrap_or("")
+            };
+        }
+        match word.as_bytes().first() {
+            Some(b'G' | b'M') if numbered(word) => gm += 1,
+            Some(b'T') if numbered(word) => other += 1,
+            _ if line_number => other += 1,
             _ => {}
         }
         if total >= ENOUGH {
@@ -383,56 +437,158 @@ fn gcode(body: &str) -> Option<Found> {
         FormatId::Gcode,
         Confidence::Likely,
         format!(
-            "{} of {total} command lines start with G/M/T/N codes",
+            "{} of {total} command lines are G/M/T codes or numbered blocks",
             gm + other
         ),
     ))
 }
 
+/// OpenSCAD: a `module NAME(` or `function NAME(...) =` definition, an `include <x.scad>` or
+/// `use <x.scad>` line, or at least two distinct signs among `include <`, `use <`, `$fn`,
+/// primitive calls, `translate([`/`rotate([`, `color(` and `text(`. A Python `def ` line or a fenced code block rules it out (source
+/// code in another language, or a document that quotes OpenSCAD).
 fn openscad(body: &str) -> Option<Found> {
-    let head: String = body.chars().take(64 * 1024).collect();
-    let primitives = [
-        "cube(",
-        "sphere(",
-        "cylinder(",
-        "polyhedron(",
-        "linear_extrude(",
-        "rotate_extrude(",
-        "square(",
-        "circle(",
-    ];
-    let structure = [
-        "module ",
-        "difference()",
-        "union()",
-        "intersection()",
-        "translate([",
-    ];
-    let prim: Vec<&str> = primitives
-        .into_iter()
-        .filter(|k| head.contains(k))
-        .collect();
-    let stru: Vec<&str> = structure.into_iter().filter(|k| head.contains(k)).collect();
-    if prim.is_empty() || prim.len() + stru.len() < 2 {
+    let mut end = body.len().min(64 * 1024);
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = &body[..end];
+    let mut signs: Vec<&str> = Vec::new();
+    let add = |s: &'static str, signs: &mut Vec<&str>| {
+        if !signs.contains(&s) {
+            signs.push(s);
+        }
+    };
+    for line in head.lines().map(str::trim_start) {
+        if line.starts_with("def ") || line.starts_with("```") || line.starts_with("~~~") {
+            return None;
+        }
+        if let Some(rest) = line.strip_prefix("module ")
+            && ident_then_paren(rest)
+        {
+            return Some(found(
+                FormatId::Openscad,
+                Confidence::Likely,
+                "openscad module definition",
+            ));
+        }
+        for (prefix, sign) in [("include <", "include <"), ("use <", "use <")] {
+            if let Some(rest) = line.strip_prefix(prefix) {
+                // `include <file.scad>` names an OpenSCAD file: proof on its own (a C
+                // include has a `#` in front and another extension).
+                if rest
+                    .split('>')
+                    .next()
+                    .is_some_and(|f| f.trim().ends_with(".scad"))
+                {
+                    return Some(found(
+                        FormatId::Openscad,
+                        Confidence::Likely,
+                        format!("openscad {prefix}...scad>"),
+                    ));
+                }
+                add(sign, &mut signs);
+            }
+        }
+        // `function NAME(args) = expr;` is OpenSCAD's own form (JavaScript and others use
+        // a block), so it counts like a module definition.
+        if let Some(rest) = line.strip_prefix("function ")
+            && ident_then_paren(rest)
+            && rest
+                .find(')')
+                .is_some_and(|i| rest[i + 1..].trim_start().starts_with('='))
+        {
+            return Some(found(
+                FormatId::Openscad,
+                Confidence::Likely,
+                "openscad function definition",
+            ));
+        }
+    }
+    if head.contains("$fn") {
+        add("$fn", &mut signs);
+    }
+    for (call, arg) in calls(head) {
+        let sign = match call {
+            "cube" => "cube(",
+            "sphere" => "sphere(",
+            "cylinder" => "cylinder(",
+            "polygon" => "polygon(",
+            "polyhedron" => "polyhedron(",
+            "linear_extrude" => "linear_extrude(",
+            "rotate_extrude" => "rotate_extrude(",
+            "color" => "color(",
+            "text" => "text(",
+            "translate" if arg == Some('[') => "translate([",
+            "rotate" if arg == Some('[') => "rotate([",
+            _ => continue,
+        };
+        add(sign, &mut signs);
+        if signs.len() >= 6 {
+            break;
+        }
+    }
+    if signs.len() < 2 {
         return None;
     }
-    let mut all = stru;
-    all.extend(prim);
     Some(found(
         FormatId::Openscad,
         Confidence::Likely,
-        format!("openscad keywords {}", all.join(" ").trim()),
+        format!("openscad signs {}", signs.join(", ")),
     ))
 }
 
-fn markdown(lines: &[&str]) -> Option<Found> {
-    if let Some(kind) = frontmatter(lines) {
-        return Some(found(
-            FormatId::Markdown,
-            Confidence::Likely,
-            format!("{kind} frontmatter"),
-        ));
-    }
+/// `NAME(` with optional spaces before the parenthesis.
+fn ident_then_paren(s: &str) -> bool {
+    let n = s
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        .count();
+    n > 0 && s[n..].trim_start().starts_with('(')
+}
+
+/// Function calls `name (` in `text` with the first non-space character of the argument.
+/// A name right after `.` or another identifier character is a method or part of a longer
+/// name and is skipped.
+fn calls(text: &str) -> impl Iterator<Item = (&str, Option<char>)> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        while i < b.len() {
+            let start = i;
+            if b[i].is_ascii_alphabetic() || b[i] == b'_' {
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                    i += 1;
+                }
+                let prev = start.checked_sub(1).map(|p| b[p]);
+                let method = matches!(prev, Some(b'.' | b'$'))
+                    || prev.is_some_and(|p| p.is_ascii_alphanumeric() || p == b'_');
+                let mut j = i;
+                while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
+                    j += 1;
+                }
+                if !method && b.get(j) == Some(&b'(') {
+                    let arg = text[j + 1..].trim_start().chars().next();
+                    return Some((&text[start..i], arg));
+                }
+            } else {
+                i += 1;
+            }
+        }
+        None
+    })
+}
+
+fn markdown_frontmatter(lines: &[&str]) -> Option<Found> {
+    let kind = frontmatter(lines)?;
+    Some(found(
+        FormatId::Markdown,
+        Confidence::Likely,
+        format!("{kind} frontmatter"),
+    ))
+}
+
+fn markdown_syntax(lines: &[&str]) -> Option<Found> {
     let mut kinds = Vec::new();
     let is_hash = |l: &str| l.starts_with('#');
     let heading = lines.iter().enumerate().any(|(i, l)| {
@@ -474,7 +630,8 @@ fn ordered_item(t: &str) -> bool {
 }
 
 /// YAML (`---`) or TOML (`+++`) frontmatter: a fence on line 1, `key: value` or
-/// `key = value` lines, and a closing fence.
+/// `key = value` lines, a closing fence and a body. A body that starts with another
+/// `key: value` line or a `---` fence is a multi-document YAML file, not Markdown.
 fn frontmatter(lines: &[&str]) -> Option<&'static str> {
     let first = lines.first()?.trim_end();
     let (fence, close_alt, kind, sep) = match first {
@@ -483,10 +640,17 @@ fn frontmatter(lines: &[&str]) -> Option<&'static str> {
         _ => return None,
     };
     let mut keys = 0;
-    for line in lines.iter().skip(1) {
+    for (i, line) in lines.iter().enumerate().skip(1) {
         let l = line.trim_end();
         if l == fence || l == close_alt {
-            return (keys > 0).then_some(kind);
+            if keys == 0 {
+                return None;
+            }
+            let body = lines[i + 1..]
+                .iter()
+                .map(|l| l.trim())
+                .find(|l| !l.is_empty())?;
+            return (!(body == "---" || yaml_key_line(body))).then_some(kind);
         }
         let t = l.trim_start();
         if t.is_empty() || t.starts_with('#') || l.starts_with([' ', '\t']) || t.starts_with("- ") {
@@ -502,6 +666,46 @@ fn frontmatter(lines: &[&str]) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// `key:` followed by a space or the line end, with a key of word characters.
+fn yaml_key_line(l: &str) -> bool {
+    let n = l
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        .count();
+    n > 0 && (l[n..].starts_with(": ") || &l[n..] == ":")
+}
+
+/// Wavefront OBJ: most non-comment lines start with an OBJ keyword, and at least one vertex
+/// line has three numbers.
+fn obj(lines: &[&str]) -> Option<Found> {
+    const KEYWORDS: &[&str] = &[
+        "v", "vt", "vn", "vp", "f", "l", "p", "g", "o", "s", "usemtl", "mtllib",
+    ];
+    let (mut total, mut hits, mut vertex) = (0usize, 0usize, false);
+    for line in lines.iter().map(|l| l.trim()) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        total += 1;
+        let mut words = line.split_whitespace();
+        let key = words.next().unwrap_or("");
+        if KEYWORDS.contains(&key) {
+            hits += 1;
+        }
+        if key == "v" && words.take(3).filter(|w| w.parse::<f64>().is_ok()).count() == 3 {
+            vertex = true;
+        }
+    }
+    if total < 3 || !vertex || hits * 2 <= total {
+        return None;
+    }
+    Some(found(
+        FormatId::Obj,
+        Confidence::Likely,
+        format!("wavefront obj: {hits} of {total} lines start with obj keywords"),
+    ))
 }
 
 /// The extension fallback: `.csv` or `.tsv` and every one of the first records has the same

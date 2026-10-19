@@ -5,7 +5,7 @@
 //! Opens a file safely, hashes it and decides its format from the bytes.
 //!
 //! Detection order: empty, magic bytes, container listing (ZIP, OLE), pattern signatures
-//! (IGES, STL), text sniffing, else
+//! (PDF after a binary prefix, IGES, ASCII DXF, SolidWorks blocks, STL), text sniffing, else
 //! unknown. The file name's extension only breaks ties between candidates with equal
 //! evidence (CSV or TSV when sniffing declines). Every check reads a bounded prefix, so
 //! detection stays cheap on large files.

@@ -27,23 +27,35 @@ pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
     }
     check_size(meta.len(), limits)?;
     let file = File::open(path).map_err(|e| io_error(&shown, &e))?;
-    // Size again from the open handle: the file may have changed since the stat.
-    let size = file.metadata().map_err(|e| io_error(&shown, &e))?.len();
+    // Type and size again from the open handle: the path may have been replaced since the
+    // stat (by a device, a FIFO or a larger file).
+    let handle_meta = file.metadata().map_err(|e| io_error(&shown, &e))?;
+    if !handle_meta.is_file() {
+        return Err(OpenError::NotAFile(shown));
+    }
+    let size = handle_meta.len();
     check_size(size, limits)?;
     let bytes = if size <= IN_MEMORY_MAX {
         // Small files are read into memory: no mapping cost, and no fault if another
-        // process truncates the file while it is being read.
+        // process truncates the file while it is being read. At most the stat size is read;
+        // one more byte means the file grew while reading.
         let mut buf = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
         (&file)
-            .take(limits.max_file_bytes.saturating_add(1))
+            .take(size + 1)
             .read_to_end(&mut buf)
             .map_err(|e| io_error(&shown, &e))?;
-        check_size(buf.len() as u64, limits)?;
+        if buf.len() as u64 > size {
+            return Err(OpenError::Io(format!(
+                "{shown}: file changed while reading"
+            )));
+        }
         Bytes::Owned(Arc::new(buf))
     } else {
-        // SAFETY: the map is read-only. Another process truncating the file while it is
-        // mapped can still fault the process (SIGBUS); that is the documented cost of memmap
-        // and is accepted for large files the user asked us to read.
+        // SAFETY: the map is read-only, but the bytes behind it belong to the file system.
+        // Another process truncating the file while it is mapped can fault this process
+        // (SIGBUS), and a concurrent write changes the bytes under the `&[u8]`, so the hash,
+        // the detection and the later read can disagree. That is the documented cost of
+        // memmap and is accepted for large files the user asked us to read.
         let map = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| io_error(&shown, &e))?;
         check_size(map.len() as u64, limits)?;
         Bytes::Mapped(Arc::new(map))
@@ -52,7 +64,7 @@ pub(crate) fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| shown.clone());
-    let modified = meta.modified().ok().and_then(rfc3339);
+    let modified = handle_meta.modified().ok().and_then(rfc3339);
     Ok(build(Some(path), name, bytes, modified))
 }
 
