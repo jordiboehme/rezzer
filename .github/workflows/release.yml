@@ -1,0 +1,428 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual dry run: builds, signs when the secrets exist, packages and stops
+  # short of publishing. The publish job only runs for a tag.
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Read only by default. The job that publishes names the scopes it needs in
+# its own `permissions:` block.
+permissions:
+  contents: read
+
+# One run per tag. A second push of the same tag waits for the first run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    # Notarization can wait a long time in Apple's queue.
+    timeout-minutes: 90
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            platform: macos-arm64
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            platform: macos-x86_64
+            # The last Intel image GitHub ships; it retires in August 2027.
+            # Before then, cross-compile this leg on macos-latest instead.
+            os: macos-15-intel
+          # Static musl binaries, built natively on each architecture so the
+          # smoke test runs the binary that ships. The workspace has no C
+          # dependencies, so musl-tools is all the linker needs.
+          - target: x86_64-unknown-linux-musl
+            platform: linux-x86_64
+            os: ubuntu-latest
+            musl: true
+          - target: aarch64-unknown-linux-musl
+            platform: linux-arm64
+            os: ubuntu-24.04-arm
+            musl: true
+    env:
+      TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+          rustup show active-toolchain
+
+      - name: Install musl-tools
+        if: ${{ matrix.musl }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      # No Rust cache in a release build: a tag run can only restore what
+      # main saved, so a poisoned cache entry would end up in a shipped
+      # binary.
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A tag that disagrees with the crate version would ship a binary whose
+      # --version lies about itself. The version comes from
+      # [workspace.package], so cargo metadata reads it, not a grep.
+      - name: Tag matches the crate version
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          crate="$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "rezzer") | .version')"
+          if [ "v$crate" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the rezzer crate version v$crate"
+            exit 1
+          fi
+
+      # cargo-auditable embeds the resolved dependency list in a section of
+      # the binary (a few kB), so `cargo audit bin`, Trivy, Grype and
+      # osv-scanner can name the crates inside a shipped binary later.
+      # `fallback: none` fails the step rather than downloading an unpinned
+      # binary.
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-auditable@0.7.7
+          fallback: none
+
+      # --locked: Cargo.lock is the build's input, and a lockfile that would
+      # need an update fails the build instead of being re-resolved here.
+      - name: Build
+        run: cargo auditable build --release --locked --target "$TARGET" -p rezzer
+
+      - name: Smoke test
+        shell: bash
+        env:
+          MUSL: ${{ matrix.musl }}
+        run: |
+          set -euo pipefail
+          bin="target/$TARGET/release/rezzer"
+          [ -f "$bin" ] || { echo "::error::$bin is missing"; exit 1; }
+          file "$bin"
+          if [ "$MUSL" = "true" ]; then
+            file "$bin" | grep -Eq 'statically linked|static-pie linked' \
+              || { echo "::error::$bin is not statically linked"; exit 1; }
+          fi
+          "$bin" --version
+
+      # Sign the bare Mach-O with a Developer ID Application certificate
+      # under the hardened runtime, then notarize it with notarytool. A bare
+      # binary cannot carry a stapled ticket, so Gatekeeper checks online on
+      # first run. Signing is optional: with none of the six secrets set the
+      # release ships unsigned macOS binaries and says so. A partial set is
+      # always a mistake and fails the build.
+      - name: Decide whether to sign and notarize
+        id: signing
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for var in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID \
+                     APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER_ID; do
+            [ -n "${!var:-}" ] || missing+=("$var")
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          elif [ "${#missing[@]}" -eq 6 ]; then
+            echo "::notice::Apple signing secrets are not configured; this build produces UNSIGNED macOS binaries"
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Apple signing secrets missing (${missing[*]}); a partial secret set is always a misconfiguration"
+            exit 1
+          fi
+
+      - name: Set up signing keychain
+        if: ${{ steps.signing.outputs.sign == 'true' }}
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+          cert="$RUNNER_TEMP/certificate.p12"
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode > "$cert"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm -f "$cert"
+
+      - name: Sign the binary
+        if: ${{ steps.signing.outputs.sign == 'true' }}
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+          if [ -z "$identity" ]; then
+            echo "::error::no Developer ID Application identity found in the signing keychain"
+            exit 1
+          fi
+          path="target/$TARGET/release/rezzer"
+          identifier="io.github.jordiboehme.rezzer"
+          codesign --force --timestamp --options runtime \
+            --identifier "$identifier" \
+            --keychain "$keychain" \
+            --sign "$identity" \
+            "$path"
+          codesign --verify --strict --verbose=2 "$path"
+          info="$(codesign --display --verbose=2 "$path" 2>&1)"
+          echo "$info"
+          grep -q "Identifier=$identifier" <<< "$info"
+          grep -q "TeamIdentifier=${APPLE_TEAM_ID}" <<< "$info"
+          grep -q "(runtime)" <<< "$info"
+
+      - name: Notarize the binary
+        if: ${{ steps.signing.outputs.sign == 'true' }}
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/asc-key.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          zip="$RUNNER_TEMP/notarize-rezzer.zip"
+          result="$RUNNER_TEMP/notarize-rezzer.json"
+          ditto -c -k --keepParent "target/$TARGET/release/rezzer" "$zip"
+          set +e
+          xcrun notarytool submit "$zip" \
+            --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
+            --wait --timeout 30m --output-format json > "$result"
+          submit_rc=$?
+          set -e
+          cat "$result"
+          status="$(jq -r '.status // "unknown"' "$result")"
+          if [ "$submit_rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            echo "::error::notarization failed (notarytool exit $submit_rc, status $status)"
+            submission_id="$(jq -r '.id // empty' "$result")"
+            if [ -n "$submission_id" ]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
+            fi
+            exit 1
+          fi
+          rm -f "$zip"
+
+      - name: Smoke test the signed binary
+        if: ${{ steps.signing.outputs.sign == 'true' }}
+        run: target/"$TARGET"/release/rezzer --version
+
+      - name: Delete signing keychain
+        if: ${{ always() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          if [ -f "$keychain" ]; then
+            security delete-keychain "$keychain"
+          fi
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/asc-key.p8" "$RUNNER_TEMP"/notarize-*
+
+      - name: Stage and package
+        id: stage
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="rezzer-${RELEASE_VERSION}-${PLATFORM}"
+          stage="dist/$name"
+          mkdir -p "$stage"
+          cp "target/$TARGET/release/rezzer" "$stage/"
+          cp LICENSE README.md "$stage/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rezzer-${{ matrix.platform }}
+          path: dist/${{ steps.stage.outputs.name }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'tag' }}
+    # contents: write creates the release. id-token and attestations: keyless
+    # signing of the provenance attestation (Sigstore through GitHub's OIDC
+    # token), nothing else.
+    permissions:
+      contents: write # create the release
+      id-token: write # Sigstore signing of the attestation
+      attestations: write # store the attestation
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: downloads
+          pattern: rezzer-*
+
+      - name: Collect assets and generate checksums
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find downloads -type f -name '*.tar.gz' -exec cp {} release/ \;
+          cd release
+          sha256sum -- *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # The attest action fails only when a whole subject list matches
+      # nothing, so a renamed asset would drop out of the attestation
+      # without a sound. Every expected file is checked here first.
+      - name: Check the release assets exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in SHA256SUMS \
+            "rezzer-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-linux-arm64.tar.gz"; do
+            [ -f "release/$f" ] || { echo "::error::missing release asset release/$f"; missing=1; }
+          done
+          exit "$missing"
+
+      # Build provenance for every release asset, SHA256SUMS included.
+      # Verify with `gh attestation verify <file> --repo jordiboehme/rezzer`.
+      # Before the release is created, so a failed attestation stops the
+      # release rather than leaving it published without provenance.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+
+      # The release notes are the tag's annotation. actions/checkout does
+      # not fetch annotated tag objects reliably, so the message comes from
+      # the API. A signature block at the end is dropped. A lightweight tag
+      # or an empty message falls back to GitHub's generated notes.
+      - name: Read the tag annotation
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          read -r type sha < <(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+            --jq '.object.type + " " + .object.sha')
+          if [ "$type" = "tag" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq '.message' \
+              | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d' > "$notes"
+          else
+            : > "$notes"
+          fi
+          if [ -s "$notes" ] && grep -q '[^[:space:]]' "$notes"; then
+            echo "notes: using the annotation of $GITHUB_REF_NAME"
+            echo "file=$notes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_REF_NAME has no annotation; using generated notes"
+            echo "file=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag)
+          if [ -n "$NOTES_FILE" ]; then
+            args+=(--notes-file "$NOTES_FILE")
+          else
+            args+=(--generate-notes)
+          fi
+          # A tag like v1.2.0-rc.1 is a pre-release.
+          case "$GITHUB_REF_NAME" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" release/* "${args[@]}"
+
+  # Homebrew tap update. Disabled: there is no formula for Rezzer in
+  # jordiboehme/homebrew-tap yet. To turn it on, add the formula to the tap,
+  # add a TAP_GITHUB_TOKEN secret (a fine-grained token with contents write
+  # on the tap only) and uncomment this job. The pattern follows the
+  # agent-cli-tools release workflow.
+  #
+  # homebrew:
+  #   name: update homebrew tap
+  #   needs: publish
+  #   timeout-minutes: 10
+  #   runs-on: ubuntu-latest
+  #   if: ${{ github.ref_type == 'tag' }}
+  #   permissions:
+  #     contents: read
+  #   steps:
+  #     - name: Download release checksums
+  #       env:
+  #         GH_TOKEN: ${{ github.token }}
+  #       run: |
+  #         set -euo pipefail
+  #         mkdir -p "$RUNNER_TEMP/release"
+  #         gh release download "$GITHUB_REF_NAME" \
+  #           --repo "$GITHUB_REPOSITORY" \
+  #           --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
+  #
+  #     - name: Regenerate and push the formula
+  #       env:
+  #         TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+  #       run: |
+  #         set -euo pipefail
+  #         TAG="$GITHUB_REF_NAME"
+  #         VERSION="${TAG#v}"
+  #         sums="$RUNNER_TEMP/release/SHA256SUMS"
+  #         sha_for() { grep "rezzer-${TAG}-$1.tar.gz" "$sums" | awk '{print $1}'; }
+  #         git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/jordiboehme/homebrew-tap.git" \
+  #           "$RUNNER_TEMP/homebrew-tap"
+  #         # Write Formula/rezzer.rb here with VERSION and
+  #         # $(sha_for macos-arm64), $(sha_for macos-x86_64),
+  #         # $(sha_for linux-x86_64) and $(sha_for linux-arm64).
+  #         cd "$RUNNER_TEMP/homebrew-tap"
+  #         git config user.name "github-actions[bot]"
+  #         git config user.email "github-actions[bot]@users.noreply.github.com"
+  #         git add Formula/rezzer.rb
+  #         git commit -m "Update rezzer to ${VERSION}"
+  #         git push
