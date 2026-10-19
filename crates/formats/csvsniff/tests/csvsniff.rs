@@ -408,3 +408,78 @@ fn number_of_cases_is_a_measure() {
     let t = t.replace("Number of cases", "Case no");
     assert!(full(&t).derived.is_empty());
 }
+
+#[test]
+fn real_csv_with_codes_and_quoted_text_is_accepted() {
+    let mut pc = String::new();
+    for i in 0..20 {
+        pc.push_str(&format!(
+            "M{} {}AB,{} Main Street,Manchester\n",
+            i % 9 + 1,
+            i % 9 + 1,
+            i + 1
+        ));
+    }
+    assert_eq!(sniff(&pc).unwrap().delimiter, b',');
+    let mut sku = String::from("sku,name,price\n");
+    for i in 0..20 {
+        sku.push_str(&format!("M{}00,Widget {i},{}.99\n", i + 1, i + 3));
+    }
+    assert_eq!(sniff(&sku).unwrap().delimiter, b',');
+    let mut semi = String::from("sku;name;price\n");
+    for i in 0..20 {
+        semi.push_str(&format!("G{}0;Widget {i};{}.99\n", i + 1, i + 3));
+    }
+    assert_eq!(sniff(&semi).unwrap().delimiter, b';');
+    let mut tr = String::from("english,german\n");
+    for i in 0..20 {
+        tr.push_str(&format!(
+            "\"I would like to buy {i} apples please\",\"Ich moechte bitte {i} Aepfel kaufen\"\n"
+        ));
+    }
+    assert_eq!(sniff(&tr).unwrap().delimiter, b',');
+    let mut qa = String::from("id,question,answer\n");
+    for i in 0..20 {
+        qa.push_str(&format!(
+            "{i},\"What is the capital of country {i}?\",\"The capital of country {i} is city {i}\"\n"
+        ));
+    }
+    assert_eq!(sniff(&qa).unwrap().delimiter, b',');
+}
+
+#[test]
+fn consecutive_ids_are_judged_over_all_rows() {
+    let mut t = String::from("n,A,B,Total\n");
+    for i in 0..30u64 {
+        let n = (i * 7) % 30 + 100;
+        let (a, b) = (i * 371 % 900 + 1000, i * 533 % 700 + 2000);
+        t.push_str(&format!("{n},{a},{b},{}\n", n + a + b));
+    }
+    let d = sniff(&t).unwrap();
+    assert!(analyze(&t, &d, 15).derived.is_empty());
+}
+
+#[test]
+fn identifier_columns_do_not_use_up_numeric_slots() {
+    let mut s = 99u64;
+    let mut t = String::from("k");
+    for i in 1..=11 {
+        t.push_str(&format!(",m{i}"));
+    }
+    t.push_str(",Total\n");
+    for i in 0..40u64 {
+        let k = (i * 7) % 40 + 1;
+        let m: Vec<u64> = (0..11).map(|_| xorshift(&mut s) % 4000 + 1000).collect();
+        let total = m[0] + m[1] + m[2];
+        let cells: Vec<String> = m.iter().map(u64::to_string).collect();
+        t.push_str(&format!("{k},{},{total}\n", cells.join(",")));
+    }
+    let a = full(&t);
+    assert!(
+        a.derived
+            .iter()
+            .any(|d| d.target == 12 && d.parts == vec![1, 2, 3]),
+        "{:?}",
+        a.derived
+    );
+}

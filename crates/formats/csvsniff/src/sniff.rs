@@ -19,6 +19,8 @@ const MIN_RAGGED_RECORDS: usize = 10;
 const KEY_TEXT_MAX_LEN: usize = 40;
 const MAX_RAGGED_LISTED: usize = 1000;
 const MAX_UNIQUE_TRACKED: usize = 200_000;
+/// Total number of value hashes kept for uniqueness over all columns of a file.
+const UNIQUE_BUDGET: usize = 2_000_000;
 
 fn strip_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
@@ -71,15 +73,33 @@ fn looks_like_other_format(text: &str) -> bool {
         .iter()
         .filter(|l| l.ends_with(['{', '}']) || (l.ends_with(';') && l.matches(';').count() == 1))
         .count();
-    // G-code: comment lines starting with `;` or G/M words.
-    let gcode = lines
-        .iter()
-        .filter(|l| {
-            l.starts_with(';')
-                || (l.starts_with(['G', 'M']) && l[1..].starts_with(|c: char| c.is_ascii_digit()))
-        })
-        .count();
+    // G-code: comment lines starting with `;`, or lines of G/M/T/N words
+    // (`G1 X10 Y5 ; move`) without any delimiter outside a trailing comment.
+    let gcode = lines.iter().filter(|l| is_gcode_line(l)).count();
     half(code) || half(gcode)
+}
+
+fn is_gcode_line(line: &str) -> bool {
+    // The comment starts at the first `;`; a second `;` means separators.
+    let (code, comment) = line.split_once(';').unwrap_or((line, ""));
+    if comment.contains(';') {
+        return false;
+    }
+    if code.is_empty() {
+        return true;
+    }
+    if code.contains([',', '\t', '|']) {
+        return false;
+    }
+    let mut chars = code.chars();
+    let word = matches!(chars.next(), Some('G' | 'M' | 'T' | 'N'));
+    let rest = chars.as_str();
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    word && digits > 0
+        && rest[digits..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace)
 }
 
 /// A cell that looks like a number or date, also with a decimal comma.
@@ -95,6 +115,44 @@ fn numeric_looking(cell: &str) -> bool {
         }
         None => false,
     }
+}
+
+/// For each field of the record that starts at the beginning of `raw`: was it quoted?
+fn quoted_flags(raw: &str, delimiter: u8, quote: u8) -> Vec<bool> {
+    let b = raw.as_bytes();
+    let (mut i, mut start, mut open) = (0, true, false);
+    let mut flags = Vec::new();
+    while i < b.len() {
+        let c = b[i];
+        if open {
+            if c == quote {
+                if b.get(i + 1) == Some(&quote) {
+                    i += 1;
+                } else {
+                    open = false;
+                }
+            }
+        } else if c == b'\n' || c == b'\r' {
+            break;
+        } else if c == quote && start {
+            open = true;
+            start = false;
+            flags.push(true);
+        } else if c == delimiter {
+            if start {
+                flags.push(false);
+            }
+            start = true;
+        } else if start {
+            flags.push(false);
+            start = false;
+        }
+        i += 1;
+    }
+    if start {
+        flags.push(false);
+    }
+    flags
 }
 
 /// A delimiter candidate that passed the checks, with its ranking keys.
@@ -138,12 +196,21 @@ pub fn sniff(text: &str) -> Option<Dialect> {
     let quote = b'"';
     let mut best: Option<Pick> = None;
     for &delimiter in CANDIDATES {
-        let rows: Vec<Vec<String>> = reader(text, delimiter, quote)
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut quoted: Vec<Vec<bool>> = Vec::new();
+        for rec in reader(text, delimiter, quote)
             .records()
             .take(SAMPLE_RECORDS)
             .map_while(Result::ok)
-            .map(|r| r.iter().map(str::to_owned).collect())
-            .collect();
+        {
+            let start = rec.position().map_or(0, |p| p.byte() as usize);
+            quoted.push(quoted_flags(
+                &text[start.min(text.len())..],
+                delimiter,
+                quote,
+            ));
+            rows.push(rec.iter().map(str::to_owned).collect());
+        }
         let counts: Vec<usize> = rows.iter().map(Vec::len).collect();
         let n = counts.len();
         if n < 2 {
@@ -170,12 +237,23 @@ pub fn sniff(text: &str) -> Option<Dialect> {
         if filled.is_empty() {
             continue;
         }
-        // Prose: most fields are long free text.
-        let long = filled
+        // Prose: most unquoted fields are long free text (quoted text is
+        // normal in CSV: translations, questions and answers).
+        let unquoted: Vec<&str> = rows
+            .iter()
+            .zip(&quoted)
+            .flat_map(|(r, q)| {
+                r.iter()
+                    .zip(q.iter().chain(std::iter::repeat(&false)))
+                    .filter(|(c, q)| !**q && !c.trim().is_empty())
+                    .map(|(c, _)| c.as_str())
+            })
+            .collect();
+        let long = unquoted
             .iter()
             .filter(|c| c.split_whitespace().count() > 4)
             .count();
-        if long * 2 > filled.len() {
+        if long * 2 > unquoted.len() {
             continue;
         }
         let numeric =
@@ -419,7 +497,6 @@ fn unit_of(header: &str) -> Option<String> {
     UNITS.contains(&tail).then(|| tail.to_owned())
 }
 
-#[derive(Default)]
 struct Acc {
     non_empty: usize,
     missing: usize,
@@ -429,6 +506,9 @@ struct Acc {
     date: usize,
     boolean: usize,
     max_len: usize,
+    /// Smallest and largest numeric value (valid when `int + dec > 0`).
+    min: f64,
+    max: f64,
     /// Hashes of the values seen so far while the column is still unique.
     seen: HashSet<u64>,
     /// A duplicate was seen, or more than `MAX_UNIQUE_TRACKED` distinct values.
@@ -436,7 +516,25 @@ struct Acc {
 }
 
 impl Acc {
-    fn add(&mut self, raw: Option<&str>) {
+    fn new() -> Self {
+        Acc {
+            non_empty: 0,
+            missing: 0,
+            int: 0,
+            dec: 0,
+            places: 0,
+            date: 0,
+            boolean: 0,
+            max_len: 0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+            seen: HashSet::new(),
+            not_unique: false,
+        }
+    }
+
+    /// `budget` is the number of uniqueness hashes the whole file may still keep.
+    fn add(&mut self, raw: Option<&str>, budget: &mut usize) {
         let v = raw.map_or("", str::trim);
         if v.is_empty() {
             self.missing += 1;
@@ -447,10 +545,16 @@ impl Acc {
         if !self.not_unique {
             let mut h = DefaultHasher::new();
             v.hash(&mut h);
-            if !self.seen.insert(h.finish()) || self.seen.len() > MAX_UNIQUE_TRACKED {
-                self.not_unique = true;
-                self.seen = HashSet::new();
+            if !self.seen.insert(h.finish()) || *budget == 0 || self.seen.len() > MAX_UNIQUE_TRACKED
+            {
+                self.give_up(budget);
+            } else {
+                *budget -= 1;
             }
+        }
+        if let Some((_, x)) = number(v) {
+            self.min = self.min.min(x);
+            self.max = self.max.max(x);
         }
         match number(v) {
             Some((0, _)) => self.int += 1,
@@ -462,6 +566,13 @@ impl Acc {
             None if is_bool(v) => self.boolean += 1,
             None => {}
         }
+    }
+
+    /// Marks the column as not unique and returns its hashes to the budget.
+    fn give_up(&mut self, budget: &mut usize) {
+        self.not_unique = true;
+        *budget += self.seen.len();
+        self.seen = HashSet::new();
     }
 
     fn kind(&self) -> ColumnKind {
@@ -499,24 +610,15 @@ fn id_like_name(name: &str) -> bool {
             .is_some_and(|w| matches!(*w, "number" | "no" | "nr" | "id"))
 }
 
-/// Integer values that step by exactly 1 once sorted (row ids); needs no gaps in the data.
-fn consecutive(values: &[Option<f64>]) -> bool {
-    let mut v: Vec<f64> = values.iter().flatten().copied().collect();
-    if v.len() != values.len() || v.len() < 2 {
+/// Integer columns that are identifiers, judged over all rows: unique values
+/// in 1000..=2999 (years), or unique values without gaps (row ids).
+fn identifier_values(acc: &Acc, c: &Column, rows: usize) -> bool {
+    if c.kind != ColumnKind::Integer || !c.unique || acc.missing > 0 || rows == 0 {
         return false;
     }
-    v.sort_by(f64::total_cmp);
-    v.windows(2).all(|w| w[1] - w[0] == 1.0)
-}
-
-/// Unique Integer column with every value in 1000..=2999.
-fn year_like(c: &Column, values: &[Option<f64>]) -> bool {
-    c.unique
-        && c.kind == ColumnKind::Integer
-        && values
-            .iter()
-            .flatten()
-            .all(|v| (1000.0..=2999.0).contains(v))
+    let years = acc.min >= 1000.0 && acc.max <= 2999.0;
+    let gapless = rows >= 2 && acc.max - acc.min + 1.0 == acc.non_empty as f64;
+    years || gapless
 }
 
 /// True when a quoted field is still open at the end of `text`.
@@ -573,11 +675,12 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     let expected = modal(&hist).map_or(0, |(c, _)| c);
 
     // Pass 2: column statistics and ragged rows.
-    let mut accs: Vec<Acc> = (0..expected).map(|_| Acc::default()).collect();
+    let mut accs: Vec<Acc> = (0..expected).map(|_| Acc::new()).collect();
     let mut header: Option<Vec<String>> = None;
     let mut ragged_rows = Vec::new();
     let mut ragged_total = 0;
     let mut rows = 0;
+    let mut budget = UNIQUE_BUDGET;
     let mut rdr = reader(text, delimiter, quote);
     let mut rec = csv::StringRecord::new();
     let mut first = true;
@@ -597,7 +700,7 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
         } else {
             rows += 1;
             for (j, acc) in accs.iter_mut().enumerate() {
-                acc.add(rec.get(j));
+                acc.add(rec.get(j), &mut budget);
             }
         }
         first = false;
@@ -638,7 +741,7 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
         let eligible: Vec<(usize, u8)> = columns
             .iter()
             .enumerate()
-            .filter(|(_, c)| !id_like_name(&c.name))
+            .filter(|(j, c)| !id_like_name(&c.name) && !identifier_values(&accs[*j], c, rows))
             .filter_map(|(j, c)| match c.kind {
                 ColumnKind::Integer => Some((j, 0)),
                 ColumnKind::Decimal { places } => Some((j, places)),
@@ -664,10 +767,6 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
             let nums: Vec<NumCol> = eligible
                 .iter()
                 .zip(values)
-                .filter(|((j, _), v)| {
-                    let c = &columns[*j];
-                    !(year_like(c, v) || (c.kind == ColumnKind::Integer && consecutive(v)))
-                })
                 .map(|(&(index, places), values)| NumCol {
                     index,
                     places,

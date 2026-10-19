@@ -92,7 +92,7 @@ pub struct Derived {
 /// Result of [`crate::analyze`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
-    /// One entry per column (modal field count, or the widest record if that is larger).
+    /// One entry per column (the modal field count; extra cells in longer records are not columns).
     pub columns: Vec<Column>,
     /// Number of data rows (the header is not counted).
     pub rows: usize,
