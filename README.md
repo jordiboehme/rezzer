@@ -182,7 +182,7 @@ Clients that support MCP tasks can follow the job natively. All others use the j
 These come as opt-in features or as a prebuilt image. The core stays small.
 
 - **OCR in tiers.** First the PDF text layer, when there is one. Then the operating system's own text recognition, or a small local model. For hard cases (handwriting, complex tables, diagrams) a larger local vision model that you download once. Everything runs on your machine.
-- **A printer for your agent.** Rezzer can show up as a network printer (AirPrint and IPP). Print from your phone or any app and the document lands with your agent. Rezzer only accepts print jobs that keep their text, like PDF, so a print job doesn't turn into an OCR job.
+- **A printer for your agent.** Rezzer can show up as a network printer (AirPrint and IPP). Print from your phone or any app and the document lands with your agent. Rezzer only accepts print jobs that keep their text, so a print job doesn't turn into an OCR job. First PDF, then PostScript as soon as Rezzer reads its text.
 
 ## How it fits
 
