@@ -35,6 +35,10 @@ pub(crate) fn header_at(
 /// values was spent. Such objects share one issue.
 pub(crate) const NOT_READ: &str = "not read: too many broken values";
 
+/// How far past its start a value that ran into its natural end is read again. A broken
+/// value costs at most its natural span plus this.
+const RETRY_WINDOW: usize = 64 << 10;
+
 /// The positions where the keyword `obj` starts, found once per stretch of the file.
 #[derive(Default)]
 pub(crate) struct Ends {
@@ -81,7 +85,8 @@ impl Ends {
 /// A broken value (a string that never closes) could otherwise read to the end of the file
 /// each time, so the bytes it reads count against the bound for broken values, and what it
 /// was charged as values is given back. A value that runs into `end` is read again without
-/// it while that bound lasts, since a valid value may hold the bytes that `end` stands for.
+/// it, up to [`RETRY_WINDOW`] and while that bound lasts, since a valid value may hold the
+/// bytes that `end` stands for.
 /// Once the bound is spent, a value that fails or runs into `end` is not read: it gives
 /// [`NOT_READ`] and is counted in [`Budget::not_read`].
 pub(crate) fn bounded<'b, T>(
@@ -110,7 +115,8 @@ pub(crate) fn bounded<'b, T>(
         budget.failed(l.i - pos);
         if cut && !spent && budget.failed_left() > 0 {
             again = true;
-            lim = bytes.len().min(pos.saturating_add(budget.failed_left()));
+            let window = budget.failed_left().min(RETRY_WINDOW);
+            lim = bytes.len().min(pos.saturating_add(window));
             continue;
         }
         return match why {

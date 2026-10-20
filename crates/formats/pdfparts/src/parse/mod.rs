@@ -82,7 +82,8 @@ pub(crate) struct Budget<'a> {
     max_failed: usize,
     /// Broken objects that were not read because the bound for broken values was spent.
     pub not_read: usize,
-    /// Where the next `obj` keyword of the file starts.
+    /// Where the next `obj` keyword of the file starts. Only for the bytes of the file, never
+    /// for unpacked data.
     pub ends: object::Ends,
     next_poll: usize,
 }

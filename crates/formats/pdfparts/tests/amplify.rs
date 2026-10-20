@@ -672,14 +672,19 @@ fn broken_values_do_not_end_the_open() {
             damaged.len(),
             damaged.last()
         );
-        assert!(!damaged.is_empty());
-        if !endobj {
-            assert!(
-                damaged
-                    .iter()
-                    .any(|i| i.what.contains("too many broken values")),
-                "{damaged:?}"
-            );
+        let grouped = damaged
+            .iter()
+            .any(|i| i.what.contains("too many broken values"));
+        if endobj {
+            // Each broken note costs a bounded read, so each one is named.
+            let named = damaged
+                .iter()
+                .filter(|i| i.what.contains("string is not closed"))
+                .count();
+            assert_eq!(named, k as usize, "{damaged:?}");
+            assert!(!grouped, "{damaged:?}");
+        } else {
+            assert!(grouped, "{damaged:?}");
         }
     }
     assert_rss_bounded();
