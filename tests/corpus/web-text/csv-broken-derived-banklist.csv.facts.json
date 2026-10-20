@@ -1,0 +1,42 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/losses",
+    "min_len": 2
+  },
+  {
+    "pointer": "/losses",
+    "contains": "row has 9 fields, expected 7"
+  },
+  {
+    "pointer": "/losses",
+    "contains": "row has 3 fields, expected 7"
+  },
+  {
+    "pointer": "/losses",
+    "contains": "unterminated quote"
+  },
+  {
+    "pointer": "/losses",
+    "contains": "record 9 (line 9)"
+  },
+  {
+    "pointer": "/losses",
+    "min_len": 4
+  },
+  {
+    "pointer": "/properties/custom/columns/value",
+    "equals": 9.0
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/8/6/inlines/0/text",
+    "equals": "only in ragged rows"
+  },
+  {
+    "pointer": "/overview/parts/0/size",
+    "equals": "9 rows x 9 columns"
+  }
+]

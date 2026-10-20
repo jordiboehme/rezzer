@@ -1,0 +1,609 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::BTreeMap;
+use std::io::Write;
+use std::sync::Arc;
+
+use rezzer_model::{
+    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
+    Detection, Document, Edge, Embedded, Event, FormatId, Formula, Graph, Inline, Loss, LossReason,
+    MODEL_VERSION, Node, Properties, ReadOptions, ReaderInfo, Role, SectionKind, Severity, Source,
+    SourceInfo, StatusColor, TaskState, Value,
+};
+
+fn src() -> SourceInfo {
+    SourceInfo {
+        path: Some("/tmp/a.xlsx".into()),
+        name: "a.xlsx".into(),
+        sha256: "00".repeat(32),
+        size: 42,
+        format: FormatId::Xlsx,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "zip with xl/workbook.xml".into(),
+        },
+        modified: Some("2026-10-19T10:00:00Z".into()),
+        encoding: None,
+        reader: Some(ReaderInfo {
+            id: "xlsx".into(),
+            version: "0.1.0".into(),
+        }),
+    }
+}
+
+fn text(s: &str) -> Inline {
+    Inline::Text {
+        text: s.into(),
+        emphasis: false,
+        strong: true,
+        strike: false,
+    }
+}
+
+fn full_document() -> Document {
+    let mut doc = Document::new(src());
+    doc.properties = Properties {
+        title: Some("Costs".into()),
+        description: Some("Quarterly costs".into()),
+        authors: vec!["Ada".into()],
+        created: Some(Value::DateTime {
+            value: "2026-01-01T00:00:00Z".into(),
+        }),
+        modified: Some(Value::Date {
+            value: "2026-02-01".into(),
+        }),
+        language: Some("en".into()),
+        keywords: vec!["budget".into()],
+        custom: BTreeMap::from([
+            (
+                "weight".to_string(),
+                Value::Number {
+                    value: 1.5,
+                    unit: Some("kg".into()),
+                },
+            ),
+            ("share".to_string(), Value::Percent { value: 0.25 }),
+            ("final".to_string(), Value::Bool { value: true }),
+            (
+                "tags".to_string(),
+                Value::List {
+                    value: vec![Value::Text { value: "a".into() }],
+                },
+            ),
+        ]),
+    };
+    let anchor = Some(Anchor("Costs!C12".into()));
+    doc.body = vec![
+        Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("Costs".into()),
+            anchor: Some(Anchor("sheet:Costs".into())),
+            blocks: vec![Block::Heading {
+                level: 2,
+                inlines: vec![text("Intro")],
+                anchor: Some(Anchor("h:intro".into())),
+            }],
+        },
+        Block::Paragraph {
+            inlines: vec![
+                text("see"),
+                Inline::Code { text: "x".into() },
+                Inline::Link {
+                    target: "https://example.org".into(),
+                    title: Some("Example".into()),
+                    internal: false,
+                    wiki: false,
+                    inlines: vec![text("here")],
+                },
+                Inline::FootnoteRef { id: "1".into() },
+                Inline::Math {
+                    latex: "x^2".into(),
+                },
+                Inline::Status {
+                    text: "Done".into(),
+                    color: StatusColor::Green,
+                },
+                Inline::AnchorMark {
+                    anchor: Anchor("p4".into()),
+                },
+            ],
+            role: Some("caption".into()),
+            anchor: None,
+        },
+        Block::List {
+            ordered: true,
+            items: vec![vec![Block::Paragraph {
+                inlines: vec![text("one")],
+                role: None,
+                anchor: None,
+            }]],
+            anchor: Some(Anchor("list:1".into())),
+        },
+        Block::Table {
+            caption: Some("Totals".into()),
+            header_rows: 1,
+            role: Some("summary".into()),
+            rows: vec![vec![Cell {
+                inlines: vec![text("12")],
+                row_span: 1,
+                col_span: 2,
+                anchor: anchor.clone(),
+            }]],
+            alignments: vec![Align::Right],
+            anchor: Some(Anchor("table:1".into())),
+        },
+        Block::Code {
+            lang: Some("rust".into()),
+            text: "fn main() {}".into(),
+            anchor: Some(Anchor("code:1".into())),
+        },
+        Block::Quote {
+            blocks: vec![Block::Paragraph {
+                inlines: vec![text("quoted")],
+                role: None,
+                anchor: None,
+            }],
+            anchor: None,
+        },
+        Block::Math {
+            latex: "\\frac{a}{b}".into(),
+            source_kind: "omml".into(),
+            anchor: Some(Anchor("eq:1".into())),
+        },
+        Block::Media {
+            asset: "img1".into(),
+            anchor: Some(Anchor("fig:1".into())),
+        },
+        Block::Callout {
+            kind: CalloutKind::Warning,
+            title: Some("Careful".into()),
+            folded: Some(true),
+            blocks: vec![],
+            anchor: None,
+        },
+        Block::Rule { anchor: None },
+        Block::Task {
+            state: TaskState::Cancelled,
+            inlines: vec![text("todo")],
+            anchor: Some(Anchor("task:1".into())),
+        },
+    ];
+    doc.facets.formulas.push(Formula {
+        anchor: Anchor("Costs!C12".into()),
+        expression: "=SUM(C1:C11)".into(),
+        dialect: "excel".into(),
+        references: vec![Anchor("Costs!C1:C11".into())],
+        cached: Some(Value::Number {
+            value: 12.0,
+            unit: None,
+        }),
+        role: Some(Role::Result),
+        pattern: Some("g1".into()),
+        latex: Some("\\sum C".into()),
+        note: Some("holds 11 of 11 rows".into()),
+    });
+    doc.facets.graphs.push(Graph {
+        id: "deps".into(),
+        kind: "dependency".into(),
+        nodes: vec![Node {
+            id: "n1".into(),
+            label: "C12".into(),
+            kind: Some("cell".into()),
+            anchor: anchor.clone(),
+        }],
+        edges: vec![Edge {
+            from: "n1".into(),
+            to: "n2".into(),
+            kind: "references".into(),
+            anchor: Some(Anchor("Costs!C12".into())),
+        }],
+    });
+    doc.facets.timeline.push(Event {
+        time: Some("2026-03-01".into()),
+        actor: Some("Ada".into()),
+        kind: "revision".into(),
+        anchor: anchor.clone(),
+        text: Some("changed".into()),
+    });
+    doc.facets.annotations.push(Annotation {
+        kind: "comment".into(),
+        author: Some("Bob".into()),
+        date: Some("2026-03-02".into()),
+        anchor: anchor.clone(),
+        quoted: Some("12".into()),
+        body: vec![text("Check this")],
+        replies: vec![Annotation {
+            kind: "comment".into(),
+            author: Some("Ada".into()),
+            date: None,
+            anchor: None,
+            quoted: None,
+            body: vec![text("Ok")],
+            replies: vec![],
+            resolved: None,
+        }],
+        resolved: Some(false),
+    });
+    doc.facets.embedded.push(Embedded {
+        kind: "macro".into(),
+        name: "Module1".into(),
+        detail: Some("vba, 120 bytes".into()),
+        target: None,
+    });
+    doc.assets.push(Asset {
+        id: "img1".into(),
+        path: Some("assets/img1.png".into()),
+        sha256: "11".repeat(32),
+        mime: "image/png".into(),
+        caption: Some("Chart".into()),
+        alt: None,
+        needs_vision: true,
+    });
+    doc.losses.push(Loss {
+        location: "Costs!D1".into(),
+        what: "chart".into(),
+        why: LossReason::NotImplemented,
+        severity: Severity::Warning,
+    });
+    doc
+}
+
+#[test]
+fn document_roundtrips_through_json() {
+    let doc = full_document();
+    let json = serde_json::to_string(&doc).unwrap();
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert_eq!(doc, back);
+}
+
+#[test]
+fn model_version_is_1() {
+    assert_eq!(MODEL_VERSION, 1);
+    assert_eq!(Document::new(src()).model_version, 1);
+}
+
+#[test]
+fn format_ids_serialize_snake_case() {
+    assert_eq!(
+        serde_json::to_string(&FormatId::ThreeMf).unwrap(),
+        "\"three_mf\""
+    );
+    assert_eq!(
+        serde_json::to_string(&FormatId::KicadPcb).unwrap(),
+        "\"kicad_pcb\""
+    );
+    assert_eq!(
+        serde_json::to_string(&FormatId::PostScript).unwrap(),
+        "\"post_script\""
+    );
+}
+
+#[test]
+fn json_schema_generates() {
+    let schema = schemars::schema_for!(Document);
+    let value = serde_json::to_value(&schema).unwrap();
+    assert!(value.is_object());
+    assert!(value["properties"]["facets"].is_object());
+}
+
+#[test]
+fn serde_shapes_are_tagged_snake_case() {
+    let v = serde_json::to_value(Value::Number {
+        value: 2.0,
+        unit: None,
+    })
+    .unwrap();
+    assert_eq!(v["type"], "number");
+    assert_eq!(v["value"], 2.0);
+    let v = serde_json::to_value(Value::DateTime { value: "x".into() }).unwrap();
+    assert_eq!(v["type"], "date_time");
+    let b = serde_json::to_value(Block::Media {
+        asset: "a".into(),
+        anchor: None,
+    })
+    .unwrap();
+    assert_eq!(b["type"], "media");
+    let i = serde_json::to_value(Inline::FootnoteRef { id: "1".into() }).unwrap();
+    assert_eq!(i["type"], "footnote_ref");
+    assert_eq!(
+        serde_json::to_value(Anchor("p4".into())).unwrap(),
+        serde_json::json!("p4")
+    );
+    assert_eq!(
+        serde_json::to_value(LossReason::NotImplemented).unwrap(),
+        "not_implemented"
+    );
+    assert_eq!(
+        serde_json::to_value(LossReason::Uncertain).unwrap(),
+        "uncertain"
+    );
+    assert_eq!(
+        serde_json::to_value(LossReason::Internal).unwrap(),
+        "internal"
+    );
+    assert_eq!(
+        serde_json::to_value(Completeness::Partial).unwrap(),
+        "partial"
+    );
+}
+
+#[test]
+fn source_exposes_bytes() {
+    let src = Source {
+        path: None,
+        name: "a.txt".into(),
+        bytes: Bytes::Owned(Arc::new(b"hello".to_vec())),
+        sha256: String::new(),
+        size: 5,
+        format: FormatId::Text,
+        detection: Detection {
+            confidence: Confidence::Guess,
+            evidence: "utf-8".into(),
+        },
+        modified: None,
+    };
+    assert_eq!(src.bytes(), b"hello");
+    assert!(format!("{src:?}").contains("5 bytes"));
+}
+
+#[test]
+fn minimal_document_json_deserializes() {
+    let json = r#"{
+        "model_version": 1,
+        "source": {
+            "name": "a.txt",
+            "sha256": "00",
+            "size": 0,
+            "format": "text",
+            "detection": {"confidence": "guess", "evidence": "utf-8"}
+        }
+    }"#;
+    let doc: Document = serde_json::from_str(json).unwrap();
+    let expected = Document::new(SourceInfo {
+        path: None,
+        name: "a.txt".into(),
+        sha256: "00".into(),
+        size: 0,
+        format: FormatId::Text,
+        detection: Detection {
+            confidence: Confidence::Guess,
+            evidence: "utf-8".into(),
+        },
+        modified: None,
+        encoding: None,
+        reader: None,
+    });
+    assert_eq!(doc, expected);
+}
+
+#[test]
+fn empty_fields_are_left_out_of_json() {
+    let v = serde_json::to_value(Document::new(src())).unwrap();
+    let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["facets", "model_version", "properties", "source"]);
+    assert_eq!(v["properties"], serde_json::json!({}));
+    assert_eq!(v["facets"], serde_json::json!({}));
+    assert!(v["source"].get("encoding").is_none());
+    let t = serde_json::to_value(Inline::Text {
+        text: "a".into(),
+        emphasis: false,
+        strong: false,
+        strike: false,
+    })
+    .unwrap();
+    assert_eq!(t, serde_json::json!({"type": "text", "text": "a"}));
+}
+
+#[test]
+fn value_number_keeps_non_finite_as_text() {
+    assert_eq!(
+        Value::number(2.5, Some("m".into())),
+        Value::Number {
+            value: 2.5,
+            unit: Some("m".into())
+        }
+    );
+    assert_eq!(
+        Value::number(f64::NAN, None),
+        Value::Text {
+            value: "NaN".into()
+        }
+    );
+    assert_eq!(
+        Value::number(f64::INFINITY, None),
+        Value::Text {
+            value: "inf".into()
+        }
+    );
+    assert_eq!(
+        Value::number(f64::NEG_INFINITY, Some("m".into())),
+        Value::Text {
+            value: "-inf".into()
+        }
+    );
+    assert_eq!(Value::percent(0.5), Value::Percent { value: 0.5 });
+    assert_eq!(
+        Value::percent(f64::NAN),
+        Value::Text {
+            value: "NaN".into()
+        }
+    );
+}
+
+#[test]
+fn cell_spans_default_to_one() {
+    let cell: Cell = serde_json::from_str(r#"{"inlines": []}"#).unwrap();
+    assert_eq!(cell, Cell::new(vec![]));
+    assert_eq!((cell.row_span, cell.col_span, cell.anchor), (1, 1, None));
+}
+
+#[test]
+fn mapped_bytes_expose_the_file() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(b"mapped data").unwrap();
+    file.flush().unwrap();
+    // SAFETY: the temp file is private to this test and not changed while mapped.
+    let map = unsafe { memmap2::Mmap::map(file.as_file()).unwrap() };
+    let bytes = Bytes::Mapped(Arc::new(map));
+    assert_eq!(bytes.as_slice(), b"mapped data");
+    assert_eq!(format!("{bytes:?}"), "Bytes::Mapped(11 bytes)");
+}
+
+#[test]
+fn read_options_debug_hides_password() {
+    let opts = ReadOptions {
+        password: Some("secret".into()),
+    };
+    let debug = format!("{opts:?}");
+    assert!(!debug.contains("secret"));
+    assert!(debug.contains("redacted"));
+}
+
+#[test]
+fn plain_fields_default_when_missing() {
+    let t: Block = serde_json::from_str(r#"{"type":"table"}"#).unwrap();
+    assert!(matches!(t, Block::Table { header_rows: 0, .. }));
+    let l: Block = serde_json::from_str(r#"{"type":"list"}"#).unwrap();
+    assert!(matches!(l, Block::List { ordered: false, .. }));
+    let a: Asset = serde_json::from_str(r#"{"id":"a","sha256":"00","mime":"image/png"}"#).unwrap();
+    assert!(!a.needs_vision);
+    let i: Inline = serde_json::from_str(r#"{"type":"link","target":"x"}"#).unwrap();
+    assert!(matches!(
+        i,
+        Inline::Link {
+            internal: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn wiki_flag_is_skipped_when_false_and_read_back() {
+    let link = |wiki| Inline::Link {
+        target: "note".into(),
+        title: None,
+        internal: true,
+        wiki,
+        inlines: Vec::new(),
+    };
+    let plain = serde_json::to_string(&link(false)).unwrap();
+    assert!(!plain.contains("wiki"), "{plain}");
+    let wiki = serde_json::to_string(&link(true)).unwrap();
+    assert!(wiki.contains("\"wiki\":true"), "{wiki}");
+    assert_eq!(serde_json::from_str::<Inline>(&wiki).unwrap(), link(true));
+    assert_eq!(serde_json::from_str::<Inline>(&plain).unwrap(), link(false));
+}
+
+#[test]
+fn source_info_copies_the_source_fields() {
+    let src = Source {
+        path: Some(std::path::PathBuf::from("/data/a.txt")),
+        name: "a.txt".into(),
+        bytes: Bytes::Owned(Arc::new(b"hello".to_vec())),
+        sha256: "abc".into(),
+        size: 5,
+        format: FormatId::Text,
+        detection: Detection {
+            confidence: Confidence::Likely,
+            evidence: "utf-8".into(),
+        },
+        modified: Some("2026-10-19T00:00:00Z".into()),
+    };
+    let info = rezzer_model::source_info(&src);
+    assert_eq!(info.path.as_deref(), Some("/data/a.txt"));
+    assert_eq!(info.name, "a.txt");
+    assert_eq!(info.sha256, "abc");
+    assert_eq!(info.size, 5);
+    assert_eq!(info.format, FormatId::Text);
+    assert_eq!(info.detection.evidence, "utf-8");
+    assert_eq!(info.modified.as_deref(), Some("2026-10-19T00:00:00Z"));
+    assert_eq!(info.encoding, None);
+    assert_eq!(info.reader, None);
+}
+
+#[test]
+fn images_rules_and_alignment_round_trip() {
+    let img = Inline::Image {
+        target: "a.png".into(),
+        alt: "A".into(),
+        title: None,
+    };
+    let j = serde_json::to_value(&img).unwrap();
+    assert_eq!(
+        j,
+        serde_json::json!({"type": "image", "target": "a.png", "alt": "A"})
+    );
+    assert_eq!(serde_json::from_value::<Inline>(j).unwrap(), img);
+    assert_eq!(
+        serde_json::to_value(Inline::LineBreak).unwrap(),
+        serde_json::json!({"type": "line_break"})
+    );
+    let r: Block = serde_json::from_str(r#"{"type":"rule"}"#).unwrap();
+    assert_eq!(r, Block::Rule { anchor: None });
+    let t: Block =
+        serde_json::from_str(r#"{"type":"table","alignments":["left","none"]}"#).unwrap();
+    assert!(
+        matches!(&t, Block::Table { alignments, .. } if alignments == &[Align::Left, Align::None])
+    );
+    let s: Inline = serde_json::from_str(r#"{"type":"text","text":"x","strike":true}"#).unwrap();
+    assert!(matches!(s, Inline::Text { strike: true, .. }));
+}
+
+#[test]
+fn formula_note_is_optional() {
+    let json = r#"{"anchor":"A1","expression":"=1","dialect":"excel"}"#;
+    let f: Formula = serde_json::from_str(json).expect("formula without note");
+    assert_eq!(f.note, None);
+    let back = serde_json::to_string(&f).unwrap();
+    assert!(!back.contains("note"), "{back}");
+    let with = Formula {
+        note: Some("seen in data".into()),
+        ..f
+    };
+    let back = serde_json::to_string(&with).unwrap();
+    assert!(back.contains(r#""note":"seen in data""#), "{back}");
+}
+
+#[test]
+fn shared_helpers() {
+    use rezzer_model::{column_letter, plain_text};
+    assert_eq!(
+        Inline::plain("a"),
+        Inline::Text {
+            text: "a".into(),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }
+    );
+    assert_eq!(
+        Block::paragraph(vec![Inline::plain("a")]),
+        Block::Paragraph {
+            inlines: vec![Inline::plain("a")],
+            role: None,
+            anchor: None,
+        }
+    );
+    for (i, l) in [(0, "A"), (25, "Z"), (26, "AA"), (701, "ZZ"), (702, "AAA")] {
+        assert_eq!(column_letter(i), l);
+    }
+    let list = vec![
+        Inline::plain("a"),
+        Inline::LineBreak,
+        Inline::Link {
+            target: "x".into(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::Code { text: "b".into() }],
+        },
+        Inline::Status {
+            text: "c".into(),
+            color: rezzer_model::StatusColor::Red,
+        },
+        Inline::FootnoteRef { id: "1".into() },
+    ];
+    assert_eq!(plain_text(&list), "a bc");
+}

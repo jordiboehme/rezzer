@@ -1,0 +1,17 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/properties/custom/rows/value",
+    "equals": 2.0
+  },
+  {
+    "pointer": "/body/0/blocks/0/rows/1/1/inlines/1/type",
+    "equals": "line_break"
+  },
+  {
+    "contains": "ha \"ha\" ha"
+  }
+]

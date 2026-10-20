@@ -1,0 +1,1524 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-semicolon-latin1-dwd-stations",
+      "blocks": [
+        {
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stations_id",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stationsname",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "geogr. Breite",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "geogr. Laenge",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stationshoehe",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bundesland",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Aach                                    ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   47.841299",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    8.849299",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          478",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Baden-Württemberg                       ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Aachen                                  ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   50.782659",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    6.094087",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          202",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Nordrhein-Westfalen                     ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         44",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Großenkneten                            ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   52.933593",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    8.237018",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "           44",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Niedersachsen                           ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         52",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ahrensburg-Wulfsdorf                    ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   53.662339",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   10.199036",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "           46",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Schleswig-Holstein                      ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         61",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Aiterhofen                              ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   48.844306",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   12.617053",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          339",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bayern                                  ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         70",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Albstadt-Ebingen                        ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   48.205158",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "     9.03707",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          712",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Baden-Württemberg                       ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         71",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Albstadt-Badkap                         ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    48.21555",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    8.978387",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          759",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Baden-Württemberg                       ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         72",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Albstadt-Onstmettingen                  ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    48.27655",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    9.000074",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          794",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Baden-Württemberg                       ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         73",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Aldersbach-Kriestorf                    ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   48.615918",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   13.050637",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          340",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bayern                                  ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         78",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Alfhausen                               ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   52.485322",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    7.912544",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         63.5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Niedersachsen                           ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "         91",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Alsfeld-Eifa                            ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "   50.744591",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "    9.344972",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!E12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "          300",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!F12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hessen                                  ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-semicolon-latin1-dwd-stations!G12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<1080 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stations_id",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stationsname",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "geogr. Breite",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "decimal (6 places)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "geogr. Laenge",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "decimal (6 places)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Stationshoehe",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "decimal (1 place)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bundesland",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 7",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "empty",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1091",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-semicolon-latin1-dwd-stations",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "csv-semicolon-latin1-dwd-stations",
+        "kind": "sheet",
+        "name": "csv-semicolon-latin1-dwd-stations",
+        "size": "1091 rows x 7 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 7.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ";"
+      },
+      "has_header": {
+        "type": "bool",
+        "value": true
+      },
+      "rows": {
+        "type": "number",
+        "value": 1091.0
+      }
+    },
+    "language": "de"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (windows-1252), delimiter ';', 100% of rows with the same field count"
+    },
+    "encoding": "windows-1252",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-semicolon-latin1-dwd-stations.txt",
+    "path": "<corpus>/web-text/csv-semicolon-latin1-dwd-stations.txt",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "6d2b0ee5d3c33f27cb36e773b0fa35bfc3468cbac4306d89010f7b3f5bd8387b",
+    "size": 148456
+  }
+}

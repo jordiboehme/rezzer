@@ -1,0 +1,941 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-latin1-noheader-derived-geonames",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.09",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vienna",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vienna",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2761367",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.08",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vorarlberg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vorarlberg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2762300",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.07",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tyrol",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tyrol",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2763586",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.06",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Styria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Styria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2764581",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.05",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Salzburg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Salzburg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2766823",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.04",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Upper Austria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Upper Austria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2769848",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.03",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lower Austria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lower Austria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2770542",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.02",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Carinthia",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Carinthia",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2774686",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AT.01",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Burgenland",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Burgenland",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2781194",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CH.ZH",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Zurich",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Zurich",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2657895",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CH.ZG",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Zug",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Zug",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2657907",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CH.VD",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vaud",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vaud",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-latin1-noheader-derived-geonames!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2658182",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<71 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-latin1-noheader-derived-geonames",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "csv-latin1-noheader-derived-geonames",
+        "kind": "sheet",
+        "name": "csv-latin1-noheader-derived-geonames",
+        "size": "83 rows x 4 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 4.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ","
+      },
+      "has_header": {
+        "type": "bool",
+        "value": false
+      },
+      "rows": {
+        "type": "number",
+        "value": 83.0
+      }
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (windows-1252), delimiter ',', 100% of rows with the same field count"
+    },
+    "encoding": "windows-1252",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-latin1-noheader-derived-geonames.csv",
+    "path": "<corpus>/web-text/csv-latin1-noheader-derived-geonames.csv",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "c3b48ea33e7ddc1c46b94bd1c4030f76e285a6cc9530a5b0603294912175b37e",
+    "size": 3140
+  }
+}

@@ -1,0 +1,51 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "csv-spectrum-empty.csv"
+resource: "<corpus>/web-text/csv-spectrum-empty.csv"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "f868c0f521228d5afc2c21eac9ad98729d2db969b98126105be844856d9b952a"
+source_size: 19
+format: csv
+detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+encoding: "UTF-8"
+reader: "csv/0.1.0"
+completeness: complete
+losses: 0
+---
+
+# csv-spectrum-empty.csv
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| csv-spectrum-empty | sheet | 2 rows x 3 columns |  |  |
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| columns | 3 |
+| delimiter | , |
+| has\_header | true |
+| rows | 2 |
+
+## csv-spectrum-empty
+
+| a | b | c |
+| --- | --- | --- |
+| 1 |  |  |
+| 2 | 3 | 4 |
+
+**Columns**
+
+| Column | Type | Unit | Missing | Unique | Key |
+| --- | --- | --- | --- | --- | --- |
+| a | integer |  | 0 | yes | yes |
+| b | integer |  | 1 | yes | no |
+| c | integer |  | 1 | yes | no |

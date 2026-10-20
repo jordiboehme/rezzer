@@ -1,0 +1,16 @@
+[package]
+name = "textenc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Turns bytes in any text encoding into UTF-8: byte order mark, strict UTF-8, then detection with chardetng"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/textenc"
+readme = "README.md"
+keywords = ["encoding", "charset", "utf-8", "decode", "detection"]
+categories = ["encoding", "text-processing"]
+
+[dependencies]
+chardetng.workspace = true
+encoding_rs.workspace = true

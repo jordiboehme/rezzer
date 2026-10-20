@@ -1,0 +1,20 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "text"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "Shift_JIS"
+  },
+  {
+    "pointer": "/properties/language",
+    "equals": "ja"
+  },
+  {
+    "contains": "坊っちゃん"
+  },
+  {
+    "contains": "夏目漱石"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "markdown"
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "About the repository README file"
+  },
+  {
+    "pointer": "/properties/custom/shortTitle/value",
+    "equals": "About READMEs"
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "min_len": 1
+  },
+  {
+    "pointer": "/body/0/inlines/0/text",
+    "equals": "About READMEs"
+  },
+  {
+    "pointer": "/body/0/level",
+    "equals": 2
+  }
+]

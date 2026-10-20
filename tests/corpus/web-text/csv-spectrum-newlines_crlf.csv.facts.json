@@ -1,0 +1,17 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/properties/custom/rows/value",
+    "equals": 3.0
+  },
+  {
+    "pointer": "/properties/custom/delimiter/value",
+    "equals": ","
+  },
+  {
+    "contains": "Once upon a time"
+  }
+]

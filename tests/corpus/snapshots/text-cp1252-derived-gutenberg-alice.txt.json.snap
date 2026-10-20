@@ -1,0 +1,154 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "text": "The Project Gutenberg eBook of Alice's Adventures in Wonderland",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "This eBook is for the use of anyone anywhere in the United States and\nmost other parts of the world at no cost and with almost no restrictions\nwhatsoever. You may copy it, give it away or re-use it under the terms\nof the Project Gutenberg License included with this eBook or online\nat www.gutenberg.org. If you are not located in the United States,\nyou will have to check the laws of the country where you are located\nbefore using this eBook.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Title: Alice's Adventures in Wonderland",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Author: Lewis Carroll",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Release date: June 27, 2008 [eBook #11]\n                Most recently updated: June 26, 2025",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Language: English",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Other information and formats: www.gutenberg.org/ebooks/11",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Credits: Arthur DiBianca and David Widger",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "*** START OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "[Illustration]",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Alice’s Adventures in Wonderland",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "by Lewis Carroll",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<865 more items>"
+      ],
+      "kind": "other",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "part:1",
+        "kind": "other",
+        "name": "Part 1",
+        "size": "877 paragraphs"
+      }
+    ]
+  },
+  "properties": {
+    "language": "en"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "text (windows-1252)"
+    },
+    "encoding": "windows-1252",
+    "format": "text",
+    "modified": "<modified>",
+    "name": "text-cp1252-derived-gutenberg-alice.txt",
+    "path": "<corpus>/web-text/text-cp1252-derived-gutenberg-alice.txt",
+    "reader": {
+      "id": "text",
+      "version": "0.1.0"
+    },
+    "sha256": "233b828e6dd75253e67925d33bb427209250ba40eedce0d3b25262b89ff74047",
+    "size": 167712
+  }
+}

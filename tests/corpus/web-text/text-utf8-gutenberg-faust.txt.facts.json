@@ -1,0 +1,20 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "text"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "UTF-8"
+  },
+  {
+    "pointer": "/properties/language",
+    "equals": "de"
+  },
+  {
+    "contains": "Tragödie erster Teil"
+  },
+  {
+    "contains": "Johann Wolfgang von Goethe"
+  }
+]

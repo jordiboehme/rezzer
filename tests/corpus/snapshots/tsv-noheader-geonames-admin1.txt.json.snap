@@ -1,0 +1,941 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "tsv-noheader-geonames-admin1",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.06",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sant Julià de Loria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sant Julia de Loria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3039162",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.05",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ordino",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ordino",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3039676",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.04",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "La Massana",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "La Massana",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3040131",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.03",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Encamp",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Encamp",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3040684",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.02",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Canillo",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Canillo",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3041203",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.07",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Andorra la Vella",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Andorra la Vella",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3041566",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AD.08",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Escaldes-Engordany",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Escaldes-Engordany",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3338529",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AE.07",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Umm Al Quwain",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Umm Al Quwain",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "290595",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AE.05",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ras Al Khaimah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ras Al Khaimah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "291075",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AE.03",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Dubai",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Dubai",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "292224",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AE.06",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sharjah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sharjah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "292673",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "tsv-noheader-geonames-admin1!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AE.04",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Fujairah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Fujairah",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "tsv-noheader-geonames-admin1!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "292879",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<3853 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "tsv-noheader-geonames-admin1",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "tsv-noheader-geonames-admin1",
+        "kind": "sheet",
+        "name": "tsv-noheader-geonames-admin1",
+        "size": "3865 rows x 4 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 4.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": "tab"
+      },
+      "has_header": {
+        "type": "bool",
+        "value": false
+      },
+      "rows": {
+        "type": "number",
+        "value": 3865.0
+      }
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (UTF-8), delimiter tab, 100% of rows with the same field count"
+    },
+    "encoding": "UTF-8",
+    "format": "tsv",
+    "modified": "<modified>",
+    "name": "tsv-noheader-geonames-admin1.txt",
+    "path": "<corpus>/web-text/tsv-noheader-geonames-admin1.txt",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "b577baa3476bbe94f0454545e517e1835401d79c5b1105c8e02cf1d4a505e8ec",
+    "size": 151583
+  }
+}

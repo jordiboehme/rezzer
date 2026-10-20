@@ -1,0 +1,15 @@
+[package]
+name = "rezzer-enrich"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rezzer-model = { path = "../rezzer-model" }
+whatlang.workspace = true
+
+[dev-dependencies]
+rezzer-read-csv = { path = "../readers/rezzer-read-csv" }
+rezzer-limits = { path = "../rezzer-limits" }

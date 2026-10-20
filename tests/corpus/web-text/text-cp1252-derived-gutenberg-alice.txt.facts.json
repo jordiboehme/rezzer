@@ -1,0 +1,17 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "text"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "windows-1252"
+  },
+  {
+    "pointer": "/properties/language",
+    "equals": "en"
+  },
+  {
+    "contains": "Alice’s Adventures in Wonderland"
+  }
+]

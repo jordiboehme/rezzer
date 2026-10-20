@@ -1,0 +1,178 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The user's config file: `$XDG_CONFIG_HOME/rezzer/config.toml`, else
+//! `~/.config/rezzer/config.toml` (on macOS too, as the spec says). A missing file means the
+//! defaults; an unknown key is an error that names the file and the key.
+//!
+//! ```toml
+//! cache = true
+//! cache_dir = "/absolute/path"
+//! cache_max_bytes = 536870912
+//!
+//! [limits]
+//! max_file_bytes = 2147483648
+//! max_time = 120
+//! max_elements = 2000000
+//! page_tokens = 20000
+//!
+//! [enrich]
+//! disabled = ["language"]
+//! ```
+
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
+use rezzer_enrich::EnrichOptions;
+use rezzer_limits::Limits;
+use serde::Deserialize;
+
+/// Settings for every run of the pipeline.
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub limits: Limits,
+    /// Results are cached unless this is false.
+    pub cache: bool,
+    /// Where cache entries live; `None` is the user cache dir
+    /// (`directories::ProjectDirs::cache_dir`).
+    pub cache_dir: Option<PathBuf>,
+    /// Size cap of the cache dir. After a write over the cap the oldest entries are removed
+    /// until the cache is under 90 % of it.
+    pub cache_max_bytes: u64,
+    pub enrich: EnrichOptions,
+}
+
+/// Default [`Config::cache_max_bytes`]: 512 MiB.
+pub const DEFAULT_CACHE_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            limits: Limits::default(),
+            cache: true,
+            cache_dir: None,
+            cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
+            enrich: EnrichOptions::default(),
+        }
+    }
+}
+
+/// A config file that could not be used. The message is one line.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigError {
+    #[error("cannot read config file {path}: {message}")]
+    Io { path: String, message: String },
+    #[error("config file {path}: {message}")]
+    Invalid { path: String, message: String },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ConfigFile {
+    limits: Limits,
+    cache: Option<bool>,
+    cache_dir: Option<PathBuf>,
+    cache_max_bytes: Option<u64>,
+    enrich: EnrichFile,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct EnrichFile {
+    disabled: Vec<String>,
+}
+
+impl Config {
+    /// Loads the user's config file, or the defaults when there is none (or no home).
+    pub fn load() -> Result<Config, ConfigError> {
+        let xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let home = std::env::var_os("HOME");
+        match config_path_from(xdg.as_deref(), home.as_deref()) {
+            Some(path) => Config::load_from(&path),
+            None => Ok(Config::default()),
+        }
+    }
+
+    /// Loads the config file at `path`. A missing file gives the defaults.
+    pub fn load_from(path: &Path) -> Result<Config, ConfigError> {
+        let shown = path.display().to_string();
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
+            Err(e) => {
+                return Err(ConfigError::Io {
+                    path: shown,
+                    message: e.to_string(),
+                });
+            }
+        };
+        let invalid = |message: String| ConfigError::Invalid {
+            path: shown.clone(),
+            message,
+        };
+        let file: ConfigFile = toml::from_str(&text).map_err(|e| {
+            let message = one_line(e.message());
+            match e.span() {
+                Some(span) => invalid(format!("line {}: {message}", line_of(&text, span.start))),
+                None => invalid(message),
+            }
+        })?;
+        if let Some(dir) = &file.cache_dir
+            && !dir.is_absolute()
+        {
+            return Err(invalid(format!(
+                "cache_dir must be an absolute path, got {}",
+                dir.display()
+            )));
+        }
+        let known: Vec<&str> = rezzer_enrich::passes().iter().map(|p| p.name()).collect();
+        if let Some(bad) = file
+            .enrich
+            .disabled
+            .iter()
+            .find(|d| !known.contains(&d.as_str()))
+        {
+            return Err(invalid(format!(
+                "enrich.disabled: unknown pass {bad:?}, expected one of {}",
+                known.join(", ")
+            )));
+        }
+        Ok(Config {
+            limits: file.limits,
+            cache: file.cache.unwrap_or(true),
+            cache_dir: file.cache_dir,
+            cache_max_bytes: file.cache_max_bytes.unwrap_or(DEFAULT_CACHE_MAX_BYTES),
+            enrich: EnrichOptions {
+                disabled: file.enrich.disabled,
+            },
+        })
+    }
+}
+
+/// The config file path from the values of `XDG_CONFIG_HOME` and `HOME`. An empty or
+/// relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says.
+pub fn config_path_from(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
+    let xdg = xdg_config_home
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute());
+    let base = match xdg {
+        Some(dir) => dir,
+        None => PathBuf::from(home.filter(|h| !h.is_empty())?).join(".config"),
+    };
+    Some(base.join("rezzer").join("config.toml"))
+}
+
+fn line_of(text: &str, offset: usize) -> usize {
+    let end = offset.min(text.len());
+    text.as_bytes()[..end]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
+        + 1
+}
+
+/// Collapses every run of whitespace, line breaks included, to one space.
+pub(crate) fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}

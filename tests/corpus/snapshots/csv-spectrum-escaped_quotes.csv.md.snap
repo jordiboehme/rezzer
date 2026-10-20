@@ -1,0 +1,50 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "csv-spectrum-escaped_quotes.csv"
+resource: "<corpus>/web-text/csv-spectrum-escaped_quotes.csv"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "a0d378e3045aefd50a6eacb40d8ab488a2f3cadcbb79f1cfd727eba95bbb0ca3"
+source_size: 25
+format: csv
+detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+encoding: "UTF-8"
+reader: "csv/0.1.0"
+completeness: complete
+losses: 0
+---
+
+# csv-spectrum-escaped\_quotes.csv
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| csv-spectrum-escaped\_quotes | sheet | 2 rows x 2 columns |  |  |
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| columns | 2 |
+| delimiter | , |
+| has\_header | true |
+| rows | 2 |
+
+## csv-spectrum-escaped\_quotes
+
+| a | b |
+| --- | --- |
+| 1 | ha "ha" ha |
+| 3 | 4 |
+
+**Columns**
+
+| Column | Type | Unit | Missing | Unique | Key |
+| --- | --- | --- | --- | --- | --- |
+| a | integer |  | 0 | yes | yes |
+| b | text |  | 0 | yes | yes |

@@ -1,0 +1,28 @@
+[package]
+name = "rezzer-detect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rezzer-model = { path = "../rezzer-model" }
+rezzer-limits = { path = "../rezzer-limits" }
+textenc = { path = "../formats/textenc" }
+csvsniff = { path = "../formats/csvsniff" }
+csv.workspace = true
+sha2.workspace = true
+hex.workspace = true
+memmap2.workspace = true
+thiserror.workspace = true
+# Only stored and deflated entries are read during detection (pure Rust inflate).
+flate2 = { workspace = true, features = ["zlib-rs"] }
+cfb.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

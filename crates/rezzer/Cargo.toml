@@ -1,0 +1,35 @@
+[package]
+name = "rezzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "rezzer"
+path = "src/main.rs"
+
+[features]
+default = ["fmt-text", "fmt-markdown", "fmt-csv"]
+fmt-text = ["dep:rezzer-read-text"]
+fmt-markdown = ["dep:rezzer-read-markdown"]
+fmt-csv = ["dep:rezzer-read-csv"]
+
+[dependencies]
+rezzer-cli = { path = "../rezzer-cli" }
+rezzer-model = { path = "../rezzer-model" }
+rezzer-read-text = { path = "../readers/rezzer-read-text", optional = true }
+rezzer-read-markdown = { path = "../readers/rezzer-read-markdown", optional = true }
+rezzer-read-csv = { path = "../readers/rezzer-read-csv", optional = true }
+
+[dev-dependencies]
+rezzer-model = { path = "../rezzer-model" }
+rezzer-pipeline = { path = "../rezzer-pipeline" }
+insta.workspace = true
+sha2.workspace = true
+hex.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

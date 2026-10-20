@@ -1,0 +1,154 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "text": "The Project Gutenberg eBook of Faust: Der Tragödie erster Teil",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "This eBook is for the use of anyone anywhere in the United States and\nmost other parts of the world at no cost and with almost no restrictions\nwhatsoever. You may copy it, give it away or re-use it under the terms\nof the Project Gutenberg License included with this eBook or online\nat www.gutenberg.org. If you are not located in the United States,\nyou will have to check the laws of the country where you are located\nbefore using this eBook.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Title: Faust: Der Tragödie erster Teil",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Author: Johann Wolfgang von Goethe",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Release date: June 1, 2000 [eBook #2229]\n                Most recently updated: June 11, 2026",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Language: German",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Other information and formats: www.gutenberg.org/ebooks/2229",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Credits: Michael Pullen",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "*** START OF THE PROJECT GUTENBERG EBOOK FAUST: DER TRAGÖDIE ERSTER TEIL ***",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Faust:\nDer Tragödie erster Teil",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "by Johann Wolfgang von Goethe",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Contents",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<1132 more items>"
+      ],
+      "kind": "other",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "part:1",
+        "kind": "other",
+        "name": "Part 1",
+        "size": "1144 paragraphs"
+      }
+    ]
+  },
+  "properties": {
+    "language": "de"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "text (UTF-8)"
+    },
+    "encoding": "UTF-8",
+    "format": "text",
+    "modified": "<modified>",
+    "name": "text-utf8-gutenberg-faust.txt",
+    "path": "<corpus>/web-text/text-utf8-gutenberg-faust.txt",
+    "reader": {
+      "id": "text",
+      "version": "0.1.0"
+    },
+    "sha256": "fed2a58edd6910ee96d27ada614d34bcc41f03750d86541c41246bb74c564ff7",
+    "size": 218440
+  }
+}

@@ -2,7 +2,7 @@
 
 Rezzer reads delimited data files as tables and describes the data: column types, keys, missing values, units and relations between columns that it can check.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: available in the development version (no release yet).
 
 File types: `.csv`, `.tsv` and delimited data in `.txt` files. Rezzer detects the format by content, not by extension. A `.txt` file is checked for delimited data, and the output says how the format was decided.
 
@@ -52,6 +52,8 @@ Example (not final):
 - An unterminated quote makes the csv crate read the rest of the file as one field, without an error. Rezzer reports the field count per row so this case is visible
 - Encoding detection has no confidence score in chardetng 1.0.0. Short Latin-1 files with few special characters are a weak spot. The output says how the encoding was found
 - Relations are only checked on files with at least 10 counted rows. Small files get no relation claims
+- A very small file (3 to 9 lines) with a ragged row is read as CSV only when it has a `.csv` or `.tsv` extension and its header row and first record have the same field count. Otherwise it is read as text
+- The table shows at most 10,000 rows, 1,000 columns and 200,000 cells (counted after short rows are padded). The Columns table lists at most 500 columns. The output says what is not shown
 - qsv-sniffer 0.12.2 was tested for delimiter and header detection. It failed or was wrong on 8 of 13 files and its repository is archived, so Rezzer does its own detection
 
 ## Tested with

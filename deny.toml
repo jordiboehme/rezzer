@@ -1,0 +1,16 @@
+[licenses]
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "MPL-2.0", "Unicode-3.0", "Unlicense", "0BSD", "CC0-1.0", "BSL-1.0"]
+
+[bans]
+multiple-versions = "warn"
+# Known duplicates, kept quiet so a new one stands out. Re-check on every bump of the
+# crates that pull them in.
+skip = [
+    # whatlang 0.18.0 (rezzer-enrich) uses hashbrown 0.15; indexmap 2.14 (rmcp, zip) uses 0.17.
+    { crate = "hashbrown@0.15.5", reason = "whatlang 0.18.0 pins hashbrown 0.15" },
+    # tracing-attributes (via rmcp's tracing) and windows-implement / windows-interface (via
+    # chrono's iana-time-zone, used by rmcp and schemars) still use syn 2; the rest uses syn 3.
+    { crate = "syn@2.0.119", reason = "tracing-attributes and the windows crates still use syn 2" },
+]
+
+[advisories]

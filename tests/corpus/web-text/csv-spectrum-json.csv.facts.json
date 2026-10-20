@@ -1,0 +1,10 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/body/0/blocks/0/rows/1/1/inlines/0/text",
+    "equals": "{\"type\": \"Point\", \"coordinates\": [102.0, 0.5]}"
+  }
+]

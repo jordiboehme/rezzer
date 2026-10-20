@@ -2,7 +2,7 @@
 
 One page per format: what Rezzer gets out of it, which crates it builds on, how it shows up in the output and what it can't do yet.
 
-Rezzer is in early development. Nothing is implemented yet. These pages describe what is planned.
+Rezzer is in early development. Text, Markdown and CSV work in the development version; the other formats are planned. These pages describe what is planned.
 
 | Page | Formats | Status |
 |---|---|---|
@@ -20,9 +20,9 @@ Rezzer is in early development. Nothing is implemented yet. These pages describe
 | [EPUB](epub.md) | EPUB 2 and 3 | first release |
 | [HTML](html.md) | HTML | first release |
 | [PostScript](postscript.md) | PostScript, EPS | first release (document facts), text later |
-| [CSV](csv.md) | CSV, TSV | first release |
-| [Plain text](text.md) | Plain text in any encoding | first release |
-| [Markdown](markdown.md) | Markdown | first release |
+| [CSV](csv.md) | CSV, TSV | available (development version) |
+| [Plain text](text.md) | Plain text in any encoding | available (development version) |
+| [Markdown](markdown.md) | Markdown | available (development version) |
 | [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; later DWG and native CAD formats | first release; DWG and closed native formats later |
 | [Mail](mail.md) | EML, MBOX | after the first release |
 | [Mathcad](mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath | later release |

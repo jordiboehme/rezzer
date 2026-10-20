@@ -1,0 +1,20 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "windows-1252"
+  },
+  {
+    "pointer": "/properties/custom/has_header/value",
+    "equals": false
+  },
+  {
+    "contains": "Île-de-France"
+  },
+  {
+    "contains": "Provence-Alpes-Côte d'Azur"
+  }
+]

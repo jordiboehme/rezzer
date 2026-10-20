@@ -1,0 +1,36 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "markdown"
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "Wikilinks"
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "min_len": 1
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "contains": "block-anchors"
+  },
+  {
+    "pointer": "/body/2/inlines/0/text",
+    "equals": "Creating Wikilinks"
+  },
+  {
+    "pointer": "/body/4/inlines/1/wiki",
+    "equals": true
+  },
+  {
+    "pointer": "/body/4/inlines/1/target",
+    "equals": "graph-view"
+  },
+  {
+    "contains": "Example: [[graph-view]]"
+  },
+  {
+    "contains": "See [[block-anchors]] for full details."
+  }
+]

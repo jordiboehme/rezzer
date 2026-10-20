@@ -1,0 +1,1855 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-broken-derived-banklist",
+      "blocks": [
+        {
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bank Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "City",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ST",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CERT",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Acquiring Institution",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Closing Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Updated Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Banks of Wisconsin d/b/a Bank of Kenosha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Kenosha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "WI",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "35386",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "North Shore Bank, FSB",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "31-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "31-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Central Arizona Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Scottsdale",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AZ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "34527",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Western State Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "20-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sunrise Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Valdosta",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58185",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Synovus Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "21-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "EXTRA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FIELDS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pisgah Community Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Asheville",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "NC",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58701",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Capital Bank, N.A.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Douglas County Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Douglasville",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Parkway Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lenoir",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "NC",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57158",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CertusBank, National Association",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "17-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Chipola Community Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Marianna",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FL",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58034",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "First Federal Bank of Florida",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "19-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Heritage Bank of North Florida",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "unterminated quote fieldOrange Park,FL,26680,FirstAtlantic Bank,19-Apr-13,16-May-13",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "First Federal Bank,Lexington,KY,29594,Your Community Bank,19-Apr-13,23-Apr-13",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Gold Canyon Bank,Gold Canyon,AZ,58066,First Scottsdale Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": " National Association\"",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-broken-derived-banklist!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Frontier Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "LaGrange",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16431",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!E10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "HeritageBank of the South",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!F10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8-Mar-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!G10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26-Mar-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!H10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-broken-derived-banklist!I10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Note",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bank Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "City",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ST",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CERT",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Acquiring Institution",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Closing Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Updated Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "unknown",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "not checked",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "only in ragged rows",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "unknown",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "not checked",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "only in ragged rows",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-broken-derived-banklist",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "losses": [
+    {
+      "location": "record 4 (line 4)",
+      "severity": "warning",
+      "what": "row has 9 fields, expected 7",
+      "why": "damaged"
+    },
+    {
+      "location": "record 6 (line 6)",
+      "severity": "warning",
+      "what": "row has 3 fields, expected 7",
+      "why": "damaged"
+    },
+    {
+      "location": "record 9 (line 9)",
+      "severity": "warning",
+      "what": "row has 5 fields, expected 7",
+      "why": "damaged"
+    },
+    {
+      "location": "record 9 (line 9)",
+      "severity": "error",
+      "what": "unterminated quote: the cell ran over the following lines up to a quote inside a later field",
+      "why": "damaged"
+    }
+  ],
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Not read",
+        "4"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "csv-broken-derived-banklist",
+        "kind": "sheet",
+        "name": "csv-broken-derived-banklist",
+        "size": "9 rows x 9 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 9.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ","
+      },
+      "has_header": {
+        "type": "bool",
+        "value": true
+      },
+      "rows": {
+        "type": "number",
+        "value": 9.0
+      }
+    },
+    "language": "en"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (UTF-8), delimiter ',', 70% of rows with the same field count"
+    },
+    "encoding": "UTF-8",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-broken-derived-banklist.csv",
+    "path": "<corpus>/web-text/csv-broken-derived-banklist.csv",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "aa22bb95031ea5ff6165378d0e74c4387b5746722c63571dcb6d3d95816ec2a6",
+    "size": 996
+  }
+}

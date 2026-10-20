@@ -1,0 +1,15 @@
+[package]
+name = "csvsniff"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CSV sniffing: dialect, header row, column types, keys and derived columns"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/csvsniff"
+readme = "README.md"
+keywords = ["csv", "tsv", "sniffer", "dialect", "schema"]
+categories = ["parser-implementations", "text-processing"]
+
+[dependencies]
+csv.workspace = true

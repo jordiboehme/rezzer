@@ -1,0 +1,14 @@
+[package]
+name = "rezzer-read-csv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rezzer-model = { path = "../../rezzer-model" }
+rezzer-limits = { path = "../../rezzer-limits" }
+textenc = { path = "../../formats/textenc" }
+csvsniff = { path = "../../formats/csvsniff" }
+csv.workspace = true
