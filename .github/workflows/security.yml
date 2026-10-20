@@ -1,0 +1,184 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 05:17 UTC. Off the hour, when the runners are less busy.
+    - cron: '17 5 * * 1'
+  workflow_dispatch: {}
+
+# No top-level `env:` or `defaults:` and no write scope at the top: the
+# Scorecard API rejects results from a workflow that has them (its "workflow
+# restrictions"). Each job names the scopes it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The Rust jobs below skip cleanly while the tree has no Cargo.toml. A
+  # job-level `if` cannot call hashFiles(), so this job answers the question.
+  detect:
+    name: detect
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    outputs:
+      cargo: ${{ steps.cargo.outputs.cargo }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Look for Cargo.toml
+        id: cargo
+        run: |
+          set -euo pipefail
+          if [ -f Cargo.toml ]; then
+            echo "cargo=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "detect: there is no Cargo.toml yet, so the Rust jobs are skipped."
+            echo "cargo=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  # RustSec advisories only. A new advisory for a crate in Cargo.lock fails
+  # this job without any change in the repository, which is why it runs on a
+  # schedule. The full check (licenses, bans, sources) runs in ci.yml.
+  advisories:
+    name: cargo-deny advisories
+    timeout-minutes: 15
+    needs: detect
+    if: ${{ needs.detect.outputs.cargo == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # The rust-toolchain.toml pin. Move it together with that file.
+          rust-version: '1.99.0'
+          command: check
+          arguments: --all-features --locked
+          command-arguments: advisories
+
+  # CodeQL for the workflows themselves. Separate from the Rust job below,
+  # since a job-level `if` cannot see a matrix value.
+  codeql-actions:
+    name: codeql (actions)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          languages: actions
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          category: /language:actions
+
+  # CodeQL for Rust (editions 2021 and 2024). The extractor needs rustup and
+  # cargo, and reads the code without a full build (build-mode none).
+  codeql-rust:
+    name: codeql (rust)
+    timeout-minutes: 45
+    needs: detect
+    if: ${{ needs.detect.outputs.cargo == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          category: /language:rust
+
+  # zizmor with its findings in the Security tab. ci.yml runs it on every
+  # change and fails inline; this run keeps a record in code scanning and
+  # catches findings from new zizmor audits on a quiet week.
+  zizmor:
+    name: zizmor
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          advanced-security: true
+
+  # OpenSSF Scorecard. This job may only use the actions the Scorecard API
+  # allows (checkout, upload-artifact, codeql-action/upload-sarif and
+  # scorecard-action), has no `env:` and no `run:` steps, and is the only job
+  # in this workflow with id-token: write.
+  scorecard:
+    name: scorecard
+    timeout-minutes: 15
+    # Scorecard supports push and schedule on the default branch only.
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF to code scanning
+      id-token: write # publish the results to the Scorecard API, signed with OIDC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload the SARIF as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: results.sarif
+          category: scorecard

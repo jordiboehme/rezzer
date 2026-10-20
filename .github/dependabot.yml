@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  # Cargo.lock and the exact pins in Cargo.toml. Format crates change fast:
+  # read the changelog before merging a bump.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Give a new release a few days before it is proposed, so a broken or
+    # malicious version has time to be yanked. Security updates ignore this.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # The SHA pins in .github/workflows. Dependabot updates the SHA and the
+  # version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: ci
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
