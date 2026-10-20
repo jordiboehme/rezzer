@@ -277,6 +277,11 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
                 return Err(damaged(format!("a sheet has two attributes named {last}")));
             }
             match key.split_once(':') {
+                None if key == "name" && has_control(value) => {
+                    return Err(damaged(format!(
+                        "the sheet name {value:?} holds a control character"
+                    )));
+                }
                 None if matches!(key.as_str(), "name" | "sheetId" | "state") => {}
                 Some((p, "id")) if REL_NS.contains(&declared.get(p).map_or("", String::as_str)) => {
                     id = Some(value.clone());
@@ -295,6 +300,25 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
         out.push(id.ok_or_else(|| damaged("a sheet without a relationship id".into()))?);
     }
     Ok(out)
+}
+
+/// A control character (U+0000 to U+001F, U+007F) Excel does not allow in a sheet name:
+/// literal, or as a decimal or hexadecimal character reference in a raw attribute value.
+fn has_control(raw: &str) -> bool {
+    let control = |c: u32| c < 0x20 || c == 0x7f;
+    if raw.chars().any(|c| control(c as u32)) {
+        return true;
+    }
+    raw.split("&#").skip(1).any(|rest| {
+        let Some((num, _)) = rest.split_once(';') else {
+            return false;
+        };
+        let value = match num.strip_prefix(['x', 'X']) {
+            Some(hex) => u32::from_str_radix(hex, 16),
+            None => num.parse::<u32>(),
+        };
+        value.is_ok_and(control)
+    })
 }
 
 /// A target both calamine and sheetparts read the same way: no `.`, `..` or empty
@@ -426,4 +450,31 @@ pub(crate) fn check_structure(
         }
     }
     Ok(calamine_parts)
+}
+
+/// Refuses a workbook whose sheet names, as calamine read them, are not exactly sheetparts'
+/// names in the same order, or repeat. calamine finds a sheet by its name.
+pub(crate) fn check_names(calamine: &[String], wb: &WorkbookParts) -> Result<(), Refusal> {
+    let ours: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+    let theirs: Vec<&str> = calamine.iter().map(String::as_str).collect();
+    if ours != theirs {
+        return Err((
+            LossReason::Damaged,
+            format!("the sheet names are read two ways: {ours:?} and {theirs:?}"),
+        ));
+    }
+    if let Some(bad) = theirs.iter().find(|n| has_control(n)) {
+        return Err((
+            LossReason::Damaged,
+            format!("the sheet name {bad:?} holds a control character"),
+        ));
+    }
+    let mut seen = HashSet::new();
+    if let Some(dup) = theirs.iter().find(|n| !seen.insert(**n)) {
+        return Err((
+            LossReason::Damaged,
+            format!("the sheet name {dup:?} is used twice"),
+        ));
+    }
+    Ok(())
 }

@@ -132,6 +132,13 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         }
     };
 
+    // calamine finds a sheet by its name, so its names must be sheetparts' names, in order
+    // and each once; otherwise one section could mix the parts of two sheets.
+    let cal_names = cal.sheet_names();
+    if let Err(refusal) = package::check_names(&cal_names, &wb) {
+        return refuse(out, refusal);
+    }
+
     properties(&mut out, &wb);
     let vba = vba_modules(&mut out, &pkg, &mut cal, &wb, &xl, budget);
 
@@ -142,8 +149,23 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         DateSystem::Date1900
     };
     let mut halted: Option<&'static str> = None;
-    for (sheet, cal_part) in wb.sheets.iter().zip(&calamine_parts) {
-        // check_structure refused every package where these differ.
+    for sheet in &wb.sheets {
+        // The part calamine reads for this sheet: the first of its sheets with this name
+        // (its own lookup), joined from that sheet's relationship. calamine keeps the path
+        // private, so the join is check_structure's; check_names made the names one to one.
+        let Some(cal_part) = cal_names
+            .iter()
+            .position(|n| n == &sheet.name)
+            .and_then(|i| calamine_parts.get(i))
+        else {
+            return refuse(
+                out,
+                (
+                    LossReason::Damaged,
+                    format!("calamine has no sheet named {:?}", sheet.name),
+                ),
+            );
+        };
         debug_assert_eq!(
             cal_part, &sheet.part,
             "calamine and sheetparts read one part"

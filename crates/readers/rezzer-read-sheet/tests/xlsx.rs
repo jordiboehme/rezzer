@@ -1599,3 +1599,106 @@ fn unknown_sheet_attribute_is_refused() {
     );
     assert_eq!(cell_text(&out.document, "S!A1").as_deref(), Some("1"));
 }
+
+/// A package with the given `<sheet>` elements, `rId1` naming a small sheet and `rId2` a
+/// 1 MB sheet whose A1 reads BOMB.
+fn named_pkg(sheet_elems: &str) -> Vec<u8> {
+    let bomb = ws(
+        "",
+        &format!(
+            "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>BOMB{}</t></is></c></row>",
+            " ".repeat(1_000_000)
+        ),
+        "",
+    );
+    raw_zip(&[
+        (
+            "[Content_Types].xml",
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"
+                .into(),
+        ),
+        (
+            "_rels/.rels",
+            format!(
+                "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{RELS}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
+            ),
+        ),
+        (
+            "xl/workbook.xml",
+            format!(
+                "<workbook xmlns=\"{MAIN}\" xmlns:r=\"{RELS}\"><sheets>{sheet_elems}</sheets></workbook>"
+            ),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            format!(
+                "<Relationships xmlns=\"{PKG}\">\
+                 <Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>\
+                 <Relationship Id=\"rId2\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet2.xml\"/>\
+                 </Relationships>"
+            ),
+        ),
+        ("xl/worksheets/sheet1.xml", small_sheet()),
+        ("xl/worksheets/sheet2.xml", bomb),
+    ])
+}
+
+fn named_limits() -> Limits {
+    Limits {
+        max_unpacked_bytes: 16_000_000,
+        max_ratio: 100_000,
+        ..Limits::default()
+    }
+}
+
+/// A literal control character in one sheet name and its character reference in the
+/// other: sheetparts turns the literal one into a space, calamine names both sheets alike
+/// and finds the sheet by name.
+fn control_twins(literal: &str, reference: &str) -> String {
+    format!(
+        "<sheet name=\"X{literal}Y\" sheetId=\"1\" r:id=\"rId2\"/>\
+         <sheet name=\"X{reference}Y\" sheetId=\"2\" r:id=\"rId1\"/>"
+    )
+}
+
+#[test]
+fn sheet_names_with_a_literal_tab_are_refused() {
+    // Probe N3.
+    let out = read_with(named_pkg(&control_twins("\t", "&#9;")), named_limits());
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn sheet_names_with_a_literal_line_feed_are_refused() {
+    // Probe N4.
+    let out = read_with(named_pkg(&control_twins("\n", "&#10;")), named_limits());
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn sheet_names_with_a_literal_crlf_are_refused() {
+    // Probe N9.
+    let out = read_with(
+        named_pkg(&control_twins("\r\n", "&#13;&#10;")),
+        named_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn control_characters_in_a_sheet_name_are_refused() {
+    for name in ["A&#1;B", "A&#x1F;B", "A&#127;B", "A\u{7f}B", "A&#X9;B"] {
+        let sheet = format!("<sheet name=\"{name}\" sheetId=\"1\" r:id=\"rId1\"/>");
+        let out = read_with(named_pkg(&sheet), named_limits());
+        refused(&out, &[LossReason::Damaged]);
+    }
+    // Plain names with references to printable characters still read.
+    let sheet = "<sheet name=\"A&#38;B &#x41;\" sheetId=\"1\" r:id=\"rId1\"/>";
+    let out = read_with(named_pkg(sheet), named_limits());
+    assert_ne!(
+        out.completeness,
+        Completeness::Failed,
+        "{:#?}",
+        out.document.losses
+    );
+}
