@@ -22,7 +22,7 @@ use rezzer_limits::{Budget, DepthGuard};
 use rezzer_model::{
     Align, Anchor, Block, CalloutKind, Cell, Completeness, Document, Edge, Embedded, FormatId,
     Graph, Inline, Loss, LossReason, Node, ReadOptions, ReadOutcome, Reader, ReaderInfo,
-    SectionKind, Severity, Source, TaskState, source_info,
+    SectionKind, Severity, Source, TaskState, plain_text, source_info,
 };
 
 use frontmatter::{FmError, Syntax};
@@ -647,12 +647,7 @@ impl<'b> Builder<'b> {
     /// body; `close_top_frame` joins it again when the quote is no callout.
     fn soft_break(&mut self) {
         self.ensure_inline_leaf();
-        let space = Inline::Text {
-            text: " ".into(),
-            emphasis: false,
-            strong: false,
-            strike: false,
-        };
+        let space = Inline::plain(" ");
         if self.can_mark_callout_break() {
             self.para_break = Some(self.cur.len());
             self.cur.push(space);
@@ -1320,22 +1315,6 @@ fn push_merged(inlines: &mut Vec<Inline>, inline: Inline) {
         return;
     }
     inlines.push(inline);
-}
-
-/// The text of inlines without markup, for slugs, titles and image descriptions.
-fn plain_text(inlines: &[Inline]) -> String {
-    let mut out = String::new();
-    for inline in inlines {
-        match inline {
-            Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
-            Inline::Link { inlines, .. } => out.push_str(&plain_text(inlines)),
-            Inline::Math { latex } => out.push_str(latex),
-            Inline::Image { alt, .. } => out.push_str(alt),
-            Inline::LineBreak => out.push(' '),
-            Inline::FootnoteRef { .. } | Inline::Status { .. } | Inline::AnchorMark { .. } => {}
-        }
-    }
-    out
 }
 
 /// A heading id the way GitHub builds it: lowercase, spaces to hyphens, punctuation dropped.

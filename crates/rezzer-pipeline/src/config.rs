@@ -171,6 +171,7 @@ fn line_of(text: &str, offset: usize) -> usize {
         + 1
 }
 
-fn one_line(s: &str) -> String {
+/// Collapses every run of whitespace, line breaks included, to one space.
+pub(crate) fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }

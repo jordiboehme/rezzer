@@ -24,7 +24,7 @@ mod mermaid;
 mod overview;
 mod paging;
 
-use rezzer_model::{Block, Completeness, Document, Inline};
+use rezzer_model::{Block, Completeness, Document, plain_text};
 
 use crate::blocks::{Ctx, MAX_DEPTH};
 
@@ -117,11 +117,9 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let title_line = match doc.body.first() {
         Some(Block::Heading {
             level: 1, inlines, ..
-        }) if plain_text(inlines, 0).trim() == title => {
-            blocks::inlines(inlines, blocks::Mode::Line)
-                .trim()
-                .to_string()
-        }
+        }) if plain_text(inlines).trim() == title => blocks::inlines(inlines, blocks::Mode::Line)
+            .trim()
+            .to_string(),
         _ => blocks::line_text(title),
     };
     out.push_str(&blocks::heading_line(1, &title_line));
@@ -188,7 +186,7 @@ fn content(doc: &Document, title: &str) -> String {
     if let Some(Block::Heading {
         level: 1, inlines, ..
     }) = body.first()
-        && plain_text(inlines, 0).trim() == title
+        && plain_text(inlines).trim() == title
     {
         body = &body[1..];
     }
@@ -226,23 +224,4 @@ fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
         }
     }
     min
-}
-
-fn plain_text(list: &[Inline], depth: usize) -> String {
-    let mut out = String::new();
-    if depth > MAX_DEPTH {
-        return out;
-    }
-    for i in list {
-        match i {
-            Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
-            Inline::Link { inlines, .. } => out.push_str(&plain_text(inlines, depth + 1)),
-            Inline::Math { latex } => out.push_str(latex),
-            Inline::Image { alt, .. } => out.push_str(alt),
-            Inline::Status { text, .. } => out.push_str(text),
-            Inline::LineBreak => out.push(' '),
-            Inline::FootnoteRef { .. } | Inline::AnchorMark { .. } => {}
-        }
-    }
-    out
 }

@@ -13,7 +13,7 @@ use rezzer_limits::Budget;
 use rezzer_model::{
     Anchor, Block, Cell, Completeness, Document, FormatId, Formula, Inline, Loss, LossReason,
     ReadOptions, ReadOutcome, Reader, ReaderInfo, Role, SectionKind, Severity, Source, Value,
-    source_info,
+    column_letter, source_info,
 };
 
 /// Data rows in the body table. Further rows are analyzed and counted but not shown.
@@ -270,7 +270,7 @@ impl Reader for CsvReader {
                 } else {
                     String::new()
                 };
-                row.push(anchored(&sheet, j, i + 1, vec![plain(&label)]));
+                row.push(anchored(&sheet, j, i + 1, vec![Inline::plain(&label)]));
             }
         }
 
@@ -305,7 +305,7 @@ impl Reader for CsvReader {
         }
         let mut col_rows = vec![
             head.iter()
-                .map(|h| Cell::new(vec![plain(h)]))
+                .map(|h| Cell::new(vec![Inline::plain(*h)]))
                 .collect::<Vec<_>>(),
         ];
         for c in &analysis.columns {
@@ -327,7 +327,12 @@ impl Reader for CsvReader {
             if extra {
                 values.push(String::new());
             }
-            col_rows.push(values.iter().map(|v| Cell::new(vec![plain(v)])).collect());
+            col_rows.push(
+                values
+                    .iter()
+                    .map(|v| Cell::new(vec![Inline::plain(v)]))
+                    .collect(),
+            );
         }
         // Columns that exist only because some rows have more fields than the rest.
         for j in known..ncols_total {
@@ -348,7 +353,12 @@ impl Reader for CsvReader {
                 "no".to_string(),
                 "only in ragged rows".to_string(),
             ];
-            col_rows.push(values.iter().map(|v| Cell::new(vec![plain(v)])).collect());
+            col_rows.push(
+                values
+                    .iter()
+                    .map(|v| Cell::new(vec![Inline::plain(v)]))
+                    .collect(),
+            );
         }
         blocks.push(Block::Table {
             caption: Some("Columns".into()),
@@ -409,7 +419,7 @@ fn cell_empty(cell: &Cell) -> bool {
 /// replaced by `Inline::LineBreak` (the renderer writes it as one space inside a table).
 fn cell_inlines(value: &str) -> Vec<Inline> {
     if !value.contains(['\n', '\r']) {
-        return vec![plain(value)];
+        return vec![Inline::plain(value)];
     }
     let mut out: Vec<Inline> = Vec::new();
     let mut text = String::new();
@@ -417,7 +427,7 @@ fn cell_inlines(value: &str) -> Vec<Inline> {
     let flush = |run: &mut String, text: &mut String, out: &mut Vec<Inline>| {
         if run.contains(['\n', '\r']) {
             if !text.is_empty() {
-                out.push(plain(text));
+                out.push(Inline::plain(text.as_str()));
                 text.clear();
             }
             out.push(Inline::LineBreak);
@@ -436,7 +446,7 @@ fn cell_inlines(value: &str) -> Vec<Inline> {
     }
     flush(&mut run, &mut text, &mut out);
     if !text.is_empty() {
-        out.push(plain(&text));
+        out.push(Inline::plain(&text));
     }
     out
 }
@@ -515,21 +525,8 @@ fn sheet_of(name: &str, blocks: Vec<Block>) -> Block {
     }
 }
 
-fn plain(text: &str) -> Inline {
-    Inline::Text {
-        text: text.to_string(),
-        emphasis: false,
-        strong: false,
-        strike: false,
-    }
-}
-
 fn note(text: &str) -> Block {
-    Block::Paragraph {
-        inlines: vec![plain(text)],
-        role: None,
-        anchor: None,
-    }
+    Block::paragraph(vec![Inline::plain(text)])
 }
 
 fn kind_label(kind: &ColumnKind) -> String {
@@ -543,33 +540,5 @@ fn kind_label(kind: &ColumnKind) -> String {
         ColumnKind::Bool => "bool".into(),
         ColumnKind::Text => "text".into(),
         ColumnKind::Empty => "empty".into(),
-    }
-}
-
-/// Spreadsheet column letters: 0 is A, 25 is Z, 26 is AA.
-fn column_letter(mut index: usize) -> String {
-    let mut out = Vec::new();
-    loop {
-        out.push(b'A' + (index % 26) as u8);
-        if index < 26 {
-            break;
-        }
-        index = index / 26 - 1;
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::column_letter;
-
-    #[test]
-    fn letters() {
-        assert_eq!(column_letter(0), "A");
-        assert_eq!(column_letter(25), "Z");
-        assert_eq!(column_letter(26), "AA");
-        assert_eq!(column_letter(701), "ZZ");
-        assert_eq!(column_letter(702), "AAA");
     }
 }

@@ -120,16 +120,10 @@ impl Reader for TextReader {
 }
 
 fn paragraph(lines: &[&str]) -> Block {
-    Block::Paragraph {
-        inlines: vec![Inline::Text {
-            text: lines.join("\n"),
-            emphasis: false,
-            strong: false,
-            strike: false,
-        }],
-        role: None,
-        anchor: None,
-    }
+    Block::paragraph(vec![Inline::plain(lines.join(
+        "
+",
+    ))])
 }
 
 /// Turns CRLF and lone CR into LF in one pass. LF-only text and text without line breaks are

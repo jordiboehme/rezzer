@@ -200,20 +200,11 @@ pub(crate) fn properties(doc: &Document) -> Option<String> {
 }
 
 fn text(t: &str) -> Inline {
-    Inline::Text {
-        text: t.to_string(),
-        emphasis: false,
-        strong: false,
-        strike: false,
-    }
+    Inline::plain(t)
 }
 
 fn paragraph(inlines: Vec<Inline>) -> Block {
-    Block::Paragraph {
-        inlines,
-        role: None,
-        anchor: None,
-    }
+    Block::paragraph(inlines)
 }
 
 /// One annotation as list item blocks: who, when and where, the quoted passage, the body

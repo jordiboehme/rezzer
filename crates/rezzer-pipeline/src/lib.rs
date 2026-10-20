@@ -33,6 +33,7 @@ pub use rezzer_limits::CancelToken;
 pub use rezzer_render::OutputSection;
 
 use crate::cache::Cache;
+use crate::config::one_line;
 
 /// The Rezzer version written into the output and the cache key.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -436,16 +437,7 @@ fn unsupported(src: &Source) -> Document {
 }
 
 fn paragraph(text: &str) -> Block {
-    Block::Paragraph {
-        inlines: vec![Inline::Text {
-            text: text.to_string(),
-            emphasis: false,
-            strong: false,
-            strike: false,
-        }],
-        role: None,
-        anchor: None,
-    }
+    Block::paragraph(vec![Inline::plain(text)])
 }
 
 /// The request's time, else [`GENERATED_AT_ENV`], else now.
@@ -459,8 +451,4 @@ fn generated_at(req: &Request) -> String {
         })
         .or_else(|| rezzer_detect::rfc3339(SystemTime::now()))
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
-}
-
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }

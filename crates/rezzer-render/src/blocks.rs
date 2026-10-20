@@ -8,7 +8,10 @@
 //! tables, code, HTML (and so no HTML comments), math or frontmatter. Anchors are not printed:
 //! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
 
-use rezzer_model::{Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState};
+use rezzer_model::{
+    Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState, column_letter,
+    plain_text,
+};
 
 /// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
 /// the stack.
@@ -285,7 +288,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
         } => {
             if link_depth > MAX_DEPTH {
                 // Too deep to walk by recursion: the text stays, flattened.
-                escape_with(&flat_text(content), line_mode(mode), dollars, out);
+                escape_with(&plain_text(content), line_mode(mode), dollars, out);
                 return;
             }
             let merged = fix_flanking(merge_text(content));
@@ -509,29 +512,6 @@ fn inline_math(latex: &str, mode: Mode, out: &mut String) {
     }
 }
 
-/// A link or image destination plus optional title, without the parentheses.
-/// The plain text of inlines, walked with a stack instead of recursion.
-fn flat_text(list: &[Inline]) -> String {
-    let mut out = String::new();
-    let mut stack: Vec<std::slice::Iter<'_, Inline>> = vec![list.iter()];
-    while let Some(top) = stack.last_mut() {
-        let Some(inline) = top.next() else {
-            stack.pop();
-            continue;
-        };
-        match inline {
-            Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
-            Inline::Link { inlines, .. } => stack.push(inlines.iter()),
-            Inline::Math { latex } => out.push_str(latex),
-            Inline::Image { alt, .. } => out.push_str(alt),
-            Inline::Status { text, .. } => out.push_str(text),
-            Inline::LineBreak => out.push(' '),
-            Inline::FootnoteRef { .. } | Inline::AnchorMark { .. } => {}
-        }
-    }
-    out
-}
-
 /// True for a target with no scheme (a relative path or `#anchor`) or with http, https,
 /// mailto, ftp or file. Tabs and newlines are ignored and leading spaces and controls
 /// trimmed first, as browsers do.
@@ -674,6 +654,7 @@ fn decode_references(text: &str) -> String {
     out
 }
 
+/// A link or image destination plus optional title, without the parentheses.
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
         out.push_str("<>");
@@ -1179,12 +1160,7 @@ fn math_is_plain(body: &str) -> bool {
 
 fn media(id: &str, ctx: &Ctx) -> String {
     let mut parts: Vec<Inline> = Vec::new();
-    let text = |t: String| Inline::Text {
-        text: t,
-        emphasis: false,
-        strong: false,
-        strike: false,
-    };
+    let text = Inline::plain;
     match ctx.assets.iter().find(|a| a.id == id) {
         None => parts.push(text(format!("Picture {id} is missing from the assets."))),
         Some(asset) => {
@@ -1396,19 +1372,6 @@ fn model_table(
         out.push_str(&notes.join("\n"));
     }
     out
-}
-
-/// `A`, `B`, ..., `Z`, `AA`, ... for a 0-based column.
-fn column_letter(mut index: usize) -> String {
-    let mut letters = Vec::new();
-    loop {
-        letters.push(char::from(b'A' + (index % 26) as u8));
-        if index < 26 {
-            break;
-        }
-        index = index / 26 - 1;
-    }
-    letters.iter().rev().collect()
 }
 
 /// Characters allowed in a wikilink written as `[[...]]`: letters and digits of any script,

@@ -565,3 +565,45 @@ fn formula_note_is_optional() {
     let back = serde_json::to_string(&with).unwrap();
     assert!(back.contains(r#""note":"seen in data""#), "{back}");
 }
+
+#[test]
+fn shared_helpers() {
+    use rezzer_model::{column_letter, plain_text};
+    assert_eq!(
+        Inline::plain("a"),
+        Inline::Text {
+            text: "a".into(),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }
+    );
+    assert_eq!(
+        Block::paragraph(vec![Inline::plain("a")]),
+        Block::Paragraph {
+            inlines: vec![Inline::plain("a")],
+            role: None,
+            anchor: None,
+        }
+    );
+    for (i, l) in [(0, "A"), (25, "Z"), (26, "AA"), (701, "ZZ"), (702, "AAA")] {
+        assert_eq!(column_letter(i), l);
+    }
+    let list = vec![
+        Inline::plain("a"),
+        Inline::LineBreak,
+        Inline::Link {
+            target: "x".into(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::Code { text: "b".into() }],
+        },
+        Inline::Status {
+            text: "c".into(),
+            color: rezzer_model::StatusColor::Red,
+        },
+        Inline::FootnoteRef { id: "1".into() },
+    ];
+    assert_eq!(plain_text(&list), "a bc");
+}

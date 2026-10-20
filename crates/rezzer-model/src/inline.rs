@@ -68,6 +68,42 @@ pub enum Inline {
     },
 }
 
+impl Inline {
+    /// Text without emphasis, strong or strike.
+    pub fn plain(text: impl Into<String>) -> Inline {
+        Inline::Text {
+            text: text.into(),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }
+    }
+}
+
+/// The text of inlines without markup: text, code, math, image descriptions, status labels
+/// and link texts; a line break reads as a space. Walked with a stack, so link nesting of
+/// any depth cannot overflow the call stack.
+pub fn plain_text(list: &[Inline]) -> String {
+    let mut out = String::new();
+    let mut stack: Vec<std::slice::Iter<'_, Inline>> = vec![list.iter()];
+    while let Some(top) = stack.last_mut() {
+        let Some(inline) = top.next() else {
+            stack.pop();
+            continue;
+        };
+        match inline {
+            Inline::Text { text, .. } | Inline::Code { text } => out.push_str(text),
+            Inline::Link { inlines, .. } => stack.push(inlines.iter()),
+            Inline::Math { latex } => out.push_str(latex),
+            Inline::Image { alt, .. } => out.push_str(alt),
+            Inline::Status { text, .. } => out.push_str(text),
+            Inline::LineBreak => out.push(' '),
+            Inline::FootnoteRef { .. } | Inline::AnchorMark { .. } => {}
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusColor {

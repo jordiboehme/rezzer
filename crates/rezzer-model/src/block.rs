@@ -113,6 +113,30 @@ pub enum Block {
     },
 }
 
+impl Block {
+    /// A paragraph without role or anchor.
+    pub fn paragraph(inlines: Vec<Inline>) -> Block {
+        Block::Paragraph {
+            inlines,
+            role: None,
+            anchor: None,
+        }
+    }
+}
+
+/// Spreadsheet column letters for a 0-based column: 0 is `A`, 25 is `Z`, 26 is `AA`.
+pub fn column_letter(mut index: usize) -> String {
+    let mut letters = Vec::new();
+    loop {
+        letters.push(char::from(b'A' + (index % 26) as u8));
+        if index < 26 {
+            break;
+        }
+        index = index / 26 - 1;
+    }
+    letters.iter().rev().collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionKind {
