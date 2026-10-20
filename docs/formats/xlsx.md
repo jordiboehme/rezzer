@@ -98,7 +98,7 @@ Example from a tunnel design workbook in the test files (shortened):
 
 Rezzer reads every file as untrusted data:
 
-- Each entry is measured before it is unpacked. Defaults: 2 GB per file, 4 GB unpacked, at most 100 times the packed size per entry, XML nesting up to 256 levels, 120 seconds, 2 GB of memory and 2 million elements
+- Each entry is measured before it is unpacked. Defaults: 2 GB per file, 4 GB unpacked, at most 100 times the packed size per entry, XML nesting up to 256 levels, 120 seconds, 2 GB of memory and 2 million elements. The unpacked limit counts every read: a part that is read three times counts three times
 - A value table shows at most 1,000 columns and 200,000 cells. The output says what was cut. Its formulas still show up in the Logic section
 - A formula longer than 8,192 characters (the Excel maximum) is kept as text and not analyzed
 - A DOCTYPE in a part is refused, so entity bombs don't expand

@@ -490,20 +490,27 @@ fn number_rows(rows: u32) -> String {
 
 #[test]
 fn xlsx_zip_bomb_is_partial() {
-    // Each sheet fits the entry and ratio limits, together they unpack past the limit: the
-    // sheets that still fit are read, the rest is a Limit loss.
+    // The package fits every limit: each entry, the ratio and the unpacked total. But the
+    // unpacked meter counts every read of a part (the package check, the part reader and
+    // calamine), so the big sheets take it past the limit while they are read: the first
+    // sheets are read, the rest is a Limit loss. This pins how the unpacked limit counts
+    // today.
     let big = worksheet("", &number_rows(20_000), "");
-    let book = xlsx(&[
+    let sheets = [
         ("Small", small_worksheet()),
         ("Big1", big.clone()),
         ("Big2", big.clone()),
         ("Big3", big),
-    ]);
+    ];
+    let limit = 8 * MB as u64;
+    let unpacked: usize = sheets.iter().map(|(_, xml)| xml.len()).sum();
+    assert!((unpacked as u64) < limit, "{unpacked} bytes of sheets");
+    let book = xlsx(&sheets);
     let mut config = Config {
         cache: false,
         ..Config::default()
     };
-    config.limits.max_unpacked_bytes = 8 * MB as u64;
+    config.limits.max_unpacked_bytes = limit;
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
     let p = Pipeline::new(config, registry);
