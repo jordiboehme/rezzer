@@ -44,6 +44,8 @@ pub(crate) struct Verdict {
     pub refused_pages: Vec<u32>,
     pub refused_objects: HashSet<ObjectId>,
     pub unpacked: u64,
+    /// What each stream that fits unpacks to, up to the first filter that stays encoded.
+    pub sizes: HashMap<ObjectId, u64>,
 }
 
 /// Measures every stream of the document once, then refuses each page that reaches a stream
@@ -79,7 +81,10 @@ pub(crate) fn measure(
         let filters = stream_filters(doc, &stream.dict);
         let budget = limits.max_total_bytes.saturating_sub(verdict.unpacked);
         match measure_bytes(&stream.content, &filters, limits, budget, stop) {
-            Measure::Fits(n) => verdict.unpacked += n,
+            Measure::Fits(n) => {
+                verdict.unpacked += n;
+                verdict.sizes.insert(id, n);
+            }
             Measure::Over(cap) => {
                 if cap == Cap::Total {
                     total_hit = true;

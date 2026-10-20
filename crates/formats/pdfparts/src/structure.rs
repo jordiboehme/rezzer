@@ -236,7 +236,10 @@ impl Walk<'_> {
                         }
                     }
                     Some(Object::Dictionary(kd)) => match get_name(doc, kd, b"Type") {
-                        Some(b"MCR") => {
+                        // Some producers leave out /Type on a marked content reference.
+                        Some(b"MCR") | None
+                            if kd.has(b"MCID") && get_name(doc, kd, b"S").is_none() =>
+                        {
                             if let Some(m) =
                                 get_int(doc, kd, b"MCID").and_then(|m| u32::try_from(m).ok())
                             {

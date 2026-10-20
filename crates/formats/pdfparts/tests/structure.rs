@@ -100,7 +100,7 @@ fn role_map_applied() {
         });
         let footnote = doc.add_object(dictionary! {
             "Type" => "StructElem", "S" => "Loop", "P" => root, "Pg" => page,
-            "K" => vec![Object::Dictionary(dictionary! { "Type" => "MCR", "MCID" => 1 })],
+            "K" => vec![Object::Dictionary(dictionary! { "MCID" => 1 })],
         });
         let parents = doc.add_object(Object::Array(vec![leaf.into(), footnote.into()]));
         (

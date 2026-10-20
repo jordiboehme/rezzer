@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use lopdf::{Object, ObjectId};
 
-use crate::guard::{Filter, Measure, cap_words, measure_bytes, stream_filters, unpack};
+use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
     Tree, TreeKey, dict, get, get_date, get_dict, get_name, get_text, reference, resolve,
     text_string, walk_tree,
@@ -24,8 +24,8 @@ pub struct EmbeddedFile {
     pub description: Option<String>,
     /// The media type of the embedded stream (`/Subtype`), for example `image/png`.
     pub mime: Option<String>,
-    /// Bytes of the file: `/Params /Size`, else the measured length. `None` when neither is
-    /// known, for example when the stream is over a limit.
+    /// Bytes of the file: `/Params /Size`, else the length the stream guard measured at open.
+    /// `None` when neither is known, for example when the stream is over a limit.
     pub size: Option<u64>,
     pub created: Option<PdfDate>,
     pub modified: Option<PdfDate>,
@@ -238,29 +238,16 @@ impl Pdf {
         })
     }
 
-    /// The unpacked length of a stream, counted without keeping the data. `None` when the
+    /// The unpacked length of a stream as the guard measured it at open. `None` when the
     /// guard refused it or a filter stays encoded.
     fn measured(&self, id: ObjectId) -> Option<u64> {
-        if self.verdict.refused_objects.contains(&id) {
-            return None;
-        }
         let Some(Object::Stream(s)) = self.doc.objects.get(&id) else {
             return None;
         };
-        let filters = stream_filters(&self.doc, &s.dict);
-        if filters.contains(&Filter::Opaque) {
+        if stream_filters(&self.doc, &s.dict).contains(&Filter::Opaque) {
             return None;
         }
-        match measure_bytes(
-            &s.content,
-            &filters,
-            &self.limits,
-            self.limits.max_total_bytes,
-            &never,
-        ) {
-            Measure::Fits(n) => Some(n),
-            _ => None,
-        }
+        self.verdict.sizes.get(&id).copied()
     }
 
     /// Optional content groups in the order of `/OCGs`, with their default visibility.
