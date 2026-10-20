@@ -27,7 +27,7 @@ pub use facet::{
     FormulaKind, Graph, Node, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
-pub use inline::{Anchor, Inline, StatusColor, plain_text};
+pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;

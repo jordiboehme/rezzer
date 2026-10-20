@@ -673,7 +673,8 @@ fn decode_references(text: &str) -> String {
     out
 }
 
-/// Writes one character of a link destination: the only place that holds the escaping rules.
+/// Writes one character of a link destination. Its size must stay within
+/// `rezzer_model::link_target_written_len`.
 fn destination_char(c: char, out: &mut String) {
     match c {
         ' ' => out.push_str("%20"),
@@ -694,27 +695,6 @@ fn destination_char(c: char, out: &mut String) {
         }
         c => out.push(c),
     }
-}
-
-/// The most bytes a link target can take where the output writes it: per character the
-/// larger of the Markdown destination and the JSON string. A reader uses it to charge the
-/// copies of targets it puts in the model; it does not change the target.
-pub fn link_target_written_len(target: &str) -> u64 {
-    let mut piece = String::new();
-    let mut total = 0u64;
-    for c in target.chars() {
-        piece.clear();
-        destination_char(c, &mut piece);
-        // JSON writes a control character below U+0020 as \u00XX and a quote or backslash
-        // with a backslash.
-        let json = match c {
-            '"' | '\\' => 2,
-            c if (c as u32) < 0x20 => 6,
-            c => c.len_utf8(),
-        };
-        total += piece.len().max(json) as u64;
-    }
-    total
 }
 
 /// A link or image destination plus optional title, without the parentheses.
@@ -1478,5 +1458,26 @@ fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
         None
     } else {
         Some(format!("[[{target}|{text}]]"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::destination_char;
+
+    #[test]
+    fn a_destination_never_takes_more_than_the_model_says() {
+        let chars = (0..0x3000u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in chars {
+            let mut out = String::new();
+            destination_char(c, &mut out);
+            let s = c.to_string();
+            assert!(
+                out.len() as u64 <= rezzer_model::link_target_written_len(&s),
+                "{c:?} is written as {out:?}"
+            );
+        }
     }
 }

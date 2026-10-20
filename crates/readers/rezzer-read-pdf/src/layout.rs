@@ -384,7 +384,7 @@ impl LinkRoom {
         // is refused without a scan.
         let floor = target.len() as u64 + LINK_COST;
         if floor <= self.left.get() {
-            let cost = rezzer_render::link_target_written_len(target) + LINK_COST;
+            let cost = rezzer_model::link_target_written_len(target) + LINK_COST;
             if cost <= self.left.get() {
                 self.left.set(self.left.get() - cost);
                 return true;
