@@ -1079,3 +1079,38 @@ fn the_element_budget_stops_the_document_with_a_limit_loss() {
     assert!(inlines.len() <= 100, "{}", inlines.len());
     assert!(!inlines.is_empty());
 }
+
+#[test]
+fn the_parser_input_is_cut_by_the_element_budget() {
+    // 100 lines of plain words and many markup bytes after them.
+    let mut text = "word\n".repeat(100);
+    text.push_str(&"````a```` ".repeat(1_000));
+    let budget = Budget::new(Limits {
+        max_elements: 3_000,
+        ..Limits::default()
+    });
+    let out = MarkdownReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let limits: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    // 6,000 markup bytes (twice the elements): 100 line ends, then 737 code spans of eight
+    // backticks each and half of the next. The model itself stays under 3,000 elements.
+    assert_eq!(limits[0].location, "line 101");
+    assert_eq!(
+        limits[0].what,
+        "element limit reached, rest of the document not read"
+    );
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("{:?}", out.document.body);
+    };
+    let code = inlines
+        .iter()
+        .filter(|i| matches!(i, Inline::Code { .. }))
+        .count();
+    assert_eq!(code, 737);
+}

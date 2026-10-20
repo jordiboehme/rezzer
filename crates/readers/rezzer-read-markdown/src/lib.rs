@@ -30,6 +30,10 @@ use frontmatter::{FmError, Syntax};
 /// How many parser events are handled between two time checks.
 const CHECK_EVERY: usize = 1024;
 
+/// Parser tree nodes allowed per model element of the budget. Markup bytes (see
+/// [`parser_cut`]) stand for the nodes the parser builds.
+const PARSER_NODES_PER_ELEMENT: u64 = 2;
+
 /// Frontmatter over this size is not parsed.
 const MAX_FRONTMATTER_BYTES: usize = 1024 * 1024;
 
@@ -205,6 +209,8 @@ struct Builder<'b> {
     time_stopped: bool,
     /// Set when the element budget ran out; the event loop then stops.
     elements_stopped: bool,
+    /// The line where the parser input was cut to bound the parser's own tree.
+    input_cut: Option<usize>,
     footnotes: Vec<(String, Vec<Block>)>,
     heading_slugs: HashMap<String, u32>,
     first_h1: Option<String>,
@@ -239,6 +245,7 @@ impl<'b> Builder<'b> {
             para_break: None,
             time_stopped: false,
             elements_stopped: false,
+            input_cut: None,
             footnotes: Vec::new(),
             heading_slugs: HashMap::new(),
             first_h1: None,
@@ -263,7 +270,23 @@ impl<'b> Builder<'b> {
             None => 0,
         };
         let body = fix_empty_potholes(&text[body_start..]);
-        let parser = Parser::new_ext(&body, options());
+        // The parser builds a tree node for every run of inline markup in the whole input
+        // before it gives the first event, so the input it gets is bounded too.
+        let cap = self
+            .budget
+            .limits()
+            .max_elements
+            .saturating_mul(PARSER_NODES_PER_ELEMENT);
+        let parsed: &str = match parser_cut(&body, cap) {
+            Some(at) => {
+                let line =
+                    text[..body_start].matches('\n').count() + body[..at].matches('\n').count() + 1;
+                self.input_cut = Some(line);
+                &body[..at]
+            }
+            None => &body,
+        };
+        let parser = Parser::new_ext(parsed, options());
         for (n, (event, range)) in parser.into_offset_iter().enumerate() {
             if n % CHECK_EVERY == CHECK_EVERY - 1 && self.budget.check_time().is_err() {
                 self.time_stopped = true;
@@ -1036,9 +1059,13 @@ impl<'b> Builder<'b> {
         if let Some(Frame::Root { blocks }) = self.stack.pop() {
             self.body.extend(blocks);
         }
-        if self.elements_stopped {
+        if self.elements_stopped || self.input_cut.is_some() {
+            let location = match self.input_cut {
+                Some(line) if !self.elements_stopped => format!("line {line}"),
+                _ => "document".into(),
+            };
             self.losses.push(Loss {
-                location: "document".into(),
+                location,
                 what: "element limit reached, rest of the document not read".into(),
                 why: LossReason::Limit,
                 severity: Severity::Warning,
@@ -1268,6 +1295,37 @@ fn read_callout_header(
         *inlines = body;
     }
     Some((kind, folded, Some(title).filter(|t| !t.is_empty())))
+}
+
+/// The byte offset where `body` is cut so that the parser sees at most `cap` markup bytes,
+/// the bytes that can start an inline or block node (emphasis, code, links, HTML, entities,
+/// escapes, strike, math, table pipes and line ends). None when the whole body fits.
+fn parser_cut(body: &str, cap: u64) -> Option<usize> {
+    let mut seen = 0u64;
+    for (i, b) in body.bytes().enumerate() {
+        if matches!(
+            b,
+            b'*' | b'_'
+                | b'`'
+                | b'['
+                | b']'
+                | b'!'
+                | b'<'
+                | b'&'
+                | b'\\'
+                | b'~'
+                | b'$'
+                | b'|'
+                | b'\n'
+        ) {
+            seen += 1;
+            if seen > cap {
+                // Markup bytes are ASCII, so `i` is a char boundary.
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 /// pulldown-cmark 0.13.4 repeats the rest of the paragraph and loses the next wikilink's
