@@ -41,7 +41,7 @@ lopdf is used as the object model in memory, to compute the decryption key and d
 
 A reader that copies text or lists out of the file may copy at most what is left of `max_object_bytes` after the open. Many entries can name one long string, and this keeps such a file from filling the memory. When the budget runs out, the reader stops with an `Issue` and keeps what it has. An `/Annots` array that several pages share is read once, for the first of these pages. The structure tree and the embedded files are read once and kept.
 
-Revisions are read from the bytes of the file with the same parser. Each section of the cross-reference chain is one save. The first section of a linearized file is part of the first save. Only the objects a save lists are parsed, and each object and object stream is read once. Pages are compared by their content references and stream lengths, not by decoded content. The pages are walked once, and again only after a save that changes an object they were read from. The result is read once and kept.
+Revisions are read from the bytes of the file with the same parser. Each section of the cross-reference chain is one save. The first section of a linearized file is part of the first save. Only the objects a save lists are parsed, and each object and object stream is read once. Pages are compared by their content references and stream lengths, not by decoded content. The pages are walked once, and again only after a save that changes an object they were read from. A complete result is read once and kept. A result cut short by the stop function is not kept, so a later call reads again.
 
 The password is never written into an error, an issue or a `Debug` output.
 

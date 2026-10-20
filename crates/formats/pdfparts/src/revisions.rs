@@ -11,6 +11,7 @@
 //! parser. Entries are compared section by section, and only the objects a section lists are
 //! parsed, for the newest `max_revisions` saves.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -101,17 +102,25 @@ struct Halt(Issue);
 impl Pdf {
     /// The saves of the file, with what each one changed in words. `stop` is asked between
     /// saves. Objects are parsed from [`Pdf::original`] with the crate's own parser, under what
-    /// is left of the object budget. The result is read once and kept: the first call's
-    /// `stop` decides, and a later call returns the same result and costs nothing.
-    pub fn revisions(&self, stop: &dyn Fn() -> bool) -> &Revisions {
-        self.revisions.get_or_init(|| self.read_revisions(stop))
+    /// is left of the object budget. A complete result (or one cut by a limit, which comes out
+    /// the same each time) is read once and kept, and a later call returns it and costs
+    /// nothing. A result that `stop` cut is not kept: a later call reads again.
+    pub fn revisions(&self, stop: &dyn Fn() -> bool) -> Cow<'_, Revisions> {
+        if let Some(r) = self.revisions.get() {
+            return Cow::Borrowed(r);
+        }
+        let (r, stopped) = self.read_revisions(stop);
+        if stopped {
+            return Cow::Owned(r);
+        }
+        Cow::Borrowed(self.revisions.get_or_init(|| r))
     }
 
-    fn read_revisions(&self, stop: &dyn Fn() -> bool) -> Revisions {
+    fn read_revisions(&self, stop: &dyn Fn() -> bool) -> (Revisions, bool) {
         let bytes = self.original();
         let mut out = Revisions::default();
         let Some(base) = header_base(bytes) else {
-            return out;
+            return (out, false);
         };
         let limits = Limits {
             max_object_bytes: self.text_left.load(Ordering::SeqCst),
@@ -125,6 +134,7 @@ impl Pdf {
             limits: self.limits,
             stop,
             issues: Vec::new(),
+            stopped: false,
         };
         run.all(bytes, &mut out);
         if run.loader.damaged > 0 {
@@ -144,7 +154,7 @@ impl Pdf {
         let mut seen = std::collections::HashSet::new();
         out.issues = run.issues;
         out.issues.retain(|i| seen.insert(i.clone()));
-        out
+        (out, run.stopped)
     }
 }
 
@@ -156,6 +166,8 @@ struct Run<'p, 'a> {
     limits: Limits,
     stop: &'a dyn Fn() -> bool,
     issues: Vec<Issue>,
+    /// The caller asked to stop: the result is not kept.
+    stopped: bool,
 }
 
 /// What the walk along the chain finds.
@@ -175,6 +187,9 @@ struct Chain {
 
 impl Run<'_, '_> {
     fn limit(&mut self, e: crate::OpenError) -> Halt {
+        if e == crate::parse::stopped() {
+            self.stopped = true;
+        }
         Halt(Issue::new(
             LOCATION,
             IssueKind::Limit,
@@ -233,6 +248,7 @@ impl Run<'_, '_> {
             };
             if !halted && (self.stop)() {
                 halted = true;
+                self.stopped = true;
                 self.issues.push(Issue::new(
                     LOCATION,
                     IssueKind::Limit,
@@ -297,6 +313,7 @@ impl Run<'_, '_> {
         let mut positions = Vec::new();
         let result = loop {
             if found.is_multiple_of(1024) && (self.stop)() {
+                self.stopped = true;
                 break Err(Halt(Issue::new(
                     LOCATION,
                     IssueKind::Limit,

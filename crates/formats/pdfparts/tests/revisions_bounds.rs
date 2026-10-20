@@ -13,7 +13,7 @@ use std::time::Instant;
 use common::updates::*;
 use lopdf::xref::XrefType;
 use lopdf::{Document, Object, Stream, dictionary};
-use pdfparts::{IssueKind, Limits, Pdf};
+use pdfparts::{IssueKind, Limits, Pdf, Revisions};
 
 fn never() -> bool {
     false
@@ -228,7 +228,27 @@ fn cut_chain_falls_back_to_a_scan() {
             .any(|i| i.kind == IssueKind::Limit && i.what.contains("not read")),
         "{:?}",
         pdf.issues()
+    ); // The file is not damaged: the cut is said once, as a limit.
+    assert!(
+        !pdf.issues().iter().any(|i| i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
     );
+}
+
+/// A call stopped by the caller is not kept: a later call reads again.
+#[test]
+fn stopped_revisions_are_read_again() {
+    let mut file = base(b"BT (x) Tj ET");
+    update(&mut file, &[(5, info("20260202120000Z"))], 6);
+    update(&mut file, &[(5, info("20260303120000Z"))], 6);
+    let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
+    let stopped = pdf.revisions(&|| true);
+    assert!(stopped.issues.iter().any(|i| i.kind == IssueKind::Limit));
+    let full = pdf.revisions(&never);
+    assert_eq!(full.list.len(), 3, "{:?}", full.list);
+    assert!(full.issues.is_empty(), "{:?}", full.issues);
+    assert_eq!(full.list[2].changes, ["changed document information"]);
 }
 
 /// Entries cost what they take in memory, so a save with two million entries stops at the
@@ -273,8 +293,8 @@ fn revisions_are_read_once() {
     let mut file = base(b"BT (x) Tj ET");
     update(&mut file, &[(5, info("20260202120000Z"))], 6);
     let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
-    let a: *const _ = pdf.revisions(&never);
-    let b: *const _ = pdf.revisions(&never);
+    let a: *const Revisions = &*pdf.revisions(&never);
+    let b: *const Revisions = &*pdf.revisions(&never);
     assert!(std::ptr::eq(a, b));
 }
 

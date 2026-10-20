@@ -27,7 +27,7 @@ fn corpus_bytes(name: &str) -> Vec<u8> {
 
 fn revisions_of(bytes: &[u8]) -> Revisions {
     let pdf = Pdf::open(bytes, None, &Limits::default(), &never).unwrap();
-    pdf.revisions(&never).clone()
+    pdf.revisions(&never).into_owned()
 }
 
 #[test]

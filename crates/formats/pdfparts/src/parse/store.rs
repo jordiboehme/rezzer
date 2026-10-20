@@ -148,7 +148,11 @@ impl<'a> Store<'a> {
         if self.scanned.is_none() {
             let found = rebuild(self.bytes, &mut self.budget)?;
             self.budget.ends.add_starts(found.starts());
-            self.note_rebuilt();
+            // A chain cut at the work bound is not damage; its Limit issue says what the
+            // scan is for.
+            if !self.scan_missing {
+                self.note_rebuilt();
+            }
             self.scanned = Some(found.table);
         }
         let at = self.scanned.as_ref().and_then(|t| t.get(&id.0)).copied();
