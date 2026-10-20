@@ -840,3 +840,49 @@ fn billion_laughs_is_refused() {
     );
     assert!(!result.markdown_pages.join("").contains("lollol"));
 }
+
+#[test]
+fn ods_content_cut_at_a_limit_names_that_limit() {
+    // Two sheets of 20 rows; the element limit stops the ODF part reader inside the first
+    // one. The read is refused, and the reason is the limit, not a sheet name mismatch.
+    let mut body = String::new();
+    for s in ["A", "B"] {
+        body.push_str(&format!("<table:table table:name=\"{s}\">"));
+        for _ in 0..20 {
+            body.push_str("<table:table-row><table:table-cell office:value-type=\"float\" office:value=\"5\"><text:p>5</text:p></table:table-cell></table:table-row>");
+        }
+        body.push_str("</table:table>");
+    }
+    let mut config = Config {
+        cache: false,
+        ..Config::default()
+    };
+    config.limits.max_elements = 40;
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    let p = Pipeline::new(config, registry);
+    let result = p.run_bytes(
+        "cut.ods",
+        ods(&ods_content("", &body)),
+        None,
+        &markdown_request(),
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Failed,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit document") && l.contains("more than 40 items")),
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        !losses(&result).iter().any(|l| l.contains("read two ways")),
+        "{:?}",
+        losses(&result)
+    );
+}

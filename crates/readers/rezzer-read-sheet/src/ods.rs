@@ -22,6 +22,7 @@ use rezzer_limits::{Budget, contain};
 use rezzer_model::{
     Anchor, Annotation, Embedded, FormulaKind, LossReason, ReadOutcome, Severity, StatusColor,
 };
+use sheetparts::IssueKind;
 use sheetparts::numfmt::{self, DateSystem};
 use sheetparts::odf::{self, OdsSheet};
 use zipguard::Archive;
@@ -197,7 +198,28 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     let cal_names = cal.sheet_names();
     let ours: Vec<&str> = parts.sheets.iter().map(|s| s.name.as_str()).collect();
     if let Err(refusal) = package::check_names(&cal_names, &ours) {
-        return refuse(out, refusal);
+        // When the ODF part reader stopped inside content.xml (a limit, broken XML), it
+        // found fewer sheets than calamine. That stop is the reason, not a second reading.
+        let stopped = parts
+            .issues
+            .iter()
+            .find(|i| i.part == CONTENT && matches!(i.kind, IssueKind::Limit | IssueKind::Damaged));
+        return match stopped {
+            Some(i) => {
+                let why = match i.kind {
+                    IssueKind::Limit => LossReason::Limit,
+                    _ => LossReason::Damaged,
+                };
+                refuse(
+                    out,
+                    (
+                        why,
+                        format!("{CONTENT}: {}, so not every sheet could be read", i.what),
+                    ),
+                )
+            }
+            None => refuse(out, refusal),
+        };
     }
 
     properties(&mut out, &parts.props, None, false);
