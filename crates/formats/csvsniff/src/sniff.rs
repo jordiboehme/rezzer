@@ -200,7 +200,8 @@ impl Pick {
 /// records), so one huge record cannot make it slow.
 const SNIFF_MAX_BYTES: usize = 1024 * 1024;
 
-/// The first `max` bytes of `text`, cut at a character boundary.
+/// The first `max` bytes of `text`, cut after the last line break within them so the sample
+/// ends with a complete record (a cut at a character boundary when there is no line break).
 fn head(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;
@@ -209,7 +210,10 @@ fn head(text: &str, max: usize) -> &str {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    &text[..end]
+    match text[..end].rfind('\n') {
+        Some(nl) => &text[..=nl],
+        None => &text[..end],
+    }
 }
 
 /// Detects the CSV dialect of already-decoded text.

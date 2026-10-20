@@ -111,24 +111,21 @@ impl Reader for CsvReader {
             dialect.has_header = true;
             analysis = csvsniff::analyze_until(text, &dialect, MAX_TABLE_ROWS, &out_of_time);
         }
-        if analysis.truncated {
-            partial = true;
-            doc.losses.push(Loss {
-                location: "document".into(),
-                what: format!(
-                    "time limit reached during the analysis, only the first {} rows are counted",
-                    analysis.rows
-                ),
-                why: LossReason::Limit,
-                severity: Severity::Warning,
-            });
-        }
-        let timed_out = budget.check_time().is_err();
+        let timed_out = analysis.truncated || budget.check_time().is_err();
         if timed_out {
             partial = true;
+            // One loss per time event.
+            let what = if analysis.truncated {
+                format!(
+                    "time limit reached during the analysis, only the first {} rows are counted, table not built",
+                    analysis.rows
+                )
+            } else {
+                "time limit reached after the analysis, table not built".to_string()
+            };
             doc.losses.push(Loss {
                 location: "document".into(),
-                what: "time limit reached after the analysis, table not built".into(),
+                what,
                 why: LossReason::Limit,
                 severity: Severity::Warning,
             });
