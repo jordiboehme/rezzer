@@ -73,6 +73,11 @@ impl Package {
         self.sizes.get(&key(part)).copied().unwrap_or(0)
     }
 
+    /// Whether the package has this entry, looked up as calamine does.
+    pub fn contains(&self, part: &str) -> bool {
+        self.sizes.contains_key(&key(part))
+    }
+
     /// Charges one more unpacking of `part` (calamine reads parts again) to the budget.
     pub fn charge(&self, budget: &Budget, part: &str) -> Result<(), LimitHit> {
         budget.add_unpacked(self.size(part))
@@ -80,11 +85,11 @@ impl Package {
 }
 
 /// One relationship as written (attribute values not unescaped).
-struct Rel {
-    id: String,
-    kind: String,
-    target: String,
-    external: bool,
+pub(crate) struct Rel {
+    pub id: String,
+    pub kind: String,
+    pub target: String,
+    pub external: bool,
 }
 
 /// The namespace of package relationship parts.
@@ -304,7 +309,7 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
 
 /// A control character (U+0000 to U+001F, U+007F) Excel does not allow in a sheet name:
 /// literal, or as a decimal or hexadecimal character reference in a raw attribute value.
-fn has_control(raw: &str) -> bool {
+pub(crate) fn has_control(raw: &str) -> bool {
     let control = |c: u32| c < 0x20 || c == 0x7f;
     if raw.chars().any(|c| control(c as u32)) {
         return true;
@@ -323,7 +328,7 @@ fn has_control(raw: &str) -> bool {
 
 /// A target both calamine and sheetparts read the same way: no `.`, `..` or empty
 /// segments, no backslash, no escaped characters.
-fn clean(target: &str) -> bool {
+pub(crate) fn clean(target: &str) -> bool {
     let path = target.strip_prefix('/').unwrap_or(target);
     !path.is_empty()
         && !target.contains(['\\', '&'])
@@ -333,30 +338,32 @@ fn clean(target: &str) -> bool {
 }
 
 /// The part a target names, as calamine joins it (absolute, or after `dir`).
-fn join(dir: &str, target: &str) -> String {
+pub(crate) fn join(dir: &str, target: &str) -> String {
     match target.strip_prefix('/') {
         Some(abs) => abs.to_string(),
         None => format!("{dir}{target}"),
     }
 }
 
-/// Refuses a package that calamine and sheetparts could read in two ways: duplicate
-/// relationship ids in any `.rels` part, not exactly one officeDocument relationship,
-/// unclean or external workbook and sheet targets, parts that are not there, and sheet
-/// names that repeat (case-insensitive). Returns the part calamine reads for each sheet, in
-/// the order of `wb.sheets`; each equals the part sheetparts resolved.
-pub(crate) fn check_structure(
-    zip: &mut Archive,
-    wb: &WorkbookParts,
-) -> Result<Vec<String>, Refusal> {
-    let damaged = |what: String| (LossReason::Damaged, what);
-    let names: Vec<String> = zip.names().iter().map(|n| n.to_string()).collect();
-    let exists: HashSet<&str> = names.iter().map(String::as_str).collect();
-    let mut parsed: HashMap<String, Vec<Rel>> = HashMap::new();
-    for name in names.iter().filter(|n| n.ends_with(".rels")) {
-        parsed.insert(name.clone(), rels(zip, name)?);
+/// The relationships of every `.rels` part, each checked to be canonical.
+pub(crate) fn all_rels(zip: &mut Archive) -> Result<HashMap<String, Vec<Rel>>, Refusal> {
+    let names: Vec<String> = zip
+        .names()
+        .iter()
+        .filter(|n| n.ends_with(".rels"))
+        .map(|n| n.to_string())
+        .collect();
+    let mut parsed = HashMap::new();
+    for name in names {
+        let list = rels(zip, &name)?;
+        parsed.insert(name, list);
     }
+    Ok(parsed)
+}
 
+/// The one officeDocument relationship of `_rels/.rels`, internal and with a plain target.
+pub(crate) fn office_document(parsed: &HashMap<String, Vec<Rel>>) -> Result<&Rel, Refusal> {
+    let damaged = |what: String| (LossReason::Damaged, what);
     let root = parsed.get("_rels/.rels").map(Vec::as_slice).unwrap_or(&[]);
     let office: Vec<&Rel> = root
         .iter()
@@ -375,6 +382,24 @@ pub(crate) fn check_structure(
             doc.target
         )));
     }
+    Ok(doc)
+}
+
+/// Refuses a package that calamine and sheetparts could read in two ways: duplicate
+/// relationship ids in any `.rels` part, not exactly one officeDocument relationship,
+/// unclean or external workbook and sheet targets, parts that are not there, and sheet
+/// names that repeat (case-insensitive). Returns the part calamine reads for each sheet, in
+/// the order of `wb.sheets`; each equals the part sheetparts resolved.
+pub(crate) fn check_structure(
+    zip: &mut Archive,
+    wb: &WorkbookParts,
+) -> Result<Vec<String>, Refusal> {
+    let damaged = |what: String| (LossReason::Damaged, what);
+    let names: Vec<String> = zip.names().iter().map(|n| n.to_string()).collect();
+    let exists: HashSet<&str> = names.iter().map(String::as_str).collect();
+    let parsed = all_rels(zip)?;
+
+    let doc = office_document(&parsed)?;
     let part = join("", &doc.target);
     if part != wb.workbook_part || !exists.contains(part.as_str()) {
         return Err(damaged(format!(
@@ -452,10 +477,10 @@ pub(crate) fn check_structure(
     Ok(calamine_parts)
 }
 
-/// Refuses a workbook whose sheet names, as calamine read them, are not exactly sheetparts'
-/// names in the same order, or repeat. calamine finds a sheet by its name.
-pub(crate) fn check_names(calamine: &[String], wb: &WorkbookParts) -> Result<(), Refusal> {
-    let ours: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+/// Refuses a workbook whose sheet names, as calamine read them, are not exactly the names
+/// Rezzer read (sheetparts, or the BIFF12 walker) in the same order, or repeat, or hold a
+/// control character. calamine finds a sheet by its name.
+pub(crate) fn check_names(calamine: &[String], ours: &[&str]) -> Result<(), Refusal> {
     let theirs: Vec<&str> = calamine.iter().map(String::as_str).collect();
     if ours != theirs {
         return Err((

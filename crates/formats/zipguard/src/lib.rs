@@ -82,14 +82,18 @@ pub struct Archive<'a> {
 }
 
 impl<'a> Archive<'a> {
-    /// Opens the archive and checks the entry count and every entry name.
+    /// Opens the archive and checks the entry count, every entry name and that the archive
+    /// can be read only one way: no two entries with one name, every local header naming
+    /// the entry its central directory record names, no entries that overlap.
     pub fn open(bytes: &'a [u8], limits: Limits) -> Result<Archive<'a>, ZipError> {
-        let zip = ZipArchive::new(Cursor::new(bytes)).map_err(open_error)?;
+        let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(open_error)?;
         if zip.len() > limits.max_entries {
             return Err(ZipError::Limit {
                 what: format!("{} entries, the limit is {}", zip.len(), limits.max_entries),
             });
         }
+        zip.validate_header_consistency()
+            .map_err(|e| ZipError::Damaged(e.to_string()))?;
         let mut names = Vec::with_capacity(zip.len());
         for name in zip.file_names() {
             let name = name.map_err(|e| ZipError::Damaged(format!("entry name: {e}")))?;

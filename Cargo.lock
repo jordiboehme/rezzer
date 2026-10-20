@@ -1190,6 +1190,7 @@ name = "rezzer-read-sheet"
 version = "0.1.0"
 dependencies = [
  "calamine",
+ "cfb",
  "formulakit",
  "quick-xml",
  "rezzer-limits",

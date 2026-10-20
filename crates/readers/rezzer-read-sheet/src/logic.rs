@@ -17,7 +17,7 @@ use rezzer_model::{
 };
 use sheetparts::DefinedName;
 use sheetparts::numfmt::{self, NumKind};
-use sheetparts::ooxml::{CalcMode, WorkbookParts};
+use sheetparts::ooxml::{CalcMode, CalcSettings};
 
 use crate::Out;
 use crate::grid::{RawCell, Val};
@@ -127,6 +127,9 @@ pub(crate) struct Formulas {
     /// a cell may be read by more formulas than the index sees.
     pub unindexed_formulas: u64,
     pub unindexed_names: u64,
+    /// The syntax cell formulas are stored in, and its name in the model.
+    dialect: Dialect,
+    dialect_name: &'static str,
 }
 
 impl Formulas {
@@ -160,7 +163,17 @@ impl Formulas {
             literal_names: Vec::new(),
             unindexed_formulas: 0,
             unindexed_names: 0,
+            dialect: Dialect::Excel,
+            dialect_name: "excel",
         }
+    }
+
+    /// Cell formulas stored as OpenFormula (`of:=[.A1]`), as in ODS files. Their stored text
+    /// is kept in `original` as written, with its namespace prefix.
+    pub fn open_formula(mut self) -> Formulas {
+        self.dialect = Dialect::OpenFormula;
+        self.dialect_name = "openformula";
+        self
     }
 
     /// Registers an Excel table. An area formulakit refuses comes back as the message for a
@@ -330,8 +343,9 @@ impl Formulas {
         }
     }
 
-    /// The model formula of one cell. `text` is the stored text without `=`; `index` is the
-    /// position the formula will take in `Facets.formulas`.
+    /// The model formula of one cell. `text` is the stored text: without `=` for Excel, as
+    /// written (`of:=...`) for OpenFormula; `index` is the position the formula will take in
+    /// `Facets.formulas`.
     #[allow(clippy::too_many_arguments)]
     pub fn cell(
         &mut self,
@@ -345,11 +359,14 @@ impl Formulas {
         index: usize,
     ) -> (Formula, Option<FormulaProblem>) {
         let anchor = format!("{}!{}", quote_sheet(sheet), crate::grid::a1(row, col));
-        let stored = format!("={text}");
+        let stored = match self.dialect {
+            Dialect::Excel => format!("={text}"),
+            Dialect::OpenFormula => text.to_string(),
+        };
         let mut formula = Formula {
             anchor: Anchor(anchor.clone()),
             expression: stored.clone(),
-            dialect: "excel".into(),
+            dialect: self.dialect_name.into(),
             references: Vec::new(),
             role: None,
             pattern: None,
@@ -380,7 +397,7 @@ impl Formulas {
                 unreadable: false,
             });
         } else {
-            match formulakit::analyze(text, Dialect::Excel, CellPos { row, col }) {
+            match formulakit::analyze(text, self.dialect, CellPos { row, col }) {
                 Ok(mut a) => {
                     // `[@col]` inside a table names no table: it is the one holding the cell.
                     if let Some(t) = self.table_at(sheet, row, col).map(str::to_string) {
@@ -430,6 +447,74 @@ impl Formulas {
             formula.note = Some(notes.join("; "));
         }
         (formula, problem)
+    }
+
+    /// A cell formula whose text is kept but not analyzed, because `why` makes the text
+    /// unreliable. The logic index does not know it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn cell_not_analyzed(
+        &mut self,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        text: &str,
+        why: &str,
+        cached: Option<Value>,
+    ) -> (Formula, FormulaProblem) {
+        let anchor = format!("{}!{}", quote_sheet(sheet), crate::grid::a1(row, col));
+        self.unindexed_formulas += 1;
+        let mut notes = Vec::new();
+        if cached.is_none() {
+            notes.push("not calculated in file".to_string());
+        }
+        notes.push(format!("not analyzed: {why}"));
+        let formula = Formula {
+            anchor: Anchor(anchor.clone()),
+            expression: match self.dialect {
+                Dialect::Excel => format!("={text}"),
+                Dialect::OpenFormula => text.to_string(),
+            },
+            dialect: self.dialect_name.into(),
+            references: Vec::new(),
+            role: None,
+            pattern: None,
+            latex: None,
+            note: Some(notes.join("; ")),
+            kind: Some(FormulaKind::Cell),
+            range: None,
+            original: None,
+            cached,
+        };
+        let problem = FormulaProblem {
+            anchor,
+            what: format!("formula not analyzed: {why}; the text is kept"),
+            unreadable: true,
+        };
+        (formula, problem)
+    }
+
+    /// A defined name whose text is not analyzed (`why`): listed with its text as written,
+    /// unknown to the logic index.
+    pub fn name_not_analyzed(&mut self, n: &DefinedName, why: &str) -> Formula {
+        self.name_not_kept(n);
+        let anchor = match &n.scope {
+            Some(s) => format!("name:{}!{}", quote_sheet(s), n.name),
+            None => format!("name:{}", n.name),
+        };
+        Formula {
+            anchor: Anchor(anchor),
+            expression: n.refers_to.clone(),
+            dialect: "excel".into(),
+            references: Vec::new(),
+            role: None,
+            pattern: None,
+            latex: None,
+            note: Some(why.to_string()),
+            kind: Some(FormulaKind::Name),
+            range: None,
+            original: None,
+            cached: None,
+        }
     }
 
     /// A what-if data table: Excel shows it as `{=TABLE(row input, column input)}`.
@@ -525,10 +610,15 @@ impl Formulas {
         if let Some(c) = n.comment.as_ref().filter(|c| !c.trim().is_empty()) {
             notes.push(c.trim().to_string());
         }
+        // ODF named expressions carry their namespace (`of:=`); named ranges and OOXML names
+        // are Excel text. formulakit switches on the prefix.
+        let open_formula = ["of:", "oooc:"]
+            .iter()
+            .any(|p| n.refers_to.trim_start().starts_with(p));
         let mut formula = Formula {
             anchor: Anchor(anchor.clone()),
             expression: n.refers_to.clone(),
-            dialect: "excel".into(),
+            dialect: if open_formula { "openformula" } else { "excel" }.into(),
             references: Vec::new(),
             cached: None,
             role: None,
@@ -773,7 +863,8 @@ pub(crate) struct SheetFacts {
     pub name: String,
     /// Sorted by row, then column, each position once (formula texts dropped).
     pub cells: Vec<RawCell>,
-    /// Style index of each cell that has one.
+    /// The format key of each cell that has one (an OOXML style index, or an index into the
+    /// reader's own format list); [`ReadState::formats`] gives its code.
     pub styles: HashMap<(u32, u32), u32>,
 }
 
@@ -799,7 +890,10 @@ impl SheetFacts {
 
 /// How the workbook was read, for the logic pass.
 pub(crate) struct ReadState<'a> {
-    pub wb: &'a WorkbookParts,
+    /// The calculation settings, when the file gives them.
+    pub calc: Option<&'a CalcSettings>,
+    /// The number format code of a format key in [`SheetFacts::styles`].
+    pub formats: &'a dyn Fn(u32) -> Option<&'a str>,
     /// Some sheet or part of one was not read, or some formula cells were not listed.
     pub incomplete: bool,
 }
@@ -822,7 +916,7 @@ pub(crate) fn workbook_logic(
     state: ReadState,
     budget: &Budget,
 ) {
-    stale_results(out, state.wb);
+    stale_results(out, state.calc);
     let Formulas {
         inputs,
         convert_units,
@@ -932,7 +1026,7 @@ pub(crate) fn workbook_logic(
     let (mut params, unit_notes) = cell_parameters(
         &logic.parameters,
         &sheets,
-        state.wb,
+        state.formats,
         &convert_units,
         &named_cells,
     );
@@ -965,23 +1059,25 @@ pub(crate) fn workbook_logic(
 /// One `Uncertain` warning when the stored results may not match the formulas: manual
 /// calculation, data tables left out of automatic calculation, iterative calculation, a file
 /// that asks for a full recalculation, or formulas without a stored result.
-fn stale_results(out: &mut Out, wb: &WorkbookParts) {
+fn stale_results(out: &mut Out, calc: Option<&CalcSettings>) {
     let formulas = &out.doc.facets.formulas;
     let mut why = Vec::new();
-    if wb.calc.mode == CalcMode::Manual {
+    let default = CalcSettings::default();
+    let calc = calc.unwrap_or(&default);
+    if calc.mode == CalcMode::Manual {
         why.push("calculation is set to manual".to_string());
     }
-    if wb.calc.mode == CalcMode::AutoNoTable
+    if calc.mode == CalcMode::AutoNoTable
         && formulas
             .iter()
             .any(|f| f.kind == Some(FormulaKind::DataTable))
     {
         why.push("data tables are not recalculated automatically".to_string());
     }
-    if wb.calc.iterate {
+    if calc.iterate {
         why.push("iterative calculation is on".to_string());
     }
-    if wb.calc.full_calc_on_load {
+    if calc.full_calc_on_load {
         why.push("the file asks for a full recalculation when opened".to_string());
     }
     let missing = formulas
@@ -1221,10 +1317,10 @@ pub(crate) fn cell_value(val: &Val, code: Option<&str>) -> Option<Value> {
 
 /// Parameters for the constant cells formulas read, with label, value, name and unit, plus
 /// a note (anchor, text) for each value whose unit sources disagree.
-fn cell_parameters(
+fn cell_parameters<'f>(
     found: &[ParamCell],
     sheets: &[SheetFacts],
-    wb: &WorkbookParts,
+    formats: &dyn Fn(u32) -> Option<&'f str>,
     convert_units: &HashMap<(String, u32, u32), String>,
     named_cells: &HashMap<(String, u32, u32), String>,
 ) -> (Vec<Parameter>, Vec<(String, String)>) {
@@ -1260,7 +1356,7 @@ fn cell_parameters(
             });
             let code = facts
                 .and_then(|f| f.styles.get(&(row, col)))
-                .and_then(|s| wb.styles.number_format(*s));
+                .and_then(|s| formats(*s));
             let value = cell.and_then(|c| cell_value(&c.val, code));
             // Units and column headers describe quantities. Above a text value the text is
             // as likely the value before it (`g`, `sg`, `lbm`) as a header.
@@ -1479,11 +1575,11 @@ mod tests {
     fn stopped_logic_keeps_patterns_and_says_so() {
         let mut out = out();
         let formulas = copies(&mut out);
-        let wb = WorkbookParts::default();
         let budget = Budget::new(Limits::default());
         budget.cancel();
         let state = ReadState {
-            wb: &wb,
+            calc: None,
+            formats: &|_| None,
             incomplete: false,
         };
         workbook_logic(&mut out, formulas, Vec::new(), state, &budget);

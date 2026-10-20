@@ -114,7 +114,7 @@ pub fn detect_with_hints(name: &str, mime: Option<&str>, bytes: &[u8]) -> (Forma
         return f;
     }
     if bytes.starts_with(magic::OLE_MAGIC) {
-        return container::ole(bytes);
+        return container::ole(name, bytes);
     }
     if bytes.starts_with(magic::ZIP_MAGIC) || bytes.starts_with(magic::ZIP_EMPTY_MAGIC) {
         return container::zip(bytes);

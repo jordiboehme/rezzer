@@ -334,9 +334,10 @@ fn content_type_present(ct: &str, wanted: &str) -> bool {
     false
 }
 
-/// Detects the format of an OLE compound file by its root stream names.
-pub(crate) fn ole(bytes: &[u8]) -> Found {
-    match rezzer_limits::contain(|| ole_inner(bytes)) {
+/// Detects the format of an OLE compound file by its root stream names. `file_name` only breaks
+/// the tie for an encrypted package, which does not say what it holds.
+pub(crate) fn ole(file_name: &str, bytes: &[u8]) -> Found {
+    match rezzer_limits::contain(|| ole_inner(file_name, bytes)) {
         Ok(Ok(f)) => f,
         Ok(Err(e)) => found(
             FormatId::Ole,
@@ -354,7 +355,7 @@ pub(crate) fn ole(bytes: &[u8]) -> Found {
 /// Native MCAD compound files: Inventor (`RSeStorage` with `RSeSegInfo` or `V<n>/RSeDb`),
 /// legacy NX (`UG_PART/UG_PART`) and SolidWorks (`ISolidWorksInformation`). Format facts
 /// from the cadmpeg documentation (CC BY 4.0).
-fn ole_inner(bytes: &[u8]) -> std::io::Result<Found> {
+fn ole_inner(file_name: &str, bytes: &[u8]) -> std::io::Result<Found> {
     if ole_directory_too_large(bytes) {
         return Ok(found(
             FormatId::Ole,
@@ -403,11 +404,32 @@ fn ole_inner(bytes: &[u8]) -> std::io::Result<Found> {
         ));
     }
     if has("EncryptedPackage") {
-        return Ok(found(
-            FormatId::Ole,
-            Confidence::Certain,
-            "ole compound file with EncryptedPackage (password-protected office file)",
-        ));
+        // A password-protected OOXML package: Word, Excel and PowerPoint use the same
+        // container, so only the extension says it is a workbook.
+        let ext = file_name
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        let workbook = match ext.as_str() {
+            "xlsx" => Some(FormatId::Xlsx),
+            "xlsm" => Some(FormatId::Xlsm),
+            "xlsb" => Some(FormatId::Xlsb),
+            _ => None,
+        };
+        return Ok(match workbook {
+            Some(format) => found(
+                format,
+                Confidence::Likely,
+                format!(
+                    "ole compound file with EncryptedPackage (password-protected office file); the extension .{ext} names a workbook"
+                ),
+            ),
+            None => found(
+                FormatId::Ole,
+                Confidence::Certain,
+                "ole compound file with EncryptedPackage (password-protected office file)",
+            ),
+        });
     }
     if has("RSeStorage") {
         if comp.is_stream("/RSeStorage/RSeSegInfo") {

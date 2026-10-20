@@ -6,7 +6,7 @@ sheetparts reads the parts of a spreadsheet package that give the cells their me
 - Defined names with scope, formula text, hidden flag and comment. An array constant such as `{"A","B"}` is kept whole
 - Calculation settings: automatic or manual, and iteration for circular references
 - Number formats: the format code of every cell style, plus a formatter that turns a number and a format code into the text a person sees. It also tells the kind (percent, currency, date, ...) and the unit (a currency symbol or literal text such as the `m` in `0.0" m"`)
-- Document properties: core, app and typed custom properties
+- Document properties: core, app and typed custom properties. `ooxml::read_doc_props` reads them from any OOXML package, also from XLSB, whose other parts are binary
 - External links (workbook, add-in, DDE, OLE) and the people behind threaded comments
 - Whether the package carries a VBA project. It is never read or run
 - ODF spreadsheets (`odf::read`): hidden sheets, rows and columns, annotations with author and date, validations, number formats built from data styles, named ranges and document metadata. Repeat counts are never expanded

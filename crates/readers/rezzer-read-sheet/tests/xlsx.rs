@@ -706,34 +706,6 @@ fn quote_sheet_rules_agree() {
 }
 
 #[test]
-fn xlsb_and_ods_are_not_read_yet() {
-    for format in [FormatId::Xlsb, FormatId::Ods] {
-        let out = SheetReader.read(
-            &source(vec![1, 2, 3], "x", format),
-            &ReadOptions::default(),
-            &Budget::new(Limits::default()),
-        );
-        assert_eq!(out.completeness, Completeness::Failed);
-        assert!(
-            out.document
-                .losses
-                .iter()
-                .any(|l| l.why == LossReason::NotImplemented)
-        );
-    }
-    assert_eq!(SheetReader.id(), "sheet");
-    assert_eq!(
-        SheetReader.formats(),
-        [
-            FormatId::Xlsx,
-            FormatId::Xlsm,
-            FormatId::Xlsb,
-            FormatId::Ods
-        ]
-    );
-}
-
-#[test]
 fn not_a_zip_fails() {
     let out = read_with(b"not a zip at all".to_vec(), Limits::default());
     assert_eq!(out.completeness, Completeness::Failed);

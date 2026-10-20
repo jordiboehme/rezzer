@@ -6,6 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["xlsx", "ods"]
+# XLSX, XLSM and XLSB.
+xlsx = []
+ods = []
+
 [dependencies]
 rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
@@ -14,6 +20,7 @@ formulakit = { path = "../../formats/formulakit" }
 sheetparts = { path = "../../formats/sheetparts" }
 calamine.workspace = true
 quick-xml.workspace = true
+cfb.workspace = true
 
 [dev-dependencies]
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

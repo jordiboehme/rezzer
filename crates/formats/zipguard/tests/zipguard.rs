@@ -216,3 +216,37 @@ fn errors_display() {
             .contains("limit")
     );
 }
+
+#[test]
+fn duplicate_entry_names_are_damaged() {
+    let mut bytes = build(&[
+        ("a.xml", b"first", CompressionMethod::Stored),
+        ("b.xml", b"second", CompressionMethod::Stored),
+    ]);
+    // Rename b.xml to a.xml in its local and central headers.
+    let mut patched = 0;
+    for i in 0..bytes.len() - 5 {
+        if &bytes[i..i + 5] == b"b.xml" {
+            bytes[i] = b'a';
+            patched += 1;
+        }
+    }
+    assert_eq!(patched, 2);
+    match Archive::open(&bytes, Limits::default()) {
+        Err(ZipError::Damaged(why)) => assert!(why.contains("duplicate"), "{why}"),
+        Err(e) => panic!("{e}"),
+        Ok(a) => panic!("opened with {:?}", a.names()),
+    }
+}
+
+#[test]
+fn central_name_unlike_its_local_header_is_damaged() {
+    let mut bytes = build(&[("a.xml", b"first", CompressionMethod::Stored)]);
+    // Only the local header says x.xml.
+    let at = bytes.windows(5).position(|w| w == b"a.xml").unwrap();
+    bytes[at] = b'x';
+    assert!(matches!(
+        Archive::open(&bytes, Limits::default()),
+        Err(ZipError::Damaged(_))
+    ));
+}

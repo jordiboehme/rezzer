@@ -234,6 +234,10 @@ pub fn corpus(name: &str) -> ReadOutcome {
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let format = if name.ends_with(".xlsm") {
         FormatId::Xlsm
+    } else if name.ends_with(".xlsb") {
+        FormatId::Xlsb
+    } else if name.ends_with(".ods") {
+        FormatId::Ods
     } else {
         FormatId::Xlsx
     };

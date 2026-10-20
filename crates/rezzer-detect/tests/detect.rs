@@ -197,6 +197,27 @@ fn ole_word_by_stream_name() {
 }
 
 #[test]
+fn encrypted_package_is_named_by_its_extension() {
+    let bytes = cfb_with(&["EncryptionInfo", "EncryptedPackage"]);
+    for (name, format) in [
+        ("secret.xlsx", FormatId::Xlsx),
+        ("Secret.XLSM", FormatId::Xlsm),
+        ("secret.xlsb", FormatId::Xlsb),
+    ] {
+        let (f, d) = detect(name, &bytes);
+        assert_eq!(f, format, "{name}: {}", d.evidence);
+        assert_eq!(d.confidence, Confidence::Likely, "{name}");
+        assert!(d.evidence.contains("EncryptedPackage"), "{}", d.evidence);
+    }
+    // Encrypted documents and decks use the same container: they stay OLE.
+    for name in ["secret.docx", "secret.pptx", "secret"] {
+        let (f, d) = detect(name, &bytes);
+        assert_eq!(f, FormatId::Ole, "{name}");
+        assert_eq!(d.confidence, Confidence::Certain, "{name}");
+    }
+}
+
+#[test]
 fn broken_ole_is_ole_likely() {
     let mut bytes = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
     bytes.extend_from_slice(&[0xFF; 600]);

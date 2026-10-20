@@ -20,6 +20,25 @@ pub struct DocProps {
     pub custom: Vec<(String, PropValue)>,
 }
 
+/// Reads the document properties of any OOXML package (also XLSB, whose workbook parts are
+/// binary but whose properties are XML): the parts `_rels/.rels` names, or the usual
+/// `docProps/` parts. Problems come back as issues.
+pub fn read_doc_props(
+    zip: &mut zipguard::Archive<'_>,
+    limits: &crate::Limits,
+    stop: &dyn Fn() -> bool,
+) -> (DocProps, Vec<crate::Issue>) {
+    let mut ctx = Ctx {
+        zip,
+        limits,
+        stop,
+        issues: Vec::new(),
+    };
+    let root_rels = ctx.rels("");
+    let props = read_props(&mut ctx, &root_rels);
+    (props, ctx.issues)
+}
+
 pub(super) fn read_props(ctx: &mut Ctx<'_, '_>, root_rels: &[Rel]) -> DocProps {
     let find = |suffix: &str, default: &str| -> String {
         root_rels

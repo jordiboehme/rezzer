@@ -19,10 +19,10 @@ use rezzer_model::{
 };
 use sheetparts::numfmt::{self, DateSystem, NumKind};
 use sheetparts::ooxml::{
-    AttrKind, CalcMode, FormulaAttr, SheetParts, SheetState, WorkbookParts, read_sheet,
-    read_workbook,
+    AttrKind, CalcMode, CalcSettings, CondFormat, DocProps, ExternalLink, FormulaAttr, SheetParts,
+    SheetState, Validation, WorkbookParts, read_sheet, read_workbook,
 };
-use sheetparts::{Issue, IssueKind, PropValue};
+use sheetparts::{DefinedName, Issue, IssueKind, PropValue};
 use zipguard::Archive;
 
 use crate::Out;
@@ -135,12 +135,23 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     // calamine finds a sheet by its name, so its names must be sheetparts' names, in order
     // and each once; otherwise one section could mix the parts of two sheets.
     let cal_names = cal.sheet_names();
-    if let Err(refusal) = package::check_names(&cal_names, &wb) {
+    let ours: Vec<&str> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+    if let Err(refusal) = package::check_names(&cal_names, &ours) {
         return refuse(out, refusal);
     }
 
-    properties(&mut out, &wb);
-    let vba = vba_modules(&mut out, &pkg, &mut cal, &wb, &xl, budget);
+    properties(&mut out, &wb.props, Some(&wb.calc), wb.date1904);
+    let vba = if wb.has_vba {
+        vba_modules(
+            &mut out,
+            &pkg,
+            &mut cal,
+            &format!("{xl}vbaProject.bin"),
+            budget,
+        )
+    } else {
+        Vba::default()
+    };
 
     let mut formulas = Formulas::new(&wb.names, lim.max_text_bytes);
     let system = if wb.date1904 {
@@ -338,13 +349,38 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             )));
         }
         objects(&mut blocks, &q, &parts);
-        rules(&mut out, &q, &parts, budget);
+        rules(
+            &mut out,
+            &q,
+            &parts.validations,
+            &parts.cond_formats,
+            budget,
+        );
         annotations(&mut out, &q, &parts, budget);
         out.doc.body.push(section(&sheet.name, &q, blocks));
     }
 
+    defined_names(&mut out, &mut formulas, &wb.names, budget);
+    embedded(&mut out, wb.has_vba, &wb.external_links, &vba, &formulas);
+    let formats = |s: u32| wb.styles.number_format(s);
+    let state = ReadState {
+        calc: Some(&wb.calc),
+        formats: &formats,
+        incomplete: incomplete || halted.is_some(),
+    };
+    crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
+    out.finish()
+}
+
+/// The defined names into the formulas facet, their texts charged to the formula text meter.
+pub(crate) fn defined_names(
+    out: &mut Out,
+    formulas: &mut Formulas,
+    names: &[DefinedName],
+    budget: &Budget,
+) {
     let mut names_dropped = 0u64;
-    for (i, n) in wb.names.iter().enumerate() {
+    for (i, n) in names.iter().enumerate() {
         let over = if i % 1_024 == 0 {
             budget.check_time().err()
         } else {
@@ -355,12 +391,20 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
                 format!("name:{}", n.name),
                 format!(
                     "{hit}: this and {} more defined names not read",
-                    wb.names.len() - i - 1
+                    names.len() - i - 1
                 ),
                 LossReason::Limit,
                 Severity::Warning,
             );
             break;
+        }
+        if n.refers_to.trim().is_empty() {
+            let f = formulas.name_not_analyzed(
+            n,
+            "the file gives no formula text for this name that is read (for XLSB: an add-in or external name)",
+        );
+            out.doc.facets.formulas.push(f);
+            continue;
         }
         // A name's text counts against the same limit as the formula texts.
         if !formulas.meter.take(n.refers_to.len()) {
@@ -371,27 +415,20 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         let (f, problem) = formulas.name(n);
         out.doc.facets.formulas.push(f);
         if let Some(p) = problem {
-            problem_loss(&mut out, p);
+            problem_loss(out, p);
         }
     }
     if names_dropped > 0 {
         out.loss(
-            "document",
-            format!(
-                "formula text limit reached ({} bytes in all): {names_dropped} defined names not listed",
-                formulas.meter.max()
-            ),
-            LossReason::Limit,
-            Severity::Warning,
-        );
+        "document",
+        format!(
+            "formula text limit reached ({} bytes in all): {names_dropped} defined names not listed",
+            formulas.meter.max()
+        ),
+        LossReason::Limit,
+        Severity::Warning,
+    );
     }
-    embedded(&mut out, &wb, &vba, &formulas);
-    let state = ReadState {
-        wb: &wb,
-        incomplete: incomplete || halted.is_some(),
-    };
-    crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
-    out.finish()
 }
 
 /// Charges what zipguard unpacked since the last call to the budget.
@@ -403,7 +440,7 @@ fn charge_reads(zip: &Archive, charged: &mut u64, budget: &Budget) -> Result<(),
 }
 
 /// A failed outcome for a package that is not read at all.
-fn refuse(mut out: Out, (why, what): Refusal) -> ReadOutcome {
+pub(crate) fn refuse(mut out: Out, (why, what): Refusal) -> ReadOutcome {
     out.loss(
         "document",
         format!("the whole file: the package is not read: {what}"),
@@ -413,7 +450,7 @@ fn refuse(mut out: Out, (why, what): Refusal) -> ReadOutcome {
     out.failed()
 }
 
-fn issues_to_losses(out: &mut Out, issues: &[Issue]) {
+pub(crate) fn issues_to_losses(out: &mut Out, issues: &[Issue]) {
     for i in issues {
         let (why, severity) = match i.kind {
             IssueKind::Damaged => (LossReason::Damaged, Severity::Warning),
@@ -424,7 +461,7 @@ fn issues_to_losses(out: &mut Out, issues: &[Issue]) {
     }
 }
 
-fn status(text: &str, color: StatusColor) -> Block {
+pub(crate) fn status(text: &str, color: StatusColor) -> Block {
     Block::Paragraph {
         inlines: vec![Inline::Status {
             text: text.to_string(),
@@ -435,7 +472,7 @@ fn status(text: &str, color: StatusColor) -> Block {
     }
 }
 
-fn section(name: &str, q: &str, blocks: Vec<Block>) -> Block {
+pub(crate) fn section(name: &str, q: &str, blocks: Vec<Block>) -> Block {
     Block::Section {
         kind: SectionKind::Sheet,
         title: Some(name.to_string()),
@@ -534,7 +571,7 @@ fn format_losses(out: &mut Out, q: &str, fmt: &Formatter) {
     }
 }
 
-fn cell_losses(out: &mut Out, q: &str, cells: &SheetCells) {
+pub(crate) fn cell_losses(out: &mut Out, q: &str, cells: &SheetCells) {
     if let Some(e) = &cells.error {
         let after = cells
             .cells
@@ -590,7 +627,7 @@ fn cell_losses(out: &mut Out, q: &str, cells: &SheetCells) {
     }
 }
 
-fn table_losses(out: &mut Out, q: &str, notes: &grid::TableNotes) {
+pub(crate) fn table_losses(out: &mut Out, q: &str, notes: &grid::TableNotes) {
     if let Some((first, last)) = notes.rows_cut {
         let rows = if first == last {
             format!("row {first}")
@@ -641,7 +678,7 @@ fn table_losses(out: &mut Out, q: &str, notes: &grid::TableNotes) {
     }
 }
 
-fn problem_loss(out: &mut Out, p: FormulaProblem) {
+pub(crate) fn problem_loss(out: &mut Out, p: FormulaProblem) {
     let why = if p.unreadable {
         LossReason::Unsupported
     } else {
@@ -650,7 +687,7 @@ fn problem_loss(out: &mut Out, p: FormulaProblem) {
     out.loss(p.anchor, p.what, why, Severity::Warning);
 }
 
-fn problem_losses(out: &mut Out, q: &str, problems: Vec<FormulaProblem>) {
+pub(crate) fn problem_losses(out: &mut Out, q: &str, problems: Vec<FormulaProblem>) {
     let total = problems.len();
     for p in problems.into_iter().take(LISTED_PROBLEMS) {
         problem_loss(out, p);
@@ -943,9 +980,15 @@ fn objects(blocks: &mut Vec<Block>, q: &str, parts: &SheetParts) {
 }
 
 /// Validations and conditional formats, one rule per range they apply to.
-fn rules(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
+pub(crate) fn rules(
+    out: &mut Out,
+    q: &str,
+    validations: &[Validation],
+    cond_formats: &[CondFormat],
+    budget: &Budget,
+) {
     let mut list: Vec<Rule> = Vec::new();
-    for v in &parts.validations {
+    for v in validations {
         let mut detail = v.kind.clone();
         if let Some(list) = &v.list {
             detail = format!("list: {}", list.join(", "));
@@ -974,7 +1017,7 @@ fn rules(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
             });
         }
     }
-    for cf in &parts.cond_formats {
+    for cf in cond_formats {
         let mut detail = cf.kind.clone();
         if let Some(op) = &cf.operator {
             detail.push(' ');
@@ -1006,18 +1049,21 @@ fn rules(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
     }
 }
 
+/// The inlines of a comment text, cut at the text limit (counted in `cut`).
+pub(crate) fn comment_body(budget: &Budget, text: &str, cut: &mut u64) -> Vec<Inline> {
+    if budget.charge_text(text.len()).is_err() {
+        *cut += 1;
+        let max = usize::try_from(budget.limits().max_text_bytes).unwrap_or(usize::MAX);
+        crate::text_inlines(&grid::cut_text(text.to_string(), max))
+    } else {
+        crate::text_inlines(text)
+    }
+}
+
 /// Notes and threaded comments at their cells; replies nested under their thread.
 fn annotations(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
-    let max = usize::try_from(budget.limits().max_text_bytes).unwrap_or(usize::MAX);
     let mut cut = 0u64;
-    let mut body = |text: &str| {
-        if budget.charge_text(text.len()).is_err() {
-            cut += 1;
-            crate::text_inlines(&grid::cut_text(text.to_string(), max))
-        } else {
-            crate::text_inlines(text)
-        }
-    };
+    let mut body = |text: &str| comment_body(budget, text, &mut cut);
     let mut list = Vec::new();
     for n in &parts.notes {
         list.push(Annotation {
@@ -1061,6 +1107,26 @@ fn annotations(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
         }
     }
     list.extend(threads);
+    add_annotations(out, q, list, budget, cut);
+    if orphans > 0 {
+        out.loss(
+            q,
+            format!("{orphans} comment replies point at a thread that is not there; shown as threads of their own"),
+            LossReason::Damaged,
+            Severity::Info,
+        );
+    }
+}
+
+/// Adds the annotations of a sheet within the element budget; `cut` texts were cut at the
+/// text limit.
+pub(crate) fn add_annotations(
+    out: &mut Out,
+    q: &str,
+    list: Vec<Annotation>,
+    budget: &Budget,
+    cut: u64,
+) {
     let total = list.len();
     for (i, a) in list.into_iter().enumerate() {
         let size = 1 + a.replies.len() as u64;
@@ -1083,20 +1149,18 @@ fn annotations(out: &mut Out, q: &str, parts: &SheetParts, budget: &Budget) {
             Severity::Warning,
         );
     }
-    if orphans > 0 {
-        out.loss(
-            q,
-            format!("{orphans} comment replies point at a thread that is not there; shown as threads of their own"),
-            LossReason::Damaged,
-            Severity::Info,
-        );
-    }
 }
 
-/// Title, authors, dates, keywords, custom properties and calculation settings.
-fn properties(out: &mut Out, wb: &WorkbookParts) {
+/// Title, authors, dates, keywords, custom properties and, when the file has them, the
+/// calculation settings and the date system.
+pub(crate) fn properties(
+    out: &mut Out,
+    doc: &DocProps,
+    calc: Option<&CalcSettings>,
+    date1904: bool,
+) {
     let props = &mut out.doc.properties;
-    let core = &wb.props.core;
+    let core = &doc.core;
     props.title = core.get("title").cloned();
     props.description = core.get("description").cloned();
     if let Some(a) = core.get("creator") {
@@ -1131,35 +1195,37 @@ fn properties(out: &mut Out, wb: &WorkbookParts) {
         }
     }
     for (key, name) in [("Application", "application"), ("Company", "company")] {
-        if let Some(v) = wb.props.app.get(key) {
+        if let Some(v) = doc.app.get(key) {
             custom.insert(name.into(), text(v));
         }
     }
-    let mode = match wb.calc.mode {
-        CalcMode::Auto => "auto",
-        CalcMode::Manual => "manual",
-        CalcMode::AutoNoTable => "auto_no_table",
-    };
-    custom.insert("calc_mode".into(), text(mode));
-    custom.insert(
-        "iterative_calculation".into(),
-        Value::Bool {
-            value: wb.calc.iterate,
-        },
-    );
-    if wb.calc.iterate {
-        if let Some(n) = wb.calc.iterate_count {
-            custom.insert("iteration_count".into(), Value::number(f64::from(n), None));
-        }
-        if let Some(d) = wb.calc.iterate_delta {
-            custom.insert("iteration_delta".into(), Value::number(d, None));
+    if let Some(calc) = calc {
+        let mode = match calc.mode {
+            CalcMode::Auto => "auto",
+            CalcMode::Manual => "manual",
+            CalcMode::AutoNoTable => "auto_no_table",
+        };
+        custom.insert("calc_mode".into(), text(mode));
+        custom.insert(
+            "iterative_calculation".into(),
+            Value::Bool {
+                value: calc.iterate,
+            },
+        );
+        if calc.iterate {
+            if let Some(n) = calc.iterate_count {
+                custom.insert("iteration_count".into(), Value::number(f64::from(n), None));
+            }
+            if let Some(d) = calc.iterate_delta {
+                custom.insert("iteration_delta".into(), Value::number(d, None));
+            }
         }
     }
-    if wb.date1904 {
+    if date1904 {
         custom.insert("date_system".into(), text("1904"));
     }
     // Custom document properties keep their names; Rezzer's own keys win a clash.
-    for (name, value) in &wb.props.custom {
+    for (name, value) in &doc.custom {
         let v = match value {
             PropValue::Text(s) => text(s),
             PropValue::Integer(i) => Value::number(*i as f64, None),
@@ -1174,28 +1240,28 @@ fn properties(out: &mut Out, wb: &WorkbookParts) {
 
 /// VBA module names and the functions each one declares. The code is never run.
 #[derive(Default)]
-struct Vba {
+pub(crate) struct Vba {
     modules: Vec<String>,
     /// Uppercase function name to its module.
     functions: HashMap<String, String>,
 }
 
-fn vba_modules(
+pub(crate) fn vba_modules<RS, R>(
     out: &mut Out,
     pkg: &Package,
-    cal: &mut Xlsx<Cursor<&[u8]>>,
-    wb: &WorkbookParts,
-    xl: &str,
+    cal: &mut R,
+    part: &str,
     budget: &Budget,
-) -> Vba {
+) -> Vba
+where
+    RS: std::io::Read + std::io::Seek,
+    R: calamine::Reader<RS>,
+    R::Error: std::fmt::Display,
+{
     let mut vba = Vba::default();
-    if !wb.has_vba {
-        return vba;
-    }
-    let part = format!("{xl}vbaProject.bin");
-    if let Err(hit) = pkg.charge(budget, &part) {
+    if let Err(hit) = pkg.charge(budget, part) {
         out.loss(
-            part.as_str(),
+            part,
             format!("VBA project not read: {hit}"),
             LossReason::Limit,
             Severity::Warning,
@@ -1215,7 +1281,7 @@ fn vba_modules(
         }
         Ok(Err(e)) => {
             out.loss(
-                part.as_str(),
+                part,
                 format!("VBA project not read: {e}"),
                 LossReason::Damaged,
                 Severity::Warning,
@@ -1224,7 +1290,7 @@ fn vba_modules(
         }
         Err(panic) => {
             out.loss(
-                part.as_str(),
+                part,
                 format!("VBA project not read: internal error: {panic}"),
                 LossReason::Internal,
                 Severity::Warning,
@@ -1247,7 +1313,7 @@ fn vba_modules(
 }
 
 /// Names of the `Function` procedures a VBA module declares.
-fn declared_functions(code: &str) -> Vec<String> {
+pub(crate) fn declared_functions(code: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in code.lines() {
         let mut words = line.split_whitespace().peekable();
@@ -1277,9 +1343,15 @@ fn declared_functions(code: &str) -> Vec<String> {
 }
 
 /// VBA modules, external workbooks and add-ins, and the user functions formulas call.
-fn embedded(out: &mut Out, wb: &WorkbookParts, vba: &Vba, formulas: &Formulas) {
+pub(crate) fn embedded(
+    out: &mut Out,
+    has_vba: bool,
+    links: &[ExternalLink],
+    vba: &Vba,
+    formulas: &Formulas,
+) {
     let list = &mut out.doc.facets.embedded;
-    if wb.has_vba && vba.modules.is_empty() {
+    if has_vba && vba.modules.is_empty() {
         list.push(Embedded {
             kind: "macro".into(),
             name: "VBA project".into(),
@@ -1295,7 +1367,7 @@ fn embedded(out: &mut Out, wb: &WorkbookParts, vba: &Vba, formulas: &Formulas) {
             target: None,
         });
     }
-    for link in &wb.external_links {
+    for link in links {
         let lower = link.target.to_ascii_lowercase();
         let addin_file = [".xlam", ".xla", ".xll"].iter().any(|e| lower.ends_with(e));
         let kind = match link.kind.as_str() {
@@ -1318,7 +1390,7 @@ fn embedded(out: &mut Out, wb: &WorkbookParts, vba: &Vba, formulas: &Formulas) {
         });
     }
     for (name, _first_use) in &formulas.user_functions {
-        let (detail, target) = user_function_source(name, wb, vba);
+        let (detail, target) = user_function_source(name, links, vba);
         list.push(Embedded {
             kind: "user-function".into(),
             name: name.clone(),
@@ -1330,12 +1402,12 @@ fn embedded(out: &mut Out, wb: &WorkbookParts, vba: &Vba, formulas: &Formulas) {
 
 /// Where a user function comes from: `VBA module` (target the module), the add-in or
 /// workbook path of a `[n]!` prefix, or `unknown`.
-fn user_function_source(name: &str, wb: &WorkbookParts, vba: &Vba) -> (String, Option<String>) {
+fn user_function_source(name: &str, links: &[ExternalLink], vba: &Vba) -> (String, Option<String>) {
     if let Some(rest) = name.strip_prefix('[')
         && let Some((book, _)) = rest.split_once("]!")
     {
         if let Ok(index) = book.parse::<u32>() {
-            return match wb.external_links.iter().find(|l| l.index == index) {
+            return match links.iter().find(|l| l.index == index) {
                 Some(l) => (l.target.clone(), None),
                 None => ("unknown".into(), None),
             };

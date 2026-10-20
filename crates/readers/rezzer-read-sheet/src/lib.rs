@@ -2,19 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Spreadsheet reader: XLSX and XLSM workbooks with their values and the logic behind them.
+//! Spreadsheet reader: XLSX, XLSM, XLSB and ODS workbooks with their values and the logic
+//! behind them.
 //!
 //! calamine gives the values, cached results and formula texts (through its sparse cell
-//! reader, never a dense range), merged cells and VBA module names. sheetparts gives what
-//! calamine does not expose: sheet states, names with scope, styles, comments, tables,
-//! pivots, charts, validations and data tables. formulakit reads every formula. zipguard
-//! measures every entry before calamine unpacks anything. VBA, add-ins and linked files are listed,
-//! never run or opened.
+//! readers for XLSX and XLSB; for ODS only after the size of its dense sheets is bounded),
+//! merged cells and VBA module names. sheetparts gives what calamine does not expose: sheet
+//! states, names with scope, styles, comments, tables, pivots, charts, validations and data
+//! tables, and the ODF parts. formulakit reads every formula. zipguard measures every entry
+//! before calamine unpacks anything. VBA, add-ins and linked files are listed, never run or
+//! opened. Encrypted workbooks are reported, never decrypted.
 
+mod biff12;
 mod grid;
 mod logic;
+mod ods;
+mod odscan;
 mod package;
 mod units;
+mod xlsb;
 mod xlsx;
 
 use rezzer_limits::Budget;
@@ -23,10 +29,25 @@ use rezzer_model::{
     Reader, ReaderInfo, Severity, Source, source_info,
 };
 
-/// Reads XLSX and XLSM workbooks. XLSB and ODS are claimed too; their readers come later and
-/// until then the read fails with a `not_implemented` loss.
+/// Reads XLSX, XLSM and XLSB workbooks (feature `xlsx`) and ODS workbooks (feature `ods`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SheetReader;
+
+/// The formats this build reads.
+const FORMATS: &[FormatId] = match (cfg!(feature = "xlsx"), cfg!(feature = "ods")) {
+    (true, true) => &[
+        FormatId::Xlsx,
+        FormatId::Xlsm,
+        FormatId::Xlsb,
+        FormatId::Ods,
+    ],
+    (true, false) => &[FormatId::Xlsx, FormatId::Xlsm, FormatId::Xlsb],
+    (false, true) => &[FormatId::Ods],
+    (false, false) => &[],
+};
+
+/// The first bytes of an OLE compound file.
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
 impl Reader for SheetReader {
     fn id(&self) -> &'static str {
@@ -38,12 +59,7 @@ impl Reader for SheetReader {
     }
 
     fn formats(&self) -> &'static [FormatId] {
-        &[
-            FormatId::Xlsx,
-            FormatId::Xlsm,
-            FormatId::Xlsb,
-            FormatId::Ods,
-        ]
+        FORMATS
     }
 
     fn read(&self, src: &Source, _opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
@@ -52,32 +68,65 @@ impl Reader for SheetReader {
             id: self.id().to_string(),
             version: self.version().to_string(),
         });
-        let out = Out::new(Document::new(info));
+        let mut out = Out::new(Document::new(info));
+        let bytes = src.bytes();
+        // A password-protected OOXML file is an OLE compound file around an encrypted
+        // package, whatever the extension. It is not decrypted.
+        if bytes.starts_with(&OLE_MAGIC) {
+            return ole(bytes, out);
+        }
         match src.format {
-            FormatId::Xlsx | FormatId::Xlsm => xlsx::read(src.bytes(), budget, out),
-            other => not_implemented(out, other),
+            FormatId::Xlsx | FormatId::Xlsm if cfg!(feature = "xlsx") => {
+                xlsx::read(bytes, budget, out)
+            }
+            FormatId::Xlsb if cfg!(feature = "xlsx") => xlsb::read(bytes, budget, out),
+            FormatId::Ods if cfg!(feature = "ods") => ods::read(bytes, budget, out),
+            other => {
+                out.loss(
+                    "document",
+                    format!("the whole file: {other:?} is not read by this build"),
+                    LossReason::NotImplemented,
+                    Severity::Error,
+                );
+                out.failed()
+            }
         }
     }
 }
 
-/// A failed outcome for a format whose reader is not built yet.
-fn not_implemented(mut out: Out, format: FormatId) -> ReadOutcome {
-    let name = match format {
-        FormatId::Xlsb => "XLSB",
-        FormatId::Ods => "ODS",
-        _ => "these",
+/// An OLE compound file given as a workbook: encrypted (an `EncryptedPackage` stream) or not
+/// a workbook package at all.
+fn ole(bytes: &[u8], mut out: Out) -> ReadOutcome {
+    let encrypted = rezzer_limits::contain(|| {
+        cfb::CompoundFile::open(std::io::Cursor::new(bytes)).map(|c| {
+            c.read_root_storage()
+                .any(|e| e.name().eq_ignore_ascii_case("EncryptedPackage"))
+        })
+    });
+    let (what, why) = match encrypted {
+        Ok(Ok(true)) => (
+            "the whole file: the workbook is protected with a password (an encrypted package); it is not decrypted".to_string(),
+            LossReason::Encrypted,
+        ),
+        Ok(Ok(false)) => (
+            "the whole file: an OLE compound file without an encrypted package, not a workbook package".to_string(),
+            LossReason::Damaged,
+        ),
+        Ok(Err(e)) => (
+            format!("the whole file: a broken OLE compound file: {e}"),
+            LossReason::Damaged,
+        ),
+        Err(panic) => (
+            format!("the whole file: listing the OLE compound file failed: {panic}"),
+            LossReason::Internal,
+        ),
     };
-    out.doc
-        .body
-        .push(Block::paragraph(vec![Inline::plain(format!(
-            "{name} workbooks are not read yet."
-        ))]));
-    out.loss(
-        "document",
-        format!("the whole file: {name} workbooks are not read yet"),
-        LossReason::NotImplemented,
-        Severity::Error,
-    );
+    if why == LossReason::Encrypted {
+        out.doc.body.push(Block::paragraph(vec![Inline::plain(
+            "This workbook is protected with a password and is not read.",
+        )]));
+    }
+    out.loss("document", what, why, Severity::Error);
     out.failed()
 }
 

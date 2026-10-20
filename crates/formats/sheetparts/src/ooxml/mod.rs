@@ -12,7 +12,7 @@ mod styles;
 mod workbook;
 
 pub use crate::DefinedName;
-pub use props::DocProps;
+pub use props::{DocProps, read_doc_props};
 pub use sheet::{
     AttrKind, Chart, CondFormat, FormulaAttr, Note, Pivot, SheetParts, TableInfo, Thread,
     Validation, read_sheet,
