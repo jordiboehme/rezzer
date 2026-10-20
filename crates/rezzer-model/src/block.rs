@@ -104,6 +104,9 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },
+    /// A list item with a check box. Readers put it as the first block of a `List` item (the
+    /// item's text; further blocks of the item follow it). A run of Task blocks outside a list
+    /// is a task list too. Either way it renders as `- [ ] text`.
     Task {
         state: TaskState,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

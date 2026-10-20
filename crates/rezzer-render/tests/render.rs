@@ -1885,3 +1885,31 @@ fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
     assert_eq!(row.matches(" | ").count(), 1, "{row}");
     assert!(row.contains("[[same]]"), "{row}");
 }
+
+#[test]
+fn task_items_inside_lists_get_one_marker() {
+    let task = |state, text: &str| Block::Task {
+        state,
+        inlines: vec![txt(text)],
+        anchor: None,
+    };
+    let list = |ordered, items: Vec<Vec<Block>>| Block::List {
+        ordered,
+        items,
+        anchor: None,
+    };
+    let md = body_of(vec![
+        list(
+            false,
+            vec![
+                vec![task(TaskState::Open, "a")],
+                vec![task(TaskState::Done, "b")],
+            ],
+        ),
+        list(false, vec![vec![task(TaskState::Open, "c")]]),
+        para("between"),
+        list(true, vec![vec![task(TaskState::Done, "d"), para("more")]]),
+    ]);
+    assert!(md.contains("\n- [ ] a\n- [x] b\n\n* [ ] c\n"), "{md}");
+    assert!(md.contains("\n1. [x] d\n\n   more\n"), "{md}");
+}

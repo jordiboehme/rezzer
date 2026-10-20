@@ -1108,7 +1108,9 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "pulldown-cmark",
+ "rezzer-limits",
  "rezzer-model",
+ "rezzer-read-markdown",
  "saphyr-parser",
 ]
 

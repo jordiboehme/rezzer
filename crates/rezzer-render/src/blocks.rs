@@ -1063,6 +1063,22 @@ fn list_block(
             } else {
                 "- ".to_string()
             };
+            // A task item: the check box follows the list marker, the task text is the
+            // item's first line and the rest of the item hangs below it.
+            if let Some(Block::Task { state, inlines, .. }) = item.first() {
+                let first = format!("{marker}[{}] ", task_mark(*state));
+                let head = paragraph(inlines);
+                let rest = blocks(&item[1..], ctx, depth + 1, level, !loose);
+                let tight_next =
+                    !loose && matches!(item.get(1), Some(Block::List { .. } | Block::Task { .. }));
+                let body = match (head.is_empty(), rest.is_empty()) {
+                    (_, true) => head,
+                    (true, false) => format!("\n{rest}"),
+                    (false, false) if tight_next => format!("{head}\n{rest}"),
+                    (false, false) => format!("{head}\n\n{rest}"),
+                };
+                return hang(&first, &body, marker.len());
+            }
             let body = blocks(item, ctx, depth + 1, level, !loose);
             hang(&marker, &body, marker.len())
         })
@@ -1070,12 +1086,17 @@ fn list_block(
     rendered.join(if loose { "\n\n" } else { "\n" })
 }
 
-fn task(state: TaskState, content: &[Inline], alt: bool) -> String {
-    let mark = match state {
+fn task_mark(state: TaskState) -> char {
+    match state {
         TaskState::Open => ' ',
         TaskState::Done => 'x',
         TaskState::Cancelled => '~',
-    };
+    }
+}
+
+/// A task that stands on its own, not inside a list item: a bullet with a check box.
+fn task(state: TaskState, content: &[Inline], alt: bool) -> String {
+    let mark = task_mark(state);
     let bullet = if alt { '*' } else { '-' };
     let first = format!("{bullet} [{mark}] ");
     hang(&first, &paragraph(content), 2)

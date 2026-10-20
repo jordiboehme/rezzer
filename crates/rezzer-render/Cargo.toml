@@ -9,6 +9,8 @@ rust-version.workspace = true
 rezzer-model = { path = "../rezzer-model" }
 
 [dev-dependencies]
+rezzer-limits = { path = "../rezzer-limits" }
+rezzer-read-markdown = { path = "../readers/rezzer-read-markdown" }
 insta.workspace = true
 pulldown-cmark.workspace = true
 saphyr-parser.workspace = true
