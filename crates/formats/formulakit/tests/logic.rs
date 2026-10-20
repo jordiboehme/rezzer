@@ -341,3 +341,53 @@ fn stop_callback_ends_early() {
     let logic = wb.finish(&|| true);
     assert!(logic.stopped);
 }
+
+#[test]
+fn many_names_resolve_fast() {
+    let start = Instant::now();
+    let mut wb = Workbook::new();
+    for i in 0..5_000u32 {
+        wb.add_constant("In", CellPos { row: i, col: 0 });
+        let a = analyze(
+            &format!("=In!$A${}", i + 1),
+            Dialect::Excel,
+            CellPos::default(),
+        )
+        .expect("name parses");
+        wb.add_name(&format!("Größe{i}"), None, Some(&a));
+    }
+    for row in 0..20_000u32 {
+        let at = CellPos { row, col: 1 };
+        let a = analyze(&format!("=GRÖSSE{}*2", row % 5_000), Dialect::Excel, at)
+            .expect("formula parses");
+        wb.add_formula("Calc", at, &a);
+    }
+    let logic = wb.finish(&never);
+    let took = start.elapsed();
+    eprintln!("many_names_resolve_fast: {took:?}");
+    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // Names match in any letter case, also beyond ASCII.
+    assert_eq!(logic.parameters.len(), 5_000);
+    assert!(logic.parameters.iter().all(|p| p.read_by == 4));
+}
+
+#[test]
+fn stop_in_the_middle_keeps_only_certain_roles() {
+    let mut wb = Workbook::new();
+    for row in 1..=20_000u32 {
+        wb.add_constant("S", CellPos { row, col: 1 });
+        let at = CellPos { row, col: 2 };
+        let a = analyze(&format!("=SUM($B$2:B{})", row + 1), Dialect::Excel, at)
+            .expect("formula parses");
+        wb.add_formula("S", at, &a);
+    }
+    let calls = Cell::new(0u32);
+    let logic = wb.finish(&|| {
+        calls.set(calls.get() + 1);
+        calls.get() > 50
+    });
+    assert!(logic.stopped);
+    assert!(logic.roles.iter().all(|(_, r)| *r != Role::Result));
+    assert!(logic.parameters.is_empty());
+    assert!(logic.graph.nodes.is_empty());
+}

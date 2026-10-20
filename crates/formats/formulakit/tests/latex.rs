@@ -66,6 +66,11 @@ fn latex_functions_constants_and_references() {
         Some(r"\frac{\mathrm{B2} \cdot \mathrm{C2}}{1000}")
     );
     assert_eq!(latex("=SUM(", Dialect::Excel), None);
+    assert_eq!(
+        tex("=my_fn(A1)*2"),
+        r"\operatorname{my\_fn}(\mathrm{A1}) \cdot 2"
+    );
+    assert_eq!(tex("=Größe(A1)*2"), r"\text{Größe}(\mathrm{A1}) \cdot 2");
 }
 
 #[test]

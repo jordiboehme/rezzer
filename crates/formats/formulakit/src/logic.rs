@@ -136,6 +136,8 @@ pub struct Workbook {
     formulas: Vec<FormulaEntry>,
     constants: Vec<(u32, CellPos)>,
     names: Vec<NameEntry>,
+    /// Uppercase name and scope to the first name added with them.
+    name_index: HashMap<(String, Option<String>), usize>,
 }
 
 /// A rectangle of cells on one sheet, inclusive.
@@ -468,6 +470,8 @@ impl Workbook {
     /// sheet in a sheet-scoped name point into the scope sheet; in a workbook-scoped name
     /// they depend on the active sheet and are not followed.
     pub fn add_name(&mut self, name: &str, scope: Option<&str>, analysis: Option<&Analysis>) {
+        let key = (name.to_uppercase(), scope.map(str::to_uppercase));
+        self.name_index.entry(key).or_insert(self.names.len());
         self.names.push(NameEntry {
             name: name.to_string(),
             scope: scope.map(str::to_string),
@@ -477,20 +481,15 @@ impl Workbook {
 
     /// The defined name `name` as seen from `sheet` (sheet scope first, then workbook).
     fn lookup(&self, name: &str, explicit: Option<&str>, sheet: Option<&str>) -> Option<usize> {
-        let matches = |n: &NameEntry, scope: Option<&str>| {
-            n.name.eq_ignore_ascii_case(name)
-                && match (n.scope.as_deref(), scope) {
-                    (None, None) => true,
-                    (Some(a), Some(b)) => a.to_uppercase() == b.to_uppercase(),
-                    _ => false,
-                }
+        let find = |scope: Option<&str>| {
+            self.name_index
+                .get(&(name.to_uppercase(), scope.map(str::to_uppercase)))
+                .copied()
         };
-        if let Some(s) = explicit {
-            return self.names.iter().position(|n| matches(n, Some(s)));
+        match explicit {
+            Some(s) => find(Some(s)),
+            None => sheet.and_then(|s| find(Some(s))).or_else(|| find(None)),
         }
-        sheet
-            .and_then(|s| self.names.iter().position(|n| matches(n, Some(s))))
-            .or_else(|| self.names.iter().position(|n| matches(n, None)))
     }
 
     /// Resolves the references of a reader. `sheet` is the sheet unqualified cell

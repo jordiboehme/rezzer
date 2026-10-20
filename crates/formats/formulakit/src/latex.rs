@@ -206,11 +206,15 @@ fn render(node: &Node, src: &str) -> Tex {
                     } else {
                         bare
                     };
-                    let name = text_escape(shown);
-                    tex(
-                        format!(r"\operatorname{{{name}}}({})", args(list, src)),
-                        ATOM,
-                    )
+                    let safe = shown
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.'));
+                    let name = if safe {
+                        format!(r"\operatorname{{{}}}", shown.replace('_', r"\_"))
+                    } else {
+                        format!(r"\text{{{}}}", text_escape(shown))
+                    };
+                    tex(format!("{name}({})", args(list, src)), ATOM)
                 }
             }
         }
