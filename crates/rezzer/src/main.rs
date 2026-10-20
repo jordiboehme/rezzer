@@ -18,5 +18,7 @@ fn registry() -> Registry {
     registry.register(Box::new(rezzer_read_markdown::MarkdownReader));
     #[cfg(feature = "fmt-csv")]
     registry.register(Box::new(rezzer_read_csv::CsvReader));
+    #[cfg(feature = "fmt-xlsx")]
+    registry.register(Box::new(rezzer_read_sheet::SheetReader));
     registry
 }

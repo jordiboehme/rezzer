@@ -81,6 +81,9 @@ pub struct Person {
 /// Everything read from the workbook-level parts.
 #[derive(Debug, Clone, Default)]
 pub struct WorkbookParts {
+    /// The workbook part in the package, for example `xl/workbook.xml`; empty when the
+    /// package has none.
+    pub workbook_part: String,
     pub sheets: Vec<SheetInfo>,
     pub names: Vec<DefinedName>,
     pub calc: CalcSettings,
@@ -135,6 +138,7 @@ pub fn read_workbook(zip: &mut Archive, limits: &Limits, stop: &dyn Fn() -> bool
         return out;
     };
 
+    out.workbook_part = workbook_part.clone();
     let rels = ctx.rels(&workbook_part);
     let mut raw_names: Vec<(DefinedName, Option<usize>)> = Vec::new();
     let mut external_rids: Vec<String> = Vec::new();

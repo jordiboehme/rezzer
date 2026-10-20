@@ -20,6 +20,8 @@
 
 mod a1;
 pub mod numfmt;
+
+pub use a1::quote_sheet;
 pub mod odf;
 pub mod ooxml;
 pub(crate) mod xml;

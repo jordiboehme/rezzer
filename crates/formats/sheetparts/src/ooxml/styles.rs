@@ -28,6 +28,13 @@ impl Styles {
         }
     }
 
+    /// The number format id of the cell style with this index, `None` when the index is out
+    /// of range. Tells a style without a known code (a locale-dependent built-in id) from a
+    /// missing style.
+    pub fn format_id(&self, style_index: u32) -> Option<u32> {
+        self.xf_ids.get(style_index as usize).copied()
+    }
+
     /// The number of cell styles.
     pub fn len(&self) -> usize {
         self.xf_ids.len()

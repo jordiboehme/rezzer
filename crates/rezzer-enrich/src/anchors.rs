@@ -10,12 +10,16 @@
 //! of them. A
 //! spreadsheet reference may also name a range or a whole column or row, such as `Sheet!A:A`
 //! or `Sheet!A1:C9`: it resolves when its sheet prefix (the text before the `!`, without
-//! single quotes; every `!` split is tried) equals the anchor of a section. Everything else that is missing becomes a
-//! Warning loss.
+//! single quotes; every `!` split is tried) equals the anchor of a section, or for a 3D
+//! reference (`Sheet1:Sheet3!A1`) when both end sheets are sections. A defined name
+//! (`name:gg`, `name:Sheet1!gg`) resolves when a formula of kind `name` or `lambda` has it as
+//! its anchor. An external reference (`ext:[1]Sheet1!A1`) points outside the document by
+//! definition (the link is listed under Embedded) and is not checked. Everything else that is
+//! missing becomes a Warning loss.
 
 use std::collections::HashSet;
 
-use rezzer_model::{Anchor, Block, Document, Inline, Loss, LossReason, Severity};
+use rezzer_model::{Anchor, Block, Document, FormulaKind, Inline, Loss, LossReason, Severity};
 
 use crate::{Pass, walk};
 
@@ -112,6 +116,14 @@ impl<'a> AnchorSet<'a> {
             sections: HashSet::new(),
         };
         set.add_blocks(&doc.body);
+        // Defined names have no place in the body; their formula is where they are defined.
+        set.all.extend(
+            doc.facets
+                .formulas
+                .iter()
+                .filter(|f| matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda)))
+                .map(|f| f.anchor.0.as_str()),
+        );
         set
     }
 
@@ -126,12 +138,20 @@ impl<'a> AnchorSet<'a> {
 
     /// True when `anchor` is an anchor of the document, or a range on a sheet that is.
     pub(crate) fn resolves(&self, anchor: &str) -> bool {
-        if self.all.contains(anchor) {
+        if self.all.contains(anchor) || anchor.starts_with("ext:") {
             return true;
         }
-        sheet_prefixes(anchor)
-            .iter()
-            .any(|sheet| self.sections.contains(sheet.as_str()))
+        sheet_prefixes(anchor).iter().any(|sheet| {
+            self.sections.contains(sheet.as_str())
+                // A 3D reference (`Sheet1:Sheet3!A1`) resolves when both end sheets are there.
+                || sheet.split_once(':').is_some_and(|(first, last)| {
+                    let quoted = |s: &str| format!("'{}'", s.replace('\'', "''"));
+                    let known = |s: &str| {
+                        self.sections.contains(s) || self.sections.contains(quoted(s).as_str())
+                    };
+                    known(first) && known(last)
+                })
+        })
     }
 }
 

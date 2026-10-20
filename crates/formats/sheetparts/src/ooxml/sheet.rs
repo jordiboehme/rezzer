@@ -94,6 +94,10 @@ pub struct TableInfo {
     pub name: String,
     pub range: String,
     pub columns: Vec<String>,
+    /// Header rows at the top (`headerRowCount`, 1 when not written).
+    pub header_rows: u32,
+    /// Totals rows at the bottom (`totalsRowCount`, 0 when not written).
+    pub totals_rows: u32,
 }
 
 /// A pivot table.

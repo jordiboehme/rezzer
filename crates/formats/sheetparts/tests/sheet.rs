@@ -359,6 +359,10 @@ fn tables_pivots_and_charts() {
     assert_eq!(multi.tables[0].name, "Inventory");
     assert_eq!(multi.tables[0].range, "A1:C5");
     assert_eq!(multi.tables[0].columns, vec!["Item", "Type", "Quantity"]);
+    assert_eq!(
+        (multi.tables[0].header_rows, multi.tables[0].totals_rows),
+        (1, 0)
+    );
 
     let named = first("simple-table-named-range.xlsx");
     assert_eq!(named.tables[0].name, "Table1");
@@ -625,4 +629,20 @@ fn external_pivot_source_is_not_shown_as_local() {
         "{:?}",
         s.issues
     );
+}
+
+#[test]
+fn table_header_and_totals_rows() {
+    let table = "<table xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" id=\"1\" name=\"T\" displayName=\"T\" ref=\"A1:B4\" headerRowCount=\"0\" totalsRowCount=\"1\"><tableColumns count=\"2\"><tableColumn id=\"1\" name=\"a\"/><tableColumn id=\"2\" name=\"b\"/></tableColumns></table>";
+    let bytes = fixture_with(
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/></worksheet>",
+        &[(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table",
+            "../tables/table1.xml",
+        )],
+        &[("xl/tables/table1.xml", table)],
+    );
+    let s = sheet_of(&bytes, "S", &Limits::default());
+    assert_eq!(s.tables.len(), 1, "{:?}", s.issues);
+    assert_eq!((s.tables[0].header_rows, s.tables[0].totals_rows), (0, 1));
 }

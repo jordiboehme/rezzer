@@ -101,6 +101,7 @@ fn sheets_with_state_and_part() {
     assert_eq!(parts.sheets[1].part, "xl/worksheets/sheet2.xml");
     assert_eq!(parts.sheets[2].state, SheetState::VeryHidden);
     assert_eq!(parts.sheets[2].part, "xl/worksheets/sheet3.xml");
+    assert_eq!(parts.workbook_part, "xl/workbook.xml");
 }
 
 #[test]
@@ -376,8 +377,11 @@ fn styles_resolve_number_formats() {
     let styles = read(&bytes).styles;
     assert_eq!(styles.number_format(0), Some("0.0\" m\""));
     assert_eq!(styles.number_format(1), Some("0.00%"));
-    // An id that is neither built in nor defined has no format.
+    // An id that is neither built in nor defined has no format, but its id is known.
     assert_eq!(styles.number_format(2), None);
+    assert_eq!(styles.format_id(2), Some(200));
+    assert_eq!(styles.format_id(0), Some(164));
+    assert_eq!(styles.format_id(3), None);
 }
 
 #[test]

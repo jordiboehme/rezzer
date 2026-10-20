@@ -25,6 +25,14 @@ pub(super) fn read_table(ctx: &mut Ctx<'_, '_>, part: &str) -> Option<TableInfo>
                     name: name.to_string(),
                     range: e.attr("ref").unwrap_or("").to_string(),
                     columns: Vec::new(),
+                    header_rows: e
+                        .attr("headerRowCount")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1),
+                    totals_rows: e
+                        .attr("totalsRowCount")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0),
                 });
             }
             "tableColumns" => in_columns = matches!(ev, Ev::Start(_)),

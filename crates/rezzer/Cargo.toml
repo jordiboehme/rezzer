@@ -11,10 +11,11 @@ name = "rezzer"
 path = "src/main.rs"
 
 [features]
-default = ["fmt-text", "fmt-markdown", "fmt-csv"]
+default = ["fmt-text", "fmt-markdown", "fmt-csv", "fmt-xlsx"]
 fmt-text = ["dep:rezzer-read-text"]
 fmt-markdown = ["dep:rezzer-read-markdown"]
 fmt-csv = ["dep:rezzer-read-csv"]
+fmt-xlsx = ["dep:rezzer-read-sheet"]
 
 [dependencies]
 rezzer-cli = { path = "../rezzer-cli" }
@@ -22,6 +23,7 @@ rezzer-model = { path = "../rezzer-model" }
 rezzer-read-text = { path = "../readers/rezzer-read-text", optional = true }
 rezzer-read-markdown = { path = "../readers/rezzer-read-markdown", optional = true }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv", optional = true }
+rezzer-read-sheet = { path = "../readers/rezzer-read-sheet", optional = true }
 
 [dev-dependencies]
 rezzer-model = { path = "../rezzer-model" }

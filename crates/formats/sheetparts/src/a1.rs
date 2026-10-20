@@ -4,10 +4,10 @@
 
 //! A1 addresses and sheet name quoting shared by the readers.
 
-/// A sheet name as a formula anchor writes it. The rules are those of formulakit's
+/// A sheet name as a formula anchor writes it (`Data`, `'My Sheet'`, `'it''s'`). The rules are those of formulakit's
 /// `quote_sheet`, so anchors from both crates agree: plain only when the name is letters,
 /// digits and underscores, does not start with a digit and does not look like `A1` or `R1C1`.
-pub(crate) fn quote_sheet(name: &str) -> String {
+pub fn quote_sheet(name: &str) -> String {
     let plain = name.chars().next().is_some_and(|c| !c.is_ascii_digit())
         && name.chars().all(|c| c.is_alphanumeric() || c == '_')
         && !looks_like_a1(name)

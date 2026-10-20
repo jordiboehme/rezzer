@@ -636,3 +636,48 @@ fn a_summary_table_is_not_the_sheet_data() {
         "4094 rows x 2 columns (none shown)"
     );
 }
+
+#[test]
+fn workbook_names_and_external_references_resolve() {
+    use rezzer_model::FormulaKind;
+    let mut d = doc();
+    d.body = vec![sheet("S", 1, 1), sheet("'My T'", 1, 1)];
+    let mut gg = formula("name:gg", &["S!A1"]);
+    gg.kind = Some(FormulaKind::Name);
+    let mut twice = formula("name:S!twice", &[]);
+    twice.kind = Some(FormulaKind::Lambda);
+    d.facets.formulas = vec![
+        gg,
+        twice,
+        formula(
+            "S!A1",
+            &[
+                "name:gg",
+                "name:S!twice",
+                "ext:[1]Sheet1!A1",
+                "ext:[2]!fn",
+                "S:'My T'!A1:B2",
+                "'S:My T'!B5",
+            ],
+        ),
+    ];
+    enrich(&mut d, &only(&[]));
+    assert!(d.losses.is_empty(), "{:?}", d.losses);
+
+    // A name the workbook does not define stays a loss, also when a cell formula has it as
+    // its own anchor.
+    d.facets
+        .formulas
+        .push(formula("S!A1", &["name:zz", "S:Other!A1"]));
+    d.facets.formulas.push(formula("name:cell", &[]));
+    enrich(&mut d, &only(&[]));
+    let what: Vec<_> = d.losses.iter().map(|l| l.what.as_str()).collect();
+    assert_eq!(
+        what,
+        [
+            "reference to name:zz not found",
+            "reference to S:Other!A1 not found",
+            "reference to name:cell not found"
+        ]
+    );
+}
