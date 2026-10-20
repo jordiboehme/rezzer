@@ -73,4 +73,4 @@ language: "en"
 | record 4 (line 4) | row has 9 fields, expected 7 | damaged | warning |
 | record 6 (line 6) | row has 3 fields, expected 7 | damaged | warning |
 | record 9 (line 9) | row has 5 fields, expected 7 | damaged | warning |
-| record 9 (line 9) | unterminated quote at record 9 (line 9): the cell ran over the following lines up to a quote inside a later field | damaged | error |
+| record 9 (line 9) | unterminated quote: the cell ran over the following lines up to a quote inside a later field | damaged | error |

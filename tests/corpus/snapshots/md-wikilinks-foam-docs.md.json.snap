@@ -368,7 +368,7 @@ source: crates/rezzer/tests/corpus.rs
   "source": {
     "detection": {
       "confidence": "likely",
-      "evidence": "markdown syntax: atx headings, list markers"
+      "evidence": "markdown syntax: atx headings, list markers, pipe table"
     },
     "encoding": "UTF-8",
     "format": "markdown",

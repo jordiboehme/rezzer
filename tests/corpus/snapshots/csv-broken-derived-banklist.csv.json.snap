@@ -834,7 +834,21 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "unterminated quote fieldOrange Park,FL,26680,FirstAtlantic Bank,19-Apr-13,16-May-13 First Federal Bank,Lexington,KY,29594,Your Community Bank,19-Apr-13,23-Apr-13 Gold Canyon Bank,Gold Canyon,AZ,58066,First Scottsdale Bank",
+                    "text": "unterminated quote fieldOrange Park,FL,26680,FirstAtlantic Bank,19-Apr-13,16-May-13",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "First Federal Bank,Lexington,KY,29594,Your Community Bank,19-Apr-13,23-Apr-13",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Gold Canyon Bank,Gold Canyon,AZ,58066,First Scottsdale Bank",
                     "type": "text"
                   }
                 ],
@@ -1779,7 +1793,7 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "record 9 (line 9)",
       "severity": "error",
-      "what": "unterminated quote at record 9 (line 9): the cell ran over the following lines up to a quote inside a later field",
+      "what": "unterminated quote: the cell ran over the following lines up to a quote inside a later field",
       "why": "damaged"
     }
   ],

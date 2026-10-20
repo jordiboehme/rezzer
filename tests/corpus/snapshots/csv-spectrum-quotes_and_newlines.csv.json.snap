@@ -50,7 +50,21 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "ha \"ha\" ha",
+                    "text": "ha",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "\"ha\"",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "ha",
                     "type": "text"
                   }
                 ],

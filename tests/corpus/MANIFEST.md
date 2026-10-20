@@ -6,9 +6,9 @@ Every file has a `<file>.facts.json` next to it and golden snapshots in `snapsho
 
 | File | Source | License | SHA-256 |
 |---|---|---|---|
-| web-text/csv-broken-derived-banklist.csv | derived from the first 12 lines of banklist.csv | BSD-3-Clause / public domain | aa22bb95031ea5ff6165378d0e74c4387b5746722c63571dcb6d3d95816ec2a6 |
+| web-text/csv-broken-derived-banklist.csv | derived from https://github.com/pandas-dev/pandas/blob/main/pandas/tests/io/data/csv/banklist.csv : the first 12 lines, changed to have rows with too many and too few fields and an unterminated quote | BSD-3-Clause / public domain | aa22bb95031ea5ff6165378d0e74c4387b5746722c63571dcb6d3d95816ec2a6 |
 | web-text/csv-datahub-co2-fossil-global.csv | https://github.com/datasets/co2-fossil-global/blob/main/data/global.csv | ODC-PDDL-1.0 | 289acefc1c96f74e23b852c1b591c6444b9c85d5663b3cffd912222f4999b546 |
-| web-text/csv-latin1-noheader-derived-geonames.csv | derived from admin1CodesASCII.txt (rows AT, CH, DE, ES, FR, comma separated, Latin-1) | CC BY 4.0 (GeoNames) | c3b48ea33e7ddc1c46b94bd1c4030f76e285a6cc9530a5b0603294912175b37e |
+| web-text/csv-latin1-noheader-derived-geonames.csv | derived from https://download.geonames.org/export/dump/admin1CodesASCII.txt : the rows for AT, CH, DE, ES and FR, comma separated instead of tab separated, transcoded to Latin-1 | CC BY 4.0 (GeoNames) | c3b48ea33e7ddc1c46b94bd1c4030f76e285a6cc9530a5b0603294912175b37e |
 | web-text/csv-pandas-fdic-banklist.csv | https://github.com/pandas-dev/pandas/blob/main/pandas/tests/io/data/csv/banklist.csv | BSD-3-Clause (pandas); data from the US FDIC, public domain | b33f2443e72c52ed02c8f9bbd4969d69590373f75c1b0f3b07e3693127c48423 |
 | web-text/csv-semicolon-latin1-dwd-stations.txt | https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/multi_annual/mean_91-20/Temperatur_1991-2020_Stationsliste.txt | CC BY 4.0 (Deutscher Wetterdienst) | 6d2b0ee5d3c33f27cb36e773b0fa35bfc3468cbac4306d89010f7b3f5bd8387b |
 | web-text/csv-spectrum-comma_in_quotes.csv | https://github.com/max-mapper/csv-spectrum/tree/master/csvs | BSD-2-Clause (package.json; not MIT) | f7654bf8e69586c8fe7f7f89392d2ed551be0e468e7101187bb482357d9a7815 |

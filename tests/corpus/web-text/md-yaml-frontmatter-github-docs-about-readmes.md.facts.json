@@ -16,6 +16,11 @@
     "min_len": 1
   },
   {
-    "contains": "## About READMEs"
+    "pointer": "/body/0/inlines/0/text",
+    "equals": "About READMEs"
+  },
+  {
+    "pointer": "/body/0/level",
+    "equals": 2
   }
 ]

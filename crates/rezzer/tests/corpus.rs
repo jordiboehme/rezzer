@@ -8,7 +8,7 @@
 //! at once, `corpus_golden` keeps `insta` snapshots of the model JSON and the Markdown.
 //!
 //! A fact is `{ "pointer": "/json/pointer", "equals"?: v, "len"?: n, "min_len"?: n,
-//! "contains"?: "text" }`. `pointer` points into the Document JSON; `contains` is a substring
+//! "contains"?: "text", "absent"?: true }`. `absent`: the pointer must not exist. `pointer` points into the Document JSON; `contains` is a substring
 //! of the rendered Markdown (without a `pointer`) or of the JSON value at the pointer
 //! (serialized, for a non-string value). Corpus files are untrusted data and are only read.
 #![cfg(all(feature = "fmt-text", feature = "fmt-markdown", feature = "fmt-csv"))]
@@ -84,6 +84,15 @@ fn run(pipeline: &Pipeline, file: &Path) -> Output {
 /// Checks one fact; returns why it fails.
 fn check(fact: &Value, out: &Output) -> Result<(), String> {
     let pointer = fact.get("pointer").and_then(Value::as_str);
+    if fact.get("absent").and_then(Value::as_bool) == Some(true) {
+        return match pointer.and_then(|p| out.json.pointer(p)) {
+            None => Ok(()),
+            Some(v) => Err(format!(
+                "{}: expected to be absent, found {v}",
+                pointer.unwrap_or("")
+            )),
+        };
+    }
     let found = match pointer {
         Some(p) => Some(
             out.json
@@ -226,4 +235,34 @@ fn corpus_golden() {
             insta::assert_snapshot!(format!("{name}.md"), redact(&out.markdown, &corpus));
         }
     });
+}
+
+/// Every corpus file is listed in MANIFEST.md with its SHA-256, and every row has a file.
+#[test]
+fn corpus_manifest_matches_the_files() {
+    use sha2::{Digest, Sha256};
+    let manifest = std::fs::read_to_string(corpus_dir().join("MANIFEST.md")).unwrap();
+    let mut listed = std::collections::BTreeMap::new();
+    for line in manifest.lines().filter(|l| l.starts_with("| web-text/")) {
+        let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+        assert_eq!(cells.len(), 4, "bad row: {line}");
+        assert!(
+            listed
+                .insert(cells[0].to_string(), cells[3].to_string())
+                .is_none()
+        );
+        assert!(cells[1].contains("http"), "no source URL: {line}");
+    }
+    let mut problems = Vec::new();
+    for file in corpus_files() {
+        let rel = format!("web-text/{}", file.file_name().unwrap().to_string_lossy());
+        let hash = hex::encode(Sha256::digest(std::fs::read(&file).unwrap()));
+        match listed.remove(&rel) {
+            None => problems.push(format!("{rel}: not in MANIFEST.md")),
+            Some(h) if h != hash => problems.push(format!("{rel}: hash differs")),
+            Some(_) => {}
+        }
+    }
+    problems.extend(listed.keys().map(|k| format!("{k}: no such file")));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }

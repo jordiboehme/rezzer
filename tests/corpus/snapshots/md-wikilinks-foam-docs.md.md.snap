@@ -11,7 +11,7 @@ temporal_confidence: medium
 source_sha256: "d36b6cbab90d8a9ca7c581f3fdda417d8386310d0f0b22f401669e185be07088"
 source_size: 4804
 format: markdown
-detected_by: "markdown syntax: atx headings, list markers"
+detected_by: "markdown syntax: atx headings, list markers, pipe table"
 encoding: "UTF-8"
 reader: "markdown/0.1.0"
 completeness: complete

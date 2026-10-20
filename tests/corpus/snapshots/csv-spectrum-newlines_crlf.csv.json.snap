@@ -85,7 +85,14 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Once upon a time",
+                    "text": "Once upon",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "a time",
                     "type": "text"
                   }
                 ],

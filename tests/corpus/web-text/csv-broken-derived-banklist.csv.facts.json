@@ -8,13 +8,20 @@
     "min_len": 2
   },
   {
+    "pointer": "/losses",
     "contains": "row has 9 fields, expected 7"
   },
   {
+    "pointer": "/losses",
     "contains": "row has 3 fields, expected 7"
   },
   {
-    "contains": "unterminated quote at record 9 (line 9)"
+    "pointer": "/losses",
+    "contains": "unterminated quote"
+  },
+  {
+    "pointer": "/losses",
+    "contains": "record 9 (line 9)"
   },
   {
     "pointer": "/losses",
@@ -25,6 +32,7 @@
     "equals": 9.0
   },
   {
-    "contains": "only in ragged rows"
+    "pointer": "/body/0/blocks/1/rows/8/6/inlines/0/text",
+    "equals": "only in ragged rows"
   }
 ]

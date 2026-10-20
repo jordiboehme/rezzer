@@ -4,6 +4,7 @@
     "equals": "csv"
   },
   {
-    "contains": "ha \"ha\" ha"
+    "pointer": "/body/0/blocks/0/rows/1/1/inlines/0/text",
+    "equals": "ha \"ha\" ha"
   }
 ]
