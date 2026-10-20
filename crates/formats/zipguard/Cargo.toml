@@ -1,0 +1,18 @@
+[package]
+name = "zipguard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded access to untrusted ZIP archives: entry, size and ratio limits on the real decompressed bytes"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/zipguard"
+readme = "README.md"
+keywords = ["zip", "archive", "security", "decompression-bomb", "limits"]
+categories = ["compression", "parser-implementations"]
+
+[dependencies]
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

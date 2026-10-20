@@ -11,6 +11,7 @@ members = [
     "crates/rezzer-mcp",
     "crates/formats/textenc",
     "crates/formats/csvsniff",
+    "crates/formats/zipguard",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
