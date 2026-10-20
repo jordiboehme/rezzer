@@ -1023,6 +1023,8 @@ struct Column<'a> {
     last_data: bool,
     /// The last text that heads the cells below it, with its row.
     head: Option<(&'a str, u32)>,
+    /// Every row from the head down to `last` holds a value or formula: an unbroken run.
+    solid: bool,
     /// The header at the top of the current run of values.
     block: Option<&'a str>,
 }
@@ -1033,9 +1035,10 @@ const UNIT_HEADERS: &[&str] = &["unit", "units", "uom", "einheit", "einheiten", 
 /// The texts around each wanted cell, in one sweep over the sorted cells.
 /// - The label to the left is at most [`LABEL_GAP`] empty cells away; a value or formula in
 ///   between stops the search.
-/// - The header is a text at most [`LABEL_GAP`] rows above, with only values, formulas or
-///   empty cells between. A text right under values of the same column (`see note` inside a
-///   number column) is a value, not a header.
+/// - The header is the first text above the value when an unbroken run of values or
+///   formulas joins them (any length, so every value under `t (m)` finds it). Across empty
+///   cells it is at most [`LABEL_GAP`] rows above. A text right under values of the same
+///   column (`see note` inside a number column) is a value, not a header.
 fn labels_of<'a>(
     cells: &'a [RawCell],
     wanted: &HashSet<(u32, u32)>,
@@ -1059,9 +1062,10 @@ fn labels_of<'a>(
                 .filter(|p| p.row == c.row && c.col - p.col - 1 <= LABEL_GAP)
                 .and_then(text_of)
                 .and_then(label);
+            let unbroken = near.is_some_and(|s| s.solid && c.row == s.last + 1);
             let header = near
                 .and_then(|s| s.head)
-                .filter(|(_, row)| c.row - row <= LABEL_GAP)
+                .filter(|(_, row)| unbroken || c.row - row <= LABEL_GAP)
                 .map(|(t, _)| t);
             // The value heads no table column of its own: `label | value | unit` rows.
             let in_table = near.and_then(|s| s.block).is_some();
@@ -1104,6 +1108,7 @@ fn labels_of<'a>(
                     last: c.row,
                     last_data: false,
                     head: head.map(|h| (h, c.row)),
+                    solid: head.is_some(),
                     block: head,
                 }
             }
@@ -1111,6 +1116,7 @@ fn labels_of<'a>(
                 last: c.row,
                 last_data: data,
                 head: near.and_then(|s| s.head),
+                solid: data && near.is_some_and(|s| s.solid && c.row == s.last + 1),
                 block: near.and_then(|s| s.block),
             },
         };

@@ -439,9 +439,23 @@ fn tunnel_parameters_have_labels() {
     }
     // `Target Factor of Safety | 2 | -`: a dash is no unit.
     assert_eq!(unit(param(doc, "Structural_Lining!B13")), (None, None));
-    let t = param(doc, "Structural_Lining!E49");
-    assert_eq!(t.label.as_deref(), Some("t"));
-    assert_eq!(unit(t), (Some("m"), Some("header")));
+    // `t (m)` heads the whole run E49:E72, `D (m)` the run E29:E38.
+    for anchor in [
+        "Structural_Lining!E49",
+        "Structural_Lining!E52",
+        "Structural_Lining!E72",
+        "Drainage!E32",
+        "Drainage!E38",
+    ] {
+        let t = param(doc, anchor);
+        let label = if anchor.starts_with("Drainage") {
+            "D"
+        } else {
+            "t"
+        };
+        assert_eq!(t.label.as_deref(), Some(label), "{anchor}");
+        assert_eq!(unit(t), (Some("m"), Some("header")), "{anchor}");
+    }
     assert!(graph(doc).nodes.len() > 1);
 }
 
@@ -609,30 +623,41 @@ fn disagreeing_units_give_none_with_a_note() {
 }
 
 #[test]
-fn headers_are_near_and_never_a_value() {
-    // `Length (m)` heads G42:G46; `see note` in G47 is a value inside the column.
-    let mut rows = vec![row(41, &[text("G41", "Length (m)")])];
+fn headers_head_their_run_and_never_a_value() {
+    // `Length (m)` heads the unbroken run G42:G46; `see note` in G47 is a value inside the
+    // column. `Speed (m/s)` in J41 heads J42, then gaps limit it to 3 rows.
+    let mut rows = vec![row(
+        41,
+        &[text("G41", "Length (m)"), text("J41", "Speed (m/s)")],
+    )];
     for r in 42..=50 {
-        let cell = if r == 47 {
+        let mut cells = vec![if r == 47 {
             text("G47", "see note")
         } else {
             num(&format!("G{r}"), f64::from(r), None)
-        };
-        let mut cells = vec![cell];
+        }];
         if r == 42 {
-            cells.push(formula_cell("H42", "SUM(G42:G50)", Some(1.0)));
+            cells.push(formula_cell("H42", "SUM(G42:G50,J42:J50)", Some(1.0)));
+        }
+        if [42, 44, 46].contains(&r) {
+            cells.push(num(&format!("J{r}"), f64::from(r), None));
         }
         rows.push(row(r, &cells));
     }
     let out = read(&Book::default().sheet("S", &ws("", &rows.concat(), "")));
     let doc = &out.document;
-    for anchor in ["S!G42", "S!G44"] {
+    for anchor in ["S!G42", "S!G44", "S!G45", "S!G46", "S!J42", "S!J44"] {
         let p = param(doc, anchor);
-        assert_eq!(p.label.as_deref(), Some("Length"), "{anchor}");
-        assert_eq!(unit(p), (Some("m"), Some("header")), "{anchor}");
+        let want = if anchor.starts_with("S!J") {
+            ("Speed", "m/s")
+        } else {
+            ("Length", "m")
+        };
+        assert_eq!(p.label.as_deref(), Some(want.0), "{anchor}");
+        assert_eq!(unit(p), (Some(want.1), Some("header")), "{anchor}");
     }
-    // More than 3 cells below the header, and below the text value: no header.
-    for anchor in ["S!G45", "S!G48", "S!G50"] {
+    // Below the text value, and more than 3 rows away across a gap: no header.
+    for anchor in ["S!G48", "S!G50", "S!J46"] {
         let p = param(doc, anchor);
         assert_eq!(p.label, None, "{anchor}");
         assert_eq!(unit(p), (None, None), "{anchor}");
