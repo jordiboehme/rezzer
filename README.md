@@ -31,7 +31,37 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (
 
 ## Status
 
-Early. The design is done, the formats and crates are picked after tests on about 600 public files and the code is being written right now. There is nothing to install yet. This README describes what Rezzer is built to do. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown and CSV today. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
+
+## Try it
+
+You need Rust (rustup picks the right version from `rust-toolchain.toml`).
+
+```sh
+git clone https://github.com/jordiboehme/rezzer
+cd rezzer
+cargo install --path crates/rezzer
+```
+
+Read a file:
+
+```sh
+rezzer read notes.md              # Markdown with OKF frontmatter to stdout
+rezzer rez budget.csv -o out/     # writes out/budget.csv.md
+rezzer read data.csv --json       # the document model as JSON
+rezzer inspect mystery.bin        # what is it, how sure, which reader
+rezzer formats                    # what this build can read
+```
+
+Use it from an agent (Claude Code shown, any MCP client works):
+
+```sh
+claude mcp add rezzer -- rezzer mcp
+```
+
+The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages.
+
+Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
 
 ## Why
 
@@ -155,6 +185,8 @@ Planned for the first release. Each format has its own page with what Rezzer ext
 | [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
+
+Ready to try today: Text, Markdown, CSV and TSV. The rest are planned.
 
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
 

@@ -2,7 +2,7 @@
 
 Rezzer reads delimited data files as tables and describes the data: column types, keys, missing values, units and relations between columns that it can check.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: available in the development version (no release yet).
 
 File types: `.csv`, `.tsv` and delimited data in `.txt` files. Rezzer detects the format by content, not by extension. A `.txt` file is checked for delimited data, and the output says how the format was decided.
 
