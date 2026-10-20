@@ -1394,3 +1394,137 @@ fn defined_name_texts_count_against_the_text_limit() {
         doc.losses
     );
 }
+
+fn raw_zip(files: &[(&str, String)]) -> Vec<u8> {
+    let mut w = ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, content) in files {
+        w.start_file(*name, opts).unwrap();
+        w.write_all(content.as_bytes()).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+/// A package whose sheet relationships and sheet elements are given, with a small sheet at
+/// `xl/worksheets/sheet1.xml` and a different part at `xl/./worksheets/sheet1.xml`.
+fn split_pkg(sheet_rels: &str, sheet_elems: &str, rels_ns: &str) -> Vec<u8> {
+    let bomb = ws(
+        "",
+        &format!(
+            "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>BOMB{}</t></is></c></row>",
+            " ".repeat(2_000_000)
+        ),
+        "",
+    );
+    raw_zip(&[
+        (
+            "[Content_Types].xml",
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"
+                .into(),
+        ),
+        (
+            "_rels/.rels",
+            format!(
+                "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{RELS}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
+            ),
+        ),
+        (
+            "xl/workbook.xml",
+            format!(
+                "<workbook xmlns=\"{MAIN}\" xmlns:r=\"{RELS}\" xmlns:x=\"urn:x\"><sheets>{sheet_elems}</sheets></workbook>"
+            ),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            format!("<Relationships xmlns=\"{PKG}\"{rels_ns}>{sheet_rels}</Relationships>"),
+        ),
+        ("xl/worksheets/sheet1.xml", small_sheet()),
+        ("xl/./worksheets/sheet1.xml", bomb),
+    ])
+}
+
+fn split_limits() -> Limits {
+    Limits {
+        max_unpacked_bytes: 3_000_000,
+        max_ratio: 100_000,
+        ..Limits::default()
+    }
+}
+
+const SHEET: &str = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/>";
+
+#[test]
+fn canonical_package_reads() {
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(split_pkg(&rels, SHEET, ""), split_limits());
+    // The dotted entry is never named, so the package is plain; only the small sheet is read.
+    assert_ne!(
+        out.completeness,
+        Completeness::Failed,
+        "{:#?}",
+        out.document.losses
+    );
+    assert_eq!(cell_text(&out.document, "S!A1").as_deref(), Some("1"));
+}
+
+#[test]
+fn prefixed_relationship_id_is_refused() {
+    let rels = format!(
+        "<Relationship x:Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>\
+         <Relationship Id=\"rId1\" x:Id=\"rIdZ\" Type=\"{RELS}/worksheet\" Target=\"./worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(
+        split_pkg(&rels, SHEET, " xmlns:x=\"urn:x\""),
+        split_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn prefixed_relationship_target_is_refused() {
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" x:Target=\"./worksheets/sheet1.xml\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(
+        split_pkg(&rels, SHEET, " xmlns:x=\"urn:x\""),
+        split_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn duplicate_relationship_type_is_refused() {
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" x:Type=\"{RELS}/styles\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(
+        split_pkg(&rels, SHEET, " xmlns:x=\"urn:x\""),
+        split_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
+    // A repeated attribute is refused as well.
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Type=\"{RELS}/styles\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(split_pkg(&rels, SHEET, ""), split_limits());
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn second_sheet_id_attribute_is_refused() {
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>\
+         <Relationship Id=\"rId2\" Type=\"{RELS}/worksheet\" Target=\"./worksheets/sheet1.xml\"/>"
+    );
+    let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" x:id=\"rId2\"/>";
+    let out = read_with(split_pkg(&rels, sheet, ""), split_limits());
+    refused(&out, &[LossReason::Damaged]);
+    let foreign = "<sheet name=\"S\" sheetId=\"1\" x:id=\"rId1\"/>";
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    let out = read_with(split_pkg(&rels, foreign, ""), split_limits());
+    refused(&out, &[LossReason::Damaged]);
+}

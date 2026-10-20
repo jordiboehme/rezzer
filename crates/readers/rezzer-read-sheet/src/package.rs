@@ -87,7 +87,20 @@ struct Rel {
     external: bool,
 }
 
-/// Reads the relationships of a `.rels` part. A DOCTYPE or broken XML is a refusal.
+/// The namespace of package relationship parts.
+const PKG_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+
+/// The namespaces of the `r:id` attribute (transitional and strict OOXML).
+const REL_NS: [&str; 2] = [
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships",
+];
+
+/// Reads the relationships of a `.rels` part. Only canonical markup is accepted, the kind
+/// every parser reads the same way: a `Relationships` root with only the package namespace
+/// as its default namespace, and `Relationship` children with exactly the unprefixed
+/// attributes `Id`, `Type`, `Target` and optionally `TargetMode`, each once. A DOCTYPE,
+/// other elements or attributes, or broken XML are a refusal.
 fn rels(zip: &mut Archive, part: &str) -> Result<Vec<Rel>, Refusal> {
     let bytes = zip
         .read(part)
@@ -96,34 +109,84 @@ fn rels(zip: &mut Archive, part: &str) -> Result<Vec<Rel>, Refusal> {
     let mut buf = Vec::new();
     let mut out = Vec::new();
     let damaged = |what: String| (LossReason::Damaged, format!("{part}: {what}"));
+    let mut depth = 0usize;
+    let mut root_seen = false;
     loop {
         buf.clear();
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == "Relationship" => {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| damaged(e.to_string()))?;
+        let (e, empty) = match event {
+            Event::Start(e) => (e, false),
+            Event::Empty(e) => (e, true),
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            Event::Text(t) => {
+                if !t.as_ref().chars().all(char::is_whitespace) {
+                    return Err(damaged("text outside the relationships".into()));
+                }
+                continue;
+            }
+            Event::DocType(_) => return Err(damaged("a DOCTYPE is not allowed".into())),
+            Event::Eof => break,
+            _ => continue,
+        };
+        let name = e.name().as_ref().to_string();
+        let mut attrs: Vec<(String, String)> = Vec::new();
+        for a in e.attributes() {
+            let a = a.map_err(|e| damaged(e.to_string()))?;
+            attrs.push((a.key.as_ref().to_string(), a.value.to_string()));
+        }
+        match (depth, name.as_str()) {
+            (0, "Relationships") if !root_seen => {
+                root_seen = true;
+                if attrs.len() != 1 || attrs[0].0 != "xmlns" || attrs[0].1 != PKG_NS {
+                    return Err(damaged(
+                        "the root must carry only the package relationships namespace".into(),
+                    ));
+                }
+            }
+            (1, "Relationship") => {
                 let mut rel = Rel {
                     id: String::new(),
                     kind: String::new(),
                     target: String::new(),
                     external: false,
                 };
-                for a in e.attributes() {
-                    let a = a.map_err(|e| damaged(e.to_string()))?;
-                    let value = a.value.to_string();
-                    match a.key.local_name().as_ref() {
+                let mut seen = HashSet::new();
+                for (key, value) in attrs {
+                    if !seen.insert(key.clone()) {
+                        return Err(damaged(format!("the attribute {key} is repeated")));
+                    }
+                    match key.as_str() {
                         "Id" => rel.id = value,
                         "Type" => rel.kind = value,
                         "Target" => rel.target = value,
                         "TargetMode" => rel.external = value.eq_ignore_ascii_case("External"),
-                        _ => {}
+                        other => {
+                            return Err(damaged(format!(
+                                "a relationship has the attribute {other}"
+                            )));
+                        }
                     }
+                }
+                if !["Id", "Type", "Target"].iter().all(|k| seen.contains(*k)) {
+                    return Err(damaged(
+                        "a relationship lacks its Id, Type or Target".into(),
+                    ));
                 }
                 out.push(rel);
             }
-            Ok(Event::DocType(_)) => return Err(damaged("a DOCTYPE is not allowed".into())),
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(e) => return Err(damaged(e.to_string())),
+            _ => return Err(damaged(format!("unexpected element {name}"))),
         }
+        if !empty {
+            depth += 1;
+        }
+    }
+    if !root_seen {
+        return Err(damaged("no Relationships root".into()));
     }
     let mut ids = HashSet::new();
     for r in &out {
@@ -137,7 +200,10 @@ fn rels(zip: &mut Archive, part: &str) -> Result<Vec<Rel>, Refusal> {
     Ok(out)
 }
 
-/// The relationship id of each `sheet` element of the workbook part, in order.
+/// The relationship id of each `sheet` element of the workbook part, in order. Each sheet
+/// must carry exactly one attribute with the local name `id`, in the relationships
+/// namespace as the workbook root declares it, and `name` and `sheetId` once each; no
+/// attribute local name may repeat.
 fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
     let bytes = zip
         .read(part)
@@ -146,25 +212,74 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
     let mut buf = Vec::new();
     let mut out = Vec::new();
     let damaged = |what: String| (LossReason::Damaged, format!("{part}: {what}"));
+    // Prefixes declared on the workbook root.
+    let mut prefixes: Option<HashMap<String, String>> = None;
     loop {
         buf.clear();
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == "sheet" => {
-                let mut id = None;
-                for a in e.attributes() {
-                    let a = a.map_err(|e| damaged(e.to_string()))?;
-                    // calamine matches the local name `id`, whatever the prefix.
-                    if a.key.local_name().as_ref() == "id" {
-                        id = Some(a.value.to_string());
-                    }
-                }
-                out.push(id.ok_or_else(|| damaged("a sheet without a relationship id".into()))?);
-            }
-            Ok(Event::DocType(_)) => return Err(damaged("a DOCTYPE is not allowed".into())),
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(e) => return Err(damaged(e.to_string())),
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| damaged(e.to_string()))?;
+        let e = match event {
+            Event::Start(e) | Event::Empty(e) => e,
+            Event::DocType(_) => return Err(damaged("a DOCTYPE is not allowed".into())),
+            Event::Eof => break,
+            _ => continue,
+        };
+        let mut attrs: Vec<(String, String)> = Vec::new();
+        for a in e.attributes() {
+            let a = a.map_err(|e| damaged(e.to_string()))?;
+            attrs.push((a.key.as_ref().to_string(), a.value.to_string()));
         }
+        if prefixes.is_none() {
+            prefixes = Some(
+                attrs
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        k.strip_prefix("xmlns:").map(|p| (p.to_string(), v.clone()))
+                    })
+                    .collect(),
+            );
+            continue;
+        }
+        if e.local_name().as_ref() != "sheet" {
+            continue;
+        }
+        let Some(declared) = prefixes.as_ref() else {
+            continue;
+        };
+        let mut local_seen = HashSet::new();
+        let mut id = None;
+        for (key, value) in &attrs {
+            let (prefix, local) = match key.split_once(':') {
+                Some((p, l)) => (Some(p), l),
+                None => (None, key.as_str()),
+            };
+            if !local_seen.insert(local.to_string()) {
+                return Err(damaged(format!("a sheet has two attributes named {local}")));
+            }
+            match (prefix, local) {
+                (Some(p), "id") => {
+                    let ns = declared.get(p).map(String::as_str).unwrap_or("");
+                    if !REL_NS.contains(&ns) {
+                        return Err(damaged(format!(
+                            "the sheet relationship id {key} is not in the relationships namespace"
+                        )));
+                    }
+                    id = Some(value.clone());
+                }
+                (None, "id") => {
+                    return Err(damaged(
+                        "a sheet id without the relationships prefix".into(),
+                    ));
+                }
+                (None, "name" | "sheetId") => {}
+                _ => {}
+            }
+        }
+        if !local_seen.contains("name") || !local_seen.contains("sheetId") {
+            return Err(damaged("a sheet lacks its name or sheetId".into()));
+        }
+        out.push(id.ok_or_else(|| damaged("a sheet without a relationship id".into()))?);
     }
     Ok(out)
 }
