@@ -2567,3 +2567,49 @@ fn small_group_that_skips_cells_lists_them() {
     let logic = logic_of(&d, true);
     assert!(logic.contains("| B30, B33 | 2 | `=A30` | A30 |"), "{logic}");
 }
+
+#[test]
+fn results_of_a_mixed_group_are_only_its_result_cells() {
+    let mut d = workbook();
+    let member = |anchor: &str, expr: &str, role: Role, value: f64| Formula {
+        role: Some(role),
+        cached: num(value),
+        ..copied(anchor, expr, &[], "p1", "Calc!C2:C4")
+    };
+    d.facets.formulas = vec![
+        member("Calc!C2", "=B2", Role::Intermediate, 1.0),
+        member("Calc!C3", "=B3", Role::Result, 2.0),
+        member("Calc!C4", "=B4", Role::Result, 3.0),
+    ];
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.contains("| C2:C4 | 3 | `=B2` |  | intermediate, result | 1 |"),
+        "{logic}"
+    );
+    let results = &logic[logic.find("#### Results").expect("Results")..];
+    assert!(results.contains("| C3:C4 | `=B3` | 2 |"), "{results}");
+    assert!(!results.contains("C2"), "{results}");
+}
+
+#[test]
+fn a_group_that_misses_cells_of_its_area_says_so() {
+    let mut d = workbook();
+    let mut list: Vec<Formula> = (2..=8)
+        .map(|r| {
+            copied(
+                &format!("Calc!C{r}"),
+                &format!("=B{r}"),
+                &[],
+                "p1",
+                "Calc!C2:C9",
+            )
+        })
+        .collect();
+    list.push(cell_formula("Calc!C9", "=0", &[], Role::Constant, 0.0));
+    d.facets.formulas = list;
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.contains("| C2:C9 (7 of 8 cells) | 7 | `=B2` |"),
+        "{logic}"
+    );
+}

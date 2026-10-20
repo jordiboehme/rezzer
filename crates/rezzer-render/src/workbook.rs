@@ -154,6 +154,9 @@ fn is_name(f: &Formula) -> bool {
 /// One row of the Formulas table: a formula of its own or a pattern group.
 struct Entry<'a> {
     members: Vec<&'a Formula>,
+    /// Only some members of a pattern (the results of a group with mixed roles): the
+    /// group's own area does not apply.
+    partial: bool,
 }
 
 impl<'a> Entry<'a> {
@@ -176,10 +179,16 @@ fn entries<'a>(list: &[&'a Formula]) -> Vec<Entry<'a>> {
                 Some(&i) => out[i].members.push(f),
                 None => {
                     by_pattern.insert(p, out.len());
-                    out.push(Entry { members: vec![f] });
+                    out.push(Entry {
+                        members: vec![f],
+                        partial: false,
+                    });
                 }
             },
-            None => out.push(Entry { members: vec![f] }),
+            None => out.push(Entry {
+                members: vec![f],
+                partial: false,
+            }),
         }
     }
     out
@@ -219,13 +228,36 @@ fn area(entry: &Entry<'_>, groups: &HashMap<&str, &str>) -> Vec<String> {
     vec![found]
 }
 
-/// The Cells text of a row, written for the part of `sheet`.
+/// The Cells text of a row, written for the part of `sheet`. A larger group of single cells
+/// that does not fill its area says how many of its cells it holds.
 fn area_text(entry: &Entry<'_>, groups: &HashMap<&str, &str>, sheet: Option<&str>) -> String {
-    area(entry, groups)
+    let list = area(entry, groups);
+    let mut out = list
         .iter()
         .map(|a| cell_text(local(a, sheet)))
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(", ");
+    let n = entry.members.len() as u64;
+    if let [one] = list.as_slice()
+        && n > 1
+        && entry.members.iter().all(|f| fills_one_cell(f))
+        && let Some(m) = cell_count(one).filter(|&m| m > n)
+    {
+        out.push_str(&format!(" ({n} of {m} cells)"));
+    }
+    out
+}
+
+/// An array, spill or data table formula fills the area it names; any other formula its cell.
+fn fills_area(f: &Formula) -> bool {
+    matches!(
+        f.kind,
+        Some(FormulaKind::Array | FormulaKind::Spill | FormulaKind::DataTable)
+    ) && f.range.as_ref().is_some_and(|r| r.0 != f.anchor.0)
+}
+
+fn fills_one_cell(f: &Formula) -> bool {
+    !fills_area(f)
 }
 
 /// A group with up to this many members that does not fill its area lists its cells.
@@ -240,10 +272,17 @@ fn cell_count(anchor: &str) -> Option<u64> {
 fn group_area(entry: &Entry<'_>, groups: &HashMap<&str, &str>) -> String {
     let first = entry.first();
     if entry.members.len() == 1 {
+        // A pattern member's range is the group's area; only a filling formula owns one.
+        if entry.partial && !fills_area(first) {
+            return first.anchor.0.clone();
+        }
         return first
             .range
             .as_ref()
             .map_or_else(|| first.anchor.0.clone(), |r| r.0.clone());
+    }
+    if entry.partial {
+        return bounding_box(entry);
     }
     if let Some(range) = &first.range
         && range.0 != first.anchor.0
@@ -257,6 +296,12 @@ fn group_area(entry: &Entry<'_>, groups: &HashMap<&str, &str>) -> String {
     if let Some(node) = first.pattern.as_deref().and_then(|p| groups.get(p)) {
         return (*node).to_string();
     }
+    bounding_box(entry)
+}
+
+/// The box around the members' cells, or the first cell when they do not share a sheet.
+fn bounding_box(entry: &Entry<'_>) -> String {
+    let first = entry.first();
     let Some((sheet, _)) = split_sheet(&first.anchor.0) else {
         return first.anchor.0.clone();
     };
@@ -409,7 +454,23 @@ fn results_table(
     sheet: Option<&str>,
     groups: &HashMap<&str, &str>,
 ) -> Option<String> {
-    let results: Vec<&Entry<'_>> = list.iter().filter(|e| e.has_role(Role::Result)).collect();
+    // Only the members that are results: a group with mixed roles gives its result cells.
+    let results: Vec<Entry<'_>> = list
+        .iter()
+        .filter(|e| e.has_role(Role::Result))
+        .map(|e| {
+            let members: Vec<&Formula> = e
+                .members
+                .iter()
+                .copied()
+                .filter(|f| f.role == Some(Role::Result))
+                .collect();
+            Entry {
+                partial: members.len() < e.members.len(),
+                members,
+            }
+        })
+        .collect();
     if results.is_empty() {
         return None;
     }

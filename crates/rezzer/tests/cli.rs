@@ -248,7 +248,9 @@ fn no_math_drops_the_math_column() {
     let with = logic(&[]);
     assert!(with.contains("| Value | Math |"), "{with}");
     assert!(with.contains("$`"), "{with}");
+    // The second run renders the cached model: math is no part of the cache key.
     let without = logic(&["--no-math"]);
+    assert_eq!(env.cache_entries(), 1);
     assert!(without.contains("### Structural\\_Lining"), "{without}");
     assert!(!without.contains("Math"), "{without}");
     assert!(!without.contains("$`"), "{without}");
