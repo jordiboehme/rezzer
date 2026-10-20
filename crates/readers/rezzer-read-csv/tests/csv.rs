@@ -358,3 +358,74 @@ fn columns_table_is_marked_as_summary() {
         vec![(None, None), (Some("Columns"), Some("summary"))]
     );
 }
+
+fn property(out: &ReadOutcome, key: &str) -> Value {
+    out.document.properties.custom[key].clone()
+}
+
+#[test]
+fn unterminated_quote_at_the_end_is_an_error_loss() {
+    let out = read(b"a,b\n1,2\n3,\"oops\n4,5\n6,7\n");
+    assert_eq!(out.completeness, Completeness::Partial);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.starts_with("unterminated quote"))
+        .expect("loss");
+    assert_eq!(loss.why, LossReason::Damaged);
+    assert_eq!(loss.severity, Severity::Error);
+    assert_eq!(loss.location, "record 3 (line 3)");
+    assert_eq!(
+        loss.what,
+        "unterminated quote at record 3 (line 3): the rest of the file was read as one cell"
+    );
+}
+
+#[test]
+fn quote_closed_inside_a_later_field_is_reported() {
+    let out = read(b"a,b\n1,\"open\n2,3\n4,\"x y\",5\n6,7\n");
+    assert_eq!(out.completeness, Completeness::Partial);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| {
+            l.what
+                .starts_with("unterminated quote at record 2 (line 2)")
+        })
+        .expect("loss");
+    assert_eq!(loss.severity, Severity::Error);
+}
+
+#[test]
+fn column_count_is_the_padded_width_everywhere() {
+    let out = read(ragged_input().as_bytes());
+    assert_eq!(property(&out, "columns"), Value::number(4.0, None));
+    let (_, blocks) = tables(&out);
+    let facts = rows_of(blocks[1]);
+    assert_eq!(
+        facts[0],
+        ["Column", "Type", "Unit", "Missing", "Unique", "Key", "Note"]
+    );
+    assert_eq!(facts.len(), 5);
+    assert_eq!(facts[4][0], "Column 4");
+    assert_eq!(facts[4][6], "only in ragged rows");
+    assert_eq!(facts[1][6], "");
+}
+
+#[test]
+fn columns_table_has_no_note_column_without_ragged_rows() {
+    let out = read(b"a,b\n1,2\n3,4\n");
+    let (_, blocks) = tables(&out);
+    assert_eq!(rows_of(blocks[1])[0].len(), 6);
+}
+
+#[test]
+fn newline_runs_in_cells_become_one_space() {
+    let out = read(b"a,b\n1,\"ha \n\"\"ha\"\" \r\n  ha\"\n3,\"x  y\"\n");
+    let (_, blocks) = tables(&out);
+    let rows = rows_of(blocks[0]);
+    assert_eq!(rows[1][1], "ha \"ha\" ha");
+    assert_eq!(rows[2][1], "x  y");
+}

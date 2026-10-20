@@ -128,6 +128,7 @@ impl Reader for CsvReader {
         };
         custom.insert("delimiter".into(), Value::Text { value: delimiter });
         custom.insert("rows".into(), Value::number(analysis.rows as f64, None));
+        // Replaced by the width of the padded table once it is known.
         custom.insert(
             "columns".into(),
             Value::number(analysis.columns.len() as f64, None),
@@ -163,12 +164,23 @@ impl Reader for CsvReader {
                 severity: Severity::Warning,
             });
         }
-        if analysis.unterminated_quote {
+        if let Some(problem) = analysis.quote_problem {
+            let place = match record_at(text, &dialect, problem.offset) {
+                Some((n, line)) => format!("record {n} (line {line})"),
+                None => "end of file".to_string(),
+            };
+            let what = if problem.at_end {
+                format!("unterminated quote at {place}: the rest of the file was read as one cell")
+            } else {
+                format!(
+                    "unterminated quote at {place}: the cell ran over the following lines up to a quote inside a later field"
+                )
+            };
             doc.losses.push(Loss {
-                location: "end of file".into(),
-                what: "a quoted field is not closed".into(),
+                location: place,
+                what,
                 why: LossReason::Damaged,
-                severity: Severity::Warning,
+                severity: Severity::Error,
             });
         }
         let damaged = doc.losses.iter().any(|l| l.why == LossReason::Damaged);
@@ -220,7 +232,7 @@ impl Reader for CsvReader {
             let cells = rec
                 .iter()
                 .enumerate()
-                .map(|(j, v)| anchored(&sheet, j, row_no, v))
+                .map(|(j, v)| anchored(&sheet, j, row_no, &tidy(v)))
                 .collect();
             rows.push(cells);
         }
@@ -254,6 +266,13 @@ impl Reader for CsvReader {
             }
         }
 
+        let rows_for_extra: Vec<Vec<String>> = if width > analysis.columns.len() {
+            rows.iter()
+                .map(|r| r.iter().map(cell_text).collect())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut blocks = Vec::new();
         if !timed_out {
             blocks.push(Block::Table {
@@ -266,10 +285,17 @@ impl Reader for CsvReader {
             });
         }
 
-        // The column facts.
+        // The column facts. The column count is the width of the (padded) table.
+        let known = analysis.columns.len();
+        let ncols_total = if timed_out { known } else { width.max(known) };
+        custom_columns(&mut doc, ncols_total);
+        let extra = ncols_total > known;
+        let mut head = vec!["Column", "Type", "Unit", "Missing", "Unique", "Key"];
+        if extra {
+            head.push("Note");
+        }
         let mut col_rows = vec![
-            ["Column", "Type", "Unit", "Missing", "Unique", "Key"]
-                .iter()
+            head.iter()
                 .map(|h| Cell::new(vec![plain(h)]))
                 .collect::<Vec<_>>(),
         ];
@@ -281,13 +307,37 @@ impl Reader for CsvReader {
             } else {
                 "no"
             };
-            let values = [
+            let mut values = vec![
                 c.name.clone(),
                 kind_label(&c.kind),
                 c.unit.clone().unwrap_or_default(),
                 c.missing.to_string(),
                 unique.to_string(),
                 if c.key_like { "yes" } else { "no" }.to_string(),
+            ];
+            if extra {
+                values.push(String::new());
+            }
+            col_rows.push(values.iter().map(|v| Cell::new(vec![plain(v)])).collect());
+        }
+        // Columns that exist only because some rows have more fields than the rest.
+        for j in known..ncols_total {
+            let data = rows_for_extra.iter().skip(usize::from(dialect.has_header));
+            let (mut missing, mut any) = (0, false);
+            for row in data {
+                match row.get(j) {
+                    Some(v) if !v.is_empty() => any = true,
+                    _ => missing += 1,
+                }
+            }
+            let values = [
+                format!("Column {}", j + 1),
+                if any { "unknown" } else { "empty" }.to_string(),
+                String::new(),
+                missing.to_string(),
+                "not checked".to_string(),
+                "no".to_string(),
+                "only in ragged rows".to_string(),
             ];
             col_rows.push(values.iter().map(|v| Cell::new(vec![plain(v)])).collect());
         }
@@ -328,6 +378,72 @@ fn anchored(sheet: &str, column: usize, row: usize, text: &str) -> Cell {
     let mut cell = Cell::new(vec![plain(text)]);
     cell.anchor = Some(Anchor(format!("{sheet}!{}{row}", column_letter(column))));
     cell
+}
+
+/// Sets the `columns` property.
+fn custom_columns(doc: &mut Document, columns: usize) {
+    doc.properties
+        .custom
+        .insert("columns".into(), Value::number(columns as f64, None));
+}
+
+/// The text of a cell made by this reader (one text inline).
+fn cell_text(cell: &Cell) -> String {
+    cell.inlines
+        .iter()
+        .map(|i| match i {
+            Inline::Text { text, .. } => text.as_str(),
+            _ => "",
+        })
+        .collect()
+}
+
+/// Replaces each run of whitespace that contains a line break with one space.
+fn tidy(value: &str) -> String {
+    if !value.contains(['\n', '\r']) {
+        return value.to_string();
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.contains(['\n', '\r']) {
+            out.push(' ');
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in value.chars() {
+        if c.is_whitespace() {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+/// The 1-based record that contains the byte `offset`, with the line it starts on.
+fn record_at(text: &str, dialect: &Dialect, offset: usize) -> Option<(usize, usize)> {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(dialect.delimiter)
+        .quote(dialect.quote)
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(text.as_bytes());
+    let mut rec = csv::StringRecord::new();
+    let (mut n, mut found) = (0, None);
+    while reader.read_record(&mut rec).unwrap_or(false) {
+        n += 1;
+        let pos = rec.position()?;
+        if pos.byte() as usize > offset {
+            break;
+        }
+        found = Some((n, pos.line() as usize));
+    }
+    found
 }
 
 /// Maps the physical start line of each listed ragged record to its 1-based record number.
