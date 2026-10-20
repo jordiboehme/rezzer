@@ -41,6 +41,13 @@ pub(crate) struct Chain {
     /// data start, while an update that writes the stream object again puts it elsewhere.
     starts: HashSet<usize>,
     streams: HashSet<usize>,
+    /// Keep free entries in `freed` (only when a section is read on its own).
+    keep_free: bool,
+    freed: Vec<u32>,
+    /// Where the section read last starts, and where it ends: after its trailer dictionary or
+    /// after the data of its cross-reference stream.
+    start: Option<usize>,
+    end: usize,
 }
 
 impl Chain {
@@ -56,6 +63,15 @@ impl Chain {
     fn add(&mut self, n: u32, e: Entry) {
         if n > 0 {
             self.table.entry(n).or_insert(e);
+        }
+    }
+
+    fn free(&mut self, n: u64) {
+        if self.keep_free
+            && let Ok(n) = u32::try_from(n)
+            && n > 0
+        {
+            self.freed.push(n);
         }
     }
 
@@ -121,6 +137,77 @@ pub(crate) fn read_chain(
     Ok(Some(chain))
 }
 
+/// The offset the last `startxref` of the file names.
+pub(crate) fn last_startxref(bytes: &[u8]) -> Option<u64> {
+    let at = rfind(bytes, b"startxref")?;
+    Lexer::new(bytes, at + 9).uint()
+}
+
+/// One cross-reference section read on its own.
+#[derive(Debug)]
+pub(crate) struct Part {
+    /// Where the section starts (the `xref` keyword or the stream object) and ends.
+    pub start: usize,
+    pub end: usize,
+    /// The entries in use it lists (with those of a hybrid file's `/XRefStm`).
+    pub table: HashMap<u32, Entry>,
+    /// The object numbers it lists as free.
+    pub freed: Vec<u32>,
+    /// `/Root`, `/Info`, `/Encrypt` and `/ID` of its trailer.
+    pub trailer: Dictionary,
+    pub prev: Option<u64>,
+}
+
+/// What reading one section gives.
+pub(crate) enum Step {
+    Part(Part),
+    /// The offset leads to a section read already.
+    Seen,
+    Damaged,
+}
+
+/// Reads the sections of a chain one by one. A section is read at most once, however many
+/// offsets lead to it.
+#[derive(Default)]
+pub(crate) struct Sections {
+    starts: HashSet<usize>,
+    streams: HashSet<usize>,
+}
+
+impl Sections {
+    pub fn read(
+        &mut self,
+        bytes: &[u8],
+        base: usize,
+        off: u64,
+        budget: &mut Budget,
+    ) -> Result<Step, OpenError> {
+        let mut chain = Chain {
+            starts: std::mem::take(&mut self.starts),
+            streams: std::mem::take(&mut self.streams),
+            keep_free: true,
+            ..Chain::default()
+        };
+        let found = section(bytes, base, off, budget, &mut chain);
+        self.starts = std::mem::take(&mut chain.starts);
+        self.streams = std::mem::take(&mut chain.streams);
+        Ok(match found? {
+            None => Step::Damaged,
+            Some(prev) => match chain.start {
+                None => Step::Seen,
+                Some(start) => Step::Part(Part {
+                    start,
+                    end: chain.end.max(start),
+                    table: chain.table,
+                    freed: chain.freed,
+                    trailer: chain.trailer,
+                    prev,
+                }),
+            },
+        })
+    }
+}
+
 /// The places an offset may point at: counted from `%PDF-`, as most readers do, or from the
 /// first byte.
 pub(crate) fn places(base: usize, off: u64) -> Vec<usize> {
@@ -156,6 +243,7 @@ fn section(
         }
         if l.keyword(b"xref") {
             chain.starts.insert(start);
+            chain.start = Some(start);
             return classic(bytes, base, l, budget, chain);
         }
         if let Some(prev) = stream_section(bytes, base, pos, budget, chain)? {
@@ -194,6 +282,7 @@ fn classic(
                 Ok(d) => d,
                 Err(f) => return fail(f),
             };
+            let end = l.i;
             chain.merge(&trailer);
             // A hybrid file lists the members of its object streams in a stream beside the
             // table. Its entries come before older sections.
@@ -206,6 +295,7 @@ fn classic(
                     }
                 }
             }
+            chain.end = end;
             return Ok(Some(
                 int(&trailer, b"Prev").and_then(|v| u64::try_from(v).ok()),
             ));
@@ -226,6 +316,9 @@ fn classic(
                 return fail(f);
             }
             let n = first.saturating_add(k);
+            if kind == b"f" {
+                chain.free(n);
+            }
             if kind == b"n"
                 && let (Ok(n), Ok(generation), Ok(pos)) = (
                     u32::try_from(n),
@@ -272,6 +365,9 @@ fn stream_section(
         return Ok(Some(None));
     }
     chain.starts.insert(start);
+    if chain.start.is_none() {
+        chain.start = Some(start);
+    }
     let (_, obj) = match finish(bytes, head, None, budget) {
         Ok(found) => found,
         Err(f) => return fail(f),
@@ -279,6 +375,7 @@ fn stream_section(
     let Object::Stream(stream) = obj else {
         return Ok(None);
     };
+    chain.end = data_start.saturating_add(stream.content.len());
     let dict = &stream.dict;
     // lopdf takes any stream here as a cross-reference stream, typed or not.
     if !(dict.has_type(b"XRef") || dict.get(b"W").is_ok()) {
@@ -351,6 +448,7 @@ fn stream_section(
                         chain.add(num, Entry::Compressed { container, index });
                     }
                 }
+                0 => chain.free(first.saturating_add(k)),
                 _ => {}
             }
         }

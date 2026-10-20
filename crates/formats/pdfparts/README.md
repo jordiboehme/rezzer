@@ -16,6 +16,7 @@ pdfparts reads the object layer of a PDF file. It tells what the file is and how
 - Document scripts, the open action, document, page, field and link actions. They are listed and never run or followed
 - Signatures with signer, reason, date, sub-filter and byte range, and whether they cover the whole file. They are described, not verified
 - Encryption: the method and whether the file opens without a password
+- Revisions: each save of the file with its end offset, its modification date and what it changed in words, such as `field Name value changed from Alice to Bob`, `signed field Signature1` or `changed page 2 content`. Only the newest saves are compared (`max_revisions`), older ones are counted
 - A canonical copy of the file for other parsers: only the objects the document uses, decrypted, with a classic cross-reference table and no object streams
 
 ```rust
@@ -39,6 +40,8 @@ Page numbers follow lopdf's page walk, so they match other parsers built on lopd
 lopdf is used as the object model in memory, to compute the decryption key and decrypt single objects, and to write the canonical copy. It never parses the original file. Trees, the outline, labels, links, annotations, the structure tree and threads are walked by this crate with a visited set and depth and item limits. A cycle or a broken entry becomes an `Issue` and the rest is still read. Nothing panics.
 
 A reader that copies text or lists out of the file may copy at most what is left of `max_object_bytes` after the open. Many entries can name one long string, and this keeps such a file from filling the memory. When the budget runs out, the reader stops with an `Issue` and keeps what it has. An `/Annots` array that several pages share is read once, for the first of these pages. The structure tree and the embedded files are read once and kept.
+
+Revisions are read from the bytes of the file with the same parser. Each section of the cross-reference chain is one save. The first section of a linearized file is part of the first save. Only the objects a save lists are parsed, and each object and object stream is read once. Pages are compared by their content references and stream lengths, not by decoded content.
 
 The password is never written into an error, an issue or a `Debug` output.
 

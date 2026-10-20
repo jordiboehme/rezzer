@@ -13,6 +13,7 @@
 //! one array or dictionary, or the members listed in one object stream.
 
 mod crypt;
+pub(crate) mod history;
 mod lexer;
 mod object;
 mod predict;
@@ -29,6 +30,8 @@ use crate::{Encryption, Issue, IssueKind, Limits, OpenError};
 use lexer::Lexer;
 use store::Store;
 use xref::{Entry, read_chain, rebuild};
+
+pub(crate) use crypt::Crypt;
 
 /// What every parsed value costs, on top of its bytes. About the size of a lopdf object.
 pub(crate) const VALUE_COST: u64 = 128;
@@ -209,6 +212,8 @@ pub(crate) struct Built {
     pub doc: Document,
     pub canonical: Vec<u8>,
     pub encryption: Option<Encryption>,
+    /// The key, kept to read the objects of earlier revisions.
+    pub crypt: Option<Crypt>,
     pub issues: Vec<Issue>,
     /// Bytes object streams and cross-reference streams unpacked to.
     pub unpacked: u64,
@@ -220,6 +225,12 @@ pub(crate) struct Built {
 
 /// How far into the file the `%PDF-` header may start.
 pub(crate) const HEADER_WINDOW: usize = 1024;
+
+/// Where `%PDF-` starts: the base that offsets in the file count from.
+pub(crate) fn header_base(bytes: &[u8]) -> Option<usize> {
+    let head = &bytes[..bytes.len().min(HEADER_WINDOW)];
+    head.windows(5).position(|w| w == b"%PDF-")
+}
 
 /// The version in the header, if it looks like one.
 fn version(bytes: &[u8], base: usize) -> String {
@@ -291,6 +302,7 @@ pub(crate) fn build(
     // written.
     objects.retain(|_, o| !matches!(o.type_name(), Ok(b"ObjStm" | b"XRef" | b"Linearized")));
     issues.append(&mut store.issues);
+    let crypt = store.crypt.take();
     let mut budget = store.budget;
     if budget.not_read > 0 {
         let n = budget.not_read;
@@ -331,6 +343,7 @@ pub(crate) fn build(
         doc,
         canonical: out.out,
         encryption,
+        crypt,
         issues,
         unpacked: budget.unpacked,
         charged: budget.bytes,

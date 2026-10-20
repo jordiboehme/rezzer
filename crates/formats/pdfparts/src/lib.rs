@@ -7,7 +7,8 @@
 //! A PDF library gives you objects. This crate reads what they mean: document metadata (Info
 //! and XMP), language, pages with their labels, sizes and images, the outline, named
 //! destinations, links, annotations, the structure tree, embedded files, layers, article
-//! threads, form fields, scripts and signatures. Scripts are read as text and never run.
+//! threads, form fields, scripts, signatures and revisions. Scripts are read as text and never
+//! run.
 //!
 //! [`Pdf::open`] parses the file with its own bounded parser, keeps only the objects the
 //! document reaches, and writes them as canonical bytes ([`Pdf::canonical`]): a plain PDF with a
@@ -33,6 +34,7 @@ mod nav;
 pub mod objects;
 mod pagetree;
 mod parse;
+mod revisions;
 pub mod script;
 mod signatures;
 mod structure;
@@ -50,6 +52,7 @@ pub use extras::{EmbeddedFile, Layer, Thread};
 pub use forms::{Field, FieldKind, Form};
 pub use meta::{Info, PdfDate};
 pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
+pub use revisions::{Revision, Revisions};
 pub use signatures::{Sig, SigKind};
 pub use structure::{StructElem, StructTree};
 
@@ -174,6 +177,8 @@ pub struct Pdf {
     object_bytes: u64,
     limits: Limits,
     encryption: Option<Encryption>,
+    /// The decryption key, to read the objects of earlier revisions. Never printed.
+    crypt: Option<parse::Crypt>,
     /// Page objects in page order; page number = index + 1.
     pages: Vec<pagetree::PageNode>,
     page_numbers: HashMap<ObjectId, u32>,
@@ -271,6 +276,7 @@ impl Pdf {
             object_bytes: built.charged,
             limits: *limits,
             encryption: built.encryption,
+            crypt: built.crypt,
             pages,
             page_numbers,
             verdict,
