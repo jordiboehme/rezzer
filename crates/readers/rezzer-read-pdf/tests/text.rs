@@ -191,6 +191,76 @@ fn untagged_headings_from_size() {
 }
 
 #[test]
+fn repeated_line_inside_the_text_stays_text() {
+    let words = ["alpha", "beta", "gamma", "delta"];
+    let pages: Vec<Page> = words
+        .iter()
+        .map(|w| {
+            Page::text(format!(
+                "{}{}{}{}",
+                show("F1", 9.0, 72.0, 815.0, "ACME Quarterly Report"),
+                show(
+                    "F1",
+                    11.0,
+                    72.0,
+                    790.0,
+                    &format!("The {w} section starts here.")
+                ),
+                show("F1", 11.0, 72.0, 760.0, "Control:"),
+                show(
+                    "F1",
+                    11.0,
+                    72.0,
+                    500.0,
+                    &format!("More about {w} in plain words.")
+                ),
+            ))
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=4u32 {
+        let roles: Vec<(Option<String>, String)> = page(&out, n)
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { inlines, role, .. } => Some((role.clone(), plain_text(inlines))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            roles[1],
+            (Some("page-header".into()), "ACME Quarterly Report".into())
+        );
+        // In the top band and on every page, but below text of the page: not a header.
+        assert!(
+            roles
+                .iter()
+                .any(|(r, t)| r.is_none() && t.contains("Control:")),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+#[test]
+fn latex_page_numbers_are_footers() {
+    // pdflatex sets the page number about 90 points above the bottom of an A4 page.
+    let out = read(&corpus("pypdf-outline.pdf"));
+    for n in 1..=4u32 {
+        let blocks = page(&out, n);
+        match blocks.last() {
+            Some(Block::Paragraph {
+                inlines,
+                role: Some(role),
+                ..
+            }) => {
+                assert_eq!(role, "page-footer", "page {n}");
+                assert_eq!(plain_text(inlines), n.to_string());
+            }
+            other => panic!("page {n}: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn actual_text_replaces_glyphs() {
     let out = read(&corpus("pdfbox-actualtext-din91379.pdf"));
     let t = all_text(&out);
@@ -335,7 +405,7 @@ fn running_header_and_footer_get_roles() {
                     "F1",
                     11.0,
                     72.0,
-                    700.0,
+                    500.0,
                     &format!("Body text of page {n} goes here, with a few more words to read.")
                 ),
                 show("F1", 9.0, 280.0, 30.0, &format!("Page {n} of 4")),

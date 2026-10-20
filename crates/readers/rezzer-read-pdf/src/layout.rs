@@ -39,7 +39,8 @@ pub(crate) struct Run {
 }
 
 /// Share of the page height at the top and the bottom where running headers and footers sit.
-const BAND: f32 = 0.08;
+/// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
+const BAND: f32 = 0.18;
 
 /// Pages a header or footer line must repeat on.
 const REPEATS: usize = 3;
@@ -81,9 +82,9 @@ pub(crate) struct Style {
     pub body_size: f32,
     /// Distinct heading sizes of an untagged file, largest first.
     heading_sizes: Vec<f32>,
-    /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages, with digits
-    /// replaced.
-    furniture: HashSet<(Band, String)>,
+    /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
+    /// height, with digits replaced.
+    furniture: HashSet<Furniture>,
 }
 
 /// One visual line.
@@ -160,6 +161,20 @@ fn band(line: &Line<'_>, height: Option<f32>) -> Option<Band> {
     }
 }
 
+/// A running header or footer line: its band, its text with digits replaced and the middle
+/// of the line in steps of [`Y_STEP`] points.
+type Furniture = (Band, String, i32);
+
+/// Lines of one header or footer sit at the same height on every page, within this many
+/// points.
+const Y_STEP: f32 = 4.0;
+
+fn furniture_key_of(line: &Line<'_>, height: Option<f32>) -> Option<Furniture> {
+    let b = band(line, height)?;
+    let key = furniture_key(&line.text);
+    (!key.is_empty()).then(|| (b, key, (line.middle() / Y_STEP).round() as i32))
+}
+
 /// Rounds a font size to half points.
 fn size_key(size: f32) -> i32 {
     (size * 2.0).round() as i32
@@ -168,18 +183,15 @@ fn size_key(size: f32) -> i32 {
 impl Style {
     /// Learns body size, heading sizes and running headers and footers from every page.
     pub(crate) fn new(pages: &[PageText<'_>]) -> Style {
-        let mut seen: HashMap<(Band, String), HashSet<u32>> = HashMap::new();
+        let mut seen: HashMap<Furniture, HashSet<u32>> = HashMap::new();
         for p in pages {
             for l in lines(p.runs) {
-                if let Some(b) = band(&l, p.height) {
-                    let key = furniture_key(&l.text);
-                    if !key.is_empty() {
-                        seen.entry((b, key)).or_default().insert(p.page);
-                    }
+                if let Some(key) = furniture_key_of(&l, p.height) {
+                    seen.entry(key).or_default().insert(p.page);
                 }
             }
         }
-        let furniture: HashSet<(Band, String)> = seen
+        let furniture: HashSet<Furniture> = seen
             .into_iter()
             .filter(|(_, pages)| pages.len() >= REPEATS)
             .map(|(k, _)| k)
@@ -190,8 +202,10 @@ impl Style {
         };
         let mut chars: HashMap<i32, usize> = HashMap::new();
         for p in pages {
-            for l in lines(p.runs) {
-                if style.furniture_band(&l, p.height).is_some() {
+            let all = lines(p.runs);
+            let bands = style.furniture(&all, p.height);
+            for (l, b) in all.iter().zip(&bands) {
+                if b.is_some() {
                     continue;
                 }
                 for r in l.runs {
@@ -207,8 +221,10 @@ impl Style {
             .unwrap_or(0.0);
         let mut sizes: Vec<i32> = Vec::new();
         for p in pages {
-            for l in lines(p.runs) {
-                if style.furniture_band(&l, p.height).is_none() && style.is_heading_size(&l) {
+            let all = lines(p.runs);
+            let bands = style.furniture(&all, p.height);
+            for (l, b) in all.iter().zip(&bands) {
+                if b.is_none() && style.is_heading_size(l) {
                     sizes.push(size_key(l.size));
                 }
             }
@@ -219,11 +235,30 @@ impl Style {
         style
     }
 
-    fn furniture_band(&self, line: &Line<'_>, height: Option<f32>) -> Option<Band> {
-        let b = band(line, height)?;
-        self.furniture
-            .contains(&(b, furniture_key(&line.text)))
-            .then_some(b)
+    /// The band of each line that is a running header or footer on its page. A header stands
+    /// above all text of the page and a footer below it: a repeated line inside the text
+    /// stays text.
+    fn furniture(&self, lines: &[Line<'_>], height: Option<f32>) -> Vec<Option<Band>> {
+        let found: Vec<Option<Band>> = lines
+            .iter()
+            .map(|l| {
+                furniture_key_of(l, height)
+                    .filter(|k| self.furniture.contains(k))
+                    .map(|k| k.0)
+            })
+            .collect();
+        let body = || lines.iter().zip(&found).filter(|(_, b)| b.is_none());
+        let top = body().map(|(l, _)| l.middle()).fold(f32::MIN, f32::max);
+        let bottom = body().map(|(l, _)| l.middle()).fold(f32::MAX, f32::min);
+        lines
+            .iter()
+            .zip(found)
+            .map(|(l, b)| match b {
+                Some(Band::Top) if l.middle() > top => Some(Band::Top),
+                Some(Band::Bottom) if l.middle() < bottom => Some(Band::Bottom),
+                _ => None,
+            })
+            .collect()
     }
 
     fn is_heading_size(&self, line: &Line<'_>) -> bool {
@@ -285,8 +320,10 @@ pub(crate) fn page_blocks(
     let mut flow: Vec<Run> = Vec::with_capacity(runs.len());
     let mut headers = Vec::new();
     let mut footers = Vec::new();
-    for l in lines(&runs) {
-        match cx.style.furniture_band(&l, height) {
+    let all = lines(&runs);
+    let bands = cx.style.furniture(&all, height);
+    for (l, b) in all.iter().zip(bands) {
+        match b {
             Some(Band::Top) => headers.push(l.runs),
             Some(Band::Bottom) => footers.push(l.runs),
             None => flow.extend_from_slice(l.runs),
