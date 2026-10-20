@@ -6,28 +6,31 @@
 //! completeness, so a hit skips reading and enriching.
 //!
 //! The key is the SHA-256 of a canonical JSON object (sorted keys) with the source hash, the
-//! Rezzer and model versions and what else changes the document: the file name (readers use it, for example as the CSV sheet name, and it is a
+//! Rezzer version and build id, the model version and what else changes the document: the file name (readers use it, for example as the CSV sheet name, and it is a
 //! detection hint), the detected format (a MIME hint can change it), the reader id and
-//! version (the reader set depends on cargo features), the limits and the disabled enrich
-//! passes. The request's output kind, sections and `generated_at` are not in the key: they
+//! version (the reader set depends on cargo features), the limits except the page size and
+//! the disabled enrich passes. The request's output kind, sections and `generated_at` are not in the key: they
 //! only change rendering, so Markdown and JSON runs share an entry. A request with a password
 //! is never cached (decided by the pipeline).
 //!
 //! Entries are written atomically (temporary file, then rename). An entry that does not parse
 //! is ignored and rewritten. After a write that takes the cache over
-//! [`crate::Config::cache_max_bytes`], the oldest entries (by modification time) are removed
+//! [`crate::Config::cache_max_bytes`], the least recently used entries (by modification
+//! time, which a hit refreshes) are removed
 //! until it is under 90 % of the cap. The cache is best effort: any cache error is skipped
 //! silently and the run goes on.
 
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use rezzer_model::{Completeness, Document, MODEL_VERSION, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::{Config, VERSION};
+use crate::{BUILD_ID, Config, VERSION};
 
 pub(crate) struct Cache {
     dir: PathBuf,
@@ -64,11 +67,19 @@ impl Cache {
 
     /// The entry for `key`, if there is one that parses and belongs to `src`.
     pub(crate) fn get(&self, key: &str, src: &Source) -> Option<(Document, Completeness)> {
-        let text = std::fs::read(self.path(key)).ok()?;
-        let entry: Entry = serde_json::from_slice(&text).ok()?;
+        let path = self.path(key);
+        let file = File::open(&path).ok()?;
+        let entry: Entry = serde_json::from_reader(BufReader::new(file)).ok()?;
         let fits = entry.document.model_version == MODEL_VERSION
             && entry.document.source.sha256 == src.sha256
             && entry.completeness != Completeness::Failed;
+        if fits {
+            // A hit makes the entry the most recently used one for eviction (LRU).
+            let _ = File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|f| f.set_modified(SystemTime::now()));
+        }
         fits.then_some((entry.document, entry.completeness))
     }
 
@@ -133,14 +144,26 @@ fn write_atomic(dir: &Path, path: &Path, entry: &EntryRef<'_>) -> std::io::Resul
         .prefix(".entry-")
         .suffix(".tmp")
         .tempfile_in(dir)?;
-    serde_json::to_writer(&mut tmp, entry)?;
-    tmp.flush()?;
+    write_entry(tmp.as_file_mut(), entry)?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
+/// Serializes `entry` through a buffer: serde_json writes token by token, which unbuffered
+/// is one system call per token and made a cache miss several times slower than no cache.
+fn write_entry<W: Write>(out: W, entry: &EntryRef<'_>) -> std::io::Result<()> {
+    let mut buffered = BufWriter::with_capacity(64 * 1024, out);
+    serde_json::to_writer(&mut buffered, entry)?;
+    buffered.flush()
+}
+
 /// The cache key of one read, as lowercase hex.
 pub(crate) fn key(src: &Source, reader: Option<(&str, &str)>, config: &Config) -> String {
+    // The page size only changes pagination, which runs after the cache.
+    let mut limits = serde_json::to_value(&config.limits).unwrap_or_default();
+    if let Some(map) = limits.as_object_mut() {
+        map.remove("page_tokens");
+    }
     let mut disabled = config.enrich.disabled.clone();
     disabled.sort();
     disabled.dedup();
@@ -148,12 +171,85 @@ pub(crate) fn key(src: &Source, reader: Option<(&str, &str)>, config: &Config) -
         "sha256": src.sha256,
         "name": src.name,
         "rezzer": VERSION,
+        "build": BUILD_ID,
         "model_version": MODEL_VERSION,
         "format": rezzer_render::format_name(src.format),
         "reader": reader.map(|(id, version)| format!("{id}@{version}")),
-        "limits": config.limits,
+        "limits": limits,
         "enrich_disabled": disabled,
     });
     // serde_json keeps object keys sorted, so the text is canonical.
     hex::encode(Sha256::digest(material.to_string().as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use rezzer_model::{Block, Confidence, Detection, FormatId, Inline, SourceInfo};
+
+    use super::*;
+
+    /// Counts write calls and bytes.
+    #[derive(Default)]
+    struct Counter {
+        calls: usize,
+        bytes: usize,
+    }
+
+    impl Write for Counter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            self.bytes += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn large_entries_are_written_in_big_chunks() {
+        let mut document = Document::new(SourceInfo {
+            path: None,
+            name: "big.txt".into(),
+            sha256: "0".repeat(64),
+            size: 0,
+            format: FormatId::Text,
+            detection: Detection {
+                confidence: Confidence::Likely,
+                evidence: "test".into(),
+            },
+            modified: None,
+            encoding: None,
+            reader: None,
+        });
+        for i in 0..50_000 {
+            document.body.push(Block::Paragraph {
+                inlines: vec![Inline::Text {
+                    text: format!("paragraph {i}"),
+                    emphasis: false,
+                    strong: false,
+                    strike: false,
+                }],
+                role: None,
+                anchor: None,
+            });
+        }
+        let entry = EntryRef {
+            completeness: Completeness::Complete,
+            document: &document,
+        };
+        let mut counter = Counter::default();
+        write_entry(&mut counter, &entry).unwrap();
+        assert!(counter.bytes > 2_000_000, "{} bytes", counter.bytes);
+        // Unbuffered, serde_json makes several write calls per paragraph (hundreds of
+        // thousands here); buffered, it is about one call per 64 KiB.
+        assert!(
+            counter.calls <= counter.bytes / (32 * 1024) + 2,
+            "{} write calls for {} bytes",
+            counter.calls,
+            counter.bytes
+        );
+    }
 }

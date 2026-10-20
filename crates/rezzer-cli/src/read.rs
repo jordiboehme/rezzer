@@ -34,10 +34,10 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
     if let Some(dir) = &args.output_dir {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-        let stem = stem(&args.path);
-        write(&dir.join(format!("{stem}.md")), &markdown)?;
+        let name = output_name(&args.path);
+        write(&dir.join(format!("{name}.md")), &markdown)?;
         if let Some(json) = &result.json {
-            write(&dir.join(format!("{stem}.json")), &with_newline(json))?;
+            write(&dir.join(format!("{name}.json")), &with_newline(json))?;
         }
     } else if let Some(json) = &result.json {
         print(&with_newline(json))?;
@@ -69,9 +69,10 @@ fn exit_code(completeness: Completeness) -> ExitCode {
     }
 }
 
-/// The output file name without extension: the input's stem, else `output`.
-fn stem(path: &Path) -> String {
-    path.file_stem()
+/// The base of the output file names: the input's whole file name, so `a.csv` and `a.md`
+/// give `a.csv.md` and `a.md.md` and never overwrite each other. Else `output`.
+fn output_name(path: &Path) -> String {
+    path.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "output".to_string())

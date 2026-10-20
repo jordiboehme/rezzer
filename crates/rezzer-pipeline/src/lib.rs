@@ -13,14 +13,14 @@
 
 mod cache;
 mod config;
+mod panics;
 
 use std::fmt;
-use std::panic::AssertUnwindSafe;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use rezzer_detect::OpenError;
-use rezzer_limits::{Budget, contain};
+use rezzer_limits::Budget;
 use rezzer_model::{
     Block, Completeness, Detection, Document, FormatId, Inline, Loss, LossReason, ReadOptions,
     ReaderInfo, Registry, Severity, Source, source_info,
@@ -34,6 +34,10 @@ use crate::cache::Cache;
 
 /// The Rezzer version written into the output and the cache key.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Identifies the build in the cache key: the git commit (with a dirty marker and build time
+/// for a changed checkout) or the build time. Set by build.rs.
+pub const BUILD_ID: &str = env!("REZZER_BUILD_ID");
 
 /// Environment variable that fixes `generated.at` when a request has none, for reproducible
 /// output (tests, golden files).
@@ -145,9 +149,9 @@ impl Pipeline {
     }
 
     /// Reads the file at `path`. A file that cannot be opened gives a failed result without
-    /// a document.
+    /// a document. The source path is made canonical and absolute (see [`canonical_path`]).
     pub fn run_path(&self, path: &Path, req: &Request) -> RunResult {
-        match rezzer_detect::open(path, &self.config.limits) {
+        match rezzer_detect::open(&canonical_path(path), &self.config.limits) {
             Ok(src) => self.run_source(&src, req),
             Err(e) => RunResult::failed(e.to_string()),
         }
@@ -170,7 +174,7 @@ impl Pipeline {
 
     /// Opens and detects `path` without reading it.
     pub fn inspect(&self, path: &Path) -> Result<Inspection, OpenError> {
-        let src = rezzer_detect::open(path, &self.config.limits)?;
+        let src = rezzer_detect::open(&canonical_path(path), &self.config.limits)?;
         Ok(Inspection {
             reader: self
                 .registry
@@ -193,10 +197,10 @@ impl Pipeline {
             archive_ref: None,
         };
         let page_tokens = self.config.limits.page_tokens;
-        let rendered = contain(AssertUnwindSafe(|| {
+        let rendered = panics::contained(|| {
             let markdown = rezzer_render::render(&document, completeness, &opts);
             rezzer_render::paginate(&markdown, page_tokens)
-        }));
+        });
         let markdown_pages = match rendered {
             Ok(pages) => pages,
             Err(panic) => {
@@ -245,10 +249,9 @@ impl Pipeline {
             document.source.detection = fresh.detection;
             return (document, completeness, None);
         }
-        let (mut document, mut completeness, message) = self.read(src, req);
-        let enriched = contain(AssertUnwindSafe(|| {
-            rezzer_enrich::enrich(&mut document, &self.config.enrich)
-        }));
+        let (mut document, mut completeness, message, cacheable) = self.read(src, req);
+        let enriched =
+            panics::contained(|| rezzer_enrich::enrich(&mut document, &self.config.enrich));
         if let Err(panic) = enriched {
             // The document stays usable (a pass may have stopped half way); say so.
             document.losses.push(Loss {
@@ -263,27 +266,37 @@ impl Pipeline {
             if completeness == Completeness::Complete {
                 completeness = Completeness::Partial;
             }
-        } else if let (Some(cache), Some(key)) = (cache, &key) {
+        } else if cacheable && let (Some(cache), Some(key)) = (cache, &key) {
             cache.put(key, &document, completeness);
         }
         (document, completeness, message)
     }
 
-    fn read(&self, src: &Source, req: &Request) -> (Document, Completeness, Option<String>) {
+    /// Reads `src`. The last value says whether the result may be cached: not when the time
+    /// limit cut the read short, because a time cut depends on the machine's load.
+    fn read(&self, src: &Source, req: &Request) -> (Document, Completeness, Option<String>, bool) {
         if src.format == FormatId::Empty {
             let mut document = Document::new(source_info(src));
             document.body.push(paragraph(EMPTY_TEXT));
-            return (document, Completeness::Complete, None);
+            return (document, Completeness::Complete, None, true);
         }
         let Some(reader) = self.registry.for_format(src.format) else {
-            return (unsupported(src), Completeness::Partial, None);
+            return (unsupported(src), Completeness::Partial, None, true);
         };
         let budget = Budget::new(self.config.limits.clone());
         let opts = ReadOptions {
             password: req.password.clone(),
         };
-        match contain(AssertUnwindSafe(|| reader.read(src, &opts, &budget))) {
-            Ok(outcome) => (outcome.document, outcome.completeness, None),
+        match panics::contained(|| reader.read(src, &opts, &budget)) {
+            Ok(outcome) => {
+                let time_cut = budget.check_time().is_err()
+                    && outcome
+                        .document
+                        .losses
+                        .iter()
+                        .any(|l| l.why == LossReason::Limit);
+                (outcome.document, outcome.completeness, None, !time_cut)
+            }
             Err(panic) => {
                 let message = format!(
                     "the {} reader stopped with an internal error: {}",
@@ -302,10 +315,29 @@ impl Pipeline {
                     why: LossReason::Internal,
                     severity: Severity::Error,
                 });
-                (document, Completeness::Failed, Some(message))
+                (document, Completeness::Failed, Some(message), false)
             }
         }
     }
+}
+
+/// The canonical absolute form of `path`, so the same file read from two working directories
+/// has one `resource`. The directory is canonicalized and the file name kept: a symlink keeps
+/// its own name (the name is a detection hint and shown as the title). On any error the path
+/// is returned as given.
+pub fn canonical_path(path: &Path) -> PathBuf {
+    let canonical = match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => {
+            let parent = if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            };
+            std::fs::canonicalize(parent).map(|p| p.join(name))
+        }
+        _ => std::fs::canonicalize(path),
+    };
+    canonical.unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// A document for a format without a reader or an unknown format: the source facts, one

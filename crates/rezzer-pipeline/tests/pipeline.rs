@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime};
 
 use rezzer_limits::Budget;
 use rezzer_model::{
@@ -162,6 +163,11 @@ fn panicking_reader_is_failed() {
     let doc = out.document.expect("the source facts survive a panic");
     let loss = doc.losses.first().expect("a loss for the panic");
     assert_eq!(loss.why, LossReason::Internal);
+    assert!(
+        loss.what.contains("pipeline.rs:"),
+        "location: {}",
+        loss.what
+    );
     assert!(loss.what.contains("counting"), "{}", loss.what);
     assert!(loss.what.contains("boom in the reader"), "{}", loss.what);
     let message = out.message.unwrap();
@@ -198,6 +204,7 @@ fn cache_hit_takes_the_path_from_the_current_source() {
     let out = pipeline.run_path(&b, &request());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let doc = out.document.unwrap();
+    let b = std::fs::canonicalize(&b).unwrap();
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
 }
 
@@ -284,6 +291,27 @@ fn dir_bytes(dir: &Path) -> u64 {
         .sum()
 }
 
+fn set_mtime(path: &Path, t: SystemTime) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
+/// Runs `content` through the pipeline and gives the entry it wrote an explicit mtime, so
+/// "oldest" does not depend on the file system's time resolution.
+fn run_aged(pipeline: &Pipeline, dir: &Path, content: &str, t: SystemTime) {
+    let before = cache_files(dir);
+    pipeline.run_bytes("x.txt", content.as_bytes().to_vec(), None, &request());
+    for path in cache_files(dir) {
+        if !before.contains(&path) {
+            set_mtime(&path, t);
+        }
+    }
+}
+
 #[test]
 fn cache_is_capped_and_drops_the_oldest_entries() {
     let dir = tempfile::tempdir().unwrap();
@@ -292,20 +320,18 @@ fn cache_is_capped_and_drops_the_oldest_entries() {
     probe.run_bytes("x.txt", b"entry 0\n".to_vec(), None, &request());
     let one = dir_bytes(dir.path());
     assert!(one > 0);
+    for path in cache_files(dir.path()) {
+        std::fs::remove_file(path).unwrap();
+    }
 
     let mut cfg = config(Some(dir.path()));
     cfg.cache_max_bytes = one * 5 / 2;
     let (registry, calls_capped) = counting(false);
     let pipeline = Pipeline::new(cfg.clone(), registry);
-    for i in 1..=5 {
-        // Distinct modification times, so "oldest" is well defined on every file system.
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        pipeline.run_bytes(
-            "x.txt",
-            format!("entry {i}\n").into_bytes(),
-            None,
-            &request(),
-        );
+    let base = SystemTime::now() - Duration::from_secs(10_000);
+    for i in 1..=5u64 {
+        let t = base + Duration::from_secs(i * 60);
+        run_aged(&pipeline, dir.path(), &format!("entry {i}\n"), t);
         assert!(
             dir_bytes(dir.path()) <= cfg.cache_max_bytes,
             "after entry {i}"
@@ -319,6 +345,121 @@ fn cache_is_capped_and_drops_the_oldest_entries() {
     assert_eq!(calls_capped.load(Ordering::SeqCst), 5);
     pipeline.run_bytes("x.txt", b"entry 1\n".to_vec(), None, &request());
     assert_eq!(calls_capped.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn a_cache_hit_keeps_an_entry_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, _) = counting(false);
+    let probe = Pipeline::new(config(Some(dir.path())), registry);
+    probe.run_bytes("x.txt", b"entry 0\n".to_vec(), None, &request());
+    let one = dir_bytes(dir.path());
+    for path in cache_files(dir.path()) {
+        std::fs::remove_file(path).unwrap();
+    }
+
+    let mut cfg = config(Some(dir.path()));
+    cfg.cache_max_bytes = one * 5 / 2;
+    let (registry, calls) = counting(false);
+    let pipeline = Pipeline::new(cfg, registry);
+    let base = SystemTime::now() - Duration::from_secs(10_000);
+    run_aged(&pipeline, dir.path(), "entry A\n", base);
+    run_aged(
+        &pipeline,
+        dir.path(),
+        "entry B\n",
+        base + Duration::from_secs(60),
+    );
+    // A hit on the older entry makes it the most recently used one.
+    pipeline.run_bytes("x.txt", b"entry A\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    run_aged(&pipeline, dir.path(), "entry C\n", SystemTime::now());
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    pipeline.run_bytes("x.txt", b"entry A\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "A survived");
+    pipeline.run_bytes("x.txt", b"entry B\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 4, "B was evicted");
+}
+
+#[test]
+fn page_size_is_not_part_of_the_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    Pipeline::new(config(Some(dir.path())), registry).run_bytes(
+        "x.txt",
+        b"hello\n".to_vec(),
+        None,
+        &request(),
+    );
+    let mut cfg = config(Some(dir.path()));
+    cfg.limits.page_tokens = 77;
+    let (registry, calls_paged) = counting(false);
+    Pipeline::new(cfg, registry).run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls_paged.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_time_cut_is_not_cached() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_text::TextReader));
+    let mut cfg = config(Some(dir.path()));
+    cfg.limits.max_time = Duration::ZERO;
+    let pipeline = Pipeline::new(cfg, registry);
+    let text: String = (0..1100).map(|i| format!("Paragraph {i}.\n\n")).collect();
+    let out = pipeline.run_bytes("long.txt", text.into_bytes(), None, &request());
+    assert_eq!(out.completeness, Completeness::Partial);
+    let doc = out.document.unwrap();
+    assert!(
+        doc.losses.iter().any(|l| l.why == LossReason::Limit),
+        "{:?}",
+        doc.losses
+    );
+    assert!(cache_files(dir.path()).is_empty());
+}
+
+#[test]
+fn other_partial_results_are_cached() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_csv::CsvReader));
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let broken = b"a,b,c\n1,2,3\n4,5\n6,7,8\n9,10,11,12\n13,14,15\n";
+    let out = pipeline.run_bytes("broken.csv", broken.to_vec(), None, &request());
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(cache_files(dir.path()).len(), 1);
+}
+
+#[test]
+fn source_path_is_canonical_and_keeps_the_given_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join("x.txt"), "hello\n").unwrap();
+    let (registry, _) = counting(false);
+    let pipeline = Pipeline::new(config(None), registry);
+    let out = pipeline.run_path(&dir.path().join("sub/../x.txt"), &request());
+    let doc = out.document.unwrap();
+    let expected = real.join("x.txt");
+    assert_eq!(doc.source.path.as_deref(), Some(expected.to_str().unwrap()));
+    assert_eq!(doc.source.name, "x.txt");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.path().join("x.txt"), dir.path().join("link.txt")).unwrap();
+        let doc = pipeline
+            .run_path(&dir.path().join("link.txt"), &request())
+            .document
+            .unwrap();
+        assert_eq!(doc.source.name, "link.txt");
+        let expected = real.join("link.txt");
+        assert_eq!(doc.source.path.as_deref(), Some(expected.to_str().unwrap()));
+    }
+}
+
+#[test]
+fn build_id_is_set() {
+    assert!(!rezzer_pipeline::BUILD_ID.is_empty());
 }
 
 #[test]

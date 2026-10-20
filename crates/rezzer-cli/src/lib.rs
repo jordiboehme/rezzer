@@ -50,7 +50,8 @@ enum Command {
 struct ReadArgs {
     /// The file to read.
     path: PathBuf,
-    /// Write <DIR>/<name>.md (and <name>.json with --json) instead of printing.
+    /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
+    /// for example budget.xlsx.md.
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
     /// Print the document model as JSON instead of Markdown.
@@ -70,9 +71,6 @@ struct ReadArgs {
 
 /// Runs the command line with the readers of this build.
 pub fn main(registry: Registry) -> ExitCode {
-    // Reader panics are contained and reported as one line; the default hook would print a
-    // multi-line trace to stderr first.
-    std::panic::set_hook(Box::new(|_| {}));
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -84,7 +82,8 @@ pub fn main(registry: Registry) -> ExitCode {
             };
         }
     };
-    // Panics outside the pipeline's own containment still end as one line and exit 1.
+    // A panic outside the pipeline's contained stages goes through the normal panic hook,
+    // then ends as one `rezzer: internal error` line and exit 1.
     match rezzer_limits::contain(std::panic::AssertUnwindSafe(|| run(cli, registry))) {
         Ok(Ok(code)) => code,
         Ok(Err(message)) => fail(&message),

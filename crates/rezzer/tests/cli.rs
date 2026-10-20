@@ -241,10 +241,38 @@ fn output_dir_writes_markdown_and_json() {
         .assert()
         .code(0)
         .stdout("");
-    let written = std::fs::read_to_string(dir.join("notes.md")).unwrap();
+    // Named after the whole file name, so notes.md and notes.csv never overwrite each other.
+    let written = std::fs::read_to_string(dir.join("notes.md.md")).unwrap();
     assert!(written.starts_with("---\ntype: document\n"));
-    let json = std::fs::read(dir.join("notes.json")).unwrap();
+    let json = std::fs::read(dir.join("notes.md.json")).unwrap();
     serde_json::from_slice::<Document>(&json).unwrap();
+
+    let csv = env.file("notes.csv", b"a,b\n1,2\n3,4\n");
+    env.cmd()
+        .arg("read")
+        .arg(&csv)
+        .arg("-o")
+        .arg(&dir)
+        .assert()
+        .code(0);
+    assert!(dir.join("notes.csv.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("notes.md.md")).unwrap(),
+        written
+    );
+}
+
+#[test]
+fn resource_is_the_canonical_absolute_path() {
+    let env = Env::new();
+    env.file("notes.md", MARKDOWN);
+    let root = std::fs::canonicalize(env.root.path()).unwrap();
+    let expected = format!("resource: \"{}\"", root.join("notes.md").display());
+    env.cmd()
+        .args(["read", "./notes.md"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains(expected));
 }
 
 #[test]
