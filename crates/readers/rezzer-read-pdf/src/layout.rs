@@ -547,20 +547,23 @@ impl Built {
     /// Adds a block, charged as one element. Past the limit the block is dropped and the page
     /// stops.
     fn push(&mut self, block: Block, cx: &Context<'_>) {
-        let mark = self.mark.take();
         if self.stop.is_some() {
             return;
         }
         match time_over(cx.budget).and_then(|()| cx.budget.add_elements(1)) {
-            Ok(()) => self.blocks.push(block),
-            Err(hit) => self.drop_block(hit, mark, cx),
+            Ok(()) => {
+                self.mark = None;
+                self.blocks.push(block);
+            }
+            Err(hit) => self.stop_at(hit, cx),
         }
     }
 
-    /// Stops the page at `hit`. The link counts of the dropped block go back, so no loss says
-    /// the text of a link is kept when the block is not.
-    fn drop_block(&mut self, hit: LimitHit, mark: Option<LinkMark>, cx: &Context<'_>) {
-        if let Some(mark) = mark {
+    /// Stops the page at `hit`: the only place that sets `stop`. The link counts taken for the
+    /// block being built go back, so no loss says the text of a link is kept when the block
+    /// is not, whichever check stopped it and however many of its cells were built.
+    fn stop_at(&mut self, hit: LimitHit, cx: &Context<'_>) {
+        if let Some(mark) = self.mark.take() {
             cx.links.restore(mark);
         }
         self.stop = Some(hit);
@@ -573,23 +576,18 @@ impl Built {
         if self.stop.is_some() {
             return None;
         }
-        if let Err(hit) = time_over(cx.budget) {
-            self.stop = Some(hit);
-            return None;
-        }
-        let bytes: usize = runs.iter().map(|r| r.text.len() + 1).sum();
-        if let Err(hit) = cx.budget.charge_text(bytes) {
-            self.stop = Some(hit);
-            return None;
-        }
         if self.mark.is_none() {
             self.mark = Some(cx.links.mark());
+        }
+        let bytes: usize = runs.iter().map(|r| r.text.len() + 1).sum();
+        if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.charge_text(bytes)) {
+            self.stop_at(hit, cx);
+            return None;
         }
         match inlines(runs, cx.links, cx.budget) {
             Ok(built) => Some(built),
             Err(hit) => {
-                let mark = self.mark.take();
-                self.drop_block(hit, mark, cx);
+                self.stop_at(hit, cx);
                 None
             }
         }
@@ -1418,6 +1416,53 @@ mod tests {
         assert!(built.blocks.is_empty());
         assert!(built.stop.is_some());
         assert_eq!(room.cut(), None);
+    }
+
+    /// A block built in two calls, as a table is, one cell per call: the first cell cuts its
+    /// link; the second call is stopped at its start by `limits`. The cut goes back.
+    fn second_cell_stops(limits: rezzer_limits::Limits) {
+        let second = run("a second cell with more text", 1, 600.0, 10.0);
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(limits);
+        let room = LinkRoom::new(0);
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &room,
+        };
+        // The first cell, as the cell before a stop is built: its cut is counted.
+        let mut built = Built {
+            mark: Some(room.mark()),
+            ..Built::default()
+        };
+        assert!(!room.take(&UriTarget::new("https://example.org/a"), 1));
+        assert_eq!(room.cut(), Some((1, 1, 1)));
+        assert!(built.inlines(&[&second], &cx).is_none());
+        assert!(built.stop.is_some());
+        assert_eq!(room.cut(), None, "the dropped block keeps a link cut");
+    }
+
+    #[test]
+    fn a_text_stop_at_a_later_cell_gives_back_the_earlier_link_cuts() {
+        second_cell_stops(rezzer_limits::Limits {
+            max_text_bytes: 10,
+            ..rezzer_limits::Limits::default()
+        });
+    }
+
+    #[test]
+    fn a_time_stop_at_a_later_cell_gives_back_the_earlier_link_cuts() {
+        second_cell_stops(rezzer_limits::Limits {
+            max_time: std::time::Duration::ZERO,
+            ..rezzer_limits::Limits::default()
+        });
     }
 
     #[test]

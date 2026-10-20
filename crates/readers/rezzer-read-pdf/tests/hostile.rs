@@ -962,13 +962,21 @@ fn far_lines_at(lines: &[usize], uri: Option<(usize, &str)>, prefix: &str) -> Ve
 /// stripes, each over one column of words and with a URI of its own: `http://x/<j>/` and
 /// `len` spaces. Lines `gap` apart that close form one paragraph.
 fn stripes(n: usize, gap: usize, k: usize, len: usize) -> Vec<u8> {
-    let h = (n + 2) * gap;
+    stripes_after(0, n, gap, k, len)
+}
+
+/// Like `stripes`, with `pre` lines 40 points apart before them, one paragraph each.
+fn stripes_after(pre: usize, n: usize, gap: usize, k: usize, len: usize) -> Vec<u8> {
+    let h = pre * 40 + (n + 2) * gap;
     let mut c = b"BT /F1 12 Tf ".to_vec();
-    for i in 0..n {
+    for i in 0..pre + n {
+        let y = if i < pre {
+            h - (i + 1) * 40
+        } else {
+            h - pre * 40 - (i - pre + 1) * gap
+        };
         for j in 0..k {
-            c.extend(
-                format!("1 0 0 1 {} {} Tm (a) Tj ", 72 + 60 * j, h - (i + 1) * gap).as_bytes(),
-            );
+            c.extend(format!("1 0 0 1 {} {y} Tm (a) Tj ", 72 + 60 * j).as_bytes());
         }
     }
     c.extend(b"ET\n");
@@ -1176,30 +1184,45 @@ fn alternating_long_targets_are_scanned_once_each() {
 }
 
 #[test]
-fn stripes_in_one_paragraph_stop_near_the_time_limit_with_agreeing_losses() {
-    // 120,000 runs in one paragraph. A short time limit: the read ends near it, and a time
-    // stop that drops the block does not leave a loss that says its text is kept.
-    let start = Instant::now();
+fn a_stop_inside_a_big_paragraph_keeps_the_blocks_before_it_with_agreeing_losses() {
+    // 50 small paragraphs, then one paragraph of 199,750 runs under five links. The text
+    // limit the test sets is far below the big paragraph and above every small one, so the
+    // stop is reached for sure at the start of the big block. The link cuts of the small
+    // paragraphs stay; the big block adds none.
     let budget = Budget::new(Limits {
-        max_time: Duration::from_secs(3),
+        max_text_bytes: 100_000,
         ..hostile()
     });
-    let out = read_with(&stripes(24_000, 14, 5, 3_000_000), &budget);
+    let out = read_with(&stripes_after(50, 39_950, 14, 5, 400_000), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let kept = page(&out, 1);
+    let n = kept
+        .iter()
+        .filter(|b| matches!(b, Block::Paragraph { role: None, .. }))
+        .count();
+    assert!(n >= 45, "{:?}", out.document.losses);
+    let (links, _) = links_in(kept);
+    let cut = losses(&out, LossReason::Limit);
+    let stop = cut
+        .iter()
+        .find(|l| l.what.contains("text"))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
     assert!(
-        start.elapsed() < Duration::from_secs(20),
-        "{:?}",
-        start.elapsed()
+        stop.what.contains(&format!("from block {} on", n + 1)),
+        "{stop:?} n={n}"
     );
-    if time_loss(&out).is_some() {
-        assert!(
-            !out.document
-                .losses
-                .iter()
-                .any(|l| l.what.contains("kept without the link")),
-            "{:?}",
-            out.document.losses
-        );
-    }
+    // Five links in each kept paragraph: the cuts are the kept paragraphs' own.
+    let cut_links = 5 * n - links;
+    let link_loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("kept without the link"))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert!(
+        link_loss.what.contains(&format!("{cut_links} links")),
+        "{link_loss:?}"
+    );
     assert_rss_under_256_mib();
 }
 
