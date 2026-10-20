@@ -212,16 +212,37 @@ pub(crate) fn is_unit(s: &str, single: bool) -> bool {
     if currency(s) || PLAIN.contains(&s) {
         return true;
     }
+    // Every factor is known, and a compound needs one factor of two or more letters:
+    // `N/A`, `A/C`, `S/N` are codes ([`is_bracketed_unit`] takes `[m/s]`).
+    compound(s).is_some_and(|short_only| !short_only)
+}
+
+/// Whether every factor of `s` is a known unit; `Some(true)` when each one is a single
+/// letter (`m/s`, `N/A`) and there are several.
+fn compound(s: &str) -> Option<bool> {
     let mut parts = 0;
+    let mut short = true;
     for part in s.split('/') {
         for factor in part.split(['*', '·', '⋅', '.']) {
             parts += 1;
             if !(atom(factor) || currency(factor)) {
-                return false;
+                return None;
             }
+            short &= strip_exponent(factor).chars().count() == 1;
         }
     }
-    parts > 0
+    (parts > 0).then_some(short && parts > 1)
+}
+
+/// A unit in square brackets, the engineering unit convention: also one letter (`[V]`) and
+/// compounds of one-letter units (`[m/s]`), which elsewhere are as often codes (`N/A`).
+pub(crate) fn is_bracketed_unit(s: &str) -> bool {
+    let s = s.trim();
+    is_unit(s, true)
+        || (!s.is_empty()
+            && s.len() <= MAX_UNIT
+            && !s.chars().any(char::is_whitespace)
+            && compound(s) == Some(true))
 }
 
 /// A `CONVERT` unit text: a known unit or one of Excel's own unit names.
@@ -254,7 +275,12 @@ pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
             let before = &inner[..start];
             let single_ok =
                 close == ']' || (ROUND_ONE.contains(&unit) && !initial_of_last_word(before, unit));
-            if is_unit(unit, single_ok) {
+            let known = if close == ']' {
+                is_bracketed_unit(unit)
+            } else {
+                is_unit(unit, single_ok)
+            };
+            if known {
                 return (clean(before), Some(unit.to_string()));
             }
         }
@@ -369,8 +395,8 @@ mod tests {
     #[test]
     fn units_on_the_list() {
         for u in [
-            "m", "mm", "kN", "MPa", "kN/m3", "kNm/m", "m/s", "m²", "s^-1", "kWh", "EUR", "€", "%",
-            "°C", "psi", "kN·m", "EUR/kWh", "deg", "mol/L",
+            "m", "mm", "kN", "MPa", "kN/m3", "kNm/m", "m²", "s^-1", "kWh", "EUR", "€", "%", "°C",
+            "psi", "kN·m", "EUR/kWh", "deg", "mol/L",
         ] {
             assert!(is_unit(u, true), "{u}");
         }
@@ -429,6 +455,15 @@ mod tests {
             (Some("Shear force".into()), Some("V".into()))
         );
         assert_eq!(s("Volume (l)"), (Some("Volume".into()), Some("l".into())));
+        assert_eq!(s("Status (N/A)"), (Some("Status (N/A)".into()), None));
+        assert_eq!(s("Speed (m/s)"), (Some("Speed (m/s)".into()), None));
+        assert_eq!(s("Speed [m/s]"), (Some("Speed".into()), Some("m/s".into())));
+        for code in ["N/A", "A/C", "S/N", "A/B"] {
+            assert!(!is_unit(code, true), "{code}");
+        }
+        assert!(is_unit("km/h", true));
+        assert!(!is_unit("m/s", true) && is_bracketed_unit("m/s"));
+        assert!(is_unit("g/km", true));
         assert_eq!(s("t (m)"), (Some("t".into()), Some("m".into())));
         assert_eq!(s("kPa"), (None, Some("kPa".into())));
         assert_eq!(s("m"), (Some("m".into()), None));

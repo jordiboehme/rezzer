@@ -1155,6 +1155,7 @@ fn text_run(cells: &[RawCell], i: usize) -> Vec<usize> {
             .ok()
             .filter(|&j| text_of(&cells[j]).is_some())
     };
+    // The whole run: its verdict is kept for every cell of it, so each run is walked once.
     let mut up = Vec::new();
     let mut row = cells[i].row;
     while let Some(r) = row.checked_sub(1)
@@ -1162,9 +1163,6 @@ fn text_run(cells: &[RawCell], i: usize) -> Vec<usize> {
     {
         up.push(j);
         row = r;
-        if up.len() > MAX_RUN {
-            break;
-        }
     }
     up.reverse();
     up.push(i);
@@ -1172,15 +1170,9 @@ fn text_run(cells: &[RawCell], i: usize) -> Vec<usize> {
     while let Some(j) = row.checked_add(1).and_then(find) {
         up.push(j);
         row += 1;
-        if up.len() > 2 * MAX_RUN {
-            break;
-        }
     }
     up
 }
-
-/// Texts of a run looked at, up and down, to tell a unit column.
-const MAX_RUN: usize = 200;
 
 /// How the text run `run` reads (see [`UnitColumn`]).
 fn reads_as_unit_column(cells: &[RawCell], run: &[usize]) -> UnitColumn {

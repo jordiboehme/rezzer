@@ -538,7 +538,11 @@ fn coded_values(header: Option<[&str; 3]>, codes: &[&str]) -> ReadOutcome {
 
 #[test]
 fn data_columns_beside_values_are_no_units() {
-    let cases: [(Option<[&str; 3]>, &[&str]); 5] = [
+    let cases: [(Option<[&str; 3]>, &[&str]); 9] = [
+        (None, &["N/A", "OK", "N/A"]),
+        (None, &["A/C", "S/N", "A/C"]),
+        (None, &["A/B", "B/C", "A", "C"]),
+        (Some(["Item", "Qty", "Unit"]), &["N/A", "A/C", "S/N"]),
         (Some(["Name", "Score", "Grade"]), &["A", "C", "F", "B", "T"]),
         (None, &["A", "C", "F", "B", "T"]),
         (None, &["N", "S", "W", "N"]),
@@ -575,6 +579,10 @@ fn codes_and_variables_are_no_units() {
         ("Number of piles [N]", Some("N")),
         ("Excavated diameter (m)", Some("m")),
         ("Code PA", None),
+        ("Status (N/A)", None),
+        ("Speed (m/s)", None),
+        ("Speed [m/s]", Some("m/s")),
+        ("Flow (km/h)", Some("km/h")),
     ];
     let mut rows = Vec::new();
     for (i, (label, _)) in labels.iter().enumerate() {
@@ -584,7 +592,7 @@ fn codes_and_variables_are_no_units() {
             num(&format!("B{r}"), 1.0, None),
         ];
         if i == 0 {
-            cells.push(formula_cell("C1", "SUM(B1:B8)", Some(8.0)));
+            cells.push(formula_cell("C1", "SUM(B1:B12)", Some(12.0)));
         }
         rows.push(row(r, &cells));
     }
@@ -625,10 +633,10 @@ fn disagreeing_units_give_none_with_a_note() {
 #[test]
 fn headers_head_their_run_and_never_a_value() {
     // `Length (m)` heads the unbroken run G42:G46; `see note` in G47 is a value inside the
-    // column. `Speed (m/s)` in J41 heads J42, then gaps limit it to 3 rows.
+    // column. `Speed (km/h)` in J41 heads J42, then gaps limit it to 3 rows.
     let mut rows = vec![row(
         41,
-        &[text("G41", "Length (m)"), text("J41", "Speed (m/s)")],
+        &[text("G41", "Length (m)"), text("J41", "Speed (km/h)")],
     )];
     for r in 42..=50 {
         let mut cells = vec![if r == 47 {
@@ -649,7 +657,7 @@ fn headers_head_their_run_and_never_a_value() {
     for anchor in ["S!G42", "S!G44", "S!G45", "S!G46", "S!J42", "S!J44"] {
         let p = param(doc, anchor);
         let want = if anchor.starts_with("S!J") {
-            ("Speed", "m/s")
+            ("Speed", "km/h")
         } else {
             ("Length", "m")
         };
