@@ -569,6 +569,24 @@ fn a_parameter_table_keeps_the_label_on_the_left() {
 }
 
 #[test]
+fn a_repeated_label_with_a_unit_keeps_label_and_unit() {
+    // `Item | Value | Unit` with `Load [kN]` twice: a text that carries a unit names a
+    // quantity, so it stays the label even when it repeats, and its unit is kept.
+    let out = headed_table(
+        ["Item", "Value", "Unit"],
+        &["Load [kN]", "Load [kN]", "Span"],
+        &["", "", ""],
+    );
+    let doc = &out.document;
+    for anchor in ["S!B2", "S!B3"] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label.as_deref(), Some("Load"), "{anchor}");
+        assert_eq!(unit(p), (Some("kN"), Some("label")), "{anchor}");
+    }
+    assert_eq!(param(doc, "S!B4").label.as_deref(), Some("Span"));
+}
+
+#[test]
 fn a_category_on_the_left_is_no_label() {
     // `Color | Value`: a text that repeats in its column is a value of the row, and so is
     // `yellow`, once in a column of categories.
