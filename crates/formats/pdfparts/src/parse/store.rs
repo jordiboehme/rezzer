@@ -44,6 +44,8 @@ pub(crate) struct Store<'a> {
     /// The catalog the trailer names. When the table cannot give it, the file is scanned for
     /// it, as for an entry that points at another object.
     pub root: Option<ObjectId>,
+    /// The table misses the oldest sections: a missing object is looked up by a scan.
+    pub scan_missing: bool,
     pub issues: Vec<Issue>,
 }
 
@@ -68,6 +70,7 @@ impl<'a> Store<'a> {
             lengths: HashMap::new(),
             headers: HashMap::new(),
             root: None,
+            scan_missing: false,
             issues: Vec::new(),
         };
         if scanned.is_some() {
@@ -120,7 +123,7 @@ impl<'a> Store<'a> {
             }
             Some(_) if !root => return Ok(None),
             Some(_) => {}
-            None if self.scanned.is_none() && !root => return Ok(None),
+            None if self.scanned.is_none() && !root && !self.scan_missing => return Ok(None),
             None => {}
         }
         match self.scanned_pos(id)? {

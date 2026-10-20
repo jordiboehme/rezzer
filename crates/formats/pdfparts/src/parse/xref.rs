@@ -41,6 +41,9 @@ pub(crate) struct Chain {
     /// data start, while an update that writes the stream object again puts it elsewhere.
     starts: HashSet<usize>,
     streams: HashSet<usize>,
+    /// The chain was cut at the work bound: objects only older sections define are missing
+    /// from the table.
+    pub cut: bool,
     /// Keep free entries in `freed` (only when a section is read on its own).
     keep_free: bool,
     freed: Vec<u32>,
@@ -111,19 +114,22 @@ pub(crate) fn read_chain(
     let mut chain = Chain::default();
     let mut seen = HashSet::new();
     let mut next = Some(start);
+    // Every section costs one item and its entries and trailer values one each.
+    let first_items = budget.items;
     while let Some(off) = next {
         if !seen.insert(off) {
             break;
         }
-        if seen.len() > budget.limits.max_revisions {
+        let max = budget.limits.max_items;
+        if seen.len().saturating_add(budget.items - first_items) > max {
             chain.issues.push(Issue::new(
                 "document",
                 IssueKind::Limit,
                 format!(
-                    "the file has more than {} revisions; the older ones are not read",
-                    budget.limits.max_revisions
+                    "the cross-reference chain has more than {max} sections and entries; the sections from offset {off} on are not read, and objects only they define are looked up by a scan of the file"
                 ),
             ));
+            chain.cut = true;
             break;
         }
         match section(bytes, base, off, budget, &mut chain)? {

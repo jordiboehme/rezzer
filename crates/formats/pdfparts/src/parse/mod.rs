@@ -261,9 +261,11 @@ pub(crate) fn build(
     };
     let mut budget = Budget::new(limits, stop, bytes.len());
     let mut issues = Vec::new();
+    let mut cut = false;
     let (table, trailer, scanned) = match read_chain(bytes, base, &mut budget)? {
         Some(chain) => {
             budget.ends.add_starts(chain.starts());
+            cut = chain.cut;
             issues.extend(chain.issues);
             (chain.table, chain.trailer, None)
         }
@@ -280,6 +282,7 @@ pub(crate) fn build(
         }
     };
     let mut store = Store::new(bytes, base, table, budget, scanned);
+    store.scan_missing = cut;
     let Ok(Object::Reference(root)) = trailer.get(b"Root") else {
         return Err(OpenError::Damaged(
             "the file has no document catalog".into(),
