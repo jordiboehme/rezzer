@@ -22,6 +22,12 @@ pub struct Facets {
     pub annotations: Vec<Annotation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub embedded: Vec<Embedded>,
+    /// Inputs a reader recognized as parameters of the document (assumptions, rates, limits).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<Parameter>,
+    /// Validation and conditional-format rules, attached to the range they apply to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<Rule>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -46,6 +52,64 @@ pub struct Formula {
     /// Evidence or remarks, for example how often an observed relation holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// What sort of formula this is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<FormulaKind>,
+    /// The area an array, spill or data table formula fills, or the cells a pattern group
+    /// covers (set on every member).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<Anchor>,
+    /// The formula text as stored, only when `expression` differs (OpenFormula `of:=[.B4]`
+    /// shown as `=B4`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FormulaKind {
+    Cell,
+    Shared,
+    Array,
+    Spill,
+    DataTable,
+    Name,
+    Lambda,
+}
+
+/// An input a reader recognized as a parameter, with its label and unit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Parameter {
+    pub anchor: Anchor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Where the unit came from: `label`, `number-format`, `convert` or `header`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_source: Option<String>,
+    /// How many formulas read this parameter.
+    pub read_by: u32,
+}
+
+/// A validation or conditional-format rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Rule {
+    /// `validation` or `conditional-format`.
+    pub kind: String,
+    /// The range the rule applies to.
+    pub anchor: Anchor,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formulas: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -59,6 +59,9 @@ fn formula(anchor: &str, refs: &[&str]) -> Formula {
         pattern: None,
         latex: None,
         note: None,
+        kind: None,
+        range: None,
+        original: None,
     }
 }
 

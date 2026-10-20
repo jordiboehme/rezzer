@@ -100,6 +100,9 @@ fn formula(anchor: &str, expr: &str, refs: &[&str], pattern: Option<&str>) -> Fo
         pattern: pattern.map(Into::into),
         latex: None,
         note: None,
+        kind: None,
+        range: None,
+        original: None,
     }
 }
 
