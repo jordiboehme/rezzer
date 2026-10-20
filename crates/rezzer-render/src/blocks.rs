@@ -673,31 +673,57 @@ fn decode_references(text: &str) -> String {
     out
 }
 
+/// Writes one character of a link destination: the only place that holds the escaping rules.
+fn destination_char(c: char, out: &mut String) {
+    match c {
+        ' ' => out.push_str("%20"),
+        '(' => out.push_str("%28"),
+        ')' => out.push_str("%29"),
+        '<' => out.push_str("%3C"),
+        '>' => out.push_str("%3E"),
+        '[' => out.push_str("%5B"),
+        ']' => out.push_str("%5D"),
+        '|' => out.push_str("%7C"),
+        '&' => out.push_str("\\&"),
+        '\\' => out.push_str("\\\\"),
+        c if c.is_control() => {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+        c => out.push(c),
+    }
+}
+
+/// The most bytes a link target can take where the output writes it: per character the
+/// larger of the Markdown destination and the JSON string. A reader uses it to charge the
+/// copies of targets it puts in the model; it does not change the target.
+pub fn link_target_written_len(target: &str) -> u64 {
+    let mut piece = String::new();
+    let mut total = 0u64;
+    for c in target.chars() {
+        piece.clear();
+        destination_char(c, &mut piece);
+        // JSON writes a control character below U+0020 as \u00XX and a quote or backslash
+        // with a backslash.
+        let json = match c {
+            '"' | '\\' => 2,
+            c if (c as u32) < 0x20 => 6,
+            c => c.len_utf8(),
+        };
+        total += piece.len().max(json) as u64;
+    }
+    total
+}
+
 /// A link or image destination plus optional title, without the parentheses.
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
         out.push_str("<>");
     }
     for c in target.chars() {
-        match c {
-            ' ' => out.push_str("%20"),
-            '(' => out.push_str("%28"),
-            ')' => out.push_str("%29"),
-            '<' => out.push_str("%3C"),
-            '>' => out.push_str("%3E"),
-            '[' => out.push_str("%5B"),
-            ']' => out.push_str("%5D"),
-            '|' => out.push_str("%7C"),
-            '&' => out.push_str("\\&"),
-            '\\' => out.push_str("\\\\"),
-            c if c.is_control() => {
-                let mut buf = [0u8; 4];
-                for b in c.encode_utf8(&mut buf).bytes() {
-                    out.push_str(&format!("%{b:02X}"));
-                }
-            }
-            c => out.push(c),
-        }
+        destination_char(c, out);
     }
     if let Some(title) = title
         && !title.is_empty()

@@ -352,14 +352,14 @@ pub(crate) struct Context<'a> {
 }
 
 /// The bytes the copies of link targets in the model may still take. Each link in the model
-/// holds its own copy of its target, and the renderer writes each copy again, so they are
-/// charged by their bytes. Once a copy does not fit, no later link keeps its target: the
-/// text stays, without the link.
+/// holds its own copy of its target, and the renderer and the JSON output write each copy
+/// again, so a copy is charged by the most bytes it can be written as. A copy that does not
+/// fit is left out: its text stays, without the link, and a shorter target later may still
+/// fit.
 #[derive(Debug)]
 pub(crate) struct LinkRoom {
     room: u64,
     left: Counter<u64>,
-    spent: Counter<bool>,
     /// Links written without their target, and the first and last page with one.
     cut: Counter<u64>,
     pages: Counter<Option<(u32, u32)>>,
@@ -373,20 +373,23 @@ impl LinkRoom {
         LinkRoom {
             room: bytes,
             left: Counter::new(bytes),
-            spent: Counter::new(false),
             cut: Counter::new(0),
             pages: Counter::new(None),
         }
     }
 
-    /// Takes room for one copy of `target` on `page`; `false` once the room is spent.
+    /// Takes room for one copy of `target` on `page`; `false` when it does not fit.
     fn take(&self, target: &str, page: u32) -> bool {
-        let cost = target.len() as u64 + LINK_COST;
-        if !self.spent.get() && cost <= self.left.get() {
-            self.left.set(self.left.get() - cost);
-            return true;
+        // Every character is written as at least one byte, so a target longer than the room
+        // is refused without a scan.
+        let floor = target.len() as u64 + LINK_COST;
+        if floor <= self.left.get() {
+            let cost = rezzer_render::link_target_written_len(target) + LINK_COST;
+            if cost <= self.left.get() {
+                self.left.set(self.left.get() - cost);
+                return true;
+            }
         }
-        self.spent.set(true);
         self.cut.set(self.cut.get() + 1);
         let (first, _) = self.pages.get().unwrap_or((page, page));
         self.pages.set(Some((first, page)));
@@ -1274,14 +1277,28 @@ mod tests {
             matches!(&built[0], Inline::Link { target, .. } if target == "https://example.org/a"),
             "{built:?}"
         );
+        let last = built.len() - 1;
         assert!(
-            built[1..].iter().all(|i| !matches!(i, Inline::Link { .. })),
+            built[1..last]
+                .iter()
+                .all(|i| !matches!(i, Inline::Link { .. })),
             "{built:?}"
         );
+        assert!(matches!(&built[last], Inline::Link { .. }), "{built:?}");
         assert_eq!(rezzer_model::plain_text(&built), "one two three four");
-        // The link over the change of style is one link cut; the last link is cut too, though
-        // it would fit, as the room is spent.
-        assert_eq!(room.cut(), Some((2, 1, 1)));
+        // The link over the change of style is one link cut; the last link fits again, as the
+        // copy of `a` is shorter than the room that is left.
+        assert_eq!(room.cut(), Some((1, 1, 1)));
+    }
+
+    #[test]
+    fn link_targets_are_charged_by_what_is_written() {
+        // Three bytes for a space in Markdown, six for a control character in JSON.
+        let room = LinkRoom::new(1_000);
+        assert!(room.take("a b", 1));
+        assert_eq!(room.left.get(), 1_000 - (1 + 3 + 1 + LINK_COST));
+        assert!(room.take("\u{1}", 1));
+        assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
     }
 
     #[test]

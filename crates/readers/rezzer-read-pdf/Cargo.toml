@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
+rezzer-render = { path = "../../rezzer-render" }
 pdfparts = { path = "../../formats/pdfparts" }
 hayro-interpret.workspace = true
 hayro-syntax.workspace = true
@@ -20,4 +21,4 @@ unicode-bidi.workspace = true
 [dev-dependencies]
 flate2 = { workspace = true, features = ["zlib-rs"] }
 libc.workspace = true
-rezzer-render = { path = "../../rezzer-render" }
+serde_json.workspace = true

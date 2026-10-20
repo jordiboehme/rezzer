@@ -27,6 +27,7 @@ mod workbook;
 
 use rezzer_model::{Block, Completeness, Document, plain_text};
 
+pub use crate::blocks::link_target_written_len;
 use crate::blocks::{Ctx, MAX_DEPTH};
 
 /// A part of the output that a caller can ask for.

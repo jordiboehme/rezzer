@@ -907,18 +907,23 @@ fn a_very_long_link_over_many_runs_is_bounded() {
 /// Pages of short lines far apart, one paragraph each: page k has `lines[k]` lines `w<i>.`.
 /// With `uri`, one link with a URI of that many bytes lies over each page.
 fn far_lines(lines: &[usize], uri: Option<usize>) -> Vec<u8> {
+    far_lines_of(lines, uri.map(|m| (m, "u")))
+}
+
+/// Like `far_lines`, with a URI made of `m` copies of `piece`, a PDF string body as written.
+fn far_lines_of(lines: &[usize], uri: Option<(usize, &str)>) -> Vec<u8> {
     const GAP: usize = 40;
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
     let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
     let annots = match uri {
-        Some(m) => {
+        Some((m, piece)) => {
             let annot = b.add(format!(
                 "<< /Type /Annot /Subtype /Link \
                  /Rect [-1000000000 -1000000000 1000000000 1000000000] \
                  /A << /S /URI /URI (http://x/{}) >> >>",
-                "u".repeat(m)
+                piece.repeat(m)
             ));
             format!("/Annots [{annot} 0 R]")
         }
@@ -1015,6 +1020,57 @@ fn links_over_many_paragraphs_are_bounded_through_render() {
     drop(pages);
     drop(md);
     assert_rss_under_256_mib();
+}
+
+/// Reads a 1,250 paragraph file under one link with a 100,000 piece URI, renders it as the
+/// pipeline does (and writes JSON when asked) and checks time, loss and memory.
+fn assert_link_pieces_bounded(piece: &str, json: bool) {
+    let start = Instant::now();
+    let bytes = far_lines_of(&[1_250], Some((100_000, piece)));
+    let out = read(&bytes);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    drop(md);
+    if json {
+        let j = serde_json::to_string_pretty(&out.document).expect("the model serializes");
+        assert!(!j.is_empty());
+    }
+    assert!(!pages.is_empty());
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let t = text(page(&out, 1));
+    assert!(
+        t.contains("w0.") && t.contains("w1249."),
+        "{:?}",
+        out.document.losses
+    );
+    let (n, _) = links_in(page(&out, 1));
+    let loss = link_loss(&out);
+    assert!(
+        loss.what.contains(&format!("{} links", 1_250 - n)),
+        "{loss:?}"
+    );
+    drop(pages);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn link_targets_of_spaces_are_charged_by_what_the_renderer_writes() {
+    // The renderer writes each space as three bytes.
+    assert_link_pieces_bounded(" ", false);
+}
+
+#[test]
+fn link_targets_of_control_characters_are_bounded_through_json() {
+    // The renderer writes each as three bytes, JSON as six.
+    assert_link_pieces_bounded("\\001", true);
 }
 
 #[test]
