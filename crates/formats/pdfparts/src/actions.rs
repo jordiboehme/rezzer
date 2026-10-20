@@ -35,10 +35,16 @@ pub struct Script {
 }
 
 impl Script {
-    /// What it copies beyond its script text, which was charged as it was read.
+    /// What it adds to the action it lists: its trigger and name. The action's kind, target
+    /// and text were charged as they were read.
     pub(crate) fn weight(&self) -> usize {
+        self.trigger.len() + self.name.as_ref().map_or(0, String::len)
+    }
+
+    /// What a copy of an action that was read before holds.
+    fn copied(&self) -> usize {
         let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
-        self.trigger.len() + self.kind.len() + text(&self.name) + text(&self.target)
+        self.kind.len() + text(&self.target) + text(&self.text)
     }
 }
 
@@ -48,6 +54,14 @@ pub(crate) struct Action {
     pub kind: String,
     pub target: Option<String>,
     pub text: Option<String>,
+}
+
+impl Action {
+    /// What one copy of it holds.
+    fn weight(&self) -> usize {
+        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
+        self.kind.len() + text(&self.target) + text(&self.text)
+    }
 }
 
 /// The spent budget ends the reader.
@@ -239,8 +253,8 @@ impl Pdf {
                     target: fa.target.clone(),
                     text: fa.js.map(|j| field.actions[j].1.clone()),
                 };
-                // The text is a copy of the form's, so it is charged again.
-                if !budget.charge(s.weight() + s.text.as_ref().map_or(0, String::len)) {
+                // Kind, target and text are copies of what the form keeps, so they are charged again.
+                if !budget.charge(s.weight() + s.copied()) {
                     return Err(Spent);
                 }
                 out.push(s);
@@ -344,8 +358,9 @@ impl Pdf {
         let doc = &self.doc;
         let start = reference(action);
         if let Some(found) = start.and_then(|id| chains.cache.get(&id)) {
+            // The actions are copied, so each copy is charged.
             for a in found {
-                if !budget.charge(a.text.as_ref().map_or(0, String::len)) {
+                if !budget.charge(a.weight()) {
                     return Err(Spent);
                 }
             }
@@ -448,6 +463,11 @@ impl Pdf {
         } else {
             None
         };
+        // The kind and target are copies; the text was charged as it was read.
+        let copied = kind.len() + target.as_ref().map_or(0, String::len);
+        if !budget.take(copied as u64) {
+            return Err(Spent);
+        }
         Ok(Action { kind, target, text })
     }
 

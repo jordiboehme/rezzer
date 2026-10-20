@@ -521,11 +521,10 @@ fn shared_kids_array_is_walked_once() {
     for took in time_form_readers(&pdf) {
         assert!(took < Duration::from_secs(1), "{took:?}");
     }
-    // The widget belongs to the first field only.
+    // The array and its widget belong to the first field only; the others are not listed.
     let form = pdf.form().unwrap();
-    assert_eq!(form.fields.len(), n);
-    let with_widget = form.fields.iter().filter(|f| !f.pages.is_empty()).count();
-    assert_eq!(with_widget, 1);
+    assert_eq!(form.fields.len(), 1);
+    assert_eq!(form.fields[0].pages, [1]);
     assert!(
         pdf.issues()
             .iter()
@@ -625,8 +624,8 @@ fn shared_value_option_and_attribute_arrays_are_bounded() {
 
 #[test]
 fn shared_byte_range_is_bounded() {
-    // 1,000 signature fields name one /ByteRange array of 100,000 numbers.
-    let (n, m) = (1000, 100_000);
+    // 10,000 signature fields name one /ByteRange array of 100,000 numbers.
+    let (n, m) = (10_000, 100_000);
     let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
     let big: String = (0..m).map(|_| "1 ").collect();
     let mut objects = vec![(9, format!("[{big}]").into_bytes())];
@@ -642,4 +641,34 @@ fn shared_byte_range_is_bounded() {
         assert!(took < Duration::from_millis(50), "{took:?}");
     }
     assert!(has_limit(&pdf, "signatures"), "{:?}", pdf.issues());
+}
+
+#[test]
+fn shared_action_target_is_bounded() {
+    // 3,000 buttons name one URI action with a 1 MB address, and 3,000 more one launch action
+    // with a 1 MB file name.
+    let n = 3000;
+    let big = "a".repeat(1 << 20);
+    for action in [
+        format!("<< /S /URI /URI (http://x/{big}) >>"),
+        format!("<< /S /Launch /F ({big}) >>"),
+    ] {
+        let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+        let mut objects = vec![(6, action.into_bytes())];
+        for i in 0..n {
+            objects.push((
+                100 + i as u32,
+                format!("<< /T (f{i}) /FT /Btn /Ff 65536 /AA << /U 6 0 R >> >>").into_bytes(),
+            ));
+        }
+        let bytes = form_file(&fields, objects);
+        let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+        let fields = pdf.form().unwrap().fields.len();
+        let scripts = pdf.scripts().len();
+        eprintln!("{fields} fields, {scripts} scripts");
+        assert!(fields < n);
+        assert!(has_limit(&pdf, "form fields"), "{:?}", pdf.issues());
+        drop(pdf);
+        assert_rss_bounded();
+    }
 }

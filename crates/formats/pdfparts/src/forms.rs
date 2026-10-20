@@ -401,14 +401,17 @@ impl<'a> Build<'a> {
         // Kids with a name, or with kids of their own, are fields; the others are widgets.
         let mut fields = Vec::new();
         let mut widgets = Vec::new();
-        match d.get(b"Kids").ok() {
-            None => widgets.push((id, d)),
-            Some(k) => {
-                let shared = reference(k).is_some_and(|kid| !self.kids_arrays.insert(kid));
-                if shared {
+        // A /Kids that is not a readable array counts as none: the node is its own widget.
+        let mut shared = false;
+        match d.get(b"Kids").ok().map(|k| (k, resolve(doc, k))) {
+            Some((k, Some(Object::Array(kids)))) => {
+                if let Some(kid_id) = reference(k)
+                    && !self.kids_arrays.insert(kid_id)
+                {
+                    shared = true;
                     self.shared_kids += 1;
-                    self.first_shared_kids = self.first_shared_kids.or(reference(k));
-                } else if let Some(Object::Array(kids)) = resolve(doc, k) {
+                    self.first_shared_kids.get_or_insert(kid_id);
+                } else {
                     self.count(kids.len())?;
                     for kid in kids {
                         let Some(kd) = dict(doc, kid) else {
@@ -429,8 +432,10 @@ impl<'a> Build<'a> {
                     }
                 }
             }
+            _ => widgets.push((id, d)),
         }
-        if fields.is_empty() {
+        // A node whose kids another field read first is not listed: the sharing issue says it.
+        if fields.is_empty() && !shared {
             self.field(d, full_name.clone(), &here, &widgets)?;
         }
         for kid in fields {
@@ -591,7 +596,7 @@ impl<'a> Build<'a> {
                     return Err(Stop);
                 };
                 for a in found {
-                    self.charge(event.len() + a.kind.len())?;
+                    self.charge(event.len())?;
                     let slot = a.text.map(|text| {
                         js.push((event.clone(), text));
                         js.len() - 1

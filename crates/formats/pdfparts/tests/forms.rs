@@ -556,3 +556,66 @@ fn actions_of_other_annotations_are_listed() {
         ]
     );
 }
+
+#[test]
+fn unreadable_and_shared_kids() {
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let child = doc.add_object(dictionary! {
+        "T" => text("child"), "FT" => "Tx", "Subtype" => "Widget",
+        "Rect" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+    });
+    let kids = doc.add_object(vec![Object::Reference(child)]);
+    let a = doc.add_object(dictionary! { "T" => text("a"), "Kids" => kids });
+    let b = doc.add_object(dictionary! { "T" => text("b"), "Kids" => kids });
+    // /Kids names an object that is not there.
+    let c = doc.add_object(dictionary! {
+        "T" => text("c"), "FT" => "Tx", "Subtype" => "Widget", "Kids" => (999, 0),
+        "Rect" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+        "AA" => dictionary! { "K" => js("k") }, "A" => js("act"),
+    });
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => vec![child.into(), c.into()],
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog", "Pages" => pages_id,
+        "AcroForm" => dictionary! { "Fields" => vec![a.into(), b.into(), c.into()] },
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let form = pdf.form().unwrap();
+    let names: Vec<&str> = form.fields.iter().map(|f| f.full_name.as_str()).collect();
+    assert_eq!(names, ["a.child", "c"]);
+    let c = field(&pdf, "c");
+    assert_eq!(c.pages, [1]);
+    assert_eq!(
+        c.actions,
+        [
+            ("keystroke".to_string(), "k".to_string()),
+            ("activate".to_string(), "act".to_string())
+        ]
+    );
+    let triggers: Vec<&str> = pdf.scripts().iter().map(|s| s.trigger.as_str()).collect();
+    assert_eq!(triggers, ["field c keystroke", "field c activate"]);
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.what.starts_with("1 field names a /Kids array")),
+        "{:?}",
+        pdf.issues()
+    );
+}
