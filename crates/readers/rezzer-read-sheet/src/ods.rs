@@ -29,7 +29,7 @@ use zipguard::Archive;
 use crate::Out;
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
 use crate::logic::{Formulas, ReadState, SheetFacts};
-use crate::odscan;
+use crate::odscan::{self, NotCanonical};
 use crate::package::{self, Package, zip_reason};
 use crate::xlsx::{
     Vba, add_annotations, cell_losses, comment_body, defined_names, embedded, issues_to_losses,
@@ -130,8 +130,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         Ok(c) => c,
         Err(e) => return refuse(out, (zip_reason(&e), format!("{CONTENT}: {e}"))),
     };
-    if let Err(why) = odscan::canonical(&content, &stop) {
-        return refuse(out, damaged(why));
+    let max_depth = usize::try_from(lim.max_depth).unwrap_or(usize::MAX);
+    match odscan::canonical(&content, max_depth, &stop) {
+        Ok(()) => {}
+        Err(NotCanonical::Damaged(why)) => return refuse(out, damaged(why)),
+        Err(NotCanonical::Limit(why)) => return refuse(out, (LossReason::Limit, why)),
     }
     let cell = (std::mem::size_of::<Data>() + std::mem::size_of::<String>()) as u64;
     let held = match odscan::calamine_bytes(&content, cell, &stop) {
@@ -153,7 +156,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     drop(content);
 
     let part_limits = sheetparts::Limits {
-        max_depth: usize::try_from(lim.max_depth).unwrap_or(usize::MAX),
+        max_depth,
         max_items: usize::try_from(lim.max_elements).unwrap_or(usize::MAX),
     };
     let parts = odf::read(&mut zip, &part_limits, &stop);

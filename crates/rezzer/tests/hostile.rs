@@ -738,15 +738,20 @@ fn deep_xml_stops_at_depth() {
     );
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(took < Duration::from_secs(10), "took {took:?}");
-    // The ODF part reader stops at the depth limit; the sheet list then disagrees with
-    // calamine's, so the whole read is refused, and both reasons are listed.
-    assert_ne!(
+    // ODS content is checked as a whole before any parser reads it: too deep, it is
+    // refused, and the loss names the depth limit as the reason.
+    assert_eq!(
         result.completeness,
-        Completeness::Complete,
+        Completeness::Failed,
         "{:?}",
         losses(&result)
     );
     assert!(depth_loss(&result), "{:?}", losses(&result));
+    assert!(
+        !losses(&result).iter().any(|l| l.contains("read two ways")),
+        "{:?}",
+        losses(&result)
+    );
 }
 
 fn depth_loss(result: &RunResult) -> bool {

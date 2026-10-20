@@ -75,9 +75,29 @@ fn attribute_prefixes(local: &str) -> Option<&'static [&'static str]> {
 /// Why `content.xml` is refused: a reason for the loss.
 pub(crate) type Refused = String;
 
+/// Why [`canonical`] refuses `content.xml`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NotCanonical {
+    /// The markup could be read two ways, or is broken.
+    Damaged(Refused),
+    /// A limit was reached while it was checked: the depth or the time.
+    Limit(Refused),
+}
+
+impl From<Refused> for NotCanonical {
+    fn from(why: Refused) -> Self {
+        NotCanonical::Damaged(why)
+    }
+}
+
 /// Checks that `content.xml` is canonical, so calamine and sheetparts read the same sheets
-/// and cells.
-pub(crate) fn canonical(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<(), Refused> {
+/// and cells, and that it nests no deeper than `max_depth` elements (the root is level 1, as
+/// sheetparts counts), so neither parser stops halfway at the depth limit.
+pub(crate) fn canonical(
+    bytes: &[u8],
+    max_depth: usize,
+    stop: &dyn Fn() -> bool,
+) -> Result<(), NotCanonical> {
     let text = std::str::from_utf8(bytes).map_err(|e| format!("content.xml is not UTF-8: {e}"))?;
     let mut reader = Reader::from_str(text);
     reader.config_mut().check_end_names = true;
@@ -87,7 +107,9 @@ pub(crate) fn canonical(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<(), Ref
     loop {
         events += 1;
         if events.is_multiple_of(4_096) && stop() {
-            return Err("content.xml: the time limit was reached while it was checked".into());
+            return Err(NotCanonical::Limit(
+                "content.xml: the time limit was reached while it was checked".into(),
+            ));
         }
         let event = reader
             .read_event()
@@ -103,24 +125,33 @@ pub(crate) fn canonical(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<(), Ref
                 if let Some(enc) = d.encoding() {
                     let enc = enc.map_err(|e| format!("content.xml: {e}"))?;
                     if !enc.eq_ignore_ascii_case("utf-8") {
-                        return Err("content.xml declares an encoding other than UTF-8".into());
+                        return Err(NotCanonical::Damaged(
+                            "content.xml declares an encoding other than UTF-8".into(),
+                        ));
                     }
                 }
                 continue;
             }
-            Event::DocType(_) => return Err("content.xml has a DOCTYPE".into()),
+            Event::DocType(_) => {
+                return Err(NotCanonical::Damaged("content.xml has a DOCTYPE".into()));
+            }
             Event::Eof => break,
             _ => continue,
         };
+        if stack.len() + 1 > max_depth {
+            return Err(NotCanonical::Limit(format!(
+                "content.xml: nesting deeper than {max_depth} levels; the workbook is not read"
+            )));
+        }
         let name = e.name().as_ref().to_string();
         check_name(&name)?;
         let (prefix, local) = split(&name);
         if let Some(want) = element_prefix(local)
             && prefix != Some(want)
         {
-            return Err(format!(
+            return Err(NotCanonical::Damaged(format!(
                 "content.xml: the element {name} is not in its usual namespace prefix {want}:"
-            ));
+            )));
         }
         // Attributes count on the elements both parsers read.
         let read_by_both = element_prefix(local).is_some();
@@ -144,40 +175,42 @@ pub(crate) fn canonical(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<(), Ref
             if let Some(allowed) = attribute_prefixes(al)
                 && !ap.is_some_and(|p| allowed.contains(&p))
             {
-                return Err(format!(
+                return Err(NotCanonical::Damaged(format!(
                     "content.xml: the attribute {key} on {name} is not in its usual namespace"
-                ));
+                )));
             }
             // Two attributes with one local name read differently by name and by prefix;
             // only the value type LibreOffice writes twice is allowed.
             if let Some(other) = seen.insert(al.to_string(), key.clone())
                 && al != "value-type"
             {
-                return Err(format!(
+                return Err(NotCanonical::Damaged(format!(
                     "content.xml: {name} has the attributes {other} and {key}"
-                ));
+                )));
             }
         }
         if root_seen {
             if !namespaces.is_empty() {
-                return Err(format!(
+                return Err(NotCanonical::Damaged(format!(
                     "content.xml: a namespace is declared on {name}, below the root"
-                ));
+                )));
             }
         } else {
             root_seen = true;
             if name != "office:document-content" {
-                return Err(format!("content.xml: the root is {name}"));
+                return Err(NotCanonical::Damaged(format!(
+                    "content.xml: the root is {name}"
+                )));
             }
             root_namespaces(&namespaces)?;
         }
         if local == "table" {
             let parent = stack.last().map(String::as_str);
             if stack.len() != 3 || parent != Some("office:spreadsheet") {
-                return Err(format!(
+                return Err(NotCanonical::Damaged(format!(
                     "content.xml: a table outside office:spreadsheet (inside {})",
                     parent.unwrap_or("nothing")
-                ));
+                )));
             }
         }
         if !empty {
@@ -185,10 +218,14 @@ pub(crate) fn canonical(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<(), Ref
         }
     }
     if !stack.is_empty() {
-        return Err("content.xml ends inside an element".into());
+        return Err(NotCanonical::Damaged(
+            "content.xml ends inside an element".into(),
+        ));
     }
     if !root_seen {
-        return Err("content.xml has no root element".into());
+        return Err(NotCanonical::Damaged(
+            "content.xml has no root element".into(),
+        ));
     }
     Ok(())
 }
@@ -663,7 +700,14 @@ mod tests {
 
     #[test]
     fn canonical_markup() {
-        assert!(canonical(doc("<table:table table:name=\"S\"/>").as_bytes(), &|| false).is_ok());
+        assert!(
+            canonical(
+                doc("<table:table table:name=\"S\"/>").as_bytes(),
+                256,
+                &|| false
+            )
+            .is_ok()
+        );
         for bad in [
             doc("<table:table table:name=\"S\" xmlns:x=\"urn:x\"/>"),
             doc(
@@ -681,7 +725,32 @@ mod tests {
             ),
             doc("<a:b:c/>"),
         ] {
-            assert!(canonical(bad.as_bytes(), &|| false).is_err(), "{bad}");
+            assert!(
+                matches!(
+                    canonical(bad.as_bytes(), 256, &|| false),
+                    Err(NotCanonical::Damaged(_))
+                ),
+                "{bad}"
+            );
         }
+    }
+
+    #[test]
+    fn content_deeper_than_the_limit_is_a_limit() {
+        // The root, office:body, office:spreadsheet and the table make four levels.
+        let table = doc("<table:table table:name=\"S\"/>");
+        assert!(canonical(table.as_bytes(), 4, &|| false).is_ok());
+        match canonical(table.as_bytes(), 3, &|| false) {
+            Err(NotCanonical::Limit(why)) => {
+                assert!(why.contains("nesting deeper than 3 levels"), "{why}")
+            }
+            other => panic!("expected a depth limit, got {other:?}"),
+        }
+        let open = doc("<table:table table:name=\"S\"></table:table>");
+        assert!(canonical(open.as_bytes(), 4, &|| false).is_ok());
+        assert!(matches!(
+            canonical(open.as_bytes(), 3, &|| false),
+            Err(NotCanonical::Limit(_))
+        ));
     }
 }
