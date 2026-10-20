@@ -409,3 +409,18 @@ fn unpacked_size_is_the_measured_size() {
     assert_eq!(pdf.unpacked_size(number, 1), None);
     assert_eq!(pdf.unpacked_size(9_999, 0), None);
 }
+
+#[test]
+fn copies_draw_on_the_object_budget_left() {
+    let bytes = content_page(&["FlateDecode"], zlib_fill(b' ', 1_000));
+    let limits = Limits {
+        max_object_bytes: 1 << 20,
+        ..Limits::default()
+    };
+    let pdf = Pdf::open(&bytes, None, &limits, &never).unwrap();
+    assert_eq!(pdf.canonical_shared().as_slice(), pdf.canonical());
+    assert!(pdf.charge_copy(1_000));
+    // More than the whole budget does not fit, and spends what is left.
+    assert!(!pdf.charge_copy(1 << 20));
+    assert!(!pdf.charge_copy(1));
+}

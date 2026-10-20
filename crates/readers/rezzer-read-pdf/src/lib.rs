@@ -107,9 +107,10 @@ fn extract(
         .map(|p| p.number)
         .filter(|n| !refused.contains(n))
         .collect();
-    let caps = Caps {
-        max_items: open::limits(budget).max_items,
-    };
+    let caps = Caps::new(
+        open::limits(budget).max_items,
+        budget.limits().max_memory_bytes,
+    );
     text::pages(pdf, &wanted, caps, stop)
 }
 
@@ -182,7 +183,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             role: Some("page".into()),
             anchor: None,
         }];
-        if let (false, Some(items)) = (halted, read.remove(&n)) {
+        if let (false, Some(mut items)) = (halted, read.remove(&n)) {
             let roles = |mcid: u32| pdf.role_of(n, mcid);
             let cx = Context {
                 style: &style,
@@ -202,11 +203,11 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             }
             notes(n, &items, out);
             let height = frame_height(info, Some(&items));
-            let laid = layout::page_blocks(n, height, items.runs, &cx);
+            let laid = layout::page_blocks(n, height, std::mem::take(&mut items.runs), &cx);
             blocks.extend(laid.blocks);
             let mut stop = laid.stop;
             if stop.is_none() {
-                match invisible(n, &items.invisible, &items.hidden_layer, budget, out) {
+                match invisible(n, &items, budget, out) {
                     Ok(Some(callout)) => blocks.push(callout),
                     Ok(None) => {}
                     Err(hit) => stop = Some(hit),
@@ -317,17 +318,8 @@ fn notes(page: u32, items: &PageItems, out: &mut Out) {
     }
 }
 
-/// The folded callout with the text that puts no glyphs on the page, and its Info loss.
-fn invisible(
-    page: u32,
-    runs: &[Run],
-    layer: &[String],
-    budget: &Budget,
-    out: &mut Out,
-) -> Result<Option<Block>, rezzer_limits::LimitHit> {
-    if runs.is_empty() && layer.is_empty() {
-        return Ok(None);
-    }
+/// The lines of runs: the runs of one line joined.
+fn run_lines(runs: &[Run]) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut last = None;
     for r in runs {
@@ -340,7 +332,27 @@ fn invisible(
         }
         last = Some(r.line);
     }
+    lines
+}
+
+/// The folded callout with the text that puts no glyphs on the page and the text of
+/// switched-off layers, each layer under its name, and their Info losses.
+fn invisible(
+    page: u32,
+    items: &PageItems,
+    budget: &Budget,
+    out: &mut Out,
+) -> Result<Option<Block>, rezzer_limits::LimitHit> {
+    let (runs, layer) = (&items.invisible, &items.hidden_layer);
+    if runs.is_empty() && layer.is_empty() && items.hidden_layers.is_empty() {
+        return Ok(None);
+    }
+    let mut lines = run_lines(runs);
     lines.extend(layer.iter().cloned());
+    for (name, layer_runs) in &items.hidden_layers {
+        lines.push(format!("Hidden layer {name}:"));
+        lines.extend(run_lines(layer_runs));
+    }
     budget.add_elements(1 + 2 * lines.len() as u64)?;
     let mut blocks = Vec::with_capacity(lines.len());
     for l in lines {
@@ -362,15 +374,25 @@ fn invisible(
             layer.len()
         ));
     }
-    out.loss(
-        format!("p{page}"),
-        format!(
-            "{}: shown in a folded callout at the end of the page, not in the text",
-            said.join(" and ")
-        ),
-        LossReason::Unsupported,
-        Severity::Info,
-    );
+    let shown = "shown in a folded callout at the end of the page, not in the text";
+    if !said.is_empty() {
+        out.loss(
+            format!("p{page}"),
+            format!("{}: {shown}", said.join(" and ")),
+            LossReason::Unsupported,
+            Severity::Info,
+        );
+    }
+    for (name, layer_runs) in &items.hidden_layers {
+        let n = layer_runs.len();
+        let word = if n == 1 { "run" } else { "runs" };
+        out.loss(
+            format!("p{page}"),
+            format!("{n} {word} in hidden layer {name}: {shown}"),
+            LossReason::Unsupported,
+            Severity::Info,
+        );
+    }
     Ok(Some(Block::Callout {
         kind: CalloutKind::Details,
         title: Some("Invisible text on this page".into()),

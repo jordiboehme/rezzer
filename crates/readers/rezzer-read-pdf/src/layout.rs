@@ -65,10 +65,17 @@ const GAP_RATIO: f32 = 1.5;
 /// Font sizes closer than this are the same size.
 const SIZE_SLACK: f32 = 0.5;
 
-/// Bytes of mid-page line texts the style pass keeps to tell running headers from content.
-/// Past it, no more are kept: a header text that also stands mid-page later in a huge file
-/// may then keep its header role.
+/// Memory the mid-page line texts the style pass keeps may take, to tell running headers from
+/// content: the text and about 64 bytes of set overhead per line. Past it, no more are kept:
+/// a header text that also stands mid-page later in a huge file may then keep its header
+/// role.
+#[cfg(not(test))]
 const BODY_KEY_BYTES: usize = 32 << 20;
+#[cfg(test)]
+const BODY_KEY_BYTES: usize = 1_000;
+
+/// Set overhead of one kept line text.
+const BODY_KEY_COST: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Band {
@@ -202,15 +209,17 @@ impl Style {
             for l in lines(p.runs) {
                 if let Some(key) = furniture_key_of(&l, p.height) {
                     seen.entry(key).or_default().push((l.middle(), p.page));
-                } else if p.height.is_some() && body_bytes < BODY_KEY_BYTES {
+                } else if p.height.is_some() {
                     let key = furniture_key(&l.text);
-                    let len = key.len();
-                    if body.insert(key) {
-                        body_bytes += len;
+                    let cost = key.len() + BODY_KEY_COST;
+                    if body_bytes + cost <= BODY_KEY_BYTES && body.insert(key) {
+                        body_bytes += cost;
                     }
                 }
             }
         }
+        #[cfg(test)]
+        BODY_KEPT.with(|k| k.set(body.len()));
         let mut furniture: HashMap<Furniture, Vec<(f32, f32)>> = HashMap::new();
         for (key, mut at) in seen {
             if key.1.chars().any(char::is_alphabetic) && body.contains(&key.1) {
@@ -1071,6 +1080,12 @@ fn tagged_table(
 }
 
 #[cfg(test)]
+thread_local! {
+    /// The mid-page line texts the last style pass kept.
+    static BODY_KEPT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
     use pdfparts::StructElem;
 
@@ -1091,6 +1106,27 @@ mod tests {
             uri: None,
             line,
         }
+    }
+
+    #[test]
+    fn kept_body_lines_are_bounded() {
+        // Distinct mid-page lines of 13 bytes each cost 77 bytes with the set: 1,000 bytes
+        // keep 12 of them.
+        let letter = |k: u32| char::from(b'a' + (k % 26) as u8);
+        let runs: Vec<Run> = (0..200)
+            .map(|k| {
+                let word: String = [letter(k / 676), letter(k / 26), letter(k)]
+                    .iter()
+                    .collect();
+                run(&format!("body line {word}"), k, 500.0, 10.0)
+            })
+            .collect();
+        Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        assert_eq!(BODY_KEPT.with(|k| k.get()), 1_000 / (13 + BODY_KEY_COST));
     }
 
     #[test]

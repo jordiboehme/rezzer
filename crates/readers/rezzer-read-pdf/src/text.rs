@@ -24,7 +24,7 @@ use hayro_interpret::{
 };
 use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::content::{TypedIter, UntypedIter};
-use hayro_syntax::object::{Array, Dict, Name, Object, Stream, dict_or_stream};
+use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier, Stream, dict_or_stream};
 use hayro_syntax::page::{Page, Resources};
 use kurbo::{Affine, BezPath, Point};
 use pdfparts::{LinkTarget, Pdf};
@@ -108,10 +108,14 @@ pub(crate) struct PageItems {
     /// coordinates are not page coordinates then, and no running header or footer is looked
     /// for.
     pub turned: bool,
+    /// Text in optional content the file switches off, by layer name, in reading order.
+    pub hidden_layers: Vec<(String, Vec<Run>)>,
     /// Visible glyphs with a Unicode mapping.
     pub mapped: u64,
     /// Glyphs without a Unicode mapping; each stands as U+FFFD in the text.
     pub unmapped: u64,
+    /// Visible glyphs without a Unicode mapping.
+    pub unmapped_visible: u64,
     /// What on this page was not read, and why.
     pub notes: Vec<Note>,
 }
@@ -156,9 +160,24 @@ pub(crate) struct Extracted {
 /// Bounds for reading one page.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Caps {
-    /// Work one page may take: one unit per content operator, per byte of shown text, per
-    /// glyph drawn and per 64 bytes a stream unpacks to, forms counted each time they run.
+    /// Work one page may take: one unit per content operator, per byte of shown text and
+    /// ActualText, and per 64 bytes a stream unpacks to, forms counted each time they run.
     pub max_items: usize,
+    /// Glyphs one page may build: the interpreter builds every glyph of a show before the
+    /// device sees it, so the walk counts shown bytes against this bound first.
+    pub max_glyphs: usize,
+}
+
+impl Caps {
+    /// The caps for a read with `max_items` and `max_memory` bytes: a page's glyphs cost about
+    /// 600 bytes each until laid out, and may take a quarter of the memory.
+    pub(crate) fn new(max_items: usize, max_memory: u64) -> Caps {
+        let glyphs = usize::try_from(max_memory / 4 / 600).unwrap_or(usize::MAX);
+        Caps {
+            max_items,
+            max_glyphs: glyphs.max(1_000),
+        }
+    }
 }
 
 /// Reads the text of `wanted` pages (1-based, ascending, none refused by the guard) from the
@@ -177,7 +196,7 @@ pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bo
         }));
     };
     let opened = panic::catch_unwind(AssertUnwindSafe(|| {
-        hayro_syntax::Pdf::new(pdf.canonical().to_vec())
+        hayro_syntax::Pdf::new(pdf.canonical_shared())
     }));
     let doc = match opened {
         Ok(Ok(doc)) => doc,
@@ -215,7 +234,8 @@ pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bo
         return out;
     }
     let links = uri_links(pdf);
-    let mut reader = PageReader::new(pdf, caps, stop);
+    let off = switched_off(&doc);
+    let mut reader = PageReader::new(pdf, caps, stop, off);
     for &n in wanted {
         if stop() {
             out.stopped_at = Some(n);
@@ -239,6 +259,42 @@ pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bo
         }
     }
     out
+}
+
+/// The optional content groups the default configuration switches off, read the way the
+/// interpreter reads them.
+fn switched_off(doc: &hayro_syntax::Pdf) -> HashSet<ObjectIdentifier> {
+    let mut off = HashSet::new();
+    let xref = doc.xref();
+    let Some(props) = xref
+        .get::<Dict<'_>>(xref.root_id())
+        .and_then(|c| c.get::<Dict<'_>>(b"OCProperties"))
+    else {
+        return off;
+    };
+    let Some(config) = props.get::<Dict<'_>>(b"D") else {
+        return off;
+    };
+    let refs = |a: Array<'_>| -> Vec<ObjectIdentifier> {
+        a.raw_iter()
+            .filter_map(|i| i.as_obj_ref())
+            .map(Into::into)
+            .collect()
+    };
+    if config.get::<Name<'_>>(b"BaseState").as_deref() == Some(b"OFF")
+        && let Some(all) = props.get::<Array<'_>>(b"OCGs")
+    {
+        off.extend(refs(all));
+    }
+    if let Some(on) = config.get::<Array<'_>>(b"ON") {
+        for id in refs(on) {
+            off.remove(&id);
+        }
+    }
+    if let Some(list) = config.get::<Array<'_>>(b"OFF") {
+        off.extend(refs(list));
+    }
+    off
 }
 
 /// A URI link box (x0, y0, x1, y1 in user space) and its target.
@@ -281,6 +337,9 @@ struct FontInfo {
     vertical: bool,
     /// The font program is in the file, so its own tables describe its glyphs.
     embedded: bool,
+    /// The embedded program and its unpacked size: a program of another size in use is a
+    /// stand-in for one that did not load.
+    program: Option<(ObjectIdentifier, u64)>,
     /// The CID collection of a CID font whose glyph ids are its CIDs (a TrueType CID font with
     /// the identity CIDToGIDMap), or whose CFF program is CID-keyed.
     collection: Option<CidFamily>,
@@ -294,6 +353,18 @@ struct Mark {
     actual: Option<Rc<str>>,
 }
 
+/// The glyph tables of embedded font programs, shared by every font dictionary that uses a
+/// program, and charged to the copy budget.
+#[derive(Default)]
+struct Programs {
+    /// Font dictionary to the program in use, `None` for a stand-in.
+    of_font: HashMap<u128, Option<ObjectIdentifier>>,
+    tables: HashMap<ObjectIdentifier, Rc<GlyphNames>>,
+    collections: HashMap<Vec<u8>, Option<Rc<CMap>>>,
+    /// The copy budget ran out; no more tables are read.
+    spent: bool,
+}
+
 /// Reads pages one after the other, sharing hayro's caches and what is known of the fonts.
 struct PageReader<'p, 'a> {
     pdf: &'p Pdf,
@@ -303,13 +374,17 @@ struct PageReader<'p, 'a> {
     cache: InterpreterCache<'a>,
     /// Font program bytes the cache holds; past the work bound it starts again empty.
     cache_bytes: u64,
-    fonts: HashMap<u128, FontInfo>,
-    names: HashMap<u128, Rc<GlyphNames>>,
-    collections: HashMap<Vec<u8>, Option<Rc<CMap>>>,
+    known: Known,
+    programs: Programs,
 }
 
 impl<'p, 'a> PageReader<'p, 'a> {
-    fn new(pdf: &'p Pdf, caps: Caps, stop: &'p dyn Fn() -> bool) -> Self {
+    fn new(
+        pdf: &'p Pdf,
+        caps: Caps,
+        stop: &'p dyn Fn() -> bool,
+        off: HashSet<ObjectIdentifier>,
+    ) -> Self {
         PageReader {
             pdf,
             caps,
@@ -322,27 +397,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
             },
             cache: InterpreterCache::new(),
             cache_bytes: 0,
-            fonts: HashMap::new(),
-            names: HashMap::new(),
-            collections: HashMap::new(),
+            known: Known {
+                off,
+                ..Known::default()
+            },
+            programs: Programs::default(),
         }
-    }
-
-    /// The unpacked size of a stream, as the guard measured it.
-    fn size(&self, s: &Stream<'_>) -> u64 {
-        let id = s.obj_id();
-        match (u32::try_from(id.obj_number), u16::try_from(id.gen_number)) {
-            (Ok(n), Ok(g)) => self.pdf.unpacked_size(n, g),
-            _ => None,
-        }
-        .unwrap_or_else(|| s.raw_data().len() as u64)
     }
 
     fn page(&mut self, n: u32, page: &Page<'a>, links: &[Link]) -> Read {
         let fail = |why: String, kind: Fail| Read::Failed(Failure { page: n, why, kind });
         let max_bytes = (self.caps.max_items as u64).saturating_mul(BYTES_PER_UNIT);
         let streams = content_streams(page.raw());
-        let size: u64 = streams.iter().map(|s| self.size(s)).sum();
+        let size: u64 = streams.iter().map(|s| stream_size(self.pdf, s)).sum();
         if size > max_bytes {
             return fail(
                 format!(
@@ -353,11 +420,15 @@ impl<'p, 'a> PageReader<'p, 'a> {
             );
         }
         let mut notes = Vec::new();
-        let mut data = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+        let mut data: Vec<u8> = Vec::new();
         for s in &streams {
             match s.decoded() {
                 Ok(d) => {
-                    data.extend_from_slice(&d);
+                    if streams.len() == 1 {
+                        data = d.into_owned();
+                    } else {
+                        data.extend_from_slice(&d);
+                    }
                     // The streams of a page are one stream cut in pieces.
                     data.push(b' ');
                 }
@@ -372,52 +443,68 @@ impl<'p, 'a> PageReader<'p, 'a> {
             self.cache_bytes = 0;
         }
         let (pdf, caps) = (self.pdf, self.caps);
-        let fonts = &mut self.fonts;
+        let known = &mut self.known;
         let walked = panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut walk = Walk::new(pdf, caps, fonts);
+            let mut walk = Walk::new(pdf, caps, n, known);
             walk.charge(size / BYTES_PER_UNIT);
             let cut = walk.top(&data, page.resources());
-            Walked {
-                cut,
-                marks: walk.marks,
-                tr7: walk.tr7,
-                clip_in_forms: walk.clip_in_forms,
-                font_bytes: walk.font_bytes,
-            }
+            walk.finish(cut)
         }));
-        let Ok(Walked {
-            cut,
-            marks,
-            tr7,
-            clip_in_forms,
-            font_bytes,
-        }) = walked
-        else {
+        let Ok(walked) = walked else {
             return fail("walking the content".into(), Fail::Internal);
         };
+        let Walked {
+            cut,
+            marks,
+            rewrites,
+            layers,
+            notes: walk_notes,
+            unread_hidden,
+            clip_in_forms,
+            font_bytes,
+        } = walked;
         self.cache_bytes = self.cache_bytes.saturating_add(font_bytes);
-        if let Some((at, why)) = &cut {
-            let kept = edit(&mut data, Some(*at), &[]);
-            if !kept {
+        let (placed, failed) = edit(&mut data, cut.as_ref().map(|(at, _)| *at), &rewrites);
+        if let Some((_, why)) = &cut {
+            if placed {
+                notes.push(Note::Limit(format!(
+                    "text of page {n} read only in part: {why}; the rest of the page is not \
+                     read"
+                )));
+            } else {
                 data.clear();
+                notes.push(Note::Limit(format!("text of page {n} not read: {why}")));
             }
-            notes.push(Note::Limit(format!(
-                "text of page {n} read only in part: {why}; the rest of the page is not read"
-            )));
         }
-        if !tr7.is_empty() {
-            // Text in render mode 7 only clips; the interpreter draws nothing for it. Mode 3
-            // is read the same and puts no glyphs on the page either.
-            edit(&mut data, None, &tr7);
+        for i in failed {
+            match rewrites.get(&i) {
+                Some(Rewrite::Layer(k)) => notes.push(Note::Unsupported(format!(
+                    "text in hidden layer {} on page {n} not read: its marked content could \
+                     not be opened",
+                    layers[*k]
+                ))),
+                _ => notes.push(Note::Unsupported(format!(
+                    "a render mode of page {n} could not be changed; text set to clip may be \
+                     missing"
+                ))),
+            }
+        }
+        notes.extend(walk_notes);
+        for (name, count) in unread_hidden {
+            let s = if count == 1 { "" } else { "s" };
+            notes.push(Note::Unsupported(format!(
+                "{count} text operator{s} in hidden layer {name} on page {n} not read: the \
+                 interpreter does not run them"
+            )));
         }
         if clip_in_forms > 0 {
             let s = if clip_in_forms == 1 { "" } else { "s" };
             notes.push(Note::Unsupported(format!(
-                "{clip_in_forms} text object{s} in render mode 7 (clip only) inside forms on \
+                "{clip_in_forms} text operator{s} in render mode 7 (clip only) inside forms on \
                  page {n} not read"
             )));
         }
-        let use_marks = marks.iter().any(|m| m.actual.is_some());
+        let use_marks = marks.iter().any(|m| m.actual.is_some()) || !layers.is_empty();
         let crop = page.intersected_crop_box();
         let origin = Affine::translate((-crop.x0, -crop.y0));
         let bbox = kurbo::Rect::new(0.0, 0.0, crop.x1 - crop.x0, crop.y1 - crop.y0);
@@ -435,15 +522,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
             open: Vec::new(),
             marks: if use_marks { &marks } else { &[] },
             next_mark: 0,
-            fonts: &self.fonts,
-            names: &mut self.names,
-            collections: &mut self.collections,
+            layers: layers.len(),
+            out_of_step: 0,
+            fonts: &self.known.fonts,
+            pdf: self.pdf,
+            programs: &mut self.programs,
+            stand_ins: HashSet::new(),
+            tables_cut: false,
             stop: self.stop,
             calls: 0,
-            // The walk bounds the glyphs by the shown bytes already; this is the backstop.
-            cap: self.caps.max_items.max(1),
+            cap: self.caps.max_glyphs.max(1),
             last: None,
             unmapped: 0,
+            unmapped_visible: 0,
             mapped: 0,
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -466,10 +557,33 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 }
             }
         }
-        let mut items = lay_out(n, &dev.glyphs, &dev.text, links, crop.x0, crop.y0);
+        if !dev.stand_ins.is_empty() {
+            let k = dev.stand_ins.len();
+            let (s, them) = if k == 1 { ("", "its") } else { ("s", "their") };
+            notes.push(Note::Damaged(format!(
+                "{k} embedded font program{s} of page {n} could not be read; {them} glyphs \
+                 without a ToUnicode mapping count as unmapped"
+            )));
+        }
+        if dev.out_of_step > 0 {
+            notes.push(Note::Unsupported(format!(
+                "the ActualText of {} marked content sequences on page {n} is not used: the \
+                 sequences did not match the content walk",
+                dev.out_of_step
+            )));
+        }
+        if dev.tables_cut {
+            notes.push(Note::Limit(format!(
+                "glyph tables of embedded fonts on page {n} not read: they take more than the \
+                 object limit allows; their glyphs count as unmapped"
+            )));
+        }
+        let mut items = lay_out(n, &dev.glyphs, &dev.text, links, crop.x0, crop.y0, &layers);
         items.images = dev.images;
         items.mapped = dev.mapped;
         items.unmapped = dev.unmapped;
+        items.unmapped_visible = dev.unmapped_visible;
+        notes.append(&mut items.notes);
         items.notes = notes;
         Read::Page(Box::new(items))
     }
@@ -485,19 +599,39 @@ fn content_streams<'a>(page: &Dict<'a>) -> Vec<Stream<'a>> {
         .unwrap_or_default()
 }
 
-/// Edits the page content in place: cuts it before operator `cut` and turns the operand of
-/// each `Tr` operator listed in `seven` (render mode 7) into 3. Returns false when the cut
-/// could not be placed (the content is then dropped by the caller).
-fn edit(data: &mut Vec<u8>, cut: Option<usize>, seven: &[usize]) -> bool {
+/// A change [`edit`] makes to one page-level operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rewrite {
+    /// The operand of a `Tr` becomes this render mode: the clipping modes 4 to 7 are read as
+    /// 0 to 3, so the interpreter builds no glyph outlines for a clip and draws mode 7 text.
+    Mode(u8),
+    /// A `BDC` that switches optional content off becomes `/Rz<k> BMC`: the interpreter draws
+    /// the text in it, and the device knows it belongs to hidden layer `k`.
+    Layer(usize),
+}
+
+/// The tag a switched-off `BDC` of the page gets.
+fn layer_tag(k: usize) -> String {
+    format!("Rz{k}")
+}
+
+/// Edits the page content in place: cuts it before operator `cut` and applies `rewrites`
+/// (keyed by operator index). Returns whether the cut could be placed, and the rewrites that
+/// did not fit.
+fn edit(
+    data: &mut Vec<u8>,
+    cut: Option<usize>,
+    rewrites: &HashMap<usize, Rewrite>,
+) -> (bool, Vec<usize>) {
     let base = data.as_ptr() as usize;
     let len = data.len();
     let mut cut_at = None;
-    let mut fixes: Vec<usize> = Vec::new();
+    let mut fixes: Vec<(usize, Vec<u8>)> = Vec::new();
+    let mut failed = Vec::new();
     {
         let mut ops = UntypedIter::new(data);
         let mut prev_end = 0usize;
         let mut i = 0usize;
-        let wanted: HashSet<usize> = seven.iter().copied().collect();
         while let Some(op) = ops.next() {
             if cut == Some(i) {
                 cut_at = Some(prev_end);
@@ -506,87 +640,162 @@ fn edit(data: &mut Vec<u8>, cut: Option<usize>, seven: &[usize]) -> bool {
             let start = (op.operator.as_ptr() as usize).wrapping_sub(base);
             if start > len {
                 // The operator was copied out of the data; no offset for it.
+                if rewrites.contains_key(&i) {
+                    failed.push(i);
+                }
                 i += 1;
                 continue;
             }
-            if wanted.contains(&i)
-                && let Some(at) = data[prev_end..start]
-                    .iter()
-                    .rposition(|&b| b == b'7')
-                    .map(|k| prev_end + k)
-            {
-                let token = data[prev_end..start].trim_ascii();
-                if let Ok(v) = std::str::from_utf8(token).unwrap_or("").parse::<f64>()
-                    && v == 7.0
-                {
-                    fixes.push(at);
+            let end = start + op.operator.len();
+            match rewrites.get(&i) {
+                Some(Rewrite::Mode(m)) => {
+                    let region = &data[prev_end..start];
+                    match region.iter().position(|b| b.is_ascii_digit() || *b == b'+') {
+                        Some(at) => {
+                            let mut new = vec![b' '; region.len()];
+                            new[at] = b'0' + m;
+                            fixes.push((prev_end, new));
+                        }
+                        None => failed.push(i),
+                    }
                 }
+                Some(Rewrite::Layer(k)) => {
+                    let new = format!("/{} BMC", layer_tag(*k));
+                    if new.len() < end - prev_end {
+                        let mut bytes = vec![b' '; end - prev_end];
+                        bytes[1..=new.len()].copy_from_slice(new.as_bytes());
+                        fixes.push((prev_end, bytes));
+                    } else {
+                        failed.push(i);
+                    }
+                }
+                None => {}
             }
-            prev_end = start + op.operator.len();
+            prev_end = end;
             i += 1;
         }
     }
-    for at in fixes {
-        data[at] = b'3';
+    for (at, bytes) in fixes {
+        data[at..at + bytes.len()].copy_from_slice(&bytes);
     }
-    match (cut, cut_at) {
+    let placed = match (cut, cut_at) {
         (Some(_), Some(at)) => {
             data.truncate(at);
             true
         }
         (Some(_), None) => false,
         _ => true,
-    }
+    };
+    (placed, failed)
 }
 
 /// What the walk of a page gives.
 struct Walked {
     cut: Option<(usize, String)>,
     marks: Vec<Mark>,
-    tr7: Vec<usize>,
+    rewrites: HashMap<usize, Rewrite>,
+    layers: Vec<String>,
+    notes: Vec<Note>,
+    unread_hidden: Vec<(String, u64)>,
     clip_in_forms: u64,
     font_bytes: u64,
 }
 
+/// What the walk keeps for the whole file: fonts, the ActualText of named properties and
+/// the optional content groups that are off.
+#[derive(Default)]
+struct Known {
+    fonts: HashMap<u128, FontInfo>,
+    properties: HashMap<ObjectIdentifier, Option<Rc<str>>>,
+    off: HashSet<ObjectIdentifier>,
+}
+
+/// The parts of the graphics state the walk follows.
+#[derive(Debug, Clone, Copy, Default)]
+struct Gs {
+    mode: i64,
+    type3: bool,
+}
+
+/// Glyphs of Type3 fonts and glyphs in a clipping render mode inside forms cost the
+/// interpreter about this many plain glyphs each.
+const HEAVY_GLYPH: u64 = 8;
+
 /// The walk of a page's content operators. It follows forms the way the interpreter runs
-/// them and stops once the page's work passes the bound.
+/// them, with the same optional content visibility, and stops once the page's work or glyphs
+/// pass their bounds.
 struct Walk<'w> {
     pdf: &'w Pdf,
     caps: Caps,
-    fonts: &'w mut HashMap<u128, FontInfo>,
+    page: u32,
+    known: &'w mut Known,
     work: usize,
+    glyphs: u64,
     /// Marked content sequences in the order the interpreter meets them.
     marks: Vec<Mark>,
-    /// Page-level operator indices of `7 Tr`.
-    tr7: Vec<usize>,
-    /// `7 Tr` operators inside forms.
+    rewrites: HashMap<usize, Rewrite>,
+    /// Names of the switched-off layers met, by index.
+    layers: Vec<String>,
+    notes: Vec<Note>,
+    /// Text operators the interpreter does not draw because their layer is off, by layer.
+    unread_hidden: Vec<(String, u64)>,
+    /// Text operators in render mode 7 inside forms, which the interpreter does not draw.
     clip_in_forms: u64,
     /// Fonts already charged on this page.
     charged: HashSet<u128>,
-    /// Font program bytes charged.
     font_bytes: u64,
     /// Forms being walked: the unpacked bytes they hold.
     held: u64,
     depth: usize,
+    gs: Vec<Gs>,
+    /// Whether the interpreter draws what is shown here.
+    visible: Vec<bool>,
+    /// The switched-off layer the content stands in.
+    layer: Vec<Option<usize>>,
+    /// Forms the interpreter does not run are walked to count their text only; their marked
+    /// content is not met.
+    skipping: usize,
     /// Why the walk stopped.
     over: Option<String>,
 }
 
 impl<'w> Walk<'w> {
-    fn new(pdf: &'w Pdf, caps: Caps, fonts: &'w mut HashMap<u128, FontInfo>) -> Self {
+    fn new(pdf: &'w Pdf, caps: Caps, page: u32, known: &'w mut Known) -> Self {
         Walk {
             pdf,
             caps,
-            fonts,
+            page,
+            known,
             work: 0,
+            glyphs: 0,
             marks: Vec::new(),
-            tr7: Vec::new(),
+            rewrites: HashMap::new(),
+            layers: Vec::new(),
+            notes: Vec::new(),
+            unread_hidden: Vec::new(),
             clip_in_forms: 0,
             charged: HashSet::new(),
             font_bytes: 0,
             held: 0,
             depth: 0,
+            gs: vec![Gs::default()],
+            visible: Vec::new(),
+            layer: Vec::new(),
+            skipping: 0,
             over: None,
+        }
+    }
+
+    fn finish(self, cut: Option<(usize, String)>) -> Walked {
+        Walked {
+            cut,
+            marks: self.marks,
+            rewrites: self.rewrites,
+            layers: self.layers,
+            notes: self.notes,
+            unread_hidden: self.unread_hidden,
+            clip_in_forms: self.clip_in_forms,
+            font_bytes: self.font_bytes,
         }
     }
 
@@ -597,21 +806,126 @@ impl<'w> Walk<'w> {
             .saturating_add(usize::try_from(units).unwrap_or(usize::MAX));
         if self.work > self.caps.max_items && self.over.is_none() {
             self.over = Some(format!(
-                "it takes more than {} units of work (content operators, shown text, glyphs \
-                 and unpacked bytes)",
+                "it takes more than {} units of work (content operators, shown text and \
+                 unpacked bytes)",
                 self.caps.max_items
             ));
         }
         self.over.is_none()
     }
 
-    fn size(&self, s: &Stream<'_>) -> u64 {
-        let id = s.obj_id();
-        match (u32::try_from(id.obj_number), u16::try_from(id.gen_number)) {
-            (Ok(n), Ok(g)) => self.pdf.unpacked_size(n, g),
-            _ => None,
+    /// Charges a text show of `bytes` bytes: its glyphs when the interpreter draws them, a
+    /// count of unread text when its layer is off.
+    fn show(&mut self, bytes: usize, top: bool) -> bool {
+        let bytes = bytes as u64;
+        if !self.charge(bytes) {
+            return false;
         }
-        .unwrap_or_else(|| s.raw_data().len() as u64)
+        if !self.is_visible() {
+            let name = self
+                .layer
+                .iter()
+                .rev()
+                .find_map(|l| *l)
+                .and_then(|k| self.layers.get(k).cloned())
+                .unwrap_or_else(|| "without a name".to_string());
+            match self.unread_hidden.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, count)) => *count += 1,
+                None => self.unread_hidden.push((name, 1)),
+            }
+            return true;
+        }
+        let gs = self.gs.last().copied().unwrap_or_default();
+        if !top && gs.mode == 7 {
+            self.clip_in_forms += 1;
+        }
+        let heavy = gs.type3 || (!top && (4..=7).contains(&gs.mode));
+        let cost = if heavy { bytes * HEAVY_GLYPH } else { bytes };
+        self.glyphs = self.glyphs.saturating_add(cost);
+        if self.glyphs > self.caps.max_glyphs as u64 && self.over.is_none() {
+            self.over = Some(format!(
+                "it shows more than {} glyphs (glyphs of Type3 fonts and glyphs that clip \
+                 count {HEAVY_GLYPH} times)",
+                self.caps.max_glyphs
+            ));
+        }
+        self.over.is_none()
+    }
+
+    fn note(&mut self, note: Note) {
+        if !self.notes.contains(&note) {
+            self.notes.push(note);
+        }
+    }
+
+    fn size(&self, s: &Stream<'_>) -> u64 {
+        stream_size(self.pdf, s)
+    }
+
+    fn is_visible(&self) -> bool {
+        self.visible.last().copied().unwrap_or(true)
+    }
+
+    /// Whether optional content `d` (a group, or a membership dictionary) is on, the way the
+    /// interpreter decides it from the default configuration.
+    fn oc_on(&self, d: &Dict<'_>, id: Option<ObjectIdentifier>) -> bool {
+        if d.get::<Name<'_>>(b"Type").as_deref() != Some(b"OCMD") {
+            return id.is_none_or(|id| !self.known.off.contains(&id));
+        }
+        let mut groups: Vec<ObjectIdentifier> = Vec::new();
+        if let Some(a) = d.get::<Array<'_>>(b"OCGs") {
+            groups.extend(
+                a.raw_iter()
+                    .filter_map(|i| i.as_obj_ref())
+                    .map(ObjectIdentifier::from),
+            );
+        } else if let Some(r) = d.get_ref(b"OCGs") {
+            groups.push(r.into());
+        }
+        if groups.is_empty() {
+            return true;
+        }
+        let off = |g: &ObjectIdentifier| self.known.off.contains(g);
+        match d.get::<Name<'_>>(b"P").as_deref() {
+            Some(b"AllOn") => groups.iter().all(|g| !off(g)),
+            Some(b"AnyOff") => groups.iter().any(off),
+            Some(b"AllOff") => groups.iter().all(off),
+            _ => groups.iter().any(|g| !off(g)),
+        }
+    }
+
+    /// The name of a layer: the group's `/Name`, or the names of a membership dictionary's
+    /// groups.
+    fn oc_name(&self, d: &Dict<'_>) -> String {
+        let name = |g: &Dict<'_>| {
+            g.get::<hayro_syntax::object::String<'_>>(b"Name")
+                .map(|s| pdfparts::objects::text_string(s.as_bytes()))
+        };
+        if d.get::<Name<'_>>(b"Type").as_deref() == Some(b"OCMD") {
+            let names: Vec<String> = match d.get::<Array<'_>>(b"OCGs") {
+                Some(a) => a.iter::<Dict<'_>>().filter_map(|g| name(&g)).collect(),
+                None => d
+                    .get::<Dict<'_>>(b"OCGs")
+                    .and_then(|g| name(&g))
+                    .into_iter()
+                    .collect(),
+            };
+            if !names.is_empty() {
+                return names.join(", ");
+            }
+        }
+        name(d).unwrap_or_else(|| "without a name".to_string())
+    }
+
+    /// The layer index for a switched-off group.
+    fn layer_index(&mut self, name: String) -> usize {
+        match self.layers.iter().position(|n| *n == name) {
+            Some(k) => k,
+            None => {
+                self.layers.push(name);
+                self.layers.len() - 1
+            }
+        }
     }
 
     /// Walks the page's own content. Returns the index of the first operator that does not
@@ -628,16 +942,32 @@ impl<'w> Walk<'w> {
             }
             i += 1;
         }
+        if stops_early(data, i) {
+            let page = self.page;
+            self.note(Note::Damaged(format!(
+                "the content of page {page} stops at a broken operator; the rest of the page \
+                 is not read"
+            )));
+        }
         None
     }
 
     /// Walks the content of a form.
     fn form(&mut self, data: &[u8], resources: &Resources<'_>) -> bool {
         let mut ops = TypedIter::new(data);
+        let mut i = 0usize;
         while let Some(op) = ops.next() {
             if !self.op(&op, resources, None) {
                 return false;
             }
+            i += 1;
+        }
+        if self.skipping == 0 && stops_early(data, i) {
+            let page = self.page;
+            self.note(Note::Damaged(format!(
+                "a form on page {page} stops at a broken operator; the rest of the form is \
+                 not read"
+            )));
         }
         true
     }
@@ -652,10 +982,13 @@ impl<'w> Walk<'w> {
         if !self.charge(1) {
             return false;
         }
+        let page_level = top.is_some();
         match op {
-            TypedInstruction::ShowText(s) => self.charge(s.0.as_bytes().len() as u64),
-            TypedInstruction::NextLineAndShowText(s) => self.charge(s.0.as_bytes().len() as u64),
-            TypedInstruction::ShowTextWithParameters(s) => self.charge(s.2.as_bytes().len() as u64),
+            TypedInstruction::ShowText(s) => self.show(s.0.as_bytes().len(), page_level),
+            TypedInstruction::NextLineAndShowText(s) => self.show(s.0.as_bytes().len(), page_level),
+            TypedInstruction::ShowTextWithParameters(s) => {
+                self.show(s.2.as_bytes().len(), page_level)
+            }
             TypedInstruction::ShowTexts(a) => {
                 let bytes: usize =
                     a.0.iter::<Object<'_>>()
@@ -664,14 +997,27 @@ impl<'w> Walk<'w> {
                             _ => 1,
                         })
                         .sum();
-                self.charge(bytes as u64)
+                self.show(bytes, page_level)
+            }
+            TypedInstruction::SaveState(_) => {
+                let gs = self.gs.last().copied().unwrap_or_default();
+                self.gs.push(gs);
+                true
+            }
+            TypedInstruction::RestoreState(_) => {
+                if self.gs.len() > 1 {
+                    self.gs.pop();
+                }
+                true
             }
             TypedInstruction::TextRenderingMode(m) => {
-                if m.0.as_i64() == 7 {
-                    match top {
-                        Some(i) => self.tr7.push(i),
-                        None => self.clip_in_forms += 1,
-                    }
+                let mut mode = m.0.as_i64();
+                if let (Some(i), 4..=7) = (top, mode) {
+                    mode -= 4;
+                    self.rewrites.insert(i, Rewrite::Mode(mode as u8));
+                }
+                if let Some(gs) = self.gs.last_mut() {
+                    gs.mode = mode;
                 }
                 true
             }
@@ -680,7 +1026,15 @@ impl<'w> Walk<'w> {
                     return true;
                 };
                 let key = font.cache_key();
-                self.fonts.entry(key).or_insert_with(|| font_info(&font));
+                if !self.known.fonts.contains_key(&key) {
+                    let mut info = font_info(&font);
+                    info.program = font_program(&font).map(|s| (s.obj_id(), self.size(&s)));
+                    self.known.fonts.insert(key, info);
+                }
+                let type3 = font.get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Type3");
+                if let Some(gs) = self.gs.last_mut() {
+                    gs.type3 = type3;
+                }
                 if self.charged.insert(key) {
                     let bytes = self.font_streams(&font);
                     self.font_bytes = self.font_bytes.saturating_add(bytes);
@@ -689,20 +1043,25 @@ impl<'w> Walk<'w> {
                 true
             }
             TypedInstruction::BeginMarkedContentWithProperties(bdc) => {
-                let (mcid, actual) = marked(bdc.1, res);
-                self.marks.push(Mark {
-                    tag: tag_hash(bdc.0),
-                    mcid,
-                    actual,
-                });
-                true
+                self.bdc(bdc.0, bdc.1, res, top)
             }
             TypedInstruction::BeginMarkedContent(bmc) => {
-                self.marks.push(Mark {
-                    tag: tag_hash(bmc.0),
-                    mcid: None,
-                    actual: None,
-                });
+                let outer = self.is_visible();
+                self.visible.push(outer);
+                let layer = self.layer.last().copied().flatten();
+                self.layer.push(layer);
+                if self.skipping == 0 {
+                    self.marks.push(Mark {
+                        tag: tag_hash(bmc.0),
+                        mcid: None,
+                        actual: None,
+                    });
+                }
+                true
+            }
+            TypedInstruction::EndMarkedContent(_) => {
+                self.visible.pop();
+                self.layer.pop();
                 true
             }
             TypedInstruction::XObject(x) => {
@@ -747,6 +1106,101 @@ impl<'w> Walk<'w> {
         }
     }
 
+    /// A marked content sequence with properties: its optional content as the interpreter
+    /// reads it, its MCID and its ActualText.
+    fn bdc(
+        &mut self,
+        tag: &Name<'_>,
+        props: &Object<'_>,
+        res: &Resources<'_>,
+        top: Option<usize>,
+    ) -> bool {
+        let outer = self.is_visible();
+        let oc = props
+            .clone()
+            .into_name()
+            .and_then(|n| {
+                let r = res.properties.get_ref(n.as_ref())?;
+                let d = res.properties.get::<Dict<'_>>(n).unwrap_or_default();
+                Some((d, ObjectIdentifier::from(r)))
+            })
+            .or_else(|| {
+                let (d, _) = dict_or_stream(props)?;
+                let r = d.get_ref(b"OC")?;
+                let oc = d.get::<Dict<'_>>(b"OC").unwrap_or_default();
+                Some((oc, ObjectIdentifier::from(r)))
+            });
+        let mut layer = self.layer.last().copied().flatten();
+        let mut visible = outer;
+        let mut tag_bytes: Vec<u8> = tag.as_ref().to_vec();
+        if let Some((d, id)) = oc
+            && !self.oc_on(&d, Some(id))
+        {
+            let k = self.layer_index(self.oc_name(&d));
+            layer = Some(k);
+            match top {
+                // The page's own content is changed so the text is drawn and read as hidden.
+                Some(i) if outer && self.skipping == 0 => {
+                    self.rewrites.insert(i, Rewrite::Layer(k));
+                    tag_bytes = layer_tag(k).into_bytes();
+                }
+                _ => visible = false,
+            }
+        }
+        self.visible.push(visible);
+        self.layer.push(layer);
+        if self.skipping > 0 {
+            return true;
+        }
+        let rewritten = top.is_some_and(|i| self.rewrites.contains_key(&i));
+        let (mcid, actual) = if rewritten {
+            (None, None)
+        } else {
+            (
+                dict_or_stream(props).and_then(|(d, _)| d.get::<i32>(b"MCID")),
+                self.actual_text(props, res),
+            )
+        };
+        if let Some(a) = &actual {
+            // The device copies the text once for the sequence.
+            if !self.charge(a.len() as u64) {
+                return false;
+            }
+            if !self.pdf.charge_copy(a.len() as u64) {
+                self.over = Some(
+                    "its ActualText copies take more than the object limit allows".to_string(),
+                );
+                return false;
+            }
+        }
+        self.marks.push(Mark {
+            tag: tag_hash(&tag_bytes),
+            mcid,
+            actual,
+        });
+        true
+    }
+
+    /// The ActualText of a sequence's properties: inline, or a named entry of `/Properties`,
+    /// read once for the file.
+    fn actual_text(&mut self, props: &Object<'_>, res: &Resources<'_>) -> Option<Rc<str>> {
+        let read = |d: &Dict<'_>| {
+            d.get::<hayro_syntax::object::String<'_>>(b"ActualText")
+                .map(|s| Rc::from(pdfparts::objects::text_string(s.as_bytes())))
+        };
+        if let Some((d, _)) = dict_or_stream(props) {
+            return read(d);
+        }
+        let name = props.clone().into_name()?;
+        let id: ObjectIdentifier = res.properties.get_ref(name.as_ref())?.into();
+        if let Some(found) = self.known.properties.get(&id) {
+            return found.clone();
+        }
+        let found = res.properties.get::<Dict<'_>>(name).and_then(|d| read(&d));
+        self.known.properties.insert(id, found.clone());
+        found
+    }
+
     /// A color space the interpreter builds may unpack an ICC profile or a lookup table.
     fn charge_color_space(&mut self, name: &Name<'_>, res: &Resources<'_>) -> bool {
         let bytes = res
@@ -755,10 +1209,25 @@ impl<'w> Walk<'w> {
         self.charge(bytes / BYTES_PER_UNIT)
     }
 
-    /// Walks a form the way the interpreter runs it: its own resources, else the caller's.
+    /// Walks a form the way the interpreter runs it: its own resources, else the caller's,
+    /// and not at all when its optional content is off, its bounding box is missing or it is
+    /// nested too deep. Each of these is said.
     fn run_form(&mut self, s: &Stream<'_>, dict: &Dict<'_>, res: &Resources<'_>) -> bool {
-        // The interpreter skips a form without a bounding box, and stops at its depth.
-        if !dict.contains_key(b"BBox") || self.depth >= FORM_DEPTH {
+        let page = self.page;
+        if self.skipping == 0 && dict.get::<[f32; 4]>(b"BBox").is_none() {
+            self.note(Note::Damaged(format!(
+                "a form on page {page} has no bounding box and is not drawn; its text is not \
+                 read"
+            )));
+            return true;
+        }
+        if self.depth >= FORM_DEPTH {
+            if self.skipping == 0 {
+                self.note(Note::Limit(format!(
+                    "forms nested deeper than {FORM_DEPTH} on page {page} are not drawn; \
+                     their text is not read"
+                )));
+            }
             return true;
         }
         let size = self.size(s);
@@ -775,10 +1244,40 @@ impl<'w> Walk<'w> {
         let Ok(data) = s.decoded() else {
             return true;
         };
+        // The interpreter does not run a form in hidden content or with its own optional
+        // content off; it is walked only to count the text in it.
+        let mut hidden = !self.is_visible();
+        let mut layer = self.layer.last().copied().flatten();
+        if let Some(oc) = dict.get::<Dict<'_>>(b"OC") {
+            let id = dict.get_ref(b"OC").map(ObjectIdentifier::from);
+            let on = match id {
+                Some(id) => self.oc_on(&oc, Some(id)),
+                None => self.oc_on(&oc, None),
+            };
+            if !on {
+                hidden = true;
+                layer = Some(self.layer_index(self.oc_name(&oc)));
+            }
+        }
         let own = dict.get::<Dict<'_>>(b"Resources").map(Resources::new);
         self.held += size;
         self.depth += 1;
+        let gs = self.gs.last().copied().unwrap_or_default();
+        self.gs.push(gs);
+        self.visible.push(!hidden);
+        self.layer.push(layer);
+        if hidden {
+            self.skipping += 1;
+        }
+        let (visible_depth, layer_depth) = (self.visible.len(), self.layer.len());
         let ok = self.form(&data, own.as_ref().unwrap_or(res));
+        // A form's unbalanced marked content ends with the form.
+        self.visible.truncate(visible_depth - 1);
+        self.layer.truncate(layer_depth - 1);
+        if hidden {
+            self.skipping -= 1;
+        }
+        self.gs.pop();
         self.depth -= 1;
         self.held -= size;
         ok
@@ -846,22 +1345,40 @@ impl<'w> Walk<'w> {
     }
 }
 
-/// The MCID and ActualText of a marked content sequence's properties. The MCID is read from
-/// an inline dictionary only, as the interpreter reads it; ActualText also from a named entry
-/// of the resources' `/Properties`.
-fn marked(props: &Object<'_>, res: &Resources<'_>) -> (Option<i32>, Option<Rc<str>>) {
-    let inline = dict_or_stream(props).map(|(d, _)| d.clone());
-    let mcid = inline.as_ref().and_then(|d| d.get::<i32>(b"MCID"));
-    let dict = inline.or_else(|| {
-        props
-            .clone()
-            .into_name()
-            .and_then(|n| res.properties.get::<Dict<'_>>(n))
-    });
-    let actual = dict
-        .and_then(|d| d.get::<hayro_syntax::object::String<'_>>(b"ActualText"))
-        .map(|s| Rc::from(pdfparts::objects::text_string(s.as_bytes())));
-    (mcid, actual)
+/// Whether the content stops before its end: the typed operators end after `typed`, but
+/// more operators follow (a path operator with operands the interpreter cannot read ends the
+/// stream for it).
+fn stops_early(data: &[u8], typed: usize) -> bool {
+    let mut ops = UntypedIter::new(data);
+    for _ in 0..typed {
+        if ops.next().is_none() {
+            return false;
+        }
+    }
+    ops.next().is_some()
+}
+
+/// The unpacked size of a stream, as the guard measured it.
+fn stream_size(pdf: &Pdf, s: &Stream<'_>) -> u64 {
+    let id = s.obj_id();
+    match (u32::try_from(id.obj_number), u16::try_from(id.gen_number)) {
+        (Ok(n), Ok(g)) => pdf.unpacked_size(n, g),
+        _ => None,
+    }
+    .unwrap_or_else(|| s.raw_data().len() as u64)
+}
+
+/// The embedded program of a font: its own descriptor's, or its descendant's for a Type0
+/// font.
+fn font_program<'a>(font: &Dict<'a>) -> Option<Stream<'a>> {
+    let desc = font.get::<Dict<'a>>(b"FontDescriptor").or_else(|| {
+        font.get::<Array<'a>>(b"DescendantFonts")
+            .and_then(|a| a.iter::<Dict<'a>>().next())
+            .and_then(|d| d.get::<Dict<'a>>(b"FontDescriptor"))
+    })?;
+    [&b"FontFile2"[..], b"FontFile3", b"FontFile"]
+        .iter()
+        .find_map(|k| desc.get::<Stream<'a>>(*k))
 }
 
 fn tag_hash(tag: &[u8]) -> u64 {
@@ -948,6 +1465,7 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         italic,
         vertical,
         embedded,
+        program: None,
         collection,
     }
 }
@@ -956,6 +1474,13 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
 #[derive(Debug, Default)]
 struct GlyphNames {
     by_gid: HashMap<u32, String>,
+}
+
+impl GlyphNames {
+    /// About the memory the table takes.
+    fn bytes(&self) -> u64 {
+        self.by_gid.values().map(|t| 56 + t.len() as u64).sum()
+    }
 }
 
 impl GlyphNames {
@@ -1089,6 +1614,8 @@ struct Gl {
     italic: bool,
     mcid: Option<u32>,
     invisible: bool,
+    /// The switched-off layer the glyph stands in.
+    layer: Option<usize>,
     vertical: bool,
     /// The glyph goes on the text before it without a space (inside one ActualText span).
     joined: bool,
@@ -1097,6 +1624,7 @@ struct Gl {
 /// An open marked content sequence on the device.
 struct Open {
     mcid: Option<u32>,
+    layer: Option<usize>,
     actual: Option<Rc<str>>,
     /// The ActualText was written out with the first glyph of the sequence.
     used: bool,
@@ -1111,15 +1639,24 @@ struct TextDevice<'d> {
     open: Vec<Open>,
     marks: &'d [Mark],
     next_mark: usize,
+    /// Switched-off layers the walk opened (tags `Rz0` and up).
+    layers: usize,
+    /// Sequences whose ActualText was not used because they did not match the walk.
+    out_of_step: u64,
     fonts: &'d HashMap<u128, FontInfo>,
-    names: &'d mut HashMap<u128, Rc<GlyphNames>>,
-    collections: &'d mut HashMap<Vec<u8>, Option<Rc<CMap>>>,
+    pdf: &'d Pdf,
+    programs: &'d mut Programs,
+    /// Fonts whose embedded program did not load and a stand-in is in use.
+    stand_ins: HashSet<u128>,
+    /// Glyph tables were not read on this page: the copy budget is spent.
+    tables_cut: bool,
     stop: &'d dyn Fn() -> bool,
     calls: u64,
     cap: usize,
     /// The glyph run drawn last, to read a run that is filled and then stroked once.
-    last: Option<(usize, usize, [u64; 6])>,
+    last: Option<u64>,
     unmapped: u64,
+    unmapped_visible: u64,
     mapped: u64,
 }
 
@@ -1131,7 +1668,8 @@ impl TextDevice<'_> {
         }
     }
 
-    /// The text of a glyph from the font's own tables, for an embedded font.
+    /// The text of a glyph from the font's own tables, for an embedded font whose program
+    /// loaded. The tables are read once per program and charged to the copy budget.
     fn fallback(&mut self, g: &Glyph<'_>) -> Option<String> {
         let Glyph::Outline(o) = g else {
             return None;
@@ -1142,23 +1680,53 @@ impl TextDevice<'_> {
             // The program in use is a stand-in; its tables say nothing about this font.
             return None;
         }
-        let names = match self.names.get(&key) {
-            Some(n) => n.clone(),
+        let program = match self.programs.of_font.get(&key) {
+            Some(p) => *p,
             None => {
-                let cmap = match &info.collection {
-                    Some(family) => collection_cmap(self.collections, family),
-                    None => None,
+                let data = o.font_data();
+                // A program of another size than the embedded one is a stand-in for a
+                // program that did not load.
+                let size_in_use = data.as_ref().map(|d| d.data.as_ref().as_ref().len() as u64);
+                let p = match (info.program, size_in_use) {
+                    (Some((id, size)), Some(used)) if used == size => Some(id),
+                    (Some(_), Some(_)) => {
+                        self.stand_ins.insert(key);
+                        None
+                    }
+                    // The interpreter gives no program data for this font kind.
+                    _ => None,
                 };
-                let built = o
-                    .font_data()
-                    .map(|d| GlyphNames::read(d.data.as_ref().as_ref(), cmap.as_deref()))
-                    .unwrap_or_default();
-                let built = Rc::new(built);
-                self.names.insert(key, built.clone());
-                built
+                self.programs.of_font.insert(key, p);
+                if let Some(id) = p
+                    && !self.programs.tables.contains_key(&id)
+                {
+                    let tables = if self.programs.spent {
+                        self.tables_cut = true;
+                        GlyphNames::default()
+                    } else {
+                        let cmap = match &info.collection {
+                            Some(family) => collection_cmap(&mut self.programs.collections, family),
+                            None => None,
+                        };
+                        let built = o
+                            .font_data()
+                            .map(|d| GlyphNames::read(d.data.as_ref().as_ref(), cmap.as_deref()))
+                            .unwrap_or_default();
+                        if self.pdf.charge_copy(built.bytes()) {
+                            built
+                        } else {
+                            self.programs.spent = true;
+                            self.tables_cut = true;
+                            GlyphNames::default()
+                        }
+                    };
+                    self.programs.tables.insert(id, Rc::new(tables));
+                }
+                p
             }
         };
-        names.by_gid.get(&o.glyph_id().to_u32()).cloned()
+        let tables = self.programs.tables.get(&program?)?;
+        tables.by_gid.get(&o.glyph_id().to_u32()).cloned()
     }
 
     fn push_glyph(&mut self, text: &str, g: Gl) {
@@ -1227,17 +1795,23 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let Some(first) = glyphs.first() else {
             return;
         };
-        let key = (
-            glyphs.as_ptr() as usize,
-            glyphs.len(),
-            first.transform().as_coeffs().map(f64::to_bits),
-        );
+        let mut h = DefaultHasher::new();
+        glyphs.len().hash(&mut h);
+        first.transform().as_coeffs().map(f64::to_bits).hash(&mut h);
+        for g in glyphs {
+            match &**g {
+                Glyph::Outline(o) => o.glyph_id().to_u32().hash(&mut h),
+                Glyph::Type3(_) => u32::MAX.hash(&mut h),
+            }
+        }
+        let key = h.finish();
         if self.last == Some(key) {
-            // Fill and stroke of one text show, or the same text drawn twice in one place.
+            // Fill and stroke of one text show, or the same glyphs drawn twice in one place.
             return;
         }
         self.last = Some(key);
-        let invisible = matches!(mode, DrawMode::Invisible);
+        let layer = self.open.iter().rev().find_map(|o| o.layer);
+        let invisible = matches!(mode, DrawMode::Invisible) || layer.is_some();
         let mcid = self.open.iter().rev().find_map(|o| o.mcid);
         let from = self.glyphs.len();
         for g in glyphs {
@@ -1283,6 +1857,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 italic: info.italic,
                 mcid,
                 invisible,
+                layer,
                 vertical: info.vertical,
                 joined: false,
             };
@@ -1311,6 +1886,9 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 }
                 None => {
                     self.unmapped += 1;
+                    if !invisible {
+                        self.unmapped_visible += 1;
+                    }
                     self.push_glyph("\u{FFFD}", gl);
                 }
             }
@@ -1346,20 +1924,31 @@ impl<'a> Device<'a> for TextDevice<'_> {
 
     fn begin_marked_content(&mut self, tag: &[u8], mcid: Option<i32>) {
         self.tick();
-        // The walk met every sequence the interpreter meets, and more when the interpreter
-        // skips a hidden form: the next one with the same tag and MCID is this one.
+        // The walk met the sequences in the order the interpreter meets them. A match further
+        // on is trusted only with an MCID; otherwise the glyphs are read.
         let want = tag_hash(tag);
         let mut actual = None;
-        if let Some(k) = self.marks[self.next_mark.min(self.marks.len())..]
+        let from = self.next_mark.min(self.marks.len());
+        if let Some(k) = self.marks[from..]
             .iter()
             .position(|m| m.tag == want && m.mcid == mcid)
         {
-            let at = self.next_mark + k;
-            actual = self.marks[at].actual.clone();
-            self.next_mark = at + 1;
+            let at = from + k;
+            if k == 0 || mcid.is_some() {
+                actual = self.marks[at].actual.clone();
+                self.next_mark = at + 1;
+            } else if self.marks[at].actual.is_some() {
+                self.out_of_step += 1;
+            }
         }
+        let layer = tag
+            .strip_prefix(b"Rz")
+            .and_then(|k| std::str::from_utf8(k).ok())
+            .and_then(|k| k.parse::<usize>().ok())
+            .filter(|k| *k < self.layers);
         self.open.push(Open {
             mcid: mcid.and_then(|m| u32::try_from(m).ok()),
+            layer,
             actual,
             used: false,
         });
@@ -1999,7 +2588,24 @@ fn compose(a: Turn, b: Turn) -> Turn {
 
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it.
-fn lay_out(page: u32, glyphs: &[Gl], text: &str, links: &[Link], x0: f64, y0: f64) -> PageItems {
+fn lay_out(
+    page: u32,
+    glyphs: &[Gl],
+    text: &str,
+    links: &[Link],
+    x0: f64,
+    y0: f64,
+    layers: &[String],
+) -> PageItems {
+    let mut by_layer: Vec<Vec<Gl>> = vec![Vec::new(); layers.len()];
+    let mut rest: Vec<Gl> = Vec::with_capacity(glyphs.len());
+    for g in glyphs {
+        match g.layer {
+            Some(k) if k < by_layer.len() => by_layer[k].push(*g),
+            _ => rest.push(*g),
+        }
+    }
+    let glyphs = &rest[..];
     let (visible, hidden): (Vec<Gl>, Vec<Gl>) = glyphs.iter().partition(|g| !g.invisible);
     // When most of the text reads in one other direction, the page is read in that frame.
     let mut by_dir = [0usize; 4];
@@ -2023,6 +2629,21 @@ fn lay_out(page: u32, glyphs: &[Gl], text: &str, links: &[Link], x0: f64, y0: f6
     };
     items.runs = runs_of(page, &visible, text, turn);
     items.invisible = runs_of(page, &hidden, text, turn);
+    for (name, list) in layers.iter().zip(&by_layer) {
+        if !list.is_empty() {
+            items
+                .hidden_layers
+                .push((name.clone(), runs_of(page, list, text, turn)));
+        }
+    }
+    if items.turned && !links.is_empty() {
+        let k = links.len();
+        let s = if k == 1 { "" } else { "s" };
+        items.notes.push(Note::Unsupported(format!(
+            "{k} URI link{s} on page {page} not attached to their text: the page is read in a \
+             turned frame"
+        )));
+    }
     if !items.turned && !links.is_empty() {
         let cost = items.runs.len().saturating_mul(links.len());
         if cost > LINK_WORK {
@@ -2068,10 +2689,15 @@ fn lay_out(page: u32, glyphs: &[Gl], text: &str, links: &[Link], x0: f64, y0: f6
 
 /// Pages that need OCR or a look at the picture, with the reasons. Only `pages` are read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn needs_ocr(pdf: &Pdf, pages: &[u32], caps: Caps) -> Vec<(u32, Vec<String>)> {
-    let found = self::pages(pdf, pages, caps, &|| false);
+pub(crate) fn needs_ocr(
+    pdf: &Pdf,
+    pages: &[u32],
+    caps: Caps,
+    stop: &dyn Fn() -> bool,
+) -> Vec<(u32, Vec<String>)> {
+    let found = self::pages(pdf, pages, caps, stop);
     let sizes: HashMap<u32, (f32, f32)> = pdf
-        .pages(&|| false)
+        .pages(stop)
         .into_iter()
         .map(|p| (p.number, (p.width, p.height)))
         .collect();
@@ -2107,7 +2733,7 @@ pub(crate) fn ocr_reasons(items: &PageItems, width: f32, height: f32) -> Vec<Str
     if !visible_text && !invisible_text && picture {
         reasons.push("no text layer: a picture covers most of the page".to_string());
     }
-    if items.mapped == 0 && items.unmapped > 0 {
+    if items.mapped == 0 && items.unmapped_visible > 0 {
         reasons.push("the glyphs on the page have no Unicode mapping".to_string());
     }
     if !visible_text && invisible_text && picture {
@@ -2134,11 +2760,14 @@ mod tests {
 
     const CAPS: Caps = Caps {
         max_items: 2_000_000,
+        max_glyphs: 1_000_000,
     };
 
     #[test]
     fn scanned_page_needs_ocr() {
-        let found = needs_ocr(&corpus("scan-truman-letter-nara.pdf"), &[1], CAPS);
+        let found = needs_ocr(&corpus("scan-truman-letter-nara.pdf"), &[1], CAPS, &|| {
+            false
+        });
         assert!(
             found.iter().any(|(p, why)| *p == 1 && !why.is_empty()),
             "{found:?}"
@@ -2147,8 +2776,27 @@ mod tests {
 
     #[test]
     fn text_page_needs_no_ocr() {
-        let found = needs_ocr(&corpus("pypdf-multicolumn.pdf"), &[1], CAPS);
+        let found = needs_ocr(&corpus("pypdf-multicolumn.pdf"), &[1], CAPS, &|| false);
         assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn unmapped_invisible_glyphs_do_not_ask_for_ocr() {
+        let items = PageItems {
+            unmapped: 5,
+            unmapped_visible: 0,
+            ..PageItems::default()
+        };
+        assert!(ocr_reasons(&items, 595.0, 842.0).is_empty());
+        let items = PageItems {
+            unmapped: 5,
+            unmapped_visible: 5,
+            ..PageItems::default()
+        };
+        assert_eq!(
+            ocr_reasons(&items, 595.0, 842.0),
+            ["the glyphs on the page have no Unicode mapping"]
+        );
     }
 
     #[test]
@@ -2179,7 +2827,10 @@ mod tests {
             FixturePage::text(words(3)),
         ];
         let pdf = open(&pdf(&pages_in, ""));
-        let caps = Caps { max_items: 1_000 };
+        let caps = Caps {
+            max_items: 1_000,
+            max_glyphs: 1_000,
+        };
         let found = pages(&pdf, &[1, 2, 3], caps, &|| false);
         let read: Vec<u32> = found.pages.iter().map(|p| p.page).collect();
         assert_eq!(read, [1, 2, 3]);
@@ -2204,15 +2855,21 @@ mod tests {
     }
 
     #[test]
-    fn mode_seven_is_read_as_invisible() {
-        let mut data = b"BT /F1 12 Tf 7 Tr 72 650 Td (x) Tj 7.0 Tr 0 Tr ET".to_vec();
-        assert!(edit(&mut data, None, &[2, 5]));
+    fn render_modes_and_layers_are_rewritten_in_place() {
+        let mut data =
+            b"BT /F1 12 Tf 7 Tr 72 650 Td (x) Tj 4.0 Tr 0 Tr ET /OC /L1 BDC EMC".to_vec();
+        let rewrites = HashMap::from([
+            (2, Rewrite::Mode(3)),
+            (5, Rewrite::Mode(0)),
+            (8, Rewrite::Layer(0)),
+        ]);
+        assert_eq!(edit(&mut data, None, &rewrites), (true, vec![]));
         assert_eq!(
             String::from_utf8_lossy(&data),
-            "BT /F1 12 Tf 3 Tr 72 650 Td (x) Tj 3.0 Tr 0 Tr ET"
+            "BT /F1 12 Tf 3 Tr 72 650 Td (x) Tj 0   Tr 0 Tr ET /Rz0 BMC    EMC"
         );
         let mut data = b"q 1 0 0 1 0 0 cm Q BT ET".to_vec();
-        assert!(edit(&mut data, Some(3), &[]));
+        assert_eq!(edit(&mut data, Some(3), &HashMap::new()), (true, vec![]));
         assert_eq!(String::from_utf8_lossy(&data), "q 1 0 0 1 0 0 cm Q");
     }
 

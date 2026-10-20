@@ -42,7 +42,7 @@ mod structure;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lopdf::{Document, ObjectId};
 
@@ -170,7 +170,7 @@ pub struct Encryption {
 /// An open PDF file.
 pub struct Pdf {
     doc: Document,
-    canonical: Vec<u8>,
+    canonical: Arc<Vec<u8>>,
     original: Vec<u8>,
     /// Values parsed and the bytes charged for them and the canonical copy.
     values: usize,
@@ -282,7 +282,7 @@ impl Pdf {
         }
         Ok(Pdf {
             doc,
-            canonical,
+            canonical: Arc::new(canonical),
             original: bytes.to_vec(),
             values: built.items,
             object_bytes: charged,
@@ -315,6 +315,18 @@ impl Pdf {
     /// not refused. Other parsers must read these bytes and never the original file.
     pub fn canonical(&self) -> &[u8] {
         &self.canonical
+    }
+
+    /// [`Pdf::canonical`] as shared bytes, for a parser that keeps its input without a copy.
+    pub fn canonical_shared(&self) -> Arc<Vec<u8>> {
+        Arc::clone(&self.canonical)
+    }
+
+    /// Takes `bytes` from the pool every reader draws on for what it copies out of the
+    /// document (the object budget left after open). False when they do not fit; the pool is
+    /// then spent and the caller must stop copying.
+    pub fn charge_copy(&self, bytes: u64) -> bool {
+        self.text_budget().take(bytes)
     }
 
     /// The bytes the file was opened from, for checks that need them as they are (signature
