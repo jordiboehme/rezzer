@@ -2531,11 +2531,11 @@ fn parameter_runs_fold_into_one_row() {
             )
         })
         .collect();
-    // A row: the label only on the first cell, read counts differ.
+    // A row without labels, read counts differ.
     list.extend((0..3).map(|i| {
         parameter(
             &format!("Inputs!{}35", ['F', 'G', 'H'][i]),
-            if i == 0 { Some("P") } else { None },
+            None,
             f64::from(i as u32),
             1 + i as u32,
         )
@@ -2550,7 +2550,7 @@ A row with a cell range stands for values next to each other that play one part.
 | Cell | Name | Label | Value | Unit | Unit from | Read by |\n\
 | --- | --- | --- | --- | --- | --- | --- |\n\
 | E49:E53 |  | t | 0.1, 0.2, 0.3 ..., 0.5 (5 values) | m | column header | 2 each |\n\
-| F35:H35 |  | P | 0, 1, 2 (3 values) |  |  | 1 to 3 each |\n\
+| F35:H35 |  |  | 0, 1, 2 (3 values) |  |  | 1 to 3 each |\n\
 | A1 |  | x | 1 |  |  | 1 |\n\
 | A2 |  | x | 2 |  |  | 1 |\n";
     assert!(logic.contains(expected), "{logic}");
@@ -2612,4 +2612,69 @@ fn a_group_that_misses_cells_of_its_area_says_so() {
         logic.contains("| C2:C9 (7 of 8 cells) | 7 | `=B2` |"),
         "{logic}"
     );
+}
+
+#[test]
+fn parameter_runs_need_the_same_label_on_every_cell() {
+    // A label left of B1 only: B2:B4 have none in the model, so they keep their own rows.
+    let mut d = workbook();
+    let mut list = vec![parameter("Inputs!B1", Some("Pressure"), 10.0, 1)];
+    list.extend((2..=4).map(|r| parameter(&format!("Inputs!B{r}"), None, f64::from(r * 10), 1)));
+    d.facets.parameters = list;
+    let logic = logic_of(&d, true);
+    let expected = "| Cell | Name | Label | Value | Unit | Unit from | Read by |\n\
+| --- | --- | --- | --- | --- | --- | --- |\n\
+| B1 |  | Pressure | 10 |  |  | 1 |\n\
+| B2:B4 |  |  | 20, 30, 40 (3 values) |  |  | 1 each |\n";
+    assert!(logic.contains(expected), "{logic}");
+    assert!(!logic.contains("B1:B4"), "{logic}");
+}
+
+#[test]
+fn mermaid_labels_escape_dollars() {
+    let mut d = workbook();
+    let q = "'a$$x^$$b'";
+    d.body = vec![sheet("a$$x^$$b", q)];
+    let a1 = format!("{q}!A1");
+    let b1 = format!("{q}!B1");
+    d.facets.formulas = vec![cell_formula(&b1, "=A1", &[&a1], Role::Result, 1.0)];
+    d.facets.graphs = vec![Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![
+            Node {
+                kind: Some("parameters".into()),
+                ..node("v1", &a1)
+            },
+            Node {
+                kind: Some("formula".into()),
+                ..node("f1", &b1)
+            },
+        ],
+        edges: vec![edge("v1", "f1", "feeds")],
+    }];
+    let logic = logic_of(&d, true);
+    let lines = mermaid_lines(&logic);
+    assert_valid_mermaid(&lines);
+    assert!(lines.iter().all(|l| !l.contains('$')), "{lines:?}");
+    assert!(lines[1].contains("a#36;#36;x^#36;#36;b"), "{lines:?}");
+}
+
+#[test]
+fn sheet_heading_that_clashes_with_a_section_says_sheet() {
+    let mut d = workbook();
+    d.body = vec![sheet("Names", "Names"), sheet("Calc", "Calc")];
+    d.facets.formulas = vec![
+        cell_formula("Names!B1", "=A1", &["Names!A1"], Role::Result, 1.0),
+        cell_formula("Calc!B1", "=A1", &["Calc!A1"], Role::Result, 1.0),
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:rate", "Names!$A$1", &["Names!A1"], None)
+        },
+    ];
+    let logic = logic_of(&d, true);
+    assert!(logic.contains("\n### Sheet: Names\n"), "{logic}");
+    assert!(logic.contains("\n### Calc\n"), "{logic}");
+    assert_eq!(logic.matches("\n### Names\n").count(), 1, "{logic}");
 }

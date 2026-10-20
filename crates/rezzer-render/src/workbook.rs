@@ -32,8 +32,9 @@ const MAX_AREAS: usize = 200;
 /// A volatile function row names at most this many cells.
 const MAX_VOLATILE_CELLS: usize = 5;
 
-/// The start of the loss the sheet reader writes when cached results may not match.
-const STALE: &str = "stored results may be old";
+/// The start of the loss the sheet reader writes when cached results may not match; shared
+/// with the reader through the model.
+const STALE: &str = rezzer_model::STALE_RESULTS;
 
 /// Functions whose result can change on every recalculation (as formulakit lists them).
 const VOLATILE: [&str; 9] = [
@@ -512,8 +513,8 @@ fn cell_of(anchor: &str, sheet: &str) -> Option<(u32, u32)> {
 }
 
 /// Runs of parameters in list order that sit next to each other in one row or one column,
-/// have no name, hold quantities of one kind and share their unit and its source; later
-/// cells have the first cell's label or none. A run of [`MIN_RUN`] or more becomes one row.
+/// have no name, hold quantities of one kind and share their label, unit and unit source
+/// (the model's facts for each cell; no label is passed on to a neighbour). A run of [`MIN_RUN`] or more becomes one row.
 fn parameter_runs<'a, 'b>(list: &'b [&'a Parameter]) -> Vec<&'b [&'a Parameter]> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -543,7 +544,7 @@ fn parameter_runs<'a, 'b>(list: &'b [&'a Parameter]) -> Vec<&'b [&'a Parameter]>
                     && p.unit == first.unit
                     && p.unit_source == first.unit_source
                     && same_kind(p.value.as_ref(), first.value.as_ref())
-                    && (p.label.is_none() || p.label == first.label);
+                    && p.label == first.label;
                 if !fits {
                     break;
                 }
@@ -1241,6 +1242,23 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
         })
         .unwrap_or_default();
 
+    let hidden = hidden_logic(doc, &cells);
+    // The headings of the parts after the sheets; a sheet with one of these names gets
+    // `Sheet: <name>`, so each heading leads to one place.
+    let mut fixed: Vec<&str> = Vec::new();
+    if !other.is_empty() {
+        fixed.push("Other");
+    }
+    if !names.is_empty() {
+        fixed.push("Names");
+    }
+    if dependency.is_some() {
+        fixed.push("Dependencies");
+    }
+    if hidden.is_some() {
+        fixed.push("Hidden logic");
+    }
+
     let mut out: Vec<String> = Vec::new();
     out.extend(stale_callout(doc));
     for (i, p) in parts.iter().enumerate() {
@@ -1248,7 +1266,12 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
             continue;
         }
         let (title, anchor) = &sheets.list[i];
-        out.push(part(title, p, Some(anchor), &groups, with_math));
+        let heading = if fixed.iter().any(|f| f.eq_ignore_ascii_case(title.trim())) {
+            format!("Sheet: {title}")
+        } else {
+            title.clone()
+        };
+        out.push(part(&heading, p, Some(anchor), &groups, with_math));
     }
     if !other.is_empty() {
         out.push(part("Other", &other, None, &groups, with_math));
@@ -1259,7 +1282,7 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
     if let Some(g) = dependency {
         out.push(dependencies(g, doc, &sheets));
     }
-    out.extend(hidden_logic(doc, &cells));
+    out.extend(hidden);
     for g in doc.facets.graphs.iter().filter(|g| g.kind != "dependency") {
         out.push(mermaid::render(g));
     }

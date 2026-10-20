@@ -41,6 +41,8 @@ pub(crate) fn label(text: &str) -> String {
             '>' => out.push_str("#gt;"),
             '`' => out.push_str("#96;"),
             '%' => out.push_str("#37;"),
+            // Mermaid renders `$$...$$` in a label as KaTeX math.
+            '$' => out.push_str("#36;"),
             '\n' | '\r' => out.push(' '),
             c if c.is_control() => out.push(' '),
             c => out.push(c),
@@ -206,8 +208,8 @@ mod tests {
     #[test]
     fn label_escapes_markup() {
         assert_eq!(
-            label("a \"b\" #1 <i> `c` 5%\nx"),
-            "a #quot;b#quot; #35;1 #lt;i#gt; #96;c#96; 5#37; x"
+            label("a \"b\" #1 <i> `c` 5%\nx $$y$$"),
+            "a #quot;b#quot; #35;1 #lt;i#gt; #96;c#96; 5#37; x #36;#36;y#36;#36;"
         );
     }
 }

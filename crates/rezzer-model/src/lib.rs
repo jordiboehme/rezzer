@@ -28,7 +28,7 @@ pub use facet::{
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, plain_text};
-pub use loss::{Loss, LossReason, Severity};
+pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
 pub use value::Value;

@@ -700,3 +700,26 @@ fn sheet_part_cut_at_its_item_limit_leaves_results_open() {
         doc.losses
     );
 }
+
+#[test]
+fn stale_results_reach_the_rendered_logic_as_a_callout() {
+    // Reader and renderer share the loss text through rezzer_model::STALE_RESULTS; this
+    // runs both, so a change on either side cannot drop the callout silently.
+    let mut book = small_model();
+    book.calc_pr = "<calcPr calcMode=\"manual\"/>".into();
+    let out = read(&book);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions {
+            sections: Some(vec![rezzer_render::OutputSection::Logic]),
+            ..rezzer_render::RenderOptions::default()
+        },
+    );
+    assert!(
+        md.contains(
+            "## Logic\n\n> [!WARNING] Stored results may be old\n> Calculation is set to manual. Rezzer does not calculate"
+        ),
+        "{md}"
+    );
+}

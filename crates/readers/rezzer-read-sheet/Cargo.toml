@@ -23,4 +23,5 @@ quick-xml.workspace = true
 cfb.workspace = true
 
 [dev-dependencies]
+rezzer-render = { path = "../../rezzer-render" }
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

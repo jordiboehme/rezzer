@@ -13,7 +13,8 @@ use formulakit::logic::{FormulaId, GroupGraph, ParamCell, Role as KitRole, Table
 use formulakit::{Analysis, CellPos, Dialect, Ref, anchor_of, quote_sheet};
 use rezzer_limits::{Budget, contain};
 use rezzer_model::{
-    Anchor, Edge, Formula, FormulaKind, Graph, LossReason, Node, Parameter, Role, Severity, Value,
+    Anchor, Edge, Formula, FormulaKind, Graph, LossReason, Node, Parameter, Role, STALE_RESULTS,
+    Severity, Value,
 };
 use sheetparts::DefinedName;
 use sheetparts::numfmt::{self, NumKind};
@@ -1094,7 +1095,7 @@ fn stale_results(out: &mut Out, calc: Option<&CalcSettings>) {
     if !why.is_empty() {
         out.loss(
             "document",
-            format!("stored results may be old: {}", why.join("; ")),
+            format!("{STALE_RESULTS}: {}", why.join("; ")),
             LossReason::Uncertain,
             Severity::Warning,
         );
