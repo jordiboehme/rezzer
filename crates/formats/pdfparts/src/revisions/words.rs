@@ -34,6 +34,8 @@ pub(crate) struct Pages {
 /// One object a save lists with a value other than before.
 struct Changed {
     n: u32,
+    /// The id the save gives the object, when it is in use.
+    id: Option<ObjectId>,
     old: Option<Rc<Object>>,
     new: Option<Rc<Object>>,
 }
@@ -201,6 +203,10 @@ impl Run<'_, '_> {
                 Some(Slot::Used(e)) => self.load(before, id_of(n, e))?,
                 _ => None,
             };
+            let id = match new_slot {
+                Slot::Used(e) => Some(id_of(n, e)),
+                Slot::Free => None,
+            };
             let new = match new_slot {
                 Slot::Used(e) => match self.load(after, id_of(n, e))? {
                     Some(o) => Some(o),
@@ -215,7 +221,7 @@ impl Run<'_, '_> {
             {
                 continue;
             }
-            out.push(Changed { n, old, new });
+            out.push(Changed { n, id, old, new });
         }
         Ok(out)
     }
@@ -403,11 +409,7 @@ fn annot_page(d: &Dictionary, c: &Changed, pages: Option<&Pages>) -> Option<u32>
     {
         return Some(*n);
     }
-    pages
-        .annots
-        .iter()
-        .find(|(id, _)| id.0 == c.n)
-        .map(|(_, &n)| n)
+    c.id.and_then(|id| pages.annots.get(&id).copied())
 }
 
 /// Added and removed pages, and pages whose content references or lengths changed.

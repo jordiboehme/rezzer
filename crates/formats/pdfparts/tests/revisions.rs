@@ -643,3 +643,84 @@ fn page_walks_are_bounded_by_visits() {
     );
     common::assert_rss_bounded();
 }
+
+/// One save adds many annotations without /P to a page that lists many already. Finding
+/// their page must not scan every listed annotation for each new one.
+#[test]
+fn added_annotations_find_their_page_by_lookup() {
+    let old = 50_000u32;
+    let new = 50_000u32;
+    let first = 10u32;
+    let mut doc = Document::with_version("1.7");
+    doc.reference_table.cross_reference_type = XrefType::CrossReferenceTable;
+    let annots: Vec<Object> = (0..old)
+        .map(|k| Object::Reference((first + k, 0)))
+        .collect();
+    doc.objects.insert(
+        (1, 0),
+        Object::Dictionary(dictionary! { "Type" => "Catalog", "Pages" => (2, 0) }),
+    );
+    doc.objects.insert(
+        (2, 0),
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages", "Kids" => vec![Object::Reference((3, 0))], "Count" => 1,
+        }),
+    );
+    doc.objects.insert(
+        (3, 0),
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => (2, 0), "Annots" => (4, 0),
+        }),
+    );
+    doc.objects.insert((4, 0), Object::Array(annots));
+    doc.objects.insert(
+        (5, 0),
+        Object::Dictionary(dictionary! { "Title" => Object::string_literal("Notes") }),
+    );
+    for k in 0..old {
+        doc.objects.insert(
+            (first + k, 0),
+            Object::Dictionary(dictionary! {
+                "Type" => "Annot", "Subtype" => "Text",
+                "Rect" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+            }),
+        );
+    }
+    doc.max_id = first + old;
+    doc.trailer.set("Root", (1, 0));
+    doc.trailer.set("Info", (5, 0));
+    let mut file = Vec::new();
+    doc.save_to(&mut file).unwrap();
+    file.push(b'\n');
+    let all: String = (0..old + new)
+        .map(|k| format!("{} 0 R ", first + k))
+        .collect();
+    let mut objects = vec![(4, format!("[{all}]").into_bytes())];
+    for k in old..old + new {
+        objects.push((
+            first + k,
+            b"<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] >>".to_vec(),
+        ));
+    }
+    update(&mut file, &objects, first + old + new);
+    let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
+    let started = Instant::now();
+    let r = pdf.revisions(&never);
+    let took = started.elapsed();
+    eprintln!("{} bytes, revisions in {took:?}", file.len());
+    assert!(took.as_secs_f64() < 2.0, "{took:?}");
+    let last = r.list.last().unwrap();
+    assert_eq!(last.changes.len(), new as usize);
+    assert!(
+        last.changes
+            .iter()
+            .all(|c| c == "added annotation Text on page 1")
+    );
+    common::assert_rss_bounded();
+}
+
+#[test]
+fn pdf_stays_send_and_sync() {
+    fn check<T: Send + Sync>() {}
+    check::<Pdf>();
+}
