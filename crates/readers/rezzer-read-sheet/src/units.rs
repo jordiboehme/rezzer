@@ -225,7 +225,7 @@ pub(crate) fn is_convert_unit(s: &str) -> bool {
 }
 
 /// A label without its unit, and the unit it names: `Excavated diameter (m)`, `Load [kN]`,
-/// `Span in mm` or a value with its unit at the end (`Diameter 10.0 m`). A one-letter unit
+/// `Span in mm` or a value with its unit at the end (`Diameter 10.0 mm`). A one-letter unit
 /// in parentheses that is the first letter of the word before it (`Height (h)`) is a
 /// variable, not a unit; a bare trailing word (`Type A`) is never a unit.
 pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
@@ -253,10 +253,11 @@ pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
         {
             return (clean(label), Some(unit.to_string()));
         }
-        // A number and its unit at the end.
+        // A number and its unit at the end. One letter after a number in a label is
+        // usually an identifier (`Phase 2 A`), not a unit.
         let before = before.trim_end();
         let (head, last) = before.rsplit_once(' ').unwrap_or(("", before));
-        if is_number(last) && is_unit(unit, true) {
+        if is_number(last) && is_unit(unit, false) {
             return (clean(head), Some(unit.to_string()));
         }
     }
@@ -379,9 +380,10 @@ mod tests {
         assert_eq!(s("Load [kN]"), (Some("Load".into()), Some("kN".into())));
         assert_eq!(s("Span in mm"), (Some("Span".into()), Some("mm".into())));
         assert_eq!(
-            s("Diameter 10.0 m"),
-            (Some("Diameter".into()), Some("m".into()))
+            s("Diameter 10.0 mm"),
+            (Some("Diameter".into()), Some("mm".into()))
         );
+        assert_eq!(s("Phase 2 A"), (Some("Phase 2 A".into()), None));
         assert_eq!(s("Height (h)"), (Some("Height (h)".into()), None));
         assert_eq!(s("Type A"), (Some("Type A".into()), None));
         assert_eq!(s("Radius, R"), (Some("Radius, R".into()), None));

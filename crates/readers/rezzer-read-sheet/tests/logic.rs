@@ -428,3 +428,24 @@ fn tunnel_parameters_have_labels() {
     assert_eq!(unit(t), (Some("m"), Some("header")));
     assert!(graph(doc).nodes.len() > 1);
 }
+
+#[test]
+fn empty_text_result_is_stored() {
+    // `=IF(A1="","",A1)` stores an empty text: that is a result, not a missing one.
+    let rows = row(
+        1,
+        &[
+            text("A1", ""),
+            "<c r=\"B1\" t=\"str\"><f>IF(A1=\"\",\"\",A1)</f><v></v></c>".to_string(),
+        ],
+    );
+    let out = read(&Book::default().sheet("S", &ws("", &rows, "")));
+    let doc = &out.document;
+    assert_eq!(
+        formula(doc, "S!B1").cached,
+        Some(Value::Text {
+            value: String::new()
+        })
+    );
+    assert!(stale_losses(doc).is_empty(), "{:#?}", doc.losses);
+}
