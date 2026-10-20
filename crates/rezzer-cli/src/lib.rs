@@ -102,8 +102,22 @@ fn run(cli: Cli, registry: Registry) -> Result<ExitCode, String> {
         }
         Command::Inspect { path } => inspect::run(load_config()?, registry, &path),
         Command::Formats => formats::run(&registry),
-        Command::Mcp => Err("the MCP server is not available yet".to_string()),
+        Command::Mcp => mcp(load_config()?, registry),
     }
+}
+
+/// Serves MCP on stdio until the client closes stdin. Errors go to stderr; stdout carries
+/// only the protocol.
+fn mcp(config: Config, registry: Registry) -> Result<ExitCode, String> {
+    let pipeline = std::sync::Arc::new(rezzer_pipeline::Pipeline::new(config, registry));
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("cannot start the MCP server: {e}"))?;
+    runtime
+        .block_on(rezzer_mcp::serve_stdio(pipeline))
+        .map_err(|e| format!("MCP server: {e}"))?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn load_config() -> Result<Config, String> {

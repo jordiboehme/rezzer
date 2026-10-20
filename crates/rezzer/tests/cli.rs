@@ -379,11 +379,36 @@ fn usage_errors_exit_1_not_2() {
 }
 
 #[test]
-fn mcp_is_not_available_yet() {
+fn mcp_serves_on_stdio_and_writes_only_the_protocol() {
+    let env = Env::new();
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        "\n",
+    );
+    let output = env.cmd().arg("mcp").write_stdin(input).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let replies: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("every stdout line is JSON-RPC"))
+        .collect();
+    assert_eq!(replies.len(), 2, "{stdout}");
+    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "rezzer");
+    let tools = replies[1]["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 3, "{stdout}");
+}
+
+#[test]
+fn mcp_ends_cleanly_when_stdin_closes_before_a_session() {
     let env = Env::new();
     env.cmd()
         .arg("mcp")
+        .write_stdin("")
         .assert()
-        .code(1)
-        .stderr(predicate::str::contains("not available yet"));
+        .code(0)
+        .stdout("");
 }

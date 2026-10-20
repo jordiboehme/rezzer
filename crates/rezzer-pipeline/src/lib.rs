@@ -111,8 +111,9 @@ impl RunResult {
     }
 }
 
-/// What the detector says about a file, without reading it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the detector says about a file, without reading it. Serializes with the model's
+/// names (`format` in snake_case, `detection` with `confidence` and `evidence`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Inspection {
     pub name: String,
     pub format: FormatId,
