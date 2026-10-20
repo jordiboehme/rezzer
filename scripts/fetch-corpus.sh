@@ -2,7 +2,8 @@
 # Fetches the large corpus files listed in tests/corpus/remote.tsv
 # (lines: path<TAB>url<TAB>sha256, paths relative to tests/corpus).
 # A file that exists with the right hash is skipped. Downloads are data: they are
-# hash-checked and never executed.
+# hash-checked and never executed. Limits per file: 50 MB and 300 seconds (curl --max-filesize,
+# --max-time); a file that needs more fails with a hint.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -33,7 +34,7 @@ while IFS="$tab" read -r path url sha || [ -n "${path:-}" ]; do
     tmp="$target.part"
     if ! curl --fail --location --proto =https --max-filesize 50M --max-time 300 --silent --show-error -o "$tmp" "$url"; then
         rm -f "$tmp"
-        echo "failed  $path: download" >&2
+        echo "failed  $path: download failed (limits: 50 MB and 300 s per file; a bigger or slower file fails here)" >&2
         failed=1
         continue
     fi
