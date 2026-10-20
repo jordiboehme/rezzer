@@ -134,3 +134,42 @@ fn one_huge_paragraph_is_time_checked() {
     assert_eq!(got.len(), 1);
     assert!(got[0].len() < text.len());
 }
+
+#[test]
+fn the_element_budget_stops_reading_with_a_limit_loss() {
+    let text = "a\n\n".repeat(100);
+    let budget = Budget::new(Limits {
+        max_elements: 20,
+        ..Limits::default()
+    });
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    // Each paragraph is two elements (the block and its text).
+    assert_eq!(paragraphs(&out).len(), 10);
+    let limits: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    assert_eq!(limits[0].location, "paragraph 11");
+    assert_eq!(
+        limits[0].what,
+        "element limit reached, rest of the text not read"
+    );
+    assert_eq!(limits[0].severity, Severity::Warning);
+}
+
+#[test]
+fn the_element_budget_ends_on_the_last_paragraph_too() {
+    // The last paragraph has no blank line after it; it is charged as well.
+    let text = "a\n\nb";
+    let budget = Budget::new(Limits {
+        max_elements: 2,
+        ..Limits::default()
+    });
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(paragraphs(&out), ["a"]);
+}

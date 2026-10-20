@@ -19,6 +19,12 @@ const CHECK_EVERY: usize = 1000;
 /// How many bytes of text are read between two time checks, so one huge paragraph is covered.
 const CHECK_BYTES: usize = 1024 * 1024;
 
+/// Model elements of one paragraph: the block and its text.
+const PARAGRAPH_ELEMENTS: u64 = 2;
+
+const TIME_STOP: &str = "rest of the text not read";
+const ELEMENT_STOP: &str = "element limit reached, rest of the text not read";
+
 /// Reads plain text. The encoding is detected, line endings are normalized to LF and the text
 /// is split into paragraphs at blank lines.
 #[derive(Debug, Clone, Copy, Default)]
@@ -62,10 +68,15 @@ impl Reader for TextReader {
         let mut blocks: Vec<Block> = Vec::new();
         let mut current: Vec<&str> = Vec::new();
         let mut since_check = 0usize;
-        let mut stopped_at: Option<usize> = None;
+        let mut stopped_at: Option<(usize, &str)> = None;
         for line in text.split('\n') {
             if line.trim().is_empty() {
                 if !current.is_empty() {
+                    if budget.add_elements(PARAGRAPH_ELEMENTS).is_err() {
+                        stopped_at = Some((blocks.len() + 1, ELEMENT_STOP));
+                        current.clear();
+                        break;
+                    }
                     blocks.push(paragraph(&current));
                     current.clear();
                 }
@@ -75,7 +86,7 @@ impl Reader for TextReader {
             {
                 // Checked lazily, only when another paragraph follows.
                 if budget.check_time().is_err() {
-                    stopped_at = Some(blocks.len() + 1);
+                    stopped_at = Some((blocks.len() + 1, TIME_STOP));
                     break;
                 }
             }
@@ -86,7 +97,7 @@ impl Reader for TextReader {
                     // Keep what is read of the current paragraph.
                     current.push(line);
                     blocks.push(paragraph(&current));
-                    stopped_at = Some(blocks.len());
+                    stopped_at = Some((blocks.len(), TIME_STOP));
                     current.clear();
                     break;
                 }
@@ -94,13 +105,17 @@ impl Reader for TextReader {
             current.push(line);
         }
         if stopped_at.is_none() && !current.is_empty() {
-            blocks.push(paragraph(&current));
+            if budget.add_elements(PARAGRAPH_ELEMENTS).is_err() {
+                stopped_at = Some((blocks.len() + 1, ELEMENT_STOP));
+            } else {
+                blocks.push(paragraph(&current));
+            }
         }
-        if let Some(n) = stopped_at {
+        if let Some((n, what)) = stopped_at {
             completeness = Completeness::Partial;
             doc.losses.push(Loss {
                 location: format!("paragraph {n}"),
-                what: "rest of the text not read".into(),
+                what: what.into(),
                 why: LossReason::Limit,
                 severity: Severity::Warning,
             });
