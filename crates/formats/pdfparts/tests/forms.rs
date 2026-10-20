@@ -471,3 +471,32 @@ fn large_calculate_script_is_kept_as_text() {
     assert_eq!(limits.len(), 1, "{limits:?}");
     assert_eq!(limits[0].location, "form");
 }
+
+#[test]
+fn simple_calculate_and_range_check_in_a_form() {
+    let pdf = with_form(|doc, page| {
+        let a = doc.add_object(dictionary! { "T" => text("a"), "FT" => "Tx", "P" => page });
+        let b = doc.add_object(dictionary! { "T" => text("b"), "FT" => "Tx", "P" => page });
+        let total = doc.add_object(dictionary! {
+            "T" => text("total"), "FT" => "Tx", "Ff" => 1, "P" => page,
+            "AA" => dictionary! {
+                "C" => js(r#"AFSimple_Calculate("SUM", new Array("a", "b"));"#),
+                "V" => js("AFRange_Validate(true, 0, true, 100);"),
+                "F" => js("AFNumber_Format(2);"),
+            },
+        });
+        dictionary! { "Fields" => vec![a.into(), b.into(), total.into()], "CO" => vec![total.into()] }
+    });
+    let total = field(&pdf, "total");
+    let events: Vec<&str> = total.actions.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(events, ["calculate", "validate", "format"]);
+    let calc = script(total, "calculate");
+    assert_eq!(describe(calc).as_deref(), Some("sum of a, b"));
+    assert_eq!(field_refs(calc).names, ["a", "b"]);
+    assert_eq!(
+        describe(script(total, "validate")).as_deref(),
+        Some("between 0 and 100")
+    );
+    assert_eq!(describe(script(total, "format")), None);
+    assert_eq!(pdf.form().unwrap().calc_order, ["total"]);
+}

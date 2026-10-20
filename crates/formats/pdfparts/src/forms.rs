@@ -402,7 +402,7 @@ impl Pdf {
                     target: a.target,
                     text: a.text,
                 };
-                if !budget.charge(s.trigger.len() + s.text.as_ref().map_or(0, String::len)) {
+                if !budget.charge(s.weight()) {
                     spent = true;
                     return Err(budget.limit_issue("scripts", "scripts"));
                 }

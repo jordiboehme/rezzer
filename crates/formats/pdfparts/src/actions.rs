@@ -35,13 +35,10 @@ pub struct Script {
 }
 
 impl Script {
-    fn weight(&self) -> usize {
+    /// What it copies beyond its script text, which was charged as it was read.
+    pub(crate) fn weight(&self) -> usize {
         let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
-        self.trigger.len()
-            + self.kind.len()
-            + text(&self.name)
-            + text(&self.target)
-            + text(&self.text)
+        self.trigger.len() + self.kind.len() + text(&self.name) + text(&self.target)
     }
 }
 
