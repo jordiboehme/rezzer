@@ -12,6 +12,7 @@ members = [
     "crates/formats/textenc",
     "crates/formats/csvsniff",
     "crates/formats/zipguard",
+    "crates/formats/formulakit",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
@@ -56,6 +57,7 @@ libc = "=0.2.191"
 flate2 = { version = "=1.1.10", default-features = false }
 base64 = "=0.23.1"
 percent-encoding = "=2.3.2"
+formualizer-parse = { version = "=4.0.0", default-features = false }
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.

@@ -1,0 +1,15 @@
+[package]
+name = "formulakit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Spreadsheet formula analysis: references, names, tables, user functions and R1C1 pattern keys for Excel and OpenFormula"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/formulakit"
+readme = "README.md"
+keywords = ["excel", "formula", "spreadsheet", "openformula", "references"]
+categories = ["parser-implementations", "text-processing"]
+
+[dependencies]
+formualizer-parse.workspace = true

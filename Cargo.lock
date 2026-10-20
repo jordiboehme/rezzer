@@ -496,6 +496,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "formualizer-common"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b936fa2da86cf6ecdd051105865836d6d0cfb5cdf496d48e4ed72592c2f0810d"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
+name = "formualizer-parse"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02cd605562630c0ddbb85ef86868a9b9b0ddad188a14666dd1796d3fcad91f8c"
+dependencies = [
+ "formualizer-common",
+ "once_cell",
+ "smallvec",
+]
+
+[[package]]
+name = "formulakit"
+version = "0.1.0"
+dependencies = [
+ "formualizer-parse",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1314,6 +1341,12 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "smallvec"
+version = "1.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
 name = "strsim"
