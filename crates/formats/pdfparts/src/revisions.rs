@@ -35,7 +35,8 @@ pub struct Revisions {
 /// One save of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Revision {
-    /// 1 is the first save.
+    /// 1 is the first save. When an issue says the cross-reference chain is cut, the numbers
+    /// count from the oldest save that was read.
     pub number: u32,
     /// The byte offset after its `%%EOF` and the line end that follows.
     pub end: u64,
@@ -46,6 +47,13 @@ pub struct Revision {
 }
 
 const LOCATION: &str = "revisions";
+
+/// What one entry of a section takes in memory while the saves are compared, on top of what
+/// the parser charges for it: a slot in the map of its save and one in the running table.
+const ENTRY_MEMORY: u64 = 128;
+
+/// The words of an issue that cuts the chain.
+const RELATIVE: &str = "revision numbers count from the oldest save read";
 
 /// How many characters of a field value the words keep.
 const VALUE_CHARS: usize = 80;
@@ -93,8 +101,13 @@ struct Halt(Issue);
 impl Pdf {
     /// The saves of the file, with what each one changed in words. `stop` is asked between
     /// saves. Objects are parsed from [`Pdf::original`] with the crate's own parser, under what
-    /// is left of the object budget.
-    pub fn revisions(&self, stop: &dyn Fn() -> bool) -> Revisions {
+    /// is left of the object budget. The result is read once and kept: the first call's
+    /// `stop` decides, and a later call returns the same result and costs nothing.
+    pub fn revisions(&self, stop: &dyn Fn() -> bool) -> &Revisions {
+        self.revisions.get_or_init(|| self.read_revisions(stop))
+    }
+
+    fn read_revisions(&self, stop: &dyn Fn() -> bool) -> Revisions {
         let bytes = self.original();
         let mut out = Revisions::default();
         let Some(base) = header_base(bytes) else {
@@ -120,7 +133,7 @@ impl Pdf {
                 LOCATION,
                 IssueKind::Damaged,
                 format!(
-                    "{n} {} of earlier revisions could not be read",
+                    "{n} {} that the saves list could not be read at their offsets",
                     if n == 1 { "object" } else { "objects" }
                 ),
             ));
@@ -128,7 +141,9 @@ impl Pdf {
         // What the parser charged stays charged: freed buffers may stay resident.
         let charged = run.loader.budget.bytes;
         run.text.take(charged);
+        let mut seen = std::collections::HashSet::new();
         out.issues = run.issues;
+        out.issues.retain(|i| seen.insert(i.clone()));
         out
     }
 }
@@ -279,12 +294,13 @@ impl Run<'_, '_> {
         let mut tail: [Option<usize>; 2] = [None, None];
         let mut found = 0usize;
         let mut older: Option<Save> = None;
+        let mut positions = Vec::new();
         let result = loop {
             if found.is_multiple_of(1024) && (self.stop)() {
                 break Err(Halt(Issue::new(
                     LOCATION,
                     IssueKind::Limit,
-                    "stopped by the caller; older revisions are not read",
+                    format!("stopped by the caller; older revisions are not read; {RELATIVE}"),
                 )));
             }
             if let Err(h) = self.visit(1) {
@@ -300,7 +316,9 @@ impl Run<'_, '_> {
                     break Err(Halt(Issue::new(
                         LOCATION,
                         IssueKind::Damaged,
-                        "the /Prev chain leads back to a section read already; it ends there",
+                        format!(
+                            "the /Prev chain leads back to a section read already; it ends there; {RELATIVE}"
+                        ),
                     )));
                 }
                 Step::Damaged => {
@@ -308,16 +326,29 @@ impl Run<'_, '_> {
                         LOCATION,
                         IssueKind::Damaged,
                         format!(
-                            "the cross-reference section at offset {off} is damaged; older revisions are not read"
+                            "the cross-reference section at offset {off} is damaged; older revisions are not read; {RELATIVE}"
                         ),
                     )));
                 }
             };
-            if let Err(h) = self.visit(part.table.len() + part.freed.len()) {
+            let entries = part.table.len() + part.freed.len();
+            if let Err(h) = self.visit(entries) {
                 break Err(h);
+            }
+            if let Err(e) = self
+                .loader
+                .budget
+                .charge((entries as u64).saturating_mul(ENTRY_MEMORY))
+            {
+                break Err(self.limit(e.into_open()));
             }
             found += 1;
             chain.starts.push(part.start);
+            positions.push(part.start);
+            positions.extend(part.table.values().filter_map(|e| match e {
+                Entry::Normal { pos, .. } => Some(*pos),
+                Entry::Compressed { .. } => None,
+            }));
             tail = [tail[1], Some(part.start)];
             let prev = part.prev;
             let save = Save::from(part);
@@ -366,6 +397,7 @@ impl Run<'_, '_> {
             merge_older(chain, o);
         }
         chain.total = found - usize::from(pair);
+        self.loader.add_starts(positions);
         result
     }
 

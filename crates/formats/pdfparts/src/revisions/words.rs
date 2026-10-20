@@ -7,14 +7,16 @@
 //! a higher word explains (the content stream of a changed page, the array that lists the
 //! annotations of a page, the signature dictionary of a signed field) gets no word of its own.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
 use super::{Diff, Halt, Run, Slot, as_dict, id_of, structural, type_word, value_text};
+use crate::nav::page_list;
 use crate::objects::text_string;
 use crate::parse::history::View;
+use crate::{Issue, IssueKind};
 
 /// The pages of one revision, in page order.
 #[derive(Default)]
@@ -29,6 +31,10 @@ pub(crate) struct Pages {
     annots_array: Vec<Option<u32>>,
     /// The page each annotation is listed on.
     annots: HashMap<ObjectId, u32>,
+    /// Every object the pages were read from: the catalog, page tree nodes, content arrays,
+    /// content streams and their lengths, annotation arrays. A save that changes none of
+    /// them leaves the pages as they are.
+    deps: HashSet<u32>,
 }
 
 /// One object a save lists with a value other than before.
@@ -38,20 +44,12 @@ struct Changed {
     id: Option<ObjectId>,
     old: Option<Rc<Object>>,
     new: Option<Rc<Object>>,
+    /// The save lists the object, but it cannot be read at its offset.
+    unreadable: bool,
 }
 
 fn name_is(d: &Dictionary, key: &[u8], want: &[u8]) -> bool {
     matches!(d.get(key), Ok(Object::Name(n)) if n == want)
-}
-
-fn is_page_part(o: &Object) -> bool {
-    match o {
-        Object::Stream(_) | Object::Array(_) => true,
-        Object::Dictionary(d) => {
-            name_is(d, b"Type", b"Page") || name_is(d, b"Type", b"Pages") || is_catalog(d)
-        }
-        _ => false,
-    }
 }
 
 fn is_catalog(d: &Dictionary) -> bool {
@@ -89,27 +87,26 @@ impl Run<'_, '_> {
         let before = d.before();
         let after = d.after();
         let changed = self.changed(d, &before, &after)?;
-        let added_annot = changed
-            .iter()
-            .any(|c| c.old.is_none() && c.new.as_deref().and_then(as_dict).is_some_and(is_annot));
-        let needs_pages = added_annot
-            || changed.iter().any(|c| {
-                c.old.as_deref().is_some_and(is_page_part)
-                    || c.new.as_deref().is_some_and(is_page_part)
-            });
-        let pages = if needs_pages {
-            let b = match prev.clone() {
-                Some(p) => p,
-                None => Rc::new(self.pages(&before, d.root.0)?),
-            };
-            Some((b, Rc::new(self.pages(&after, d.root.1)?)))
-        } else {
-            None
+        // The pages are walked once, and again only after a save that changes an object
+        // they were read from.
+        let b = match prev {
+            Some(p) => p,
+            None => Rc::new(self.pages(&before, d.root.0)?),
         };
+        let tree_changed =
+            ref_num(d.root.0) != ref_num(d.root.1) || changed.iter().any(|c| b.deps.contains(&c.n));
+        let a = if tree_changed {
+            Rc::new(self.pages(&after, d.root.1)?)
+        } else {
+            b.clone()
+        };
+        let pages = Some((b, a));
         let changed_nums: HashSet<u32> = changed.iter().map(|c| c.n).collect();
         let mut explained = HashSet::new();
         let mut words = Vec::new();
-        if let Some((b, a)) = &pages {
+        if let Some((b, a)) = &pages
+            && !Rc::ptr_eq(b, a)
+        {
             words = page_words(b, a, &changed_nums, &mut explained);
             if words
                 .iter()
@@ -134,7 +131,9 @@ impl Run<'_, '_> {
             let new_d = c.new.as_deref().and_then(as_dict);
             let old_d = c.old.as_deref().and_then(as_dict);
             let mut w = Vec::new();
-            if root_nums.contains(&Some(c.n)) || new_d.or(old_d).is_some_and(is_catalog) {
+            if c.unreadable {
+                w.push(format!("changed object {} (unreadable)", c.n));
+            } else if root_nums.contains(&Some(c.n)) || new_d.or(old_d).is_some_and(is_catalog) {
                 w.push("changed the catalog".to_string());
             } else if info_nums.contains(&Some(c.n)) {
                 w.push("changed document information".to_string());
@@ -144,6 +143,7 @@ impl Run<'_, '_> {
                 w = self.field_words(&before, &after, old_d, nd, &mut explained)?;
             }
             if c.old.is_none()
+                && !c.unreadable
                 && let Some(nd) = new_d
                 && is_annot(nd)
             {
@@ -180,11 +180,7 @@ impl Run<'_, '_> {
         for w in &words {
             self.copy(w.len())?;
         }
-        let after_pages = match pages {
-            Some((_, a)) => Some(a),
-            None => prev,
-        };
-        Ok((words, after_pages))
+        Ok((words, pages.map(|(_, a)| a)))
     }
 
     /// The objects a save lists whose value differs from before, by number.
@@ -208,20 +204,33 @@ impl Run<'_, '_> {
                 Slot::Free => None,
             };
             let new = match new_slot {
-                Slot::Used(e) => match self.load(after, id_of(n, e))? {
-                    Some(o) => Some(o),
-                    // Damaged: counted by the loader.
-                    None => continue,
-                },
+                Slot::Used(e) => self.load(after, id_of(n, e))?,
                 Slot::Free => None,
             };
+            if new.is_none() && matches!(new_slot, Slot::Used(_)) {
+                // Counted by the loader for the issue.
+                out.push(Changed {
+                    n,
+                    id,
+                    old,
+                    new,
+                    unreadable: true,
+                });
+                continue;
+            }
             if old == new
                 || old.as_deref().is_some_and(structural)
                 || new.as_deref().is_some_and(structural)
             {
                 continue;
             }
-            out.push(Changed { n, id, old, new });
+            out.push(Changed {
+                n,
+                id,
+                old,
+                new,
+                unreadable: false,
+            });
         }
         Ok(out)
     }
@@ -293,9 +302,12 @@ impl Run<'_, '_> {
     }
 
     /// The pages of a revision, walked from its catalog. Every node, kid, content stream and
-    /// annotation counts as a visit.
+    /// annotation counts as a visit. An indirect /Kids, /Contents or /Annots array is walked
+    /// once: pages that share a /Contents or /Annots array get it for the first of them only,
+    /// with one issue.
     fn pages(&mut self, view: View, root: Option<&Object>) -> Result<Pages, Halt> {
         let mut out = Pages::default();
+        out.deps.extend(ref_num(root));
         let catalog = self.deref(view, root)?;
         let Some(Ok(Object::Reference(top))) = catalog
             .as_deref()
@@ -306,17 +318,29 @@ impl Run<'_, '_> {
         };
         let mut stack = vec![(*top, 1usize)];
         let mut seen = HashSet::new();
+        // An indirect array walked already, and the page that got it.
+        let mut arrays: HashMap<ObjectId, u32> = HashMap::new();
+        let mut shared: BTreeMap<(&'static str, u32), Vec<u32>> = BTreeMap::new();
         while let Some((id, depth)) = stack.pop() {
             if depth > self.limits.max_depth || !seen.insert(id) {
                 continue;
             }
+            out.deps.insert(id.0);
             let node = self.load(view, id)?;
             let Some(d) = node.as_deref().and_then(as_dict) else {
                 continue;
             };
+            let number = out.ids.len() as u32 + 1;
             if !name_is(d, b"Type", b"Page") && d.get(b"Kids").is_ok() {
-                let held = self.deref(view, d.get(b"Kids").ok())?;
-                if let Some(Object::Array(kids)) = held.as_deref().or(d.get(b"Kids").ok()) {
+                let kids = d.get(b"Kids").ok();
+                if let Some(Object::Reference(r)) = kids {
+                    out.deps.insert(r.0);
+                    if arrays.insert(*r, number).is_some() {
+                        continue;
+                    }
+                }
+                let held = self.deref(view, kids)?;
+                if let Some(Object::Array(kids)) = held.as_deref().or(kids) {
                     self.visit(kids.len())?;
                     for k in kids.iter().rev() {
                         if let Object::Reference(r) = k {
@@ -326,37 +350,85 @@ impl Run<'_, '_> {
                 }
                 continue;
             }
-            let number = out.ids.len() as u32 + 1;
             out.num.entry(id).or_insert(number);
             out.ids.push(id);
             let mut content = Vec::new();
             let mut contents_array = None;
-            let held = self.deref(view, d.get(b"Contents").ok())?;
-            match (d.get(b"Contents").ok(), held.as_deref()) {
-                (Some(Object::Reference(r)), Some(Object::Stream(s))) => {
-                    content.push((*r, Some(s.content.len())));
+            let contents = d.get(b"Contents").ok();
+            let first = match contents {
+                Some(Object::Reference(r)) => arrays.get(r).copied(),
+                _ => None,
+            };
+            match first {
+                Some(first) => shared.entry(("content", first)).or_default().push(number),
+                None => {
+                    let held = self.deref(view, contents)?;
+                    match (contents, held.as_deref()) {
+                        (Some(Object::Reference(r)), Some(Object::Stream(s))) => {
+                            content.push((*r, Some(s.content.len())));
+                        }
+                        (Some(Object::Reference(r)), Some(Object::Array(items))) => {
+                            contents_array = Some(r.0);
+                            arrays.insert(*r, number);
+                            self.content_refs(view, items, &mut content)?;
+                        }
+                        (Some(Object::Reference(r)), _) => content.push((*r, None)),
+                        (Some(Object::Array(items)), _) => {
+                            self.content_refs(view, items, &mut content)?
+                        }
+                        _ => {}
+                    }
                 }
-                (Some(Object::Reference(r)), Some(Object::Array(items))) => {
-                    contents_array = Some(r.0);
-                    self.content_refs(view, items, &mut content)?;
-                }
-                (Some(Object::Reference(r)), _) => content.push((*r, None)),
-                (Some(Object::Array(items)), _) => self.content_refs(view, items, &mut content)?,
-                _ => {}
             }
-            let held = self.deref(view, d.get(b"Annots").ok())?;
-            let annots_array = ref_num(d.get(b"Annots").ok());
-            if let Some(Object::Array(items)) = held.as_deref().or(d.get(b"Annots").ok()) {
-                self.visit(items.len())?;
-                for o in items {
-                    if let Object::Reference(r) = o {
-                        out.annots.entry(*r).or_insert(number);
+            for (r, _) in &content {
+                out.deps.insert(r.0);
+                out.deps.extend(self.loader.length_dep(view, *r));
+            }
+            out.deps.extend(contents_array);
+            let annots = d.get(b"Annots").ok();
+            let annots_array = ref_num(annots);
+            out.deps.extend(annots_array);
+            let first = match annots {
+                Some(Object::Reference(r)) => arrays.get(r).copied(),
+                _ => None,
+            };
+            if let Some(first) = first {
+                shared
+                    .entry(("annotation", first))
+                    .or_default()
+                    .push(number);
+            } else {
+                if let Some(Object::Reference(r)) = annots {
+                    arrays.insert(*r, number);
+                }
+                let held = self.deref(view, annots)?;
+                if let Some(Object::Array(items)) = held.as_deref().or(annots) {
+                    self.visit(items.len())?;
+                    for o in items {
+                        if let Object::Reference(r) = o {
+                            out.annots.entry(*r).or_insert(number);
+                        }
                     }
                 }
             }
             out.content.push(content);
             out.contents_array.push(contents_array);
             out.annots_array.push(annots_array);
+        }
+        for ((what, first), pages) in shared {
+            let list = page_list(&pages);
+            let (verb, own) = if pages.len() == 1 {
+                ("page", "shares")
+            } else {
+                ("pages", "share")
+            };
+            self.issues.push(Issue::new(
+                super::LOCATION,
+                IssueKind::Damaged,
+                format!(
+                    "{verb} {list} {own} the {what} list of page {first}; it is compared for page {first} only"
+                ),
+            ));
         }
         Ok(out)
     }

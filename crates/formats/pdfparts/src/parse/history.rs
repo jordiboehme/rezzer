@@ -4,8 +4,9 @@
 
 //! Objects as an earlier revision of the file defines them. The caller passes the table of a
 //! revision as a lookup; objects are read from the original bytes with the same bounded
-//! parser as the open. Every object is read at most once per file position and every object
-//! stream is unpacked at most once, whichever revision asks.
+//! parser as the open. Every object is read at most once per file position (and per value of
+//! an indirect `/Length`, which a later save may change) and every object stream is unpacked
+//! at most once, whichever revision asks.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -40,7 +41,10 @@ pub(crate) struct Loader<'a> {
     pub budget: Budget<'a>,
     crypt: Option<&'a Crypt>,
     headers: HashMap<usize, Option<ObjectId>>,
-    tops: HashMap<usize, Option<Rc<Object>>>,
+    /// The indirect `/Length` of the object at a position, once it was read.
+    length_refs: HashMap<usize, Option<ObjectId>>,
+    /// Objects by position and the value of their indirect `/Length`.
+    tops: HashMap<(usize, Option<i64>), Option<Rc<Object>>>,
     packed: HashMap<usize, Option<Rc<Packed>>>,
     members: HashMap<(usize, u32), Option<Rc<Object>>>,
     busy: HashSet<usize>,
@@ -61,6 +65,7 @@ impl<'a> Loader<'a> {
             budget,
             crypt,
             headers: HashMap::new(),
+            length_refs: HashMap::new(),
             tops: HashMap::new(),
             packed: HashMap::new(),
             members: HashMap::new(),
@@ -71,17 +76,25 @@ impl<'a> Loader<'a> {
 
     /// Reads the cross-reference section at offset `off`.
     pub fn section(&mut self, sections: &mut Sections, off: u64) -> Result<Step, OpenError> {
-        let step = sections.read(self.bytes, self.base, off, &mut self.budget)?;
-        if let Step::Part(part) = &step {
-            let starts = part.table.values().filter_map(|e| match e {
-                Entry::Normal { pos, .. } => Some(*pos),
-                Entry::Compressed { .. } => None,
-            });
-            self.budget
-                .ends
-                .add_starts(starts.chain([part.start]).collect::<Vec<_>>());
-        }
-        Ok(step)
+        sections.read(self.bytes, self.base, off, &mut self.budget)
+    }
+
+    /// Adds the starts of objects and sections, once all sections are read: sorting them per
+    /// section would make the walk quadratic.
+    pub fn add_starts(&mut self, starts: Vec<usize>) {
+        self.budget.ends.add_starts(starts);
+    }
+
+    /// The number of the indirect `/Length` object of `id` in a revision, once `id` was read.
+    pub fn length_dep(&self, view: View, id: ObjectId) -> Option<u32> {
+        let Some(Entry::Normal { pos, .. }) = view(id.0) else {
+            return None;
+        };
+        let other = pos.checked_sub(self.base).filter(|_| self.base > 0);
+        std::iter::once(pos)
+            .chain(other)
+            .find_map(|at| self.length_refs.get(&at).copied().flatten())
+            .map(|r| r.0)
     }
 
     /// The first object of the file is a linearization dictionary.
@@ -126,7 +139,8 @@ impl<'a> Loader<'a> {
     }
 
     /// The plain object `id` at `pos` (or at `pos` counted from the first byte). `members`
-    /// allows an indirect `/Length` inside an object stream.
+    /// allows an indirect `/Length` inside an object stream. A position without the header
+    /// of `id` counts as damaged.
     fn top(
         &mut self,
         view: View,
@@ -139,36 +153,54 @@ impl<'a> Loader<'a> {
             if at >= self.bytes.len() || self.header(at)? != Some(id) {
                 continue;
             }
-            if let Some(found) = self.tops.get(&at) {
-                return Ok(found.clone());
-            }
             if !self.busy.insert(at) {
                 return Ok(None);
             }
-            let found = self.read_top(view, id, at, members);
+            let found = self.top_at(view, id, at, members);
             self.busy.remove(&at);
-            let found = found?;
-            self.tops.insert(at, found.clone());
-            return Ok(found);
+            return found;
         }
+        self.damaged += 1;
         Ok(None)
     }
 
-    fn read_top(
+    fn top_at(
         &mut self,
         view: View,
         id: ObjectId,
         at: usize,
         members: bool,
     ) -> Result<Option<Rc<Object>>, OpenError> {
+        if let Some(r) = self.length_refs.get(&at).copied() {
+            let length = match r {
+                Some(r) => self.length_of(view, r, members)?,
+                None => None,
+            };
+            if let Some(found) = self.tops.get(&(at, length)) {
+                return Ok(found.clone());
+            }
+        }
         let head = match head_at(self.bytes, at, &mut self.budget) {
             Ok(h) => h,
             Err(f) => return self.fail(f),
         };
-        let length = match length_ref(&head) {
+        let r = length_ref(&head);
+        self.length_refs.insert(at, r);
+        let length = match r {
             Some(r) => self.length_of(view, r, members)?,
             None => None,
         };
+        let found = self.finish_top(id, head, length)?;
+        self.tops.insert((at, length), found.clone());
+        Ok(found)
+    }
+
+    fn finish_top(
+        &mut self,
+        id: ObjectId,
+        head: super::object::Head,
+        length: Option<i64>,
+    ) -> Result<Option<Rc<Object>>, OpenError> {
         let mut obj = match finish(self.bytes, head, length, &mut self.budget) {
             Ok((_, o)) => o,
             Err(f) => return self.fail(f),
@@ -259,17 +291,19 @@ impl<'a> Loader<'a> {
         }
         // Marked first, so a container that needs itself is not unpacked again.
         self.packed.insert(pos, None);
+        // A container that is not there was counted by `top`.
         let packed = match self.top(view, id, pos, false)? {
             Some(o) => match o.as_ref() {
                 Object::Stream(s) if s.dict.has_type(b"ObjStm") => self.members_of(s)?,
                 _ => None,
-            },
+            }
+            .or_else(|| {
+                self.damaged += 1;
+                None
+            }),
             None => None,
         };
         let packed = packed.map(Rc::new);
-        if packed.is_none() {
-            self.damaged += 1;
-        }
         self.packed.insert(pos, packed.clone());
         Ok(packed)
     }

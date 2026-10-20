@@ -13,6 +13,8 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
+pub mod updates;
+
 /// Writes `n` copies of `byte` into `w` in chunks, so the plain data is never held.
 pub fn fill(w: &mut impl Write, byte: u8, n: usize) {
     let chunk = vec![byte; 1 << 20];

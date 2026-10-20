@@ -193,6 +193,8 @@ pub struct Pdf {
     form: OnceLock<forms::FormData>,
     scripts: OnceLock<Vec<Script>>,
     signatures: OnceLock<Vec<Sig>>,
+    /// The revisions, read on first use.
+    revisions: OnceLock<Revisions>,
     /// What all readers together may still copy out of the document: the object budget left
     /// after open.
     text_left: AtomicU64,
@@ -287,6 +289,7 @@ impl Pdf {
             form: OnceLock::new(),
             scripts: OnceLock::new(),
             signatures: OnceLock::new(),
+            revisions: OnceLock::new(),
             text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(built.charged)),
         })
     }
