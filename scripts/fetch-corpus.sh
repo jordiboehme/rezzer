@@ -31,7 +31,7 @@ while IFS="$tab" read -r path url sha || [ -n "${path:-}" ]; do
     fi
     mkdir -p "$(dirname "$target")"
     tmp="$target.part"
-    if ! curl --fail --location --proto =https --silent --show-error -o "$tmp" "$url"; then
+    if ! curl --fail --location --proto =https --max-filesize 50M --max-time 300 --silent --show-error -o "$tmp" "$url"; then
         rm -f "$tmp"
         echo "failed  $path: download" >&2
         failed=1
