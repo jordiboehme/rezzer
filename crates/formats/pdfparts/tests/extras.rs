@@ -271,3 +271,26 @@ fn files_without_extras_have_none() {
     assert!(pdf.layers().is_empty());
     assert!(pdf.threads().is_empty());
 }
+
+#[test]
+fn direct_bead_link_has_its_own_message() {
+    let bytes = document(1, |doc, pages| {
+        let first = doc.add_object(dictionary! {
+            "P" => pages[0],
+            "N" => dictionary! { "P" => pages[0] },
+        });
+        let thread = doc.add_object(dictionary! { "F" => first });
+        dictionary! { "Threads" => vec![thread.into()] }
+    });
+    let pdf = open_bytes(&bytes);
+    let threads = pdf.threads();
+    assert_eq!(threads[0].beads, 1);
+    let issues = pdf.issues();
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.location == "article threads" && i.what.contains("not an indirect")),
+        "{issues:?}"
+    );
+    assert!(!issues.iter().any(|i| i.what.contains("loops back")));
+}

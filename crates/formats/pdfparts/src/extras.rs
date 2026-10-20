@@ -56,6 +56,33 @@ struct Found {
     stream: Option<ObjectId>,
 }
 
+/// The embedded files as listed, and the stream of each.
+#[derive(Debug, Default)]
+pub(crate) struct Attachments {
+    files: Vec<EmbeddedFile>,
+    streams: Vec<Option<ObjectId>>,
+}
+
+/// File specifications and streams listed already.
+#[derive(Default)]
+struct Seen {
+    specs: HashSet<ObjectId>,
+    streams: HashSet<ObjectId>,
+}
+
+impl EmbeddedFile {
+    /// The bytes it copies out of the document.
+    fn weight(&self) -> usize {
+        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
+        let date = |d: &Option<PdfDate>| d.as_ref().map_or(0, |d| d.raw.len() * 2);
+        self.name.len()
+            + text(&self.description)
+            + text(&self.mime)
+            + date(&self.created)
+            + date(&self.modified)
+    }
+}
+
 const THREADS: &str = "article threads";
 
 fn never() -> bool {
@@ -64,9 +91,9 @@ fn never() -> bool {
 
 impl Pdf {
     /// Embedded files from the `/EmbeddedFiles` name tree, then from file attachment
-    /// annotations, each stream once.
-    pub fn embedded_files(&self) -> Vec<EmbeddedFile> {
-        self.found_files().into_iter().map(|f| f.file).collect()
+    /// annotations, each stream once. They are read on the first call and kept.
+    pub fn embedded_files(&self) -> &[EmbeddedFile] {
+        &self.attachment_list().files
     }
 
     /// The bytes of embedded file `index` (as listed by [`Pdf::embedded_files`]), unpacked
@@ -74,11 +101,10 @@ impl Pdf {
     pub fn embedded_file_bytes(&self, index: usize) -> Result<Vec<u8>, Issue> {
         let place = format!("attachment {}", index + 1);
         let fail = |kind, what: &str| Err(Issue::new(&place, kind, what));
-        let files = self.found_files();
-        let Some(found) = files.get(index) else {
+        let Some(stream) = self.attachment_list().streams.get(index) else {
             return fail(IssueKind::Damaged, "there is no such embedded file");
         };
-        let Some(id) = found.stream else {
+        let Some(id) = *stream else {
             return fail(IssueKind::Damaged, "the file specification holds no file");
         };
         if self.verdict.refused_objects.contains(&id) {
@@ -114,11 +140,24 @@ impl Pdf {
         }
     }
 
-    fn found_files(&self) -> Vec<Found> {
+    /// The embedded files, read on the first call and kept.
+    fn attachment_list(&self) -> &Attachments {
+        self.attachments.get_or_init(|| {
+            let (files, streams) = self
+                .read_files()
+                .into_iter()
+                .map(|f| (f.file, f.stream))
+                .unzip();
+            Attachments { files, streams }
+        })
+    }
+
+    fn read_files(&self) -> Vec<Found> {
         let doc = &self.doc;
         let mut issues = Vec::new();
         let mut out = Vec::new();
-        let mut streams = HashSet::new();
+        let mut seen = Seen::default();
+        let mut budget = self.text_budget();
         let tree = self
             .catalog()
             .and_then(|c| get_dict(doc, c, b"Names"))
@@ -129,6 +168,7 @@ impl Pdf {
                 tree,
                 Tree::Name,
                 &self.limits,
+                &mut budget,
                 "attachments",
                 &mut issues,
             );
@@ -137,59 +177,53 @@ impl Pdf {
                     TreeKey::Name(n) => text_string(&n),
                     TreeKey::Number(n) => n.to_string(),
                 };
-                if let Some(f) = self.found(spec, key, &mut streams) {
-                    out.push(f);
+                let Some(f) = self.found(spec, key, &mut seen) else {
+                    continue;
+                };
+                if !budget.charge(f.file.weight()) {
+                    issues.push(budget.limit_issue("attachments", "attachments"));
+                    self.note(issues);
+                    return out;
                 }
+                out.push(f);
             }
         }
         // File attachment annotations, each annotation once.
-        let mut seen = HashSet::new();
-        let mut visited = 0usize;
-        'pages: for node in &self.pages {
-            let Some(pd) = doc.objects.get(&node.id).and_then(|o| dict(doc, o)) else {
-                continue;
-            };
-            let Some(Object::Array(annots)) = get(doc, pd, b"Annots") else {
-                continue;
-            };
-            for a in annots {
-                visited += 1;
-                if visited > self.limits.max_items {
-                    issues.push(Issue::new(
-                        "attachments",
-                        IssueKind::Limit,
-                        format!(
-                            "more than {} annotations; file attachments may be missing",
-                            self.limits.max_items
-                        ),
-                    ));
-                    break 'pages;
-                }
-                if let Some(r) = reference(a)
-                    && !seen.insert(r)
-                {
-                    continue;
-                }
-                let Some(ad) = dict(doc, a) else {
-                    continue;
-                };
-                if get_name(doc, ad, b"Subtype") != Some(b"FileAttachment") {
-                    continue;
-                }
-                if let Some(spec) = ad.get(b"FS").ok()
-                    && let Some(f) = self.found(spec, String::new(), &mut streams)
-                {
-                    out.push(f);
-                }
+        let mut annots = HashSet::new();
+        self.each_annot("attachments", &mut issues, |_, _, a| {
+            if let Some(r) = reference(a)
+                && !annots.insert(r)
+            {
+                return Ok(());
             }
-        }
+            let Some(ad) = dict(doc, a) else {
+                return Ok(());
+            };
+            if get_name(doc, ad, b"Subtype") != Some(b"FileAttachment") {
+                return Ok(());
+            }
+            if let Some(spec) = ad.get(b"FS").ok()
+                && let Some(f) = self.found(spec, String::new(), &mut seen)
+            {
+                if !budget.charge(f.file.weight()) {
+                    return Err(budget.limit_issue("attachments", "attachments"));
+                }
+                out.push(f);
+            }
+            Ok(())
+        });
         self.note(issues);
         out
     }
 
-    /// One file specification. `None` when its stream is listed already.
-    fn found(&self, spec: &Object, key: String, streams: &mut HashSet<ObjectId>) -> Option<Found> {
+    /// One file specification. `None` when it or its stream is listed already.
+    fn found(&self, spec: &Object, key: String, seen: &mut Seen) -> Option<Found> {
         let doc = &self.doc;
+        if let Some(id) = reference(spec)
+            && !seen.specs.insert(id)
+        {
+            return None;
+        }
         let (name, description, ef) = match resolve(doc, spec) {
             Some(Object::String(s, _)) => (text_string(s), None, None),
             Some(Object::Dictionary(d)) => (
@@ -208,7 +242,7 @@ impl Pdf {
                 .and_then(reference)
         });
         if let Some(id) = stream
-            && !streams.insert(id)
+            && !seen.streams.insert(id)
         {
             return None;
         }
@@ -271,6 +305,7 @@ impl Pdf {
         };
         let (on, off) = (set(b"ON"), set(b"OFF"));
         let base_on = config.and_then(|c| get_name(doc, c, b"BaseState")) != Some(b"OFF");
+        let mut budget = self.text_budget();
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for g in groups {
@@ -288,10 +323,12 @@ impl Pdf {
                 Some(id) if off.contains(&id) => false,
                 _ => base_on,
             };
-            out.push(Layer {
-                name: get_text(doc, gd, b"Name").unwrap_or_default(),
-                visible,
-            });
+            let name = get_text(doc, gd, b"Name").unwrap_or_default();
+            if !budget.charge(name.len()) {
+                self.note(vec![budget.limit_issue("layers", "layers")]);
+                break;
+            }
+            out.push(Layer { name, visible });
         }
         out
     }
@@ -305,11 +342,16 @@ impl Pdf {
         let mut issues = Vec::new();
         let mut out = Vec::new();
         let mut beads_left = self.limits.max_items;
+        let mut budget = self.text_budget();
         for (t, thread) in list.iter().enumerate() {
             let Some(td) = dict(doc, thread) else {
                 continue;
             };
             let title = get_dict(doc, td, b"I").and_then(|i| get_text(doc, i, b"Title"));
+            if !budget.charge(title.as_ref().map_or(0, String::len)) {
+                issues.push(budget.limit_issue(THREADS, "article threads"));
+                break;
+            }
             let mut pages = Vec::new();
             let mut beads = 0u32;
             if let Ok(first) = td.get(b"F") {
@@ -346,11 +388,13 @@ impl Pdf {
                     let Some(next) = bead.get(b"N").ok() else {
                         break Some("the bead chain is broken");
                     };
-                    let next_id = reference(next);
-                    if next_id.is_some() && next_id == first_id {
+                    let Some(next_id) = reference(next) else {
+                        break Some("a bead's /N is not an indirect object");
+                    };
+                    if Some(next_id) == first_id {
                         break None;
                     }
-                    if next_id.is_none_or(|n| seen.contains(&n)) {
+                    if seen.contains(&next_id) {
                         break Some("the bead chain loops back to a bead in the middle");
                     }
                     current = next;

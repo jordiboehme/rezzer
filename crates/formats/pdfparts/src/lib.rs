@@ -174,6 +174,8 @@ pub struct Pdf {
     issues: Mutex<IssueLog>,
     /// The structure tree, read on first use.
     structure: OnceLock<Option<structure::Built>>,
+    /// The embedded files, read on first use.
+    attachments: OnceLock<extras::Attachments>,
 }
 
 /// Issues in the order found, each once.
@@ -260,6 +262,7 @@ impl Pdf {
             unsafe_tree: tree.unsafe_tree,
             issues: Mutex::new(log),
             structure: OnceLock::new(),
+            attachments: OnceLock::new(),
         })
     }
 
@@ -322,6 +325,15 @@ impl Pdf {
                 log.add(issue);
             }
         }
+    }
+
+    /// The budget for what one reader call copies: the object budget left after open.
+    pub(crate) fn text_budget(&self) -> objects::TextBudget {
+        objects::TextBudget::new(
+            self.limits
+                .max_object_bytes
+                .saturating_sub(self.object_bytes),
+        )
     }
 
     pub(crate) fn catalog(&self) -> Option<&lopdf::Dictionary> {

@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use lopdf::{Dictionary, Document, Object};
 
 use crate::nav::rect;
-use crate::objects::{dict, get, get_date, get_name, get_text, number, reference, resolve};
+use crate::objects::{dict, get_date, get_name, get_text, number, reference, resolve};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
 /// One annotation that is not a link, a popup or a form widget.
@@ -43,23 +43,23 @@ pub struct Annot {
 }
 
 impl Annot {
-    /// What the annotation costs to keep beyond the fixed part: its texts and quads.
-    fn weight(&self) -> u64 {
+    /// What the annotation copies beyond the fixed part: its texts and quads.
+    fn weight(&self) -> usize {
         let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
         let dates = |d: &Option<PdfDate>| d.as_ref().map_or(0, |d| d.raw.len() * 2);
-        (self.id.len()
+        self.id.len()
             + self.subtype.len()
             + text(&self.author)
             + text(&self.contents)
             + text(&self.subject)
             + dates(&self.created)
             + dates(&self.modified)
-            + self.quads.len() * 32) as u64
+            + text(&self.in_reply_to)
+            + text(&self.reply_type)
+            + text(&self.state)
+            + self.quads.len() * 32
     }
 }
-
-/// Fixed cost of one annotation, as for one parsed value.
-const ANNOT_BYTES: u64 = 128;
 
 /// The `#rrggbb` form of a `/C` array: gray, RGB or CMYK components from 0 to 1.
 fn color(doc: &Document, obj: Option<&Object>) -> Option<String> {
@@ -115,81 +115,109 @@ fn id_text(id: lopdf::ObjectId) -> String {
 }
 
 impl Pdf {
-    /// Every annotation on every page in page order, except links, popups and form widgets.
-    /// An annotation that several pages share is listed once, on the first.
-    pub fn annotations(&self) -> Vec<Annot> {
+    /// Calls `visit` with the page number, the position in the array (from 0) and the entry,
+    /// for each `/Annots` entry in page order. An `/Annots` array object that several pages
+    /// share is walked once, on the first of them. At most `max_items` entries are visited in
+    /// all. `visit` ends the walk with an issue.
+    pub(crate) fn each_annot<'a>(
+        &'a self,
+        what: &str,
+        issues: &mut Vec<Issue>,
+        mut visit: impl FnMut(u32, usize, &'a Object) -> Result<(), Issue>,
+    ) {
         let doc = &self.doc;
-        let mut issues = Vec::new();
-        let mut out = Vec::new();
-        let mut seen = HashSet::new();
-        // Direct dictionaries in an /Annots array that pages share are listed on each page.
-        // In a file that shares nothing they take less than their objects did, so that bounds
-        // the copies.
-        let mut left = self.object_bytes;
+        let mut arrays = HashSet::new();
+        let mut visited = 0usize;
         for (i, node) in self.pages.iter().enumerate() {
             let page = i as u32 + 1;
             let Some(pd) = doc.objects.get(&node.id).and_then(|o| dict(doc, o)) else {
                 continue;
             };
-            let Some(Object::Array(annots)) = get(doc, pd, b"Annots") else {
+            let Ok(entry) = pd.get(b"Annots") else {
                 continue;
             };
-            let mut broken_quads = 0usize;
+            if let Some(id) = reference(entry)
+                && !arrays.insert(id)
+            {
+                continue;
+            }
+            let Some(Object::Array(annots)) = resolve(doc, entry) else {
+                continue;
+            };
             for (k, a) in annots.iter().enumerate() {
-                if out.len() >= self.limits.max_items {
-                    issues.push(Issue::new(
-                        "document",
-                        IssueKind::Limit,
-                        format!("more than {} annotations", self.limits.max_items),
-                    ));
-                    self.note(issues);
-                    return out;
-                }
-                let id = match reference(a) {
-                    Some(r) => {
-                        if !seen.insert(r) {
-                            continue;
-                        }
-                        id_text(r)
-                    }
-                    None => format!("p{page}#{}", k + 1),
-                };
-                let Some(ad) = dict(doc, a) else {
-                    continue;
-                };
-                let Some(annot) = self.annot(ad, id, page, &mut broken_quads) else {
-                    continue;
-                };
-                let cost = ANNOT_BYTES + annot.weight();
-                if cost > left {
+                visited += 1;
+                if visited > self.limits.max_items {
                     issues.push(Issue::new(
                         "document",
                         IssueKind::Limit,
                         format!(
-                            "the annotations repeat more text than the file holds; annotations from page {page} on are not listed"
+                            "the pages list more than {} annotation entries; {what} from page {page} on are not read",
+                            self.limits.max_items
                         ),
                     ));
-                    self.note(issues);
-                    return out;
+                    return;
                 }
-                left -= cost;
-                out.push(annot);
+                if let Err(issue) = visit(page, k, a) {
+                    issues.push(issue);
+                    return;
+                }
             }
-            if broken_quads > 0 {
-                issues.push(Issue::new(
-                    &format!("page {page}"),
-                    IssueKind::Damaged,
-                    format!(
-                        "{} {} QuadPoints that do not form whole quads; the broken part is left out",
-                        broken_quads,
-                        if broken_quads == 1 {
-                            "annotation has"
-                        } else {
-                            "annotations have"
-                        }
-                    ),
-                ));
+        }
+    }
+
+    /// Every annotation on every page in page order, except links, popups and form widgets.
+    /// An annotation that several pages share is listed once, on the first, and so is an
+    /// `/Annots` array that pages share.
+    pub fn annotations(&self) -> Vec<Annot> {
+        let doc = &self.doc;
+        let mut issues = Vec::new();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut budget = self.text_budget();
+        // Pages with QuadPoints that do not form whole quads, and how many annotations each.
+        let mut broken: Vec<(u32, usize)> = Vec::new();
+        self.each_annot("annotations", &mut issues, |page, k, a| {
+            let id = match reference(a) {
+                Some(r) => {
+                    if !seen.insert(r) {
+                        return Ok(());
+                    }
+                    id_text(r)
+                }
+                None => format!("p{page}#{}", k + 1),
+            };
+            let Some(ad) = dict(doc, a) else {
+                return Ok(());
+            };
+            let mut bad = 0usize;
+            let Some(annot) = self.annot(ad, id, page, &mut bad) else {
+                return Ok(());
+            };
+            if bad > 0 {
+                match broken.last_mut() {
+                    Some((p, n)) if *p == page => *n += 1,
+                    _ => broken.push((page, 1)),
+                }
             }
+            if !budget.charge(annot.weight()) {
+                return Err(budget.limit_issue("document", "annotations"));
+            }
+            out.push(annot);
+            Ok(())
+        });
+        for (page, n) in broken {
+            issues.push(Issue::new(
+                &format!("page {page}"),
+                IssueKind::Damaged,
+                format!(
+                    "{n} {} QuadPoints that do not form whole quads; the broken part is left out",
+                    if n == 1 {
+                        "annotation has"
+                    } else {
+                        "annotations have"
+                    }
+                ),
+            ));
         }
         self.note(issues);
         out

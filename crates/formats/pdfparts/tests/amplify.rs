@@ -12,7 +12,7 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{assert_rss_bounded, zlib_fill};
+use common::{Classic, assert_rss_bounded, zlib_fill};
 use pdfparts::{IssueKind, Limits, OpenError, Pdf};
 
 fn never() -> bool {
@@ -31,49 +31,6 @@ fn limits() -> Limits {
 fn deadline(after: Duration) -> impl Fn() -> bool {
     let start = Instant::now();
     move || start.elapsed() > after
-}
-
-/// Writes plain objects and a classic table.
-struct Classic {
-    out: Vec<u8>,
-    offs: Vec<(u32, usize)>,
-}
-
-impl Classic {
-    fn new() -> Classic {
-        Classic {
-            out: b"%PDF-1.5\n".to_vec(),
-            offs: Vec::new(),
-        }
-    }
-
-    fn object(&mut self, n: u32, body: &[u8]) {
-        self.offs.push((n, self.out.len()));
-        self.out.extend(format!("{n} 0 obj\n").as_bytes());
-        self.out.extend(body);
-        self.out.extend(b"\nendobj\n");
-    }
-
-    /// A table with one entry per object, each in its own subsection, and the trailer.
-    fn table(&mut self, trailer: &str) -> usize {
-        let at = self.out.len();
-        self.out.extend(b"xref\n0 1\n0000000000 65535 f \n");
-        for (n, o) in &self.offs {
-            self.out
-                .extend(format!("{n} 1\n{o:010} 00000 n \n").as_bytes());
-        }
-        let size = self.offs.iter().map(|o| o.0).max().unwrap_or(0) + 1;
-        self.out
-            .extend(format!("trailer\n<< /Size {size} /Root 1 0 R {trailer} >>\n").as_bytes());
-        at
-    }
-
-    fn finish(mut self, trailer: &str) -> Vec<u8> {
-        let at = self.table(trailer);
-        self.out
-            .extend(format!("startxref\n{at}\n%%EOF\n").as_bytes());
-        self.out
-    }
 }
 
 #[test]
@@ -421,15 +378,15 @@ fn shared_link_text_is_bounded() {
         format!("<< /Type /Pages /MediaBox [0 0 612 792] /Kids [{kids}] /Count {pages} >>")
             .as_bytes(),
     );
-    let mut link = b"<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI (".to_vec();
-    link.extend(vec![b'a'; 1 << 20]);
-    link.extend(b") >> >>");
-    c.object(3, &link);
-    c.object(4, b"[3 0 R]");
+    let mut address = b"(".to_vec();
+    address.extend(vec![b'a'; 1 << 20]);
+    address.extend(b")");
+    c.object(3, &address);
+    // Each page has its own link, and every link names the one address.
     for p in 0..pages {
         c.object(
             p as u32 + 5,
-            b"<< /Type /Page /Parent 2 0 R /Annots 4 0 R >>",
+            b"<< /Type /Page /Parent 2 0 R /Annots [<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI 3 0 R >> >>] >>",
         );
     }
     let bytes = c.finish("");

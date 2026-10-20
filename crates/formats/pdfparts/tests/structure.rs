@@ -86,7 +86,7 @@ fn struct_roles_and_mcids() {
         assert_eq!(tree.elems[leaf].role, "NonStruct");
         assert_eq!(tree.elems[leaf].mcids, [mcid as u32]);
         assert_eq!(tree.elems[leaf].page, Some(1));
-        assert_eq!(parent_of(&tree, leaf), Some(heading));
+        assert_eq!(parent_of(tree, leaf), Some(heading));
         assert_eq!(tree.elems[leaf].parent, Some(heading));
     }
     // Walking up from the first marked content reaches the H1, then the root.
@@ -145,7 +145,8 @@ fn role_map_applied() {
 
 #[test]
 fn alt_and_table_headers() {
-    let nist = corpus("nist-sp800-53r5.pdf").struct_tree().unwrap();
+    let nist = corpus("nist-sp800-53r5.pdf");
+    let nist = nist.struct_tree().unwrap();
     assert_eq!(nist.elems.iter().filter(|e| e.alt.is_some()).count(), 36);
     assert!(nist.elems.iter().any(|e| {
         e.alt
@@ -153,7 +154,8 @@ fn alt_and_table_headers() {
             .is_some_and(|a| a.starts_with("Table C-20 provides a summary"))
     }));
 
-    let irs = corpus("irs-f1040-2025.pdf").struct_tree().unwrap();
+    let irs = corpus("irs-f1040-2025.pdf");
+    let irs = irs.struct_tree().unwrap();
     let th = irs
         .elems
         .iter()
@@ -246,4 +248,30 @@ fn struct_tree_cycle_is_damaged() {
 fn untagged_file_has_no_tree() {
     assert!(corpus("pypdf-annotated.pdf").struct_tree().is_none());
     assert_eq!(corpus("pypdf-annotated.pdf").role_of(1, 0), None);
+}
+
+#[test]
+fn long_role_map_chain_is_a_limit() {
+    let pdf = tagged(|doc, page, root| {
+        let leaf = doc.add_object(dictionary! {
+            "Type" => "StructElem", "S" => "R0", "P" => root, "Pg" => page,
+        });
+        let mut map = Dictionary::new();
+        for i in 0..40 {
+            map.set(
+                format!("R{i}"),
+                Object::Name(format!("R{}", i + 1).into_bytes()),
+            );
+        }
+        (Object::Reference(leaf), dictionary! { "RoleMap" => map })
+    });
+    let tree = pdf.struct_tree().unwrap();
+    assert_eq!(tree.elems[0].role, "R32");
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Limit && i.location == "structure tree"),
+        "{:?}",
+        pdf.issues()
+    );
 }

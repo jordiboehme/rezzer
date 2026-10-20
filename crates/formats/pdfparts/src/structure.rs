@@ -10,8 +10,8 @@ use std::collections::{HashMap, HashSet};
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::objects::{
-    Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, reference, resolve,
-    text_string, walk_tree,
+    TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, reference,
+    resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Pdf};
 
@@ -74,15 +74,23 @@ struct Walk<'a> {
     index: HashMap<ObjectId, usize>,
     elems: Vec<StructElem>,
     issues: Vec<Issue>,
-    /// The element limit was hit; nothing more is read.
+    /// What the tree may still copy out of the document.
+    budget: TextBudget,
+    /// `/K` entries visited so far, bounded by `max_items`.
+    work: usize,
+    /// Elements reached a second time, and the first of them.
+    repeats: usize,
+    first_repeat: Option<ObjectId>,
+    /// A limit was hit; nothing more is read.
     full: bool,
 }
 
 impl Pdf {
-    /// The structure tree, or `None` when the file has no `/StructTreeRoot`. A cycle or an
-    /// element that two parents share is a Damaged issue; the rest is still read.
-    pub fn struct_tree(&self) -> Option<StructTree> {
-        self.built_structure().map(|b| b.tree.clone())
+    /// The structure tree, or `None` when the file has no `/StructTreeRoot`. It is read on
+    /// the first call and kept. A cycle or an element that two parents share is a Damaged
+    /// issue; the rest is still read.
+    pub fn struct_tree(&self) -> Option<&StructTree> {
+        self.built_structure().map(|b| &b.tree)
     }
 
     /// The element that holds marked content `mcid` of page `page`, as an index into
@@ -123,6 +131,10 @@ impl Pdf {
             index: HashMap::new(),
             elems: Vec::new(),
             issues: Vec::new(),
+            budget: self.text_budget(),
+            work: 0,
+            repeats: 0,
+            first_repeat: None,
             full: false,
         };
         let mut roots = Vec::new();
@@ -134,6 +146,19 @@ impl Pdf {
             }
         }
         let parents = walk.parent_tree(root);
+        if let Some(id) = walk.first_repeat {
+            walk.issues.push(Issue::new(
+                WHERE,
+                IssueKind::Damaged,
+                format!(
+                    "{} {} reached twice: the tree has a cycle or a shared element (the first is object {} {})",
+                    walk.repeats,
+                    if walk.repeats == 1 { "element is" } else { "elements are" },
+                    id.0,
+                    id.1
+                ),
+            ));
+        }
         let Walk { elems, issues, .. } = walk;
         self.note(issues);
         Some(Built {
@@ -176,14 +201,8 @@ impl Walk<'_> {
         if let Some(id) = id
             && !self.seen.insert(id)
         {
-            self.issues.push(Issue::new(
-                WHERE,
-                IssueKind::Damaged,
-                format!(
-                    "element {} {} is reached twice: the tree has a cycle or a shared element",
-                    id.0, id.1
-                ),
-            ));
+            self.repeats += 1;
+            self.first_repeat.get_or_insert(id);
             return None;
         }
         let d = dict(doc, obj)?;
@@ -199,10 +218,6 @@ impl Walk<'_> {
                 ),
             ));
             return None;
-        }
-        let index = self.elems.len();
-        if let Some(id) = id {
-            self.index.insert(id, index);
         }
         let page = d
             .get(b"Pg")
@@ -224,16 +239,49 @@ impl Walk<'_> {
             row_span: 1,
             ..StructElem::default()
         };
-        attributes(pdf, d, &mut elem);
+        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
+        let copied = elem.role.len()
+            + text(&elem.alt)
+            + text(&elem.actual_text)
+            + text(&elem.lang)
+            + text(&elem.id);
+        if !self.budget.charge(copied) || !attributes(pdf, d, &mut elem, &mut self.budget) {
+            self.spent();
+            return None;
+        }
+        let index = self.elems.len();
+        if let Some(id) = id {
+            self.index.insert(id, index);
+        }
         self.elems.push(elem);
         let mut children = Vec::new();
         let mut mcids = Vec::new();
         let mut mcr_page = None;
         if let Ok(k) = d.get(b"K") {
             for kid in kids(doc, k) {
+                if self.full {
+                    break;
+                }
+                self.work += 1;
+                if self.work > limits.max_items {
+                    self.full = true;
+                    self.issues.push(Issue::new(
+                        WHERE,
+                        IssueKind::Limit,
+                        format!(
+                            "the structure tree has more than {} entries; the rest is not read",
+                            limits.max_items
+                        ),
+                    ));
+                    break;
+                }
                 match resolve(doc, kid) {
                     Some(Object::Integer(m)) => {
                         if let Ok(m) = u32::try_from(*m) {
+                            if !self.budget.take(4) {
+                                self.spent();
+                                break;
+                            }
                             mcids.push(m);
                         }
                     }
@@ -245,6 +293,10 @@ impl Walk<'_> {
                             if let Some(m) =
                                 get_int(doc, kd, b"MCID").and_then(|m| u32::try_from(m).ok())
                             {
+                                if !self.budget.take(4) {
+                                    self.spent();
+                                    break;
+                                }
                                 mcids.push(m);
                             }
                             if mcr_page.is_none() {
@@ -279,6 +331,15 @@ impl Walk<'_> {
         Some(index)
     }
 
+    /// The budget is spent: one Limit issue, and nothing more is read.
+    fn spent(&mut self) {
+        if !self.full {
+            self.full = true;
+            self.issues
+                .push(self.budget.limit_issue(WHERE, "structure elements"));
+        }
+    }
+
     /// The role of structure type `s` after the role map.
     fn role(&mut self, s: &[u8]) -> String {
         if let Some(r) = self.roles.get(s) {
@@ -288,10 +349,21 @@ impl Walk<'_> {
         let mut current = s;
         let mut path: Vec<&[u8]> = vec![s];
         if let Some(map) = self.role_map {
-            for _ in 0..ROLE_HOPS {
+            for hop in 0..=ROLE_HOPS {
                 let Some(next) = get_name(doc, map, current) else {
                     break;
                 };
+                if hop == ROLE_HOPS {
+                    self.issues.push(Issue::new(
+                        WHERE,
+                        IssueKind::Limit,
+                        format!(
+                            "the role map chain from {} is longer than {ROLE_HOPS} steps",
+                            String::from_utf8_lossy(s)
+                        ),
+                    ));
+                    break;
+                }
                 if path.contains(&next) {
                     self.issues.push(Issue::new(
                         WHERE,
@@ -327,6 +399,7 @@ impl Walk<'_> {
             tree,
             Tree::Number,
             &pdf.limits,
+            &mut self.budget,
             WHERE,
             &mut self.issues,
         ) {
@@ -350,6 +423,12 @@ impl Walk<'_> {
                 break;
             }
             left -= a.len();
+            let row_bytes = (a.len() * std::mem::size_of::<Option<usize>>()) as u64;
+            if !self.budget.take(row_bytes) {
+                self.issues
+                    .push(self.budget.limit_issue(WHERE, "parent tree entries"));
+                break;
+            }
             let row = a
                 .iter()
                 .map(|o| reference(o).and_then(|id| self.index.get(&id).copied()))
@@ -361,11 +440,11 @@ impl Walk<'_> {
 }
 
 /// Table attributes from `/A`: one attribute dictionary, or an array of them with revision
-/// numbers in between.
-fn attributes(pdf: &Pdf, d: &Dictionary, elem: &mut StructElem) {
+/// numbers in between. The copied headers are charged to `budget`; false when it is spent.
+fn attributes(pdf: &Pdf, d: &Dictionary, elem: &mut StructElem, budget: &mut TextBudget) -> bool {
     let doc = &pdf.doc;
     let Ok(a) = d.get(b"A") else {
-        return;
+        return true;
     };
     let list: Vec<&Dictionary> = match resolve(doc, a) {
         Some(Object::Array(items)) => items
@@ -381,13 +460,16 @@ fn attributes(pdf: &Pdf, d: &Dictionary, elem: &mut StructElem) {
             continue;
         }
         if let Some(Object::Array(h)) = get(doc, attr, b"Headers") {
-            elem.headers = h
-                .iter()
-                .filter_map(|o| match resolve(doc, o) {
-                    Some(Object::String(s, _)) => Some(text_string(s)),
-                    _ => None,
-                })
-                .collect();
+            let mut headers = Vec::new();
+            for o in h {
+                if let Some(Object::String(s, _)) = resolve(doc, o) {
+                    if !budget.charge(s.len()) {
+                        return false;
+                    }
+                    headers.push(text_string(s));
+                }
+            }
+            elem.headers = headers;
         }
         if let Some(s) = get_name(doc, attr, b"Scope") {
             elem.scope = Some(String::from_utf8_lossy(s).into_owned());
@@ -404,4 +486,5 @@ fn attributes(pdf: &Pdf, d: &Dictionary, elem: &mut StructElem) {
             elem.row_span = n;
         }
     }
+    true
 }

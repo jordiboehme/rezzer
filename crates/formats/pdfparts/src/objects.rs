@@ -216,12 +216,14 @@ pub(crate) enum TreeKey {
 }
 
 /// Walks a number or name tree from `root` and returns its pairs in tree order. A cycle is a
-/// Damaged issue, depth and item limits are Limit issues. Each issue names `location`.
+/// Damaged issue, depth and item limits are Limit issues. Each pair and its copied key are
+/// charged to `budget`. Each issue names `location`.
 pub(crate) fn walk_tree<'a>(
     doc: &'a Document,
     root: &'a Object,
     tree: Tree,
     limits: &Limits,
+    budget: &mut TextBudget,
     location: &str,
     issues: &mut Vec<Issue>,
 ) -> Vec<(TreeKey, &'a Object)> {
@@ -229,7 +231,16 @@ pub(crate) fn walk_tree<'a>(
     let mut seen = HashSet::new();
     let mut items = 0usize;
     walk_node(
-        doc, root, tree, limits, location, issues, &mut seen, &mut items, 1, &mut out,
+        doc,
+        root,
+        tree,
+        limits,
+        &mut (budget, &mut items),
+        location,
+        issues,
+        &mut seen,
+        1,
+        &mut out,
     );
     out
 }
@@ -240,10 +251,10 @@ fn walk_node<'a>(
     node: &'a Object,
     tree: Tree,
     limits: &Limits,
+    work: &mut (&mut TextBudget, &mut usize),
     location: &str,
     issues: &mut Vec<Issue>,
     seen: &mut HashSet<ObjectId>,
-    items: &mut usize,
     depth: usize,
     out: &mut Vec<(TreeKey, &'a Object)>,
 ) -> bool {
@@ -279,8 +290,8 @@ fn walk_node<'a>(
     };
     if let Some(Object::Array(pairs)) = get(doc, d, key) {
         for pair in pairs.chunks(2) {
-            *items += 1;
-            if *items > limits.max_items {
+            *work.1 += 1;
+            if *work.1 > limits.max_items {
                 issues.push(Issue::new(
                     location,
                     IssueKind::Limit,
@@ -309,6 +320,14 @@ fn walk_node<'a>(
                     continue;
                 }
             };
+            let copied = match &k {
+                TreeKey::Name(n) => n.len(),
+                TreeKey::Number(_) => 0,
+            };
+            if !work.0.charge(copied) {
+                issues.push(work.0.limit_issue(location, "tree entries"));
+                return false;
+            }
             out.push((k, v));
         }
     }
@@ -319,10 +338,10 @@ fn walk_node<'a>(
                 kid,
                 tree,
                 limits,
+                work,
                 location,
                 issues,
                 seen,
-                items,
                 depth + 1,
                 out,
             ) {
@@ -339,4 +358,46 @@ pub(crate) fn get_date(doc: &Document, d: &Dictionary, key: &[u8]) -> Option<cra
         iso: pdf_date(&raw),
         raw,
     })
+}
+
+/// Fixed cost of one item a reader copies out of the document, as for one parsed value.
+pub(crate) const ITEM_BYTES: u64 = 128;
+
+/// What one reader call may still copy out of the document: lists, strings and arrays. Data
+/// that many entries share would otherwise be copied once per entry. Each item costs
+/// [`ITEM_BYTES`] plus its copied bytes; once the budget is spent, nothing more is copied.
+#[derive(Debug)]
+pub(crate) struct TextBudget {
+    left: u64,
+}
+
+impl TextBudget {
+    pub(crate) fn new(left: u64) -> TextBudget {
+        TextBudget { left }
+    }
+
+    /// Charges one item with `bytes` copied bytes. False when it does not fit; the item must
+    /// then be left out and the reader stop.
+    pub(crate) fn charge(&mut self, bytes: usize) -> bool {
+        self.take(ITEM_BYTES.saturating_add(bytes as u64))
+    }
+
+    /// Charges `bytes` copied bytes without the fixed item cost.
+    pub(crate) fn take(&mut self, bytes: u64) -> bool {
+        if bytes > self.left {
+            self.left = 0;
+            return false;
+        }
+        self.left -= bytes;
+        true
+    }
+
+    /// The one Limit issue a reader adds when its budget is spent.
+    pub(crate) fn limit_issue(&self, location: &str, what: &str) -> Issue {
+        Issue::new(
+            location,
+            IssueKind::Limit,
+            format!("the {what} copy more data than the object limit allows; the rest is not read"),
+        )
+    }
 }

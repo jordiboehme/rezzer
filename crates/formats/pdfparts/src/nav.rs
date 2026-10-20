@@ -10,8 +10,8 @@ use std::sync::Arc;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::objects::{
-    Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference, resolve,
-    text_string, walk_tree,
+    TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference,
+    resolve, text_string, walk_tree,
 };
 use crate::pagetree::ResourcesKey;
 use crate::{Issue, IssueKind, Pdf, pagetree};
@@ -200,6 +200,9 @@ struct OutlineWalk<'a> {
     seen: HashSet<ObjectId>,
     issues: Vec<Issue>,
     out: Vec<OutlineItem>,
+    budget: TextBudget,
+    /// The budget ran out; nothing more is read.
+    spent: bool,
 }
 
 impl Pdf {
@@ -417,14 +420,21 @@ impl Pdf {
         let Some(root) = self.catalog().and_then(|c| c.get(b"PageLabels").ok()) else {
             return vec![None; n];
         };
-        let mut ranges: Vec<(u64, &Object)> =
-            walk_tree(doc, root, Tree::Number, &self.limits, "page labels", issues)
-                .into_iter()
-                .filter_map(|(k, v)| match k {
-                    TreeKey::Number(i) if i >= 0 => Some((i as u64, v)),
-                    _ => None,
-                })
-                .collect();
+        let mut ranges: Vec<(u64, &Object)> = walk_tree(
+            doc,
+            root,
+            Tree::Number,
+            &self.limits,
+            &mut self.text_budget(),
+            "page labels",
+            issues,
+        )
+        .into_iter()
+        .filter_map(|(k, v)| match k {
+            TreeKey::Number(i) if i >= 0 => Some((i as u64, v)),
+            _ => None,
+        })
+        .collect();
         ranges.sort_by_key(|(start, _)| *start);
         // Each range is decoded once: prefix, style and first value.
         let ranges: Vec<(u64, String, Option<&[u8]>, u64)> = ranges
@@ -485,7 +495,11 @@ impl Pdf {
 
     /// Named destinations from the `/Dests` name tree and the older catalog `/Dests`
     /// dictionary.
-    fn dest_names(&self, issues: &mut Vec<Issue>) -> Vec<(Vec<u8>, &Object)> {
+    fn dest_names(
+        &self,
+        budget: &mut TextBudget,
+        issues: &mut Vec<Issue>,
+    ) -> Vec<(Vec<u8>, &Object)> {
         let doc = &self.doc;
         let mut out = Vec::new();
         let Some(catalog) = self.catalog() else {
@@ -497,6 +511,7 @@ impl Pdf {
                 tree,
                 Tree::Name,
                 &self.limits,
+                budget,
                 "named destinations",
                 issues,
             ) {
@@ -507,6 +522,10 @@ impl Pdf {
         }
         if let Some(old) = get_dict(doc, catalog, b"Dests") {
             for (k, v) in old.iter() {
+                if !budget.charge(k.len()) {
+                    issues.push(budget.limit_issue("named destinations", "named destinations"));
+                    break;
+                }
                 out.push((k.clone(), v));
             }
         }
@@ -542,7 +561,7 @@ impl Pdf {
 
     fn name_map<'a>(&'a self, issues: &mut Vec<Issue>) -> HashMap<Vec<u8>, &'a Object> {
         let mut map = HashMap::new();
-        for (k, v) in self.dest_names(issues) {
+        for (k, v) in self.dest_names(&mut self.text_budget(), issues) {
             map.entry(k).or_insert(v);
         }
         map
@@ -551,12 +570,19 @@ impl Pdf {
     /// Every named destination with the page it resolves to, in file order.
     pub fn named_destinations(&self) -> Vec<(String, Option<u32>)> {
         let mut issues = Vec::new();
-        let list = self.dest_names(&mut issues);
-        let map = self.name_map(&mut Vec::new());
-        let out = list
-            .iter()
-            .map(|(name, dest)| (text_string(name), self.dest_page(dest, &map, 1)))
-            .collect();
+        let mut budget = self.text_budget();
+        let list = self.dest_names(&mut budget, &mut issues);
+        let map: HashMap<Vec<u8>, &Object> =
+            list.iter().rev().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut out = Vec::with_capacity(list.len());
+        for (name, dest) in &list {
+            // The names were charged once as they were read; the decoded copy is charged again.
+            if !budget.take(name.len() as u64) {
+                issues.push(budget.limit_issue("named destinations", "named destinations"));
+                break;
+            }
+            out.push((text_string(name), self.dest_page(dest, &map, 1)));
+        }
         self.note(issues);
         out
     }
@@ -569,6 +595,8 @@ impl Pdf {
             seen: HashSet::new(),
             issues: Vec::new(),
             out: Vec::new(),
+            budget: self.text_budget(),
+            spent: false,
         };
         walk.names = self.name_map(&mut walk.issues);
         let first = self
@@ -582,68 +610,45 @@ impl Pdf {
         walk.out
     }
 
-    /// Every link annotation on every page, in page order.
+    /// Every link annotation on every page, in page order. A link object listed several times
+    /// is listed once, and an /Annots array that pages share counts for the first of them.
     pub fn links(&self) -> Vec<Link> {
         let doc = &self.doc;
         let mut issues = Vec::new();
         let names = self.name_map(&mut issues);
         let mut out = Vec::new();
-        // Pages may share their annotations, and each link copies its text. In a file that
-        // shares nothing the text of all links is less than its objects take, so that bounds
-        // the copies.
-        let mut text_left = self.object_bytes;
-        for (i, node) in self.pages.iter().enumerate() {
-            let page = i as u32 + 1;
-            let Some(pd) = doc.objects.get(&node.id).and_then(|o| dict(doc, o)) else {
-                continue;
-            };
-            let Some(Object::Array(annots)) = get(doc, pd, b"Annots") else {
-                continue;
-            };
-            for a in annots {
-                if out.len() >= self.limits.max_items {
-                    issues.push(Issue::new(
-                        "document",
-                        IssueKind::Limit,
-                        format!("more than {} links", self.limits.max_items),
-                    ));
-                    self.note(issues);
-                    return out;
-                }
-                let Some(ad) = dict(doc, a) else {
-                    continue;
-                };
-                if get_name(doc, ad, b"Subtype") != Some(b"Link") {
-                    continue;
-                }
-                let target = if let Some(action) = get_dict(doc, ad, b"A") {
-                    self.action_target(action, &names)
-                } else {
-                    ad.get(b"Dest").ok().map(|d| self.goto_target(d, &names))
-                };
-                let Some(target) = target else {
-                    continue;
-                };
-                let text = target.text_len() as u64;
-                if text > text_left {
-                    issues.push(Issue::new(
-                        "document",
-                        IssueKind::Limit,
-                        format!(
-                            "the links repeat more text than the file holds; links from page {page} on are not listed"
-                        ),
-                    ));
-                    self.note(issues);
-                    return out;
-                }
-                text_left -= text;
-                out.push(Link {
-                    page,
-                    rect: rect(doc, ad.get(b"Rect").ok()).unwrap_or([0.0; 4]),
-                    target,
-                });
+        let mut budget = self.text_budget();
+        let mut seen = HashSet::new();
+        self.each_annot("links", &mut issues, |page, _, a| {
+            if let Some(r) = reference(a)
+                && !seen.insert(r)
+            {
+                return Ok(());
             }
-        }
+            let Some(ad) = dict(doc, a) else {
+                return Ok(());
+            };
+            if get_name(doc, ad, b"Subtype") != Some(b"Link") {
+                return Ok(());
+            }
+            let target = if let Some(action) = get_dict(doc, ad, b"A") {
+                self.action_target(action, &names)
+            } else {
+                ad.get(b"Dest").ok().map(|d| self.goto_target(d, &names))
+            };
+            let Some(target) = target else {
+                return Ok(());
+            };
+            if !budget.charge(target.text_len()) {
+                return Err(budget.limit_issue("document", "links"));
+            }
+            out.push(Link {
+                page,
+                rect: rect(doc, ad.get(b"Rect").ok()).unwrap_or([0.0; 4]),
+                target,
+            });
+            Ok(())
+        });
         self.note(issues);
         out
     }
@@ -758,6 +763,15 @@ impl OutlineWalk<'_> {
             } else {
                 (None, None)
             };
+            if !self
+                .budget
+                .charge(title.len() + uri.as_ref().map_or(0, String::len))
+            {
+                self.spent = true;
+                self.issues
+                    .push(self.budget.limit_issue("outline", "outline entries"));
+                return;
+            }
             self.out.push(OutlineItem {
                 level: level as u8,
                 title,
@@ -766,6 +780,9 @@ impl OutlineWalk<'_> {
             });
             if let Ok(child) = d.get(b"First") {
                 self.siblings(child, level + 1);
+                if self.spent {
+                    return;
+                }
             }
             node = d.get(b"Next").ok();
         }

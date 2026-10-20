@@ -34,6 +34,8 @@ Page numbers follow lopdf's page walk, so they match other parsers built on lopd
 
 lopdf is used as the object model in memory, to compute the decryption key and decrypt single objects, and to write the canonical copy. It never parses the original file. Trees, the outline, labels, links, annotations, the structure tree and threads are walked by this crate with a visited set and depth and item limits. A cycle or a broken entry becomes an `Issue` and the rest is still read. Nothing panics.
 
+A reader that copies text or lists out of the file may copy at most what is left of `max_object_bytes` after the open. Many entries can name one long string, and this keeps such a file from filling the memory. When the budget runs out, the reader stops with an `Issue` and keeps what it has. An `/Annots` array that several pages share is read once, for the first of these pages. The structure tree and the embedded files are read once and kept.
+
 The password is never written into an error, an issue or a `Debug` output.
 
 lopdf has a `rayon` feature. When any crate in the same build turns it on, lopdf parses objects on rayon threads while it loads a file, for example the canonical copy. Memory checks must measure the whole process (for example its maximum resident set size), not one thread.

@@ -265,3 +265,52 @@ pub fn append_update(
     out.extend(format!("\nendobj\nstartxref\n{pos}\n%%EOF\n").as_bytes());
     out
 }
+
+/// Writes plain objects and a classic table.
+pub struct Classic {
+    pub out: Vec<u8>,
+    pub offs: Vec<(u32, usize)>,
+}
+
+impl Default for Classic {
+    fn default() -> Self {
+        Classic::new()
+    }
+}
+
+impl Classic {
+    pub fn new() -> Classic {
+        Classic {
+            out: b"%PDF-1.5\n".to_vec(),
+            offs: Vec::new(),
+        }
+    }
+
+    pub fn object(&mut self, n: u32, body: &[u8]) {
+        self.offs.push((n, self.out.len()));
+        self.out.extend(format!("{n} 0 obj\n").as_bytes());
+        self.out.extend(body);
+        self.out.extend(b"\nendobj\n");
+    }
+
+    /// A table with one entry per object, each in its own subsection, and the trailer.
+    pub fn table(&mut self, trailer: &str) -> usize {
+        let at = self.out.len();
+        self.out.extend(b"xref\n0 1\n0000000000 65535 f \n");
+        for (n, o) in &self.offs {
+            self.out
+                .extend(format!("{n} 1\n{o:010} 00000 n \n").as_bytes());
+        }
+        let size = self.offs.iter().map(|o| o.0).max().unwrap_or(0) + 1;
+        self.out
+            .extend(format!("trailer\n<< /Size {size} /Root 1 0 R {trailer} >>\n").as_bytes());
+        at
+    }
+
+    pub fn finish(mut self, trailer: &str) -> Vec<u8> {
+        let at = self.table(trailer);
+        self.out
+            .extend(format!("startxref\n{at}\n%%EOF\n").as_bytes());
+        self.out
+    }
+}
