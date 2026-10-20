@@ -1729,3 +1729,53 @@ fn a_custom_detector_sees_name_mime_and_bytes() {
     assert_eq!(src.detection.evidence, "b Some(\"text/csv\") 2");
     assert_eq!(src.sha256.len(), 64);
 }
+
+#[test]
+fn xlsm_detected_by_vba_part() {
+    // The content types name no main part, so the part names decide: a VBA project next
+    // to the workbook makes it a macro workbook, whatever the file name says.
+    let ct = content_types("");
+    let with_vba = zip_of(&[
+        ("[Content_Types].xml", &ct),
+        ("xl/workbook.xml", b"<w/>"),
+        ("xl/vbaProject.bin", b"\0"),
+    ]);
+    let (f, d) = detect("book.xlsx", &with_vba);
+    assert_eq!(f, FormatId::Xlsm, "{}", d.evidence);
+    assert!(d.evidence.contains("xl/vbaProject.bin"), "{}", d.evidence);
+    let without = zip_of(&[("[Content_Types].xml", &ct), ("xl/workbook.xml", b"<w/>")]);
+    assert_eq!(detect("book.xlsm", &without).0, FormatId::Xlsx);
+}
+
+#[test]
+fn ods_detected_by_mimetype() {
+    let bytes = odf("application/vnd.oasis.opendocument.spreadsheet");
+    let (f, d) = detect("data.csv", &bytes);
+    assert_eq!(f, FormatId::Ods, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain);
+}
+
+#[test]
+fn xlsx_named_csv_still_reads_as_xlsx() {
+    let ct = content_types(
+        r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#,
+    );
+    let bytes = zip_of(&[
+        ("[Content_Types].xml", &ct),
+        ("xl/workbook.xml", b"<workbook/>"),
+    ]);
+    for name in ["data.csv", "data.tsv", "data.txt"] {
+        let (f, d) = detect(name, &bytes);
+        assert_eq!(f, FormatId::Xlsx, "{name}: {}", d.evidence);
+        assert_eq!(d.confidence, Confidence::Certain, "{name}");
+    }
+}
+
+#[test]
+fn encrypted_package_named_csv_is_not_taken_for_a_workbook() {
+    // The extension only breaks the tie between the OLE office formats for .xlsx, .xlsm and
+    // .xlsb; any other name leaves the container as plain OLE.
+    let bytes = cfb_with(&["EncryptionInfo", "EncryptedPackage"]);
+    assert_eq!(detect("secret.csv", &bytes).0, FormatId::Ole);
+    assert_eq!(detect("secret.xlsx", &bytes).0, FormatId::Xlsx);
+}
