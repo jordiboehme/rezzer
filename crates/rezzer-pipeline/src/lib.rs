@@ -377,6 +377,7 @@ impl Pipeline {
         };
         let budget = Budget::with_cancel(self.config.limits.clone(), req.cancel.clone());
         let opts = ReadOptions {
+            extract_assets: false,
             password: req.password.clone(),
         };
         match panics::contained(|| reader.read(src, &opts, &budget)) {

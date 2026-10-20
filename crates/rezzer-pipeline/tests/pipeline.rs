@@ -83,6 +83,7 @@ impl Reader for Counting {
             anchor: None,
         });
         ReadOutcome {
+            blobs: Vec::new(),
             document: doc,
             completeness: Completeness::Complete,
         }

@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::block::Block;
-use crate::facet::{Facets, Role};
+use crate::facet::{Facets, FileFacts, Role};
 use crate::format::FormatId;
 use crate::loss::Loss;
 use crate::value::Value;
@@ -117,6 +117,9 @@ pub struct Properties {
     pub keywords: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub custom: BTreeMap<String, Value>,
+    /// Facts about the file as a whole (page count, signed, encrypted and so on).
+    #[serde(default, skip_serializing_if = "FileFacts::is_empty")]
+    pub facts: FileFacts,
 }
 
 /// An extracted picture or file.

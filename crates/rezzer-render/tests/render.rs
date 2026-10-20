@@ -794,6 +794,7 @@ fn rich_document() -> Document {
         text: Some("and a pipe".into()),
     }];
     d.facets.embedded = vec![Embedded {
+        text: None,
         kind: "macro".into(),
         name: "AutoOpen".into(),
         detail: Some("VBA".into()),
@@ -2198,6 +2199,7 @@ fn hidden_logic_lists_udf_and_external() {
         },
     ];
     let embedded = |kind: &str, name: &str, detail: &str, target: Option<&str>| Embedded {
+        text: None,
         kind: kind.into(),
         name: name.into(),
         detail: Some(detail.into()),

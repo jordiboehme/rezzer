@@ -160,6 +160,7 @@ impl Reader for TextReader {
             blocks,
         });
         ReadOutcome {
+            blobs: Vec::new(),
             document: doc,
             completeness,
         }

@@ -25,6 +25,7 @@ impl Reader for Dummy {
     }
     fn read(&self, src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
         ReadOutcome {
+            blobs: Vec::new(),
             document: Document::new(SourceInfo {
                 path: None,
                 name: src.name.clone(),

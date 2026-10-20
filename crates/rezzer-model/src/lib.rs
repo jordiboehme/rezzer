@@ -23,12 +23,12 @@ pub use document::{
     ReaderInfo, SourceInfo,
 };
 pub use facet::{
-    Annotation, Edge, Embedded, Event, Facets, Formula, FormulaKind, Graph, Node, Parameter, Role,
-    Rule,
+    Annotation, Edge, Embedded, Event, Facets, FieldAction, FileFacts, FormField, Formula,
+    FormulaKind, Graph, Node, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, plain_text};
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
-pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
+pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
 pub use value::Value;

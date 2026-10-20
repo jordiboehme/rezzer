@@ -545,6 +545,7 @@ impl Reader for Slow {
         self.cancelled
             .store(budget.is_cancelled(), Ordering::SeqCst);
         ReadOutcome {
+            blobs: Vec::new(),
             document: Document::new(source_info(src)),
             completeness: Completeness::Partial,
         }
@@ -670,6 +671,7 @@ impl Reader for Book {
             original: None,
         }];
         ReadOutcome {
+            blobs: Vec::new(),
             document,
             completeness: Completeness::Complete,
         }

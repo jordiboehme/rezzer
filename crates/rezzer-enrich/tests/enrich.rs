@@ -811,6 +811,7 @@ fn workbook_overview_counts() {
         resolved: None,
     }];
     let embedded = |kind: &str| rezzer_model::Embedded {
+        text: None,
         kind: kind.into(),
         name: "x".into(),
         detail: None,

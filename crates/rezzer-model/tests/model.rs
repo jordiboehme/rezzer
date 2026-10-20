@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
-    Detection, Document, Edge, Embedded, Event, FormatId, Formula, FormulaKind, Graph, Inline,
-    Loss, LossReason, MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role,
-    Rule, SectionKind, Severity, Source, SourceInfo, StatusColor, TaskState, Value,
+    Detection, Document, Edge, Embedded, Event, FieldAction, FileFacts, FormField, FormatId,
+    Formula, FormulaKind, Graph, Inline, Loss, LossReason, MODEL_VERSION, Node, Parameter,
+    Properties, ReadOptions, ReaderInfo, Role, Rule, SectionKind, Severity, Signature, Source,
+    SourceInfo, StatusColor, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -45,6 +46,7 @@ fn text(s: &str) -> Inline {
 fn full_document() -> Document {
     let mut doc = Document::new(src());
     doc.properties = Properties {
+        facts: Default::default(),
         title: Some("Costs".into()),
         description: Some("Quarterly costs".into()),
         authors: vec!["Ada".into()],
@@ -253,7 +255,48 @@ fn full_document() -> Document {
         name: "Module1".into(),
         detail: Some("vba, 120 bytes".into()),
         target: None,
+        text: Some("app.alert(1)".into()),
     });
+    doc.facets.fields.push(FormField {
+        anchor: Anchor("field:total".into()),
+        name: "total".into(),
+        label: Some("Total".into()),
+        kind: "text".into(),
+        value: Some(Value::Text { value: "10".into() }),
+        role: Some(Role::Result),
+        format: Some("number, 2 decimals".into()),
+        calc_order: Some(1),
+        actions: vec![FieldAction {
+            trigger: "calculate".into(),
+            script: "event.value = a + b".into(),
+            words: Some("sum of a and b".into()),
+        }],
+        flags: vec!["read-only".into()],
+        options: vec!["x".into()],
+        pages: vec![1, 2],
+    });
+    doc.facets.signatures.push(Signature {
+        anchor: Some(Anchor("field:sig".into())),
+        kind: "field".into(),
+        signer: Some("Ada".into()),
+        date: Some("2026-01-01".into()),
+        reason: Some("approval".into()),
+        location: Some("Berlin".into()),
+        sub_filter: Some("adbe.pkcs7.detached".into()),
+        covers_whole_file: true,
+        later_revisions: 2,
+    });
+    doc.properties.facts = FileFacts {
+        pages: Some(3),
+        tagged: Some(true),
+        encrypted: Some(false),
+        signed: Some(true),
+        signatures: Some(1),
+        revisions: Some(2),
+        form_fields: Some(1),
+        has_javascript: Some(true),
+        layers: Some(2),
+    };
     doc.assets.push(Asset {
         id: "img1".into(),
         path: Some("assets/img1.png".into()),
@@ -477,10 +520,19 @@ fn mapped_bytes_expose_the_file() {
 fn read_options_debug_hides_password() {
     let opts = ReadOptions {
         password: Some("secret".into()),
+        extract_assets: true,
     };
     let debug = format!("{opts:?}");
     assert!(!debug.contains("secret"));
     assert!(debug.contains("redacted"));
+    assert!(debug.contains("extract_assets: true"));
+}
+
+#[test]
+fn empty_file_facts_are_skipped() {
+    assert!(FileFacts::default().is_empty());
+    let v = serde_json::to_value(Properties::default()).unwrap();
+    assert!(v.get("facts").is_none());
 }
 
 #[test]

@@ -98,6 +98,7 @@ impl Reader for MarkdownReader {
             Completeness::Complete
         };
         ReadOutcome {
+            blobs: Vec::new(),
             document: doc,
             completeness,
         }
@@ -1230,6 +1231,7 @@ impl<'b> Builder<'b> {
             alt.to_string()
         };
         self.embedded.push(Embedded {
+            text: None,
             kind: "image".into(),
             name,
             detail: None,

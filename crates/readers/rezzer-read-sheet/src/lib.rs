@@ -173,6 +173,7 @@ impl Out {
 
     pub fn finish(self) -> ReadOutcome {
         ReadOutcome {
+            blobs: Vec::new(),
             document: self.doc,
             completeness: if self.partial {
                 Completeness::Partial
@@ -184,6 +185,7 @@ impl Out {
 
     pub fn failed(self) -> ReadOutcome {
         ReadOutcome {
+            blobs: Vec::new(),
             document: self.doc,
             completeness: Completeness::Failed,
         }
