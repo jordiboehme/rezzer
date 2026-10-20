@@ -704,3 +704,43 @@ fn config_load_uses_xdg_config_home() {
     );
     assert_eq!(rezzer_pipeline::config_path_from(None, None), None);
 }
+
+fn panicking_detector(_: &str, _: Option<&str>, _: &[u8]) -> (FormatId, rezzer_model::Detection) {
+    panic!("boom in the detector");
+}
+
+#[test]
+fn a_panic_during_detection_is_an_internal_loss() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    let mut pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    pipeline.set_detector(panicking_detector);
+    let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let doc = out.document.expect("the source facts survive");
+    assert_eq!(doc.source.size, 6);
+    assert_eq!(doc.source.sha256.len(), 64);
+    assert_eq!(doc.source.format, FormatId::Unknown);
+    let loss = doc.losses.first().unwrap();
+    assert_eq!(loss.why, LossReason::Internal);
+    assert!(loss.what.contains("detection"), "{}", loss.what);
+    assert!(loss.what.contains("boom in the detector"), "{}", loss.what);
+    assert!(
+        loss.what.contains("pipeline.rs:"),
+        "location: {}",
+        loss.what
+    );
+    assert!(out.message.unwrap().contains("boom in the detector"));
+    assert!(cache_files(dir.path()).is_empty());
+
+    let file = dir.path().join("y.txt");
+    std::fs::write(&file, "hello\n").unwrap();
+    assert_eq!(
+        pipeline.run_path(&file, &request()).completeness,
+        Completeness::Failed
+    );
+    let info = pipeline.inspect(&file).unwrap();
+    assert_eq!(info.format, FormatId::Unknown);
+    assert!(info.detection.evidence.contains("boom in the detector"));
+}

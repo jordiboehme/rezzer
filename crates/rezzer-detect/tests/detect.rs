@@ -1600,3 +1600,34 @@ fn from_bytes_with_hints_uses_the_mime_type() {
         FormatId::Text
     );
 }
+
+#[test]
+fn a_custom_detector_sees_name_mime_and_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let detector = |name: &str, mime: Option<&str>, bytes: &[u8]| {
+        let evidence = format!("{name} {mime:?} {}", bytes.len());
+        (
+            FormatId::Csv,
+            rezzer_model::Detection {
+                confidence: Confidence::Guess,
+                evidence,
+            },
+        )
+    };
+    let src = rezzer_detect::open_with_detector(&path, &Limits::default(), &detector).unwrap();
+    assert_eq!(src.format, FormatId::Csv);
+    assert_eq!(src.detection.evidence, "a.txt None 5");
+    assert_eq!(src.size, 5);
+    let src = rezzer_detect::from_bytes_with_detector(
+        "b",
+        Some("text/csv"),
+        b"xy".to_vec(),
+        &Limits::default(),
+        &detector,
+    )
+    .unwrap();
+    assert_eq!(src.detection.evidence, "b Some(\"text/csv\") 2");
+    assert_eq!(src.sha256.len(), 64);
+}

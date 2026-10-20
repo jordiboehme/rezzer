@@ -15,6 +15,7 @@ mod cache;
 mod config;
 mod panics;
 
+use std::cell::RefCell;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -22,8 +23,8 @@ use std::time::SystemTime;
 use rezzer_detect::OpenError;
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Block, Completeness, Detection, Document, FormatId, Inline, Loss, LossReason, ReadOptions,
-    ReaderInfo, Registry, Severity, Source, source_info,
+    Block, Completeness, Confidence, Detection, Document, FormatId, Inline, Loss, LossReason,
+    ReadOptions, ReaderInfo, Registry, Severity, Source, source_info,
 };
 use rezzer_render::RenderOptions;
 
@@ -128,7 +129,11 @@ pub struct Pipeline {
     config: Config,
     registry: Registry,
     cache: Option<Cache>,
+    detector: DetectFn,
 }
+
+/// A format detector as a plain function, see [`Pipeline::set_detector`].
+pub type DetectFn = fn(&str, Option<&str>, &[u8]) -> (FormatId, Detection);
 
 impl Pipeline {
     pub fn new(config: Config, registry: Registry) -> Pipeline {
@@ -137,6 +142,7 @@ impl Pipeline {
             config,
             registry,
             cache,
+            detector: rezzer_detect::detect_with_hints,
         }
     }
 
@@ -151,9 +157,10 @@ impl Pipeline {
     /// Reads the file at `path`. A file that cannot be opened gives a failed result without
     /// a document. The source path is made canonical and absolute (see [`canonical_path`]).
     pub fn run_path(&self, path: &Path, req: &Request) -> RunResult {
-        match rezzer_detect::open(&canonical_path(path), &self.config.limits) {
-            Ok(src) => self.run_source(&src, req),
-            Err(e) => RunResult::failed(e.to_string()),
+        let path = canonical_path(path);
+        match self.open(|d| rezzer_detect::open_with_detector(&path, &self.config.limits, d)) {
+            Ok((src, detect_panic)) => self.run_source(&src, detect_panic, req),
+            Err(message) => RunResult::failed(message),
         }
     }
 
@@ -166,15 +173,21 @@ impl Pipeline {
         mime: Option<&str>,
         req: &Request,
     ) -> RunResult {
-        match rezzer_detect::from_bytes_with_hints(name, mime, bytes, &self.config.limits) {
-            Ok(src) => self.run_source(&src, req),
-            Err(e) => RunResult::failed(e.to_string()),
+        let opened = self.open(|d| {
+            rezzer_detect::from_bytes_with_detector(name, mime, bytes, &self.config.limits, d)
+        });
+        match opened {
+            Ok((src, detect_panic)) => self.run_source(&src, detect_panic, req),
+            Err(message) => RunResult::failed(message),
         }
     }
 
     /// Opens and detects `path` without reading it.
     pub fn inspect(&self, path: &Path) -> Result<Inspection, OpenError> {
-        let src = rezzer_detect::open(&canonical_path(path), &self.config.limits)?;
+        let path = canonical_path(path);
+        let (src, _) = self
+            .open(|d| rezzer_detect::open_with_detector(&path, &self.config.limits, d))
+            .map_err(OpenError::Io)?;
         Ok(Inspection {
             reader: self
                 .registry
@@ -188,8 +201,63 @@ impl Pipeline {
         })
     }
 
-    fn run_source(&self, src: &Source, req: &Request) -> RunResult {
-        let (document, completeness, message) = self.document(src, req);
+    /// Replaces the format detector, for tests of the panic containment. The default is
+    /// [`rezzer_detect::detect_with_hints`].
+    #[doc(hidden)]
+    pub fn set_detector(&mut self, detector: DetectFn) {
+        self.detector = detector;
+    }
+
+    /// Opens a source with panic capture around opening and around detection. A detection
+    /// panic gives the source (hash and size are known) with format unknown and the message;
+    /// any other panic or an open error gives the error message.
+    fn open(
+        &self,
+        open: impl FnOnce(&rezzer_detect::Detector<'_>) -> Result<Source, OpenError>,
+    ) -> Result<(Source, Option<String>), String> {
+        let detect_panic: RefCell<Option<String>> = RefCell::new(None);
+        let detector = self.detector;
+        let detect = |name: &str, mime: Option<&str>, bytes: &[u8]| match panics::contained(|| {
+            detector(name, mime, bytes)
+        }) {
+            Ok(found) => found,
+            Err(panic) => {
+                let message = format!(
+                    "detection stopped with an internal error: {}",
+                    one_line(&panic)
+                );
+                *detect_panic.borrow_mut() = Some(message.clone());
+                let detection = Detection {
+                    confidence: Confidence::Guess,
+                    evidence: message,
+                };
+                (FormatId::Unknown, detection)
+            }
+        };
+        match panics::contained(|| open(&detect)) {
+            Ok(Ok(src)) => Ok((src, detect_panic.into_inner())),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(panic) => Err(format!(
+                "opening the file stopped with an internal error: {}",
+                one_line(&panic)
+            )),
+        }
+    }
+
+    fn run_source(&self, src: &Source, detect_panic: Option<String>, req: &Request) -> RunResult {
+        let (document, completeness, message) = match detect_panic {
+            Some(message) => {
+                let mut document = Document::new(source_info(src));
+                document.losses.push(Loss {
+                    location: "document".into(),
+                    what: format!("the whole file: {message}"),
+                    why: LossReason::Internal,
+                    severity: Severity::Error,
+                });
+                (document, Completeness::Failed, Some(message))
+            }
+            None => self.document(src, req),
+        };
         let opts = RenderOptions {
             sections: req.sections.clone(),
             generated_at: generated_at(req),

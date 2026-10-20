@@ -39,13 +39,38 @@ pub enum OpenError {
 /// `limits.max_file_bytes`, maps the file, hashes it (SHA-256, lowercase hex), records the
 /// modification time (RFC 3339, UTC) and detects its format.
 pub fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
-    source::open(path, limits)
+    source::open(path, limits, &detect_with_hints)
+}
+
+/// A format detector: file name, declared MIME type and bytes in, format and evidence out.
+/// [`detect_with_hints`] is the one Rezzer uses.
+pub type Detector<'a> = dyn Fn(&str, Option<&str>, &[u8]) -> (FormatId, Detection) + 'a;
+
+/// Like [`open`], with another detector, for example [`detect_with_hints`] wrapped in panic
+/// containment by the pipeline, or a test double.
+pub fn open_with_detector(
+    path: &Path,
+    limits: &Limits,
+    detector: &Detector<'_>,
+) -> Result<Source, OpenError> {
+    source::open(path, limits, detector)
+}
+
+/// Like [`from_bytes_with_hints`], with another detector. See [`open_with_detector`].
+pub fn from_bytes_with_detector(
+    name: &str,
+    mime: Option<&str>,
+    bytes: Vec<u8>,
+    limits: &Limits,
+    detector: &Detector<'_>,
+) -> Result<Source, OpenError> {
+    source::from_bytes(name, mime, bytes, limits, detector)
 }
 
 /// Builds a [`Source`] from bytes already in memory (an upload, a container member).
 /// `name` is used for display and as the extension tie-breaker.
 pub fn from_bytes(name: &str, bytes: Vec<u8>, limits: &Limits) -> Result<Source, OpenError> {
-    source::from_bytes(name, None, bytes, limits)
+    source::from_bytes(name, None, bytes, limits, &detect_with_hints)
 }
 
 /// Like [`from_bytes`], with the MIME type the sender declared (for example the type of a
@@ -56,7 +81,7 @@ pub fn from_bytes_with_hints(
     bytes: Vec<u8>,
     limits: &Limits,
 ) -> Result<Source, OpenError> {
-    source::from_bytes(name, mime, bytes, limits)
+    source::from_bytes(name, mime, bytes, limits, &detect_with_hints)
 }
 
 /// Formats a time as RFC 3339 in UTC with whole seconds, for example
