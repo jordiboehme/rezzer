@@ -1114,3 +1114,49 @@ fn the_parser_input_is_cut_by_the_element_budget() {
         .count();
     assert_eq!(code, 737);
 }
+
+#[test]
+fn time_stop_before_cut_reports_time() {
+    // 3,000 short paragraphs. The element budget of 1,500 cuts the parser input after about
+    // 1,500 paragraphs, but the budget is cancelled, so the time check at event 1,024 stops
+    // the read long before that point.
+    let text = "a\n\n".repeat(3_000);
+    let budget = Budget::new(Limits {
+        max_elements: 1_500,
+        ..Limits::default()
+    });
+    budget.cancel();
+    let out = MarkdownReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let limits: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    assert!(
+        limits[0].what.starts_with("time limit reached"),
+        "{limits:?}"
+    );
+    assert!(!limits[0].what.contains("element"), "{limits:?}");
+}
+
+#[test]
+fn empty_inline_math_is_a_loss() {
+    let out = read("a $``$ b\n");
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("{:?}", out.document.body);
+    };
+    assert!(
+        !inlines.iter().any(|i| matches!(i, Inline::Math { .. })),
+        "{inlines:?}"
+    );
+    let losses: Vec<_> = out.document.losses.iter().collect();
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+    assert!(losses[0].what.contains("empty math"), "{losses:?}");
+    assert_eq!(losses[0].location, "line 1");
+    // A doubtful reading does not make the document partial.
+    assert_eq!(out.completeness, Completeness::Complete);
+}

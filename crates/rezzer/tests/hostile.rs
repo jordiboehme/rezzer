@@ -7,10 +7,61 @@
 //! memory or in a temp dir; nothing is executed.
 #![cfg(all(feature = "fmt-text", feature = "fmt-markdown", feature = "fmt-csv"))]
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use rezzer_model::{Completeness, LossReason, Registry};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request, RunResult};
+
+/// Counts the heap of the thread that allocates, so tests that run side by side do not
+/// disturb a measurement. The pipeline runs on the calling thread.
+struct Counting;
+
+thread_local! {
+    static CURRENT: Cell<isize> = const { Cell::new(0) };
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn grow(n: usize) {
+    let now = CURRENT.with(|c| {
+        c.set(c.get() + n as isize);
+        c.get()
+    });
+    PEAK.with(|p| p.set(p.get().max(now)));
+}
+
+fn shrink(n: usize) {
+    CURRENT.with(|c| c.set(c.get() - n as isize));
+}
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        grow(l.size());
+        unsafe { System.alloc(l) }
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        shrink(l.size());
+        unsafe { System.dealloc(p, l) }
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+        shrink(l.size());
+        grow(new);
+        unsafe { System.realloc(p, l, new) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// Runs `f` and returns its result with the peak heap it added on this thread, in bytes.
+fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    let base = CURRENT.with(Cell::get);
+    PEAK.with(|p| p.set(base));
+    let out = f();
+    let peak = PEAK.with(Cell::get);
+    (out, usize::try_from(peak - base).unwrap_or(0))
+}
 
 /// Allowed overshoot of a time limit (CI machines are slower than a laptop).
 const SLACK: Duration = Duration::from_secs(2);
@@ -35,6 +86,14 @@ fn request() -> Request {
         output: OutputKind::Json,
         generated_at: Some("2026-01-01T00:00:00Z".to_string()),
         ..Request::default()
+    }
+}
+
+/// What the CLI and the server give by default: Markdown pages, no JSON copy of the model.
+fn markdown_request() -> Request {
+    Request {
+        output: OutputKind::Markdown,
+        ..request()
     }
 }
 
@@ -227,4 +286,35 @@ fn many_text_paragraphs_stop_at_the_element_limit() {
         result.message
     );
     assert!(element_limit_loss(&result));
+}
+
+#[test]
+fn huge_single_paragraph_is_bounded() {
+    // 100 MB without a line break is one paragraph. The file is read from disk (memory
+    // mapped), so the heap shows only the copies the pipeline makes.
+    const SIZE: usize = 100 * 1000 * 1000;
+    let dir = tempfile::tempdir().unwrap();
+    let path = streamed(dir.path(), "one.txt", &[b'x'; 1000], SIZE / 1000);
+
+    let (result, peak) = peak_heap(|| pipeline_with(None).run_path(&path, &markdown_request()));
+    eprintln!("huge_single_paragraph: peak heap {peak} bytes for {SIZE} bytes of text");
+    assert_ne!(result.completeness, Completeness::Failed, "{result:?}");
+    assert!(peak < 4 * SIZE, "peak heap {peak} bytes");
+
+    // With a text limit below the input the paragraph is cut and the loss says so.
+    let mut config = Config {
+        cache: false,
+        ..Config::default()
+    };
+    config.limits.max_text_bytes = (SIZE / 2) as u64;
+    let p = Pipeline::new(config, {
+        let mut registry = Registry::new();
+        registry.register(Box::new(rezzer_read_text::TextReader));
+        registry
+    });
+    let (result, peak) = peak_heap(|| p.run_path(&path, &markdown_request()));
+    eprintln!("huge_single_paragraph (limit): peak heap {peak} bytes");
+    assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
+    assert!(has_loss(&result, LossReason::Limit));
+    assert!(peak < 4 * SIZE, "peak heap {peak} bytes");
 }

@@ -19,6 +19,7 @@ fn defaults_match_spec() {
     assert_eq!(l.max_memory_bytes, 2 * GIB);
     assert_eq!(l.page_tokens, 20_000);
     assert_eq!(l.max_elements, 2_000_000);
+    assert_eq!(l.max_text_bytes, 256 * 1024 * 1024);
 }
 
 #[test]
@@ -186,4 +187,25 @@ fn element_budget_saturates() {
 fn max_elements_reads_from_config() {
     let l: Limits = serde_json::from_str(r#"{"max_elements": 7}"#).unwrap();
     assert_eq!(l.max_elements, 7);
+}
+
+#[test]
+fn text_runs_are_checked_one_by_one() {
+    let b = Budget::new(Limits {
+        max_text_bytes: 10,
+        ..Limits::default()
+    });
+    assert!(b.charge_text(10).is_ok());
+    assert!(b.charge_text(10).is_ok());
+    let hit = b.charge_text(11).unwrap_err();
+    assert_eq!(
+        (hit.limit, hit.value, hit.max, hit.unit),
+        ("text", 11, 10, "bytes")
+    );
+}
+
+#[test]
+fn max_text_bytes_reads_from_config() {
+    let l: Limits = serde_json::from_str(r#"{"max_text_bytes": 7}"#).unwrap();
+    assert_eq!(l.max_text_bytes, 7);
 }

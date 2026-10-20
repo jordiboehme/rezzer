@@ -17,7 +17,28 @@ source: crates/rezzer/tests/corpus.rs
         {
           "inlines": [
             {
-              "text": "This eBook is for the use of anyone anywhere at no cost and with\nalmost no restrictions whatsoever.  You may copy it, give it away or\nre-use it under the terms of the Project Gutenberg License included\nwith this eBook or online at www.gutenberg.org",
+              "text": "This eBook is for the use of anyone anywhere at no cost and with",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "almost no restrictions whatsoever.  You may copy it, give it away or",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "re-use it under the terms of the Project Gutenberg License included",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "with this eBook or online at www.gutenberg.org",
               "type": "text"
             }
           ],
@@ -80,7 +101,14 @@ source: crates/rezzer/tests/corpus.rs
         {
           "inlines": [
             {
-              "text": "Produced by Jana Srna, Alexander Bauer and the Online\nDistributed Proofreading Team at http://www.pgdp.net",
+              "text": "Produced by Jana Srna, Alexander Bauer and the Online",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Distributed Proofreading Team at http://www.pgdp.net",
               "type": "text"
             }
           ],

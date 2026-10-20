@@ -8,6 +8,8 @@
 //! tables, code, HTML (and so no HTML comments), math or frontmatter. Anchors are not printed:
 //! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
 
+use std::borrow::Cow;
+
 use rezzer_model::{
     Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState, column_letter,
     plain_text,
@@ -42,13 +44,29 @@ pub(crate) struct Ctx<'a> {
 
 /// Renders inlines. In [`Mode::Block`] the result still needs [`finish_lines`].
 pub(crate) fn inlines(list: &[Inline], mode: Mode) -> String {
-    let merged = fix_flanking(merge_text(list));
-    let dollars = count_dollars(&merged) >= 2;
+    // Merging and the flanking fix only change styled runs and neighbouring text runs of the
+    // same style; without those the list is used as it is, so a huge run is not copied.
+    let prepared: Cow<'_, [Inline]> = if needs_preparing(list) {
+        Cow::Owned(fix_flanking(merge_text(list)))
+    } else {
+        Cow::Borrowed(list)
+    };
+    let merged: &[Inline] = &prepared;
+    let dollars = count_dollars(merged) >= 2;
     let mut out = String::new();
-    for inline in &merged {
+    for inline in merged {
         inline_into(inline, mode, 0, dollars, &mut out);
     }
     out
+}
+
+/// Whether [`merge_text`] or [`fix_flanking`] would change `list`: it has a styled text run
+/// or two neighbouring text runs.
+fn needs_preparing(list: &[Inline]) -> bool {
+    list.iter().any(is_styled)
+        || list
+            .windows(2)
+            .any(|w| matches!(w, [Inline::Text { .. }, Inline::Text { .. }]))
 }
 
 /// The `$` signs in the text runs of `list` (not in code), each math span counted as two,
@@ -396,12 +414,13 @@ pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
 /// [`escape_text`]; with `dollars` every `$` is escaped (the block has a pair of them
 /// across its runs).
 fn escape_with(text: &str, mode: Mode, dollars: bool, out: &mut String) {
-    let chars: Vec<char> = text.chars().collect();
+    out.reserve(text.len());
     let mut prev: Option<char> = None;
     // A `$` with another `$` later in the run could pair into math in GitHub's reading.
-    let last_dollar = chars.iter().rposition(|c| *c == '$');
-    for (i, &c) in chars.iter().enumerate() {
-        let next = chars.get(i + 1).copied();
+    let last_dollar = text.rfind('$');
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let next = chars.peek().map(|&(_, n)| n);
         match c {
             '\\' | '`' | '*' | '_' | '[' | ']' | '~' | '|' | '&' => {
                 out.push('\\');
@@ -876,7 +895,11 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                 || (tight && prev.tight_lead && now.kind != PrevKind::Other);
             out.push_str(if joins_tight { "\n" } else { "\n\n" });
         }
-        out.push_str(&text);
+        if out.is_empty() {
+            out = text;
+        } else {
+            out.push_str(&text);
+        }
         prev = now;
     }
     out

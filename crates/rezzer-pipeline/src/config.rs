@@ -15,6 +15,7 @@
 //! max_file_bytes = 2147483648
 //! max_time = 120
 //! max_elements = 2000000
+//! max_text_bytes = 268435456
 //! page_tokens = 20000
 //!
 //! [enrich]

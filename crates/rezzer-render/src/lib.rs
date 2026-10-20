@@ -156,6 +156,13 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     if want(OutputSection::NotRead) {
         parts.extend(facets::not_read(doc));
     }
+    // One growth for all parts, so a huge part is not doubled by the push.
+    out.reserve_exact(
+        parts
+            .iter()
+            .map(|p| p.len() + if p.is_empty() { 0 } else { 2 })
+            .sum(),
+    );
     for part in parts.iter().filter(|p| !p.is_empty()) {
         out.push('\n');
         out.push_str(part);

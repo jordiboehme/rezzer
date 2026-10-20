@@ -43,10 +43,14 @@ fn paragraphs(out: &rezzer_model::ReadOutcome) -> Vec<String> {
     blocks
         .iter()
         .map(|b| match b {
-            Block::Paragraph { inlines, .. } => match inlines.as_slice() {
-                [Inline::Text { text, .. }] => text.clone(),
-                other => panic!("unexpected inlines {other:?}"),
-            },
+            Block::Paragraph { inlines, .. } => inlines
+                .iter()
+                .map(|i| match i {
+                    Inline::Text { text, .. } => text.as_str(),
+                    Inline::LineBreak => "\n",
+                    other => panic!("unexpected inline {other:?}"),
+                })
+                .collect::<String>(),
             other => panic!("unexpected block {other:?}"),
         })
         .collect()
@@ -172,4 +176,60 @@ fn the_element_budget_ends_on_the_last_paragraph_too() {
     let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
     assert_eq!(out.completeness, Completeness::Partial);
     assert_eq!(paragraphs(&out), ["a"]);
+}
+
+#[test]
+fn text_lines_join_with_line_break_inline() {
+    let out = read(b"one\ntwo\n\nsolo");
+    let [Block::Section { blocks, .. }] = out.document.body.as_slice() else {
+        panic!("{:?}", out.document.body);
+    };
+    let Block::Paragraph { inlines, .. } = &blocks[0] else {
+        panic!("{blocks:?}");
+    };
+    assert!(
+        matches!(
+            inlines.as_slice(),
+            [Inline::Text { text: a, .. }, Inline::LineBreak, Inline::Text { text: b, .. }]
+                if a == "one" && b == "two"
+        ),
+        "{inlines:?}"
+    );
+    let Block::Paragraph { inlines, .. } = &blocks[1] else {
+        panic!("{blocks:?}");
+    };
+    assert!(matches!(inlines.as_slice(), [Inline::Text { .. }]));
+}
+
+#[test]
+fn a_text_run_over_the_text_limit_is_cut_with_a_loss() {
+    let text = format!("first\n\n{}\nmore\n\nlast", "x".repeat(100));
+    let budget = Budget::new(Limits {
+        max_text_bytes: 40,
+        ..Limits::default()
+    });
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let got = paragraphs(&out);
+    assert_eq!(got, ["first".to_string(), "x".repeat(40)]);
+    let loss = out.document.losses.last().unwrap();
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(loss.location, "paragraph 2");
+    assert!(loss.what.starts_with("text limit reached"), "{loss:?}");
+}
+
+#[test]
+fn every_line_of_a_paragraph_counts_as_elements() {
+    // Block plus text for the first line, a break and a text for each further line.
+    let text = "a\n".repeat(100);
+    let budget = Budget::new(Limits {
+        max_elements: 50,
+        ..Limits::default()
+    });
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let got = paragraphs(&out);
+    assert_eq!(got.len(), 1);
+    assert!(got[0].lines().count() < 30, "{}", got[0].lines().count());
+    assert!(budget.elements() <= 50 + 2);
 }

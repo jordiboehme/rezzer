@@ -17,9 +17,48 @@ source: crates/rezzer/tests/corpus.rs
         {
           "inlines": [
             {
-              "text": "This eBook is for the use of anyone anywhere in the United States and\nmost other parts of the world at no cost and with almost no restrictions\nwhatsoever. You may copy it, give it away or re-use it under the terms\nof the Project Gutenberg License included with this eBook or online\nat www.gutenberg.org. If you are not located in the United States,\nyou will have to check the laws of the country where you are located\nbefore using this eBook.",
+              "text": "This eBook is for the use of anyone anywhere in the United States and",
               "type": "text"
-            }
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "most other parts of the world at no cost and with almost no restrictions",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "whatsoever. You may copy it, give it away or re-use it under the terms",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "of the Project Gutenberg License included with this eBook or online",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "at www.gutenberg.org. If you are not located in the United States,",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "you will have to check the laws of the country where you are located",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            "<1 more items>"
           ],
           "type": "paragraph"
         },
@@ -44,7 +83,14 @@ source: crates/rezzer/tests/corpus.rs
         {
           "inlines": [
             {
-              "text": "Release date: June 1, 2000 [eBook #2229]\n                Most recently updated: June 11, 2026",
+              "text": "Release date: June 1, 2000 [eBook #2229]",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "                Most recently updated: June 11, 2026",
               "type": "text"
             }
           ],
@@ -89,7 +135,14 @@ source: crates/rezzer/tests/corpus.rs
         {
           "inlines": [
             {
-              "text": "Faust:\nDer Tragödie erster Teil",
+              "text": "Faust:",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Der Tragödie erster Teil",
               "type": "text"
             }
           ],
