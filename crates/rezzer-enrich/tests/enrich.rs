@@ -139,6 +139,7 @@ fn references_resolve_through_every_anchor_place() {
                     target: "x".into(),
                     title: None,
                     internal: false,
+                    wiki: false,
                     inlines: vec![Inline::AnchorMark { anchor: a("deep") }],
                 }],
                 role: None,
