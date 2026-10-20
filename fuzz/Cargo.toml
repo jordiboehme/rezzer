@@ -40,8 +40,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "csvsniff"
-path = "fuzz_targets/csvsniff.rs"
+name = "csvsniff_analyze"
+path = "fuzz_targets/csvsniff_analyze.rs"
 test = false
 doc = false
 bench = false

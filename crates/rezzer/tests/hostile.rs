@@ -72,20 +72,21 @@ fn deep_markdown_nesting_is_partial() {
 fn huge_csv_row_respects_time_limit() {
     let limit = Duration::from_secs(1);
     let p = pipeline_with(Some(limit));
-    let mut bytes = b"a,b\n".to_vec();
+    let mut bytes = Vec::new();
     bytes.extend(std::iter::repeat_n(b'x', 50 * 1024 * 1024));
     bytes.push(b'\n');
     let start = Instant::now();
     let result = p.run_bytes("huge.csv", bytes, None, &request());
     let took = start.elapsed();
     assert!(took < limit + SLACK, "took {took:?}");
-    assert!(
-        matches!(
-            result.completeness,
-            Completeness::Partial | Completeness::Complete
-        ),
-        "{result:?}"
-    );
+    // Either the limit was hit (Partial with a Limit loss) or the run finished in time
+    // (Complete); the test machine decides which, both are clean.
+    match result.completeness {
+        Completeness::Partial => assert!(has_loss(&result, LossReason::Limit), "{result:?}"),
+        Completeness::Complete => {}
+        Completeness::Failed => panic!("{result:?}"),
+    }
+    eprintln!("huge_csv_row: {:?} in {took:?}", result.completeness);
 }
 
 #[test]

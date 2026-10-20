@@ -16,7 +16,16 @@ fuzz_target!(|data: &[u8]| {
     let n = usize::from(n).min(rest.len());
     let (name, content) = rest.split_at(n);
     let name = String::from_utf8_lossy(name);
-    let mime = name.split('/').next_back().map(str::to_owned);
-    let _ = rezzer_detect::detect_with_hints(&name, mime.as_deref(), content);
+    // The MIME hint comes from a small fixed list, chosen by the first content byte.
+    const MIMES: [&str; 6] = [
+        "text/csv",
+        "text/markdown",
+        "text/plain",
+        "application/pdf",
+        "application/octet-stream",
+        "application/json",
+    ];
+    let mime = content.first().map(|b| MIMES[usize::from(*b) % MIMES.len()]);
+    let _ = rezzer_detect::detect_with_hints(&name, mime, content);
     let _ = rezzer_detect::detect_with_hints(&name, None, content);
 });
