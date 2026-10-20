@@ -932,3 +932,35 @@ fn second_yaml_document_is_a_loss() {
     assert!(matches!(&out.document.body[0], Block::Code { lang: Some(l), .. } if l == "yaml"));
     assert_eq!(out.completeness, Completeness::Partial);
 }
+
+#[test]
+fn wikilinks_are_marked() {
+    let out = read("See [[Getting Started]], [[a#sec|label]] and [web](https://example.com).\n");
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("not a paragraph");
+    };
+    let links: Vec<(&str, &str, bool)> = inlines
+        .iter()
+        .filter_map(|i| match i {
+            Inline::Link {
+                target,
+                wiki,
+                inlines,
+                ..
+            } => Some((
+                target.as_str(),
+                if inlines.is_empty() { "" } else { "text" },
+                *wiki,
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        links.iter().map(|l| (l.0, l.2)).collect::<Vec<_>>(),
+        vec![
+            ("Getting Started", true),
+            ("a#sec", true),
+            ("https://example.com", false)
+        ]
+    );
+}
