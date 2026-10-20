@@ -139,6 +139,9 @@ fn odd_af_arguments_keep_call_text() {
         "",
         "AFNumber_Format(2, 0, 0, 0, \"$\", true",
         "AFSimple_Calculate(\"SUM\", [[[[[[[[[[[[\"a\"]]]]]]]]]]]])",
+        r#"AFNumber_Format(9223372036854775807, 0, 0, 0, "", true)"#,
+        "AFNumber_Format(16, 0, 0, 0, \"\", true)",
+        "AFPercent_Format(16, 0)",
     ] {
         assert_eq!(words(script), None, "{script}");
     }
@@ -166,6 +169,43 @@ fn field_refs_from_get_field() {
         field_refs("mygetField(\"a\"); getFields(\"b\")"),
         FieldRefs::default()
     );
+}
+
+#[test]
+fn absurd_numbers_are_odd() {
+    let long = "1".repeat(31);
+    assert_eq!(
+        words(&format!("AFRange_Validate(true, {long}, false, 0)")),
+        None
+    );
+    let ok = "1".repeat(30);
+    assert_eq!(
+        words(&format!("AFRange_Validate(true, {ok}, false, 0)")),
+        Some(format!("at least {ok}"))
+    );
+    assert_eq!(
+        words("AFNumber_Format(15, 0, 0, 0, \"\", true)").as_deref(),
+        Some("number, 15 decimals")
+    );
+    // A name listed twice is named once.
+    assert_eq!(
+        words(r#"AFSimple_Calculate("SUM", ["a", "b", "a"])"#).as_deref(),
+        Some("sum of a, b")
+    );
+}
+
+#[test]
+fn comments_and_strings_are_not_calls() {
+    let refs = field_refs(
+        "// getField(\"c1\")\n/* getField(\"c2\") getField(n) */\n\
+         var s = \"getField('c3')\"; var t = 'getField(\"c4\")';\n\
+         var u = getField(\"real\").value; // getField(x)",
+    );
+    assert_eq!(refs.names, ["real"]);
+    assert!(!refs.dynamic);
+    // An unclosed comment or string ends the scan.
+    assert_eq!(field_refs("/* getField(\"a\")"), FieldRefs::default());
+    assert_eq!(field_refs("'getField(\"a\")"), FieldRefs::default());
 }
 
 #[test]

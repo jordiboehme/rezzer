@@ -82,13 +82,35 @@ pub fn field_refs(script: &str) -> FieldRefs {
     refs
 }
 
-/// Where `getField` and `AFSimple_Calculate` are named as functions, in text order.
+/// Where `getField` and `AFSimple_Calculate` are named as functions, in text order. Comments
+/// and string literals are skipped; an unclosed one ends the scan.
 fn calls(script: &str) -> impl Iterator<Item = (usize, &'static str)> + '_ {
     let bytes = script.as_bytes();
     let mut i = 0;
     std::iter::from_fn(move || {
         while i < bytes.len() {
             let at = i;
+            match bytes[at] {
+                b'/' if bytes.get(at + 1) == Some(&b'/') => {
+                    i = bytes[at..]
+                        .iter()
+                        .position(|b| *b == b'\n')
+                        .map_or(bytes.len(), |k| at + k + 1);
+                    continue;
+                }
+                b'/' if bytes.get(at + 1) == Some(&b'*') => {
+                    i = bytes[at + 2..]
+                        .windows(2)
+                        .position(|w| w == b"*/")
+                        .map_or(bytes.len(), |k| at + 2 + k + 2);
+                    continue;
+                }
+                quote @ (b'"' | b'\'' | b'`') => {
+                    i = string_end(bytes, at + 1, quote);
+                    continue;
+                }
+                _ => {}
+            }
             i += 1;
             for word in ["getField", "AFSimple_Calculate"] {
                 if bytes[at..].starts_with(word.as_bytes())
@@ -102,6 +124,20 @@ fn calls(script: &str) -> impl Iterator<Item = (usize, &'static str)> + '_ {
         }
         None
     })
+}
+
+/// Where a string literal that starts at `from` ends: after its closing `quote`, or at the
+/// end of the text.
+fn string_end(bytes: &[u8], from: usize, quote: u8) -> usize {
+    let mut k = from;
+    while k < bytes.len() {
+        match bytes[k] {
+            b'\\' => k += 2,
+            b if b == quote => return k + 1,
+            _ => k += 1,
+        }
+    }
+    bytes.len()
 }
 
 fn ident_byte(b: u8) -> bool {
@@ -174,7 +210,7 @@ pub fn describe(script: &str) -> Option<String> {
     match (name, args.as_slice()) {
         ("AFNumber_Format", [dec, sep, neg, curr_style, Str(curr), Bool(before)]) => {
             curr_style.int()?;
-            let mut parts = vec!["number".to_string(), decimals(dec.int()?)];
+            let mut parts = vec!["number".to_string(), decimals(dec.int()?)?];
             parts.extend(separator(sep.int()?)?);
             parts.extend(
                 match neg.int()? {
@@ -198,7 +234,7 @@ pub fn describe(script: &str) -> Option<String> {
                 [Bool(b)] => *b,
                 _ => return None,
             };
-            let mut parts = vec!["percent".to_string(), decimals(dec.int()?)];
+            let mut parts = vec!["percent".to_string(), decimals(dec.int()?)?];
             parts.extend(separator(sep.int()?)?);
             if before {
                 parts.push("\"%\" before the number".into());
@@ -230,7 +266,11 @@ pub fn describe(script: &str) -> Option<String> {
                 "MAX" => "maximum",
                 _ => return None,
             };
-            let names = field_list(fields)?;
+            let mut seen = HashSet::new();
+            let names: Vec<String> = field_list(fields)?
+                .into_iter()
+                .filter(|n| seen.insert(n.clone()))
+                .collect();
             if names.is_empty() {
                 return None;
             }
@@ -249,7 +289,21 @@ pub fn describe(script: &str) -> Option<String> {
     }
 }
 
-fn decimals(n: i64) -> String {
+/// Most characters of a number argument; a longer one is an odd argument.
+const NUMBER_MAX: usize = 30;
+
+/// Most decimals a format may ask for; more is an odd argument.
+const DECIMALS_MAX: i64 = 15;
+
+/// The decimals of a format in words, `None` past [`DECIMALS_MAX`].
+fn decimals(n: i64) -> Option<String> {
+    if n > DECIMALS_MAX {
+        return None;
+    }
+    Some(decimals_words(n))
+}
+
+fn decimals_words(n: i64) -> String {
     if n == 1 {
         "1 decimal".into()
     } else {
@@ -463,8 +517,9 @@ impl<'a> Parser<'a> {
                 self.i += n;
                 let text = &self.s[start..self.i];
                 let digits = text.trim_start_matches(['-', '+']);
-                let valid =
-                    digits.bytes().any(|b| b.is_ascii_digit()) && digits.matches('.').count() <= 1;
+                let valid = digits.bytes().any(|b| b.is_ascii_digit())
+                    && digits.matches('.').count() <= 1
+                    && text.len() <= NUMBER_MAX;
                 valid.then(|| Arg::Num(text.trim_start_matches('+').to_string()))
             }
             _ => {
