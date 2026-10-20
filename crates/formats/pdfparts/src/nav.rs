@@ -12,17 +12,7 @@ use crate::objects::{
     Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference, resolve,
     text_string, walk_tree,
 };
-use crate::{Issue, IssueKind, Limits, Pdf};
-
-/// One page as the page tree gives it, with the inherited attributes resolved.
-#[derive(Debug, Clone)]
-pub(crate) struct PageNode {
-    pub id: ObjectId,
-    media_box: Option<[f32; 4]>,
-    crop_box: Option<[f32; 4]>,
-    rotate: i64,
-    pub resources: Option<Object>,
-}
+use crate::{Issue, IssueKind, Pdf};
 
 /// A page with its label, size and what it carries.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,7 +82,7 @@ pub enum LinkTarget {
     Other(String),
 }
 
-fn rect(doc: &Document, obj: Option<&Object>) -> Option<[f32; 4]> {
+pub(crate) fn rect(doc: &Document, obj: Option<&Object>) -> Option<[f32; 4]> {
     let Some(Object::Array(a)) = obj.and_then(|o| resolve(doc, o)) else {
         return None;
     };
@@ -104,116 +94,6 @@ fn rect(doc: &Document, obj: Option<&Object>) -> Option<[f32; 4]> {
         *slot = number(resolve(doc, o)?)?;
     }
     Some(out)
-}
-
-/// Walks the page tree from the catalog. A cycle is Damaged, depth and item limits are Limit.
-/// `/Count` is never trusted.
-pub(crate) fn page_tree(doc: &Document, limits: &Limits, issues: &mut Vec<Issue>) -> Vec<PageNode> {
-    let mut out = Vec::new();
-    let Some(root) = doc
-        .trailer
-        .get(b"Root")
-        .ok()
-        .and_then(|r| dict(doc, r))
-        .and_then(|c| c.get(b"Pages").ok())
-    else {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Damaged,
-            "the catalog has no page tree",
-        ));
-        return out;
-    };
-    let mut seen = HashSet::new();
-    let inherited = PageNode {
-        id: (0, 0),
-        media_box: None,
-        crop_box: None,
-        rotate: 0,
-        resources: None,
-    };
-    walk_pages(
-        doc, root, &inherited, 1, limits, &mut seen, issues, &mut out,
-    );
-    out
-}
-
-#[allow(clippy::too_many_arguments)]
-fn walk_pages(
-    doc: &Document,
-    node: &Object,
-    parent: &PageNode,
-    depth: usize,
-    limits: &Limits,
-    seen: &mut HashSet<ObjectId>,
-    issues: &mut Vec<Issue>,
-    out: &mut Vec<PageNode>,
-) -> bool {
-    if depth > limits.max_depth {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Limit,
-            format!("the page tree is deeper than {} levels", limits.max_depth),
-        ));
-        return false;
-    }
-    if seen.len() >= limits.max_items {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Limit,
-            format!("the page tree has more than {} nodes", limits.max_items),
-        ));
-        return false;
-    }
-    let Some(id) = reference(node) else {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Damaged,
-            "a page tree node is not an indirect object",
-        ));
-        return true;
-    };
-    if !seen.insert(id) {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Damaged,
-            format!("the page tree has a cycle at object {} {}", id.0, id.1),
-        ));
-        return true;
-    }
-    let Some(d) = dict(doc, node) else {
-        issues.push(Issue::new(
-            &format!("object {} {}", id.0, id.1),
-            IssueKind::Damaged,
-            "a page tree node is missing or not a dictionary",
-        ));
-        return true;
-    };
-    let here = PageNode {
-        id,
-        media_box: rect(doc, d.get(b"MediaBox").ok()).or(parent.media_box),
-        crop_box: rect(doc, d.get(b"CropBox").ok()).or(parent.crop_box),
-        rotate: get_int(doc, d, b"Rotate").unwrap_or(parent.rotate),
-        resources: d
-            .get(b"Resources")
-            .ok()
-            .cloned()
-            .or_else(|| parent.resources.clone()),
-    };
-    let kind = get_name(doc, d, b"Type");
-    let is_pages = kind == Some(b"Pages") || (kind.is_none() && d.has(b"Kids"));
-    if !is_pages {
-        out.push(here);
-        return true;
-    }
-    if let Some(Object::Array(kids)) = get(doc, d, b"Kids") {
-        for kid in kids {
-            if !walk_pages(doc, kid, &here, depth + 1, limits, seen, issues, out) {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 fn roman(mut v: u64, lower: bool) -> String {
@@ -240,6 +120,28 @@ fn roman(mut v: u64, lower: bool) -> String {
         }
     }
     if lower { s.to_lowercase() } else { s }
+}
+
+/// Longest page label prefix kept; a longer one is cut.
+const PREFIX_MAX: usize = 256;
+
+/// "1 page" or "N pages".
+fn pages_word(n: usize) -> String {
+    if n == 1 {
+        "1 page".into()
+    } else {
+        format!("{n} pages")
+    }
+}
+
+/// The first page numbers of a list, then how many more there are.
+fn page_list(pages: &[u32]) -> String {
+    const SHOWN: usize = 20;
+    let mut s: Vec<String> = pages.iter().take(SHOWN).map(u32::to_string).collect();
+    if pages.len() > SHOWN {
+        s.push(format!("and {} more", pages.len() - SHOWN));
+    }
+    s.join(", ")
 }
 
 /// Above this a roman label would be absurdly long; it is written in digits.
@@ -279,14 +181,12 @@ impl Pdf {
         let mut issues = Vec::new();
         let labels = self.labels(&mut issues);
         let mut out = Vec::with_capacity(self.pages.len());
+        let mut no_box = Vec::new();
+        let mut odd_rotation = Vec::new();
         for (i, node) in self.pages.iter().enumerate() {
             let number = i as u32 + 1;
             let media = node.media_box.unwrap_or_else(|| {
-                issues.push(Issue::new(
-                    &format!("page {number}"),
-                    IssueKind::Damaged,
-                    "the page has no media box; US Letter is assumed",
-                ));
+                no_box.push(number);
                 [0.0, 0.0, 612.0, 792.0]
             });
             let visible = node.crop_box.map(|c| intersect(media, c)).unwrap_or(media);
@@ -294,11 +194,7 @@ impl Pdf {
             let rotation = if rotation % 90 == 0 {
                 rotation as u16
             } else {
-                issues.push(Issue::new(
-                    &format!("page {number}"),
-                    IssueKind::Damaged,
-                    format!("rotation {} is not a multiple of 90", node.rotate),
-                ));
+                odd_rotation.push(number);
                 0
             };
             let mut has_fonts = false;
@@ -316,6 +212,28 @@ impl Pdf {
                 has_fonts,
                 images,
             });
+        }
+        if !no_box.is_empty() {
+            issues.push(Issue::new(
+                "document",
+                IssueKind::Damaged,
+                format!(
+                    "{} have no media box; US Letter is assumed: {}",
+                    pages_word(no_box.len()),
+                    page_list(&no_box)
+                ),
+            ));
+        }
+        if !odd_rotation.is_empty() {
+            issues.push(Issue::new(
+                "document",
+                IssueKind::Damaged,
+                format!(
+                    "{} have a rotation that is not a multiple of 90; 0 is used: {}",
+                    pages_word(odd_rotation.len()),
+                    page_list(&odd_rotation)
+                ),
+            ));
         }
         self.note(issues);
         out
@@ -438,7 +356,18 @@ impl Pdf {
                 continue;
             };
             let d = dict(doc, range);
-            let prefix = d.and_then(|d| get_text(doc, d, b"P")).unwrap_or_default();
+            let mut prefix = d.and_then(|d| get_text(doc, d, b"P")).unwrap_or_default();
+            if prefix.chars().count() > PREFIX_MAX {
+                prefix = prefix.chars().take(PREFIX_MAX).collect();
+                issues.push(Issue::new(
+                    "page labels",
+                    IssueKind::Limit,
+                    format!(
+                        "a label prefix from page {} on is longer than {PREFIX_MAX} characters and is cut",
+                        start + 1
+                    ),
+                ));
+            }
             let style = d.and_then(|d| get_name(doc, d, b"S"));
             let first = d
                 .and_then(|d| get_int(doc, d, b"St"))

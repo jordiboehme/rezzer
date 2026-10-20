@@ -23,8 +23,9 @@ mod guard;
 mod meta;
 mod nav;
 pub mod objects;
+mod pagetree;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Mutex;
 
@@ -64,7 +65,7 @@ impl Default for Limits {
 }
 
 /// Why a part, or a piece of it, could not be read in full.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IssueKind {
     /// The part is broken or points at something that is not there.
     Damaged,
@@ -75,7 +76,7 @@ pub enum IssueKind {
 }
 
 /// One thing that went wrong while reading, with the place it concerns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Issue {
     /// Where: `document`, `page 3`, `field Total`, `object 12 0`, `outline`, `metadata`.
     pub location: String,
@@ -145,10 +146,26 @@ pub struct Pdf {
     limits: Limits,
     encryption: Option<Encryption>,
     /// Page objects in page order; page number = index + 1.
-    pages: Vec<nav::PageNode>,
+    pages: Vec<pagetree::PageNode>,
     page_numbers: HashMap<ObjectId, u32>,
     verdict: guard::Verdict,
-    issues: Mutex<Vec<Issue>>,
+    unsafe_tree: bool,
+    issues: Mutex<IssueLog>,
+}
+
+/// Issues in the order found, each once.
+#[derive(Default)]
+struct IssueLog {
+    list: Vec<Issue>,
+    seen: HashSet<Issue>,
+}
+
+impl IssueLog {
+    fn add(&mut self, issue: Issue) {
+        if self.seen.insert(issue.clone()) {
+            self.list.push(issue);
+        }
+    }
 }
 
 impl fmt::Debug for Pdf {
@@ -181,18 +198,13 @@ impl Pdf {
         if stop() {
             return Err(OpenError::Limit("stopped by the caller".into()));
         }
-        let pre = guard::prescan(bytes, limits, stop)?;
-        // lopdf inflates object and cross-reference streams while it loads. The scan above
-        // has measured those it could read; this cap bounds the rest (the object streams of
-        // an encrypted file) to the ratio limit of the largest such stream.
-        let largest = if pre.largest_raw > 0 {
-            pre.largest_raw
-        } else {
-            bytes.len() as u64
-        };
-        let cap = limits
-            .max_stream_bytes
-            .min(limits.max_ratio.saturating_mul(largest));
+        // lopdf counts offsets from the first `%PDF-`.
+        let base = bytes.windows(5).position(|w| w == b"%PDF-").unwrap_or(0);
+        let pre = guard::prescan(bytes, base, limits, stop)?;
+        // lopdf inflates object and cross-reference streams while it loads, on several
+        // threads when its rayon feature is on. The scan above has measured them; this fixed
+        // cap bounds each one lopdf decodes all the same.
+        let cap = limits.max_stream_bytes.min(guard::BACKSTOP);
         let cap = usize::try_from(cap).unwrap_or(usize::MAX);
         let options = |password: Option<&str>| LoadOptions {
             password: password.map(str::to_string),
@@ -234,17 +246,20 @@ impl Pdf {
                 "the file has no document catalog".into(),
             ));
         }
-        missing_members(&doc, &mut issues);
-        let pages = nav::page_tree(&doc, limits, &mut issues);
-        let ids: Vec<ObjectId> = pages.iter().map(|p| p.id).collect();
+        let tree = pagetree::page_tree(&doc, limits, &mut issues);
+        let pages = tree.pages;
         let roots: Vec<(ObjectId, Option<&Object>)> =
             pages.iter().map(|p| (p.id, p.resources.as_ref())).collect();
-        let verdict = guard::measure(&doc, &roots, &pre, limits, stop, &mut issues)?;
-        let page_numbers = ids
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (*id, i as u32 + 1))
-            .collect();
+        let verdict = guard::measure(&doc, bytes, base, &roots, &pre, limits, stop, &mut issues)?;
+        // A page listed twice keeps its first number.
+        let mut page_numbers = HashMap::new();
+        for (i, p) in pages.iter().enumerate() {
+            page_numbers.entry(p.id).or_insert(i as u32 + 1);
+        }
+        let mut log = IssueLog::default();
+        for issue in issues {
+            log.add(issue);
+        }
         Ok(Pdf {
             doc,
             limits: *limits,
@@ -252,7 +267,8 @@ impl Pdf {
             pages,
             page_numbers,
             verdict,
-            issues: Mutex::new(issues),
+            unsafe_tree: tree.unsafe_tree,
+            issues: Mutex::new(log),
         })
     }
 
@@ -284,6 +300,14 @@ impl Pdf {
         &self.verdict.refused_pages
     }
 
+    /// The page tree has a cycle, a shared or repeated node, an untyped node or more depth
+    /// than the limits allow. Page numbers here follow lopdf's page walk, which other parsers
+    /// built on lopdf use too; a parser with a different walk may number such a file
+    /// differently, so it must not get the file.
+    pub fn unsafe_page_tree(&self) -> bool {
+        self.unsafe_tree
+    }
+
     /// Bytes all measured streams unpack to.
     pub fn unpacked(&self) -> u64 {
         self.verdict.unpacked
@@ -291,7 +315,10 @@ impl Pdf {
 
     /// Every issue found so far: while opening, and by the readers called since.
     pub fn issues(&self) -> Vec<Issue> {
-        self.issues.lock().map(|i| i.clone()).unwrap_or_default()
+        self.issues
+            .lock()
+            .map(|i| i.list.clone())
+            .unwrap_or_default()
     }
 
     /// Number of pages found in the page tree.
@@ -304,11 +331,9 @@ impl Pdf {
         if found.is_empty() {
             return;
         }
-        if let Ok(mut all) = self.issues.lock() {
+        if let Ok(mut log) = self.issues.lock() {
             for issue in found {
-                if !all.contains(&issue) {
-                    all.push(issue);
-                }
+                log.add(issue);
             }
         }
     }
@@ -353,26 +378,6 @@ fn load(bytes: &[u8], options: LoadOptions, password: Option<&str>) -> Result<Do
             other => OpenError::Damaged(redact(other.to_string(), password)),
         }
     })
-}
-
-/// lopdf drops an object stream it cannot read without saying so. The cross-reference table
-/// still lists its members, so the loss is reported here.
-fn missing_members(doc: &Document, issues: &mut Vec<Issue>) {
-    let mut lost: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
-    for (&n, entry) in &doc.reference_table.entries {
-        if let lopdf::xref::XrefEntry::Compressed { container, .. } = entry
-            && !doc.objects.contains_key(&(n, 0))
-        {
-            *lost.entry(*container).or_default() += 1;
-        }
-    }
-    for (container, count) in lost {
-        issues.push(Issue::new(
-            &format!("object {container} 0"),
-            IssueKind::Damaged,
-            format!("the object stream could not be read: {count} objects in it are missing"),
-        ));
-    }
 }
 
 fn redact(text: String, password: Option<&str>) -> String {

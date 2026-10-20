@@ -18,9 +18,11 @@ assert_eq!(
 );
 ```
 
-`Pdf::open` takes the bytes, an optional password, limits and a stop function. Before it returns, it measures every stream once. The data goes into a counting sink that keeps nothing. A stream may not unpack to more than `max_stream_bytes` or more than `max_ratio` times its own size. All streams together may not unpack to more than `max_total_bytes`. A page that uses a stream over a limit is refused (`refused_pages`). Do not give such a page to another parser.
+`Pdf::open` takes the bytes, an optional password, limits and a stop function. Before it returns, it measures every stream once. The data goes into counters that keep nothing. Every filter layer of a stream is counted, not only the last one. A stream or a layer may not unpack to more than `max_stream_bytes`. Once it is past 16 MiB, it may also not unpack to more than `max_ratio` times the size of the stream. Smaller streams with a high ratio, such as blank images, are fine. All streams together may not unpack to more than `max_total_bytes`. A page that uses a stream over a limit is refused (`refused_pages`). Do not give such a page to another parser.
 
-Object streams and cross-reference streams are unpacked while the file loads. So they are measured in the raw file first, before the parser sees them. An object stream over a limit ends the open with `OpenError::Limit`. In an encrypted file the object streams are still encrypted at that point. The parser then unpacks them one at a time, up to the ratio limit of the largest one.
+Object streams and cross-reference streams are unpacked while the file loads. So they are measured in the raw file first, before the parser sees them. The scan reads every object header in file order and follows the `startxref` chain. Each of these streams may unpack to at most 64 MiB, here and in the parser. A stream over that or over another limit ends the open with `OpenError::Limit`. In an encrypted file the object streams are still encrypted at that point. The parser unpacks them one at a time with the 64 MiB cap, and they are measured again after the load.
+
+Page numbers follow lopdf's page walk, so they match other parsers built on lopdf. `unsafe_page_tree` is true when the page tree has a cycle, a node listed twice, a node without a type or too much depth. Such a file may get other page numbers in a parser with its own walk. Do not give it to one.
 
 The parser underneath is lopdf, used as an object store only. Trees, the outline, labels and links are walked by this crate with a visited set and depth and item limits. A cycle or a broken entry becomes an `Issue` and the rest is still read. Nothing panics.
 

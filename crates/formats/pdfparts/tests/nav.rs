@@ -285,3 +285,53 @@ fn page_images_are_listed() {
     assert!(image.width > 100 && image.height > 100, "{image:?}");
     assert!(matches!(image.components, 1 | 3 | 4), "{image:?}");
 }
+
+#[test]
+fn long_label_prefix_is_cut() {
+    let prefix = "p".repeat(300);
+    let pdf = labelled(
+        3,
+        Object::Dictionary(dictionary! {
+            "Nums" => vec![0.into(), Object::Dictionary(dictionary! { "S" => "D", "P" => Object::string_literal(prefix) })],
+        }),
+    );
+    let pages = pdf.pages();
+    let label = pages[2].label.as_deref().unwrap();
+    assert_eq!(label, format!("{}3", "p".repeat(256)));
+    let limits: Vec<_> = pdf
+        .issues()
+        .into_iter()
+        .filter(|i| i.kind == IssueKind::Limit && i.what.contains("prefix"))
+        .collect();
+    assert_eq!(limits.len(), 1, "{:?}", pdf.issues());
+}
+
+#[test]
+fn page_issues_are_grouped() {
+    // 50 pages without a media box give one issue that lists them.
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let kids: Vec<Object> = (0..50)
+        .map(|_| {
+            doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id })
+                .into()
+        })
+        .collect();
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 50 }),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    assert_eq!(pdf.pages().len(), 50);
+    let boxes: Vec<_> = pdf
+        .issues()
+        .into_iter()
+        .filter(|i| i.what.contains("media box"))
+        .collect();
+    assert_eq!(boxes.len(), 1, "{boxes:?}");
+    assert!(boxes[0].what.contains("50 pages"), "{boxes:?}");
+}

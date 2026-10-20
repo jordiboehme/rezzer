@@ -26,6 +26,22 @@ fn open(bytes: &[u8], password: Option<&str>) -> Result<Pdf, OpenError> {
     Pdf::open(bytes, password, &Limits::default(), &never)
 }
 
+/// Deflate of `n` copies of `byte`, fed in chunks so the plain data is never held.
+fn zlib_fill(byte: u8, n: usize) -> Vec<u8> {
+    let mut e = ZlibEncoder::new(Vec::new(), Compression::best());
+    let chunk = vec![byte; 1 << 20];
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(chunk.len());
+        e.write_all(&chunk[..k]).unwrap();
+        left -= k;
+    }
+    e.finish().unwrap()
+}
+
+/// Past the 16 MiB size from which the ratio limit applies.
+const BOMB: usize = 32 << 20;
+
 fn zlib(data: &[u8]) -> Vec<u8> {
     let mut e = ZlibEncoder::new(Vec::new(), Compression::best());
     e.write_all(data).unwrap();
@@ -91,6 +107,7 @@ fn opens_corpus_files_without_panic() {
             pdf.refused_pages(),
             pdf.issues()
         );
+        assert!(!pdf.unsafe_page_tree(), "{name}: {:?}", pdf.issues());
         let _ = (pdf.info(), pdf.xmp(), pdf.language(), pdf.tagged());
         let _ = (pdf.outline(), pdf.named_destinations(), pdf.links());
         eprintln!(
@@ -178,7 +195,10 @@ fn page_tree_cycle_is_damaged() {
         pages.set("Count", 2);
     });
     let pdf = open(&bytes, None).unwrap();
-    assert_eq!(pdf.pages().len(), 1);
+    // Page numbers follow lopdf, which yields the page again while it walks the cycle, up to
+    // its own bound. The tree is marked unsafe for other parsers.
+    assert!(!pdf.pages().is_empty());
+    assert!(pdf.unsafe_page_tree());
     let issues = pdf.issues();
     assert!(
         issues
@@ -223,7 +243,10 @@ fn deep_page_tree_is_limited() {
             .set("Kids", vec![child.into()]);
     });
     let pdf = Pdf::open(&bytes, None, &limits, &never).unwrap();
-    assert!(pdf.pages().is_empty());
+    // lopdf's own depth bound is 256, so it still finds the page; the bounded check does not
+    // and marks the tree unsafe.
+    assert_eq!(pdf.pages().len(), 1);
+    assert!(pdf.unsafe_page_tree());
     assert!(
         pdf.issues().iter().any(|i| i.kind == IssueKind::Limit),
         "{:?}",
@@ -233,9 +256,9 @@ fn deep_page_tree_is_limited() {
 
 #[test]
 fn stream_bomb_is_refused() {
-    // About 1 KB of deflate that inflates to 1 MB: far over a ratio of 100.
-    let packed = zlib(&vec![b' '; 1 << 20]);
-    assert!(packed.len() < 2048, "{}", packed.len());
+    // About 32 KB of deflate that inflates to 32 MiB: far over a ratio of 100.
+    let packed = zlib_fill(b' ', BOMB);
+    assert!(packed.len() < 64 << 10, "{}", packed.len());
     let content = Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed);
     let bytes = one_page(content.with_compression(false), |_, _, _| {});
     let pdf = open(&bytes, None).unwrap();
@@ -262,7 +285,7 @@ fn plain_stream_is_measured() {
 #[test]
 fn font_bomb_refuses_the_page() {
     // A font file reachable only through the page resources.
-    let packed = zlib(&vec![0u8; 1 << 20]);
+    let packed = zlib_fill(0, BOMB);
     let bytes = one_page(plain_content(), |doc, _, page_id| {
         let file = doc.add_object(
             Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed).with_compression(false),
@@ -290,7 +313,7 @@ fn font_bomb_refuses_the_page() {
 #[test]
 fn inherited_font_bomb_refuses_the_page() {
     // The same font bomb, but the resources sit on the page tree node above the page.
-    let packed = zlib(&vec![0u8; 1 << 20]);
+    let packed = zlib_fill(0, BOMB);
     let bytes = one_page(plain_content(), |doc, pages_id, _| {
         let file = doc.add_object(
             Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed).with_compression(false),
@@ -315,9 +338,9 @@ fn inherited_font_bomb_refuses_the_page() {
     assert_eq!(pdf.refused_pages(), &[1]);
 }
 
-/// A page whose content stream is about 1 KB of deflate that inflates to 1 MB.
+/// A page whose content stream is about 32 KB of deflate that inflates to 32 MiB.
 fn bomb_page() -> Vec<u8> {
-    let packed = zlib(&vec![b' '; 1 << 20]);
+    let packed = zlib_fill(b' ', BOMB);
     let content = Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed);
     one_page(content.with_compression(false), |_, _, _| {})
 }
@@ -352,9 +375,9 @@ fn encrypt_text_does_not_turn_off_the_scan() {
 #[test]
 fn raw_deflate_after_another_filter_is_measured() {
     // Hex around a deflate stream with a broken zlib header. lopdf retries it as raw deflate
-    // and gets 1 MB, so the guard must count the same.
+    // and gets 32 MiB, so the guard must count the same.
     let mut e = flate2::write::DeflateEncoder::new(Vec::new(), Compression::best());
-    e.write_all(&vec![b' '; 1 << 20]).unwrap();
+    e.write_all(&vec![b' '; BOMB]).unwrap();
     let mut data = vec![0xFF, 0xFF];
     data.extend(e.finish().unwrap());
     let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
@@ -423,6 +446,8 @@ fn objstm_bomb() -> Vec<u8> {
     bytes
 }
 
+/// Maximum resident set size of the process. It covers lopdf's rayon threads too. It is the
+/// figure of one test only under nextest, which runs every test in its own process.
 #[cfg(unix)]
 fn max_rss_bytes() -> u64 {
     // SAFETY: getrusage fills the struct we pass.
