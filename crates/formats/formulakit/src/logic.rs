@@ -131,6 +131,42 @@ pub struct TableArea {
     pub columns: Vec<String>,
 }
 
+/// A table area [`Workbook::add_table`] refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableError {
+    pub message: String,
+}
+
+impl std::fmt::Display for TableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "table area not usable: {}", self.message)
+    }
+}
+
+impl std::error::Error for TableError {}
+
+/// Why a table area cannot be used, if it cannot.
+fn check_table(a: &TableArea) -> Result<(), String> {
+    if a.start.row > a.end.row || a.start.col > a.end.col {
+        return Err("the start cell is after the end cell".to_string());
+    }
+    let width = u64::from(a.end.col - a.start.col) + 1;
+    if u64::try_from(a.columns.len()).unwrap_or(u64::MAX) != width {
+        return Err(format!(
+            "{} column names for {width} columns",
+            a.columns.len()
+        ));
+    }
+    let height = u64::from(a.end.row - a.start.row) + 1;
+    if u64::from(a.header_rows) + u64::from(a.totals_rows) > height {
+        return Err(format!(
+            "{} header and {} totals rows in {height} rows",
+            a.header_rows, a.totals_rows
+        ));
+    }
+    Ok(())
+}
+
 struct FormulaEntry {
     sheet: u32,
     at: CellPos,
@@ -425,19 +461,20 @@ struct Event {
     delta: i64,
 }
 
-fn push_events(events: &mut [Vec<Event>], r: &Rect) {
+/// The start and end events of a rectangle that `weight` readers read.
+fn push_events(events: &mut [Vec<Event>], r: &Rect, weight: i64) {
     if let Some(list) = events.get_mut(r.sheet as usize) {
         list.push(Event {
             row: r.r1,
             c1: r.c1,
             c2: r.c2,
-            delta: 1,
+            delta: weight,
         });
         list.push(Event {
             row: r.r2.saturating_add(1),
             c1: r.c1,
             c2: r.c2,
-            delta: -1,
+            delta: -weight,
         });
     }
 }
@@ -654,12 +691,25 @@ impl Workbook {
     /// `[@Qty]`, `Sales[[#Headers],[Price]]`, a bare `Sales`) resolve to its cells. A column
     /// reference reads that column of the data rows unless it names other rows; `[@col]`
     /// reads the formula's own row.
-    pub fn add_table(&mut self, name: &str, sheet: &str, area: TableArea) {
+    ///
+    /// A damaged area (start after end, a column count that differs from the width, more
+    /// header and totals rows than rows) is refused with a [`TableError`]: the table is not
+    /// added, and references to it stay `table:` nodes that read no cells.
+    pub fn add_table(
+        &mut self,
+        name: &str,
+        sheet: &str,
+        area: TableArea,
+    ) -> Result<(), TableError> {
+        check_table(&area).map_err(|why| TableError {
+            message: format!("table {name}: {why}"),
+        })?;
         let sheet = self.sheet_id(sheet);
         self.table_index
             .entry(name.to_uppercase())
             .or_insert(self.tables.len());
         self.tables.push(TableEntry { sheet, area });
+        Ok(())
     }
 
     /// The defined name `name` as seen from `sheet` (sheet scope first, then workbook).
@@ -924,7 +974,9 @@ impl Workbook {
         };
         let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut reader_rects: Vec<Vec<Rect>> = vec![Vec::new(); nodes.len()];
-        let mut events: Vec<Vec<Event>> = vec![Vec::new(); self.sheets.len()];
+        // Each distinct rectangle with the number of formulas that read it: the events
+        // come from these, so memory follows distinct rectangles, not formulas x areas.
+        let mut read_counts: HashMap<Rect, u32> = HashMap::new();
         let mut closures = Closures::new(self.names.len());
         let mut names_read: Vec<usize> = Vec::new();
         for f in &order {
@@ -956,8 +1008,8 @@ impl Workbook {
             let Some(cells) = disjoint(cells, &mut stopper) else {
                 break;
             };
-            for r in &cells {
-                push_events(&mut events, r);
+            for r in cells {
+                *read_counts.entry(r).or_insert(0) += 1;
             }
             if let Some(list) = reader_rects.get_mut(reader) {
                 list.extend(reads.rects);
@@ -979,11 +1031,15 @@ impl Workbook {
             }
             reader_rects[reader].extend(reads.rects.iter().copied());
         }
+        let mut events: Vec<Vec<Event>> = vec![Vec::new(); self.sheets.len()];
+        for (r, n) in read_counts {
+            push_events(&mut events, &r, i64::from(n));
+        }
         // Cells a name refers to are parameters even when no formula reads the name.
         let mut named_events: Vec<Vec<Event>> = vec![Vec::new(); self.sheets.len()];
         for reads in &name_reads {
             for r in merge(reads.rects.clone()) {
-                push_events(&mut named_events, &r);
+                push_events(&mut named_events, &r, 1);
             }
         }
 

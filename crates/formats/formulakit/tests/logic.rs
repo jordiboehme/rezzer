@@ -6,7 +6,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use formulakit::logic::{FormulaId, Logic, ParamCell, Role, TableArea, Workbook};
+use formulakit::logic::{FormulaId, Logic, ParamCell, Role, TableArea, TableError, Workbook};
 use formulakit::{CellPos, Dialect, analyze};
 
 /// Counts the heap of the thread that allocates, so tests that run side by side do not
@@ -504,7 +504,8 @@ fn tables_resolve_to_cells() {
             totals_rows: 0,
             columns: vec!["Price".into(), "Qty".into(), "Total".into()],
         },
-    );
+    )
+    .expect("table area is fine");
     let mut rows = Vec::new();
     for r in 2..=4 {
         // A formula inside the table may leave out the table name.
@@ -578,7 +579,8 @@ fn bare_table_name_reads_its_data_rows() {
             totals_rows: 1,
             columns: vec!["v".into()],
         },
-    );
+    )
+    .expect("table area is fine");
     formula(&mut wb, "S", "C1", "=SUM(t)");
     formula(&mut wb, "S", "C2", "=T[[#Totals],[v]]");
     let logic = wb.finish(&never);
@@ -590,4 +592,79 @@ fn bare_table_name_reads_its_data_rows() {
             param("S", "A4", 1)
         ]
     );
+}
+
+#[test]
+fn damaged_table_area_is_refused() {
+    let area = |end: &str, totals_rows: u32, columns: usize| TableArea {
+        start: at("A1"),
+        end: at(end),
+        header_rows: 1,
+        totals_rows,
+        columns: (0..columns).map(|i| format!("c{i}")).collect(),
+    };
+    let mut wb = Workbook::new();
+    wb.add_constant("S", at("E2"));
+    wb.add_constant("S", at("A2"));
+    let refused: Vec<TableError> = [
+        ("T", area("B3", 0, 6)),
+        ("U", area("B3", 5, 2)),
+        (
+            "V",
+            TableArea {
+                start: at("C1"),
+                ..area("A3", 0, 1)
+            },
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, a)| wb.add_table(name, "S", a).err())
+    .collect();
+    assert_eq!(refused.len(), 3);
+    assert!(refused[0].message.contains("6 column names for 2 columns"));
+    assert!(refused[1].message.contains("totals"));
+    assert!(refused[2].message.contains("after"));
+    formula(&mut wb, "S", "G1", "=SUM(T[c5])+SUM(U[[#Totals],[c0]])");
+    formula(&mut wb, "S", "G2", "=E2");
+    let logic = wb.finish(&never);
+    // The refused tables read nothing and do not disturb other counts.
+    assert_eq!(logic.parameters, vec![param("S", "E2", 1)]);
+    let tables: Vec<&str> = logic
+        .graph
+        .nodes
+        .iter()
+        .filter(|(_, l, _)| l.starts_with("table:"))
+        .map(|(_, l, _)| l.as_str())
+        .collect();
+    assert_eq!(tables, vec!["table:T", "table:U"]);
+}
+
+#[test]
+fn many_area_name_read_by_many_formulas_stays_small() {
+    // A name with 700 scattered cells, read by 30,000 formulas.
+    let cells: Vec<String> = (0..700).map(|i| format!("In!$A${}", 2 * i + 1)).collect();
+    let (logic, peak) = peak_heap(|| {
+        let mut wb = Workbook::new();
+        for i in 0..700u32 {
+            wb.add_constant("In", CellPos { row: 2 * i, col: 0 });
+        }
+        let pick = analyze(
+            &format!("=SUM({})", cells.join(",")),
+            Dialect::Excel,
+            at("A1"),
+        )
+        .expect("name parses");
+        wb.add_name("pick", None, Some(&pick));
+        for row in 0..30_000u32 {
+            let at = CellPos { row, col: 4 };
+            let a = analyze(&format!("=pick*D{}", row + 1), Dialect::Excel, at)
+                .expect("formula parses");
+            wb.add_formula("Calc", at, &a);
+        }
+        wb.finish(&never)
+    });
+    eprintln!("many_area_name_read_by_many_formulas_stays_small: peak heap {peak} bytes");
+    assert!(peak < 64 * 1024 * 1024, "peak heap {peak} bytes");
+    assert_eq!(logic.parameters.len(), 700);
+    assert!(logic.parameters.iter().all(|p| p.read_by == 30_000));
 }
