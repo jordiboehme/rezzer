@@ -87,7 +87,17 @@ fn struct_roles_and_mcids() {
         assert_eq!(tree.elems[leaf].mcids, [mcid as u32]);
         assert_eq!(tree.elems[leaf].page, Some(1));
         assert_eq!(parent_of(&tree, leaf), Some(heading));
+        assert_eq!(tree.elems[leaf].parent, Some(heading));
     }
+    // Walking up from the first marked content reaches the H1, then the root.
+    let mut up = pdf.role_of(1, 0);
+    let mut roles = Vec::new();
+    while let Some(i) = up {
+        roles.push(tree.elems[i].role.as_str());
+        up = tree.elems[i].parent;
+    }
+    assert_eq!(roles, ["NonStruct", "H1", "Document"]);
+    assert_eq!(doc.parent, None);
     assert_eq!(pdf.role_of(1, 4), None);
     assert_eq!(pdf.role_of(2, 0), None);
 }

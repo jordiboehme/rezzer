@@ -49,6 +49,8 @@ pub struct StructElem {
     pub id: Option<String>,
     /// Indexes into [`StructTree::elems`].
     pub children: Vec<usize>,
+    /// The index of the parent element; `None` for elements right below the root.
+    pub parent: Option<usize>,
 }
 
 /// The tree read once, with the ParentTree as indexes.
@@ -264,6 +266,9 @@ impl Walk<'_> {
                     _ => {}
                 }
             }
+        }
+        for &c in &children {
+            self.elems[c].parent = Some(index);
         }
         let elem = &mut self.elems[index];
         elem.children = children;
