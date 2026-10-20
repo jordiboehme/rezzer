@@ -161,6 +161,7 @@ enum InlineFrame {
         target: String,
         title: Option<String>,
         internal: bool,
+        wiki: bool,
         inlines: Vec<Inline>,
     },
     Image {
@@ -481,6 +482,7 @@ impl<'b> Builder<'b> {
                     target,
                     title: Some(title.into_string()).filter(|t| !t.is_empty()),
                     internal,
+                    wiki: wikilink,
                     inlines: Vec::new(),
                 });
             }
@@ -685,6 +687,7 @@ impl<'b> Builder<'b> {
                 target,
                 title,
                 internal,
+                wiki,
                 inlines,
             }) => {
                 self.record_link(&target, internal);
@@ -692,6 +695,7 @@ impl<'b> Builder<'b> {
                     target,
                     title,
                     internal,
+                    wiki,
                     inlines,
                 });
             }

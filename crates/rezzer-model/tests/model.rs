@@ -94,6 +94,7 @@ fn full_document() -> Document {
                     target: "https://example.org".into(),
                     title: Some("Example".into()),
                     internal: false,
+                    wiki: false,
                     inlines: vec![text("here")],
                 },
                 Inline::FootnoteRef { id: "1".into() },
@@ -476,6 +477,23 @@ fn plain_fields_default_when_missing() {
             ..
         }
     ));
+}
+
+#[test]
+fn wiki_flag_is_skipped_when_false_and_read_back() {
+    let link = |wiki| Inline::Link {
+        target: "note".into(),
+        title: None,
+        internal: true,
+        wiki,
+        inlines: Vec::new(),
+    };
+    let plain = serde_json::to_string(&link(false)).unwrap();
+    assert!(!plain.contains("wiki"), "{plain}");
+    let wiki = serde_json::to_string(&link(true)).unwrap();
+    assert!(wiki.contains("\"wiki\":true"), "{wiki}");
+    assert_eq!(serde_json::from_str::<Inline>(&wiki).unwrap(), link(true));
+    assert_eq!(serde_json::from_str::<Inline>(&plain).unwrap(), link(false));
 }
 
 #[test]

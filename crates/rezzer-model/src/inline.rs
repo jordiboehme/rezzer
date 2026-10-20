@@ -46,6 +46,9 @@ pub enum Inline {
         /// True when the target is an anchor inside this document.
         #[serde(default)]
         internal: bool,
+        /// True when the source wrote the link as a wikilink (`[[target]]`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        wiki: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         inlines: Vec<Inline>,
     },

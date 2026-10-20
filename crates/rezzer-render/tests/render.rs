@@ -391,6 +391,7 @@ fn inline_styles_links_images_breaks() {
                 target: "https://example.org/a b".into(),
                 title: Some("T \"q\"".into()),
                 internal: false,
+                wiki: false,
                 inlines: vec![txt("site")],
             },
             txt(" "),
@@ -1265,6 +1266,7 @@ fn table_cells_keep_links_images_and_footnotes_intact() {
         target: "http://a/b|c".into(),
         title: Some("x|y".into()),
         internal: false,
+        wiki: false,
         inlines: vec![txt("L")],
     };
     let image = Inline::Image {
@@ -1374,6 +1376,7 @@ fn deeply_nested_link_text_is_kept() {
             target: format!("u{i}"),
             title: None,
             internal: false,
+            wiki: false,
             inlines: vec![txt("t"), inline],
         };
     }
@@ -1438,6 +1441,7 @@ fn only_safe_schemes_become_links() {
         target: target.into(),
         title: None,
         internal: false,
+        wiki: false,
         inlines: vec![txt("go")],
     };
     let md = body_of(vec![Block::Paragraph {
@@ -1514,6 +1518,7 @@ fn character_references_cannot_sneak_a_scheme_in() {
         target: target.into(),
         title: Some("see [[Target]]".into()),
         internal: false,
+        wiki: false,
         inlines: vec![txt("go")],
     };
     let md = body_of(vec![Block::Paragraph {
@@ -1627,6 +1632,7 @@ fn scheme_check_sees_references_and_ampersands() {
         target: target.into(),
         title: None,
         internal: false,
+        wiki: false,
         inlines: vec![txt("go")],
     };
     let long = format!("javascript&#{}58;x", "0".repeat(40));
@@ -1702,4 +1708,54 @@ fn format_name_is_snake_case() {
         rezzer_render::format_name(rezzer_model::FormatId::ThreeMf),
         "three_mf"
     );
+}
+
+fn wiki_link(target: &str, text: &str) -> Inline {
+    Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: true,
+        wiki: true,
+        inlines: vec![Inline::Text {
+            text: text.into(),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }],
+    }
+}
+
+fn render_inline(inline: Inline) -> String {
+    let doc = {
+        let mut d = Document::new(source());
+        d.body.push(Block::Paragraph {
+            inlines: vec![inline],
+            role: None,
+            anchor: None,
+        });
+        d
+    };
+    let md = render(&doc, Completeness::Complete, &opts());
+    let (_, body) = md.split_once("\n---\n\n").expect("frontmatter");
+    body.trim().replace("# ", "").to_string()
+}
+
+#[test]
+fn wikilinks_are_written_as_wikilinks() {
+    assert!(render_inline(wiki_link("graph-view", "graph-view")).ends_with("[[graph-view]]"));
+    assert!(render_inline(wiki_link("a#sec", "label")).ends_with("[[a#sec|label]]"));
+}
+
+#[test]
+fn unsafe_wikilinks_fall_back_to_a_normal_link() {
+    for (target, text) in [
+        ("a]]b", "a]]b"),
+        ("a|b", "a|b"),
+        ("a\nb", "x"),
+        ("ok", "x|y"),
+        ("ok", "x]]y"),
+    ] {
+        let out = render_inline(wiki_link(target, text));
+        assert!(!out.contains("[["), "{out}");
+    }
 }
