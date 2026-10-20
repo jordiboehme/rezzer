@@ -1554,6 +1554,13 @@ fn sheet_id_name_with_two_colons_is_refused() {
     let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" x:b:id=\"rId2\"/>";
     let out = read_with(split_pkg(&two_sheet_rels(), sheet, ""), split_limits());
     refused(&out, &[LossReason::Damaged]);
+    // The reviewer's probe 20c as written.
+    let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" a:b:id=\"rId2\"/>";
+    let out = read_with(
+        split_pkg_ns(&two_sheet_rels(), sheet, "", " xmlns:a=\"urn:a\""),
+        split_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
 }
 
 #[test]
