@@ -5,6 +5,7 @@
 //! Decoding of PDF values: text strings, dates, and bounded walks over number and name trees.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
@@ -223,7 +224,7 @@ pub(crate) fn walk_tree<'a>(
     root: &'a Object,
     tree: Tree,
     limits: &Limits,
-    budget: &mut TextBudget,
+    budget: &mut TextBudget<'_>,
     location: &str,
     issues: &mut Vec<Issue>,
 ) -> Vec<(TreeKey, &'a Object)> {
@@ -251,7 +252,7 @@ fn walk_node<'a>(
     node: &'a Object,
     tree: Tree,
     limits: &Limits,
-    work: &mut (&mut TextBudget, &mut usize),
+    work: &mut (&mut TextBudget<'_>, &mut usize),
     location: &str,
     issues: &mut Vec<Issue>,
     seen: &mut HashSet<ObjectId>,
@@ -363,17 +364,35 @@ pub(crate) fn get_date(doc: &Document, d: &Dictionary, key: &[u8]) -> Option<cra
 /// Fixed cost of one item a reader copies out of the document, as for one parsed value.
 pub(crate) const ITEM_BYTES: u64 = 128;
 
-/// What one reader call may still copy out of the document: lists, strings and arrays. Data
+/// What the readers may still copy out of the document: lists, strings and arrays. Data
 /// that many entries share would otherwise be copied once per entry. Each item costs
-/// [`ITEM_BYTES`] plus its copied bytes; once the budget is spent, nothing more is copied.
+/// [`ITEM_BYTES`] plus its copied bytes. A budget made by [`crate::Pdf`] draws on one pool that
+/// every reader shares, so all readers together stay within the object limit; once a charge
+/// does not fit, the pool is spent and nothing more is copied.
 #[derive(Debug)]
-pub(crate) struct TextBudget {
-    left: u64,
+pub(crate) struct TextBudget<'a> {
+    pool: Pool<'a>,
 }
 
-impl TextBudget {
-    pub(crate) fn new(left: u64) -> TextBudget {
-        TextBudget { left }
+#[derive(Debug)]
+enum Pool<'a> {
+    Shared(&'a AtomicU64),
+    Own(u64),
+}
+
+impl<'a> TextBudget<'a> {
+    /// A budget that draws on `pool`, shared with other readers.
+    pub(crate) fn shared(pool: &'a AtomicU64) -> TextBudget<'a> {
+        TextBudget {
+            pool: Pool::Shared(pool),
+        }
+    }
+
+    /// A budget of its own, for a walk with a separate bound.
+    pub(crate) fn own(left: u64) -> TextBudget<'static> {
+        TextBudget {
+            pool: Pool::Own(left),
+        }
     }
 
     /// Charges one item with `bytes` copied bytes. False when it does not fit; the item must
@@ -384,12 +403,23 @@ impl TextBudget {
 
     /// Charges `bytes` copied bytes without the fixed item cost.
     pub(crate) fn take(&mut self, bytes: u64) -> bool {
-        if bytes > self.left {
-            self.left = 0;
-            return false;
+        match &mut self.pool {
+            Pool::Own(left) => {
+                if bytes > *left {
+                    *left = 0;
+                    return false;
+                }
+                *left -= bytes;
+                true
+            }
+            // A charge that does not fit spends the pool, as for a budget of its own.
+            Pool::Shared(pool) => {
+                let before = pool.update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.saturating_sub(bytes)
+                });
+                before >= bytes
+            }
         }
-        self.left -= bytes;
-        true
     }
 
     /// The one Limit issue a reader adds when its budget is spent.

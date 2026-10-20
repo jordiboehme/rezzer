@@ -4,11 +4,11 @@
 
 //! Markup annotations: comments, highlights, notes and drawings with their author and dates.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use lopdf::{Dictionary, Document, Object};
+use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use crate::nav::rect;
+use crate::nav::{page_list, rect};
 use crate::objects::{dict, get_date, get_name, get_text, number, reference, resolve};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
@@ -117,8 +117,9 @@ fn id_text(id: lopdf::ObjectId) -> String {
 impl Pdf {
     /// Calls `visit` with the page number, the position in the array (from 0) and the entry,
     /// for each `/Annots` entry in page order. An `/Annots` array object that several pages
-    /// share is walked once, on the first of them. At most `max_items` entries are visited in
-    /// all. `visit` ends the walk with an issue.
+    /// share is walked once, on the first of them, with one Damaged issue that names the
+    /// pages; an entry whose `/P` names one of those pages is given that page. At most
+    /// `max_items` entries are visited in all. `visit` ends the walk with an issue.
     pub(crate) fn each_annot<'a>(
         &'a self,
         what: &str,
@@ -126,21 +127,55 @@ impl Pdf {
         mut visit: impl FnMut(u32, usize, &'a Object) -> Result<(), Issue>,
     ) {
         let doc = &self.doc;
-        let mut arrays = HashSet::new();
-        let mut visited = 0usize;
+        // Each page's /Annots entry, and for each array object the pages that list it.
+        let mut entries = Vec::with_capacity(self.pages.len());
+        let mut sharing: HashMap<ObjectId, Vec<u32>> = HashMap::new();
         for (i, node) in self.pages.iter().enumerate() {
             let page = i as u32 + 1;
-            let Some(pd) = doc.objects.get(&node.id).and_then(|o| dict(doc, o)) else {
+            let Some(entry) = doc
+                .objects
+                .get(&node.id)
+                .and_then(|o| dict(doc, o))
+                .and_then(|pd| pd.get(b"Annots").ok())
+            else {
                 continue;
             };
-            let Ok(entry) = pd.get(b"Annots") else {
-                continue;
-            };
-            if let Some(id) = reference(entry)
-                && !arrays.insert(id)
-            {
-                continue;
+            if let Some(id) = reference(entry) {
+                sharing.entry(id).or_default().push(page);
             }
+            entries.push((page, entry));
+        }
+        let mut shared_lists: Vec<&Vec<u32>> = sharing.values().filter(|l| l.len() > 1).collect();
+        shared_lists.sort_by_key(|l| l[0]);
+        for list in shared_lists {
+            let (first, rest) = (list[0], &list[1..]);
+            let pages = page_list(rest);
+            issues.push(Issue::new(
+                "document",
+                IssueKind::Damaged,
+                if rest.len() == 1 {
+                    format!(
+                        "page {pages} shares the annotation list of page {first}; its annotations and links are listed on page {first} only"
+                    )
+                } else {
+                    format!(
+                        "pages {pages} share the annotation list of page {first}; their annotations and links are listed on page {first} only"
+                    )
+                },
+            ));
+        }
+        let mut walked = HashSet::new();
+        let mut visited = 0usize;
+        for (page, entry) in entries {
+            let shared = match reference(entry) {
+                Some(id) => {
+                    if !walked.insert(id) {
+                        continue;
+                    }
+                    sharing.get(&id).filter(|l| l.len() > 1)
+                }
+                None => None,
+            };
             let Some(Object::Array(annots)) = resolve(doc, entry) else {
                 continue;
             };
@@ -157,7 +192,15 @@ impl Pdf {
                     ));
                     return;
                 }
-                if let Err(issue) = visit(page, k, a) {
+                let on = shared
+                    .and_then(|pages| {
+                        let p = dict(doc, a)?.get(b"P").ok().and_then(reference)?;
+                        // The list is in page order.
+                        self.page_number(p)
+                            .filter(|n| pages.binary_search(n).is_ok())
+                    })
+                    .unwrap_or(page);
+                if let Err(issue) = visit(on, k, a) {
                     issues.push(issue);
                     return;
                 }

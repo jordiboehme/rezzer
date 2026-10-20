@@ -277,3 +277,131 @@ fn shared_outline_title_is_bounded() {
     assert_rss_bounded();
     assert!(has_limit(&pdf, "outline"), "{:?}", pdf.issues());
 }
+
+#[test]
+fn readers_share_one_budget() {
+    // 300 annotations and 300 layers name one 1 MB string. The first reader spends what the
+    // object limit leaves; the second gets nothing.
+    let n = 300;
+    let mut c = Classic::new();
+    let layers: String = (0..n).map(|_| "<< /Type /OCG /Name 5 0 R >> ").collect();
+    c.object(
+        1,
+        format!("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [{layers}] >> >>")
+            .as_bytes(),
+    );
+    c.object(
+        2,
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+    );
+    let annots: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    c.object(
+        3,
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>").as_bytes(),
+    );
+    c.object(5, &big_string(1 << 20));
+    for i in 0..n {
+        c.object(
+            100 + i as u32,
+            b"<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents 5 0 R >>",
+        );
+    }
+    let bytes = c.finish("");
+    let tight = Limits {
+        max_object_bytes: 64 << 20,
+        ..Limits::default()
+    };
+    let pdf = Pdf::open(&bytes, None, &tight, &never).unwrap();
+    let annots = pdf.annotations();
+    assert!(!annots.is_empty() && annots.len() < n);
+    let layers = pdf.layers();
+    assert!(layers.is_empty(), "{} layers", layers.len());
+    assert!(has_limit(&pdf, "annotations"), "{:?}", pdf.issues());
+    assert!(has_limit(&pdf, "layers"), "{:?}", pdf.issues());
+}
+
+#[test]
+fn parent_tree_survives_a_spent_structure_budget() {
+    // The first element has marked content 0; the others spend the budget with a 1 MB /Alt.
+    let n = 100;
+    let mut c = Classic::new();
+    c.object(
+        1,
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",
+    );
+    c.object(
+        2,
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+    );
+    c.object(3, b"<< /Type /Page /Parent 2 0 R /StructParents 0 >>");
+    let kids: String = (0..n).map(|i| format!("{} 0 R ", 10 + i)).collect();
+    let row: String = (0..n).map(|i| format!("{} 0 R ", 10 + i)).collect();
+    c.object(
+        4,
+        format!("<< /Type /StructTreeRoot /K [{kids}] /ParentTree << /Nums [0 [{row}]] >> >>")
+            .as_bytes(),
+    );
+    c.object(5, &big_string(1 << 20));
+    c.object(10, b"<< /S /P /Pg 3 0 R /K 0 >>");
+    for i in 1..n {
+        c.object(10 + i as u32, b"<< /S /Figure /Alt 5 0 R /K 1 >>");
+    }
+    let bytes = c.finish("");
+    let tight = Limits {
+        max_object_bytes: 16 << 20,
+        ..Limits::default()
+    };
+    let pdf = Pdf::open(&bytes, None, &tight, &never).unwrap();
+    let tree = pdf.struct_tree().unwrap();
+    assert!(tree.elems.len() < n);
+    assert_eq!(pdf.role_of(1, 0), Some(0));
+    let limits: Vec<_> = pdf
+        .issues()
+        .into_iter()
+        .filter(|i| i.kind == IssueKind::Limit && i.location == "structure tree")
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+}
+
+#[test]
+fn shared_annots_array_is_reported_and_uses_p() {
+    // Three pages share one /Annots array. One note names page 3 in /P, one names no page.
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    c.object(
+        2,
+        b"<< /Type /Pages /MediaBox [0 0 612 792] /Kids [10 0 R 11 0 R 12 0 R] /Count 3 >>",
+    );
+    c.object(
+        3,
+        b"<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (on 3) /P 12 0 R >>",
+    );
+    c.object(
+        4,
+        b"<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (no page) >>",
+    );
+    c.object(5, b"[3 0 R 4 0 R]");
+    for p in 10..13 {
+        c.object(p, b"<< /Type /Page /Parent 2 0 R /Annots 5 0 R >>");
+    }
+    let bytes = c.finish("");
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let annots = pdf.annotations();
+    let pages: Vec<(Option<&str>, u32)> = annots
+        .iter()
+        .map(|a| (a.contents.as_deref(), a.page))
+        .collect();
+    assert_eq!(pages, [(Some("on 3"), 3), (Some("no page"), 1)]);
+    pdf.links();
+    let shared: Vec<_> = pdf
+        .issues()
+        .into_iter()
+        .filter(|i| i.what.contains("share the annotation list"))
+        .collect();
+    assert_eq!(shared.len(), 1, "{:?}", pdf.issues());
+    assert_eq!(shared[0].kind, IssueKind::Damaged);
+    assert_eq!(
+        shared[0].what,
+        "pages 2, 3 share the annotation list of page 1; their annotations and links are listed on page 1 only"
+    );
+}

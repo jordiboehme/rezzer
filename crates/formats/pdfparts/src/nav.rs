@@ -200,7 +200,7 @@ struct OutlineWalk<'a> {
     seen: HashSet<ObjectId>,
     issues: Vec<Issue>,
     out: Vec<OutlineItem>,
-    budget: TextBudget,
+    budget: TextBudget<'a>,
     /// The budget ran out; nothing more is read.
     spent: bool,
 }
@@ -497,7 +497,7 @@ impl Pdf {
     /// dictionary.
     fn dest_names(
         &self,
-        budget: &mut TextBudget,
+        budget: &mut TextBudget<'_>,
         issues: &mut Vec<Issue>,
     ) -> Vec<(Vec<u8>, &Object)> {
         let doc = &self.doc;

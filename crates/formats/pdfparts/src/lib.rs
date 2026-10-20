@@ -35,6 +35,7 @@ mod structure;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Mutex, OnceLock};
 
 use lopdf::{Document, ObjectId};
@@ -176,6 +177,9 @@ pub struct Pdf {
     structure: OnceLock<Option<structure::Built>>,
     /// The embedded files, read on first use.
     attachments: OnceLock<extras::Attachments>,
+    /// What all readers together may still copy out of the document: the object budget left
+    /// after open.
+    text_left: AtomicU64,
 }
 
 /// Issues in the order found, each once.
@@ -263,6 +267,7 @@ impl Pdf {
             issues: Mutex::new(log),
             structure: OnceLock::new(),
             attachments: OnceLock::new(),
+            text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(built.charged)),
         })
     }
 
@@ -327,13 +332,10 @@ impl Pdf {
         }
     }
 
-    /// The budget for what one reader call copies: the object budget left after open.
-    pub(crate) fn text_budget(&self) -> objects::TextBudget {
-        objects::TextBudget::new(
-            self.limits
-                .max_object_bytes
-                .saturating_sub(self.object_bytes),
-        )
+    /// The budget for what a reader copies. Every reader draws on the same pool: the object
+    /// budget left after open.
+    pub(crate) fn text_budget(&self) -> objects::TextBudget<'_> {
+        objects::TextBudget::shared(&self.text_left)
     }
 
     pub(crate) fn catalog(&self) -> Option<&lopdf::Dictionary> {

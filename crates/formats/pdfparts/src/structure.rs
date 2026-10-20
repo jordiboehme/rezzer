@@ -75,7 +75,7 @@ struct Walk<'a> {
     elems: Vec<StructElem>,
     issues: Vec<Issue>,
     /// What the tree may still copy out of the document.
-    budget: TextBudget,
+    budget: TextBudget<'a>,
     /// `/K` entries visited so far, bounded by `max_items`.
     work: usize,
     /// Elements reached a second time, and the first of them.
@@ -393,13 +393,16 @@ impl Walk<'_> {
         let Ok(tree) = root.get(b"ParentTree") else {
             return out;
         };
+        // The rows have their own bound, so a tree whose elements spent the copy budget
+        // still maps marked content to the elements that were read.
         let mut left = pdf.limits.max_items;
+        let mut own = TextBudget::own(u64::MAX);
         for (k, v) in walk_tree(
             doc,
             tree,
             Tree::Number,
             &pdf.limits,
-            &mut self.budget,
+            &mut own,
             WHERE,
             &mut self.issues,
         ) {
@@ -423,12 +426,6 @@ impl Walk<'_> {
                 break;
             }
             left -= a.len();
-            let row_bytes = (a.len() * std::mem::size_of::<Option<usize>>()) as u64;
-            if !self.budget.take(row_bytes) {
-                self.issues
-                    .push(self.budget.limit_issue(WHERE, "parent tree entries"));
-                break;
-            }
             let row = a
                 .iter()
                 .map(|o| reference(o).and_then(|id| self.index.get(&id).copied()))
@@ -441,7 +438,12 @@ impl Walk<'_> {
 
 /// Table attributes from `/A`: one attribute dictionary, or an array of them with revision
 /// numbers in between. The copied headers are charged to `budget`; false when it is spent.
-fn attributes(pdf: &Pdf, d: &Dictionary, elem: &mut StructElem, budget: &mut TextBudget) -> bool {
+fn attributes(
+    pdf: &Pdf,
+    d: &Dictionary,
+    elem: &mut StructElem,
+    budget: &mut TextBudget<'_>,
+) -> bool {
     let doc = &pdf.doc;
     let Ok(a) = d.get(b"A") else {
         return true;
