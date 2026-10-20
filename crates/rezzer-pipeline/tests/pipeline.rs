@@ -944,3 +944,49 @@ fn bad_asset_id_is_not_written() {
     assert!(!out.join("scan.txt.assets/evil.png").exists());
     assert!(doc.losses.iter().any(|l| l.why == LossReason::Internal));
 }
+
+#[cfg(unix)]
+#[test]
+fn symlinked_assets_folder_is_refused() {
+    let (registry, _) = pictures(&["page-1"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, out.join("scan.txt.assets")).unwrap();
+    let req = Request {
+        output_dir: Some(out),
+        ..request()
+    };
+    let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(res.completeness, Completeness::Partial);
+    let doc = res.document.unwrap();
+    assert!(doc.assets[0].path.is_none());
+    assert!(doc.losses.iter().any(|l| l.why == LossReason::Internal));
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_target_file_is_not_followed() {
+    let (registry, _) = pictures(&["page-1"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir_all(out.join("scan.txt.assets")).unwrap();
+    let victim = root.path().join("victim");
+    std::fs::write(&victim, b"keep").unwrap();
+    std::os::unix::fs::symlink(&victim, out.join("scan.txt.assets/page-1.png")).unwrap();
+    let req = Request {
+        output_dir: Some(out.clone()),
+        ..request()
+    };
+    let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    let written = out.join("scan.txt.assets/page-1.png");
+    assert_eq!(std::fs::read(&written).unwrap(), [1, 2, 3]);
+    assert!(!std::fs::symlink_metadata(&written).unwrap().is_symlink());
+    assert_eq!(res.completeness, Completeness::Complete);
+}

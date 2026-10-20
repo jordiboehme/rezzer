@@ -371,7 +371,11 @@ impl Pipeline {
             cache.put(key, &document, completeness);
         }
         if let Some(dir) = &req.output_dir {
+            let before = document.losses.len();
             write_bundle(&mut document, blobs, dir, &bundle_name(&src.name));
+            if document.losses.len() > before && completeness == Completeness::Complete {
+                completeness = Completeness::Partial;
+            }
         }
         (document, completeness, message)
     }
@@ -500,6 +504,11 @@ fn asset_extension(mime: &str) -> &'static str {
 fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &str) {
     let folder = format!("{bundle}.assets");
     let mut losses = Vec::new();
+    let folder_ready = if blobs.is_empty() {
+        Ok(())
+    } else {
+        prepare_folder(dir, &folder)
+    };
     for blob in blobs {
         let Some(asset) = document.assets.iter_mut().find(|a| a.id == blob.asset) else {
             continue;
@@ -516,8 +525,10 @@ fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &
         }
         let relative = format!("{folder}/{}.{}", asset.id, asset_extension(&asset.mime));
         let target = dir.join(&relative);
-        let written = std::fs::create_dir_all(dir.join(&folder))
-            .and_then(|()| std::fs::write(&target, &blob.bytes));
+        let written = match &folder_ready {
+            Ok(()) => write_new(&target, &blob.bytes),
+            Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
+        };
         match written {
             Ok(()) => asset.path = Some(relative),
             Err(e) => losses.push(Loss {
@@ -529,6 +540,40 @@ fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &
         }
     }
     document.losses.extend(losses);
+}
+
+/// Makes `<dir>/<folder>`, a real directory: an existing symlink or file there is refused, so
+/// nothing lands outside `dir`.
+fn prepare_folder(dir: &Path, folder: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(folder);
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::other(
+            "the assets folder exists and is not a plain directory",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes a new file at `path`. An existing entry (also a symlink) is removed without being
+/// followed, and the file is created exclusively, so a symlink is never written through.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            return Err(std::io::Error::other("a directory is in the way"));
+        }
+        Ok(_) => std::fs::remove_file(path)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)
 }
 
 /// The canonical absolute form of `path`, so the same file read from two working directories

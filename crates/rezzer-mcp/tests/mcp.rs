@@ -775,3 +775,27 @@ async fn rez_output_dir_must_be_absolute() {
     .await;
     assert_eq!(structured(&ok)["status"], "complete");
 }
+
+#[test]
+fn params_debug_hides_the_password() {
+    let params = rezzer_mcp::tools::RezParams {
+        password: Some("hunter2-secret".into()),
+        ..Default::default()
+    };
+    let shown = format!("{params:?}");
+    assert!(!shown.contains("hunter2"), "{shown}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_wrong_password_type_is_not_echoed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let client = connect(config()).await;
+    let result = call(&client, "rez", json!({ "path": path, "password": 1234567 })).await;
+    let s = structured(&result);
+    assert_eq!(s["status"], "failed", "{s}");
+    let message = s["message"].as_str().unwrap();
+    assert!(message.contains("password"), "{message}");
+    assert!(!message.contains("1234567"), "{message}");
+    assert!(!text(&result).contains("1234567"));
+}

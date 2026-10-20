@@ -31,7 +31,7 @@ const DEFAULT_NAME: &str = "file";
 // leniently, so a wrong value or type becomes a failed result with structured content and a
 // message, never a protocol error.
 /// Read a file: give exactly one of path, file or source.
-#[derive(Debug, Default, Clone, PartialEq, Deserialize, JsonSchema)]
+#[derive(Default, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct RezParams {
     /// Path of a local file, absolute or relative to the server's working directory.
     #[serde(default)]
@@ -77,6 +77,23 @@ fn format_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         "enum": ["markdown", "json"],
         "default": "markdown",
     })
+}
+
+// Debug hides the password.
+impl std::fmt::Debug for RezParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RezParams")
+            .field("path", &self.path)
+            .field("file", &self.file.as_ref().map(|_| "<data>"))
+            .field("source", &self.source)
+            .field("page", &self.page)
+            .field("sections", &self.sections)
+            .field("math", &self.math)
+            .field("format", &self.format)
+            .field("output_dir", &self.output_dir)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl RezParams {
@@ -163,6 +180,8 @@ fn string(args: &mut Map<String, Value>, key: &str) -> Result<Option<String>, St
     match take(args, key) {
         None => Ok(None),
         Some(Value::String(s)) => Ok(Some(s)),
+        // The value of a password is never echoed.
+        Some(_) if key == "password" => Err("password must be a string".to_string()),
         Some(other) => Err(format!("{key} must be a string, not {}", shown(&other))),
     }
 }
