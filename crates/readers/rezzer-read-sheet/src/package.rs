@@ -42,7 +42,8 @@ fn key(name: &str) -> String {
 impl Package {
     /// Measures every entry of the archive (entry size and ratio through zipguard) and
     /// charges it to the budget, once: this is the only charge of unpacked bytes, so the
-    /// unpacked limit bounds what the package really unpacks to. Entries whose names differ only in case are refused.
+    /// unpacked limit bounds what the package really unpacks to. Entries whose names
+    /// differ only in case are refused.
     pub fn preflight(zip: &mut Archive, budget: &Budget) -> Result<Package, Refusal> {
         let names: Vec<String> = zip.names().iter().map(|n| n.to_string()).collect();
         let mut sizes = HashMap::new();

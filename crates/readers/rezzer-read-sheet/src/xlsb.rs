@@ -478,8 +478,10 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
                 blocks.push(note("This sheet was not read."));
                 out.doc.body.push(section(&entry.name, &q, blocks));
                 incomplete = true;
+                // Every entry passed the size and ratio check before; a limit here is one
+                // of those caps.
                 if why == LossReason::Limit {
-                    halted = Some("unpacked limit reached");
+                    halted = Some("entry size or compression ratio limit reached");
                 }
                 continue;
             }
