@@ -33,6 +33,9 @@ pub enum OpenError {
     TooLarge { size: u64, max: u64 },
     #[error("cannot read file: {0}")]
     Io(String),
+    /// Rezzer stopped with an internal error (a panic) while opening; the text says where.
+    #[error("{0}")]
+    Internal(String),
 }
 
 /// Opens `path`: refuses directories and other non-files, refuses files larger than

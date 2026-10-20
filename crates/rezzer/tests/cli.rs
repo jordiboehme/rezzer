@@ -326,7 +326,13 @@ fn inspect_shows_format_and_sha() {
         .args(["inspect", "nope.bin"])
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("not found"));
+        .stderr(predicate::str::starts_with("rezzer: file not found: "));
+    std::fs::create_dir_all(env.root.path().join("sub")).unwrap();
+    env.cmd()
+        .args(["inspect", "sub"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::starts_with("rezzer: not a regular file: "));
 }
 
 #[test]

@@ -744,3 +744,30 @@ fn a_panic_during_detection_is_an_internal_loss() {
     assert_eq!(info.format, FormatId::Unknown);
     assert!(info.detection.evidence.contains("boom in the detector"));
 }
+
+#[test]
+fn inspect_keeps_the_open_error_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = Pipeline::new(config(None), Registry::new());
+    let err = pipeline.inspect(dir.path()).unwrap_err();
+    assert!(
+        matches!(err, rezzer_detect::OpenError::NotAFile(_)),
+        "{err:?}"
+    );
+    let err = pipeline.inspect(&dir.path().join("missing")).unwrap_err();
+    assert!(
+        matches!(err, rezzer_detect::OpenError::NotFound(_)),
+        "{err:?}"
+    );
+    let mut cfg = config(None);
+    cfg.limits.max_file_bytes = 2;
+    let file = dir.path().join("big.txt");
+    std::fs::write(&file, "hello").unwrap();
+    let err = Pipeline::new(cfg, Registry::new())
+        .inspect(&file)
+        .unwrap_err();
+    assert!(
+        matches!(err, rezzer_detect::OpenError::TooLarge { .. }),
+        "{err:?}"
+    );
+}

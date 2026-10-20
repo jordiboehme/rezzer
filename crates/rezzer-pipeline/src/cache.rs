@@ -21,7 +21,7 @@
 //! silently and the run goes on.
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -68,8 +68,10 @@ impl Cache {
     /// The entry for `key`, if there is one that parses and belongs to `src`.
     pub(crate) fn get(&self, key: &str, src: &Source) -> Option<(Document, Completeness)> {
         let path = self.path(key);
-        let file = File::open(&path).ok()?;
-        let entry: Entry = serde_json::from_reader(BufReader::new(file)).ok()?;
+        // One bulk read and from_slice: about twice as fast as from_reader, and an entry is
+        // bounded by the cache cap.
+        let text = std::fs::read(&path).ok()?;
+        let entry: Entry = serde_json::from_slice(&text).ok()?;
         let fits = entry.document.model_version == MODEL_VERSION
             && entry.document.source.sha256 == src.sha256
             && entry.completeness != Completeness::Failed;

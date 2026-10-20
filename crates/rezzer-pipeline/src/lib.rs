@@ -160,7 +160,7 @@ impl Pipeline {
         let path = canonical_path(path);
         match self.open(|d| rezzer_detect::open_with_detector(&path, &self.config.limits, d)) {
             Ok((src, detect_panic)) => self.run_source(&src, detect_panic, req),
-            Err(message) => RunResult::failed(message),
+            Err(e) => RunResult::failed(e.to_string()),
         }
     }
 
@@ -178,16 +178,15 @@ impl Pipeline {
         });
         match opened {
             Ok((src, detect_panic)) => self.run_source(&src, detect_panic, req),
-            Err(message) => RunResult::failed(message),
+            Err(e) => RunResult::failed(e.to_string()),
         }
     }
 
     /// Opens and detects `path` without reading it.
     pub fn inspect(&self, path: &Path) -> Result<Inspection, OpenError> {
         let path = canonical_path(path);
-        let (src, _) = self
-            .open(|d| rezzer_detect::open_with_detector(&path, &self.config.limits, d))
-            .map_err(OpenError::Io)?;
+        let (src, _) =
+            self.open(|d| rezzer_detect::open_with_detector(&path, &self.config.limits, d))?;
         Ok(Inspection {
             reader: self
                 .registry
@@ -210,11 +209,11 @@ impl Pipeline {
 
     /// Opens a source with panic capture around opening and around detection. A detection
     /// panic gives the source (hash and size are known) with format unknown and the message;
-    /// any other panic or an open error gives the error message.
+    /// an open error is returned as it is, any other panic as [`OpenError::Internal`].
     fn open(
         &self,
         open: impl FnOnce(&rezzer_detect::Detector<'_>) -> Result<Source, OpenError>,
-    ) -> Result<(Source, Option<String>), String> {
+    ) -> Result<(Source, Option<String>), OpenError> {
         let detect_panic: RefCell<Option<String>> = RefCell::new(None);
         let detector = self.detector;
         let detect = |name: &str, mime: Option<&str>, bytes: &[u8]| match panics::contained(|| {
@@ -236,11 +235,11 @@ impl Pipeline {
         };
         match panics::contained(|| open(&detect)) {
             Ok(Ok(src)) => Ok((src, detect_panic.into_inner())),
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(panic) => Err(format!(
+            Ok(Err(e)) => Err(e),
+            Err(panic) => Err(OpenError::Internal(format!(
                 "opening the file stopped with an internal error: {}",
                 one_line(&panic)
-            )),
+            ))),
         }
     }
 
