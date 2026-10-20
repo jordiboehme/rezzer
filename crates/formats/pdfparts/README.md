@@ -11,6 +11,10 @@ pdfparts reads the object layer of a PDF file. It tells what the file is and how
 - Embedded files with name, type, size and dates. Their bytes are unpacked under the same limits as every stream and are never opened
 - Layers (optional content) with their names and whether they are shown when the file opens
 - Article threads with their title, pages and number of beads
+- Form fields with full names, types, values, flags in words, options, pages and scripts. Values that a field takes from its parents are filled in
+- Form scripts in words: the fields a script reads, and Acrobat calls such as `AFNumber_Format(2, 0, 0, 0, "$", true)` as `number, 2 decimals, "$" before the number`
+- Document scripts, the open action, document, page, field and link actions. They are listed and never run or followed
+- Signatures with signer, reason, date, sub-filter and byte range, and whether they cover the whole file. They are described, not verified
 - Encryption: the method and whether the file opens without a password
 - A canonical copy of the file for other parsers: only the objects the document uses, decrypted, with a classic cross-reference table and no object streams
 

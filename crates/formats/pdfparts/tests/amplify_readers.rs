@@ -405,3 +405,54 @@ fn shared_annots_array_is_reported_and_uses_p() {
         "pages 2, 3 share the annotation list of page 1; their annotations and links are listed on page 1 only"
     );
 }
+
+#[test]
+fn shared_field_names_and_scripts_are_bounded() {
+    // A chain of 200 fields names one 1 MB /T, so each full name is longer than the one
+    // before. 300 more fields share one 1 MB calculate script.
+    let depth = 200;
+    let n = 300;
+    let mut c = Classic::new();
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 1000 + i)).collect();
+    c.object(
+        1,
+        format!("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [10 0 R {fields}] >> >>")
+            .as_bytes(),
+    );
+    c.object(
+        2,
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+    );
+    c.object(3, b"<< /Type /Page /Parent 2 0 R >>");
+    c.object(5, &big_string(1 << 20));
+    c.object(6, b"<< /S /JavaScript /JS 5 0 R >>");
+    for i in 0..depth {
+        let kids = if i + 1 < depth {
+            format!("/Kids [{} 0 R]", 11 + i)
+        } else {
+            String::new()
+        };
+        c.object(
+            10 + i as u32,
+            format!("<< /T 5 0 R /FT /Tx {kids} >>").as_bytes(),
+        );
+    }
+    for i in 0..n {
+        c.object(
+            1000 + i as u32,
+            format!("<< /T (f{i}) /FT /Tx /AA << /C 6 0 R >> >>").as_bytes(),
+        );
+    }
+    let bytes = c.finish("");
+    let open = || Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let pdf = open();
+    let form = pdf.form().unwrap();
+    assert!(form.fields.len() < n);
+    assert!(has_limit(&pdf, "form fields"), "{:?}", pdf.issues());
+    drop(pdf);
+    let pdf = open();
+    let scripts = pdf.scripts();
+    assert!(scripts.len() < n);
+    assert!(has_limit(&pdf, "copy more data"), "{:?}", pdf.issues());
+    assert_rss_bounded();
+}

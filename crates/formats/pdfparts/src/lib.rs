@@ -6,8 +6,8 @@
 //!
 //! A PDF library gives you objects. This crate reads what they mean: document metadata (Info
 //! and XMP), language, pages with their labels, sizes and images, the outline, named
-//! destinations, links, annotations, the structure tree, embedded files, layers and article
-//! threads.
+//! destinations, links, annotations, the structure tree, embedded files, layers, article
+//! threads, form fields, scripts and signatures. Scripts are read as text and never run.
 //!
 //! [`Pdf::open`] parses the file with its own bounded parser, keeps only the objects the
 //! document reaches, and writes them as canonical bytes ([`Pdf::canonical`]): a plain PDF with a
@@ -23,14 +23,18 @@
 //! assert_eq!(pdf_date("D:20151230152248+01'00'").as_deref(), Some("2015-12-30T15:22:48+01:00"));
 //! ```
 
+mod actions;
 mod annots;
 mod extras;
+mod forms;
 mod guard;
 mod meta;
 mod nav;
 pub mod objects;
 mod pagetree;
 mod parse;
+pub mod script;
+mod signatures;
 mod structure;
 
 use std::collections::{HashMap, HashSet};
@@ -40,10 +44,13 @@ use std::sync::{Mutex, OnceLock};
 
 use lopdf::{Document, ObjectId};
 
+pub use actions::Script;
 pub use annots::Annot;
 pub use extras::{EmbeddedFile, Layer, Thread};
+pub use forms::{Field, FieldKind, Form};
 pub use meta::{Info, PdfDate};
 pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
+pub use signatures::{Sig, SigKind};
 pub use structure::{StructElem, StructTree};
 
 /// Bounds for reading one file.
@@ -177,6 +184,10 @@ pub struct Pdf {
     structure: OnceLock<Option<structure::Built>>,
     /// The embedded files, read on first use.
     attachments: OnceLock<extras::Attachments>,
+    /// The form, the scripts and the signatures, each read on first use.
+    form: OnceLock<Option<Form>>,
+    scripts: OnceLock<Vec<Script>>,
+    signatures: OnceLock<Vec<Sig>>,
     /// What all readers together may still copy out of the document: the object budget left
     /// after open.
     text_left: AtomicU64,
@@ -267,6 +278,9 @@ impl Pdf {
             issues: Mutex::new(log),
             structure: OnceLock::new(),
             attachments: OnceLock::new(),
+            form: OnceLock::new(),
+            scripts: OnceLock::new(),
+            signatures: OnceLock::new(),
             text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(built.charged)),
         })
     }
