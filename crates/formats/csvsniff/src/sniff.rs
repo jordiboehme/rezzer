@@ -660,15 +660,16 @@ fn identifier_values(acc: &Acc, c: &Column, rows: usize) -> bool {
 }
 
 /// Scans the quoting like the csv crate does (a quote only opens a field at its start) and
-/// returns the first quoted field that is not closed properly: the byte offset of its opening
+/// returns the problems: the first mid-file one and, independently, a field still open at the
+/// end. Each is a quoted field that is not closed properly: the byte offset of its opening
 /// quote and whether it is still open at the end of `text`. A field that runs over a line break
 /// and then ends in a quote that is not followed by a delimiter or a line break (the csv crate
 /// reads on without an error) counts as well, with `at_end` false.
-fn find_quote_problem(text: &str, delimiter: u8, quote: u8) -> Option<QuoteProblem> {
+fn find_quote_problems(text: &str, delimiter: u8, quote: u8) -> Vec<QuoteProblem> {
     let b = text.as_bytes();
     let (mut i, mut start, mut open) = (0, true, false);
     let (mut opened_at, mut multiline) = (0, false);
-    let mut first: Option<QuoteProblem> = None;
+    let mut problems: Vec<QuoteProblem> = Vec::new();
     while i < b.len() {
         let c = b[i];
         if open {
@@ -684,8 +685,8 @@ fn find_quote_problem(text: &str, delimiter: u8, quote: u8) -> Option<QuoteProbl
                         None => true,
                         Some(&n) => n == delimiter || n == b'\n' || n == b'\r',
                     };
-                    if multiline && !ends_field && first.is_none() {
-                        first = Some(QuoteProblem {
+                    if multiline && !ends_field && problems.is_empty() {
+                        problems.push(QuoteProblem {
                             offset: opened_at,
                             at_end: false,
                         });
@@ -703,12 +704,12 @@ fn find_quote_problem(text: &str, delimiter: u8, quote: u8) -> Option<QuoteProbl
         i += 1;
     }
     if open {
-        return first.or(Some(QuoteProblem {
+        problems.push(QuoteProblem {
             offset: opened_at,
             at_end: true,
-        }));
+        });
     }
-    first
+    problems
 }
 
 /// Analyzes the whole text with a known dialect.
@@ -845,14 +846,14 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     } else {
         Vec::new()
     };
-    let quote_problem = find_quote_problem(text, delimiter, quote);
+    let quote_problems = find_quote_problems(text, delimiter, quote);
     Analysis {
         columns,
         rows,
         ragged_rows,
         ragged_total,
-        unterminated_quote: quote_problem.is_some_and(|p| p.at_end),
-        quote_problem,
+        unterminated_quote: quote_problems.iter().any(|p| p.at_end),
+        quote_problems,
         derived,
     }
 }

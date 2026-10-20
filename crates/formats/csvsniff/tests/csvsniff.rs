@@ -145,19 +145,30 @@ fn quote_problem_is_located() {
     // Open at the end of the text.
     let text = "a,b\n1,2\n3,\"oops\n4,5\n";
     let a = fixed(text);
-    let p = a.quote_problem.expect("problem");
+    let p = a.quote_problems[0];
     assert!(p.at_end);
     assert_eq!(&text[p.offset..p.offset + 5], "\"oops");
     // Closed by a later quote that is not at the end of a field.
     let text = "a,b\n1,\"open\n2,3\n4,\"x y\",5\n6,7\n";
     let a = fixed(text);
-    let p = a.quote_problem.expect("problem");
+    let p = a.quote_problems[0];
     assert!(!p.at_end);
     assert!(!a.unterminated_quote);
     assert_eq!(&text[p.offset..p.offset + 5], "\"open");
     // Proper multi-line and escaped quotes are fine.
     let a = fixed("a,b\n1,\"ha \n\"\"ha\"\" \nha\"\n3,4\n");
-    assert_eq!(a.quote_problem, None);
+    assert!(a.quote_problems.is_empty());
+}
+
+#[test]
+fn mid_file_and_end_problems_are_both_reported() {
+    let text = "a,b\n1,2\n2,\"open\n3,4\n4,\"x y\",5\n9,\"oops,1\n7,8\n7,8\n";
+    let a = fixed(text);
+    assert_eq!(a.quote_problems.len(), 2);
+    assert!(!a.quote_problems[0].at_end);
+    assert!(a.quote_problems[1].at_end);
+    assert!(a.unterminated_quote);
+    assert_eq!(&text[a.quote_problems[1].offset..][..6], "\"oops,");
 }
 
 #[test]

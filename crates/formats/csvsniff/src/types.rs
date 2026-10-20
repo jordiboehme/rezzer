@@ -107,8 +107,9 @@ pub struct Analysis {
     pub ragged_total: usize,
     /// True when a quoted field is still open at the end of the text.
     pub unterminated_quote: bool,
-    /// The first quoted field that is not closed properly, if any (see [`QuoteProblem`]).
-    pub quote_problem: Option<QuoteProblem>,
+    /// Quoted fields that are not closed properly (see [`QuoteProblem`]): the first one in the
+    /// middle of the text, if any, and one that is still open at the end, if any.
+    pub quote_problems: Vec<QuoteProblem>,
     /// Observed sum relations between numeric columns.
     pub derived: Vec<Derived>,
 }
