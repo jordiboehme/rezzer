@@ -27,7 +27,7 @@ use rezzer_model::{
 };
 use rezzer_render::RenderOptions;
 
-pub use config::{Config, ConfigError, config_path_from};
+pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, config_path_from};
 pub use rezzer_render::OutputSection;
 
 use crate::cache::Cache;
@@ -234,7 +234,7 @@ impl Pipeline {
             .for_format(src.format)
             .map(|r| (r.id(), r.version()));
         let cache = self.cache.as_ref().filter(|_| req.password.is_none());
-        let key = cache.map(|_| cache::key(src, reader, &self.config, req));
+        let key = cache.map(|_| cache::key(src, reader, &self.config));
         if let (Some(cache), Some(key)) = (cache, &key)
             && let Some((mut document, completeness)) = cache.get(key, src)
         {
@@ -257,7 +257,7 @@ impl Pipeline {
                     "enrichment (overview, language, anchor check) stopped with an internal error: {}",
                     one_line(&panic)
                 ),
-                why: LossReason::NotImplemented,
+                why: LossReason::Internal,
                 severity: Severity::Warning,
             });
             if completeness == Completeness::Complete {
@@ -299,7 +299,7 @@ impl Pipeline {
                 document.losses.push(Loss {
                     location: "document".into(),
                     what: format!("the whole file: {message}"),
-                    why: LossReason::Damaged,
+                    why: LossReason::Internal,
                     severity: Severity::Error,
                 });
                 (document, Completeness::Failed, Some(message))

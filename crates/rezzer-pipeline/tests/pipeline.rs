@@ -161,6 +161,7 @@ fn panicking_reader_is_failed() {
     assert_eq!(out.completeness, Completeness::Failed);
     let doc = out.document.expect("the source facts survive a panic");
     let loss = doc.losses.first().expect("a loss for the panic");
+    assert_eq!(loss.why, LossReason::Internal);
     assert!(loss.what.contains("counting"), "{}", loss.what);
     assert!(loss.what.contains("boom in the reader"), "{}", loss.what);
     let message = out.message.unwrap();
@@ -230,7 +231,7 @@ fn cache_off_reads_every_time() {
 }
 
 #[test]
-fn generated_at_is_not_part_of_the_cache_key_but_options_are() {
+fn output_options_are_not_part_of_the_cache_key() {
     let dir = tempfile::tempdir().unwrap();
     let (registry, calls) = counting(false);
     let pipeline = Pipeline::new(config(Some(dir.path())), registry);
@@ -240,13 +241,97 @@ fn generated_at_is_not_part_of_the_cache_key_but_options_are() {
         ..Request::default()
     };
     let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &later);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(out.markdown_pages[0].contains("2027-01-01T00:00:00Z"));
     let sections = Request {
-        sections: Some(vec![OutputSection::Content]),
+        sections: Some(vec![OutputSection::NotRead]),
         ..request()
     };
-    pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &sections);
+    let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &sections);
+    assert!(
+        !out.markdown_pages.concat().contains("hello"),
+        "sections still apply"
+    );
+    let json = Request {
+        output: OutputKind::Json,
+        ..request()
+    };
+    let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &json);
+    assert!(out.json.is_some());
+    // Markdown, JSON and section runs share one entry: the cache holds the document.
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(cache_files(dir.path()).len(), 1);
+}
+
+#[test]
+fn reading_options_are_part_of_the_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    let mut cfg = config(Some(dir.path()));
+    let first = Pipeline::new(cfg.clone(), registry);
+    first.run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    cfg.enrich.disabled = vec!["language".into()];
+    let (registry2, calls2) = counting(false);
+    let second = Pipeline::new(cfg, registry2);
+    second.run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls2.load(Ordering::SeqCst), 1, "other passes: a miss");
+}
+
+fn dir_bytes(dir: &Path) -> u64 {
+    cache_files(dir)
+        .iter()
+        .map(|p| std::fs::metadata(p).unwrap().len())
+        .sum()
+}
+
+#[test]
+fn cache_is_capped_and_drops_the_oldest_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    let probe = Pipeline::new(config(Some(dir.path())), registry);
+    probe.run_bytes("x.txt", b"entry 0\n".to_vec(), None, &request());
+    let one = dir_bytes(dir.path());
+    assert!(one > 0);
+
+    let mut cfg = config(Some(dir.path()));
+    cfg.cache_max_bytes = one * 5 / 2;
+    let (registry, calls_capped) = counting(false);
+    let pipeline = Pipeline::new(cfg.clone(), registry);
+    for i in 1..=5 {
+        // Distinct modification times, so "oldest" is well defined on every file system.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        pipeline.run_bytes(
+            "x.txt",
+            format!("entry {i}\n").into_bytes(),
+            None,
+            &request(),
+        );
+        assert!(
+            dir_bytes(dir.path()) <= cfg.cache_max_bytes,
+            "after entry {i}"
+        );
+    }
+    assert!(cache_files(dir.path()).len() <= 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls_capped.load(Ordering::SeqCst), 5);
+    // The newest entry is kept, the oldest is gone.
+    pipeline.run_bytes("x.txt", b"entry 5\n".to_vec(), None, &request());
+    assert_eq!(calls_capped.load(Ordering::SeqCst), 5);
+    pipeline.run_bytes("x.txt", b"entry 1\n".to_vec(), None, &request());
+    assert_eq!(calls_capped.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn an_unusable_cache_never_fails_a_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("not-a-dir");
+    std::fs::write(&blocker, "file in the way").unwrap();
+    let (registry, calls) = counting(false);
+    let pipeline = Pipeline::new(config(Some(&blocker)), registry);
+    let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(out.completeness, Completeness::Complete);
+    assert!(out.message.is_none());
+    pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
@@ -400,6 +485,7 @@ fn config_defaults_when_file_missing() {
     assert_eq!(cfg.limits, rezzer_limits::Limits::default());
     assert!(cfg.cache);
     assert_eq!(cfg.cache_dir, None);
+    assert_eq!(cfg.cache_max_bytes, 512 * 1024 * 1024);
     assert!(cfg.enrich.disabled.is_empty());
 }
 
@@ -411,7 +497,7 @@ fn config_reads_its_keys() {
     std::fs::write(
         &path,
         format!(
-            "cache = false\ncache_dir = {:?}\n\n[limits]\npage_tokens = 1000\nmax_time = 5\n\n[enrich]\ndisabled = [\"language\"]\n",
+            "cache = false\ncache_dir = {:?}\ncache_max_bytes = 4096\n\n[limits]\npage_tokens = 1000\nmax_time = 5\n\n[enrich]\ndisabled = [\"language\"]\n",
             cache.to_str().unwrap()
         ),
     )
@@ -419,6 +505,7 @@ fn config_reads_its_keys() {
     let cfg = Config::load_from(&path).unwrap();
     assert!(!cfg.cache);
     assert_eq!(cfg.cache_dir, Some(cache));
+    assert_eq!(cfg.cache_max_bytes, 4096);
     assert_eq!(cfg.limits.page_tokens, 1000);
     assert_eq!(cfg.limits.max_time, std::time::Duration::from_secs(5));
     assert_eq!(cfg.limits.max_depth, 256);

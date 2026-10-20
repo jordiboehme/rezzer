@@ -9,6 +9,7 @@
 //! ```toml
 //! cache = true
 //! cache_dir = "/absolute/path"
+//! cache_max_bytes = 536870912
 //!
 //! [limits]
 //! max_file_bytes = 2147483648
@@ -35,8 +36,14 @@ pub struct Config {
     /// Where cache entries live; `None` is the user cache dir
     /// (`directories::ProjectDirs::cache_dir`).
     pub cache_dir: Option<PathBuf>,
+    /// Size cap of the cache dir. After a write over the cap the oldest entries are removed
+    /// until the cache is under 90 % of it.
+    pub cache_max_bytes: u64,
     pub enrich: EnrichOptions,
 }
+
+/// Default [`Config::cache_max_bytes`]: 512 MiB.
+pub const DEFAULT_CACHE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 impl Default for Config {
     fn default() -> Self {
@@ -44,6 +51,7 @@ impl Default for Config {
             limits: Limits::default(),
             cache: true,
             cache_dir: None,
+            cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
             enrich: EnrichOptions::default(),
         }
     }
@@ -64,6 +72,7 @@ struct ConfigFile {
     limits: Limits,
     cache: Option<bool>,
     cache_dir: Option<PathBuf>,
+    cache_max_bytes: Option<u64>,
     enrich: EnrichFile,
 }
 
@@ -132,6 +141,7 @@ impl Config {
             limits: file.limits,
             cache: file.cache.unwrap_or(true),
             cache_dir: file.cache_dir,
+            cache_max_bytes: file.cache_max_bytes.unwrap_or(DEFAULT_CACHE_MAX_BYTES),
             enrich: EnrichOptions {
                 disabled: file.enrich.disabled,
             },
