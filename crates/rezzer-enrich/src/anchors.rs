@@ -4,6 +4,9 @@
 
 //! Pass `anchors`: every reference to an anchor must name an anchor of the document.
 //!
+//! References are the anchors of formulas (with the range an array formula fills and the
+//! cells it reads), parameters, rules, graph nodes and edges, annotations and changes.
+//!
 //! The anchors of a document are the anchors of its blocks (sections included), table cells,
 //! `AnchorMark` inlines. Graph node
 //! anchors are references into the body, not definitions. A reference resolves when it is one
@@ -43,9 +46,18 @@ impl Pass for Anchors {
         };
         for f in &doc.facets.formulas {
             check(f.anchor.0.clone(), &f.anchor);
+            if let Some(range) = &f.range {
+                check(f.anchor.0.clone(), range);
+            }
             for r in &f.references {
                 check(f.anchor.0.clone(), r);
             }
+        }
+        for p in &doc.facets.parameters {
+            check("parameter".into(), &p.anchor);
+        }
+        for r in &doc.facets.rules {
+            check(format!("rule ({})", r.kind), &r.anchor);
         }
         for g in &doc.facets.graphs {
             for n in &g.nodes {

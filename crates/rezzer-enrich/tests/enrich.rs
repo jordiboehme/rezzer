@@ -7,7 +7,8 @@ use std::time::Instant;
 use rezzer_enrich::{EnrichOptions, enrich};
 use rezzer_model::{
     Anchor, Annotation, Asset, Block, Cell, Confidence, Detection, Document, Edge, Event, FormatId,
-    Formula, Graph, Inline, Loss, LossReason, Node, Role, SectionKind, Severity, SourceInfo, Value,
+    Formula, Graph, Inline, Loss, LossReason, Node, Parameter, Role, Rule, SectionKind, Severity,
+    SourceInfo, Value,
 };
 
 fn doc() -> Document {
@@ -678,6 +679,64 @@ fn workbook_names_and_external_references_resolve() {
             "reference to name:zz not found",
             "reference to S:Other!A1 not found",
             "reference to name:cell not found"
+        ]
+    );
+}
+
+#[test]
+fn parameter_rule_and_formula_range_anchors_are_checked() {
+    use rezzer_model::FormulaKind;
+    let mut d = doc();
+    d.body = vec![sheet("S", 2, 2)];
+    let mut gg = formula("name:gg", &[]);
+    gg.kind = Some(FormulaKind::Name);
+    let mut spill = formula("S!A1", &[]);
+    spill.range = Some(a("S!A1:B2"));
+    d.facets.formulas = vec![gg, spill];
+    let param = |anchor: &str| Parameter {
+        anchor: a(anchor),
+        name: None,
+        label: None,
+        value: Some(Value::number(1.0, None)),
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+    };
+    let rule = |anchor: &str| Rule {
+        kind: "validation".into(),
+        anchor: a(anchor),
+        detail: "whole number".into(),
+        formulas: vec![],
+        message: None,
+    };
+    d.facets.parameters = vec![param("S!B1"), param("name:gg")];
+    d.facets.rules = vec![rule("S!A1:A2 B1:B2")];
+    enrich(&mut d, &only(&[]));
+    assert!(d.losses.is_empty(), "{:?}", d.losses);
+
+    let mut gone = formula("S!B2", &[]);
+    gone.range = Some(a("Gone!A1:A3"));
+    d.facets.formulas.push(gone);
+    d.facets.parameters.push(param("Gone!C3"));
+    d.facets.rules.push(Rule {
+        kind: "conditional-format".into(),
+        ..rule("Lost!A1:A9")
+    });
+    enrich(&mut d, &only(&[]));
+    let found: Vec<_> = d
+        .losses
+        .iter()
+        .map(|l| (l.location.as_str(), l.what.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("S!B2", "reference to Gone!A1:A3 not found"),
+            ("parameter", "reference to Gone!C3 not found"),
+            (
+                "rule (conditional-format)",
+                "reference to Lost!A1:A9 not found"
+            ),
         ]
     );
 }
