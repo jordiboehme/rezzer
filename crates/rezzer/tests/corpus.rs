@@ -45,12 +45,21 @@ fn request() -> Request {
     }
 }
 
-/// Corpus files, sorted: everything in the subfolders except facts files.
+/// Folders whose files run through the pipeline with facts and snapshots. `office/` holds the
+/// spreadsheet corpus; it is checked by `office_corpus_matches_manifest` until the spreadsheet
+/// readers get facts and snapshots.
+const PIPELINE_FOLDERS: [&str; 1] = ["web-text"];
+
+/// Corpus files, sorted: everything in the pipeline folders except facts files.
 fn corpus_files() -> Vec<PathBuf> {
     let mut files = Vec::new();
     for folder in std::fs::read_dir(corpus_dir()).unwrap() {
         let folder = folder.unwrap().path();
-        if !folder.is_dir() || folder.file_name().is_some_and(|n| n == "snapshots") {
+        if !folder.is_dir()
+            || !PIPELINE_FOLDERS
+                .iter()
+                .any(|f| folder.file_name().is_some_and(|n| n == *f))
+        {
             continue;
         }
         for file in std::fs::read_dir(&folder).unwrap() {
@@ -237,10 +246,8 @@ fn corpus_golden() {
     });
 }
 
-/// Every corpus file is listed in MANIFEST.md with its SHA-256, and every row has a file.
-#[test]
-fn corpus_manifest_matches_the_files() {
-    use sha2::{Digest, Sha256};
+/// The rows of MANIFEST.md: relative path to SHA-256. Only rows whose first cell is a path.
+fn manifest_rows() -> std::collections::BTreeMap<String, String> {
     let manifest = std::fs::read_to_string(corpus_dir().join("MANIFEST.md")).unwrap();
     let mut listed = std::collections::BTreeMap::new();
     for line in manifest.lines().filter(|l| {
@@ -255,23 +262,83 @@ fn corpus_manifest_matches_the_files() {
         assert!(
             listed
                 .insert(cells[0].to_string(), cells[3].to_string())
-                .is_none()
+                .is_none(),
+            "listed twice: {line}"
         );
         assert!(cells[1].contains("http"), "no source URL: {line}");
     }
+    listed
+}
+
+fn relative(file: &Path) -> String {
+    file.strip_prefix(corpus_dir())
+        .unwrap()
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn sha256_of(file: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
+}
+
+/// Every pipeline corpus file is listed in MANIFEST.md with its SHA-256, and every row has a file.
+#[test]
+fn corpus_manifest_matches_the_files() {
+    let mut listed = manifest_rows();
+    listed.retain(|k, _| {
+        PIPELINE_FOLDERS
+            .iter()
+            .any(|f| k.starts_with(&format!("{f}/")))
+    });
     let mut problems = Vec::new();
     for file in corpus_files() {
-        let rel = file
-            .strip_prefix(corpus_dir())
-            .unwrap()
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join("/");
-        let hash = hex::encode(Sha256::digest(std::fs::read(&file).unwrap()));
+        let rel = relative(&file);
+        let hash = sha256_of(&file);
         match listed.remove(&rel) {
             None => problems.push(format!("{rel}: not in MANIFEST.md")),
             Some(h) if h != hash => problems.push(format!("{rel}: hash differs")),
+            Some(_) => {}
+        }
+    }
+    problems.extend(listed.keys().map(|k| format!("{k}: no such file")));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Every file in `office/` (including `office/malformed/`) is listed in MANIFEST.md with its
+/// full SHA-256, every `office/` row has a file, and no file is over 2 MB. The files are never
+/// skipped: a missing file fails the test.
+#[test]
+fn office_corpus_matches_manifest() {
+    fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, files);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    let mut listed = manifest_rows();
+    listed.retain(|k, _| k.starts_with("office/"));
+    assert_eq!(listed.len(), 33, "expected 33 office rows");
+    let mut files = Vec::new();
+    walk(&corpus_dir().join("office"), &mut files);
+    files.sort();
+    let mut problems = Vec::new();
+    for file in &files {
+        let rel = relative(file);
+        let len = std::fs::metadata(file).unwrap().len();
+        if len > 2 * 1024 * 1024 {
+            problems.push(format!("{rel}: {len} bytes, over 2 MB"));
+        }
+        match listed.remove(&rel) {
+            None => problems.push(format!("{rel}: not in MANIFEST.md")),
+            Some(h) if h.len() != 64 => problems.push(format!("{rel}: not a full SHA-256")),
+            Some(h) if h != sha256_of(file) => problems.push(format!("{rel}: hash differs")),
             Some(_) => {}
         }
     }
