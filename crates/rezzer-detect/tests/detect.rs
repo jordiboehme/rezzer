@@ -302,6 +302,23 @@ fn small_broken_csv_is_csv_by_extension() {
 }
 
 #[test]
+fn very_small_ragged_csv_is_csv_by_extension() {
+    for text in [
+        &b"name,mass,count\nalpha,1.5,3\nbeta,2.5,4,9\ngamma,3.5,5\n"[..],
+        &b"a,b\n1,2\n3,4,5\n"[..],
+    ] {
+        let (f, d) = detect("x.csv", text);
+        assert_eq!(f, FormatId::Csv, "{}", d.evidence);
+        assert_eq!(d.confidence, Confidence::Guess);
+    }
+    // Two lines are too few to tell a header from a sentence.
+    assert_ne!(detect("x.csv", b"a,b\n1,2,3\n").0, FormatId::Csv);
+    // Short prose with commas in a .csv file stays text.
+    let prose = b"Hello there, my friend.\nHow are you, today, then?\nFine.\n";
+    assert_ne!(detect("x.csv", prose).0, FormatId::Csv);
+}
+
+#[test]
 fn dwg_version_detected() {
     let mut bytes = b"AC1032".to_vec();
     bytes.extend_from_slice(&[0u8; 128]);

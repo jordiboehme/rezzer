@@ -895,11 +895,11 @@ fn csv_by_extension(name: &str, body: &str) -> Option<Found> {
     ))
 }
 
-/// The ragged rule for a small file with a `.csv` or `.tsv` extension: 7 to 9 lines, the header
+/// The ragged rule for a small file with a `.csv` or `.tsv` extension: 3 to 9 lines, the header
 /// and the first record agree on a field count of at least two, later records do not.
 fn small_ragged(ext: &str, format: FormatId, body: &str, delimiter: u8) -> Option<Found> {
     let lines = body.lines().filter(|l| !l.trim().is_empty()).count();
-    if !(7..=9).contains(&lines) {
+    if !(3..=9).contains(&lines) {
         return None;
     }
     let mut rdr = csv::ReaderBuilder::new()
