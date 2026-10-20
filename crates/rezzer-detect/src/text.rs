@@ -119,6 +119,9 @@ fn classify(
     if let Some(f) = markdown_frontmatter(&lines) {
         return f;
     }
+    if let Some(f) = reference_definition_first(name, &lines) {
+        return f;
+    }
     if let Some(f) = gltf(trimmed) {
         return f;
     }
@@ -639,6 +642,22 @@ fn calls(text: &str) -> impl Iterator<Item = (&str, Option<char>)> {
     })
 }
 
+/// A `.md` or `.markdown` file whose first line is a link reference definition (`[foo]: url`).
+fn reference_definition_first(name: &str, lines: &[&str]) -> Option<Found> {
+    extension(name).filter(|e| e == "md" || e == "markdown")?;
+    let first = lines.first()?.trim_start();
+    let rest = first.strip_prefix('[')?;
+    let (label, after) = rest.split_once("]:")?;
+    if label.is_empty() || label.contains(['[', ']']) || after.trim().is_empty() {
+        return None;
+    }
+    Some(found(
+        FormatId::Markdown,
+        Confidence::Guess,
+        "extension .md and a link reference definition on the first line",
+    ))
+}
+
 fn markdown_frontmatter(lines: &[&str]) -> Option<Found> {
     let kind = frontmatter(lines)?;
     Some(found(
@@ -688,8 +707,10 @@ fn markdown_syntax(name: &str, lines: &[&str]) -> Option<Found> {
         if !kinds.is_empty() || prose || md_ext {
             kinds.push("pipe table");
         }
-        if kinds.len() == 1 {
-            // Only the table: nothing else to agree with it, the extension decided.
+        if kinds.len() == 1 && prose {
+            kinds.push("prose");
+        }
+        if kinds.len() == 1 && md_ext {
             kinds.push("extension");
         }
     }
@@ -861,7 +882,9 @@ fn csv_by_extension(name: &str, body: &str) -> Option<Found> {
         "tsv" => (FormatId::Tsv, b'\t'),
         _ => return None,
     };
-    let width = uniform_width(body, delimiter)?;
+    let Some(width) = uniform_width(body, delimiter) else {
+        return small_ragged(&ext, format, body, delimiter);
+    };
     Some(found(
         format,
         Confidence::Guess,
@@ -870,6 +893,41 @@ fn csv_by_extension(name: &str, body: &str) -> Option<Found> {
             clean(&ext)
         ),
     ))
+}
+
+/// The ragged rule for a small file with a `.csv` or `.tsv` extension: 7 to 9 lines, the header
+/// and the first record agree on a field count of at least two, later records do not.
+fn small_ragged(ext: &str, format: FormatId, body: &str, delimiter: u8) -> Option<Found> {
+    let lines = body.lines().filter(|l| !l.trim().is_empty()).count();
+    if !(7..=9).contains(&lines) {
+        return None;
+    }
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .delimiter(delimiter)
+        .from_reader(body.as_bytes());
+    let records: Vec<csv::StringRecord> = rdr.records().take(2).filter_map(|r| r.ok()).collect();
+    // A header names columns: short cells, no sentence ends (prose also splits at commas).
+    let header_like = records.first().is_some_and(|r| {
+        r.iter()
+            .all(|c| c.chars().count() <= 40 && !c.trim_end().ends_with(['.', '?', '!']))
+    });
+    let widths: Vec<usize> = records.iter().map(|r| r.len()).collect();
+    if !header_like {
+        return None;
+    }
+    match widths.as_slice() {
+        [a, b] if a == b && *a >= 2 => Some(found(
+            format,
+            Confidence::Guess,
+            format!(
+                "extension .{} and {a} fields in the first records, later records ragged; content sniffing declined",
+                clean(ext)
+            ),
+        )),
+        _ => None,
+    }
 }
 
 /// The field count shared by every one of the first records, if it is at least two.

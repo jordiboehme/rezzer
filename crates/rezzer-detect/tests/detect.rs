@@ -268,6 +268,40 @@ fn markdown_with_a_pipe_table_is_not_csv() {
 }
 
 #[test]
+fn pipe_table_evidence_names_what_decided() {
+    let prose =
+        b"Some words about the table that follows here.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n";
+    let (f, d) = detect("x.txt", prose);
+    assert_eq!(f, FormatId::Markdown);
+    assert!(d.evidence.contains("prose"), "{}", d.evidence);
+    assert!(!d.evidence.contains("extension"), "{}", d.evidence);
+    let (_, d) = detect("t.md", b"| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+    assert!(d.evidence.contains("extension"), "{}", d.evidence);
+}
+
+#[test]
+fn markdown_file_starting_with_a_reference_definition_is_markdown() {
+    let text = b"[foo]: https://example.org/x\n\nSome text with a [foo] link and [[foo]].\n";
+    let (f, d) = detect("w.md", text);
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    assert_eq!(detect("w.markdown", text).0, FormatId::Markdown);
+    assert_ne!(detect("w.dat", text).0, FormatId::Markdown);
+}
+
+#[test]
+fn small_broken_csv_is_csv_by_extension() {
+    let text = b"a,b,c\n1,2,3\n4,5\n6,7,8,9\n1,2,3\n4,5,6\n7,8,9\n";
+    let (f, d) = detect("x.csv", text);
+    assert_eq!(f, FormatId::Csv, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Guess);
+    assert!(d.evidence.contains(".csv"), "{}", d.evidence);
+    assert_ne!(detect("x.txt", text).0, FormatId::Csv);
+    // Prose in a .csv file is still not CSV.
+    let prose = b"Hello there, my friend.\nHow are you, today?\nFine.\nThanks, and you?\nWell, ok.\nGood.\nBye.\n";
+    assert_ne!(detect("x.csv", prose).0, FormatId::Csv);
+}
+
+#[test]
 fn dwg_version_detected() {
     let mut bytes = b"AC1032".to_vec();
     bytes.extend_from_slice(&[0u8; 128]);
