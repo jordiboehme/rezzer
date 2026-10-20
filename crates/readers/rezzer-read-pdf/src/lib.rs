@@ -180,6 +180,9 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             let laid = layout::page_blocks(n, height, items.runs, &cx);
             blocks.extend(laid.blocks);
             let mut stop = laid.stop;
+            if items.hidden_layer.is_empty() {
+                unread_invisible(pdf, n, items.mode3_runs, budget, out);
+            }
             if stop.is_none() {
                 match invisible(n, &items.invisible, &items.hidden_layer, budget, out) {
                     Ok(Some(callout)) => blocks.push(callout),
@@ -261,6 +264,27 @@ fn failures(failed: &[(u32, String, bool)], out: &mut Out) {
     }
 }
 
+/// Says how many runs of render mode 3 text the page shows beyond the `read` ones the text
+/// parser gave back. Their text is not read.
+fn unread_invisible(pdf: &Pdf, page: u32, read: u64, budget: &Budget, out: &mut Out) {
+    let found = pdf.invisible_text_shows(page, &|| budget.check_time().is_err());
+    let unread = found.count.saturating_sub(read);
+    if unread == 0 {
+        return;
+    }
+    let runs = if unread == 1 { "run" } else { "runs" };
+    let at_least = if found.complete { "" } else { "at least " };
+    out.loss(
+        format!("p{page}"),
+        format!(
+            "{at_least}{unread} {runs} of invisible text (render mode 3) not read: the text \
+             parser does not give back hidden text on a page with visible text"
+        ),
+        LossReason::Unsupported,
+        Severity::Info,
+    );
+}
+
 /// The folded callout with the text that puts no glyphs on the page, and its Info loss.
 fn invisible(
     page: u32,
@@ -296,10 +320,9 @@ fn invisible(
     }
     let mut said = Vec::new();
     if !runs.is_empty() {
-        said.push(format!(
-            "{} runs of invisible text (render mode 3 or 7)",
-            runs.len()
-        ));
+        let n = runs.len();
+        let word = if n == 1 { "run" } else { "runs" };
+        said.push(format!("{n} {word} of invisible text (render mode 3 or 7)"));
     }
     if !layer.is_empty() {
         said.push(format!(

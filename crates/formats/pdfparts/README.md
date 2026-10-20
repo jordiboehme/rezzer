@@ -17,6 +17,7 @@ pdfparts reads the object layer of a PDF file. It tells what the file is and how
 - Signatures with signer, reason, date, sub-filter and byte range, and whether they cover the whole file. They are described, not verified
 - Encryption: the method and whether the file opens without a password
 - Revisions: each save of the file with its end offset, its modification date and what it changed in words, such as `field Name value changed from Alice to Bob`, `signed field Signature1` or `changed page 2 content`. Only the newest saves are compared (`max_revisions`), older ones are counted
+- Invisible text: how many text operators on a page run in render mode 3, which puts no glyphs on the page. Only operators are counted, the text is not decoded
 - A canonical copy of the file for other parsers: only the objects the document uses, decrypted, with a classic cross-reference table and no object streams
 
 ```rust

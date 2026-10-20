@@ -43,6 +43,8 @@ pub(crate) struct PageItems {
     pub images: Vec<[f32; 4]>,
     /// Text that puts no glyphs on the page (render mode 3 or 7), in reading order.
     pub invisible: Vec<Run>,
+    /// Runs in render mode 3 among `invisible`.
+    pub mode3_runs: u64,
     /// The lines of an invisible text layer (render mode 3) on a page without visible text,
     /// as an OCR program writes it behind a scan.
     pub hidden_layer: Vec<String>,
@@ -214,6 +216,11 @@ fn read_batch(bytes: &[u8], batch: &[u32]) -> Result<Vec<PageItems>, (String, bo
             };
             let runs = line_runs(&line, number, on_page);
             if invisible {
+                page.mode3_runs += line
+                    .items
+                    .iter()
+                    .filter(|i| i.render_mode == Some(3))
+                    .count() as u64;
                 page.invisible.extend(runs);
             } else {
                 page.runs.extend(runs);

@@ -26,6 +26,7 @@
 
 mod actions;
 mod annots;
+mod content;
 mod extras;
 mod forms;
 mod guard;
@@ -48,6 +49,7 @@ use lopdf::{Document, ObjectId};
 
 pub use actions::Script;
 pub use annots::Annot;
+pub use content::InvisibleShows;
 pub use extras::{EmbeddedFile, Layer, Thread};
 pub use forms::{Field, FieldKind, Form};
 pub use meta::{Info, PdfDate};

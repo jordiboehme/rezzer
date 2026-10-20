@@ -432,7 +432,16 @@ fn invisible_text_is_reported_not_mixed() {
         .filter(|l| l.severity == Severity::Info && l.what.contains("invisible"))
         .map(|l| l.location.clone())
         .collect();
-    assert_eq!(infos, ["p1", "p2"], "{:?}", out.document.losses);
+    assert_eq!(infos, ["p1", "p1", "p2"], "{:?}", out.document.losses);
+    // The mode 3 run on the mixed page is not given back by the text parser: it is counted.
+    assert!(
+        out.document.losses.iter().any(|l| l.location == "p1"
+            && l.severity == Severity::Info
+            && l.what
+                .starts_with("1 run of invisible text (render mode 3) not read")),
+        "{:?}",
+        out.document.losses
+    );
 }
 
 #[test]
