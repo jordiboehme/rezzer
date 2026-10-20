@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsm"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 154
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 7
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 6
+  },
+  {
+    "contains": "| E7 | type | номер корреляции | 5 |  |  | 115 |"
+  }
+]

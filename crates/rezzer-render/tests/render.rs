@@ -5,9 +5,9 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, CalloutKind, Cell, Completeness, Confidence,
-    Detection, Document, Edge, Embedded, Event as TimelineEvent, FormatId, Formula, Graph, Inline,
-    Loss, LossReason, Node, Overview, OverviewPart, ReaderInfo, Role, SectionKind, Severity,
-    SourceInfo, StatusColor, TaskState, Value,
+    Detection, Document, Edge, Embedded, Event as TimelineEvent, FormatId, Formula, FormulaKind,
+    Graph, Inline, Loss, LossReason, Node, Overview, OverviewPart, Parameter, ReaderInfo, Role,
+    Rule, SectionKind, Severity, SourceInfo, StatusColor, TaskState, Value,
 };
 use rezzer_render::{OutputSection, RenderOptions, paginate, render, render_overview};
 
@@ -41,6 +41,7 @@ fn opts() -> RenderOptions {
         generated_at: "2026-10-20T12:00:00Z".into(),
         rezzer_version: "0.1.0".into(),
         archive_ref: None,
+        math: true,
     }
 }
 
@@ -100,6 +101,9 @@ fn formula(anchor: &str, expr: &str, refs: &[&str], pattern: Option<&str>) -> Fo
         pattern: pattern.map(Into::into),
         latex: None,
         note: None,
+        kind: None,
+        range: None,
+        original: None,
     }
 }
 
@@ -1912,4 +1916,765 @@ fn task_items_inside_lists_get_one_marker() {
     ]);
     assert!(md.contains("\n- [ ] a\n- [x] b\n\n* [ ] c\n"), "{md}");
     assert!(md.contains("\n1. [x] d\n\n   more\n"), "{md}");
+}
+
+// ---------------------------------------------------------------------------------------
+// Spreadsheet logic
+
+fn workbook() -> Document {
+    let mut d = doc();
+    d.source.format = FormatId::Xlsx;
+    d.source.name = "calc.xlsx".into();
+    d.body = vec![sheet("Inputs", "Inputs"), sheet("Calc", "Calc")];
+    d
+}
+
+fn sheet(title: &str, anchor: &str) -> Block {
+    Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some(title.into()),
+        anchor: Some(Anchor(anchor.into())),
+        blocks: vec![para("values")],
+    }
+}
+
+fn num(value: f64) -> Option<Value> {
+    Some(Value::Number { value, unit: None })
+}
+
+fn cell_formula(anchor: &str, expr: &str, refs: &[&str], role: Role, cached: f64) -> Formula {
+    Formula {
+        role: Some(role),
+        cached: num(cached),
+        kind: Some(FormulaKind::Cell),
+        ..formula(anchor, expr, refs, None)
+    }
+}
+
+fn copied(anchor: &str, expr: &str, refs: &[&str], pattern: &str, range: &str) -> Formula {
+    Formula {
+        role: Some(Role::Intermediate),
+        cached: num(2.0),
+        kind: Some(FormulaKind::Shared),
+        pattern: Some(pattern.into()),
+        range: Some(Anchor(range.into())),
+        ..formula(anchor, expr, refs, None)
+    }
+}
+
+fn parameter(anchor: &str, label: Option<&str>, value: f64, read_by: u32) -> Parameter {
+    Parameter {
+        anchor: Anchor(anchor.into()),
+        name: None,
+        label: label.map(Into::into),
+        value: num(value),
+        unit: None,
+        unit_source: None,
+        read_by,
+    }
+}
+
+fn logic_of(d: &Document, math: bool) -> String {
+    let md = render(
+        d,
+        Completeness::Complete,
+        &RenderOptions {
+            math,
+            sections: Some(vec![OutputSection::Logic]),
+            ..opts()
+        },
+    );
+    let start = md.find("## Logic").expect("a Logic section");
+    md[start..].to_string()
+}
+
+#[test]
+fn logic_per_sheet_with_patterns_and_counts() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        cell_formula("Calc!C1", "=SUM(C2:C4)", &["Calc!C2:C4"], Role::Result, 6.0),
+        copied(
+            "Calc!C2",
+            "=Inputs!B1*B2",
+            &["Inputs!B1", "Calc!B2"],
+            "p1",
+            "Calc!C2:C4",
+        ),
+        copied(
+            "Calc!C3",
+            "=Inputs!B1*B3",
+            &["Inputs!B1", "Calc!B3"],
+            "p1",
+            "Calc!C2:C4",
+        ),
+        copied(
+            "Calc!C4",
+            "=Inputs!B1*B4",
+            &["Inputs!B1", "Calc!B4"],
+            "p1",
+            "Calc!C2:C4",
+        ),
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:rate", "Inputs!$B$1", &["Inputs!B1"], None)
+        },
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Lambda),
+            note: Some("parameters: x".into()),
+            ..formula("name:Calc!Twice", "LAMBDA(x, 2*x)", &[], None)
+        },
+    ];
+    d.facets.parameters = vec![parameter("Inputs!B1", Some("Rate"), 2.0, 3)];
+    let logic = logic_of(&d, true);
+    let inputs = logic.find("\n### Inputs\n").expect("Inputs heading");
+    let calc = logic.find("\n### Calc\n").expect("Calc heading");
+    let names = logic.find("\n### Names\n").expect("Names heading");
+    assert!(inputs < calc && calc < names, "{logic}");
+    let expected = "### Calc\n\n\
+#### Formulas\n\n\
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.\n\n\
+| Cells | Count | Formula | Reads | Role | Value |\n\
+| --- | --- | --- | --- | --- | --- |\n\
+| C1 | 1 | `=SUM(C2:C4)` | C2:C4 | result | 6 |\n\
+| C2:C4 | 3 | `=Inputs!B1*B2` | Inputs!B1, B2 | intermediate | 2 |\n\
+\n\
+#### Results\n\n\
+| Cell | Formula | Value |\n\
+| --- | --- | --- |\n\
+| C1 | `=SUM(C2:C4)` | 6 |\n";
+    assert!(logic.contains(expected), "{logic}");
+    let expected_names = "### Names\n\n\
+| Name | Scope | Kind | Refers to | Value | Read by | Note |\n\
+| --- | --- | --- | --- | --- | --- | --- |\n\
+| rate | workbook | name | `Inputs!$B$1` |  |  |  |\n\
+| Twice | Calc | LAMBDA | `LAMBDA(x, 2*x)` |  |  | parameters: x |\n";
+    assert!(logic.contains(expected_names), "{logic}");
+    // The formulas of a copied group are one row, not one row per cell.
+    assert_eq!(logic.matches("`=Inputs!B1*").count(), 1, "{logic}");
+}
+
+#[test]
+fn parameters_table_shows_unit_source() {
+    let mut d = workbook();
+    d.facets.parameters = vec![
+        Parameter {
+            unit: Some("m".into()),
+            unit_source: Some("unit-cell".into()),
+            ..parameter("Inputs!B5", Some("Diameter"), 10.0, 2)
+        },
+        Parameter {
+            name: Some("rate".into()),
+            unit: Some("%".into()),
+            unit_source: Some("number-format".into()),
+            ..parameter("Inputs!B6", Some("Rate"), 0.05, 1)
+        },
+        Parameter {
+            unit: Some("kN".into()),
+            unit_source: Some("header".into()),
+            ..parameter("Inputs!C9", None, 4.0, 1)
+        },
+    ];
+    let logic = logic_of(&d, true);
+    let expected = "### Inputs\n\n\
+#### Parameters\n\n\
+| Cell | Name | Label | Value | Unit | Unit from | Read by |\n\
+| --- | --- | --- | --- | --- | --- | --- |\n\
+| B5 |  | Diameter | 10 | m | cell beside | 2 |\n\
+| B6 | rate | Rate | 0.05 | % | number format | 1 |\n\
+| C9 |  |  | 4 | kN | column header | 1 |\n";
+    assert!(logic.contains(expected), "{logic}");
+    assert!(!logic.contains("### Calc"), "{logic}");
+}
+
+#[test]
+fn math_column_only_when_enabled() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        Formula {
+            latex: Some(r"\frac{\mathrm{B1}}{2}".into()),
+            ..cell_formula("Calc!C1", "=B1/2", &["Calc!B1"], Role::Result, 1.0)
+        },
+        cell_formula("Calc!C2", "=B2", &["Calc!B2"], Role::Result, 1.0),
+    ];
+    let with = logic_of(&d, true);
+    assert!(
+        with.contains("| Cells | Count | Formula | Reads | Role | Value | Math |"),
+        "{with}"
+    );
+    assert!(
+        with.contains("| C1 | 1 | `=B1/2` | B1 | result | 1 | $`\\frac{\\mathrm{B1}}{2}`$ |"),
+        "{with}"
+    );
+    assert!(
+        with.contains("| C2 | 1 | `=B2` | B2 | result | 1 |  |"),
+        "{with}"
+    );
+    let without = logic_of(&d, false);
+    assert!(!without.contains("Math"), "{without}");
+    assert!(!without.contains('$'), "{without}");
+    assert!(
+        without.contains("| Cells | Count | Formula | Reads | Role | Value |\n"),
+        "{without}"
+    );
+    // A workbook without LaTeX has no Math column either.
+    d.facets.formulas[0].latex = None;
+    assert!(!logic_of(&d, true).contains("Math"));
+}
+
+#[test]
+fn results_table_lists_cached_values() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        Formula {
+            cached: Some(Value::Text {
+                value: "SAFE".into(),
+            }),
+            ..cell_formula(
+                "Calc!B9",
+                "=IF(B8>1,\"SAFE\",\"NOT SAFE\")",
+                &["Calc!B8"],
+                Role::Result,
+                0.0,
+            )
+        },
+        Formula {
+            cached: None,
+            ..cell_formula("Calc!B10", "=B9", &["Calc!B9"], Role::Result, 0.0)
+        },
+        cell_formula("Calc!B8", "=B7*2", &["Calc!B7"], Role::Intermediate, 1.5),
+        Formula {
+            role: Some(Role::Result),
+            cached: num(4.0),
+            ..copied("Calc!D2", "=C2*2", &["Calc!C2"], "p1", "Calc!D2:D3")
+        },
+        Formula {
+            role: Some(Role::Result),
+            cached: num(6.0),
+            ..copied("Calc!D3", "=C3*2", &["Calc!C3"], "p1", "Calc!D2:D3")
+        },
+    ];
+    let logic = logic_of(&d, true);
+    let expected = "#### Results\n\n\
+For formulas copied over several cells the first cell is shown.\n\n\
+| Cell | Formula | Value |\n\
+| --- | --- | --- |\n\
+| B9 | `=IF(B8>1,\"SAFE\",\"NOT SAFE\")` | SAFE |\n\
+| B10 | `=B9` | not calculated in file |\n\
+| D2:D3 | `=C2*2` | 4 |\n";
+    assert!(logic.contains(expected), "{logic}");
+    assert!(!logic[logic.find("#### Results").unwrap()..].contains("| B8 |"));
+}
+
+#[test]
+fn hidden_logic_lists_udf_and_external() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        cell_formula(
+            "Calc!C1",
+            "=myFunc(B1)+[1]!addin_f(B2)",
+            &["Calc!B1"],
+            Role::Result,
+            1.0,
+        ),
+        cell_formula("Calc!C2", "=MYFUNC(B2)", &["Calc!B2"], Role::Result, 1.0),
+        cell_formula("Calc!C3", "=NOW()+\"RAND()\"", &[], Role::Constant, 1.0),
+        Formula {
+            kind: Some(FormulaKind::DataTable),
+            range: Some(Anchor("Calc!B5:B11".into())),
+            note: Some("what-if data table: column input A2".into()),
+            ..cell_formula("Calc!B5", "=TABLE(,A2)", &["Calc!A2"], Role::Result, 2.0)
+        },
+        Formula {
+            kind: Some(FormulaKind::Spill),
+            range: Some(Anchor("Calc!E1:E9".into())),
+            ..cell_formula("Calc!E1", "=SEQUENCE(9)", &[], Role::Constant, 1.0)
+        },
+        Formula {
+            kind: Some(FormulaKind::Spill),
+            range: Some(Anchor("Calc!F1".into())),
+            ..cell_formula("Calc!F1", "=SUM(E1#)", &[], Role::Result, 45.0)
+        },
+    ];
+    let embedded = |kind: &str, name: &str, detail: &str, target: Option<&str>| Embedded {
+        kind: kind.into(),
+        name: name.into(),
+        detail: Some(detail.into()),
+        target: target.map(Into::into),
+    };
+    d.facets.embedded = vec![
+        embedded("macro", "Module1", "VBA module, never run", None),
+        embedded("user-function", "myFunc", "VBA module", Some("Module1")),
+        embedded(
+            "external-workbook",
+            "data.xlsx",
+            "[2] in formulas, never opened",
+            Some("data.xlsx"),
+        ),
+        embedded(
+            "add-in",
+            "Tools.xlam",
+            "[1] in formulas, never opened",
+            Some("C:\\Tools.xlam"),
+        ),
+        embedded("user-function", "[1]!addin_f", "C:\\Tools.xlam", None),
+    ];
+    d.properties.custom.insert(
+        "calc_mode".into(),
+        Value::Text {
+            value: "manual".into(),
+        },
+    );
+    d.properties
+        .custom
+        .insert("iterative_calculation".into(), Value::Bool { value: true });
+    d.properties.custom.insert(
+        "iteration_count".into(),
+        Value::Number {
+            value: 100.0,
+            unit: None,
+        },
+    );
+    let logic = logic_of(&d, true);
+    let expected = "### Hidden logic\n\n\
+| What | Where | Detail |\n\
+| --- | --- | --- |\n\
+| user function | `myFunc` | VBA module `Module1`, used in 2 formulas |\n\
+| user function | `[1]!addin_f` | C:\\\\Tools.xlam, used in 1 formula |\n\
+| add-in | Tools.xlam | \\[1\\] in formulas, never opened `C:\\Tools.xlam` |\n\
+| external workbook | data.xlsx | \\[2\\] in formulas, never opened `data.xlsx` |\n\
+| VBA module | Module1 | VBA module, never run |\n\
+| data table | Calc!B5:B11 | `=TABLE(,A2)` what-if data table: column input A2 |\n\
+| spill range | Calc!E1:E9 | `=SEQUENCE(9)` |\n\
+| volatile function | NOW | in 1 formula: Calc!C3 |\n\
+| calculation | workbook | manual, iterative calculation on (100 steps) |\n";
+    assert!(logic.contains(expected), "{logic}");
+    // A spill formula that fills only its own cell is no spill range.
+    assert!(!logic.contains("| spill range | Calc!F1 |"), "{logic}");
+}
+
+#[test]
+fn stale_results_warning_is_a_callout_at_the_top() {
+    let mut d = workbook();
+    d.facets.formulas = vec![cell_formula(
+        "Calc!C1",
+        "=B1",
+        &["Calc!B1"],
+        Role::Result,
+        1.0,
+    )];
+    d.losses = vec![loss(
+        "document",
+        "stored results may be old: calculation is set to manual; 1 formula has no stored result",
+        LossReason::Uncertain,
+        Severity::Warning,
+    )];
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.starts_with(
+            "## Logic\n\n\
+> [!WARNING] Stored results may be old\n\
+> Calculation is set to manual; 1 formula has no stored result. Rezzer does not calculate: the values shown are the ones stored in the file.\n\n\
+### Calc\n"
+        ),
+        "{logic}"
+    );
+}
+
+/// The lines inside the first mermaid fence of `md`.
+fn mermaid_lines(md: &str) -> Vec<&str> {
+    let start = md.find("```mermaid\n").expect("a mermaid fence") + 11;
+    let end = md[start..].find("\n```").expect("fence end") + start;
+    md[start..end].lines().collect()
+}
+
+/// A node line is `    <id><open>"<label>"<close>` with an id of `[A-Za-z0-9_]` and no raw
+/// quote in the label; an edge line joins two such ids.
+fn assert_valid_mermaid(lines: &[&str]) {
+    assert_eq!(lines[0], "flowchart LR");
+    let id_ok =
+        |id: &str| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    for line in &lines[1..] {
+        let line = line.strip_prefix("    ").expect("indented");
+        if let Some((from, rest)) = line.split_once(" -->") {
+            assert!(id_ok(from), "{line}");
+            let to = match rest.strip_prefix("|\"") {
+                Some(r) => {
+                    let (label, to) = r.split_once("\"| ").expect("edge label");
+                    assert!(!label.contains('"'), "{line}");
+                    to
+                }
+                None => rest.trim_start(),
+            };
+            assert!(id_ok(to), "{line}");
+            continue;
+        }
+        let open = line.find('"').expect("a quoted label");
+        let close = line.rfind('"').expect("a quoted label");
+        assert!(
+            id_ok(line[..open].trim_end_matches(['[', '(', '{'])),
+            "{line}"
+        );
+        assert!(!line[open + 1..close].contains('"'), "{line}");
+    }
+}
+
+#[test]
+fn sheet_name_with_quote_renders_valid_mermaid() {
+    let mut d = workbook();
+    let q = "'It''s \"x\" [1]'";
+    d.body = vec![sheet("It's \"x\" [1]", q)];
+    let a1 = format!("{q}!A1");
+    let b1 = format!("{q}!B1");
+    d.facets.formulas = vec![cell_formula(&b1, "=A1*2", &[&a1], Role::Result, 2.0)];
+    d.facets.graphs = vec![Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![
+            Node {
+                kind: Some("parameters".into()),
+                anchor: Some(Anchor(a1.clone())),
+                ..node("v1", &a1)
+            },
+            Node {
+                kind: Some("formula".into()),
+                anchor: Some(Anchor(b1.clone())),
+                ..node("f1", &b1)
+            },
+        ],
+        edges: vec![edge("v1", "f1", "feeds")],
+    }];
+    let logic = logic_of(&d, true);
+    assert!(logic.contains("### It's \"x\" \\[1\\]\n"), "{logic}");
+    assert!(
+        logic.contains("| B1 | 1 | `=A1*2` | A1 | result | 2 |"),
+        "{logic}"
+    );
+    let lines = mermaid_lines(&logic);
+    assert_valid_mermaid(&lines);
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert!(lines[1].contains("#quot;x#quot;"), "{lines:?}");
+}
+
+fn big_graph(sheets: usize, per_sheet: usize) -> Graph {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for s in 0..sheets {
+        for i in 0..per_sheet {
+            let a = format!("'S {s}'!A{i}");
+            nodes.push(Node {
+                kind: Some("formula".into()),
+                anchor: Some(Anchor(a.clone())),
+                ..node(&format!("f{s}_{i}"), &a)
+            });
+            if i > 0 {
+                edges.push(edge(
+                    &format!("f{s}_{}", i - 1),
+                    &format!("f{s}_{i}"),
+                    "feeds",
+                ));
+            }
+        }
+        if s > 0 {
+            edges.push(edge(&format!("f{}_0", s - 1), &format!("f{s}_0"), "feeds"));
+            edges.push(edge(&format!("f{}_1", s - 1), &format!("f{s}_1"), "feeds"));
+        }
+    }
+    nodes.push(Node {
+        kind: Some("name".into()),
+        anchor: Some(Anchor("name:rate".into())),
+        ..node("n1", "name:rate")
+    });
+    edges.push(edge("n1", "f0_0", "feeds"));
+    Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes,
+        edges,
+    }
+}
+
+#[test]
+fn big_graph_collapses_to_sheets() {
+    let mut d = workbook();
+    d.body = (0..3)
+        .map(|s| sheet(&format!("S {s}"), &format!("'S {s}'")))
+        .collect();
+    d.facets.formulas = vec![cell_formula(
+        "'S 0'!A1",
+        "=A0",
+        &["'S 0'!A0"],
+        Role::Result,
+        1.0,
+    )];
+    d.facets.graphs = vec![big_graph(3, 100)];
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.contains(
+            "The graph has 301 nodes and 302 edges, more than can be drawn, so it shows one box per sheet. A number on an arrow counts the links it stands for.\n```mermaid\n"
+        ),
+        "{logic}"
+    );
+    let lines = mermaid_lines(&logic);
+    assert_valid_mermaid(&lines);
+    let text = lines.join("\n");
+    assert!(
+        text.contains("[\"S 0\"]") && text.contains("[\"S 2\"]"),
+        "{text}"
+    );
+    assert!(text.contains("{{\"Names\"}}"), "{text}");
+    // Two links from S 0 to S 1 become one arrow with their count; links inside a sheet
+    // are no arrows.
+    assert!(text.contains("-->|\"2\"|"), "{text}");
+    assert_eq!(lines.len(), 1 + 4 + 3, "{text}");
+
+    // Too many sheets even for the collapsed graph: a note instead of a fence.
+    d.facets.graphs = vec![big_graph(250, 2)];
+    let logic = logic_of(&d, true);
+    let deps = &logic[logic.find("### Dependencies").expect("Dependencies")..];
+    assert!(!deps.contains("```mermaid"), "{deps}");
+    assert!(
+        deps.contains(
+            "The graph has 501 nodes and 749 edges on 250 sheets, too many to draw even with one box per sheet. The model JSON has the whole graph."
+        ),
+        "{deps}"
+    );
+}
+
+#[test]
+fn small_dependency_graph_uses_shapes_and_pattern_counts() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        copied("Calc!C2", "=B2", &["Calc!B2"], "p1", "Calc!C2:C3"),
+        copied("Calc!C3", "=B3", &["Calc!B3"], "p1", "Calc!C2:C3"),
+    ];
+    let typed = |id: &str, label: &str, kind: &str| Node {
+        kind: Some(kind.into()),
+        anchor: Some(Anchor(label.into())),
+        ..node(id, label)
+    };
+    d.facets.graphs = vec![Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![
+            typed("v1", "Calc!B2:B3", "parameters"),
+            typed("p1", "Calc!C2:C3", "group"),
+            typed("n1", "name:rate", "name"),
+        ],
+        edges: vec![edge("v1", "p1", "feeds"), edge("n1", "p1", "feeds")],
+    }];
+    let logic = logic_of(&d, true);
+    let expected = "### Dependencies\n\n\
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters, hexagons are names.\n\
+```mermaid\n\
+flowchart LR\n    \
+n0([\"Calc!B2:B3\"])\n    \
+n1[[\"Calc!C2:C3, 2 formulas\"]]\n    \
+n2{{\"name:rate\"}}\n    \
+n0 --> n1\n    \
+n2 --> n1\n\
+```\n";
+    assert!(logic.contains(expected), "{logic}");
+}
+
+#[test]
+fn rules_table_per_sheet() {
+    let mut d = workbook();
+    d.facets.rules = vec![Rule {
+        kind: "validation".into(),
+        anchor: Anchor("Inputs!C6:C9".into()),
+        detail: "whole greaterThan".into(),
+        formulas: vec!["E6".into()],
+        message: Some("Must be | big".into()),
+    }];
+    let logic = logic_of(&d, true);
+    let expected = "### Inputs\n\n\
+#### Rules\n\n\
+| Kind | Cells | Rule | Formulas | Message |\n\
+| --- | --- | --- | --- | --- |\n\
+| validation | C6:C9 | whole greaterThan | `E6` | Must be \\| big |\n";
+    assert!(logic.contains(expected), "{logic}");
+}
+
+#[test]
+fn csv_derived_formulas_keep_the_plain_layout() {
+    // A CSV document has a sheet section and sheet-like anchors, but it is no workbook.
+    let mut d = doc();
+    d.source.format = FormatId::Csv;
+    d.body = vec![sheet("data", "data")];
+    d.facets.formulas = vec![Formula {
+        dialect: "derived".into(),
+        ..formula("data!C:C", "Total = A + B", &["data!A:A"], None)
+    }];
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.starts_with(
+            "## Logic\n\nFound in the data, not written as formulas in the file.\n\n| Cells | Formula | Reads | Role | Value |\n"
+        ),
+        "{logic}"
+    );
+}
+
+#[test]
+fn parameter_runs_fold_into_one_row() {
+    let mut d = workbook();
+    let mut list: Vec<Parameter> = (0..5)
+        .map(|i| Parameter {
+            unit: Some("m".into()),
+            unit_source: Some("header".into()),
+            ..parameter(
+                &format!("Inputs!E{}", 49 + i),
+                Some("t"),
+                0.1 * f64::from(i + 1),
+                2,
+            )
+        })
+        .collect();
+    // A row without labels, read counts differ.
+    list.extend((0..3).map(|i| {
+        parameter(
+            &format!("Inputs!{}35", ['F', 'G', 'H'][i]),
+            None,
+            f64::from(i as u32),
+            1 + i as u32,
+        )
+    }));
+    // Two cells are no run; a named cell breaks one.
+    list.push(parameter("Inputs!A1", Some("x"), 1.0, 1));
+    list.push(parameter("Inputs!A2", Some("x"), 2.0, 1));
+    d.facets.parameters = list;
+    let logic = logic_of(&d, true);
+    let expected = "#### Parameters\n\n\
+A row with a cell range stands for values next to each other that play one part.\n\n\
+| Cell | Name | Label | Value | Unit | Unit from | Read by |\n\
+| --- | --- | --- | --- | --- | --- | --- |\n\
+| E49:E53 |  | t | 0.1, 0.2, 0.3 ..., 0.5 (5 values) | m | column header | 2 each |\n\
+| F35:H35 |  |  | 0, 1, 2 (3 values) |  |  | 1 to 3 each |\n\
+| A1 |  | x | 1 |  |  | 1 |\n\
+| A2 |  | x | 2 |  |  | 1 |\n";
+    assert!(logic.contains(expected), "{logic}");
+}
+
+#[test]
+fn small_group_that_skips_cells_lists_them() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        copied("Calc!B30", "=A30", &["Calc!A30"], "p1", "Calc!B30:B33"),
+        cell_formula("Calc!B31", "=1", &[], Role::Constant, 1.0),
+        copied("Calc!B33", "=A33", &["Calc!A33"], "p1", "Calc!B30:B33"),
+    ];
+    let logic = logic_of(&d, true);
+    assert!(logic.contains("| B30, B33 | 2 | `=A30` | A30 |"), "{logic}");
+}
+
+#[test]
+fn results_of_a_mixed_group_are_only_its_result_cells() {
+    let mut d = workbook();
+    let member = |anchor: &str, expr: &str, role: Role, value: f64| Formula {
+        role: Some(role),
+        cached: num(value),
+        ..copied(anchor, expr, &[], "p1", "Calc!C2:C4")
+    };
+    d.facets.formulas = vec![
+        member("Calc!C2", "=B2", Role::Intermediate, 1.0),
+        member("Calc!C3", "=B3", Role::Result, 2.0),
+        member("Calc!C4", "=B4", Role::Result, 3.0),
+    ];
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.contains("| C2:C4 | 3 | `=B2` |  | intermediate, result | 1 |"),
+        "{logic}"
+    );
+    let results = &logic[logic.find("#### Results").expect("Results")..];
+    assert!(results.contains("| C3:C4 | `=B3` | 2 |"), "{results}");
+    assert!(!results.contains("C2"), "{results}");
+}
+
+#[test]
+fn a_group_that_misses_cells_of_its_area_says_so() {
+    let mut d = workbook();
+    let mut list: Vec<Formula> = (2..=8)
+        .map(|r| {
+            copied(
+                &format!("Calc!C{r}"),
+                &format!("=B{r}"),
+                &[],
+                "p1",
+                "Calc!C2:C9",
+            )
+        })
+        .collect();
+    list.push(cell_formula("Calc!C9", "=0", &[], Role::Constant, 0.0));
+    d.facets.formulas = list;
+    let logic = logic_of(&d, true);
+    assert!(
+        logic.contains("| C2:C9 (7 of 8 cells) | 7 | `=B2` |"),
+        "{logic}"
+    );
+}
+
+#[test]
+fn parameter_runs_need_the_same_label_on_every_cell() {
+    // A label left of B1 only: B2:B4 have none in the model, so they keep their own rows.
+    let mut d = workbook();
+    let mut list = vec![parameter("Inputs!B1", Some("Pressure"), 10.0, 1)];
+    list.extend((2..=4).map(|r| parameter(&format!("Inputs!B{r}"), None, f64::from(r * 10), 1)));
+    d.facets.parameters = list;
+    let logic = logic_of(&d, true);
+    let expected = "| Cell | Name | Label | Value | Unit | Unit from | Read by |\n\
+| --- | --- | --- | --- | --- | --- | --- |\n\
+| B1 |  | Pressure | 10 |  |  | 1 |\n\
+| B2:B4 |  |  | 20, 30, 40 (3 values) |  |  | 1 each |\n";
+    assert!(logic.contains(expected), "{logic}");
+    assert!(!logic.contains("B1:B4"), "{logic}");
+}
+
+#[test]
+fn mermaid_labels_escape_dollars() {
+    let mut d = workbook();
+    let q = "'a$$x^$$b'";
+    d.body = vec![sheet("a$$x^$$b", q)];
+    let a1 = format!("{q}!A1");
+    let b1 = format!("{q}!B1");
+    d.facets.formulas = vec![cell_formula(&b1, "=A1", &[&a1], Role::Result, 1.0)];
+    d.facets.graphs = vec![Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![
+            Node {
+                kind: Some("parameters".into()),
+                ..node("v1", &a1)
+            },
+            Node {
+                kind: Some("formula".into()),
+                ..node("f1", &b1)
+            },
+        ],
+        edges: vec![edge("v1", "f1", "feeds")],
+    }];
+    let logic = logic_of(&d, true);
+    let lines = mermaid_lines(&logic);
+    assert_valid_mermaid(&lines);
+    assert!(lines.iter().all(|l| !l.contains('$')), "{lines:?}");
+    assert!(lines[1].contains("a#36;#36;x^#36;#36;b"), "{lines:?}");
+}
+
+#[test]
+fn sheet_heading_that_clashes_with_a_section_says_sheet() {
+    let mut d = workbook();
+    d.body = vec![sheet("Names", "Names"), sheet("Calc", "Calc")];
+    d.facets.formulas = vec![
+        cell_formula("Names!B1", "=A1", &["Names!A1"], Role::Result, 1.0),
+        cell_formula("Calc!B1", "=A1", &["Calc!A1"], Role::Result, 1.0),
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:rate", "Names!$A$1", &["Names!A1"], None)
+        },
+    ];
+    let logic = logic_of(&d, true);
+    assert!(logic.contains("\n### Sheet: Names\n"), "{logic}");
+    assert!(logic.contains("\n### Calc\n"), "{logic}");
+    assert_eq!(logic.matches("\n### Names\n").count(), 1, "{logic}");
 }

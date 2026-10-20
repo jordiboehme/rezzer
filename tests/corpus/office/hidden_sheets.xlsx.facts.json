@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/body/0/blocks/0/inlines/0/text",
+    "equals": "hidden"
+  },
+  {
+    "pointer": "/body/2/blocks/0/inlines/0/text",
+    "equals": "hidden"
+  }
+]

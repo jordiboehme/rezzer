@@ -7,7 +7,8 @@ use std::time::Instant;
 use rezzer_enrich::{EnrichOptions, enrich};
 use rezzer_model::{
     Anchor, Annotation, Asset, Block, Cell, Confidence, Detection, Document, Edge, Event, FormatId,
-    Formula, Graph, Inline, Loss, LossReason, Node, Role, SectionKind, Severity, SourceInfo, Value,
+    Formula, Graph, Inline, Loss, LossReason, Node, Parameter, Role, Rule, SectionKind, Severity,
+    SourceInfo, Value,
 };
 
 fn doc() -> Document {
@@ -59,6 +60,9 @@ fn formula(anchor: &str, refs: &[&str]) -> Formula {
         pattern: None,
         latex: None,
         note: None,
+        kind: None,
+        range: None,
+        original: None,
     }
 }
 
@@ -631,5 +635,216 @@ fn a_summary_table_is_not_the_sheet_data() {
     assert_eq!(
         d.overview.unwrap().parts[0].size,
         "4094 rows x 2 columns (none shown)"
+    );
+}
+
+#[test]
+fn workbook_names_and_external_references_resolve() {
+    use rezzer_model::FormulaKind;
+    let mut d = doc();
+    d.body = vec![sheet("S", 1, 1), sheet("'My T'", 1, 1)];
+    let mut gg = formula("name:gg", &["S!A1"]);
+    gg.kind = Some(FormulaKind::Name);
+    let mut twice = formula("name:S!twice", &[]);
+    twice.kind = Some(FormulaKind::Lambda);
+    d.facets.formulas = vec![
+        gg,
+        twice,
+        formula(
+            "S!A1",
+            &[
+                "name:gg",
+                "name:S!twice",
+                "ext:[1]Sheet1!A1",
+                "ext:[2]!fn",
+                "S:'My T'!A1:B2",
+                "'S:My T'!B5",
+            ],
+        ),
+    ];
+    enrich(&mut d, &only(&[]));
+    assert!(d.losses.is_empty(), "{:?}", d.losses);
+
+    // A name the workbook does not define stays a loss, also when a cell formula has it as
+    // its own anchor.
+    d.facets
+        .formulas
+        .push(formula("S!A1", &["name:zz", "S:Other!A1"]));
+    d.facets.formulas.push(formula("name:cell", &[]));
+    enrich(&mut d, &only(&[]));
+    let what: Vec<_> = d.losses.iter().map(|l| l.what.as_str()).collect();
+    assert_eq!(
+        what,
+        [
+            "reference to name:zz not found",
+            "reference to S:Other!A1 not found",
+            "reference to name:cell not found"
+        ]
+    );
+}
+
+#[test]
+fn parameter_rule_and_formula_range_anchors_are_checked() {
+    use rezzer_model::FormulaKind;
+    let mut d = doc();
+    d.body = vec![sheet("S", 2, 2)];
+    let mut gg = formula("name:gg", &[]);
+    gg.kind = Some(FormulaKind::Name);
+    let mut spill = formula("S!A1", &[]);
+    spill.range = Some(a("S!A1:B2"));
+    d.facets.formulas = vec![gg, spill];
+    let param = |anchor: &str| Parameter {
+        anchor: a(anchor),
+        name: None,
+        label: None,
+        value: Some(Value::number(1.0, None)),
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+    };
+    let rule = |anchor: &str| Rule {
+        kind: "validation".into(),
+        anchor: a(anchor),
+        detail: "whole number".into(),
+        formulas: vec![],
+        message: None,
+    };
+    d.facets.parameters = vec![param("S!B1"), param("name:gg")];
+    d.facets.rules = vec![rule("S!A1:A2 B1:B2")];
+    enrich(&mut d, &only(&[]));
+    assert!(d.losses.is_empty(), "{:?}", d.losses);
+
+    let mut gone = formula("S!B2", &[]);
+    gone.range = Some(a("Gone!A1:A3"));
+    d.facets.formulas.push(gone);
+    d.facets.parameters.push(param("Gone!C3"));
+    d.facets.rules.push(Rule {
+        kind: "conditional-format".into(),
+        ..rule("Lost!A1:A9")
+    });
+    enrich(&mut d, &only(&[]));
+    let found: Vec<_> = d
+        .losses
+        .iter()
+        .map(|l| (l.location.as_str(), l.what.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("S!B2", "reference to Gone!A1:A3 not found"),
+            ("parameter", "reference to Gone!C3 not found"),
+            (
+                "rule (conditional-format)",
+                "reference to Lost!A1:A9 not found"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn workbook_overview_counts() {
+    let mut d = doc();
+    d.source.format = FormatId::Xlsx;
+    let hidden = |name: &str, state: &str| Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some(name.into()),
+        anchor: Some(a(name)),
+        blocks: vec![Block::Paragraph {
+            inlines: vec![Inline::Status {
+                text: state.into(),
+                color: rezzer_model::StatusColor::Grey,
+            }],
+            role: Some("status".into()),
+            anchor: None,
+        }],
+    };
+    d.body = vec![
+        sheet("Input", 3, 2),
+        sheet("Calc", 3, 2),
+        hidden("Old", "hidden"),
+        hidden("Secret", "very hidden"),
+    ];
+    let with = |f: Formula, role: Option<Role>, pattern: Option<&str>| Formula {
+        role,
+        pattern: pattern.map(Into::into),
+        kind: Some(rezzer_model::FormulaKind::Cell),
+        ..f
+    };
+    d.facets.formulas = vec![
+        with(formula("Calc!A1", &["Input!A1"]), Some(Role::Result), None),
+        with(
+            formula("Calc!A2", &["Input!A2"]),
+            Some(Role::Intermediate),
+            Some("p1"),
+        ),
+        with(
+            formula("Calc!A3", &["Input!A3"]),
+            Some(Role::Intermediate),
+            Some("p1"),
+        ),
+        Formula {
+            kind: Some(rezzer_model::FormulaKind::Name),
+            ..formula("name:rate", &["Input!A1"])
+        },
+        Formula {
+            kind: Some(rezzer_model::FormulaKind::Lambda),
+            ..formula("name:Twice", &[])
+        },
+    ];
+    d.facets.parameters = vec![rezzer_model::Parameter {
+        anchor: a("Input!A1"),
+        name: None,
+        label: None,
+        value: None,
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+    }];
+    d.facets.annotations = vec![Annotation {
+        kind: "comment".into(),
+        author: None,
+        date: None,
+        anchor: Some(a("Calc!A1")),
+        quoted: None,
+        body: vec![txt("check")],
+        replies: Vec::new(),
+        resolved: None,
+    }];
+    let embedded = |kind: &str| rezzer_model::Embedded {
+        kind: kind.into(),
+        name: "x".into(),
+        detail: None,
+        target: None,
+    };
+    d.facets.embedded = vec![
+        embedded("external-workbook"),
+        embedded("add-in"),
+        embedded("macro"),
+    ];
+    d.facets.graphs.push(Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![],
+        edges: vec![],
+    });
+    enrich(&mut d, &only(&[]));
+    let facts: Vec<(String, String)> = d.overview.expect("overview").facts;
+    let facts: Vec<(&str, &str)> = facts
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(
+        facts,
+        vec![
+            ("Sheets", "4 (hidden: Old, Secret)"),
+            ("Formulas", "3"),
+            ("Patterns", "1"),
+            ("Parameters", "1"),
+            ("Results", "1"),
+            ("Names", "2"),
+            ("Comments", "1"),
+            ("External links", "2"),
+            ("Embedded", "3"),
+        ]
     );
 }

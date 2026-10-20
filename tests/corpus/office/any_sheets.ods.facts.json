@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "ods"
+  },
+  {
+    "pointer": "/body",
+    "len": 4
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/body/1/title",
+    "equals": "Hidden"
+  },
+  {
+    "pointer": "/body/1/blocks/0/inlines/0/text",
+    "equals": "hidden"
+  }
+]

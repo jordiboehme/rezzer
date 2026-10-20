@@ -1,0 +1,24 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 6
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 22
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 40
+  },
+  {
+    "contains": "| PivotTable1 | A3:E5 | DataSheet!A1:J11 |"
+  },
+  {
+    "contains": "| PivotTable2 | A3:D11 | DataSheet!A1:J11 |"
+  }
+]

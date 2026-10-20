@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "ods"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 52
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 6
+  },
+  {
+    "pointer": "/facets/formulas/0/dialect",
+    "equals": "openformula"
+  },
+  {
+    "contains": "| B4, C4, E4 | 3 | `=Data!A3` | Data!A3 |"
+  }
+]

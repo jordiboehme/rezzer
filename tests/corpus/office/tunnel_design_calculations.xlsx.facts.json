@@ -1,0 +1,22 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 4
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 86
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 65
+  },
+  {
+    "pointer": "/body/1/title",
+    "equals": "Structural_Lining"
+  }
+]

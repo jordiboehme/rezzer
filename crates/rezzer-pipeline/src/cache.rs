@@ -9,7 +9,7 @@
 //! Rezzer version and build id, the model version and what else changes the document: the file name (readers use it, for example as the CSV sheet name, and it is a
 //! detection hint), the detected format (a MIME hint can change it), the reader id and
 //! version (the reader set depends on cargo features), the limits except the page size and
-//! the disabled enrich passes. The request's output kind, sections and `generated_at` are not in the key: they
+//! the disabled enrich passes. The request's output kind, sections, `math` and `generated_at` are not in the key: they
 //! only change rendering, so Markdown and JSON runs share an entry. A request with a password
 //! is never cached (decided by the pipeline).
 //!

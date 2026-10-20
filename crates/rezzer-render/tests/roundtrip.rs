@@ -47,6 +47,7 @@ fn rendered_body(doc: &Document) -> String {
             generated_at: "2026-10-20T12:00:00Z".into(),
             rezzer_version: "0.1.0".into(),
             archive_ref: None,
+            ..RenderOptions::default()
         },
     );
     let rest = md.strip_prefix("---\n").expect("frontmatter");

@@ -5,6 +5,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The start of the loss a spreadsheet reader writes when the stored results may not match
+/// the formulas (`stored results may be old: <reasons>`). The renderer finds the loss by it
+/// and shows it as a warning at the top of the Logic section.
+pub const STALE_RESULTS: &str = "stored results may be old";
+
 /// Something the reader could not read, with the reason. Rezzer never drops content silently.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

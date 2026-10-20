@@ -1,0 +1,142 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "Sheet1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "text": "The sheet is empty.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Sheet1",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "annotations": [
+      {
+        "anchor": "Sheet1!A5",
+        "author": "Mike Kaganski",
+        "body": [
+          {
+            "text": "Mike Kaganski:",
+            "type": "text"
+          },
+          {
+            "type": "line_break"
+          },
+          {
+            "text": "sdadasd",
+            "type": "text"
+          }
+        ],
+        "kind": "note"
+      },
+      {
+        "anchor": "Sheet1!A2",
+        "author": "Mike Kaganski",
+        "body": [
+          {
+            "text": "a comment on A2",
+            "type": "text"
+          }
+        ],
+        "date": "2026-03-24T09:25:49.80",
+        "kind": "comment",
+        "replies": [
+          {
+            "anchor": "Sheet1!A2",
+            "author": "Mike Kaganski",
+            "body": [
+              {
+                "text": "A reply",
+                "type": "text"
+              }
+            ],
+            "date": "2026-04-07T14:14:05.49",
+            "kind": "comment"
+          }
+        ],
+        "resolved": false
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Comments",
+        "2"
+      ],
+      [
+        "Last changed",
+        "2026-04-07T14:14:38Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "Sheet1",
+        "kind": "sheet",
+        "name": "Sheet1",
+        "size": "1 paragraph"
+      }
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2026-03-24T09:25:20Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel Online"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "Mike Kaganski"
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2026-04-07T14:14:38Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "threadedComment.xlsx",
+    "path": "<corpus>/office/threadedComment.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "47f1813c00f19e88e202f5915b419a0c2e5e2768f95524af0cb11634612d5158",
+    "size": 9175
+  }
+}

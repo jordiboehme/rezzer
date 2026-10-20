@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-const GIB: u64 = 1024 * 1024 * 1024;
+const MIB: u64 = 1024 * 1024;
+const GIB: u64 = 1024 * MIB;
 
 /// Configurable limits. Missing fields in a config file fall back to the defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +35,10 @@ pub struct Limits {
     /// Model elements (blocks, inlines, table cells) one read may build. This is how readers
     /// bound the memory of the document model; on a hit the reader stops with a `Limit` loss.
     pub max_elements: u64,
+    /// Bytes of one text run (a paragraph, a cell, a line). The element budget counts
+    /// model elements, not their size, so one huge paragraph or cell needs its own bound.
+    /// See [`Budget::charge_text`].
+    pub max_text_bytes: u64,
 }
 
 impl Default for Limits {
@@ -47,6 +52,7 @@ impl Default for Limits {
             max_memory_bytes: 2 * GIB,
             page_tokens: 20_000,
             max_elements: 2_000_000,
+            max_text_bytes: 256 * MIB,
         }
     }
 }
@@ -193,6 +199,22 @@ impl Budget {
                 value: total,
                 max: self.limits.max_elements,
                 unit: "count",
+            });
+        }
+        Ok(())
+    }
+
+    /// Checks the size of one text run (a paragraph, a cell, a line) against
+    /// [`Limits::max_text_bytes`]. Call it before the text is copied or built, with the size
+    /// the run would have. Runs are checked one by one; nothing is added up.
+    pub fn charge_text(&self, bytes: usize) -> Result<(), LimitHit> {
+        let value = u64::try_from(bytes).unwrap_or(u64::MAX);
+        if value > self.limits.max_text_bytes {
+            return Err(LimitHit {
+                limit: "text",
+                value,
+                max: self.limits.max_text_bytes,
+                unit: "bytes",
             });
         }
         Ok(())

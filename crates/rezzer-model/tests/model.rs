@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
-    Detection, Document, Edge, Embedded, Event, FormatId, Formula, Graph, Inline, Loss, LossReason,
-    MODEL_VERSION, Node, Properties, ReadOptions, ReaderInfo, Role, SectionKind, Severity, Source,
-    SourceInfo, StatusColor, TaskState, Value,
+    Detection, Document, Edge, Embedded, Event, FormatId, Formula, FormulaKind, Graph, Inline,
+    Loss, LossReason, MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role,
+    Rule, SectionKind, Severity, Source, SourceInfo, StatusColor, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -183,6 +183,28 @@ fn full_document() -> Document {
         pattern: Some("g1".into()),
         latex: Some("\\sum C".into()),
         note: Some("holds 11 of 11 rows".into()),
+        kind: Some(FormulaKind::Spill),
+        range: Some(Anchor("Costs!C12:C14".into())),
+        original: Some("of:=SUM([.C1:.C11])".into()),
+    });
+    doc.facets.parameters.push(Parameter {
+        anchor: Anchor("Costs!B2".into()),
+        name: Some("rate".into()),
+        label: Some("Rate (EUR/h)".into()),
+        value: Some(Value::Number {
+            value: 80.0,
+            unit: Some("EUR/h".into()),
+        }),
+        unit: Some("EUR/h".into()),
+        unit_source: Some("label".into()),
+        read_by: 3,
+    });
+    doc.facets.rules.push(Rule {
+        kind: "validation".into(),
+        anchor: Anchor("Costs!B2:B9".into()),
+        detail: "whole number between 1 and 10".into(),
+        formulas: vec!["1".into(), "10".into()],
+        message: Some("Enter 1 to 10".into()),
     });
     doc.facets.graphs.push(Graph {
         id: "deps".into(),
@@ -469,6 +491,8 @@ fn plain_fields_default_when_missing() {
     assert!(matches!(l, Block::List { ordered: false, .. }));
     let a: Asset = serde_json::from_str(r#"{"id":"a","sha256":"00","mime":"image/png"}"#).unwrap();
     assert!(!a.needs_vision);
+    let p: Parameter = serde_json::from_str(r#"{"anchor":"S!A1"}"#).unwrap();
+    assert_eq!(p.read_by, 0);
     let i: Inline = serde_json::from_str(r#"{"type":"link","target":"x"}"#).unwrap();
     assert!(matches!(
         i,
@@ -606,4 +630,36 @@ fn shared_helpers() {
         Inline::FootnoteRef { id: "1".into() },
     ];
     assert_eq!(plain_text(&list), "a bc");
+}
+
+#[test]
+fn old_json_without_new_fields_still_reads() {
+    let json = include_str!("fixtures/plan1-document.json");
+    let doc: Document = serde_json::from_str(json).expect("plan 1 document reads");
+    let f = &doc.facets.formulas[0];
+    assert_eq!(f.kind, None);
+    assert_eq!(f.range, None);
+    assert_eq!(f.original, None);
+    assert!(doc.facets.parameters.is_empty());
+    assert!(doc.facets.rules.is_empty());
+    let back = serde_json::to_string(&doc).unwrap();
+    for key in ["parameters", "rules", "original", "\"range\""] {
+        assert!(!back.contains(key), "{key} leaked into {back}");
+    }
+}
+
+#[test]
+fn formula_kinds_serialize_snake_case() {
+    let kinds = [
+        (FormulaKind::Cell, "cell"),
+        (FormulaKind::Shared, "shared"),
+        (FormulaKind::Array, "array"),
+        (FormulaKind::Spill, "spill"),
+        (FormulaKind::DataTable, "data_table"),
+        (FormulaKind::Name, "name"),
+        (FormulaKind::Lambda, "lambda"),
+    ];
+    for (k, name) in kinds {
+        assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
+    }
 }

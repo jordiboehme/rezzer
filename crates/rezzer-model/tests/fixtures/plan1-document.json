@@ -1,0 +1,333 @@
+{
+  "model_version": 1,
+  "source": {
+    "path": "/tmp/a.xlsx",
+    "name": "a.xlsx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 42,
+    "format": "xlsx",
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with xl/workbook.xml"
+    },
+    "modified": "2026-10-19T10:00:00Z",
+    "reader": {
+      "id": "xlsx",
+      "version": "0.1.0"
+    }
+  },
+  "properties": {
+    "title": "Costs",
+    "description": "Quarterly costs",
+    "authors": [
+      "Ada"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2026-01-01T00:00:00Z"
+    },
+    "modified": {
+      "type": "date",
+      "value": "2026-02-01"
+    },
+    "language": "en",
+    "keywords": [
+      "budget"
+    ],
+    "custom": {
+      "final": {
+        "type": "bool",
+        "value": true
+      },
+      "share": {
+        "type": "percent",
+        "value": 0.25
+      },
+      "tags": {
+        "type": "list",
+        "value": [
+          {
+            "type": "text",
+            "value": "a"
+          }
+        ]
+      },
+      "weight": {
+        "type": "number",
+        "value": 1.5,
+        "unit": "kg"
+      }
+    }
+  },
+  "body": [
+    {
+      "type": "section",
+      "kind": "sheet",
+      "title": "Costs",
+      "anchor": "sheet:Costs",
+      "blocks": [
+        {
+          "type": "heading",
+          "level": 2,
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Intro",
+              "strong": true
+            }
+          ],
+          "anchor": "h:intro"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "type": "text",
+          "text": "see",
+          "strong": true
+        },
+        {
+          "type": "code",
+          "text": "x"
+        },
+        {
+          "type": "link",
+          "target": "https://example.org",
+          "title": "Example",
+          "internal": false,
+          "inlines": [
+            {
+              "type": "text",
+              "text": "here",
+              "strong": true
+            }
+          ]
+        },
+        {
+          "type": "footnote_ref",
+          "id": "1"
+        },
+        {
+          "type": "math",
+          "latex": "x^2"
+        },
+        {
+          "type": "status",
+          "text": "Done",
+          "color": "green"
+        },
+        {
+          "type": "anchor_mark",
+          "anchor": "p4"
+        }
+      ],
+      "role": "caption"
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "items": [
+        [
+          {
+            "type": "paragraph",
+            "inlines": [
+              {
+                "type": "text",
+                "text": "one",
+                "strong": true
+              }
+            ]
+          }
+        ]
+      ],
+      "anchor": "list:1"
+    },
+    {
+      "type": "table",
+      "caption": "Totals",
+      "header_rows": 1,
+      "role": "summary",
+      "rows": [
+        [
+          {
+            "inlines": [
+              {
+                "type": "text",
+                "text": "12",
+                "strong": true
+              }
+            ],
+            "row_span": 1,
+            "col_span": 2,
+            "anchor": "Costs!C12"
+          }
+        ]
+      ],
+      "alignments": [
+        "right"
+      ],
+      "anchor": "table:1"
+    },
+    {
+      "type": "code",
+      "lang": "rust",
+      "text": "fn main() {}",
+      "anchor": "code:1"
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "quoted",
+              "strong": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "math",
+      "latex": "\\frac{a}{b}",
+      "source_kind": "omml",
+      "anchor": "eq:1"
+    },
+    {
+      "type": "media",
+      "asset": "img1",
+      "anchor": "fig:1"
+    },
+    {
+      "type": "callout",
+      "kind": "warning",
+      "title": "Careful",
+      "folded": true
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "task",
+      "state": "cancelled",
+      "inlines": [
+        {
+          "type": "text",
+          "text": "todo",
+          "strong": true
+        }
+      ],
+      "anchor": "task:1"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "Costs!C12",
+        "expression": "=SUM(C1:C11)",
+        "dialect": "excel",
+        "references": [
+          "Costs!C1:C11"
+        ],
+        "cached": {
+          "type": "number",
+          "value": 12.0
+        },
+        "role": "result",
+        "pattern": "g1",
+        "latex": "\\sum C",
+        "note": "holds 11 of 11 rows"
+      }
+    ],
+    "graphs": [
+      {
+        "id": "deps",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "id": "n1",
+            "label": "C12",
+            "kind": "cell",
+            "anchor": "Costs!C12"
+          }
+        ],
+        "edges": [
+          {
+            "from": "n1",
+            "to": "n2",
+            "kind": "references",
+            "anchor": "Costs!C12"
+          }
+        ]
+      }
+    ],
+    "timeline": [
+      {
+        "time": "2026-03-01",
+        "actor": "Ada",
+        "kind": "revision",
+        "anchor": "Costs!C12",
+        "text": "changed"
+      }
+    ],
+    "annotations": [
+      {
+        "kind": "comment",
+        "author": "Bob",
+        "date": "2026-03-02",
+        "anchor": "Costs!C12",
+        "quoted": "12",
+        "body": [
+          {
+            "type": "text",
+            "text": "Check this",
+            "strong": true
+          }
+        ],
+        "replies": [
+          {
+            "kind": "comment",
+            "author": "Ada",
+            "body": [
+              {
+                "type": "text",
+                "text": "Ok",
+                "strong": true
+              }
+            ]
+          }
+        ],
+        "resolved": false
+      }
+    ],
+    "embedded": [
+      {
+        "kind": "macro",
+        "name": "Module1",
+        "detail": "vba, 120 bytes"
+      }
+    ]
+  },
+  "assets": [
+    {
+      "id": "img1",
+      "path": "assets/img1.png",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "mime": "image/png",
+      "caption": "Chart",
+      "needs_vision": true
+    }
+  ],
+  "losses": [
+    {
+      "location": "Costs!D1",
+      "what": "chart",
+      "why": "not_implemented",
+      "severity": "warning"
+    }
+  ]
+}

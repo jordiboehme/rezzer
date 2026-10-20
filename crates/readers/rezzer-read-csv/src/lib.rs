@@ -433,6 +433,9 @@ impl Reader for CsvReader {
                 pattern: None,
                 latex: None,
                 note: Some(format!("holds {} of {} rows", d.holds, d.checked)),
+                kind: None,
+                range: None,
+                original: None,
             });
         }
 

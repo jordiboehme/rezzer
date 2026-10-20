@@ -1,0 +1,246 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "formula-across-sheets.ods"
+resource: "<corpus>/office/formula-across-sheets.ods"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "e63f058d75938fc5e4b1f39002100e0fdc1b21d3ef208a6ce41339cefc7f5434"
+source_size: 15572
+format: ods
+detected_by: "zip with mimetype application/vnd.oasis.opendocument.spreadsheet"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 1
+authors: ["Laurent BALLAND-POIRIER"]
+created: "2006-12-29T12:10:22"
+modified: "2014-01-25T21:08:47.223500176"
+---
+
+# formula-across-sheets.ods
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| indiceOrga | sheet | 2 rows x 1 column |  |  |
+| Calculation | sheet | 9 rows x 7 columns | result | Data |
+| Data | sheet | 4 rows x 4 columns | result | Calculation |
+
+- Sheets: 3
+- Formulas: 23
+- Patterns: 6
+- Parameters: 6
+- Results: 5
+- Names: 29
+- Not read: 1
+- Last changed: 2014-01-25T21:08:47.223500176
+
+```mermaid
+flowchart LR
+    p0["indiceOrga"]
+    p1["Calculation"]
+    p2["Data"]
+    p2 --> p1
+    p1 --> p2
+```
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| Info 1 |  |
+| Info 2 |  |
+| Info 3 |  |
+| Info 4 |  |
+| application | LibreOffice/4.1.4.2\$Linux\_X86\_64 LibreOffice\_project/410m0$Build-2 |
+| last\_modified\_by | Laurent Balland-Poirier |
+
+## indiceOrga
+
+|  |
+| --- |
+| 1.4965 |
+| -0.1459 |
+
+## Calculation
+
+|  |  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- | --- |
+| Semi // | Colonne a |  | Colonne b |  |  | 1.4965 |
+|  | bas (1) | haut (n) | bas (1) | haut (n) |  | -0.1459 |
+|  | L | L | L | L |  |  |
+| Indice | 1.4666 | 1.4870 |  | 1.4907 |  |  |
+| titre | 20.49% | 6.51% | 6.51% | 3.98% |  |  |
+| rapport | 25.78% | 6.96% | 6.96% | 4.14% |  |  |
+| débit | 12 | 10 |  | 1.00E+01 |  |  |
+|  |  |  |  |  |  |  |
+| Aexp | 10 |  | 10 |  |  |  |
+
+## Data
+
+|  |  |  |  |
+| --- | --- | --- | --- |
+| 66 | 170 | (b) | 107 |
+| L0a | Lna | L0b | Lnb |
+| 1.4666 | 1.4870 | 1.4870 | 1.4907 |
+| 12.078 | 10.271 | 10.271 | 10.000 |
+
+## Logic
+
+### Calculation
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 |  | Colonne b | 1.4965 |  |  | 3 |
+| G2 |  | haut (n) | -0.1459 |  |  | 3 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B4, C4, E4 | 3 | `=Data!A3` | Data!A3 | intermediate | 1.4666 |  |
+| B5, C5, E5 | 3 | `=(B4-$G$1)/$G$2` | B4, G1, G2 | intermediate | 20.493488691 % | $`\frac{\mathrm{B4}-\mathrm{G1}}{\mathrm{G2}}`$ |
+| D5 | 1 | `=C5` | C5 | intermediate | 6.511309116 % |  |
+| B6:E6 | 4 | `=B5/(1-B5)` | B5 | intermediate, result | 25.775862069 % | $`\frac{\mathrm{B5}}{1-\mathrm{B5}}`$ |
+| B7 | 1 | `=B9*(1+B6)` | B9, B6 | intermediate | 12.077586207 | $`\mathrm{B9} \cdot (1+\mathrm{B6})`$ |
+| C7 | 1 | `=B9*(1+C6)` | B9, C6 | intermediate | 10.271260997 | $`\mathrm{B9} \cdot (1+\mathrm{C6})`$ |
+| E7 | 1 | `=Data!D4` | Data!D4 | intermediate | 10 |  |
+| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L\_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| D6 | `=D5/(1-D5)` | 6.964809384 % |
+| D9 | `=L_nb/(1+Xnb)` | 9.602467443 |
+
+### Data
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 |  |  | 66 |  |  | 1 |
+| B1 |  |  | 170 |  |  | 1 |
+| D1 |  | (b) | 107 |  |  | 1 |
+| D4 |  |  | 10 |  |  | 1 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| A3 | 1 | `=1.46+A1/10000` | A1 | intermediate | 1.4666 | $`1.46+\frac{\mathrm{A1}}{10000}`$ |
+| B3 | 1 | `=1.47+B1/10000` | B1 | intermediate | 1.487 | $`1.47+\frac{\mathrm{B1}}{10000}`$ |
+| C3:C4 | 2 | `=B3` | B3 | result | 1.487 |  |
+| D3 | 1 | `=1.48+D1/10000` | D1 | intermediate | 1.4907 | $`1.48+\frac{\mathrm{D1}}{10000}`$ |
+| A4:B4 | 2 | `=Calculation!B7` | Calculation!B7 | result, intermediate | 12.077586207 |  |
+
+#### Results
+
+For formulas copied over several cells the first cell is shown.
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| C3:C4 | `=B3` | 1.487 |
+| A4 | `=Calculation!B7` | 12.077586207 |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| A\_ab | workbook | name | `Calculation!$B$9` |  |  |  |
+| A\_ab\_2 | workbook | name | `#REF!` |  |  |  |
+| B\_a | workbook | name | `#REF!` |  |  |  |
+| B\_ab | workbook | name | `#REF!` |  |  |  |
+| B\_b | workbook | name | `#REF!` |  |  |  |
+| L\_nb | workbook | name | `Calculation!$E$7` |  |  |  |
+| L\_nb\_2 | workbook | name | `#REF!` |  |  |  |
+| M\_A | workbook | name | `#REF!` |  |  |  |
+| M\_B | workbook | name | `#REF!` |  |  |  |
+| M\_C | workbook | name | `#REF!` |  |  |  |
+| V\_1a | workbook | name | `#REF!` |  |  |  |
+| V\_1a\_2 | workbook | name | `#REF!` |  |  |  |
+| V\_1b | workbook | name | `#REF!` |  |  |  |
+| X1a | workbook | name | `Calculation!$B$6` |  |  |  |
+| X1a\_2 | workbook | name | `#REF!` |  |  |  |
+| X1b | workbook | name | `Calculation!$D$6` |  |  |  |
+| X1b\_2 | workbook | name | `#REF!` |  |  |  |
+| Xna | workbook | name | `Calculation!$C$6` |  |  |  |
+| Xna\_2 | workbook | name | `#REF!` |  |  |  |
+| Xnb | workbook | name | `Calculation!$E$6` |  |  |  |
+| Xnb\_2 | workbook | name | `#REF!` |  |  |  |
+| Y1a | workbook | name | `#REF!` |  |  |  |
+| Y1a\_2 | workbook | name | `#REF!` |  |  |  |
+| Y1b | workbook | name | `#REF!` |  |  |  |
+| Y1b\_2 | workbook | name | `#REF!` |  |  |  |
+| Yna | workbook | name | `#REF!` |  |  |  |
+| Yna\_2 | workbook | name | `#REF!` |  |  |  |
+| Ynb | workbook | name | `#REF!` |  |  |  |
+| Ynb\_2 | workbook | name | `#REF!` |  |  |  |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters, hexagons are names.
+```mermaid
+flowchart LR
+    n0[["Calculation!B4:E4, 3 formulas"]]
+    n1[["Calculation!B5:E5, 3 formulas"]]
+    n2["Calculation!D5"]
+    n3[["Calculation!B6:E6, 4 formulas"]]
+    n4["Calculation!B7"]
+    n5["Calculation!C7"]
+    n6["Calculation!E7"]
+    n7[["Calculation!B9:D9, 2 formulas"]]
+    n8["Data!A3"]
+    n9["Data!B3"]
+    n10[["Data!C3:C4, 2 formulas"]]
+    n11["Data!D3"]
+    n12[["Data!A4:B4, 2 formulas"]]
+    n13(["Calculation!G1:G2"])
+    n14(["Data!D4"])
+    n15{{"name:L_nb"}}
+    n16{{"name:Xnb"}}
+    n17(["Data!A1"])
+    n18(["Data!B1"])
+    n19(["Data!D1"])
+    n0 --> n1
+    n1 --> n2
+    n1 --> n3
+    n2 --> n3
+    n3 --> n4
+    n3 --> n5
+    n3 --> n16
+    n4 --> n12
+    n5 --> n12
+    n6 --> n15
+    n7 --> n4
+    n7 --> n5
+    n8 --> n0
+    n9 --> n0
+    n9 --> n10
+    n11 --> n0
+    n12 --> n10
+    n13 --> n1
+    n14 --> n6
+    n15 --> n7
+    n16 --> n7
+    n17 --> n8
+    n18 --> n9
+    n19 --> n11
+```
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| document | not read for ODS: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings | unsupported | info |

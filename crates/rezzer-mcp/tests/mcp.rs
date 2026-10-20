@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Completeness, Document, FormatId, ReadOptions, ReadOutcome, Reader, Registry, Source,
-    source_info,
+    Anchor, Block, Completeness, Document, FormatId, Formula, FormulaKind, ReadOptions,
+    ReadOutcome, Reader, Registry, SectionKind, Source, source_info,
 };
 use rezzer_pipeline::{Config, Pipeline};
 use rmcp::model::{CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest};
@@ -631,4 +631,76 @@ async fn a_disconnect_stops_a_long_run() {
         wait_for(&cancelled, Duration::from_secs(10)).await,
         "the disconnect reached the budget"
     );
+}
+
+/// A text reader that returns a one-sheet workbook with a formula that has LaTeX.
+struct Book;
+
+impl Reader for Book {
+    fn id(&self) -> &'static str {
+        "book"
+    }
+    fn version(&self) -> &'static str {
+        "0.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        let mut document = Document::new(source_info(src));
+        document.source.format = FormatId::Xlsx;
+        document.body = vec![Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("Calc".into()),
+            anchor: Some(Anchor("Calc".into())),
+            blocks: Vec::new(),
+        }];
+        document.facets.formulas = vec![Formula {
+            anchor: Anchor("Calc!B1".into()),
+            expression: "=A1/2".into(),
+            dialect: "excel".into(),
+            references: vec![Anchor("Calc!A1".into())],
+            cached: None,
+            role: None,
+            pattern: None,
+            latex: Some(r"\frac{\mathrm{A1}}{2}".into()),
+            note: None,
+            kind: Some(FormulaKind::Cell),
+            range: None,
+            original: None,
+        }];
+        ReadOutcome {
+            document,
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_math_option_drops_the_math_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let mut registry = Registry::new();
+    registry.register(Box::new(Book));
+    let client = connect_to(Pipeline::new(config(), registry)).await;
+    let with = call(
+        &client,
+        "rez",
+        json!({ "path": path, "sections": ["logic"] }),
+    )
+    .await;
+    assert!(text(&with).contains("| Math |"), "{}", text(&with));
+    let without = call(
+        &client,
+        "rez",
+        json!({ "path": path, "sections": ["logic"], "math": false }),
+    )
+    .await;
+    assert_eq!(structured(&without)["status"], "complete");
+    assert!(text(&without).contains("`=A1/2`"), "{}", text(&without));
+    assert!(!text(&without).contains("Math"), "{}", text(&without));
+    let bad = call(&client, "rez", json!({ "path": path, "math": "no" })).await;
+    let s = structured(&bad);
+    assert_eq!(s["status"], "failed");
+    assert!(s["message"].as_str().unwrap().contains("math"), "{s}");
 }

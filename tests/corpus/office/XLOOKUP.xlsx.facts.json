@@ -1,0 +1,18 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 10
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 439
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 580
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 13
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 10
+  },
+  {
+    "pointer": "/facets/formulas/0/expression",
+    "equals": "=SUM(Sheet1:Sheet3!A1)"
+  },
+  {
+    "pointer": "/facets/formulas/0/references/0",
+    "equals": "Sheet1:Sheet3!A1"
+  },
+  {
+    "contains": "| A1 |  |  | 22 |  |  | 10 |"
+  }
+]

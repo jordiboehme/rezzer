@@ -19,10 +19,12 @@ const CHECK_EVERY: usize = 1000;
 /// How many bytes of text are read between two time checks, so one huge paragraph is covered.
 const CHECK_BYTES: usize = 1024 * 1024;
 
-/// Model elements of one paragraph: the block and its text.
-const PARAGRAPH_ELEMENTS: u64 = 2;
+/// Model elements one line adds to its paragraph: the block (first line) or a line break
+/// (further lines), and the text.
+const LINE_ELEMENTS: u64 = 2;
 
 const TIME_STOP: &str = "rest of the text not read";
+const TEXT_STOP: &str = "text limit reached, rest of the paragraph and the text not read";
 const ELEMENT_STOP: &str = "element limit reached, rest of the text not read";
 
 /// Reads plain text. The encoding is detected, line endings are normalized to LF and the text
@@ -65,20 +67,19 @@ impl Reader for TextReader {
         }
 
         let text = normalize_newlines(&decoded.text, decoded.line_ending);
+        let max_text = usize::try_from(budget.limits().max_text_bytes).unwrap_or(usize::MAX);
         let mut blocks: Vec<Block> = Vec::new();
         let mut current: Vec<&str> = Vec::new();
+        // Bytes of the paragraph in `current`, line breaks included.
+        let mut current_bytes = 0usize;
         let mut since_check = 0usize;
         let mut stopped_at: Option<(usize, &str)> = None;
         for line in text.split('\n') {
             if line.trim().is_empty() {
                 if !current.is_empty() {
-                    if budget.add_elements(PARAGRAPH_ELEMENTS).is_err() {
-                        stopped_at = Some((blocks.len() + 1, ELEMENT_STOP));
-                        current.clear();
-                        break;
-                    }
                     blocks.push(paragraph(&current));
                     current.clear();
+                    current_bytes = 0;
                 }
                 continue;
             }
@@ -89,6 +90,40 @@ impl Reader for TextReader {
                     stopped_at = Some((blocks.len() + 1, TIME_STOP));
                     break;
                 }
+            }
+            // Every line is charged before it is kept: the block and its text for the first
+            // line, a line break and a text for each further one.
+            if budget.add_elements(LINE_ELEMENTS).is_err() {
+                // What was read of the paragraph is kept.
+                let kept = !current.is_empty();
+                if kept {
+                    blocks.push(paragraph(&current));
+                    current.clear();
+                }
+                stopped_at = Some((blocks.len() + usize::from(!kept), ELEMENT_STOP));
+                break;
+            }
+            let separator = usize::from(!current.is_empty());
+            if budget
+                .charge_text(current_bytes + separator + line.len())
+                .is_err()
+            {
+                // Keep what fits of the paragraph, cut on a character boundary.
+                let room = max_text.saturating_sub(current_bytes + separator);
+                let mut cut = room.min(line.len());
+                while !line.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                if cut > 0 {
+                    current.push(&line[..cut]);
+                }
+                let kept = !current.is_empty();
+                if kept {
+                    blocks.push(paragraph(&current));
+                    current.clear();
+                }
+                stopped_at = Some((blocks.len() + usize::from(!kept), TEXT_STOP));
+                break;
             }
             since_check += line.len() + 1;
             if since_check >= CHECK_BYTES {
@@ -102,14 +137,11 @@ impl Reader for TextReader {
                     break;
                 }
             }
+            current_bytes += separator + line.len();
             current.push(line);
         }
         if stopped_at.is_none() && !current.is_empty() {
-            if budget.add_elements(PARAGRAPH_ELEMENTS).is_err() {
-                stopped_at = Some((blocks.len() + 1, ELEMENT_STOP));
-            } else {
-                blocks.push(paragraph(&current));
-            }
+            blocks.push(paragraph(&current));
         }
         if let Some((n, what)) = stopped_at {
             completeness = Completeness::Partial;
@@ -134,11 +166,16 @@ impl Reader for TextReader {
     }
 }
 
+/// One paragraph: the lines as text inlines with a line break between them.
 fn paragraph(lines: &[&str]) -> Block {
-    Block::paragraph(vec![Inline::plain(lines.join(
-        "
-",
-    ))])
+    let mut inlines = Vec::with_capacity(lines.len() * 2);
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            inlines.push(Inline::LineBreak);
+        }
+        inlines.push(Inline::plain(*line));
+    }
+    Block::paragraph(inlines)
 }
 
 /// Turns CRLF and lone CR into LF in one pass. LF-only text and text without line breaks are

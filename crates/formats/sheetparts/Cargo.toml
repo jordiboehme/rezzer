@@ -1,0 +1,19 @@
+[package]
+name = "sheetparts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Workbook parts no spreadsheet crate exposes well: sheets, defined names, calc settings, styles, properties, external links and number formats"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/sheetparts"
+readme = "README.md"
+keywords = ["xlsx", "ooxml", "spreadsheet", "number-format", "excel"]
+categories = ["parser-implementations"]
+
+[dependencies]
+zipguard = { path = "../zipguard" }
+quick-xml.workspace = true
+
+[dev-dependencies]
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

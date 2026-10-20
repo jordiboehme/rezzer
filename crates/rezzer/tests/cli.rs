@@ -227,6 +227,35 @@ fn sections_limit_the_output() {
         .stderr(predicate::str::contains("bogus"));
 }
 
+#[cfg(feature = "fmt-xlsx")]
+#[test]
+fn no_math_drops_the_math_column() {
+    let env = Env::new();
+    let book = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office/tunnel_design_calculations.xlsx");
+    let logic = |extra: &[&str]| {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&book)
+            .args(["--sections", "logic"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let with = logic(&[]);
+    assert!(with.contains("| Value | Math |"), "{with}");
+    assert!(with.contains("$`"), "{with}");
+    // The second run renders the cached model: math is no part of the cache key.
+    let without = logic(&["--no-math"]);
+    assert_eq!(env.cache_entries(), 1);
+    assert!(without.contains("### Structural\\_Lining"), "{without}");
+    assert!(!without.contains("Math"), "{without}");
+    assert!(!without.contains("$`"), "{without}");
+}
+
 #[test]
 fn output_dir_writes_markdown_and_json() {
     let env = Env::new();
@@ -411,4 +440,81 @@ fn mcp_ends_cleanly_when_stdin_closes_before_a_session() {
         .assert()
         .code(0)
         .stdout("");
+}
+
+fn corpus(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+#[test]
+fn rezzer_formats_lists_sheet_reader() {
+    let env = Env::new();
+    let out = env.cmd().arg("formats").output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let rows: Vec<Vec<&str>> = text
+        .lines()
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    let version = env!("CARGO_PKG_VERSION");
+    for format in ["xlsx", "xlsm", "xlsb", "ods"] {
+        assert!(
+            rows.iter().any(|r| r[..] == [format, "sheet", version]),
+            "{format}: {text}"
+        );
+    }
+}
+
+#[test]
+fn xlsx_end_to_end_exit_0() {
+    let env = Env::new();
+    let book = env.file("book.xlsx", &corpus("one-variable.xlsx"));
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: xlsx"))
+        .stdout(predicate::str::contains("## Logic"));
+}
+
+#[test]
+fn ods_end_to_end_exit_0() {
+    let env = Env::new();
+    let book = env.file("book.ods", &corpus("formula-across-sheets.ods"));
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: ods"))
+        .stdout(predicate::str::contains("## Logic"));
+}
+
+#[test]
+fn xlsm_end_to_end_exit_0() {
+    let env = Env::new();
+    let book = env.file("macros.xlsx", &corpus("testNames.xlsm"));
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: xlsm").and(predicate::str::contains("## Logic")));
+}
+
+#[test]
+fn xlsx_named_csv_still_reads_as_xlsx() {
+    let env = Env::new();
+    let book = env.file("data.csv", &corpus("one-variable.xlsx"));
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: xlsx"))
+        .stdout(predicate::str::contains("## Logic"));
 }

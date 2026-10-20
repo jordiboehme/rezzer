@@ -204,6 +204,11 @@ struct Builder<'b> {
     offset: usize,
     /// Set when the depth loss still needs its line number.
     need_line: bool,
+    /// Index in `losses` of the empty-math loss and how many empty formulas were dropped.
+    empty_math_loss: Option<usize>,
+    empty_math: usize,
+    /// Set when the empty-math loss still needs its line number.
+    need_math_line: bool,
     /// Index in `cur` of the first soft break of a possible callout header.
     para_break: Option<usize>,
     time_stopped: bool,
@@ -242,6 +247,9 @@ impl<'b> Builder<'b> {
             depth_loss: None,
             offset: 0,
             need_line: false,
+            empty_math_loss: None,
+            empty_math: 0,
+            need_math_line: false,
             para_break: None,
             time_stopped: false,
             elements_stopped: false,
@@ -297,6 +305,18 @@ impl<'b> Builder<'b> {
             if self.elements_stopped {
                 break;
             }
+            if self.need_math_line {
+                self.need_math_line = false;
+                let end = self.offset.min(text.len());
+                let line = text.as_bytes()[..end]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count()
+                    + 1;
+                if let Some(loss) = self.empty_math_loss.and_then(|i| self.losses.get_mut(i)) {
+                    loss.location = format!("line {line}");
+                }
+            }
             if self.need_line {
                 self.need_line = false;
                 let end = self.offset.min(text.len());
@@ -339,10 +359,14 @@ impl<'b> Builder<'b> {
                     Some(inner) => inner.to_string(),
                     None => s.into_string(),
                 };
-                self.push_inline(Inline::Math { latex });
+                self.math_or_loss(latex);
             }
             Event::DisplayMath(s) => {
                 self.ensure_inline_leaf();
+                if s.trim().is_empty() {
+                    self.math_or_loss(s.into_string());
+                    return;
+                }
                 // Only a formula that is the whole paragraph is a display block.
                 let alone = self.cur.is_empty() && self.inline_stack.is_empty();
                 self.push_inline(Inline::Math {
@@ -715,6 +739,26 @@ impl<'b> Builder<'b> {
         true
     }
 
+    /// Pushes a formula. An empty one has nothing to show and is not kept, but it is said:
+    /// the source had math delimiters with nothing inside.
+    fn math_or_loss(&mut self, latex: String) {
+        if !latex.trim().is_empty() {
+            self.push_inline(Inline::Math { latex });
+            return;
+        }
+        self.empty_math += 1;
+        if self.empty_math == 1 {
+            self.empty_math_loss = Some(self.losses.len());
+            self.need_math_line = true;
+            self.losses.push(Loss {
+                location: "document".into(),
+                what: "empty math (a formula with no content) dropped".into(),
+                why: LossReason::Uncertain,
+                severity: Severity::Warning,
+            });
+        }
+    }
+
     fn push_inline(&mut self, inline: Inline) {
         if !self.charge() {
             return;
@@ -1059,13 +1103,12 @@ impl<'b> Builder<'b> {
         if let Some(Frame::Root { blocks }) = self.stack.pop() {
             self.body.extend(blocks);
         }
-        if self.elements_stopped || self.input_cut.is_some() {
-            let location = match self.input_cut {
-                Some(line) if !self.elements_stopped => format!("line {line}"),
-                _ => "document".into(),
-            };
+        // Name what really stopped the read: the element budget first, then the clock. The
+        // input cut only counts when nothing earlier stopped the read, because then the
+        // parser never got to the cut.
+        if self.elements_stopped {
             self.losses.push(Loss {
-                location,
+                location: "document".into(),
                 what: "element limit reached, rest of the document not read".into(),
                 why: LossReason::Limit,
                 severity: Severity::Warning,
@@ -1073,10 +1116,22 @@ impl<'b> Builder<'b> {
         } else if self.time_stopped {
             self.losses.push(Loss {
                 location: "document".into(),
-                what: "rest of the document not read".into(),
+                what: "time limit reached, rest of the document not read".into(),
                 why: LossReason::Limit,
                 severity: Severity::Warning,
             });
+        } else if let Some(line) = self.input_cut {
+            self.losses.push(Loss {
+                location: format!("line {line}"),
+                what: "element limit reached, rest of the document not read".into(),
+                why: LossReason::Limit,
+                severity: Severity::Warning,
+            });
+        }
+        if self.empty_math > 1
+            && let Some(loss) = self.empty_math_loss.and_then(|i| self.losses.get_mut(i))
+        {
+            loss.what = format!("{} (in {} places)", loss.what, self.empty_math);
         }
         if self.skipped_subtrees > 1
             && let Some(loss) = self.depth_loss.and_then(|i| self.losses.get_mut(i))

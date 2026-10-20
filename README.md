@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown and CSV today. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV and spreadsheets (XLSX, XLSM, XLSB and ODS) today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -47,8 +47,9 @@ Read a file:
 
 ```sh
 rezzer read notes.md              # Markdown with OKF frontmatter to stdout
-rezzer rez budget.csv -o out/     # writes out/budget.csv.md
+rezzer rez budget.xlsx -o out/    # writes out/budget.xlsx.md (rez is short for read)
 rezzer read data.csv --json       # the document model as JSON
+rezzer read calc.xlsx --sections logic   # only the formulas and what they read
 rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
@@ -83,9 +84,9 @@ flowchart LR
 ```
 
 1. **Detect:** Rezzer looks at the content, not at the file extension. A CSV saved as `.txt` is still a CSV.
-2. **Read:** one reader per format fills Rezzer's document model. Readers never write Markdown themselves.
+2. **Read:** one reader per format fills Rezzer's document model. Readers never write Markdown themselves. The spreadsheet reader also folds copied formulas into patterns, tells inputs from results and builds the dependency graph.
 3. **Model:** the content as blocks (sections, headings, tables, lists, pictures) plus layers for what lies beneath: formulas and dependencies, graphs, timelines, comments, annotations and embedded objects. Anchors tie every comment to its passage and every formula to its cell. The model also lists what couldn't be read, and why.
-4. **Enrich:** steps that work the same for every format. Group copied formulas into patterns, tell inputs from results, build dependency graphs, write an overview.
+4. **Enrich:** steps that work the same for every format: check that every anchor points somewhere, detect the language, write an overview.
 5. **Render:** one renderer writes Markdown with frontmatter in the [Open Knowledge Format](https://okf.md) (OKF). Graphs become Mermaid. The model is also available as JSON.
 
 A new format means one new reader. The rest of the pipeline stays the same.
@@ -95,7 +96,7 @@ A new format means one new reader. The rest of the pipeline stays the same.
 - **Structure:** headings, sections, lists, footnotes and cross references stay what they are. Tables become real Markdown tables, merged cells included.
 - **Metadata:** title, authors, dates, revisions, keywords and custom properties go into the frontmatter. Values keep their type: a date stays a date, 9 % stays a percentage.
 - **The logic behind the content:** every format has a layer that tells how it works. Rezzer reads it and shows it as tables and graphs:
-  - Spreadsheets: formulas with the cells they read, named ranges, number formats, validation rules, data tables
+  - Spreadsheets: formulas with the cells they read, inputs with label and unit, results, named ranges, number formats, validation rules, data tables
   - PDF forms: which field is calculated from which, in what order, with what format
   - Documents: fields, cross references, mail merge sources, embedded data
   - Mail and web: reply threads, link graphs, structured data
@@ -112,65 +113,80 @@ A new format means one new reader. The rest of the pipeline stays the same.
 
 ## Example
 
-A budget spreadsheet could come out like this (the format is not final yet):
+A small budget workbook comes out like this (shortened, and the format may still change):
 
 ````markdown
 ---
 type: document
 title: "Budget 2026"
-description: "Spreadsheet with 3 sheets: Costs, Income, Summary."
 resource: "finance/budget-2026.xlsx"
-tags: [spreadsheet]
-generated: { by: rezzer/0.1.0, at: 2026-11-02T10:15:00+01:00 }
+generated: { by: rezzer/0.1.0, at: 2026-11-02T10:15:00Z }
 source_date: 2026-10-28
+format: xlsx
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
 ---
 
 # Budget 2026
 
 ## Overview
 
-| Sheet   | Role   | Cells  | Formulas | Reads from    |
-|---------|--------|--------|----------|---------------|
-| Costs   | input  | A1:D40 | 0        |               |
-| Income  | input  | A1:C25 | 0        |               |
-| Summary | result | A1:D4  | 6        | Costs, Income |
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Costs | sheet | 40 rows x 4 columns |  |  |
+| Income | sheet | 25 rows x 3 columns |  |  |
+| Summary | sheet | 4 rows x 4 columns | result | Costs, Income |
+
+- Sheets: 3
+- Formulas: 6
+- Patterns: 1
+- Parameters: 66
+- Results: 4
+- Comments: 2
+- Last changed: 2026-10-28T09:12:00Z
 
 ```mermaid
 flowchart LR
-    Costs --> Summary
-    Income --> Summary
+    p0["Costs"]
+    p1["Income"]
+    p2["Summary"]
+    p0 --> p2
+    p1 --> p2
 ```
 
-- Last changed: 2026-10-28 by A. Meyer
-- Open comments: 2 (Costs!C12, Summary!D4)
+## Summary
 
-## Sheet: Summary
+| Item | 2025 | 2026 | Change |
+| --- | --- | --- | --- |
+| Costs | 41,200 | 44,900 | 9.0 % |
+| Income | 52,000 | 55,300 | 6.3 % |
+| Result | 10,800 | 10,400 | -3.7 % |
 
-| Item    | 2025   | 2026   | Change |
-|---------|--------|--------|--------|
-| Costs   | 41,200 | 44,900 | 9.0 %  |
-| Income  | 52,000 | 55,300 | 6.3 %  |
-| Result  | 10,800 | 10,400 | -3.7 % |
+## Logic
 
-### Formulas
+### Summary
 
-| Cells | Formula              | Reads               | Role   |
-|-------|----------------------|---------------------|--------|
-| C2    | `=SUM(Costs!C2:C40)` | sheet Costs, C2:C40 | result |
-| C4    | `=C3-C2`             | C3, C2              | result |
-| D2:D4 | `=C2/B2-1` (copied)  | B, C of each row    | result |
+#### Formulas
+
+| Cells | Count | Formula | Reads | Role | Value |
+| --- | --- | --- | --- | --- | --- |
+| C2 | 1 | `=SUM(Costs!C2:C40)` | Costs!C2:C40 | intermediate | 44900 |
+| C3 | 1 | `=SUM(Income!C2:C25)` | Income!C2:C25 | intermediate | 55300 |
+| C4 | 1 | `=C3-C2` | C3, C2 | result | 10400 |
+| D2:D4 | 3 | `=C2/B2-1` | C2, B2 | result | 9.0 % |
 ````
 
 ## Formats
 
-Planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
+Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS work today. The other formats are planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
 
 | Format | What Rezzer gets | Built on |
 |---|---|---|
 | [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, signatures, revisions | [lopdf](https://crates.io/crates/lopdf), [pdf-inspector](https://crates.io/crates/pdf-inspector), [hayro](https://crates.io/crates/hayro) |
-| [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own reader |
+| [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, inputs and results, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [XLS](docs/formats/xls.md) | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
-| [ODS](docs/formats/ods.md) | Values, formulas, names, comments | [calamine](https://crates.io/crates/calamine), own reader |
+| [ODS](docs/formats/ods.md) | Values, formulas with references, inputs and results, names, comments, validation | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [DOCX](docs/formats/docx.md) | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
 | [DOC](docs/formats/doc.md) | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
 | [ODT](docs/formats/odt.md) | Structure, comments, tracked changes, footnotes | own reader |
@@ -185,8 +201,6 @@ Planned for the first release. Each format has its own page with what Rezzer ext
 | [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
-
-Ready to try today: Text, Markdown, CSV and TSV. The rest are planned.
 
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
 

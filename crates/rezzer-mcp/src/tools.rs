@@ -52,6 +52,10 @@ pub struct RezParams {
     /// embedded, not_read. Default all.
     #[serde(default)]
     pub sections: Option<Vec<String>>,
+    /// Show formulas also as LaTeX math in the Logic section. Default true.
+    #[serde(default)]
+    #[schemars(extend("default" = true))]
+    pub math: Option<bool>,
     /// `markdown` (default) or `json` (the document model, one page).
     #[serde(default)]
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
@@ -101,12 +105,22 @@ impl RezParams {
                 ));
             }
         };
+        let math = match take(&mut args, "math") {
+            None => None,
+            Some(Value::Bool(b)) => Some(b),
+            Some(Value::String(s)) if s.trim() == "true" => Some(true),
+            Some(Value::String(s)) if s.trim() == "false" => Some(false),
+            Some(other) => {
+                return Err(format!("math must be true or false, not {}", shown(&other)));
+            }
+        };
         Ok(RezParams {
             path: string(&mut args, "path")?,
             file: string(&mut args, "file")?,
             source: string(&mut args, "source")?,
             page,
             sections,
+            math,
             format: string(&mut args, "format")?,
         })
     }
@@ -232,6 +246,7 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
     let request = Request {
         output,
         sections,
+        math: params.math.unwrap_or(true),
         cancel,
         ..Request::default()
     };

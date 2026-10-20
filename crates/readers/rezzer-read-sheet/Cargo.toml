@@ -1,0 +1,27 @@
+[package]
+name = "rezzer-read-sheet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = ["xlsx", "ods"]
+# XLSX, XLSM and XLSB.
+xlsx = []
+ods = []
+
+[dependencies]
+rezzer-model = { path = "../../rezzer-model" }
+rezzer-limits = { path = "../../rezzer-limits" }
+zipguard = { path = "../../formats/zipguard" }
+formulakit = { path = "../../formats/formulakit" }
+sheetparts = { path = "../../formats/sheetparts" }
+calamine.workspace = true
+quick-xml.workspace = true
+cfb.workspace = true
+
+[dev-dependencies]
+rezzer-render = { path = "../../rezzer-render" }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

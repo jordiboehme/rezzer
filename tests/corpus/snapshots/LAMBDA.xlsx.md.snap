@@ -1,0 +1,127 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "LAMBDA.xlsx"
+resource: "<corpus>/office/LAMBDA.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "6fda1c171601204eb5ce8d9b2a48706c5a60adbd6d60d59d13db5a24675f01bb"
+source_size: 10383
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["microsoft-image@theuniverse.today"]
+created: "2026-04-29T11:51:34Z"
+modified: "2026-04-29T12:02:54Z"
+---
+
+# LAMBDA.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Sheet1 | sheet | 8 rows x 7 columns | result |  |
+
+- Sheets: 1
+- Formulas: 8
+- Patterns: 1
+- Parameters: 7
+- Results: 6
+- Names: 2
+- Last changed: 2026-04-29T12:02:54Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Macintosh Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | microsoft-image@theuniverse.today |
+
+## Sheet1
+
+|  |  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6 | &lt;= on cell |  | 7 | 6 | Because it's in the Impossible that you find reality |  |
+| 5 | &lt;=more complex lambda |  |  |  | 9 |  |
+|  |  |  |  |  |  |  |
+| Temps | Fahrenheit |  |  |  | 42 | &lt;= this was the question all along! |
+| 0 | -17.77777778 |  |  |  |  |  |
+| 100 | 37.77777778 |  |  |  |  |  |
+| 50 | 10 |  |  |  |  |  |
+| -10 | -23.33333333 |  |  |  |  |  |
+
+## Logic
+
+### Sheet1
+
+#### Parameters
+
+A row with a cell range stands for values next to each other that play one part.
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| D1 |  | &lt;= on cell | 7 |  |  | 1 |
+| E1 |  |  | 6 |  |  | 1 |
+| F1 |  |  | Because it's in the Impossible that you find reality |  |  | 1 |
+| A5:A8 |  |  | 0, 100, 50, -10 (4 values) |  |  | 1 each |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 | 1 | `=LAMBDA(x, x+1)(5)` |  | constant | 6 | $`\operatorname{LAMBDA}(\mathrm{x}, \mathrm{x}+1)(5)`$ |
+| A2 | 1 | `=LAMBDA(x,y, SQRT(x*x+y*y))(3,4)` |  | constant | 5 | $`\operatorname{LAMBDA}(\mathrm{x}, \mathrm{y}, \sqrt{\mathrm{x} \cdot \mathrm{x}+\mathrm{y} \cdot \mathrm{y}})(3, 4)`$ |
+| F2 | 1 | `=CountWords(F1)` | F1 | result | 9 | $`\operatorname{CountWords}(\mathrm{F1})`$ |
+| F4 | 1 | `=LET(area, LAMBDA(x,y,x*y), area(D1,E1))` | D1, E1 | result | 42 | $`\operatorname{LET}(\mathrm{area}, \operatorname{LAMBDA}(\mathrm{x}, \mathrm{y}, \mathrm{x} \cdot \mathrm{y}), \operatorname{area}(\mathrm{D1}, \mathrm{E1}))`$ |
+| B5:B8 | 4 | `=Temperature(A5)` | A5 | result | -17.777777778 | $`\operatorname{Temperature}(\mathrm{A5})`$ |
+
+#### Results
+
+For formulas copied over several cells the first cell is shown.
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| F2 | `=CountWords(F1)` | 9 |
+| F4 | `=LET(area, LAMBDA(x,y,x*y), area(D1,E1))` | 42 |
+| B5:B8 | `=Temperature(A5)` | -17.777777778 |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| CountWords | workbook | LAMBDA | `LAMBDA(text, LEN(TRIM(text)) - LEN(SUBSTITUTE(TRIM(text), " ", "")) + 1)` |  |  | parameters: text |
+| Temperature | workbook | LAMBDA | `LAMBDA(temp, (5/9) * (temp-32))` |  |  | parameters: temp; Fahrenheit |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters.
+```mermaid
+flowchart LR
+    n0["Sheet1!A1"]
+    n1["Sheet1!A2"]
+    n2["Sheet1!F2"]
+    n3["Sheet1!F4"]
+    n4[["Sheet1!B5:B8, 4 formulas"]]
+    n5(["Sheet1!F1"])
+    n6(["Sheet1!D1:E1"])
+    n7(["Sheet1!A5:A8"])
+    n5 --> n2
+    n6 --> n3
+    n7 --> n4
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| calculation | workbook | automatic, iterative calculation off |

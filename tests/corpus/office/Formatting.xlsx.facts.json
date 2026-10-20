@@ -1,0 +1,24 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "contains": "| £nn.nn | £10.52 |"
+  },
+  {
+    "contains": "| yyyy-mm-dd | 2006-11-24 |"
+  }
+]
