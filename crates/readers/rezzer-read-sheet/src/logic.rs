@@ -70,6 +70,10 @@ impl TextMeter {
         true
     }
 
+    pub fn is_full(&self) -> bool {
+        self.full
+    }
+
     pub fn max(&self) -> u64 {
         self.max
     }
@@ -440,6 +444,13 @@ impl Formulas {
             range: range.map(|r| Anchor(format!("{q}!{}", r.replace('$', "")))),
             original: None,
         }
+    }
+
+    /// A defined name whose text is not kept: the logic index still knows the name.
+    pub fn name_not_kept(&mut self, n: &DefinedName) {
+        self.inputs
+            .workbook
+            .add_name(&n.name, n.scope.as_deref(), None);
     }
 
     /// The model formula of a defined name: `name:gg` or `name:Sheet1!gg`, kind `name` or

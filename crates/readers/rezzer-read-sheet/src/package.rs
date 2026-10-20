@@ -137,6 +137,38 @@ fn rels(zip: &mut Archive, part: &str) -> Result<Vec<Rel>, Refusal> {
     Ok(out)
 }
 
+/// The relationship id of each `sheet` element of the workbook part, in order.
+fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
+    let bytes = zip
+        .read(part)
+        .map_err(|e| (zip_reason(&e), format!("{part}: {e}")))?;
+    let mut reader = Reader::from_reader(bytes.as_slice());
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    let damaged = |what: String| (LossReason::Damaged, format!("{part}: {what}"));
+    loop {
+        buf.clear();
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == "sheet" => {
+                let mut id = None;
+                for a in e.attributes() {
+                    let a = a.map_err(|e| damaged(e.to_string()))?;
+                    // calamine matches the local name `id`, whatever the prefix.
+                    if a.key.local_name().as_ref() == "id" {
+                        id = Some(a.value.to_string());
+                    }
+                }
+                out.push(id.ok_or_else(|| damaged("a sheet without a relationship id".into()))?);
+            }
+            Ok(Event::DocType(_)) => return Err(damaged("a DOCTYPE is not allowed".into())),
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(e) => return Err(damaged(e.to_string())),
+        }
+    }
+    Ok(out)
+}
+
 /// A target both calamine and sheetparts read the same way: no `.`, `..` or empty
 /// segments, no backslash, no escaped characters.
 fn clean(target: &str) -> bool {
@@ -203,23 +235,44 @@ pub(crate) fn check_structure(zip: &mut Archive, wb: &WorkbookParts) -> Result<(
         )));
     }
 
+    // Every sheet's relationship, by the id the workbook gives it and whatever its type
+    // (sheetparts follows the id, calamine the last segment of the type): the part calamine
+    // joins must be the part sheetparts resolved.
     let wb_rels = format!("{dir}_rels/workbook.xml.rels");
-    for r in parsed.get(&wb_rels).map(Vec::as_slice).unwrap_or(&[]) {
-        let sheet_like = ["/worksheet", "/chartsheet", "/dialogsheet"]
-            .iter()
-            .any(|k| r.kind.ends_with(k));
-        if !sheet_like {
-            continue;
-        }
+    let by_id: HashMap<&str, &Rel> = parsed
+        .get(&wb_rels)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .map(|r| (r.id.as_str(), r))
+        .collect();
+    let ids = sheet_ids(zip, &part)?;
+    if ids.len() != wb.sheets.len() {
+        return Err(damaged(format!(
+            "{part} lists {} sheets, {} were read",
+            ids.len(),
+            wb.sheets.len()
+        )));
+    }
+    for (id, s) in ids.iter().zip(&wb.sheets) {
+        let Some(r) = by_id.get(id.as_str()) else {
+            return Err(damaged(format!(
+                "sheet {:?} names the relationship {id:?}, which is not there",
+                s.name
+            )));
+        };
         if r.external || !clean(&r.target) {
             return Err(damaged(format!(
-                "the sheet target {:?} is external or not a plain path",
-                r.target
+                "the target {:?} of sheet {:?} is external or not a plain path",
+                r.target, s.name
             )));
         }
         let p = join(&dir, &r.target);
-        if !exists.contains(p.as_str()) {
-            return Err(damaged(format!("the sheet part {p} is not in the package")));
+        if p != s.part || !exists.contains(p.as_str()) {
+            return Err(damaged(format!(
+                "the part {p} of sheet {:?} is not in the package",
+                s.name
+            )));
         }
     }
 

@@ -302,6 +302,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         out.doc.body.push(section(&sheet.name, &q, blocks));
     }
 
+    let mut names_dropped = 0u64;
     for (i, n) in wb.names.iter().enumerate() {
         let over = if i % 1_024 == 0 {
             budget.check_time().err()
@@ -320,11 +321,28 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             );
             break;
         }
+        // A name's text counts against the same limit as the formula texts.
+        if !formulas.meter.take(n.refers_to.len()) {
+            names_dropped += 1;
+            formulas.name_not_kept(n);
+            continue;
+        }
         let (f, problem) = formulas.name(n);
         out.doc.facets.formulas.push(f);
         if let Some(p) = problem {
             problem_loss(&mut out, p);
         }
+    }
+    if names_dropped > 0 {
+        out.loss(
+            "document",
+            format!(
+                "formula text limit reached ({} bytes in all): {names_dropped} defined names not listed",
+                formulas.meter.max()
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
     }
     embedded(&mut out, &wb, &vba, &formulas);
     // The logic inputs stay with the formulas for the workbook logic pass.
@@ -717,7 +735,22 @@ fn sheet_formulas(
             && let Some(AttrKind::Shared { index }) = attr.map(|a| &a.kind)
             && let Some((t, start)) = masters.get(index)
         {
-            text = calamine::expand_shared_formula(t, *start, pos).ok();
+            // The same meter as every other formula text: checked before the copy is made,
+            // charged with its real length after.
+            let copy = if formulas.meter.fits(t.len()) {
+                calamine::expand_shared_formula(t, *start, pos).ok()
+            } else {
+                None
+            };
+            match copy {
+                Some(f) if formulas.meter.take(f.len()) => text = Some(f),
+                Some(_) | None if formulas.meter.is_full() => {
+                    dropped.0 += 1;
+                    dropped.1.get_or_insert(pos);
+                    continue;
+                }
+                _ => {}
+            }
         }
         let index = out.doc.facets.formulas.len();
         if let Some(text) = text {

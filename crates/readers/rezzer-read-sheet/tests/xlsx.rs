@@ -31,6 +31,8 @@ struct Sheet {
     related: Vec<(&'static str, String, String)>,
     /// The relationship target in place of `worksheets/sheet<n>.xml`.
     target: Option<String>,
+    /// The relationship type in place of the full worksheet type.
+    rel_type: Option<String>,
 }
 
 /// A small workbook built in memory.
@@ -55,12 +57,18 @@ impl Book {
             xml: xml.into(),
             related: Vec::new(),
             target: None,
+            rel_type: None,
         });
         self
     }
 
     fn target(mut self, target: &str) -> Book {
         self.sheets.last_mut().unwrap().target = Some(target.into());
+        self
+    }
+
+    fn rel_type(mut self, kind: &str) -> Book {
+        self.sheets.last_mut().unwrap().rel_type = Some(kind.into());
         self
     }
 
@@ -118,8 +126,12 @@ impl Book {
                 .target
                 .clone()
                 .unwrap_or_else(|| format!("worksheets/sheet{n}.xml"));
+            let kind = s
+                .rel_type
+                .clone()
+                .unwrap_or_else(|| format!("{RELS}/worksheet"));
             rels.push_str(&format!(
-                "<Relationship Id=\"rId{n}\" Type=\"{RELS}/worksheet\" Target=\"{target}\"/>"
+                "<Relationship Id=\"rId{n}\" Type=\"{kind}\" Target=\"{target}\"/>"
             ));
             files.push((format!("xl/worksheets/sheet{n}.xml"), s.xml.clone()));
             if !s.related.is_empty() {
@@ -1285,4 +1297,100 @@ fn shared_formula_copies_stay_within_the_text_limit() {
     assert_eq!(out.completeness, Completeness::Partial);
     // The values are still all there.
     assert_eq!(cell_text(doc, "S!B20000").as_deref(), Some("1"));
+}
+
+#[test]
+fn shared_copies_before_their_master_stay_within_the_text_limit() {
+    let master = "A1+".repeat(2_666) + "A1";
+    let mut rows = String::new();
+    for r in 1..20_000 {
+        rows.push_str(&format!(
+            "<row r=\"{r}\"><c r=\"B{r}\"><f t=\"shared\" si=\"0\"/><v>1</v></c></row>"
+        ));
+    }
+    rows.push_str(&format!(
+        "<row r=\"20000\"><c r=\"B20000\"><f t=\"shared\" ref=\"B1:B20000\" si=\"0\">{master}</f><v>1</v></c></row>"
+    ));
+    let limits = Limits {
+        max_text_bytes: 1_000_000,
+        ..Limits::default()
+    };
+    let out = read_with(
+        Book::default().sheet("S", &ws("", &rows, "")).bytes(),
+        limits,
+    );
+    let doc = &out.document;
+    let text: usize = doc
+        .facets
+        .formulas
+        .iter()
+        .map(|f| f.expression.len() + f.original.as_ref().map_or(0, String::len))
+        .sum();
+    assert!(
+        text <= 1_000_000 + 2 * 8_200,
+        "{text} bytes of formula text"
+    );
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("formula text")),
+        "{:#?}",
+        doc.losses
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn sheet_relationship_type_without_slash_is_still_checked() {
+    let plain = Book::default()
+        .sheet("S", &small_sheet())
+        .rel_type("worksheet")
+        .target("./worksheets/sheet1.xml");
+    refused(&read(&plain), &[LossReason::Damaged]);
+    let other = ws(
+        "",
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>BOMB other part</t></is></c></row>",
+        "",
+    );
+    let split = Book::default()
+        .sheet("S", &small_sheet())
+        .rel_type("worksheet")
+        .target("./worksheets/sheet1.xml")
+        .entry("xl/./worksheets/sheet1.xml", other);
+    refused(&read(&split), &[LossReason::Damaged]);
+}
+
+#[test]
+fn defined_name_texts_count_against_the_text_limit() {
+    let text = format!("\"{}\"", "n".repeat(4_000));
+    let names: String = (0..300)
+        .map(|i| format!("<definedName name=\"big{i}\">{text}</definedName>"))
+        .collect();
+    let limits = Limits {
+        max_text_bytes: 100_000,
+        max_ratio: 100_000,
+        ..Limits::default()
+    };
+    let out = read_with(
+        Book::default()
+            .sheet("S", &small_sheet())
+            .names(&names)
+            .bytes(),
+        limits,
+    );
+    let doc = &out.document;
+    let kept: usize = doc
+        .facets
+        .formulas
+        .iter()
+        .map(|f| f.expression.len() + f.original.as_ref().map_or(0, String::len))
+        .sum();
+    assert!(kept <= 100_000, "{kept}");
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("defined names")),
+        "{:#?}",
+        doc.losses
+    );
 }
