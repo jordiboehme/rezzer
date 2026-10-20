@@ -929,13 +929,16 @@ pub(crate) fn workbook_logic(
         );
     }
 
-    let mut params = cell_parameters(
+    let (mut params, unit_notes) = cell_parameters(
         &logic.parameters,
         &sheets,
         state.wb,
         &convert_units,
         &named_cells,
     );
+    for (anchor, what) in unit_notes {
+        out.loss(anchor, what, LossReason::Uncertain, Severity::Info);
+    }
     params.extend(name_parameters(&out.doc.facets.formulas, literal_names));
     let total = params.len();
     for (i, p) in params.into_iter().enumerate() {
@@ -960,19 +963,28 @@ pub(crate) fn workbook_logic(
 }
 
 /// One `Uncertain` warning when the stored results may not match the formulas: manual
-/// calculation, iterative calculation or formulas without a stored result.
+/// calculation, data tables left out of automatic calculation, iterative calculation, a file
+/// that asks for a full recalculation, or formulas without a stored result.
 fn stale_results(out: &mut Out, wb: &WorkbookParts) {
+    let formulas = &out.doc.facets.formulas;
     let mut why = Vec::new();
     if wb.calc.mode == CalcMode::Manual {
         why.push("calculation is set to manual".to_string());
     }
+    if wb.calc.mode == CalcMode::AutoNoTable
+        && formulas
+            .iter()
+            .any(|f| f.kind == Some(FormulaKind::DataTable))
+    {
+        why.push("data tables are not recalculated automatically".to_string());
+    }
     if wb.calc.iterate {
         why.push("iterative calculation is on".to_string());
     }
-    let missing = out
-        .doc
-        .facets
-        .formulas
+    if wb.calc.full_calc_on_load {
+        why.push("the file asks for a full recalculation when opened".to_string());
+    }
+    let missing = formulas
         .iter()
         .filter(|f| {
             f.cached.is_none() && !matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
@@ -994,7 +1006,8 @@ fn stale_results(out: &mut Out, wb: &WorkbookParts) {
 }
 
 /// The texts around a value: the label to its left, the text right beside it (where a unit
-/// sits in `Diameter | 10.0 | m`) and the header above it.
+/// sits in `Diameter | 10.0 | m`) when its column reads as a unit column, the header above
+/// it.
 #[derive(Clone, Copy, Default)]
 struct Around<'a> {
     left: Option<&'a str>,
@@ -1002,30 +1015,43 @@ struct Around<'a> {
     header: Option<&'a str>,
 }
 
-/// The texts around each wanted cell. The label to the left and the header above are at
-/// most [`LABEL_GAP`] empty cells away; the header is the first text cell above a run of
-/// value or formula cells, so every value in a column under `t (m)` finds it. The text
-/// beside is the next cell to the right. One sweep over the sorted cells.
+/// What the sweep knows about one column.
+#[derive(Clone, Copy)]
+struct Column<'a> {
+    /// The last row with a cell, and whether that cell holds a value or formula.
+    last: u32,
+    last_data: bool,
+    /// The last text that heads the cells below it, with its row.
+    head: Option<(&'a str, u32)>,
+    /// The header at the top of the current run of values.
+    block: Option<&'a str>,
+}
+
+/// Words a column header uses for a column of units.
+const UNIT_HEADERS: &[&str] = &["unit", "units", "uom", "einheit", "einheiten", "dimension"];
+
+/// The texts around each wanted cell, in one sweep over the sorted cells.
+/// - The label to the left is at most [`LABEL_GAP`] empty cells away; a value or formula in
+///   between stops the search.
+/// - The header is a text at most [`LABEL_GAP`] rows above, with only values, formulas or
+///   empty cells between. A text right under values of the same column (`see note` inside a
+///   number column) is a value, not a header.
 fn labels_of<'a>(
     cells: &'a [RawCell],
     wanted: &HashSet<(u32, u32)>,
 ) -> HashMap<(u32, u32), Around<'a>> {
-    let text_of = |c: &'a RawCell| match &c.val {
-        Val::Text(t) if c.formula.is_none() && !c.shared_unknown && !c.text_dropped => {
-            Some(t.as_str())
-        }
-        _ => None,
-    };
     let label = |t: &'a str| (t.len() <= MAX_LABEL && !t.trim().is_empty()).then_some(t);
-    // Per column: the last row with a cell, and the header for the cells below it.
-    let mut columns: HashMap<u32, (u32, Option<&'a str>)> = HashMap::new();
+    let mut columns: HashMap<u32, Column<'a>> = HashMap::new();
     let mut out = HashMap::new();
+    // The verdict on each text run beside values, kept for every cell of the run.
+    let mut unit_columns: HashMap<usize, UnitColumn> = HashMap::new();
     for (i, c) in cells.iter().enumerate() {
-        let header = columns
+        let near = columns
             .get(&c.col)
-            .filter(|(last, _)| c.row - last - 1 <= LABEL_GAP)
-            .and_then(|(_, h)| *h);
+            .copied()
+            .filter(|s| c.row - s.last - 1 <= LABEL_GAP);
         let text = text_of(c);
+        let data = text.is_none() && !(c.val == Val::Empty && c.formula.is_none());
         if wanted.contains(&(c.row, c.col)) {
             let left = i
                 .checked_sub(1)
@@ -1033,10 +1059,33 @@ fn labels_of<'a>(
                 .filter(|p| p.row == c.row && c.col - p.col - 1 <= LABEL_GAP)
                 .and_then(text_of)
                 .and_then(label);
+            let header = near
+                .and_then(|s| s.head)
+                .filter(|(_, row)| c.row - row <= LABEL_GAP)
+                .map(|(t, _)| t);
+            // The value heads no table column of its own: `label | value | unit` rows.
+            let in_table = near.and_then(|s| s.block).is_some();
             let beside = cells
                 .get(i + 1)
                 .filter(|n| n.row == c.row && n.col == c.col + 1)
-                .and_then(text_of);
+                .and_then(|n| {
+                    let t = text_of(n)?;
+                    let column = match unit_columns.get(&(i + 1)) {
+                        Some(v) => *v,
+                        None => {
+                            let run = text_run(cells, i + 1);
+                            let v = reads_as_unit_column(cells, &run);
+                            unit_columns.extend(run.into_iter().map(|j| (j, v)));
+                            v
+                        }
+                    };
+                    let ok = match column {
+                        UnitColumn::Declared => true,
+                        UnitColumn::Likely => left.is_some() && !in_table,
+                        UnitColumn::No => false,
+                    };
+                    ok.then_some(t)
+                });
             out.insert(
                 (c.row, c.col),
                 Around {
@@ -1046,14 +1095,116 @@ fn labels_of<'a>(
                 },
             );
         }
-        let below = match text {
-            Some(t) => label(t),
-            None if c.val == Val::Empty && c.formula.is_none() => None,
-            None => header,
+        let state = match text {
+            Some(t) => {
+                // A text right under values is one more value of the column.
+                let heads = !near.is_some_and(|s| s.last_data);
+                let head = label(t).filter(|_| heads);
+                Column {
+                    last: c.row,
+                    last_data: false,
+                    head: head.map(|h| (h, c.row)),
+                    block: head,
+                }
+            }
+            None => Column {
+                last: c.row,
+                last_data: data,
+                head: near.and_then(|s| s.head),
+                block: near.and_then(|s| s.block),
+            },
         };
-        columns.insert(c.col, (c.row, below));
+        columns.insert(c.col, state);
     }
     out
+}
+
+/// A text cell's text, for cells that hold a text and no formula.
+fn text_of(c: &RawCell) -> Option<&str> {
+    match &c.val {
+        Val::Text(t) if c.formula.is_none() && !c.shared_unknown && !c.text_dropped => {
+            Some(t.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// How a column of texts beside values reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnitColumn {
+    /// Its header says it holds units (`Unit`, `Einheit`).
+    Declared,
+    /// It reads as units: at least two known units of two or more characters, most of its
+    /// texts known units, and at least one that no code looks like (`kN/m3`, `m2`, `°C`).
+    Likely,
+    No,
+}
+
+/// The cells above and below `i` in its column that hold text, with no gap, top first.
+fn text_run(cells: &[RawCell], i: usize) -> Vec<usize> {
+    let col = cells[i].col;
+    let find = |row: u32| {
+        cells
+            .binary_search_by_key(&(row, col), |c| (c.row, c.col))
+            .ok()
+            .filter(|&j| text_of(&cells[j]).is_some())
+    };
+    let mut up = Vec::new();
+    let mut row = cells[i].row;
+    while let Some(r) = row.checked_sub(1)
+        && let Some(j) = find(r)
+    {
+        up.push(j);
+        row = r;
+        if up.len() > MAX_RUN {
+            break;
+        }
+    }
+    up.reverse();
+    up.push(i);
+    let mut row = cells[i].row;
+    while let Some(j) = row.checked_add(1).and_then(find) {
+        up.push(j);
+        row += 1;
+        if up.len() > 2 * MAX_RUN {
+            break;
+        }
+    }
+    up
+}
+
+/// Texts of a run looked at, up and down, to tell a unit column.
+const MAX_RUN: usize = 200;
+
+/// How the text run `run` reads (see [`UnitColumn`]).
+fn reads_as_unit_column(cells: &[RawCell], run: &[usize]) -> UnitColumn {
+    let texts: Vec<&str> = run
+        .iter()
+        .filter_map(|&j| text_of(&cells[j]))
+        .map(str::trim)
+        .collect();
+    if texts
+        .first()
+        .is_some_and(|t| UNIT_HEADERS.iter().any(|h| t.eq_ignore_ascii_case(h)))
+    {
+        return UnitColumn::Declared;
+    }
+    let counted: Vec<&str> = texts.into_iter().filter(|t| *t != "-").collect();
+    let known: Vec<&str> = counted
+        .iter()
+        .copied()
+        .filter(|t| units::is_unit(t, true))
+        .collect();
+    let long = known.iter().filter(|t| t.chars().count() > 1).count();
+    let marked = known.iter().any(|t| {
+        t.chars()
+            .any(|c| c.is_ascii_digit() || "/^²³°%·".contains(c))
+    });
+    if long >= 2 && known.len() * 2 >= counted.len() && marked {
+        UnitColumn::Likely
+    } else {
+        UnitColumn::No
+    }
 }
 
 /// The value of a cell as a typed value; a number with a percent format is a percent.
@@ -1070,15 +1221,17 @@ pub(crate) fn cell_value(val: &Val, code: Option<&str>) -> Option<Value> {
     }
 }
 
-/// Parameters for the constant cells formulas read, with label, value, name and unit.
+/// Parameters for the constant cells formulas read, with label, value, name and unit, plus
+/// a note (anchor, text) for each value whose unit sources disagree.
 fn cell_parameters(
     found: &[ParamCell],
     sheets: &[SheetFacts],
     wb: &WorkbookParts,
     convert_units: &HashMap<(String, u32, u32), String>,
     named_cells: &HashMap<(String, u32, u32), String>,
-) -> Vec<Parameter> {
+) -> (Vec<Parameter>, Vec<(String, String)>) {
     let mut out = Vec::with_capacity(found.len());
+    let mut notes = Vec::new();
     let mut start = 0;
     while start < found.len() {
         let sheet = &found[start].sheet;
@@ -1100,6 +1253,7 @@ fn cell_parameters(
         let q = quote_sheet(sheet);
         for p in group {
             let (row, col) = (p.at.row, p.at.col);
+            let anchor = format!("{q}!{}", crate::grid::a1(row, col));
             let cell = facts.and_then(|f| {
                 f.cells
                     .binary_search_by_key(&(row, col), |c| (c.row, c.col))
@@ -1120,35 +1274,43 @@ fn cell_parameters(
             }
             let (left_label, left_unit) = around.left.map(units::split_label).unwrap_or_default();
             let (head_label, head_unit) = around.header.map(units::split_label).unwrap_or_default();
-            // `Diameter | 10.0 | m`: a unit right after the value belongs to the label row.
-            let beside_unit = around
-                .beside
-                .map(str::trim)
-                .filter(|t| units::is_unit(t, true))
-                .map(str::to_string);
             let key = (upper.clone(), row, col);
-            let unit = left_unit
-                .filter(|_| quantity)
-                .or(beside_unit)
-                .map(|u| (u, "label"))
-                .or_else(|| {
-                    code.filter(|_| quantity)
-                        .and_then(units::from_number_format)
-                        .map(|u| (u, "number-format"))
-                })
-                .or_else(|| {
-                    convert_units
-                        .get(&key)
-                        .filter(|_| quantity)
-                        .map(|u| (u.clone(), "convert"))
-                })
-                .or_else(|| head_unit.map(|u| (u, "header")));
-            let (unit, unit_source) = match unit {
-                Some((u, s)) => (Some(u), Some(s.to_string())),
+            let mut found_units: Vec<(String, &str)> = Vec::new();
+            if quantity {
+                found_units.extend(left_unit.map(|u| (u, "label")));
+                found_units.extend(
+                    around
+                        .beside
+                        .map(str::trim)
+                        .filter(|t| units::is_unit(t, true))
+                        .map(|u| (u.to_string(), "unit-cell")),
+                );
+                found_units.extend(
+                    code.and_then(units::from_number_format)
+                        .map(|u| (u, "number-format")),
+                );
+                found_units.extend(convert_units.get(&key).map(|u| (u.clone(), "convert")));
+                found_units.extend(head_unit.map(|u| (u, "header")));
+            }
+            let (unit, unit_source) = match found_units.split_first() {
                 None => (None, None),
+                Some(((u, s), rest)) if rest.iter().all(|(r, _)| r == u) => {
+                    (Some(u.clone()), Some(s.to_string()))
+                }
+                Some(_) => {
+                    let named: Vec<String> = found_units
+                        .iter()
+                        .map(|(u, s)| format!("{u} ({s})"))
+                        .collect();
+                    notes.push((
+                        anchor.clone(),
+                        format!("units disagree: {}; no unit set", named.join(", ")),
+                    ));
+                    (None, None)
+                }
             };
             out.push(Parameter {
-                anchor: Anchor(format!("{q}!{}", crate::grid::a1(row, col))),
+                anchor: Anchor(anchor),
                 name: named_cells.get(&key).cloned(),
                 label: left_label.or(head_label),
                 value,
@@ -1158,7 +1320,7 @@ fn cell_parameters(
             });
         }
     }
-    out
+    (out, notes)
 }
 
 /// Parameters for defined names whose whole text is a number; read by the cell formulas

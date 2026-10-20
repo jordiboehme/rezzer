@@ -6,18 +6,36 @@
 //! `CONVERT` argument names one. A short list decides; anything not on it is no unit, so
 //! Rezzer never guesses one.
 
-/// SI prefixes, longest first so `da` wins over `d`.
+/// SI prefixes, longest first so `da` wins over `d`. Only `CONVERT` units take any prefix:
+/// Excel defines them so. Elsewhere only the prefixed units in [`PREFIXED`] count.
 const PREFIXES: &[&str] = &[
     "da", "Y", "Z", "E", "P", "T", "G", "M", "k", "h", "d", "c", "m", "µ", "μ", "u", "n", "p", "f",
     "a",
 ];
 
-/// Units that take an SI prefix (`mm`, `kN`, `MPa`, `kWh`).
-const PREFIXED: &[&str] = &[
+/// SI units and other metric units without a prefix.
+const BASE: &[&str] = &[
     "m", "g", "s", "A", "K", "mol", "cd", "Hz", "N", "Pa", "J", "W", "C", "V", "F", "Ω", "ohm",
     "S", "Wb", "T", "H", "lm", "lx", "Bq", "Gy", "Sv", "kat", "L", "l", "t", "bar", "eV", "Wh",
     "VA", "var", "Nm", "B", "bit",
 ];
+
+/// Prefixed units people write. A prefix is not combined with every unit: `PA`, `ES` or
+/// `MT` are codes far more often than petaampere, exasiemens or megatesla.
+const PREFIXED: &[&str] = &[
+    "mm", "cm", "dm", "km", "um", "µm", "μm", "nm", "mg", "kg", "ug", "µg", "μg", "ms", "us", "µs",
+    "μs", "ns", "kN", "MN", "kNm", "MNm", "kPa", "MPa", "GPa", "hPa", "mbar", "kJ", "MJ", "GJ",
+    "kW", "MW", "GW", "mW", "kWh", "MWh", "GWh", "TWh", "kVA", "MVA", "kvar", "Mvar", "mA", "kA",
+    "µA", "uA", "kV", "MV", "mV", "kΩ", "MΩ", "mΩ", "kohm", "Mohm", "mL", "ml", "cl", "cL", "dl",
+    "dL", "hl", "hL", "µL", "µl", "uL", "kHz", "MHz", "GHz", "kmol", "mmol", "µmol", "umol", "keV",
+    "MeV", "GeV", "mT", "kB", "MB", "GB", "TB", "kbit", "Mbit", "Gbit", "mGy", "mSv", "µSv", "uSv",
+    "kBq", "MBq", "mH", "µH", "uH", "µF", "uF", "nF", "pF", "kt", "Mt", "kcd",
+];
+
+/// One-letter units that count in round brackets: length, mass, time and volume. Any other
+/// one-letter unit counts only in square brackets (`Shear force [V]`); in round brackets it
+/// is usually the variable (`Shear force (V)`, `Height of wall (h)`).
+const ROUND_ONE: &[&str] = &["m", "g", "s", "l", "L"];
 
 /// Units without a prefix: time, angle, temperature, ratios, imperial and US units.
 const PLAIN: &[&str] = &[
@@ -131,9 +149,11 @@ const CONVERT_PLAIN: &[&str] = &[
 /// Texts that read as a prefixed unit but mean something else (`pH`, `am`, `pm`).
 const NOT_UNITS: &[&str] = &["pH", "am", "pm", "AM", "PM", "as", "Ms", "Pt"];
 
-/// Bases an exponent may follow (`m3`, `ft2`, `s^-1`); `B2` is a cell, not bytes squared.
+/// Units an exponent may follow (`m3`, `mm2`, `ft2`, `s^-1`); `B2` is a cell, not bytes
+/// squared.
 const WITH_EXPONENT: &[&str] = &[
-    "m", "s", "ft", "in", "yd", "mi", "L", "l", "h", "min", "rad",
+    "m", "mm", "cm", "dm", "km", "um", "µm", "μm", "nm", "s", "ms", "ft", "in", "yd", "mi", "L",
+    "l", "h", "min", "rad",
 ];
 
 /// Longest unit text looked at.
@@ -149,17 +169,8 @@ fn atom(s: &str) -> bool {
         return false;
     }
     let raised = base.len() != s.len();
-    let plain = |b: &str| {
-        (PLAIN.contains(&b) || PREFIXED.contains(&b)) && (!raised || WITH_EXPONENT.contains(&b))
-    };
-    if plain(base) {
-        return true;
-    }
-    PREFIXES.iter().any(|p| {
-        base.strip_prefix(p).is_some_and(|rest| {
-            PREFIXED.contains(&rest) && (!raised || WITH_EXPONENT.contains(&rest))
-        })
-    })
+    (PLAIN.contains(&base) || BASE.contains(&base) || PREFIXED.contains(&base))
+        && (!raised || WITH_EXPONENT.contains(&base))
 }
 
 /// `s` without a trailing exponent: `2`, `3`, `²`, `³`, `^2`, `^-1`, `⁻¹`.
@@ -219,15 +230,16 @@ pub(crate) fn is_convert_unit(s: &str) -> bool {
         return true;
     }
     PREFIXES.iter().any(|p| {
-        s.strip_prefix(p)
-            .is_some_and(|rest| !rest.is_empty() && CONVERT_METRIC.contains(&rest))
+        s.strip_prefix(p).is_some_and(|rest| {
+            !rest.is_empty() && (CONVERT_METRIC.contains(&rest) || BASE.contains(&rest))
+        })
     })
 }
 
 /// A label without its unit, and the unit it names: `Excavated diameter (m)`, `Load [kN]`,
-/// `Span in mm` or a value with its unit at the end (`Diameter 10.0 mm`). A one-letter unit
-/// in parentheses that is the first letter of the word before it (`Height (h)`) is a
-/// variable, not a unit; a bare trailing word (`Type A`) is never a unit.
+/// `Span in mm` or a value with its unit at the end (`Diameter 10.0 mm`). In round brackets
+/// a one-letter unit counts only for [`ROUND_ONE`], and not when it is the first letter of the
+/// word before it (`Mass (m)` is a variable); a bare trailing word (`Type A`) is never a unit.
 pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
     let t = text.trim();
     let clean = |s: &str| {
@@ -240,7 +252,8 @@ pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
         {
             let unit = inner[start + open.len_utf8()..].trim();
             let before = &inner[..start];
-            let single_ok = close == ']' || !initial_of_last_word(before, unit);
+            let single_ok =
+                close == ']' || (ROUND_ONE.contains(&unit) && !initial_of_last_word(before, unit));
             if is_unit(unit, single_ok) {
                 return (clean(before), Some(unit.to_string()));
             }
@@ -368,6 +381,16 @@ mod tests {
         }
         assert!(!is_unit("A", false));
         assert!(is_unit("A", true));
+        // Prefix and unit put together by chance are codes, not units.
+        for code in ["PA", "GA", "ES", "PL", "MS", "TN", "MT", "Mm", "dN"] {
+            assert!(!is_unit(code, true), "{code}");
+        }
+        for u in [
+            "mm", "km", "kN", "MN", "kPa", "MPa", "GPa", "kW", "MW", "kWh", "kV", "mA", "mg", "kg",
+            "ms", "kJ", "MB", "GB", "mm2", "cm3",
+        ] {
+            assert!(is_unit(u, true), "{u}");
+        }
     }
 
     #[test]
@@ -388,6 +411,24 @@ mod tests {
         assert_eq!(s("Type A"), (Some("Type A".into()), None));
         assert_eq!(s("Radius, R"), (Some("Radius, R".into()), None));
         assert_eq!(s("Area [A]"), (Some("Area".into()), Some("A".into())));
+        assert_eq!(
+            s("Revenue Spain (ES)"),
+            (Some("Revenue Spain (ES)".into()), None)
+        );
+        assert_eq!(s("Shear force (V)"), (Some("Shear force (V)".into()), None));
+        assert_eq!(
+            s("Number of piles (N)"),
+            (Some("Number of piles (N)".into()), None)
+        );
+        assert_eq!(
+            s("Height of wall (h)"),
+            (Some("Height of wall (h)".into()), None)
+        );
+        assert_eq!(
+            s("Shear force [V]"),
+            (Some("Shear force".into()), Some("V".into()))
+        );
+        assert_eq!(s("Volume (l)"), (Some("Volume".into()), Some("l".into())));
         assert_eq!(s("t (m)"), (Some("t".into()), Some("m".into())));
         assert_eq!(s("kPa"), (None, Some("kPa".into())));
         assert_eq!(s("m"), (Some("m".into()), None));

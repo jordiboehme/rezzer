@@ -90,7 +90,8 @@ pub struct Parameter {
     pub value: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
-    /// Where the unit came from: `label`, `number-format`, `convert` or `header`.
+    /// Where the unit came from: `label`, `unit-cell` (the cell right of the value),
+    /// `number-format`, `convert` or `header`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_source: Option<String>,
     /// How many formulas read this parameter.

@@ -216,6 +216,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             }
         };
         issues_to_losses(&mut out, &parts.issues);
+        // A sheet part cut at a limit may hide formula details the logic index never sees.
+        incomplete |= parts
+            .issues
+            .iter()
+            .any(|i| matches!(i.kind, IssueKind::Limit));
 
         let read = contain(AssertUnwindSafe(|| {
             grid::read_cells(&mut cal, &sheet.name, budget, &mut formulas.meter)

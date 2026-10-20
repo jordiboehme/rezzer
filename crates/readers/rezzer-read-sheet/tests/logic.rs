@@ -418,9 +418,25 @@ fn tunnel_parameters_have_labels() {
     let d = param(doc, "Structural_Lining!B5");
     assert_eq!(d.label.as_deref(), Some("Excavated diameter, D"));
     assert_eq!(d.value, number(10.0));
-    assert_eq!(unit(d), (Some("m"), Some("label")));
+    assert_eq!(unit(d), (Some("m"), Some("unit-cell")));
     let gamma = param(doc, "Structural_Lining!B8");
-    assert_eq!(unit(gamma), (Some("kN/m3"), Some("label")));
+    assert_eq!(unit(gamma), (Some("kN/m3"), Some("unit-cell")));
+    // The input units of all three calculation sheets stay.
+    for (anchor, u) in [
+        ("Structural_Lining!B9", "deg"),
+        ("Structural_Lining!B11", "MPa"),
+        ("Ventilation!B5", "m"),
+        ("Ventilation!B15", "K"),
+        ("Ventilation!B17", "N"),
+        ("Drainage!B9", "mm/hr"),
+        ("Drainage!B13", "min"),
+    ] {
+        assert_eq!(
+            unit(param(doc, anchor)),
+            (Some(u), Some("unit-cell")),
+            "{anchor}"
+        );
+    }
     // `Target Factor of Safety | 2 | -`: a dash is no unit.
     assert_eq!(unit(param(doc, "Structural_Lining!B13")), (None, None));
     let t = param(doc, "Structural_Lining!E49");
@@ -448,4 +464,206 @@ fn empty_text_result_is_stored() {
         })
     );
     assert!(stale_losses(doc).is_empty(), "{:#?}", doc.losses);
+}
+
+#[test]
+fn full_calc_on_load_and_tables_warn_results_may_be_old() {
+    let mut book = small_model();
+    book.calc_pr = "<calcPr fullCalcOnLoad=\"1\"/>".into();
+    assert_eq!(
+        stale_losses(&read(&book).document),
+        ["stored results may be old: the file asks for a full recalculation when opened"]
+    );
+
+    // Automatic except tables, with a data table in the workbook.
+    let rows = "<row r=\"2\"><c r=\"A2\"><v>1</v></c></row><row r=\"5\"><c r=\"B5\"><f t=\"dataTable\" ref=\"B5:B7\" dt2D=\"0\" dtr=\"0\" r1=\"A2\"/><v>1</v></c></row>";
+    let mut book = Book::default().sheet("S", &ws("", rows, ""));
+    book.calc_pr = "<calcPr calcMode=\"autoNoTable\"/>".into();
+    assert_eq!(
+        stale_losses(&read(&book).document),
+        ["stored results may be old: data tables are not recalculated automatically"]
+    );
+
+    // Automatic except tables, but no data table: nothing to say.
+    let mut book = small_model();
+    book.calc_pr = "<calcPr calcMode=\"autoNoTable\"/>".into();
+    assert!(stale_losses(&read(&book).document).is_empty());
+}
+
+/// Values in B, read by a SUM in D1, with `codes` in column C and the labels in A.
+fn coded_values(header: Option<[&str; 3]>, codes: &[&str]) -> ReadOutcome {
+    let mut rows = Vec::new();
+    let first = if let Some(h) = header {
+        rows.push(row(
+            1,
+            &[text("A1", h[0]), text("B1", h[1]), text("C1", h[2])],
+        ));
+        2
+    } else {
+        1
+    };
+    let last = first + codes.len() as u32 - 1;
+    for (i, code) in codes.iter().enumerate() {
+        let r = first + i as u32;
+        let mut cells = vec![
+            text(&format!("A{r}"), &format!("Item {r}")),
+            num(&format!("B{r}"), 10.0 + r as f64, None),
+            text(&format!("C{r}"), code),
+        ];
+        if i == 0 {
+            cells.push(formula_cell(
+                &format!("D{r}"),
+                &format!("SUM(B{first}:B{last})"),
+                Some(1.0),
+            ));
+        }
+        rows.push(row(r, &cells));
+    }
+    read(&Book::default().sheet("S", &ws("", &rows.concat(), "")))
+}
+
+#[test]
+fn data_columns_beside_values_are_no_units() {
+    let cases: [(Option<[&str; 3]>, &[&str]); 5] = [
+        (Some(["Name", "Score", "Grade"]), &["A", "C", "F", "B", "T"]),
+        (None, &["A", "C", "F", "B", "T"]),
+        (None, &["N", "S", "W", "N"]),
+        (
+            Some(["Store", "Sales", "Region"]),
+            &["MN", "GB", "cd", "var", "h"],
+        ),
+        (None, &["MN", "GB", "cd", "var", "h"]),
+    ];
+    for (header, codes) in cases {
+        let out = coded_values(header, codes);
+        let doc = &out.document;
+        assert!(!doc.facets.parameters.is_empty());
+        for p in &doc.facets.parameters {
+            assert_eq!(unit(p), (None, None), "{codes:?}: {p:?}");
+        }
+    }
+    // A column whose header says it holds units is a unit column.
+    let out = coded_values(Some(["Item", "Qty", "Unit"]), &["kg", "m", "pcs"]);
+    let doc = &out.document;
+    assert_eq!(unit(param(doc, "S!B2")), (Some("kg"), Some("unit-cell")));
+    assert_eq!(unit(param(doc, "S!B3")), (Some("m"), Some("unit-cell")));
+    assert_eq!(unit(param(doc, "S!B4")), (None, None));
+}
+
+#[test]
+fn codes_and_variables_are_no_units() {
+    let labels = [
+        ("Revenue Spain (ES)", None),
+        ("Shear force (V)", None),
+        ("Number of piles (N)", None),
+        ("Height of wall (h)", None),
+        ("Shear force [V]", Some("V")),
+        ("Number of piles [N]", Some("N")),
+        ("Excavated diameter (m)", Some("m")),
+        ("Code PA", None),
+    ];
+    let mut rows = Vec::new();
+    for (i, (label, _)) in labels.iter().enumerate() {
+        let r = i as u32 + 1;
+        let mut cells = vec![
+            text(&format!("A{r}"), label),
+            num(&format!("B{r}"), 1.0, None),
+        ];
+        if i == 0 {
+            cells.push(formula_cell("C1", "SUM(B1:B8)", Some(8.0)));
+        }
+        rows.push(row(r, &cells));
+    }
+    let out = read(&Book::default().sheet("S", &ws("", &rows.concat(), "")));
+    let doc = &out.document;
+    for (i, (label, want)) in labels.iter().enumerate() {
+        let p = param(doc, &format!("S!B{}", i + 1));
+        assert_eq!(p.unit.as_deref(), *want, "{label}");
+    }
+}
+
+#[test]
+fn disagreeing_units_give_none_with_a_note() {
+    // The label says mm, the number format writes m.
+    let rows = row(
+        1,
+        &[
+            text("A1", "Length (mm)"),
+            num("B1", 10.0, Some(4)),
+            formula_cell("C1", "B1*2", Some(20.0)),
+        ],
+    );
+    let out = read(&Book::default().sheet("S", &ws("", &rows, "")));
+    let doc = &out.document;
+    let p = param(doc, "S!B1");
+    assert_eq!(p.label.as_deref(), Some("Length"));
+    assert_eq!(unit(p), (None, None));
+    assert!(
+        doc.losses.iter().any(|l| l.why == LossReason::Uncertain
+            && l.location == "S!B1"
+            && l.what.contains("mm (label)")
+            && l.what.contains("m (number-format)")),
+        "{:#?}",
+        doc.losses
+    );
+}
+
+#[test]
+fn headers_are_near_and_never_a_value() {
+    // `Length (m)` heads G42:G46; `see note` in G47 is a value inside the column.
+    let mut rows = vec![row(41, &[text("G41", "Length (m)")])];
+    for r in 42..=50 {
+        let cell = if r == 47 {
+            text("G47", "see note")
+        } else {
+            num(&format!("G{r}"), f64::from(r), None)
+        };
+        let mut cells = vec![cell];
+        if r == 42 {
+            cells.push(formula_cell("H42", "SUM(G42:G50)", Some(1.0)));
+        }
+        rows.push(row(r, &cells));
+    }
+    let out = read(&Book::default().sheet("S", &ws("", &rows.concat(), "")));
+    let doc = &out.document;
+    for anchor in ["S!G42", "S!G44"] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label.as_deref(), Some("Length"), "{anchor}");
+        assert_eq!(unit(p), (Some("m"), Some("header")), "{anchor}");
+    }
+    // More than 3 cells below the header, and below the text value: no header.
+    for anchor in ["S!G45", "S!G48", "S!G50"] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label, None, "{anchor}");
+        assert_eq!(unit(p), (None, None), "{anchor}");
+    }
+}
+
+#[test]
+fn sheet_part_cut_at_its_item_limit_leaves_results_open() {
+    let mut cells = vec![num("A1", 1.0, None), formula_cell("B1", "A1*2", Some(2.0))];
+    for c in ["C", "D", "E", "F", "G", "H"] {
+        cells.push(num(&format!("{c}1"), 1.0, None));
+    }
+    let book = Book::default().sheet("S", &ws("", &row(1, &cells), ""));
+    let limits = Limits {
+        max_elements: 60,
+        ..Limits::default()
+    };
+    let out = read_with(book.bytes(), limits);
+    let doc = &out.document;
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| l.location.ends_with("sheet1.xml") && l.what.contains("items")),
+        "{:#?}",
+        doc.losses
+    );
+    assert_eq!(formula(doc, "S!B1").role, None);
+    assert!(
+        doc.losses.iter().any(|l| l.why == LossReason::Uncertain
+            && l.what.starts_with("the workbook logic is incomplete")),
+        "{:#?}",
+        doc.losses
+    );
 }
