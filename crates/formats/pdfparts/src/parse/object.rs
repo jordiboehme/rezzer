@@ -5,6 +5,8 @@
 //! One indirect object at a file position (ISO 32000-1, 7.3.10 and 7.3.8): its header, its
 //! value and, for a stream, its raw data.
 
+use std::collections::BTreeMap;
+
 use lopdf::{Object, ObjectId, Stream};
 
 use super::lexer::{Lexer, find};
@@ -29,28 +31,120 @@ pub(crate) fn header_at(
     Ok(id)
 }
 
+/// The reason given for a broken object that was not read because the bound for broken
+/// values was spent. Such objects share one issue.
+pub(crate) const NOT_READ: &str = "not read: too many broken values";
+
+/// The positions where the keyword `obj` starts, found once per stretch of the file.
+#[derive(Default)]
+pub(crate) struct Ends {
+    /// Stretches searched so far: from a start to the next `obj` (or the end of the file),
+    /// with no `obj` starting in between.
+    spans: BTreeMap<usize, usize>,
+}
+
+impl Ends {
+    /// Where the next `obj` at or after `p` starts, or the end of `bytes`. Every byte is
+    /// searched about once, however often this is asked.
+    pub fn next(&mut self, bytes: &[u8], p: usize) -> usize {
+        let len = bytes.len();
+        if p >= len {
+            return len;
+        }
+        if let Some((_, &e)) = self.spans.range(..=p).next_back()
+            && p <= e
+        {
+            return e;
+        }
+        let after = self.spans.range(p + 1..).next().map(|(&s, &e)| (s, e));
+        let stop = after.map_or(len, |(s, _)| s);
+        // A match may start right before `stop` and end after it.
+        let hay = &bytes[..len.min(stop + 2)];
+        let e = match find(hay, b"obj", p) {
+            Some(q) => q,
+            None => match after {
+                Some((s, e)) => {
+                    self.spans.remove(&s);
+                    e
+                }
+                None => len,
+            },
+        };
+        self.spans.insert(p, e);
+        e
+    }
+}
+
+/// Reads a value at `pos` with `read`, first only up to `end`, where the value should end.
+/// Returns the value and where it ends.
+///
+/// A broken value (a string that never closes) could otherwise read to the end of the file
+/// each time, so the bytes it reads count against the bound for broken values, and what it
+/// was charged as values is given back. A value that runs into `end` is read again without
+/// it while that bound lasts, since a valid value may hold the bytes that `end` stands for.
+/// Once the bound is spent, a value that fails or runs into `end` is not read: it gives
+/// [`NOT_READ`] and is counted in [`Budget::not_read`].
+pub(crate) fn bounded<'b, T>(
+    bytes: &'b [u8],
+    pos: usize,
+    end: usize,
+    budget: &mut Budget,
+    read: impl Fn(&mut Lexer<'b>, &mut Budget) -> Result<T, Fail>,
+) -> Result<(T, usize), Fail> {
+    let spent = budget.failed_left() == 0;
+    let mut lim = end.min(bytes.len());
+    let mut again = false;
+    loop {
+        let mut l = Lexer::new(&bytes[..lim], pos);
+        let charged = budget.bytes;
+        let v = read(&mut l, budget);
+        budget.skipped(l.skipped)?;
+        let cut = !again && l.i >= lim && lim < bytes.len();
+        let why = match v {
+            Ok(v) if !cut => return Ok((v, l.i)),
+            Err(Fail::Stop(e)) => return Err(Fail::Stop(e)),
+            Ok(_) => None,
+            Err(Fail::Bad(why)) => Some(why),
+        };
+        budget.bytes = charged;
+        budget.failed(l.i - pos);
+        if cut && !spent && budget.failed_left() > 0 {
+            again = true;
+            lim = bytes.len().min(pos.saturating_add(budget.failed_left()));
+            continue;
+        }
+        return match why {
+            Some(why) if !spent => Err(Fail::Bad(why)),
+            _ => {
+                budget.not_read += 1;
+                Err(Fail::Bad(NOT_READ))
+            }
+        };
+    }
+}
+
 /// Reads the header and the value of the object at `pos`, and finds out whether stream data
-/// follows. White space and comments it skips count as work.
+/// follows. White space and comments it skips count as work. The value should end before
+/// the next `obj` (of `endobj` or of the next header).
 pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<Head, Fail> {
     let mut l = Lexer::new(bytes, pos);
-    let Some(id) = l.header() else {
-        budget.skipped(l.skipped)?;
+    let id = l.header();
+    budget.skipped(l.skipped)?;
+    let Some(id) = id else {
         return Err(Fail::Bad("there is no object header at its offset"));
     };
-    let value = l.value(budget, 0);
+    let end = budget.ends.next(bytes, l.i);
+    let (value, at) = bounded(bytes, l.i, end, budget, |l, b| l.value(b, 0))?;
     let stream = match value {
-        Ok(Object::Dictionary(_)) => l.stream_start(),
+        Object::Dictionary(_) => {
+            let mut l = Lexer::new(bytes, at);
+            let start = l.stream_start();
+            budget.skipped(l.skipped)?;
+            start
+        }
         _ => None,
     };
-    budget.skipped(l.skipped)?;
-    if value.is_err() {
-        budget.failed(l.i - pos)?;
-    }
-    Ok(Head {
-        id,
-        value: value?,
-        stream,
-    })
+    Ok(Head { id, value, stream })
 }
 
 /// The `/Length` of a stream that is a reference.
@@ -163,5 +257,20 @@ mod tests {
         let s = s.as_stream().unwrap();
         assert_eq!(s.content, b"abc");
         assert_eq!(s.dict.get(b"Length").unwrap().as_i64().unwrap(), 3);
+    }
+
+    #[test]
+    fn next_obj_is_found_in_any_order() {
+        let file = b"1 0 obj x endobj 2 0 obj y endobj trailer";
+        let want = |p: usize| {
+            file[p.min(file.len())..]
+                .windows(3)
+                .position(|w| w == b"obj")
+                .map_or(file.len(), |q| q + p)
+        };
+        let mut ends = Ends::default();
+        for p in [20, 30, 0, 9, 4, 5, 33, 40, 100, 21, 1] {
+            assert_eq!(ends.next(file, p), want(p).min(file.len()), "{p}");
+        }
     }
 }

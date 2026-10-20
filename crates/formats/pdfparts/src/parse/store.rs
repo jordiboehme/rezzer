@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use super::crypt::Crypt;
 use super::lexer::Lexer;
-use super::object::{finish, head_at, header_at, length_ref};
+use super::object::{NOT_READ, bounded, finish, head_at, header_at, length_ref};
 use super::predict::{last_parms, unpredict};
 use super::xref::{Entry, rebuild, unpack_stream};
 use super::{Budget, Fail};
@@ -87,6 +87,10 @@ impl<'a> Store<'a> {
     }
 
     fn damaged(&mut self, id: ObjectId, what: &str) {
+        // Objects not read share one issue, made from the count in the budget.
+        if what == NOT_READ {
+            return;
+        }
         self.issues.push(Issue::new(
             &format!("object {} {}", id.0, id.1),
             IssueKind::Damaged,
@@ -325,24 +329,38 @@ impl<'a> Store<'a> {
         }
         let mut list: Vec<(u32, usize)> = wanted.into_iter().map(|(m, (o, _))| (m, o)).collect();
         list.sort_unstable();
+        // A member should end where the next one starts.
+        let mut starts: Vec<usize> = list.iter().map(|&(_, o)| first.saturating_add(o)).collect();
+        starts.sort_unstable();
+        starts.dedup();
+        // Members may share a start; a broken one is read once.
+        let mut broken: HashMap<usize, &'static str> = HashMap::new();
         for (m, off) in list {
             let at = first.saturating_add(off);
             if at >= data.len() {
                 self.damaged((m, 0), "the member lies outside its object stream");
                 continue;
             }
-            // Members may overlap, so the bytes each one reads count as work.
-            let mut l = Lexer::new(&data, at);
-            let v = l.value(&mut self.budget, 0);
-            self.budget.skipped(l.skipped).map_err(Fail::into_open)?;
-            if v.is_err() {
-                self.budget.failed(l.i - at).map_err(Fail::into_open)?;
+            if let Some(&why) = broken.get(&at) {
+                if why == NOT_READ {
+                    self.budget.not_read += 1;
+                }
+                self.damaged((m, 0), why);
+                continue;
             }
-            match v {
-                Ok(v) => {
+            let end = match starts.binary_search(&at) {
+                Ok(i) => starts.get(i + 1).copied().unwrap_or(data.len()),
+                Err(i) => starts.get(i).copied().unwrap_or(data.len()),
+            };
+            // Members may overlap, so the bytes each one reads count as work.
+            match bounded(&data, at, end, &mut self.budget, |l, b| l.value(b, 0)) {
+                Ok((v, _)) => {
                     self.members.insert(m, v);
                 }
-                Err(Fail::Bad(why)) => self.damaged((m, 0), why),
+                Err(Fail::Bad(why)) => {
+                    broken.insert(at, why);
+                    self.damaged((m, 0), why);
+                }
                 Err(Fail::Stop(e)) => return Err(e),
             }
         }

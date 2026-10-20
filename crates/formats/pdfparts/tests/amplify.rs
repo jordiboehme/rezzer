@@ -608,3 +608,79 @@ fn object_stream_members_share_one_work_bound() {
     }
     assert_rss_bounded();
 }
+
+/// One page whose `k` annotations hold a string that never closes, written before 1 MB of
+/// content. Without `endobj` the broken objects run into the content.
+fn unclosed_notes(k: u32, endobj: bool) -> Vec<u8> {
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    for i in 0..k {
+        let body = format!(
+            "<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (broken note {i} >>"
+        );
+        if endobj {
+            c.object(10 + i, body.as_bytes());
+        } else {
+            c.offs.push((10 + i, c.out.len()));
+            c.out
+                .extend(format!("{} 0 obj\n{body}\n", 10 + i).as_bytes());
+        }
+    }
+    let annots: Vec<String> = (0..k).map(|i| format!("{} 0 R", 10 + i)).collect();
+    c.object(2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    c.object(
+        3,
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [{}] >>",
+            annots.join(" ")
+        )
+        .as_bytes(),
+    );
+    let mut content = b"BT /F1 12 Tf 72 720 Td (Hello) Tj ET\n% ".to_vec();
+    content.extend(vec![b'x'; 1_000_000]);
+    content.push(b'\n');
+    let mut body = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+    body.extend(&content);
+    body.extend(b"\nendstream");
+    c.object(4, &body);
+    c.finish("")
+}
+
+#[test]
+fn broken_values_do_not_end_the_open() {
+    let cases = [(16, true), (32, true), (64, true), (2000, false)];
+    for (k, endobj) in cases {
+        let bytes = unclosed_notes(k, endobj);
+        let start = Instant::now();
+        let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
+        let took = start.elapsed();
+        eprintln!(
+            "k {k}, endobj {endobj}: {} KB, {took:?}, {:?}",
+            bytes.len() / 1024,
+            result.as_ref().map(|p| p.page_count())
+        );
+        assert!(took < Duration::from_secs(1), "{took:?}");
+        let pdf = result.unwrap();
+        assert_eq!(pdf.page_count(), 1);
+        let issues = pdf.issues();
+        let damaged: Vec<_> = issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::Damaged)
+            .collect();
+        eprintln!(
+            "{} damaged issues, last {:?}",
+            damaged.len(),
+            damaged.last()
+        );
+        assert!(!damaged.is_empty());
+        if !endobj {
+            assert!(
+                damaged
+                    .iter()
+                    .any(|i| i.what.contains("too many broken values")),
+                "{damaged:?}"
+            );
+        }
+    }
+    assert_rss_bounded();
+}

@@ -806,3 +806,54 @@ fn catalog_missing_from_its_object_stream_is_rebuilt() {
         pdf.issues()
     );
 }
+
+#[test]
+fn values_may_hold_the_obj_keyword() {
+    // A string with `endobj` and a header in it, and a name that ends in `obj`.
+    let objects: [&[u8]; 5] = [
+        b"<< /Type /Catalog /Pages 2 0 R /Note 4 0 R /Tag 5 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] /Info [(a 9 0 obj) (b endobj)] >>",
+        b"(see endobj and 7 0 obj here)",
+        b"/Xobj",
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offs.push(out.len());
+        out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend(*body);
+        out.extend(b"\nendobj\n");
+    }
+    let at = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offs.len() + 1).as_bytes());
+    for o in &offs {
+        out.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{at}\n%%EOF\n",
+            offs.len() + 1
+        )
+        .as_bytes(),
+    );
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    let get = |n: u32| doc.get_object((n, 0)).unwrap().clone();
+    assert_eq!(
+        get(4).as_str().unwrap(),
+        b"see endobj and 7 0 obj here".as_slice()
+    );
+    assert_eq!(get(5).as_name().unwrap(), b"Xobj".as_slice());
+    let page = get(3);
+    let info = page
+        .as_dict()
+        .unwrap()
+        .get(b"Info")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(info[0].as_str().unwrap(), b"a 9 0 obj".as_slice());
+}

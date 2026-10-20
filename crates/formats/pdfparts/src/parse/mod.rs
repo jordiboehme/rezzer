@@ -25,7 +25,7 @@ use std::io::{self, Write};
 use lopdf::xref::XrefType;
 use lopdf::{Dictionary, Document, Object};
 
-use crate::{Encryption, Issue, Limits, OpenError};
+use crate::{Encryption, Issue, IssueKind, Limits, OpenError};
 use lexer::Lexer;
 use store::Store;
 use xref::{Entry, read_chain, rebuild};
@@ -37,7 +37,8 @@ pub(crate) const VALUE_COST: u64 = 128;
 const ENTRY_COST: u64 = 32;
 
 /// How many times the file length (and the length of unpacked object streams) the searches
-/// for `endstream`, skipped white space and broken values may read in total.
+/// for `endstream` and skipped white space may read in total. Broken values have a bound of
+/// the same size of their own.
 const WORK_FACTOR: usize = 8;
 
 /// How often, in charged values, the stop callback is asked.
@@ -76,6 +77,13 @@ pub(crate) struct Budget<'a> {
     pub unpacked: u64,
     work: usize,
     max_work: usize,
+    /// Bytes read by values that turned out broken, and their bound.
+    failed: usize,
+    max_failed: usize,
+    /// Broken objects that were not read because the bound for broken values was spent.
+    pub not_read: usize,
+    /// Where the next `obj` keyword of the file starts.
+    pub ends: object::Ends,
     next_poll: usize,
 }
 
@@ -90,6 +98,10 @@ impl<'a> Budget<'a> {
             unpacked: 0,
             work: 0,
             max_work: file_len.saturating_mul(WORK_FACTOR).saturating_add(1 << 20),
+            failed: 0,
+            max_failed: file_len.saturating_mul(WORK_FACTOR).saturating_add(1 << 20),
+            not_read: 0,
+            ends: object::Ends::default(),
             next_poll: POLL_EVERY,
         }
     }
@@ -146,9 +158,16 @@ impl<'a> Budget<'a> {
     }
 
     /// Counts bytes read by a value that turned out broken. A broken value is not charged
-    /// as a value, so this bounds how often the same bytes are read in vain.
-    pub fn failed(&mut self, n: usize) -> Result<(), Fail> {
-        self.count_work(n, "too many of its values are broken")
+    /// as a value, so this bounds how often the same bytes are read in vain. It never ends
+    /// the open: once it is spent, broken values are no longer read again (see
+    /// [`object::bounded`]).
+    pub fn failed(&mut self, n: usize) {
+        self.failed = self.failed.saturating_add(n);
+    }
+
+    /// What broken values may still read.
+    pub fn failed_left(&self) -> usize {
+        self.max_failed.saturating_sub(self.failed)
     }
 
     fn count_work(&mut self, n: usize, why: &str) -> Result<(), Fail> {
@@ -165,6 +184,9 @@ impl<'a> Budget<'a> {
     pub fn more_work(&mut self, n: u64) {
         let n = usize::try_from(n).unwrap_or(usize::MAX);
         self.max_work = self.max_work.saturating_add(n.saturating_mul(WORK_FACTOR));
+        self.max_failed = self
+            .max_failed
+            .saturating_add(n.saturating_mul(WORK_FACTOR));
     }
 
     /// The work or byte bound was hit.
@@ -267,6 +289,15 @@ pub(crate) fn build(
     objects.retain(|_, o| !matches!(o.type_name(), Ok(b"ObjStm" | b"XRef" | b"Linearized")));
     issues.append(&mut store.issues);
     let mut budget = store.budget;
+    if budget.not_read > 0 {
+        let n = budget.not_read;
+        let what = if n == 1 { "object" } else { "objects" };
+        issues.push(Issue::new(
+            "document",
+            IssueKind::Damaged,
+            format!("{n} {what} not read: too many broken values"),
+        ));
+    }
 
     let mut doc = Document::with_version(version(bytes, base));
     doc.reference_table.cross_reference_type = XrefType::CrossReferenceTable;
@@ -371,6 +402,9 @@ fn scan_trailer(
             }
         }
     };
+    // A trailer dictionary ends before the next `trailer` keyword.
+    let mut starts = found.trailers.clone();
+    starts.sort_unstable();
     for (k, &at) in found.trailers.iter().rev().enumerate() {
         if k % 1024 == 0 {
             look.poll().map_err(Fail::into_open)?;
@@ -383,18 +417,15 @@ fn scan_trailer(
         if !bytes[l.i..].starts_with(b"<<") {
             continue;
         }
-        l.i += 2;
-        let charged = l.skipped;
-        let d = l.dictionary(&mut look, 0);
-        let mut counted = look.skipped(l.skipped - charged);
-        if d.is_err() && counted.is_ok() {
-            counted = look.failed(l.i - at);
-        }
-        if let Err(Fail::Stop(e)) = counted {
-            return Err(spent(&look, e));
-        }
+        let end = match starts.binary_search(&l.i) {
+            Ok(i) | Err(i) => starts.get(i).copied().unwrap_or(bytes.len()),
+        };
+        let d = object::bounded(bytes, l.i, end, &mut look, |l, b| {
+            l.i += 2;
+            l.dictionary(b, 0)
+        });
         match d {
-            Ok(d) => merge(&mut trailer, &d),
+            Ok((d, _)) => merge(&mut trailer, &d),
             Err(Fail::Bad(_)) => {}
             Err(Fail::Stop(e)) => return Err(spent(&look, e)),
         }
