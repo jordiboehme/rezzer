@@ -88,6 +88,16 @@ fn fixture(sheet_xml: &str) -> Vec<u8> {
 
 /// A package with one sheet `S`, optional sheet relationships and extra parts.
 fn fixture_with(sheet_xml: &str, sheet_rels: &[(&str, &str)], extra: &[(&str, &str)]) -> Vec<u8> {
+    fixture_full(sheet_xml, "", &[], sheet_rels, extra)
+}
+
+fn fixture_full(
+    sheet_xml: &str,
+    workbook_inner: &str,
+    workbook_rels: &[(&str, &str)],
+    sheet_rels: &[(&str, &str)],
+    extra: &[(&str, &str)],
+) -> Vec<u8> {
     const PKG: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
     const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
@@ -105,15 +115,19 @@ fn fixture_with(sheet_xml: &str, sheet_rels: &[(&str, &str)], extra: &[(&str, &s
     put(
         "xl/workbook.xml",
         &format!(
-            "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"{REL}\"><sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"
+            "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"{REL}\"><sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets>{workbook_inner}</workbook>"
         ),
     );
-    put(
-        "xl/_rels/workbook.xml.rels",
-        &format!(
-            "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>"
-        ),
+    let mut wb_rels = format!(
+        "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{REL}/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
     );
+    for (i, (kind, target)) in workbook_rels.iter().enumerate() {
+        wb_rels.push_str(&format!(
+            "<Relationship Id=\"w{i}\" Type=\"{kind}\" Target=\"{target}\"/>"
+        ));
+    }
+    wb_rels.push_str("</Relationships>");
+    put("xl/_rels/workbook.xml.rels", &wb_rels);
     put("xl/worksheets/sheet1.xml", sheet_xml);
     if !sheet_rels.is_empty() {
         let mut r = format!("<Relationships xmlns=\"{PKG}\">");
@@ -507,4 +521,108 @@ fn every_corpus_sheet_reads_without_panic() {
         }
     }
     assert!(files > 10);
+}
+
+#[test]
+fn impossible_column_and_row_numbers_are_dropped_with_an_issue() {
+    let bytes = fixture(
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><cols><col min=\"20000\" max=\"20001\" hidden=\"1\"/><col min=\"5\" max=\"3\" hidden=\"1\"/><col min=\"16000\" max=\"99999\" hidden=\"1\"/></cols><sheetData><row r=\"1048577\" hidden=\"1\" outlineLevel=\"2\"/><row r=\"1048576\" hidden=\"1\"/><row r=\"0\" hidden=\"1\"/></sheetData></worksheet>",
+    );
+    let s = sheet_of(&bytes, "S", &Limits::default());
+    assert_eq!(
+        s.hidden_cols,
+        vec![RowSpan {
+            first: 15999,
+            last: 16383
+        }]
+    );
+    assert_eq!(
+        s.hidden_rows,
+        vec![RowSpan {
+            first: 1_048_575,
+            last: 1_048_575
+        }]
+    );
+    assert!(s.outline_rows.is_empty());
+    assert!(s.hidden_cols.iter().all(|c| c.first <= c.last));
+    assert!(s.issues.iter().any(|i| i.what.contains("column")));
+    assert!(s.issues.iter().any(|i| i.what.contains("row")));
+}
+
+#[test]
+fn empty_author_keeps_later_authors_aligned() {
+    let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+    let bytes = fixture_with(
+        "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"/>",
+        &[(rel, "../c.xml")],
+        &[(
+            "xl/c.xml",
+            "<comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><authors><author/><author>Ann</author><author></author></authors><commentList><comment ref=\"A1\" authorId=\"0\"><text><t>x</t></text></comment><comment ref=\"A2\" authorId=\"1\"><text><t>y</t></text></comment><comment ref=\"A3\" authorId=\"2\"><text><t>z</t></text></comment></commentList></comments>",
+        )],
+    );
+    let s = sheet_of(&bytes, "S", &Limits::default());
+    assert!(s.issues.is_empty(), "{:?}", s.issues);
+    let authors: Vec<_> = s.notes.iter().map(|n| n.author.as_deref()).collect();
+    assert_eq!(authors, vec![None, Some("Ann"), None]);
+}
+
+fn pivot_source(sheet_attrs: &str) -> sheetparts::ooxml::SheetParts {
+    let rel = |t: &str| {
+        format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{t}")
+    };
+    let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let bytes = fixture_full(
+        &format!("<worksheet xmlns=\"{main}\"/>"),
+        "<pivotCaches><pivotCache cacheId=\"7\" r:id=\"w0\"/></pivotCaches>",
+        &[(&rel("pivotCacheDefinition"), "pc.xml")],
+        &[(&rel("pivotTable"), "../pt.xml")],
+        &[
+            (
+                "xl/pt.xml",
+                &format!(
+                    "<pivotTableDefinition xmlns=\"{main}\" name=\"P\" cacheId=\"7\"><location ref=\"A1:B2\"/></pivotTableDefinition>"
+                ),
+            ),
+            (
+                "xl/pc.xml",
+                &format!(
+                    "<pivotCacheDefinition xmlns=\"{main}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><cacheSource type=\"worksheet\"><worksheetSource {sheet_attrs}/></cacheSource></pivotCacheDefinition>"
+                ),
+            ),
+        ],
+    );
+    sheet_of(&bytes, "S", &Limits::default())
+}
+
+#[test]
+fn pivot_source_sheet_names_are_quoted_like_formula_anchors() {
+    for (name, expected) in [
+        ("Data", "Data!A1:B2"),
+        ("2024", "'2024'!A1:B2"),
+        ("A1", "'A1'!A1:B2"),
+        ("R1C1", "'R1C1'!A1:B2"),
+        ("My Sheet", "'My Sheet'!A1:B2"),
+        ("it's", "'it''s'!A1:B2"),
+        ("a.b", "'a.b'!A1:B2"),
+        ("_x", "_x!A1:B2"),
+    ] {
+        let s = pivot_source(&format!(
+            "sheet=\"{}\" ref=\"A1:B2\"",
+            name.replace('\'', "&apos;")
+        ));
+        assert_eq!(s.pivots[0].source.as_deref(), Some(expected), "{name}");
+    }
+}
+
+#[test]
+fn external_pivot_source_is_not_shown_as_local() {
+    let s = pivot_source("r:id=\"rId1\" sheet=\"Other\" ref=\"A1:B2\"");
+    assert_eq!(s.pivots[0].source, None);
+    assert!(
+        s.issues
+            .iter()
+            .any(|i| i.kind == IssueKind::Unsupported && i.what.contains("another workbook")),
+        "{:?}",
+        s.issues
+    );
 }

@@ -32,14 +32,22 @@ pub(super) fn read_notes(ctx: &mut Ctx<'_, '_>, part: &str, skip_placeholders: b
             }
             stack.push(e.name.clone());
         }
-        Ev::Empty(e) if e.name == "comment" => notes.push(Note {
-            cell: e.attr("ref").unwrap_or("").to_string(),
-            author: e
+        Ev::Empty(e) if e.name == "author" => authors.push(String::new()),
+        Ev::Empty(e) if e.name == "comment" => {
+            let author = e
                 .attr("authorId")
                 .and_then(|v| v.parse::<usize>().ok())
-                .and_then(|i| authors.get(i).cloned()),
-            text: String::new(),
-        }),
+                .and_then(|i| authors.get(i).cloned())
+                .filter(|a| !a.is_empty());
+            let placeholder = author.as_deref().is_some_and(|a| a.starts_with("tc="));
+            if !(skip_placeholders && placeholder) {
+                notes.push(Note {
+                    cell: e.attr("ref").unwrap_or("").to_string(),
+                    author,
+                    text: String::new(),
+                });
+            }
+        }
         Ev::Text(t) => {
             if stack.last().is_some_and(|n| n == "t")
                 && !stack.iter().any(|n| n == "rPh")
@@ -64,7 +72,7 @@ pub(super) fn read_notes(ctx: &mut Ctx<'_, '_>, part: &str, skip_placeholders: b
                                 if a.is_none() {
                                     bad_author = true;
                                 }
-                                a
+                                a.filter(|a| !a.is_empty())
                             }
                             None => None,
                         };

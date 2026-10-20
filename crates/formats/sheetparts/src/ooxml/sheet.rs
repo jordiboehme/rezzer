@@ -255,27 +255,36 @@ impl Scan<'_> {
                     let min = e.attr("min").and_then(|v| v.parse::<u32>().ok());
                     let max = e.attr("max").and_then(|v| v.parse::<u32>().ok());
                     match (min, max) {
-                        (Some(min), Some(max)) if min >= 1 && max >= min => {
+                        (Some(min), Some(max)) if (1..=16384).contains(&min) && max >= min => {
                             push_span(&mut self.out.hidden_cols, min - 1, max.min(16384) - 1)
                         }
-                        _ => self.bad_ref("a hidden column span with bad min or max"),
+                        _ => self.bad_ref("a hidden column span with a column number out of range"),
                     }
                 }
             }
             "row" if self.in_sheet_data => {
-                let row = match e.attr("r").and_then(|v| v.parse::<u32>().ok()) {
-                    Some(r) if r >= 1 => r - 1,
-                    _ => self.next_row,
+                let valid = match e.attr("r") {
+                    None => Some(self.next_row).filter(|r| *r < 1_048_576),
+                    Some(v) => v
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|r| (1..=1_048_576).contains(r))
+                        .map(|r| r - 1),
                 };
+                let row = valid.unwrap_or(self.next_row);
                 self.next_row = row.saturating_add(1);
                 self.next_col = 0;
-                if e.flag("hidden") {
-                    push_span(&mut self.out.hidden_rows, row, row);
-                }
-                if let Some(level) = e.attr("outlineLevel").and_then(|v| v.parse::<u8>().ok())
-                    && level > 0
-                {
-                    self.out.outline_rows.push((row, level));
+                if valid.is_none() {
+                    self.bad_ref("a row with a row number out of range");
+                } else {
+                    if e.flag("hidden") {
+                        push_span(&mut self.out.hidden_rows, row, row);
+                    }
+                    if let Some(level) = e.attr("outlineLevel").and_then(|v| v.parse::<u8>().ok())
+                        && level > 0
+                    {
+                        self.out.outline_rows.push((row, level));
+                    }
                 }
             }
             "c" if self.in_sheet_data => {
