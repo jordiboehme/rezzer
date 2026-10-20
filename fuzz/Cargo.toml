@@ -16,6 +16,8 @@ rezzer-limits = { path = "../crates/rezzer-limits" }
 rezzer-model = { path = "../crates/rezzer-model" }
 rezzer-render = { path = "../crates/rezzer-render" }
 rezzer-read-markdown = { path = "../crates/readers/rezzer-read-markdown" }
+rezzer-read-csv = { path = "../crates/readers/rezzer-read-csv" }
+rezzer-read-text = { path = "../crates/readers/rezzer-read-text" }
 textenc = { path = "../crates/formats/textenc" }
 csvsniff = { path = "../crates/formats/csvsniff" }
 
@@ -56,6 +58,20 @@ bench = false
 [[bin]]
 name = "render"
 path = "fuzz_targets/render.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "csv_read"
+path = "fuzz_targets/csv_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text_read"
+path = "fuzz_targets/text_read.rs"
 test = false
 doc = false
 bench = false

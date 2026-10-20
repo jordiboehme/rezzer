@@ -447,7 +447,9 @@ dependencies = [
  "rezzer-enrich",
  "rezzer-limits",
  "rezzer-model",
+ "rezzer-read-csv",
  "rezzer-read-markdown",
+ "rezzer-read-text",
  "rezzer-render",
  "textenc",
 ]
@@ -470,6 +472,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rezzer-read-csv"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "csvsniff",
+ "rezzer-limits",
+ "rezzer-model",
+ "textenc",
+]
+
+[[package]]
 name = "rezzer-read-markdown"
 version = "0.1.0"
 dependencies = [
@@ -480,6 +493,15 @@ dependencies = [
  "serde_json",
  "textenc",
  "toml",
+]
+
+[[package]]
+name = "rezzer-read-text"
+version = "0.1.0"
+dependencies = [
+ "rezzer-limits",
+ "rezzer-model",
+ "textenc",
 ]
 
 [[package]]
