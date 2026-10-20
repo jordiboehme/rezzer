@@ -199,6 +199,10 @@ Planned after that:
 | [Mail](docs/formats/mail.md) | EML, MBOX, MSG |
 | [Calculation sheets](docs/formats/mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath |
 | Diagrams | draw.io, Visio |
+| Data science | Parquet, Arrow and Feather, Avro, JSON Lines, compressed CSV, HDF5, NetCDF, NumPy, Zarr |
+| Retro | WordStar, WordPerfect, disk and tape images from the C64, Atari and classic Mac |
+
+For large data sets Rezzer gives the agent the schema and a profile of all rows. A `rows` tool then fetches exactly the rows the agent needs, page by page, as a table, CSV, JSON Lines or [TOON](https://github.com/toon-format/toon).
 
 ## What sets Rezzer apart
 
