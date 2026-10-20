@@ -259,8 +259,8 @@ impl<'b> Builder<'b> {
             }
             None => 0,
         };
-        let body = &text[body_start..];
-        let parser = Parser::new_ext(body, options());
+        let body = fix_empty_potholes(&text[body_start..]);
+        let parser = Parser::new_ext(&body, options());
         for (n, (event, range)) in parser.into_offset_iter().enumerate() {
             if n % CHECK_EVERY == CHECK_EVERY - 1 && self.budget.check_time().is_err() {
                 self.time_stopped = true;
@@ -1224,6 +1224,57 @@ fn read_callout_header(
         *inlines = body;
     }
     Some((kind, folded, Some(title).filter(|t| !t.is_empty())))
+}
+
+/// pulldown-cmark 0.13.4 repeats the rest of the paragraph and loses the next wikilink's
+/// target after an empty pothole `[[x|]]`. Written as `[[x]]` it means the same. Code spans,
+/// fenced and indented code stay as they are.
+fn fix_empty_potholes(body: &str) -> std::borrow::Cow<'_, str> {
+    if !body.contains("|]]") {
+        return std::borrow::Cow::Borrowed(body);
+    }
+    let mut out = String::with_capacity(body.len());
+    let mut fence: Option<char> = None;
+    for line in body.split_inclusive('\n') {
+        let t = line.trim_start_matches(' ');
+        let marker = t.chars().next().filter(|c| matches!(c, '`' | '~'));
+        let is_fence = marker.is_some_and(|m| t.starts_with(&m.to_string().repeat(3)));
+        if let Some(open) = fence {
+            if is_fence && marker == Some(open) {
+                fence = None;
+            }
+            out.push_str(line);
+            continue;
+        }
+        if is_fence {
+            fence = marker;
+            out.push_str(line);
+            continue;
+        }
+        if line.starts_with("    ") || line.starts_with('\t') {
+            out.push_str(line);
+            continue;
+        }
+        let mut rest = line;
+        let mut ticks = 0usize;
+        while let Some(pos) = rest.find("|]]") {
+            let before = &rest[..pos];
+            ticks += before.matches('`').count();
+            let open = before.rfind("[[");
+            let plain_target = open.is_some_and(|o| {
+                let target = &before[o + 2..];
+                !target.is_empty() && !target.contains(['[', ']', '|', '`'])
+            });
+            out.push_str(before);
+            if !(plain_target && ticks.is_multiple_of(2)) {
+                out.push('|');
+            }
+            out.push_str("]]");
+            rest = &rest[pos + 3..];
+        }
+        out.push_str(rest);
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 fn heading_level(level: HeadingLevel) -> u8 {

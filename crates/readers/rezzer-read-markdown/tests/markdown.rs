@@ -964,3 +964,30 @@ fn wikilinks_are_marked() {
         ]
     );
 }
+
+#[test]
+fn empty_pothole_wikilink_does_not_repeat_the_paragraph() {
+    let out = read("A [[x|]] b [[y]] end.\n");
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("not a paragraph");
+    };
+    assert_eq!(plain(inlines), "A x b y end.");
+    let targets: Vec<&str> = inlines
+        .iter()
+        .filter_map(|i| match i {
+            Inline::Link { target, wiki, .. } => {
+                assert!(wiki);
+                Some(target.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(targets, ["x", "y"]);
+}
+
+#[test]
+fn empty_pothole_in_code_is_left_alone() {
+    let out = read("`[[x|]]` and\n\n```\n[[x|]]\n```\n");
+    let json = serde_json::to_string(&out.document.body).unwrap();
+    assert_eq!(json.matches("[[x|]]").count(), 2, "{json}");
+}
