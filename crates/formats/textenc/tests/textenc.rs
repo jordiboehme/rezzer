@@ -131,3 +131,10 @@ fn non_ascii_only_in_the_middle_of_a_large_input_decodes() {
     assert_eq!(d.encoding, "Shift_JIS");
     assert!(d.confident);
 }
+
+#[test]
+fn readme_example() {
+    let decoded = textenc::decode(b"\xff\xfeh\0i\0");
+    assert_eq!(decoded.text, "hi");
+    assert_eq!(decoded.encoding, "UTF-16LE");
+}
