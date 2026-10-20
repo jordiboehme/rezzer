@@ -453,6 +453,8 @@ fn refused_page_is_skipped_with_loss() {
     let out = read_with(&pdf(&pages, ""), limits);
     assert_eq!(out.completeness, Completeness::Partial);
     assert!(!all_text(&out).contains("Second page text."));
+    // The other page is read.
+    assert!(text(page(&out, 1)).contains("First page text."));
     let refused: Vec<_> = out
         .document
         .losses
@@ -464,6 +466,32 @@ fn refused_page_is_skipped_with_loss() {
     // Both page sections are there, each with its marker.
     assert_eq!(marker(page(&out, 1)), "Page 1");
     assert_eq!(marker(page(&out, 2)), "Page 2");
+}
+
+#[test]
+fn cmap_bomb_on_a_refused_page_stays_out_of_the_text_parser() {
+    // Page 1's font reads a CMap that unpacks to 2 GiB; page 2 is plain.
+    let pages = vec![
+        Page {
+            content: show("F1", 12.0, 72.0, 700.0, "Bomb page text."),
+            packed_cmap: Some(zeros_packed(2 << 30)),
+            ..Page::default()
+        },
+        Page::text(show("F1", 12.0, 72.0, 700.0, "Plain page text.")),
+    ];
+    let out = read(&pdf(&pages, ""));
+    assert!(text(page(&out, 2)).contains("Plain page text."));
+    assert!(!all_text(&out).contains("Bomb page text."));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "p1" && l.why == LossReason::Limit),
+        "{:?}",
+        out.document.losses
+    );
+    let rss = common::max_rss_bytes();
+    assert!(rss < 512 << 20, "max RSS {rss}");
 }
 
 #[test]

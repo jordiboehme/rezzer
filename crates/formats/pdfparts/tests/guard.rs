@@ -371,3 +371,24 @@ fn pages_naming_one_bad_resources_object_are_all_refused() {
     let pdf = open(&bytes).unwrap();
     assert_eq!(pdf.refused_pages(), &[1, 2, 3]);
 }
+
+#[test]
+fn refused_streams_are_empty_in_the_canonical_copy() {
+    // The page's content unpacks to 256 MiB of spaces through two layers.
+    let bytes = content_page(
+        &["FlateDecode", "ASCIIHexDecode"],
+        zlib_fill(b' ', 256 << 20),
+    );
+    let pdf = open(&bytes).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1]);
+    // The canonical copy keeps the stream's dictionary but not its data, so a parser that
+    // reads it finds nothing to unpack.
+    let copy = open(pdf.canonical()).unwrap();
+    assert!(copy.refused_pages().is_empty(), "{:?}", copy.issues());
+    assert_eq!(copy.page_count(), 1);
+    assert!(
+        pdf.canonical().len() < 4096,
+        "canonical copy holds {} bytes",
+        pdf.canonical().len()
+    );
+}

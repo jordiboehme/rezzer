@@ -137,7 +137,7 @@ pub fn show(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
 
 /// `n` bytes of zeros, deflated.
 pub fn zeros_packed(n: usize) -> Vec<u8> {
-    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
     let chunk = vec![0u8; 1 << 20];
     let mut left = n;
     while left > 0 {
@@ -146,4 +146,24 @@ pub fn zeros_packed(n: usize) -> Vec<u8> {
         left -= k;
     }
     z.finish().expect("deflate")
+}
+
+/// Maximum resident set size of the process. It is the figure of one test only under nextest,
+/// which runs every test in its own process.
+#[cfg(unix)]
+pub fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
+}
+
+#[cfg(not(unix))]
+pub fn max_rss_bytes() -> u64 {
+    0
 }

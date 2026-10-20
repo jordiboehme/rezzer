@@ -245,7 +245,7 @@ impl Pdf {
             return Err(OpenError::Limit("stopped by the caller".into()));
         }
         let built = parse::build(bytes, password, limits, stop)?;
-        let doc = built.doc;
+        let mut doc = built.doc;
         let mut issues = built.issues;
         let catalog_ok = doc
             .trailer
@@ -261,6 +261,16 @@ impl Pdf {
         let tree = pagetree::page_tree(&doc, limits, &mut issues);
         let pages = tree.pages;
         let verdict = guard::measure(&doc, &pages, built.unpacked, limits, stop, &mut issues)?;
+        // A stream over a limit is written without its data, so no parser that reads the
+        // canonical copy can unpack it, whichever page it asks for.
+        for id in &verdict.refused_objects {
+            if let Some(lopdf::Object::Stream(stream)) = doc.objects.get_mut(id) {
+                stream.dict.remove(b"Filter");
+                stream.dict.remove(b"DecodeParms");
+                stream.set_content(Vec::new());
+            }
+        }
+        let (canonical, charged) = parse::write_canonical(&mut doc, limits, built.charged)?;
         // A page listed twice keeps its first number.
         let mut page_numbers = HashMap::new();
         for (i, p) in pages.iter().enumerate() {
@@ -272,10 +282,10 @@ impl Pdf {
         }
         Ok(Pdf {
             doc,
-            canonical: built.canonical,
+            canonical,
             original: bytes.to_vec(),
             values: built.items,
-            object_bytes: built.charged,
+            object_bytes: charged,
             limits: *limits,
             encryption: built.encryption,
             crypt: built.crypt,
@@ -290,7 +300,7 @@ impl Pdf {
             scripts: OnceLock::new(),
             signatures: OnceLock::new(),
             revisions: OnceLock::new(),
-            text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(built.charged)),
+            text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(charged)),
         })
     }
 
@@ -300,8 +310,9 @@ impl Pdf {
     }
 
     /// The document as canonical bytes: the objects it reaches, decrypted, with a classic
-    /// cross-reference table and no object streams. Other parsers must read these bytes and
-    /// never the original file.
+    /// cross-reference table and no object streams. A stream the guard refused is written
+    /// empty (its dictionary without `/Filter`), so another parser can read any page that was
+    /// not refused. Other parsers must read these bytes and never the original file.
     pub fn canonical(&self) -> &[u8] {
         &self.canonical
     }

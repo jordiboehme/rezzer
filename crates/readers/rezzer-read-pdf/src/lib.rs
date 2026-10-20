@@ -18,7 +18,7 @@ mod text;
 #[path = "../tests/common/mod.rs"]
 mod fixtures;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pdfparts::{IssueKind, PageInfo, Pdf};
 use rezzer_limits::Budget;
@@ -93,38 +93,15 @@ fn extract(pdf: &Pdf, pages: &[PageInfo], out: &mut Out, stop: &dyn Fn() -> bool
         );
         return Extracted::default();
     }
-    let refused = pdf.refused_pages();
-    if !refused.is_empty() {
-        // The text parser reads the fonts of every page, also of pages it is not asked for,
-        // so a refused stream could reach it through any page.
-        out.loss(
-            "document",
-            format!(
-                "text not read on any page: {} refused by the stream guard, and the text \
-                 parser reads the fonts of every page",
-                page_list(refused)
-            ),
-            LossReason::Limit,
-            Severity::Error,
-        );
-        return Extracted::default();
-    }
-    let wanted: Vec<u32> = pages.iter().map(|p| p.number).collect();
+    // pdfparts writes refused streams empty, so the other pages are safe to read; the refused
+    // ones keep the guard's loss.
+    let refused: HashSet<u32> = pdf.refused_pages().iter().copied().collect();
+    let wanted: Vec<u32> = pages
+        .iter()
+        .map(|p| p.number)
+        .filter(|n| !refused.contains(n))
+        .collect();
     text::pages(pdf.canonical(), &wanted, stop)
-}
-
-/// `page 3` or `pages 2, 5 and 9`, at most ten numbers.
-fn page_list(pages: &[u32]) -> String {
-    let shown: Vec<String> = pages.iter().take(10).map(u32::to_string).collect();
-    let more = pages.len().saturating_sub(shown.len());
-    match (shown.as_slice(), more) {
-        ([one], 0) => format!("page {one} was"),
-        (_, 0) => {
-            let (last, rest) = shown.split_last().expect("two or more");
-            format!("pages {} and {last} were", rest.join(", "))
-        }
-        _ => format!("pages {} and {more} more were", shown.join(", ")),
-    }
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.

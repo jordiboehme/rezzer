@@ -210,14 +210,13 @@ impl<'a> Budget<'a> {
 /// The document as other parsers may see it.
 pub(crate) struct Built {
     pub doc: Document,
-    pub canonical: Vec<u8>,
     pub encryption: Option<Encryption>,
     /// The key, kept to read the objects of earlier revisions.
     pub crypt: Option<Crypt>,
     pub issues: Vec<Issue>,
     /// Bytes object streams and cross-reference streams unpacked to.
     pub unpacked: u64,
-    /// Bytes charged for the parsed objects and the canonical copy.
+    /// Bytes charged for the parsed objects.
     pub charged: u64,
     /// Values parsed.
     pub items: usize,
@@ -248,7 +247,8 @@ fn version(bytes: &[u8], base: usize) -> String {
     }
 }
 
-/// Reads the file into a document and its canonical bytes.
+/// Reads the file into a document. [`write_canonical`] writes it once the guard has emptied
+/// the streams it refused.
 pub(crate) fn build(
     bytes: &[u8],
     password: Option<&str>,
@@ -319,7 +319,7 @@ pub(crate) fn build(
     objects.retain(|_, o| !matches!(o.type_name(), Ok(b"ObjStm" | b"XRef" | b"Linearized")));
     issues.append(&mut store.issues);
     let crypt = store.crypt.take();
-    let mut budget = store.budget;
+    let budget = store.budget;
     if budget.not_read > 0 {
         let n = budget.not_read;
         let what = if n == 1 { "object" } else { "objects" };
@@ -341,23 +341,8 @@ pub(crate) fn build(
         }
     }
     doc.trailer = canon_trailer;
-    let left = limits.max_object_bytes.saturating_sub(budget.bytes);
-    let mut out = Capped {
-        out: Vec::new(),
-        left,
-    };
-    if doc.save_to(&mut out).is_err() {
-        return Err(OpenError::Limit(format!(
-            "the objects of the file take more than {} bytes",
-            limits.max_object_bytes
-        )));
-    }
-    budget
-        .charge(out.out.len() as u64)
-        .map_err(Fail::into_open)?;
     Ok(Built {
         doc,
-        canonical: out.out,
         encryption,
         crypt,
         issues,
@@ -365,6 +350,27 @@ pub(crate) fn build(
         charged: budget.bytes,
         items: budget.items,
     })
+}
+
+/// Writes the document as canonical bytes. The copy counts against the object budget after
+/// the `charged` bytes; returns the copy and the new total.
+pub(crate) fn write_canonical(
+    doc: &mut Document,
+    limits: &Limits,
+    charged: u64,
+) -> Result<(Vec<u8>, u64), OpenError> {
+    let mut out = Capped {
+        out: Vec::new(),
+        left: limits.max_object_bytes.saturating_sub(charged),
+    };
+    if doc.save_to(&mut out).is_err() {
+        return Err(OpenError::Limit(format!(
+            "the objects of the file take more than {} bytes",
+            limits.max_object_bytes
+        )));
+    }
+    let total = charged.saturating_add(out.out.len() as u64);
+    Ok((out.out, total))
 }
 
 /// A writer that fails once it has taken `left` bytes.

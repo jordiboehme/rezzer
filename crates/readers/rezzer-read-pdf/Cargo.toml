@@ -14,3 +14,4 @@ pdf-inspector.workspace = true
 
 [dev-dependencies]
 flate2 = { workspace = true, features = ["zlib-rs"] }
+libc.workspace = true
