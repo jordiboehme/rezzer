@@ -296,11 +296,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 }
                 return;
             }
-            if *wiki
-                && link_depth == 0
-                && safe_target(target)
-                && let Some(written) = wikilink(target, &flat_text(content))
-            {
+            if *wiki && let Some(written) = wikilink(target, content) {
                 out.push_str(&written);
                 return;
             }
@@ -1415,11 +1411,31 @@ fn column_letter(mut index: usize) -> String {
     letters.iter().rev().collect()
 }
 
-/// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None when the
-/// target or the text has `]]`, `|` or a line break (the link is then written normally).
-fn wikilink(target: &str, text: &str) -> Option<String> {
-    let bad = |s: &str| s.contains("]]") || s.contains('|') || s.contains(['\n', '\r']);
-    if target.is_empty() || bad(target) || (text != target && bad(text)) {
+/// Characters allowed in a wikilink written as `[[...]]`: letters and digits of any script,
+/// space and `- _ . / # ' ,`. Nothing here has a Markdown or HTML meaning inside `[[ ]]`.
+fn wiki_plain(text: &str) -> bool {
+    text.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/' | '#' | '\'' | ','))
+}
+
+/// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None unless the
+/// target (without a `:`) and the text are plain (see [`wiki_plain`]) and the text has no
+/// formatting, image or code; the link is then written as a normal, escaped link.
+fn wikilink(target: &str, content: &[Inline]) -> Option<String> {
+    let mut text = String::new();
+    for inline in content {
+        match inline {
+            Inline::Text {
+                text: t,
+                emphasis: false,
+                strong: false,
+                strike: false,
+            } => text.push_str(t),
+            Inline::AnchorMark { .. } => {}
+            _ => return None,
+        }
+    }
+    if target.is_empty() || !wiki_plain(target) || !wiki_plain(&text) {
         return None;
     }
     if text.is_empty() || text == target {

@@ -1759,3 +1759,69 @@ fn unsafe_wikilinks_fall_back_to_a_normal_link() {
         assert!(!out.contains("[["), "{out}");
     }
 }
+
+/// Parses the rendered Markdown back: no live javascript link and no raw HTML.
+fn assert_inert(md: &str) {
+    for event in Parser::new_ext(md, Options::all()) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                let url = dest_url.to_ascii_lowercase();
+                assert!(
+                    !url.trim_start().starts_with("javascript:"),
+                    "live link {dest_url:?} in {md:?}"
+                );
+            }
+            Event::Html(h) | Event::InlineHtml(h) => panic!("raw html {h:?} in {md:?}"),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn hostile_wikilinks_stay_inert() {
+    let cases = [
+        ("<javascript:alert(1)>", "<javascript:alert(1)>"),
+        ("<script>alert(1)</script>", "x"),
+        ("x", "<img src=x onerror=alert(1)>"),
+        ("x", "a <b>bold</b> c"),
+        ("a] [evil](javascript:x) [b", "a] [evil](javascript:x) [b"),
+        ("javascript:alert(1)", "javascript:alert(1)"),
+        ("a\\", "b"),
+        ("x", "`code` *em* $m$ &amp; ![i](u)"),
+    ];
+    for (target, text) in cases {
+        let out = render_inline(wiki_link(target, text));
+        assert!(!out.contains("[["), "{out}");
+        assert_inert(&out);
+    }
+}
+
+#[test]
+fn wikilinks_with_formatting_in_the_text_fall_back() {
+    let mut link = wiki_link("x", "label");
+    if let Inline::Link { inlines, .. } = &mut link {
+        *inlines = vec![Inline::Text {
+            text: "label".into(),
+            emphasis: false,
+            strong: true,
+            strike: false,
+        }];
+    }
+    assert!(!render_inline(link).contains("[["));
+    let mut link = wiki_link("x", "label");
+    if let Inline::Link { inlines, .. } = &mut link {
+        *inlines = vec![Inline::Code {
+            text: "label".into(),
+        }];
+    }
+    assert!(!render_inline(link).contains("[["));
+}
+
+#[test]
+fn plain_wikilinks_in_any_script_are_written() {
+    assert!(
+        render_inline(wiki_link("Straße/日本語 note-1_x.md#Sec, it's", "Straße"))
+            .ends_with("[[Straße/日本語 note-1_x.md#Sec, it's|Straße]]")
+    );
+    assert!(!render_inline(wiki_link("http://x", "http://x")).contains("[["));
+}
