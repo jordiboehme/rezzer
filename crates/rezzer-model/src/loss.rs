@@ -26,6 +26,9 @@ pub enum LossReason {
     NotImplemented,
     /// A fact was guessed or inferred, not read from the file.
     Uncertain,
+    /// Rezzer itself stopped with an internal error (a reader or enrich pass panicked): a bug
+    /// in Rezzer, not a fault of the file.
+    Internal,
 }
 
 #[derive(

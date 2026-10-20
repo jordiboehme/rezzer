@@ -640,13 +640,20 @@ fn not_read_table() {
             LossReason::Uncertain,
             Severity::Info,
         ),
+        loss(
+            "document",
+            "reader stopped",
+            LossReason::Internal,
+            Severity::Error,
+        ),
     ];
     let md = render(&d, Completeness::Partial, &opts());
     let expected = "## Not read\n\n\
 | Where | What | Why | Severity |\n\
 | --- | --- | --- | --- |\n\
 | page 3 | table \\| odd | not implemented | warning |\n\
-| A1 | header guessed | uncertain | info |\n";
+| A1 | header guessed | uncertain | info |\n\
+| document | reader stopped | internal error | error |\n";
     assert!(md.ends_with(expected), "{md}");
 }
 

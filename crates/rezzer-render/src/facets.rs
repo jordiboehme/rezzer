@@ -404,6 +404,7 @@ fn reason(why: LossReason) -> &'static str {
         LossReason::Encrypted => "encrypted",
         LossReason::NotImplemented => "not implemented",
         LossReason::Uncertain => "uncertain",
+        LossReason::Internal => "internal error",
     }
 }
 
