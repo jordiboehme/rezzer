@@ -200,10 +200,12 @@ fn rels(zip: &mut Archive, part: &str) -> Result<Vec<Rel>, Refusal> {
     Ok(out)
 }
 
-/// The relationship id of each `sheet` element of the workbook part, in order. Each sheet
-/// must carry exactly one attribute with the local name `id`, in the relationships
-/// namespace as the workbook root declares it, and `name` and `sheetId` once each; no
-/// attribute local name may repeat.
+/// The relationship id of each `sheet` element of the workbook part, in order. Only
+/// canonical markup is accepted, the kind calamine (last attribute ending in `:id`),
+/// sheetparts (first local name after the last colon) and this check read the same way:
+/// no element or attribute name in the part has more than one colon, and each sheet
+/// carries only the unprefixed `name` and `sheetId`, optionally `state`, and exactly one
+/// `<prefix>:id` whose prefix the workbook root declares as the relationships namespace.
 fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
     let bytes = zip
         .read(part)
@@ -212,6 +214,7 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
     let mut buf = Vec::new();
     let mut out = Vec::new();
     let damaged = |what: String| (LossReason::Damaged, format!("{part}: {what}"));
+    let colons = |name: &str| name.bytes().filter(|b| *b == b':').count();
     // Prefixes declared on the workbook root.
     let mut prefixes: Option<HashMap<String, String>> = None;
     loop {
@@ -221,14 +224,29 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
             .map_err(|e| damaged(e.to_string()))?;
         let e = match event {
             Event::Start(e) | Event::Empty(e) => e,
+            Event::End(e) => {
+                let name = e.name().as_ref().to_string();
+                if colons(&name) > 1 {
+                    return Err(damaged(format!("the element name {name} has two colons")));
+                }
+                continue;
+            }
             Event::DocType(_) => return Err(damaged("a DOCTYPE is not allowed".into())),
             Event::Eof => break,
             _ => continue,
         };
+        let name = e.name().as_ref().to_string();
+        if colons(&name) > 1 {
+            return Err(damaged(format!("the element name {name} has two colons")));
+        }
         let mut attrs: Vec<(String, String)> = Vec::new();
         for a in e.attributes() {
             let a = a.map_err(|e| damaged(e.to_string()))?;
-            attrs.push((a.key.as_ref().to_string(), a.value.to_string()));
+            let key = a.key.as_ref().to_string();
+            if colons(&key) > 1 {
+                return Err(damaged(format!("the attribute name {key} has two colons")));
+            }
+            attrs.push((key, a.value.to_string()));
         }
         if prefixes.is_none() {
             prefixes = Some(
@@ -247,36 +265,31 @@ fn sheet_ids(zip: &mut Archive, part: &str) -> Result<Vec<String>, Refusal> {
         let Some(declared) = prefixes.as_ref() else {
             continue;
         };
-        let mut local_seen = HashSet::new();
+        // Local names by the first and by the last colon (the same once no name has two
+        // colons; both are kept so the rule does not rest on that).
+        let mut by_first = HashSet::new();
+        let mut by_last = HashSet::new();
         let mut id = None;
         for (key, value) in &attrs {
-            let (prefix, local) = match key.split_once(':') {
-                Some((p, l)) => (Some(p), l),
-                None => (None, key.as_str()),
-            };
-            if !local_seen.insert(local.to_string()) {
-                return Err(damaged(format!("a sheet has two attributes named {local}")));
+            let first = key.split_once(':').map_or(key.as_str(), |(_, l)| l);
+            let last = key.rsplit_once(':').map_or(key.as_str(), |(_, l)| l);
+            if !by_first.insert(first.to_string()) || !by_last.insert(last.to_string()) {
+                return Err(damaged(format!("a sheet has two attributes named {last}")));
             }
-            match (prefix, local) {
-                (Some(p), "id") => {
-                    let ns = declared.get(p).map(String::as_str).unwrap_or("");
-                    if !REL_NS.contains(&ns) {
-                        return Err(damaged(format!(
-                            "the sheet relationship id {key} is not in the relationships namespace"
-                        )));
-                    }
+            match key.split_once(':') {
+                None if matches!(key.as_str(), "name" | "sheetId" | "state") => {}
+                Some((p, "id")) if REL_NS.contains(&declared.get(p).map_or("", String::as_str)) => {
                     id = Some(value.clone());
                 }
-                (None, "id") => {
-                    return Err(damaged(
-                        "a sheet id without the relationships prefix".into(),
-                    ));
+                Some((_, "id")) => {
+                    return Err(damaged(format!(
+                        "the sheet relationship id {key} is not in the relationships namespace"
+                    )));
                 }
-                (None, "name" | "sheetId") => {}
-                _ => {}
+                _ => return Err(damaged(format!("a sheet has the attribute {key}"))),
             }
         }
-        if !local_seen.contains("name") || !local_seen.contains("sheetId") {
+        if !by_first.contains("name") || !by_first.contains("sheetId") {
             return Err(damaged("a sheet lacks its name or sheetId".into()));
         }
         out.push(id.ok_or_else(|| damaged("a sheet without a relationship id".into()))?);
@@ -306,8 +319,12 @@ fn join(dir: &str, target: &str) -> String {
 /// Refuses a package that calamine and sheetparts could read in two ways: duplicate
 /// relationship ids in any `.rels` part, not exactly one officeDocument relationship,
 /// unclean or external workbook and sheet targets, parts that are not there, and sheet
-/// names that repeat (case-insensitive).
-pub(crate) fn check_structure(zip: &mut Archive, wb: &WorkbookParts) -> Result<(), Refusal> {
+/// names that repeat (case-insensitive). Returns the part calamine reads for each sheet, in
+/// the order of `wb.sheets`; each equals the part sheetparts resolved.
+pub(crate) fn check_structure(
+    zip: &mut Archive,
+    wb: &WorkbookParts,
+) -> Result<Vec<String>, Refusal> {
     let damaged = |what: String| (LossReason::Damaged, what);
     let names: Vec<String> = zip.names().iter().map(|n| n.to_string()).collect();
     let exists: HashSet<&str> = names.iter().map(String::as_str).collect();
@@ -369,6 +386,7 @@ pub(crate) fn check_structure(zip: &mut Archive, wb: &WorkbookParts) -> Result<(
             wb.sheets.len()
         )));
     }
+    let mut calamine_parts = Vec::with_capacity(ids.len());
     for (id, s) in ids.iter().zip(&wb.sheets) {
         let Some(r) = by_id.get(id.as_str()) else {
             return Err(damaged(format!(
@@ -389,6 +407,7 @@ pub(crate) fn check_structure(zip: &mut Archive, wb: &WorkbookParts) -> Result<(
                 s.name
             )));
         }
+        calamine_parts.push(p);
     }
 
     let mut sheet_names = HashSet::new();
@@ -406,5 +425,5 @@ pub(crate) fn check_structure(zip: &mut Archive, wb: &WorkbookParts) -> Result<(
             )));
         }
     }
-    Ok(())
+    Ok(calamine_parts)
 }

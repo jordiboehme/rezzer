@@ -81,9 +81,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         );
         return out.failed();
     }
-    if let Err(refusal) = package::check_structure(&mut zip, &wb) {
-        return refuse(out, refusal);
-    }
+    // The part calamine reads for each sheet, which its re-reads are charged at.
+    let calamine_parts = match package::check_structure(&mut zip, &wb) {
+        Ok(parts) => parts,
+        Err(refusal) => return refuse(out, refusal),
+    };
     if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
         return refuse(out, (LossReason::Limit, hit.to_string()));
     }
@@ -140,7 +142,12 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         DateSystem::Date1900
     };
     let mut halted: Option<&'static str> = None;
-    for sheet in &wb.sheets {
+    for (sheet, cal_part) in wb.sheets.iter().zip(&calamine_parts) {
+        // check_structure refused every package where these differ.
+        debug_assert_eq!(
+            cal_part, &sheet.part,
+            "calamine and sheetparts read one part"
+        );
         let q = quote_sheet(&sheet.name);
         let mut blocks = Vec::new();
         match sheet.state {
@@ -163,7 +170,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             continue;
         }
         // calamine unpacks the sheet for its cells, sheetparts for its logic.
-        let charged_sheet = pkg.charge(budget, &sheet.part).and_then(|()| {
+        let charged_sheet = pkg.charge(budget, cal_part).and_then(|()| {
             let parts = read_sheet(&mut zip, sheet, &wb, &part_limits, &stop);
             charge_reads(&zip, &mut charged, budget).map(|()| parts)
         });
@@ -208,7 +215,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             None => {}
         }
         // calamine unpacks the sheet a second time for its merged cells.
-        let merged = match pkg.charge(budget, &sheet.part) {
+        let merged = match pkg.charge(budget, cal_part) {
             Ok(()) => contain(AssertUnwindSafe(|| {
                 cal.merge_cells_by_sheet_name(&sheet.name)
             })),

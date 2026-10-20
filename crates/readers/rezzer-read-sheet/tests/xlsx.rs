@@ -1408,6 +1408,11 @@ fn raw_zip(files: &[(&str, String)]) -> Vec<u8> {
 /// A package whose sheet relationships and sheet elements are given, with a small sheet at
 /// `xl/worksheets/sheet1.xml` and a different part at `xl/./worksheets/sheet1.xml`.
 fn split_pkg(sheet_rels: &str, sheet_elems: &str, rels_ns: &str) -> Vec<u8> {
+    split_pkg_ns(sheet_rels, sheet_elems, rels_ns, " xmlns:x=\"urn:x\"")
+}
+
+/// Like `split_pkg`, with the extra namespace declarations of the workbook root given.
+fn split_pkg_ns(sheet_rels: &str, sheet_elems: &str, rels_ns: &str, wb_ns: &str) -> Vec<u8> {
     let bomb = ws(
         "",
         &format!(
@@ -1431,7 +1436,7 @@ fn split_pkg(sheet_rels: &str, sheet_elems: &str, rels_ns: &str) -> Vec<u8> {
         (
             "xl/workbook.xml",
             format!(
-                "<workbook xmlns=\"{MAIN}\" xmlns:r=\"{RELS}\" xmlns:x=\"urn:x\"><sheets>{sheet_elems}</sheets></workbook>"
+                "<workbook xmlns=\"{MAIN}\" xmlns:r=\"{RELS}\"{wb_ns}><sheets>{sheet_elems}</sheets></workbook>"
             ),
         ),
         (
@@ -1527,4 +1532,63 @@ fn second_sheet_id_attribute_is_refused() {
     );
     let out = read_with(split_pkg(&rels, foreign, ""), split_limits());
     refused(&out, &[LossReason::Damaged]);
+}
+
+/// Two sheet relationships: `rId1` names the small sheet, `rId2` the dotted part, which
+/// calamine would read as `xl/./worksheets/sheet1.xml`.
+fn two_sheet_rels() -> String {
+    format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>\
+         <Relationship Id=\"rId2\" Type=\"{RELS}/worksheet\" Target=\"./worksheets/sheet1.xml\"/>"
+    )
+}
+
+#[test]
+fn sheet_id_name_with_two_colons_is_refused() {
+    // calamine takes the last attribute whose name ends in `:id` (rId2), sheetparts the first
+    // local `id` (rId1).
+    let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" r:x:id=\"rId2\"/>";
+    let out = read_with(split_pkg(&two_sheet_rels(), sheet, ""), split_limits());
+    refused(&out, &[LossReason::Damaged]);
+    // The same with a prefix the root declares.
+    let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" x:b:id=\"rId2\"/>";
+    let out = read_with(split_pkg(&two_sheet_rels(), sheet, ""), split_limits());
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn second_relationship_prefix_on_a_sheet_is_refused() {
+    // Both prefixes are the relationships namespace; still only one id is allowed.
+    let sheet = "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" r2:id=\"rId2\"/>";
+    let ns = format!(" xmlns:r2=\"{RELS}\"");
+    let out = read_with(
+        split_pkg_ns(&two_sheet_rels(), sheet, "", &ns),
+        split_limits(),
+    );
+    refused(&out, &[LossReason::Damaged]);
+}
+
+#[test]
+fn unknown_sheet_attribute_is_refused() {
+    let rels = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+    );
+    for sheet in [
+        "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" foo=\"bar\"/>",
+        "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" x:foo=\"bar\"/>",
+        "<sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\" xmlns:r=\"urn:x\"/>",
+    ] {
+        let out = read_with(split_pkg(&rels, sheet, ""), split_limits());
+        refused(&out, &[LossReason::Damaged]);
+    }
+    // `state` is allowed.
+    let hidden = "<sheet name=\"S\" sheetId=\"1\" state=\"hidden\" r:id=\"rId1\"/>";
+    let out = read_with(split_pkg(&rels, hidden, ""), split_limits());
+    assert_ne!(
+        out.completeness,
+        Completeness::Failed,
+        "{:#?}",
+        out.document.losses
+    );
+    assert_eq!(cell_text(&out.document, "S!A1").as_deref(), Some("1"));
 }
