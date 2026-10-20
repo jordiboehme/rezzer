@@ -20,5 +20,7 @@ fn registry() -> Registry {
     registry.register(Box::new(rezzer_read_csv::CsvReader));
     #[cfg(any(feature = "fmt-xlsx", feature = "fmt-ods"))]
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    #[cfg(feature = "fmt-pdf")]
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
     registry
 }

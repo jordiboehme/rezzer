@@ -1,0 +1,16 @@
+[package]
+name = "rezzer-read-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rezzer-model = { path = "../../rezzer-model" }
+rezzer-limits = { path = "../../rezzer-limits" }
+pdfparts = { path = "../../formats/pdfparts" }
+pdf-inspector.workspace = true
+
+[dev-dependencies]
+flate2 = { workspace = true, features = ["zlib-rs"] }

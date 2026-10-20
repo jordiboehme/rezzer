@@ -14,3 +14,8 @@ skip = [
 ]
 
 [advisories]
+ignore = [
+    # Unmaintained, not a known flaw. pdf-inspector 1.25.2 (the newest) reads embedded font
+    # programs with it and no release moves to skrifa yet. Re-check on every pdf-inspector bump.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained; pdf-inspector 1.25.2 still depends on it" },
+]

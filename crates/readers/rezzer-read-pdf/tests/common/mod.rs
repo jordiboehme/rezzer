@@ -1,0 +1,149 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Small PDF files written by hand for the tests, with a classic cross-reference table.
+
+#![allow(dead_code)]
+
+use std::io::Write;
+
+/// One page of a generated file.
+#[derive(Default, Clone)]
+pub struct Page {
+    /// The content stream, uncompressed.
+    pub content: String,
+    /// Annotation dictionaries, each written as its own object.
+    pub annots: Vec<String>,
+    /// A stream that the page's font reads as its `/ToUnicode` CMap, already deflated.
+    pub packed_cmap: Option<Vec<u8>>,
+}
+
+impl Page {
+    pub fn text(content: impl Into<String>) -> Page {
+        Page {
+            content: content.into(),
+            ..Page::default()
+        }
+    }
+}
+
+/// A file being written: object `n` is `objects[n - 1]`.
+#[derive(Default)]
+pub struct Builder {
+    objects: Vec<Vec<u8>>,
+}
+
+impl Builder {
+    /// Reserves the next object number.
+    pub fn reserve(&mut self) -> u32 {
+        self.objects.push(Vec::new());
+        self.objects.len() as u32
+    }
+
+    pub fn set(&mut self, n: u32, body: impl Into<Vec<u8>>) {
+        self.objects[n as usize - 1] = body.into();
+    }
+
+    pub fn add(&mut self, body: impl Into<Vec<u8>>) -> u32 {
+        let n = self.reserve();
+        self.set(n, body);
+        n
+    }
+
+    pub fn stream(&mut self, dict: &str, data: &[u8]) -> u32 {
+        let mut body = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
+        body.extend(data);
+        body.extend(b"\nendstream");
+        self.add(body)
+    }
+
+    pub fn finish(self, root: u32) -> Vec<u8> {
+        let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in self.objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+            out.extend(body);
+            out.extend(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend(
+            format!(
+                "trailer\n<< /Size {} /Root {root} 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                self.objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        out
+    }
+}
+
+/// A file with the given pages (A4, Helvetica as `/F1`, Helvetica-Bold as `/F2`).
+/// `catalog_extra` goes into the catalog dictionary.
+pub fn pdf(pages: &[Page], catalog_extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let mut kids = Vec::new();
+    for page in pages {
+        let font = match &page.packed_cmap {
+            Some(packed) => {
+                let cmap = b.stream("/Filter /FlateDecode", packed);
+                b.add(format!(
+                    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode {cmap} 0 R >>"
+                ))
+            }
+            None => b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        };
+        let content = b.stream("", page.content.as_bytes());
+        let annots: Vec<String> = page
+            .annots
+            .iter()
+            .map(|a| format!("{} 0 R", b.add(a.as_bytes())))
+            .collect();
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> \
+             /Contents {content} 0 R /Annots [{}] >>",
+            annots.join(" ")
+        ));
+        kids.push(format!("{kid} 0 R"));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            kids.len()
+        ),
+    );
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R {catalog_extra} >>"),
+    );
+    b.finish(catalog)
+}
+
+/// A text object that shows `text` with font `font` at size `size` at `(x, y)`.
+pub fn show(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
+    format!("BT /{font} {size} Tf {x} {y} Td ({text}) Tj ET\n")
+}
+
+/// `n` bytes of zeros, deflated.
+pub fn zeros_packed(n: usize) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    let chunk = vec![0u8; 1 << 20];
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(chunk.len());
+        z.write_all(&chunk[..k]).expect("deflate");
+        left -= k;
+    }
+    z.finish().expect("deflate")
+}

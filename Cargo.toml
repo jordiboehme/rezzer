@@ -19,6 +19,7 @@ members = [
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
     "crates/readers/rezzer-read-sheet",
+    "crates/readers/rezzer-read-pdf",
     "crates/rezzer",
 ]
 # The fuzz targets are their own cargo-fuzz project (nightly only).
@@ -66,6 +67,8 @@ calamine = { version = "=0.37.0", default-features = false }
 lopdf = { version = "=0.45.0", default-features = false }
 weezl = "=0.2.1"
 brotli-decompressor = "=5.0.3"
+# Never enable its features: they download OCR models.
+pdf-inspector = { version = "=1.25.2", default-features = false }
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.
