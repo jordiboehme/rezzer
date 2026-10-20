@@ -13,6 +13,7 @@ zipguard = { path = "../../formats/zipguard" }
 formulakit = { path = "../../formats/formulakit" }
 sheetparts = { path = "../../formats/sheetparts" }
 calamine.workspace = true
+quick-xml.workspace = true
 
 [dev-dependencies]
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

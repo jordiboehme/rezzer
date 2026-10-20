@@ -12,7 +12,7 @@ use std::panic::AssertUnwindSafe;
 
 use calamine::{Reader as _, Xlsx};
 use formulakit::quote_sheet;
-use rezzer_limits::{Budget, contain};
+use rezzer_limits::{Budget, LimitHit, contain};
 use rezzer_model::{
     Anchor, Annotation, Block, Cell, Embedded, FormulaKind, Inline, LossReason, ReadOutcome, Rule,
     SectionKind, Severity, StatusColor, Value,
@@ -23,11 +23,12 @@ use sheetparts::ooxml::{
     read_workbook,
 };
 use sheetparts::{Issue, IssueKind, PropValue};
-use zipguard::{Archive, ZipError};
+use zipguard::Archive;
 
 use crate::Out;
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
 use crate::logic::{FormulaProblem, Formulas};
+use crate::package::{self, Package, Refusal, zip_reason};
 
 /// Formula problems listed one by one per sheet; the rest are counted in one loss.
 const LISTED_PROBLEMS: usize = 20;
@@ -36,12 +37,12 @@ const LISTED_PROBLEMS: usize = 20;
 pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     let lim = budget.limits();
     let stop = || budget.check_time().is_err();
-    // One entry may unpack to the unpacked limit, within the ratio limit. The archive total
-    // covers the preflight and sheetparts' own reads; what calamine unpacks is charged to
-    // the budget part by part.
+    // One entry may unpack to the unpacked limit, within the ratio limit. Everything
+    // zipguard unpacks (the preflight and sheetparts' reads) and every part calamine
+    // unpacks again is charged to the budget, so the unpacked limit bounds the real total.
     let zip_limits = zipguard::Limits {
         max_entry_bytes: lim.max_unpacked_bytes,
-        max_total_bytes: lim.max_unpacked_bytes.saturating_mul(3),
+        max_total_bytes: lim.max_unpacked_bytes,
         max_ratio: u64::from(lim.max_ratio),
         ..zipguard::Limits::default()
     };
@@ -58,7 +59,12 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             return out.failed();
         }
     };
-    let entries = EntryMap::new(&zip);
+    // Every entry is measured before anything else reads it.
+    let pkg = match Package::preflight(&mut zip, budget) {
+        Ok(p) => p,
+        Err(refusal) => return refuse(out, refusal),
+    };
+    let mut charged = zip.unpacked();
     let part_limits = sheetparts::Limits {
         max_depth: usize::try_from(lim.max_depth).unwrap_or(usize::MAX),
         max_items: usize::try_from(lim.max_elements).unwrap_or(usize::MAX),
@@ -75,8 +81,14 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         );
         return out.failed();
     }
+    if let Err(refusal) = package::check_structure(&mut zip, &wb) {
+        return refuse(out, refusal);
+    }
+    if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
+        return refuse(out, (LossReason::Limit, hit.to_string()));
+    }
 
-    // Everything calamine unpacks when it opens the workbook is measured first.
+    // calamine unpacks these again when it opens the workbook.
     let xl = match wb.workbook_part.rsplit_once('/') {
         Some((dir, _)) => format!("{dir}/"),
         None => String::new(),
@@ -89,14 +101,8 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         format!("{xl}styles.xml"),
     ];
     for part in &open_parts {
-        if let Err((why, what)) = entries.measure(&mut zip, part, budget) {
-            out.loss(
-                part.as_str(),
-                format!("the whole file: workbook part not read: {what}"),
-                why,
-                Severity::Error,
-            );
-            return out.failed();
+        if let Err(hit) = pkg.charge(budget, part) {
+            return refuse(out, (LossReason::Limit, format!("{part}: {hit}")));
         }
     }
     let opened = contain(AssertUnwindSafe(|| Xlsx::new(Cursor::new(bytes))));
@@ -125,9 +131,9 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
 
     properties(&mut out, &wb);
-    let vba = vba_modules(&mut out, &mut zip, &entries, &mut cal, &wb, &xl, budget);
+    let vba = vba_modules(&mut out, &pkg, &mut cal, &wb, &xl, budget);
 
-    let mut formulas = Formulas::new(&wb.names);
+    let mut formulas = Formulas::new(&wb.names, lim.max_text_bytes);
     let system = if wb.date1904 {
         DateSystem::Date1904
     } else {
@@ -156,37 +162,30 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             out.doc.body.push(section(&sheet.name, &q, blocks));
             continue;
         }
-        let measured = if sheet.part.is_empty() {
-            Err((LossReason::Damaged, "the sheet has no part".to_string()))
-        } else {
-            match entries.measure(&mut zip, &sheet.part, budget) {
-                Ok(Some(n)) => Ok(n),
-                Ok(None) => Err((
-                    LossReason::Damaged,
-                    format!("{} is not in the package", sheet.part),
-                )),
-                Err(e) => Err(e),
-            }
-        };
-        let sheet_bytes = match measured {
-            Ok(n) => n,
-            Err((why, what)) => {
+        // calamine unpacks the sheet for its cells, sheetparts for its logic.
+        let charged_sheet = pkg.charge(budget, &sheet.part).and_then(|()| {
+            let parts = read_sheet(&mut zip, sheet, &wb, &part_limits, &stop);
+            charge_reads(&zip, &mut charged, budget).map(|()| parts)
+        });
+        let parts = match charged_sheet {
+            Ok(p) => p,
+            Err(hit) => {
                 out.loss(
                     q.as_str(),
-                    format!("sheet not read: {what}"),
-                    why,
+                    format!("sheet not read: {hit}"),
+                    LossReason::Limit,
                     Severity::Warning,
                 );
                 blocks.push(note("This sheet was not read."));
                 out.doc.body.push(section(&sheet.name, &q, blocks));
+                halted = Some("unpacked limit reached");
                 continue;
             }
         };
-        let parts = read_sheet(&mut zip, sheet, &wb, &part_limits, &stop);
         issues_to_losses(&mut out, &parts.issues);
 
         let read = contain(AssertUnwindSafe(|| {
-            grid::read_cells(&mut cal, &sheet.name, budget)
+            grid::read_cells(&mut cal, &sheet.name, budget, &mut formulas.meter)
         }));
         let cells = match read {
             Ok(c) => c,
@@ -209,7 +208,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             None => {}
         }
         // calamine unpacks the sheet a second time for its merged cells.
-        let merged = match budget.add_unpacked(sheet_bytes) {
+        let merged = match pkg.charge(budget, &sheet.part) {
             Ok(()) => contain(AssertUnwindSafe(|| {
                 cal.merge_cells_by_sheet_name(&sheet.name)
             })),
@@ -333,54 +332,23 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     out.finish()
 }
 
-/// Finds entries the way calamine does: case-insensitive, with `\` read as `/`.
-struct EntryMap {
-    by_key: HashMap<String, Vec<String>>,
+/// Charges what zipguard unpacked since the last call to the budget.
+fn charge_reads(zip: &Archive, charged: &mut u64, budget: &Budget) -> Result<(), LimitHit> {
+    let now = zip.unpacked();
+    let delta = now.saturating_sub(*charged);
+    *charged = now;
+    budget.add_unpacked(delta)
 }
 
-impl EntryMap {
-    fn new(zip: &Archive) -> EntryMap {
-        let mut by_key: HashMap<String, Vec<String>> = HashMap::new();
-        for name in zip.names() {
-            by_key
-                .entry(name.replace('\\', "/").to_ascii_lowercase())
-                .or_default()
-                .push(name.to_string());
-        }
-        EntryMap { by_key }
-    }
-
-    /// Measures every entry calamine could take for `part` and charges the bytes to the
-    /// budget. `Ok(None)` when there is none.
-    fn measure(
-        &self,
-        zip: &mut Archive,
-        part: &str,
-        budget: &Budget,
-    ) -> Result<Option<u64>, (LossReason, String)> {
-        let Some(names) = self.by_key.get(&part.to_ascii_lowercase()) else {
-            return Ok(None);
-        };
-        let mut total = 0u64;
-        for name in names {
-            let n = zip
-                .measure(name)
-                .map_err(|e| (zip_reason(&e), format!("{name}: {e}")))?;
-            budget
-                .add_unpacked(n)
-                .map_err(|hit| (LossReason::Limit, format!("{name}: {hit}")))?;
-            total = total.saturating_add(n);
-        }
-        Ok(Some(total))
-    }
-}
-
-fn zip_reason(e: &ZipError) -> LossReason {
-    match e {
-        ZipError::Limit { .. } => LossReason::Limit,
-        ZipError::Encrypted(_) => LossReason::Encrypted,
-        _ => LossReason::Damaged,
-    }
+/// A failed outcome for a package that is not read at all.
+fn refuse(mut out: Out, (why, what): Refusal) -> ReadOutcome {
+    out.loss(
+        "document",
+        format!("the whole file: the package is not read: {what}"),
+        why,
+        Severity::Error,
+    );
+    out.failed()
 }
 
 fn issues_to_losses(out: &mut Out, issues: &[Issue]) {
@@ -722,6 +690,7 @@ fn sheet_formulas(
     let mut active: Vec<((u32, u32), (u32, u32))> = Vec::new();
 
     let mut problems = Vec::new();
+    let mut dropped: (u64, Option<(u32, u32)>) = (0, None);
     let mut lost_shared: Vec<(u32, u32)> = Vec::new();
     let mut stopped = false;
     for (i, c) in cells.cells.iter().enumerate() {
@@ -736,6 +705,11 @@ fn sheet_formulas(
             break;
         }
         let pos = (c.row, c.col);
+        if c.text_dropped {
+            dropped.0 += 1;
+            dropped.1.get_or_insert(pos);
+            continue;
+        }
         let attr = attrs.get(&pos).copied();
         let mut text = c.formula.clone();
         if text.is_none()
@@ -811,6 +785,18 @@ fn sheet_formulas(
         if !filled && c.val != Val::Empty {
             formulas.add_constant(sheet, c.row, c.col);
         }
+    }
+    if let (n, Some((r, c))) = dropped {
+        out.loss(
+            format!("{q}!{}", grid::a1(r, c)),
+            format!(
+                "formula text limit reached ({} bytes in all): {n} formula cells from {} on not listed; their values are shown",
+                formulas.meter.max(),
+                grid::a1(r, c)
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
     }
     if !lost_shared.is_empty() {
         let first: Vec<String> = lost_shared
@@ -1129,8 +1115,7 @@ struct Vba {
 
 fn vba_modules(
     out: &mut Out,
-    zip: &mut Archive,
-    entries: &EntryMap,
+    pkg: &Package,
     cal: &mut Xlsx<Cursor<&[u8]>>,
     wb: &WorkbookParts,
     xl: &str,
@@ -1141,11 +1126,11 @@ fn vba_modules(
         return vba;
     }
     let part = format!("{xl}vbaProject.bin");
-    if let Err((why, what)) = entries.measure(zip, &part, budget) {
+    if let Err(hit) = pkg.charge(budget, &part) {
         out.loss(
             part.as_str(),
-            format!("VBA project not read: {what}"),
-            why,
+            format!("VBA project not read: {hit}"),
+            LossReason::Limit,
             Severity::Warning,
         );
         return vba;

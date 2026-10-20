@@ -31,6 +31,50 @@ pub(crate) struct LogicInputs {
     pub formula_ids: Vec<(usize, FormulaId)>,
 }
 
+/// Formula text kept over the whole workbook, against `max_text_bytes`. Shared formulas
+/// turn a few bytes per cell into a copy of the master's text, so the sum is bounded, not
+/// only each text. Once full it stays full, so the texts kept are a prefix of the workbook.
+pub(crate) struct TextMeter {
+    used: u64,
+    max: u64,
+    full: bool,
+}
+
+impl TextMeter {
+    pub fn new(max: u64) -> TextMeter {
+        TextMeter {
+            used: 0,
+            max,
+            full: false,
+        }
+    }
+
+    /// Takes `bytes` of text if they fit.
+    pub fn take(&mut self, bytes: usize) -> bool {
+        let n = u64::try_from(bytes).unwrap_or(u64::MAX);
+        if self.full || self.used.saturating_add(n) > self.max {
+            self.full = true;
+            return false;
+        }
+        self.used += n;
+        true
+    }
+
+    /// Whether `bytes` would still fit; takes nothing, but a miss makes the meter full.
+    pub fn fits(&mut self, bytes: usize) -> bool {
+        let n = u64::try_from(bytes).unwrap_or(u64::MAX);
+        if self.full || self.used.saturating_add(n) > self.max {
+            self.full = true;
+            return false;
+        }
+        true
+    }
+
+    pub fn max(&self) -> u64 {
+        self.max
+    }
+}
+
 /// A table of the workbook with its place.
 struct TableLoc {
     name: String,
@@ -60,10 +104,11 @@ pub(crate) struct Formulas {
     pub user_functions: Vec<(String, String)>,
     user_seen: HashSet<String>,
     pub inputs: LogicInputs,
+    pub meter: TextMeter,
 }
 
 impl Formulas {
-    pub fn new(names: &[DefinedName]) -> Formulas {
+    pub fn new(names: &[DefinedName], max_text: u64) -> Formulas {
         let mut set = HashSet::new();
         let mut lambdas = HashSet::new();
         for n in names {
@@ -87,6 +132,7 @@ impl Formulas {
                 workbook: Workbook::new(),
                 formula_ids: Vec::new(),
             },
+            meter: TextMeter::new(max_text),
         }
     }
 
@@ -299,9 +345,16 @@ impl Formulas {
                     formula.references = self.anchors(Some(sheet), &a.refs);
                     formula.latex = self.latex_of(&a);
                     if a.display != stored {
-                        formula.original = Some(stored);
+                        // The display form is a second copy of the text.
+                        if self.meter.take(a.display.len()) {
+                            formula.original = Some(stored);
+                            formula.expression = a.display.clone();
+                        } else {
+                            notes.push(
+                                "display form not kept: formula text limit reached".to_string(),
+                            );
+                        }
                     }
-                    formula.expression = a.display.clone();
                     self.note_user_functions(&a, &anchor);
                     let id = self
                         .inputs
@@ -441,6 +494,18 @@ impl Formulas {
             match formulakit::analyze(&n.refers_to, Dialect::Excel, CellPos::default()) {
                 Ok(a) => {
                     formula.references = self.anchors(n.scope.as_deref(), &a.refs);
+                    // The text as written has no `=` and may carry `_xlfn.` prefixes.
+                    let shown = a.display.strip_prefix('=').unwrap_or(&a.display);
+                    if shown != n.refers_to {
+                        if self.meter.take(shown.len()) {
+                            formula.original = Some(n.refers_to.clone());
+                            formula.expression = shown.to_string();
+                        } else {
+                            notes.push(
+                                "display form not kept: formula text limit reached".to_string(),
+                            );
+                        }
+                    }
                     self.note_user_functions(&a, &anchor);
                     self.inputs
                         .workbook

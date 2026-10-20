@@ -1191,6 +1191,7 @@ version = "0.1.0"
 dependencies = [
  "calamine",
  "formulakit",
+ "quick-xml",
  "rezzer-limits",
  "rezzer-model",
  "sheetparts",

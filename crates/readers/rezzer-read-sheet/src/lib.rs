@@ -8,11 +8,12 @@
 //! reader, never a dense range), merged cells and VBA module names. sheetparts gives what
 //! calamine does not expose: sheet states, names with scope, styles, comments, tables,
 //! pivots, charts, validations and data tables. formulakit reads every formula. zipguard
-//! measures every part before calamine unpacks it. VBA, add-ins and linked files are listed,
+//! measures every entry before calamine unpacks anything. VBA, add-ins and linked files are listed,
 //! never run or opened.
 
 mod grid;
 mod logic;
+mod package;
 mod xlsx;
 
 use rezzer_limits::Budget;

@@ -29,6 +29,8 @@ struct Sheet {
     xml: String,
     /// Related parts: (relationship type suffix, part name, content).
     related: Vec<(&'static str, String, String)>,
+    /// The relationship target in place of `worksheets/sheet<n>.xml`.
+    target: Option<String>,
 }
 
 /// A small workbook built in memory.
@@ -38,6 +40,11 @@ struct Book {
     names: String,
     workbook_pr: String,
     calc_pr: String,
+    /// More relationships in `_rels/.rels` and in the workbook relationships.
+    root_rels_extra: String,
+    wb_rels_extra: String,
+    /// More entries, written after the others.
+    extra: Vec<(String, String)>,
 }
 
 impl Book {
@@ -47,7 +54,18 @@ impl Book {
             state: None,
             xml: xml.into(),
             related: Vec::new(),
+            target: None,
         });
+        self
+    }
+
+    fn target(mut self, target: &str) -> Book {
+        self.sheets.last_mut().unwrap().target = Some(target.into());
+        self
+    }
+
+    fn entry(mut self, name: &str, content: String) -> Book {
+        self.extra.push((name.into(), content));
         self
     }
 
@@ -80,7 +98,8 @@ impl Book {
         files.push((
             "_rels/.rels".into(),
             format!(
-                "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{RELS}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"
+                "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{RELS}/officeDocument\" Target=\"xl/workbook.xml\"/>{}</Relationships>",
+                self.root_rels_extra
             ),
         ));
         let mut sheets = String::new();
@@ -95,8 +114,12 @@ impl Book {
                 "<sheet name=\"{}\" sheetId=\"{n}\"{state} r:id=\"rId{n}\"/>",
                 s.name
             ));
+            let target = s
+                .target
+                .clone()
+                .unwrap_or_else(|| format!("worksheets/sheet{n}.xml"));
             rels.push_str(&format!(
-                "<Relationship Id=\"rId{n}\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet{n}.xml\"/>"
+                "<Relationship Id=\"rId{n}\" Type=\"{RELS}/worksheet\" Target=\"{target}\"/>"
             ));
             files.push((format!("xl/worksheets/sheet{n}.xml"), s.xml.clone()));
             if !s.related.is_empty() {
@@ -116,6 +139,7 @@ impl Book {
         rels.push_str(&format!(
             "<Relationship Id=\"rIdS\" Type=\"{RELS}/styles\" Target=\"styles.xml\"/>"
         ));
+        rels.push_str(&self.wb_rels_extra);
         let names = if self.names.is_empty() {
             String::new()
         } else {
@@ -136,6 +160,7 @@ impl Book {
             "xl/styles.xml".into(),
             format!("<styleSheet xmlns=\"{MAIN}\">{STYLES}</styleSheet>"),
         ));
+        files.extend(self.extra.iter().cloned());
         let mut w = ZipWriter::new(Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for (name, content) in files {
@@ -455,9 +480,13 @@ fn defined_names_with_scope() {
     let twice = formula(doc, "name:Twice");
     assert_eq!(twice.kind, Some(FormulaKind::Lambda));
     assert_eq!(twice.note.as_deref(), Some("parameters: x"));
-    // Names keep their text as written.
-    assert_eq!(twice.expression, "_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)");
-    assert_eq!(twice.original, None);
+    // Names show the display form, like cell formulas, with the stored text beside it.
+    assert_eq!(twice.expression, "LAMBDA(x,x*2)");
+    assert_eq!(
+        twice.original.as_deref(),
+        Some("_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)")
+    );
+    assert_eq!(gg.original, None);
     // A workbook lambda is not an unknown user function.
     assert!(
         !doc.facets
@@ -627,6 +656,8 @@ fn damaged_sheet_xml_is_partial_with_loss() {
 
 #[test]
 fn part_over_unpacked_limit_is_skipped_with_loss() {
+    // Every entry fits the preflight, but reading the big sheet would take the unpacked
+    // total past the limit: that sheet is skipped, the one before it is read.
     let mut rows = String::new();
     for r in 1..=5_000 {
         rows.push_str(&format!(
@@ -634,16 +665,17 @@ fn part_over_unpacked_limit_is_skipped_with_loss() {
         ));
     }
     let big = ws("", &rows, "");
+    assert!(big.len() > 200_000);
     let small = ws("", "<row r=\"1\"><c r=\"A1\"><v>7</v></c></row>", "");
     let limits = Limits {
-        max_unpacked_bytes: 100_000,
+        max_unpacked_bytes: 500_000,
         max_ratio: 100_000,
         ..Limits::default()
     };
     let out = read_with(
         Book::default()
-            .sheet("Big", &big)
             .sheet("Small", &small)
+            .sheet("Big", &big)
             .bytes(),
         limits,
     );
@@ -656,6 +688,29 @@ fn part_over_unpacked_limit_is_skipped_with_loss() {
     );
     assert!(cell_text(doc, "Big!A1").is_none());
     assert_eq!(cell_text(doc, "Small!A1").as_deref(), Some("7"));
+}
+
+#[test]
+fn entry_over_unpacked_limit_fails_the_read() {
+    let mut rows = String::new();
+    for r in 1..=5_000 {
+        rows.push_str(&format!(
+            "<row r=\"{r}\"><c r=\"A{r}\"><v>{r}</v></c></row>"
+        ));
+    }
+    let limits = Limits {
+        max_unpacked_bytes: 100_000,
+        max_ratio: 100_000,
+        ..Limits::default()
+    };
+    let out = read_with(
+        Book::default()
+            .sheet("Small", &small_sheet())
+            .sheet("Big", &ws("", &rows, ""))
+            .bytes(),
+        limits,
+    );
+    refused(&out, &[LossReason::Limit]);
 }
 
 #[test]
@@ -1060,4 +1115,174 @@ fn uncalculated_data_table_is_still_listed() {
             .is_some_and(|n| n.contains("not calculated in file")),
         "{f:#?}"
     );
+}
+
+/// A worksheet whose only cell holds `BOMB` plus 5 MB of `x`: far above 100:1.
+fn bomb_sheet() -> String {
+    ws(
+        "",
+        &format!(
+            "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>BOMB{}</t></is></c></row>",
+            "x".repeat(5_000_000)
+        ),
+        "",
+    )
+}
+
+fn small_sheet() -> String {
+    ws("", "<row r=\"1\"><c r=\"A1\"><v>1</v></c></row>", "")
+}
+
+/// The read failed, said why, and no text of the bomb part reached the document.
+fn refused(out: &ReadOutcome, why: &[LossReason]) {
+    let doc = &out.document;
+    assert_eq!(out.completeness, Completeness::Failed, "{:#?}", doc.losses);
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| why.contains(&l.why) && l.what.contains("the whole file")),
+        "{:#?}",
+        doc.losses
+    );
+    let json = format!("{doc:?}");
+    assert!(!json.contains("BOMB"));
+}
+
+#[test]
+fn second_office_document_relationship_is_refused() {
+    let evil_sst = format!(
+        "<sst xmlns=\"{MAIN}\" count=\"1\" uniqueCount=\"1\"><si><t>BOMB{}</t></si></sst>",
+        "x".repeat(5_000_000)
+    );
+    let mut book = Book::default()
+        .sheet("S", &small_sheet())
+        .entry(
+            "evil/workbook.xml",
+            format!(
+                "<workbook xmlns=\"{MAIN}\" xmlns:r=\"{RELS}\"><sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"
+            ),
+        )
+        .entry(
+            "evil/_rels/workbook.xml.rels",
+            format!(
+                "<Relationships xmlns=\"{PKG}\"><Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"/xl/worksheets/sheet1.xml\"/></Relationships>"
+            ),
+        );
+    book.root_rels_extra = format!(
+        "<Relationship Id=\"rId9\" Type=\"{RELS}/officeDocument\" Target=\"evil/workbook.xml\"/>"
+    );
+    // Without a bomb: the structure itself is refused.
+    refused(&read(&book), &[LossReason::Damaged]);
+    let book = book.entry("evil/sharedStrings.xml", evil_sst);
+    refused(&read(&book), &[LossReason::Limit, LossReason::Damaged]);
+}
+
+#[test]
+fn duplicate_relationship_id_is_refused() {
+    let mut book = Book::default().sheet("S", &small_sheet());
+    book.wb_rels_extra = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/other.xml\"/>"
+    );
+    let plain = book.entry("xl/worksheets/other.xml", small_sheet());
+    refused(&read(&plain), &[LossReason::Damaged]);
+
+    let mut book = Book::default().sheet("S", &small_sheet());
+    book.wb_rels_extra = format!(
+        "<Relationship Id=\"rId1\" Type=\"{RELS}/worksheet\" Target=\"worksheets/bomb.xml\"/>"
+    );
+    let bomb = book.entry("xl/worksheets/bomb.xml", bomb_sheet());
+    refused(&read(&bomb), &[LossReason::Limit, LossReason::Damaged]);
+}
+
+#[test]
+fn duplicate_sheet_names_are_refused() {
+    let plain = Book::default()
+        .sheet("A", &small_sheet())
+        .sheet("a", &small_sheet());
+    refused(&read(&plain), &[LossReason::Damaged]);
+    let bomb = Book::default()
+        .sheet("A", &bomb_sheet())
+        .sheet("A", &small_sheet());
+    refused(&read(&bomb), &[LossReason::Limit, LossReason::Damaged]);
+}
+
+#[test]
+fn dotted_part_paths_are_refused() {
+    let plain = Book::default()
+        .sheet("S", &small_sheet())
+        .target("./worksheets/sheet1.xml");
+    refused(&read(&plain), &[LossReason::Damaged]);
+    let bomb = Book::default()
+        .sheet("S", &small_sheet())
+        .target("./worksheets/sheet1.xml")
+        .entry("xl/./worksheets/sheet1.xml", bomb_sheet());
+    refused(&read(&bomb), &[LossReason::Limit, LossReason::Damaged]);
+    let external = format!(
+        "<Relationship Id=\"rIdE\" Type=\"{RELS}/worksheet\" Target=\"worksheets/sheet1.xml\" TargetMode=\"External\"/>"
+    );
+    let mut ext = Book::default()
+        .sheet("S", &small_sheet())
+        .target("worksheets/missing.xml");
+    ext.wb_rels_extra = external;
+    refused(&read(&ext), &[LossReason::Damaged]);
+}
+
+#[test]
+fn entries_differing_only_in_case_are_refused() {
+    let book = Book::default()
+        .sheet("S", &small_sheet())
+        .entry("XL/worksheets/Sheet1.xml", small_sheet());
+    refused(&read(&book), &[LossReason::Damaged]);
+}
+
+#[test]
+fn unread_entry_over_the_ratio_fails_the_read() {
+    // calamine never opens this entry, but nothing is unpacked unmeasured.
+    let book = Book::default()
+        .sheet("S", &small_sheet())
+        .entry("xl/media/huge.bin", " ".repeat(5_000_000));
+    refused(&read(&book), &[LossReason::Limit]);
+}
+
+#[test]
+fn shared_formula_copies_stay_within_the_text_limit() {
+    let master = "A1+".repeat(2_666) + "A1";
+    assert!(master.len() > 7_990 && master.len() <= 8_192);
+    let mut rows = format!(
+        "<row r=\"1\"><c r=\"B1\"><f t=\"shared\" ref=\"B1:B20000\" si=\"0\">{master}</f><v>1</v></c></row>"
+    );
+    for r in 2..=20_000 {
+        rows.push_str(&format!(
+            "<row r=\"{r}\"><c r=\"B{r}\"><f t=\"shared\" si=\"0\"/><v>1</v></c></row>"
+        ));
+    }
+    let limits = Limits {
+        max_text_bytes: 1_000_000,
+        ..Limits::default()
+    };
+    let out = read_with(
+        Book::default().sheet("S", &ws("", &rows, "")).bytes(),
+        limits,
+    );
+    let doc = &out.document;
+    let text: usize = doc
+        .facets
+        .formulas
+        .iter()
+        .map(|f| f.expression.len() + f.original.as_ref().map_or(0, String::len))
+        .sum();
+    assert!(
+        text <= 1_000_000 + 2 * 8_200,
+        "{text} bytes of formula text"
+    );
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("formula text")),
+        "{:#?}",
+        doc.losses
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+    // The values are still all there.
+    assert_eq!(cell_text(doc, "S!B20000").as_deref(), Some("1"));
 }

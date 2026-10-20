@@ -11,6 +11,8 @@ use calamine::{DataRef, Dimensions, Xlsx, XlsxFormulaMetadata};
 use rezzer_limits::Budget;
 use rezzer_model::{Anchor, Block, Cell, Inline, column_letter};
 
+use crate::logic::TextMeter;
+
 /// Columns in a value table, as the renderer shows them.
 pub(crate) const MAX_TABLE_COLUMNS: u32 = 1_000;
 
@@ -48,6 +50,8 @@ pub(crate) struct RawCell {
     pub shared: bool,
     /// A shared formula cell whose master cell was not seen first, so its text is unknown.
     pub shared_unknown: bool,
+    /// The formula text was not kept: the workbook's formula text limit was reached.
+    pub text_dropped: bool,
 }
 
 /// Why reading cells stopped early.
@@ -76,6 +80,7 @@ pub(crate) fn read_cells<RS: Read + Seek>(
     cal: &mut Xlsx<RS>,
     sheet: &str,
     budget: &Budget,
+    meter: &mut TextMeter,
 ) -> SheetCells {
     let mut out = SheetCells::default();
     let mut reader = match cal.worksheet_cells_reader(sheet) {
@@ -107,9 +112,15 @@ pub(crate) fn read_cells<RS: Read + Seek>(
         // An `f` element marks a formula cell even when its text is empty (a data table
         // master or an array cell) and no value was stored.
         let has_f = record.formula.is_some();
-        let (mut formula, mut is_shared, mut unknown) = (None, false, false);
+        let (mut formula, mut is_shared, mut unknown, mut dropped) = (None, false, false, false);
         match record.formula {
-            Some(XlsxFormulaMetadata::Normal { formula: f }) => formula = Some(f),
+            Some(XlsxFormulaMetadata::Normal { formula: f }) => {
+                if meter.take(f.len()) {
+                    formula = Some(f);
+                } else {
+                    dropped = true;
+                }
+            }
             Some(XlsxFormulaMetadata::Shared {
                 shared_index,
                 range,
@@ -118,16 +129,24 @@ pub(crate) fn read_cells<RS: Read + Seek>(
                 is_shared = true;
                 let start = range.map_or((row, col), |r| r.start);
                 // The text applies to the master cell itself relative to the range start.
-                formula = if start == (row, col) {
-                    Some(f.clone())
+                if meter.fits(f.len()) {
+                    formula = if start == (row, col) {
+                        Some(f.clone())
+                    } else {
+                        calamine::expand_shared_formula(&f, start, (row, col)).ok()
+                    };
+                    unknown = formula.is_none();
                 } else {
-                    calamine::expand_shared_formula(&f, start, (row, col)).ok()
-                };
+                    dropped = true;
+                }
                 shared.insert(shared_index, (f, start));
             }
             Some(XlsxFormulaMetadata::SharedDerived { shared_index }) => {
                 is_shared = true;
                 match shared.get(&shared_index) {
+                    // A copy is about as long as the master: check before expanding, charge
+                    // the real length after.
+                    Some((f, _)) if !meter.fits(f.len()) => dropped = true,
                     Some((f, start)) => {
                         match calamine::expand_shared_formula(f, *start, (row, col)) {
                             Ok(text) => formula = Some(text),
@@ -139,6 +158,15 @@ pub(crate) fn read_cells<RS: Read + Seek>(
             }
             Some(_) => {}
             None => {}
+        }
+        if is_shared && !dropped && !unknown {
+            match &formula {
+                Some(f) if !meter.take(f.len()) => {
+                    formula = None;
+                    dropped = true;
+                }
+                _ => {}
+            }
         }
         // Data table masters and the inner cells of an array come back with empty text;
         // their meaning comes from the formula attributes.
@@ -178,6 +206,7 @@ pub(crate) fn read_cells<RS: Read + Seek>(
             formula,
             shared: is_shared,
             shared_unknown: unknown,
+            text_dropped: dropped,
         });
     }
     // Hostile files may repeat or reorder cells: sort, keep the first of each position.
