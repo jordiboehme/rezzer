@@ -1195,6 +1195,7 @@ dependencies = [
  "quick-xml",
  "rezzer-limits",
  "rezzer-model",
+ "rezzer-render",
  "sheetparts",
  "zip",
  "zipguard",
