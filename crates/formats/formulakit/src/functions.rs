@@ -540,15 +540,14 @@ const EXCEL: &[&str] = &[
     "ZTEST",
 ];
 
-/// OpenFormula functions that Excel does not have (OASIS OpenDocument 1.2 Part 2, section 6).
-/// Application functions written with an `ORG.OPENOFFICE.` or `ORG.LIBREOFFICE.` prefix are
-/// built in as well.
+/// OpenFormula functions that Excel does not have: the function index of OASIS OpenDocument
+/// 1.2 Part 2, section 6 (<https://docs.oasis-open.org/office/v1.2/os/OpenDocument-v1.2-os-part2.html>,
+/// 394 names, read on 2026-10-20) minus the Excel list above. Application functions written
+/// with an `ORG.OPENOFFICE.` or `ORG.LIBREOFFICE.` prefix are built in as well.
 const OPENFORMULA: &[&str] = &[
-    "B",
     "CHISQDIST",
     "CHISQINV",
     "DDE",
-    "ERRORTYPE",
     "FORMULA",
     "LEGACY.CHIDIST",
     "LEGACY.CHIINV",
@@ -558,6 +557,8 @@ const OPENFORMULA: &[&str] = &[
     "LEGACY.NORMSDIST",
     "LEGACY.NORMSINV",
     "LEGACY.TDIST",
+    "MULTIPLE.OPERATIONS",
+    "SKEWP",
 ];
 
 /// Application prefixes of OpenFormula functions that ship with the office suite.

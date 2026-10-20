@@ -440,4 +440,7 @@ fn ranges_rows_and_columns() {
 
     // A reference read twice is listed once.
     assert_eq!(excel("=A1+A1*A1").refs.len(), 1);
+    // The same cell written with other `$` flags is another reference with the same anchor.
+    let a = excel("=A1+$A$1");
+    assert_eq!(anchors(&a, "s"), vec!["s!A1", "s!A1"]);
 }

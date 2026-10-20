@@ -63,8 +63,9 @@ pub struct Analysis {
     /// The formula in Excel A1 syntax with a leading `=`, without the storage prefixes
     /// `_xlfn.`, `_xlws.`, `_xludf.` and `_xlpm.`; OpenFormula converted to A1.
     pub display: String,
-    /// Everything the formula reads, each once, in order of first appearance. LET and LAMBDA
-    /// parameters are not in here.
+    /// Everything the formula reads, each distinct reference once, in order of first
+    /// appearance. `A1` and `$A$1` differ in their `$` flags and are both listed (same anchor).
+    /// LET and LAMBDA parameters are not in here.
     pub refs: Vec<Ref>,
     /// The functions called, each once. Built-in names are uppercase; user functions are
     /// written as in the formula. Calls of a LET-bound lambda by its local name are not listed.
