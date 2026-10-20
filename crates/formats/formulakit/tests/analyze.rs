@@ -400,9 +400,9 @@ fn unparsable_formula_keeps_text_and_note() {
     // Deep and long inputs fail cleanly instead of overflowing the stack.
     let deep = format!("={}1{}", "(".repeat(5000), ")".repeat(5000));
     assert!(analyze(&deep, Dialect::Excel, pos(0, 0)).is_err());
-    // 300 chained operands pass Excel's limits; the parser may refuse them, but never panics.
+    // 300 chained operands pass Excel's limits, but the tree height limit (256) refuses them.
     let long = format!("={}", vec!["A1"; 300].join("+"));
-    let _ = analyze(&long, Dialect::Excel, pos(0, 0));
+    assert!(analyze(&long, Dialect::Excel, pos(0, 0)).is_err());
     let huge = format!("={}", "1+".repeat(100_000));
     assert!(analyze(&huge, Dialect::Excel, pos(0, 0)).is_err());
 }
@@ -443,4 +443,76 @@ fn ranges_rows_and_columns() {
     // The same cell written with other `$` flags is another reference with the same anchor.
     let a = excel("=A1+$A$1");
     assert_eq!(anchors(&a, "s"), vec!["s!A1", "s!A1"]);
+}
+
+#[test]
+fn range_operator_between_refs_folds() {
+    // Generated files can store `Sheet1!A1:Sheet1!B2`: it reads all of A1:B2.
+    let a = excel("=SUM(Sheet1!A1:Sheet1!B2)");
+    assert_eq!(anchors(&a, "s"), vec!["Sheet1!A1:B2"]);
+    assert_eq!(a.display, "=SUM(Sheet1!A1:Sheet1!B2)");
+    // `A1:B2:C3` reads the bounding area.
+    let a = excel("=SUM(A1:B2:C3)");
+    assert_eq!(anchors(&a, "s"), vec!["s!A1:C3"]);
+    let a = excel("=SUM((A1):$B$2)");
+    assert_eq!(anchors(&a, "s"), vec!["s!A1:B2"]);
+    assert_eq!(a.pattern_key, "=SUM((RC):R2C2)");
+    // Copies keep sharing a key.
+    let d2 = analyze("=SUM(B2:C2:B9)", Dialect::Excel, pos(1, 3)).unwrap();
+    let d3 = analyze("=SUM(B3:C3:B10)", Dialect::Excel, pos(2, 3)).unwrap();
+    assert_eq!(d2.pattern_key, d3.pattern_key);
+    assert_eq!(anchors(&d2, "s"), vec!["s!B2:C9"]);
+    // Different sheets are not folded: both ends stay references.
+    let a = excel("=SUM(Sheet1!A1:Sheet2!B2)");
+    assert_eq!(anchors(&a, "s"), vec!["Sheet1!A1", "Sheet2!B2"]);
+}
+
+#[test]
+fn user_functions_dedupe_ignores_case() {
+    let a = excel("=myFn(1)+MYFN(2)+myfn(3)");
+    assert_eq!(a.user_functions, vec!["myFn"]);
+    assert_eq!(a.functions, vec!["myFn"]);
+    let a = excel("=sum(1)+SUM(2)");
+    assert_eq!(a.functions, vec!["SUM"]);
+}
+
+#[test]
+fn open_ended_range_key_does_not_depend_on_row() {
+    let a = analyze("=SUM(A2:A)", Dialect::Excel, pos(1, 1)).unwrap();
+    let b = analyze("=SUM(A3:A)", Dialect::Excel, pos(2, 1)).unwrap();
+    assert_eq!(a.pattern_key, b.pattern_key);
+    assert_eq!(a.pattern_key, "=SUM(RC[-1]:R1048576C[-1])");
+    let a = analyze("of:=SUM([.A2:.A])", Dialect::OpenFormula, pos(1, 1)).unwrap();
+    let b = analyze("of:=SUM([.A3:.A])", Dialect::OpenFormula, pos(2, 1)).unwrap();
+    assert_eq!(a.pattern_key, b.pattern_key);
+}
+
+#[test]
+fn sixty_four_nested_functions_parse_on_a_small_stack() {
+    // Excel allows 64 levels of nested functions, each with its own parentheses.
+    let nested = format!("={}1{}", "SUM(1+(".repeat(64), "))".repeat(64));
+    let too_deep = format!("={}1{}", "SUM(1+(".repeat(200), "))".repeat(200));
+    let worker = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(move || {
+            let ok = analyze(&nested, Dialect::Excel, pos(0, 0)).is_ok()
+                && formulakit::latex(&nested, Dialect::Excel).is_some();
+            let refused = analyze(&too_deep, Dialect::Excel, pos(0, 0)).is_err()
+                && formulakit::latex(&too_deep, Dialect::Excel).is_none();
+            // The deepest shapes the limits still let through must not overflow either.
+            let deepest = [
+                format!("={}1{}", "(".repeat(199), ")".repeat(199)),
+                format!("={}1", "-".repeat(199)),
+                format!("={}", vec!["A1"; 250].join("^")),
+                format!("={}1{}", "SUM(1+(".repeat(66), "))".repeat(66)),
+                format!("={}1{}", "IF(1,".repeat(120), ")".repeat(120)),
+            ];
+            let deepest_ok = deepest.iter().all(|deep| {
+                analyze(deep, Dialect::Excel, pos(0, 0)).is_ok()
+                    && formulakit::latex(deep, Dialect::Excel).is_some()
+            });
+            (ok && deepest_ok, refused)
+        })
+        .expect("thread starts");
+    assert_eq!(worker.join().expect("no stack overflow"), (true, true));
 }

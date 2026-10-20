@@ -10,6 +10,10 @@
 //! of one formula share the pattern key, so a sheet of filled-down formulas folds into a few
 //! patterns. [`anchor_of`] gives a stable text anchor for each reference.
 //!
+//! [`logic::Workbook`] puts the formulas of a workbook together: roles, pattern groups,
+//! parameter cells and a dependency graph on group level. [`latex`] writes a formula as
+//! KaTeX-ready math, and [`worth_math`] tells whether that is worth showing.
+//!
 //! ```
 //! use formulakit::{CellPos, Dialect, analyze, anchor_of};
 //!
@@ -23,15 +27,19 @@
 
 mod engine;
 mod functions;
+mod latex;
+pub mod logic;
 mod openformula;
 mod pattern;
 mod refs;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::Range;
 
 use engine::{Node, Target};
+pub use latex::{latex, worth_math};
 pub use refs::{CellPos, MAX_COL, MAX_ROW, Ref, SheetSpan, Whole, anchor_of, quote_sheet};
 
 /// The syntax a formula is written in.
@@ -112,8 +120,11 @@ struct Walk {
     scope: Vec<String>,
 }
 
+/// Adds `item` unless the list has it already in any letter case (function and parameter
+/// names are case-insensitive); the first spelling stays.
 fn push_unique(list: &mut Vec<String>, item: &str) {
-    if !list.iter().any(|x| x == item) {
+    let upper = item.to_uppercase();
+    if !list.iter().any(|x| x.to_uppercase() == upper) {
         list.push(item.to_string());
     }
 }
@@ -158,9 +169,24 @@ impl Walk {
 
     fn visit(&mut self, node: &Node) {
         match node {
-            Node::Leaf => {}
-            Node::Group(children) => children.iter().for_each(|c| self.visit(c)),
+            Node::Literal(_) | Node::Empty => {}
+            Node::Unary { expr, .. } => self.visit(expr),
+            Node::Binary { left, right, .. } => {
+                self.visit(left);
+                self.visit(right);
+            }
+            Node::Call { callee, args } => {
+                self.visit(callee);
+                args.iter().for_each(|a| self.visit(a));
+            }
+            Node::Array(rows) => rows.iter().flatten().for_each(|c| self.visit(c)),
             Node::Ref { span, target } => self.visit_ref(span, target),
+            Node::Area { parts, folded } => {
+                for (span, part) in parts {
+                    self.key_edit(span, part);
+                }
+                self.add_ref(folded.clone());
+            }
             Node::Func { name, span, args } => {
                 let (bare, udf) = functions::strip_prefixes(name);
                 let upper = bare.to_uppercase();
@@ -248,15 +274,20 @@ impl Walk {
                 }
             }
             Target::Ref(r) => {
-                if let Some(key) = pattern::r1c1(r, self.at) {
-                    self.edits.push(Edit {
-                        span: span.clone(),
-                        display: Repl::Keep,
-                        key: Repl::Text(key),
-                    });
-                }
+                self.key_edit(span, r);
                 self.add_ref(r.clone());
             }
+        }
+    }
+
+    /// Writes a cell or range reference in R1C1 form in the pattern key.
+    fn key_edit(&mut self, span: &Range<usize>, r: &Ref) {
+        if let Some(key) = pattern::r1c1(r, self.at) {
+            self.edits.push(Edit {
+                span: span.clone(),
+                display: Repl::Keep,
+                key: Repl::Text(key),
+            });
         }
     }
 }
@@ -311,27 +342,28 @@ fn namespace(text: &str, dialect: Dialect) -> Result<(&str, Dialect), ParseError
     }
 }
 
+/// Formula text as Excel A1 text with a leading `=`: the namespace prefix removed and
+/// OpenFormula converted.
+pub(crate) fn excel_text(text: &str, dialect: Dialect) -> Result<Cow<'_, str>, ParseError> {
+    let (body, dialect) = namespace(text.trim_start(), dialect)?;
+    let body: Cow<'_, str> = if body.starts_with('=') {
+        Cow::Borrowed(body)
+    } else {
+        Cow::Owned(format!("={body}"))
+    };
+    match dialect {
+        Dialect::Excel => Ok(body),
+        Dialect::OpenFormula => openformula::to_excel(&body).map(Cow::Owned),
+    }
+}
+
 /// Analyzes one formula in the cell `at` (0-based; relative references in the pattern key are
 /// offsets from it). The text may come with or without its leading `=` and, for ODF, with its
 /// namespace prefix (`of:=`). A formula that cannot be read returns a [`ParseError`]; this
 /// function never panics on any input.
 pub fn analyze(text: &str, dialect: Dialect, at: CellPos) -> Result<Analysis, ParseError> {
-    let (body, dialect) = namespace(text.trim_start(), dialect)?;
-    let with_eq;
-    let body = if body.starts_with('=') {
-        body
-    } else {
-        with_eq = format!("={body}");
-        with_eq.as_str()
-    };
-    let excel_text;
-    let excel = match dialect {
-        Dialect::Excel => body,
-        Dialect::OpenFormula => {
-            excel_text = openformula::to_excel(body)?;
-            excel_text.as_str()
-        }
-    };
+    let excel = excel_text(text, dialect)?;
+    let excel = excel.as_ref();
     let tree = engine::parse(excel)?;
     let mut walk = Walk {
         at,

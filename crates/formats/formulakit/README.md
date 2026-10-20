@@ -22,6 +22,17 @@ assert_eq!(a.pattern_key, "=SUM(Data!R[1]C[-2]:R[8]C[-2])*rate");
 
 Anchors look like `Sheet!A1`, `'My Sheet'!A1:B9`, `name:gg`, `name:Sheet1!gg`, `table:Table1` and `ext:[1]Sheet1!A1`.
 
+For a whole workbook, `logic::Workbook` takes every formula, constant cell and defined name and tells you:
+
+- The role of each formula: constant (reads nothing), result (nothing reads it) or intermediate
+- Pattern groups: copies of one formula on one sheet, with their area (`D2:D100`)
+- Parameters: constant cells that formulas or names read, with how many formulas read them
+- A dependency graph on group level: groups, single formulas, parameter blocks, names and other workbooks
+
+Ranges are not expanded cell by cell, so `A:A` costs what the sheet holds. A stop callback ends the work early.
+
+`latex` writes a formula as LaTeX math that KaTeX can show (`=B2*C2/1000` becomes `\frac{\mathrm{B2} \cdot \mathrm{C2}}{1000}`). `worth_math` tells if a formula is more than a sum or a single reference. Text from the file is escaped, so it never becomes a TeX command.
+
 A formula that cannot be read gives a `ParseError` with a short reason. `analyze` does not panic on any input. Very long or deeply nested formulas are refused by the parser limits.
 
 formulakit does not calculate anything and never opens another workbook.
