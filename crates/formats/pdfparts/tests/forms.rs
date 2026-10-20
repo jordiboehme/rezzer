@@ -278,7 +278,7 @@ fn field_tree_cycle_is_damaged() {
         .collect();
     assert_eq!(damaged.len(), 1, "{damaged:?}");
     assert!(
-        damaged[0].what.starts_with("2 fields are reached twice"),
+        damaged[0].what.starts_with("2 nodes are reached twice"),
         "{damaged:?}"
     );
 }
@@ -499,4 +499,60 @@ fn simple_calculate_and_range_check_in_a_form() {
     );
     assert_eq!(describe(script(total, "format")), None);
     assert_eq!(pdf.form().unwrap().calc_order, ["total"]);
+}
+
+#[test]
+fn actions_of_other_annotations_are_listed() {
+    // A widget outside /Fields, a screen annotation and a link with /AA.
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let rect = || vec![0.into(), 0.into(), 10.into(), 10.into()];
+    let widget = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Widget", "Rect" => rect(), "A" => js("app.alert(1)"),
+    });
+    let screen = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Screen", "Rect" => rect(), "A" => js("app.alert(2)"),
+    });
+    let link = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "Link", "Rect" => rect(),
+        "AA" => dictionary! { "E" => js("app.alert(3)") },
+        "A" => js("app.alert(4)"),
+    });
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => vec![widget.into(), screen.into(), link.into()],
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog", "Pages" => pages_id,
+        "AcroForm" => dictionary! { "Fields" => Vec::<Object>::new() },
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let got: Vec<(&str, &str)> = pdf
+        .scripts()
+        .iter()
+        .map(|s| (s.trigger.as_str(), s.text.as_deref().unwrap_or("")))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("annotation page 1 activate", "app.alert(1)"),
+            ("annotation page 1 activate", "app.alert(2)"),
+            ("link page 1", "app.alert(4)"),
+            ("annotation page 1 mouse-enter", "app.alert(3)"),
+        ]
+    );
 }

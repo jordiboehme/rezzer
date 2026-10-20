@@ -91,9 +91,17 @@ fn shared_marked_content_array_is_bounded() {
     let tree = pdf.struct_tree().unwrap();
     let mcids: usize = tree.elems.iter().map(|e| e.mcids.len()).sum();
     eprintln!("{mcids} ids kept in {:?}", start.elapsed());
-    assert!(mcids < 100 * 500_000);
+    // The array is read for the first element only, and the sharing is said.
+    assert_eq!(mcids, 500_000);
     assert_rss_bounded();
-    assert!(has_limit(&pdf, "structure tree"), "{:?}", pdf.issues());
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged
+                && i.what.starts_with("99 elements name a /K array")),
+        "{:?}",
+        pdf.issues()
+    );
 }
 
 #[test]
@@ -402,7 +410,7 @@ fn shared_annots_array_is_reported_and_uses_p() {
     assert_eq!(shared[0].kind, IssueKind::Damaged);
     assert_eq!(
         shared[0].what,
-        "pages 2, 3 share the annotation list of page 1; their annotations and links are listed on page 1 only"
+        "pages 2, 3 share the annotation list of page 1; their annotations and links are listed on page 1 unless they name their own page"
     );
 }
 
@@ -455,4 +463,183 @@ fn shared_field_names_and_scripts_are_bounded() {
     assert!(scripts.len() < n);
     assert!(has_limit(&pdf, "copy more data"), "{:?}", pdf.issues());
     assert_rss_bounded();
+}
+
+/// A file whose catalog has `/AcroForm << /Fields [fields] >>`, page 3, and `objects`.
+fn form_file(fields: &str, objects: Vec<(u32, Vec<u8>)>) -> Vec<u8> {
+    let mut c = Classic::new();
+    c.object(
+        1,
+        format!("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [{fields}] >> >>").as_bytes(),
+    );
+    c.object(
+        2,
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+    );
+    c.object(3, b"<< /Type /Page /Parent 2 0 R >>");
+    for (n, body) in objects {
+        c.object(n, &body);
+    }
+    c.finish("")
+}
+
+/// Runs the form, scripts and signatures readers and returns how long each took.
+fn time_form_readers(pdf: &Pdf) -> [Duration; 3] {
+    let start = Instant::now();
+    let fields = pdf.form().map_or(0, |f| f.fields.len());
+    let form = start.elapsed();
+    let start = Instant::now();
+    let scripts = pdf.scripts().len();
+    let script_time = start.elapsed();
+    let start = Instant::now();
+    let sigs = pdf.signatures().len();
+    let sig_time = start.elapsed();
+    eprintln!(
+        "form {form:?} ({fields} fields), scripts {script_time:?} ({scripts}), signatures {sig_time:?} ({sigs})"
+    );
+    [form, script_time, sig_time]
+}
+
+#[test]
+fn shared_kids_array_is_walked_once() {
+    // 1,000 fields name one /Kids array of 100,000 references to one widget.
+    let (n, m) = (1000, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let kids: String = (0..m).map(|_| "7 0 R ").collect();
+    let mut objects = vec![
+        (7, b"<< /Subtype /Widget /P 3 0 R >>".to_vec()),
+        (9, format!("[{kids}]").into_bytes()),
+    ];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Tx /Kids 9 0 R >>").into_bytes(),
+        ));
+    }
+    let bytes = form_file(&fields, objects);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    for took in time_form_readers(&pdf) {
+        assert!(took < Duration::from_secs(1), "{took:?}");
+    }
+    // The widget belongs to the first field only.
+    let form = pdf.form().unwrap();
+    assert_eq!(form.fields.len(), n);
+    let with_widget = form.fields.iter().filter(|f| !f.pages.is_empty()).count();
+    assert_eq!(with_widget, 1);
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.contains("/Kids")),
+        "{:?}",
+        pdf.issues()
+    );
+    assert_rss_bounded();
+}
+
+#[test]
+fn shared_next_chain_is_read_once() {
+    // 100 fields share one action whose /Next names one array of 100,000 repeats.
+    let (n, l) = (100, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let next: String = (0..l).map(|_| "7 0 R ").collect();
+    let mut objects = vec![
+        (6, b"<< /S /JavaScript /JS (x) /Next 8 0 R >>".to_vec()),
+        (7, b"<< /S /JavaScript /JS (y) >>".to_vec()),
+        (8, format!("[{next}]").into_bytes()),
+    ];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Tx /AA << /C 6 0 R >> >>").into_bytes(),
+        ));
+    }
+    let bytes = form_file(&fields, objects);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    for took in time_form_readers(&pdf) {
+        assert!(took < Duration::from_secs(1), "{took:?}");
+    }
+    let form = pdf.form().unwrap();
+    assert_eq!(form.fields.len(), n);
+    assert_eq!(form.fields[n - 1].actions.len(), 2);
+    let repeats = pdf
+        .issues()
+        .iter()
+        .filter(|i| i.what.contains("a second time"))
+        .count();
+    assert_eq!(repeats, 1, "{:?}", pdf.issues());
+    assert!(pdf.issues().len() < 10, "{:?}", pdf.issues());
+    assert_rss_bounded();
+}
+
+#[test]
+fn shared_value_option_and_attribute_arrays_are_bounded() {
+    // 1,000 fields share one /Opt and one /V array of 100,000 entries, and 1,000 structure
+    // elements share one /A array of 100,000 entries.
+    let (n, m) = (1000, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let big: String = (0..m).map(|_| "1 ").collect();
+    let mut objects = vec![(9, format!("[{big}]").into_bytes())];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Ch /Opt 9 0 R /V 9 0 R >>").into_bytes(),
+        ));
+    }
+    let bytes = form_file(&fields, objects);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    for took in time_form_readers(&pdf) {
+        assert!(took < Duration::from_millis(250), "{took:?}");
+    }
+    assert!(has_limit(&pdf, "form"), "{:?}", pdf.issues());
+    drop(pdf);
+
+    let mut c = Classic::new();
+    c.object(
+        1,
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",
+    );
+    c.object(
+        2,
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+    );
+    c.object(3, b"<< /Type /Page /Parent 2 0 R >>");
+    let kids: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    c.object(
+        4,
+        format!("<< /Type /StructTreeRoot /K [{kids}] >>").as_bytes(),
+    );
+    c.object(9, format!("[{big}]").as_bytes());
+    for i in 0..n {
+        c.object(100 + i as u32, b"<< /S /TD /A 9 0 R >>");
+    }
+    let bytes = c.finish("");
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let start = Instant::now();
+    pdf.struct_tree();
+    let took = start.elapsed();
+    eprintln!("struct_tree {took:?}");
+    assert!(took < Duration::from_millis(250), "{took:?}");
+    assert!(has_limit(&pdf, "structure tree"), "{:?}", pdf.issues());
+    assert_rss_bounded();
+}
+
+#[test]
+fn shared_byte_range_is_bounded() {
+    // 1,000 signature fields name one /ByteRange array of 100,000 numbers.
+    let (n, m) = (1000, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let big: String = (0..m).map(|_| "1 ").collect();
+    let mut objects = vec![(9, format!("[{big}]").into_bytes())];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>").into_bytes(),
+        ));
+    }
+    let bytes = form_file(&fields, objects);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    for took in time_form_readers(&pdf) {
+        assert!(took < Duration::from_millis(50), "{took:?}");
+    }
+    assert!(has_limit(&pdf, "signatures"), "{:?}", pdf.issues());
 }

@@ -5,23 +5,23 @@
 //! Document scripts and actions: the JavaScript name tree, the open action, document, page,
 //! field and link actions. They are listed, never run or followed.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
-    TextBudget, Tree, TreeKey, dict, get, get_dict, get_name, reference, resolve, text_string,
-    walk_tree,
+    TextBudget, Tree, TreeKey, Work, dict, get, get_dict, get_name, reference, resolve,
+    text_string, walk_tree,
 };
-use crate::{Issue, IssueKind, Pdf};
+use crate::{Issue, IssueKind, Limits, Pdf};
 
 /// One action the document holds, with what starts it. Nothing here is run or followed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Script {
     /// What starts it: `document` (a document-level script), `open`, `will-close`,
     /// `will-save`, `did-save`, `will-print`, `did-print`, `page-open`, `page-close`,
-    /// `field <full name> <event>` or `link page <N>`.
+    /// `field <full name> <event>`, `link page <N>` or `annotation page <N> <event>`.
     pub trigger: String,
     /// The name of a document-level script; `page <N>` for a page action.
     pub name: Option<String>,
@@ -52,6 +52,45 @@ pub(crate) struct Action {
 
 /// The spent budget ends the reader.
 pub(crate) struct Spent;
+
+/// The action chains one reader has read: its visits, the chains by their first action, and
+/// the actions reached a second time.
+pub(crate) struct Chains {
+    work: Work,
+    cache: HashMap<ObjectId, Vec<Action>>,
+    repeats: usize,
+    first_repeat: Option<ObjectId>,
+    location: &'static str,
+}
+
+impl Chains {
+    pub(crate) fn new(limits: &Limits, location: &'static str) -> Chains {
+        Chains {
+            work: Work::new(limits),
+            cache: HashMap::new(),
+            repeats: 0,
+            first_repeat: None,
+            location,
+        }
+    }
+
+    /// Adds the one issue for actions reached a second time.
+    pub(crate) fn finish(&self, issues: &mut Vec<Issue>) {
+        if let Some(id) = self.first_repeat {
+            issues.push(Issue::new(
+                self.location,
+                IssueKind::Damaged,
+                format!(
+                    "{} action {} an action a second time: a /Next chain loops or repeats (the first is object {} {})",
+                    self.repeats,
+                    if self.repeats == 1 { "entry reaches" } else { "entries reach" },
+                    id.0,
+                    id.1
+                ),
+            ));
+        }
+    }
+}
 
 const SCRIPTS: &str = "scripts";
 
@@ -105,8 +144,9 @@ pub(crate) fn event_word(key: &[u8]) -> String {
 impl Pdf {
     /// Every script and action of the document, in this order: document-level scripts, the
     /// open action, document actions, page actions in page order, field actions in field
-    /// order, then link actions. Plain jumps inside the document are left out, and so are
-    /// link addresses, which [`Pdf::links`] lists. Read on the first call and kept.
+    /// order, then the actions of every other annotation (links, widgets outside the form,
+    /// screens) in page order. Plain jumps inside the document are left out, and so are link
+    /// addresses, which [`Pdf::links`] lists. Read on the first call and kept.
     pub fn scripts(&self) -> &[Script] {
         self.scripts.get_or_init(|| self.read_scripts())
     }
@@ -115,8 +155,15 @@ impl Pdf {
         let mut issues = Vec::new();
         let mut out = Vec::new();
         let mut budget = self.text_budget();
+        let mut chains = Chains::new(&self.limits, SCRIPTS);
         // A spent budget has added its issue; what was read is kept.
-        let _ = self.collect_scripts(&mut out, &mut budget, &mut issues);
+        if self
+            .collect_scripts(&mut out, &mut budget, &mut chains, &mut issues)
+            .is_err()
+        {
+            issues.push(budget.limit_issue(SCRIPTS, "scripts"));
+        }
+        chains.finish(&mut issues);
         self.note(issues);
         out
     }
@@ -125,6 +172,7 @@ impl Pdf {
         &'a self,
         out: &mut Vec<Script>,
         budget: &mut TextBudget<'a>,
+        chains: &mut Chains,
         issues: &mut Vec<Issue>,
     ) -> Result<(), Spent> {
         let doc = &self.doc;
@@ -139,13 +187,13 @@ impl Pdf {
                     TreeKey::Name(n) => text_string(&n),
                     TreeKey::Number(n) => n.to_string(),
                 };
-                self.push_chain(out, "document", Some(name), v, budget, issues)?;
+                self.push_chain(out, "document", Some(name), v, budget, chains, issues)?;
             }
         }
         if let Some(open) = catalog.and_then(|c| c.get(b"OpenAction").ok())
             && dict(doc, open).is_some()
         {
-            self.push_chain(out, "open", None, open, budget, issues)?;
+            self.push_chain(out, "open", None, open, budget, chains, issues)?;
         }
         if let Some(aa) = catalog.and_then(|c| get_dict(doc, c, b"AA")) {
             for (key, v) in aa.iter() {
@@ -157,7 +205,7 @@ impl Pdf {
                     b"DP" => "did-print",
                     _ => continue,
                 };
-                self.push_chain(out, trigger, None, v, budget, issues)?;
+                self.push_chain(out, trigger, None, v, budget, chains, issues)?;
             }
         }
         for (i, node) in self.pages.iter().enumerate() {
@@ -176,70 +224,95 @@ impl Pdf {
                     _ => continue,
                 };
                 let name = Some(format!("page {}", i + 1));
-                self.push_chain(out, trigger, name, v, budget, issues)?;
+                self.push_chain(out, trigger, name, v, budget, chains, issues)?;
             }
         }
-        self.field_scripts(out, budget, issues)?;
+        // Field actions as the form read them; nothing is read again.
+        let data = self.form_data();
+        if let Some(form) = &data.form {
+            for fa in &data.actions {
+                let field = &form.fields[fa.field];
+                let s = Script {
+                    trigger: format!("field {} {}", field.full_name, fa.event),
+                    name: None,
+                    kind: fa.kind.clone(),
+                    target: fa.target.clone(),
+                    text: fa.js.map(|j| field.actions[j].1.clone()),
+                };
+                // The text is a copy of the form's, so it is charged again.
+                if !budget.charge(s.weight() + s.text.as_ref().map_or(0, String::len)) {
+                    return Err(Spent);
+                }
+                out.push(s);
+            }
+        }
+        // The actions of every other annotation: links, widgets outside the form, screens.
         let mut seen = HashSet::new();
-        let mut spent = false;
         let mut found_issues = Vec::new();
         self.each_annot(SCRIPTS, issues, |page, _, a| {
             if let Some(r) = reference(a)
-                && !seen.insert(r)
+                && (data.widgets.contains(&r) || !seen.insert(r))
             {
                 return Ok(());
             }
             let Some(ad) = dict(doc, a) else {
                 return Ok(());
             };
-            if get_name(doc, ad, b"Subtype") != Some(b"Link") {
-                return Ok(());
-            }
-            let Ok(action) = ad.get(b"A") else {
-                return Ok(());
-            };
-            let mut found = Vec::new();
-            if self
-                .action_chain(action, budget, &mut found, SCRIPTS, &mut found_issues)
-                .is_err()
-            {
-                spent = true;
-                return Err(budget.limit_issue(SCRIPTS, "scripts"));
-            }
-            for a in found.into_iter().filter(|a| a.kind != "uri") {
-                let s = Script {
-                    trigger: format!("link page {page}"),
-                    name: None,
-                    kind: a.kind,
-                    target: a.target,
-                    text: a.text,
+            let link = get_name(doc, ad, b"Subtype") == Some(b"Link");
+            let mut entries: Vec<(String, &Object)> = Vec::new();
+            if let Ok(action) = ad.get(b"A") {
+                let trigger = if link {
+                    format!("link page {page}")
+                } else {
+                    format!("annotation page {page} activate")
                 };
-                if !budget.charge(s.weight()) {
-                    spent = true;
-                    return Err(budget.limit_issue(SCRIPTS, "scripts"));
+                entries.push((trigger, action));
+            }
+            if let Some(aa) = get_dict(doc, ad, b"AA") {
+                for (key, v) in aa.iter() {
+                    entries.push((format!("annotation page {page} {}", event_word(key)), v));
                 }
-                out.push(s);
+            }
+            for (trigger, action) in entries {
+                let Ok(found) = self.action_chain(action, budget, chains, &mut found_issues) else {
+                    return Err(budget.limit_issue(SCRIPTS, "scripts"));
+                };
+                // Link addresses are listed by `links()`.
+                for a in found.into_iter().filter(|a| !(link && a.kind == "uri")) {
+                    let s = Script {
+                        trigger: trigger.clone(),
+                        name: None,
+                        kind: a.kind,
+                        target: a.target,
+                        text: a.text,
+                    };
+                    if !budget.charge(s.weight()) {
+                        return Err(budget.limit_issue(SCRIPTS, "scripts"));
+                    }
+                    out.push(s);
+                }
             }
             Ok(())
         });
         issues.append(&mut found_issues);
-        if spent { Err(Spent) } else { Ok(()) }
+        // A spent budget ended the walk with its issue; what was read is kept.
+        Ok(())
     }
 
-    /// Adds the actions of the chain at `action` with one trigger. A spent budget adds the
-    /// Limit issue and ends the reader.
-    pub(crate) fn push_chain(
+    /// Adds the actions of the chain at `action` with one trigger. `Err` when the budget is
+    /// spent; the caller adds the Limit issue.
+    #[allow(clippy::too_many_arguments)]
+    fn push_chain(
         &self,
         out: &mut Vec<Script>,
         trigger: &str,
         name: Option<String>,
         action: &Object,
         budget: &mut TextBudget<'_>,
+        chains: &mut Chains,
         issues: &mut Vec<Issue>,
     ) -> Result<(), Spent> {
-        let mut found = Vec::new();
-        let read = self.action_chain(action, budget, &mut found, SCRIPTS, issues);
-        for a in found {
+        for a in self.action_chain(action, budget, chains, issues)? {
             let s = Script {
                 trigger: trigger.to_string(),
                 name: name.clone(),
@@ -248,50 +321,54 @@ impl Pdf {
                 text: a.text,
             };
             if !budget.charge(s.weight()) {
-                issues.push(budget.limit_issue(SCRIPTS, "scripts"));
                 return Err(Spent);
             }
             out.push(s);
-        }
-        if read.is_err() {
-            issues.push(budget.limit_issue(SCRIPTS, "scripts"));
-            return Err(Spent);
         }
         Ok(())
     }
 
     /// The actions of the chain that starts at `action`, `/Next` entries after the action
-    /// that names them. Plain jumps inside the document are left out. A cycle ends the
-    /// chain; it is bounded by `max_items` and `max_depth`. Script text is charged to
-    /// `budget`; `Err` when it is spent.
+    /// that names them. Plain jumps inside the document are left out. Every entry counts
+    /// toward the reader's visits in `chains`; an action reached a second time is skipped and
+    /// counted for one issue. A chain that starts at an object read before is not read again:
+    /// its actions are copied, and the copies charged. Script text is charged to `budget`;
+    /// `Err` when it is spent.
     pub(crate) fn action_chain(
         &self,
         action: &Object,
         budget: &mut TextBudget<'_>,
-        out: &mut Vec<Action>,
-        location: &str,
+        chains: &mut Chains,
         issues: &mut Vec<Issue>,
-    ) -> Result<(), Spent> {
+    ) -> Result<Vec<Action>, Spent> {
         let doc = &self.doc;
+        let start = reference(action);
+        if let Some(found) = start.and_then(|id| chains.cache.get(&id)) {
+            for a in found {
+                if !budget.charge(a.text.as_ref().map_or(0, String::len)) {
+                    return Err(Spent);
+                }
+            }
+            return Ok(found.clone());
+        }
+        let location = chains.location;
+        let mut out = Vec::new();
         let mut seen: HashSet<ObjectId> = HashSet::new();
-        let mut stack: Vec<(&Object, usize)> = vec![(action, 1)];
-        let mut count = 0usize;
+        let mut stack: Vec<(&Object, usize)> = Vec::new();
+        if chains.work.take(1) {
+            stack.push((action, 1));
+        } else {
+            issues.extend(chains.work.limit_issue(location, "action chains"));
+        }
         while let Some((obj, depth)) = stack.pop() {
             if let Some(id) = reference(obj)
                 && !seen.insert(id)
             {
-                issues.push(Issue::new(
-                    location,
-                    IssueKind::Damaged,
-                    format!(
-                        "an action chain reaches object {} {} a second time",
-                        id.0, id.1
-                    ),
-                ));
+                chains.repeats += 1;
+                chains.first_repeat.get_or_insert(id);
                 continue;
             }
-            count += 1;
-            if count > self.limits.max_items || depth > self.limits.max_depth {
+            if depth > self.limits.max_depth {
                 issues.push(Issue::new(location, IssueKind::Limit, CHAIN_LIMIT));
                 break;
             }
@@ -307,7 +384,8 @@ impl Pdf {
             {
                 out.push(self.action(d, s, budget, location, issues)?);
             }
-            // /Next is one action or an array of them, read in order.
+            // /Next is one action or an array of them, read in order. Each entry counts as
+            // it is stacked, so a list that many actions share costs each time.
             let next: &[Object] = match d.get(b"Next").ok() {
                 Some(next) => match resolve(doc, next) {
                     Some(Object::Array(list)) => list,
@@ -316,15 +394,16 @@ impl Pdf {
                 },
                 None => &[],
             };
-            // Entries waiting count against the bound too, so a list that many actions
-            // share is not stacked again and again.
-            if count + stack.len() + next.len() > self.limits.max_items {
-                issues.push(Issue::new(location, IssueKind::Limit, CHAIN_LIMIT));
+            if !chains.work.take(next.len()) {
+                issues.extend(chains.work.limit_issue(location, "action chains"));
                 break;
             }
             stack.extend(next.iter().rev().map(|n| (n, depth + 1)));
         }
-        Ok(())
+        if let Some(id) = start {
+            chains.cache.insert(id, out.clone());
+        }
+        Ok(out)
     }
 
     fn action(

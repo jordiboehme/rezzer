@@ -185,7 +185,7 @@ pub struct Pdf {
     /// The embedded files, read on first use.
     attachments: OnceLock<extras::Attachments>,
     /// The form, the scripts and the signatures, each read on first use.
-    form: OnceLock<Option<Form>>,
+    form: OnceLock<forms::FormData>,
     scripts: OnceLock<Vec<Script>>,
     signatures: OnceLock<Vec<Sig>>,
     /// What all readers together may still copy out of the document: the object budget left

@@ -431,3 +431,54 @@ impl<'a> TextBudget<'a> {
         )
     }
 }
+
+/// How many entries one reader may still visit: kids, chain links, array members and the
+/// like, `max_items` in all. Shared data costs each time it is visited, so a reader's time is
+/// bounded by what it visits and not only by what it keeps.
+#[derive(Debug)]
+pub(crate) struct Work {
+    left: usize,
+    max: usize,
+    noted: bool,
+}
+
+impl Work {
+    pub(crate) fn new(limits: &Limits) -> Work {
+        Work {
+            left: limits.max_items,
+            max: limits.max_items,
+            noted: false,
+        }
+    }
+
+    /// Counts `n` visits. False when they do not fit; the reader then stops.
+    pub(crate) fn take(&mut self, n: usize) -> bool {
+        if n > self.left {
+            self.left = 0;
+            return false;
+        }
+        self.left -= n;
+        true
+    }
+
+    /// The one Limit issue of a reader whose visits ran out; `None` after the first.
+    pub(crate) fn limit_issue(&mut self, location: &str, what: &str) -> Option<Issue> {
+        if self.noted {
+            return None;
+        }
+        self.noted = true;
+        Some(self.issue(location, what))
+    }
+
+    /// The Limit issue for a reader that stops at once.
+    pub(crate) fn issue(&self, location: &str, what: &str) -> Issue {
+        Issue::new(
+            location,
+            IssueKind::Limit,
+            format!(
+                "the {what} visit more than {} entries; the rest is not read",
+                self.max
+            ),
+        )
+    }
+}

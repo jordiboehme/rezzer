@@ -76,8 +76,12 @@ struct Walk<'a> {
     issues: Vec<Issue>,
     /// What the tree may still copy out of the document.
     budget: TextBudget<'a>,
-    /// `/K` entries visited so far, bounded by `max_items`.
+    /// `/K` entries and attribute entries visited so far, bounded by `max_items`.
     work: usize,
+    /// `/K` array objects read so far, and the elements that named one again.
+    k_arrays: HashSet<ObjectId>,
+    shared_k: usize,
+    first_shared_k: Option<ObjectId>,
     /// Elements reached a second time, and the first of them.
     repeats: usize,
     first_repeat: Option<ObjectId>,
@@ -133,6 +137,9 @@ impl Pdf {
             issues: Vec::new(),
             budget: self.text_budget(),
             work: 0,
+            k_arrays: HashSet::new(),
+            shared_k: 0,
+            first_shared_k: None,
             repeats: 0,
             first_repeat: None,
             full: false,
@@ -154,6 +161,19 @@ impl Pdf {
                     "{} {} reached twice: the tree has a cycle or a shared element (the first is object {} {})",
                     walk.repeats,
                     if walk.repeats == 1 { "element is" } else { "elements are" },
+                    id.0,
+                    id.1
+                ),
+            ));
+        }
+        if let Some(id) = walk.first_shared_k {
+            walk.issues.push(Issue::new(
+                WHERE,
+                IssueKind::Damaged,
+                format!(
+                    "{} {} a /K array that another element names; it is read for the first only (the first is object {} {})",
+                    walk.shared_k,
+                    if walk.shared_k == 1 { "element names" } else { "elements name" },
                     id.0,
                     id.1
                 ),
@@ -245,9 +265,20 @@ impl Walk<'_> {
             + text(&elem.actual_text)
             + text(&elem.lang)
             + text(&elem.id);
-        if !self.budget.charge(copied) || !attributes(pdf, d, &mut elem, &mut self.budget) {
+        if !self.budget.charge(copied) {
             self.spent();
             return None;
+        }
+        match attributes(pdf, d, &mut elem, &mut self.budget, &mut self.work) {
+            Ok(()) => {}
+            Err(Cut::Budget) => {
+                self.spent();
+                return None;
+            }
+            Err(Cut::Work) => {
+                self.too_many();
+                return None;
+            }
         }
         let index = self.elems.len();
         if let Some(id) = id {
@@ -257,22 +288,24 @@ impl Walk<'_> {
         let mut children = Vec::new();
         let mut mcids = Vec::new();
         let mut mcr_page = None;
-        if let Ok(k) = d.get(b"K") {
+        let mut k = d.get(b"K").ok();
+        // A /K array object that another element named is not read again.
+        if let Some(id) = k.and_then(reference)
+            && matches!(doc.objects.get(&id), Some(Object::Array(_)))
+            && !self.k_arrays.insert(id)
+        {
+            self.shared_k += 1;
+            self.first_shared_k.get_or_insert(id);
+            k = None;
+        }
+        if let Some(k) = k {
             for kid in kids(doc, k) {
                 if self.full {
                     break;
                 }
                 self.work += 1;
                 if self.work > limits.max_items {
-                    self.full = true;
-                    self.issues.push(Issue::new(
-                        WHERE,
-                        IssueKind::Limit,
-                        format!(
-                            "the structure tree has more than {} entries; the rest is not read",
-                            limits.max_items
-                        ),
-                    ));
+                    self.too_many();
                     break;
                 }
                 match resolve(doc, kid) {
@@ -329,6 +362,21 @@ impl Walk<'_> {
             elem.page = mcr_page;
         }
         Some(index)
+    }
+
+    /// Too many entries were visited: one Limit issue, and nothing more is read.
+    fn too_many(&mut self) {
+        if !self.full {
+            self.full = true;
+            self.issues.push(Issue::new(
+                WHERE,
+                IssueKind::Limit,
+                format!(
+                    "the structure tree has more than {} entries; the rest is not read",
+                    self.pdf.limits.max_items
+                ),
+            ));
+        }
     }
 
     /// The budget is spent: one Limit issue, and nothing more is read.
@@ -436,24 +484,39 @@ impl Walk<'_> {
     }
 }
 
+/// Why reading attributes stopped.
+enum Cut {
+    Budget,
+    Work,
+}
+
 /// Table attributes from `/A`: one attribute dictionary, or an array of them with revision
-/// numbers in between. The copied headers are charged to `budget`; false when it is spent.
+/// numbers in between. The copied headers are charged to `budget`, and every entry visited
+/// counts toward `work`.
 fn attributes(
     pdf: &Pdf,
     d: &Dictionary,
     elem: &mut StructElem,
     budget: &mut TextBudget<'_>,
-) -> bool {
+    work: &mut usize,
+) -> Result<(), Cut> {
     let doc = &pdf.doc;
+    let mut visit = |n: usize| {
+        *work = work.saturating_add(n);
+        if *work > pdf.limits.max_items {
+            Err(Cut::Work)
+        } else {
+            Ok(())
+        }
+    };
     let Ok(a) = d.get(b"A") else {
-        return true;
+        return Ok(());
     };
     let list: Vec<&Dictionary> = match resolve(doc, a) {
-        Some(Object::Array(items)) => items
-            .iter()
-            .take(pdf.limits.max_items)
-            .filter_map(|o| dict(doc, o))
-            .collect(),
+        Some(Object::Array(items)) => {
+            visit(items.len())?;
+            items.iter().filter_map(|o| dict(doc, o)).collect()
+        }
         Some(_) => dict(doc, a).into_iter().collect(),
         None => Vec::new(),
     };
@@ -462,11 +525,12 @@ fn attributes(
             continue;
         }
         if let Some(Object::Array(h)) = get(doc, attr, b"Headers") {
+            visit(h.len())?;
             let mut headers = Vec::new();
             for o in h {
                 if let Some(Object::String(s, _)) = resolve(doc, o) {
                     if !budget.charge(s.len()) {
-                        return false;
+                        return Err(Cut::Budget);
                     }
                     headers.push(text_string(s));
                 }
@@ -488,5 +552,5 @@ fn attributes(
             elem.row_span = n;
         }
     }
-    true
+    Ok(())
 }

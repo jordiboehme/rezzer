@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
-use crate::objects::{dict, get, get_date, get_dict, get_name, get_text, reference, resolve};
+use crate::forms::SigValue;
+use crate::objects::{Work, dict, get, get_date, get_dict, get_name, get_text, reference, resolve};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
 /// One signature as the file describes it. It is not verified.
@@ -92,28 +93,37 @@ impl Pdf {
         let mut found: Vec<(Option<String>, SigKind, &Dictionary)> = Vec::new();
         let mut listed: HashSet<ObjectId> = HashSet::new();
         let mut budget = self.text_budget();
-        self.walk_fields(&mut budget, &mut issues, |node, _, _| {
-            if !node.terminal || !node.is_signature() {
-                return Ok(());
+        let mut work = Work::new(&self.limits);
+        // Signature fields as the form read them.
+        let data = self.form_data();
+        if let Some(form) = &data.form {
+            for (index, value) in &data.sigs {
+                let sd = match *value {
+                    SigValue::Object(id) => {
+                        if !listed.insert(id) {
+                            continue;
+                        }
+                        doc.objects.get(&id).and_then(|o| dict(doc, o))
+                    }
+                    SigValue::In(holder) => doc
+                        .objects
+                        .get(&holder)
+                        .and_then(|o| dict(doc, o))
+                        .and_then(|h| get_dict(doc, h, b"V")),
+                };
+                let Some(sd) = sd else {
+                    continue;
+                };
+                let kind = match *value {
+                    SigValue::Object(id) => perm_ids
+                        .iter()
+                        .find(|(p, _)| *p == id)
+                        .map_or(SigKind::Field, |(_, k)| *k),
+                    SigValue::In(_) => SigKind::Field,
+                };
+                found.push((Some(form.fields[*index].full_name.clone()), kind, sd));
             }
-            let Some(v) = node.value() else {
-                return Ok(());
-            };
-            let Some(sd) = dict(doc, v) else {
-                return Ok(());
-            };
-            let mut kind = SigKind::Field;
-            if let Some(id) = reference(v) {
-                if !listed.insert(id) {
-                    return Ok(());
-                }
-                if let Some((_, k)) = perm_ids.iter().find(|(p, _)| *p == id) {
-                    kind = *k;
-                }
-            }
-            found.push((Some(node.full_name.clone()), kind, sd));
-            Ok(())
-        });
+        }
         if let Some(p) = perms {
             for (k, v) in p.iter() {
                 let Some(kind) = perm_kind(k) else {
@@ -129,7 +139,9 @@ impl Pdf {
         }
         let mut out = Vec::new();
         for (field, kind, sd) in found {
-            let sig = self.sig(field, kind, sd, &mut issues);
+            let Some(sig) = self.sig(field, kind, sd, &mut work, &mut issues) else {
+                break;
+            };
             if !budget.charge(sig.weight()) {
                 issues.push(budget.limit_issue(WHERE, "signatures"));
                 break;
@@ -145,8 +157,9 @@ impl Pdf {
         field: Option<String>,
         kind: SigKind,
         sd: &Dictionary,
+        work: &mut Work,
         issues: &mut Vec<Issue>,
-    ) -> Sig {
+    ) -> Option<Sig> {
         let doc = &self.doc;
         let place = match &field {
             Some(f) => format!("field {f}"),
@@ -155,9 +168,12 @@ impl Pdf {
         let mut byte_range = Vec::new();
         match get(doc, sd, b"ByteRange") {
             Some(Object::Array(a)) => {
+                if !work.take(a.len()) {
+                    issues.extend(work.limit_issue(WHERE, "signatures"));
+                    return None;
+                }
                 let values: Option<Vec<u64>> = a
                     .iter()
-                    .take(self.limits.max_items)
                     .map(|o| match resolve(doc, o)? {
                         Object::Integer(i) => u64::try_from(*i).ok(),
                         _ => None,
@@ -185,7 +201,7 @@ impl Pdf {
         };
         let covers_whole_file =
             contents.is_some_and(|len| covers_whole_file(self.original(), &byte_range, len));
-        Sig {
+        Some(Sig {
             field,
             kind,
             signer: get_text(doc, sd, b"Name"),
@@ -197,7 +213,7 @@ impl Pdf {
             date: get_date(doc, sd, b"M"),
             byte_range,
             covers_whole_file,
-        }
+        })
     }
 }
 

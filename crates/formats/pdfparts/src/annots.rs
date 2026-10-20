@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::nav::{page_list, rect};
-use crate::objects::{dict, get_date, get_name, get_text, number, reference, resolve};
+use crate::objects::{Work, dict, get_date, get_name, get_text, number, reference, resolve};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
 /// One annotation that is not a link, a popup or a form widget.
@@ -155,11 +155,11 @@ impl Pdf {
                 IssueKind::Damaged,
                 if rest.len() == 1 {
                     format!(
-                        "page {pages} shares the annotation list of page {first}; its annotations and links are listed on page {first} only"
+                        "page {pages} shares the annotation list of page {first}; its annotations and links are listed on page {first} unless they name their own page"
                     )
                 } else {
                     format!(
-                        "pages {pages} share the annotation list of page {first}; their annotations and links are listed on page {first} only"
+                        "pages {pages} share the annotation list of page {first}; their annotations and links are listed on page {first} unless they name their own page"
                     )
                 },
             ));
@@ -217,6 +217,7 @@ impl Pdf {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         let mut budget = self.text_budget();
+        let mut work = Work::new(&self.limits);
         // Pages with QuadPoints that do not form whole quads, and how many annotations each.
         let mut broken: Vec<(u32, usize)> = Vec::new();
         self.each_annot("annotations", &mut issues, |page, k, a| {
@@ -232,6 +233,14 @@ impl Pdf {
             let Some(ad) = dict(doc, a) else {
                 return Ok(());
             };
+            // Arrays that many annotations share cost each time they are read.
+            let len = |key: &[u8]| match ad.get(key).ok().and_then(|o| resolve(doc, o)) {
+                Some(Object::Array(items)) => items.len(),
+                _ => 0,
+            };
+            if !work.take(len(b"QuadPoints") + len(b"C")) {
+                return Err(work.issue("document", "annotations"));
+            }
             let mut bad = 0usize;
             let Some(annot) = self.annot(ad, id, page, &mut bad) else {
                 return Ok(());
