@@ -27,7 +27,7 @@ use zipguard::Archive;
 
 use crate::Out;
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
-use crate::logic::{FormulaProblem, Formulas};
+use crate::logic::{FormulaProblem, Formulas, ReadState, SheetFacts};
 use crate::package::{self, Package, Refusal, zip_reason};
 
 /// Formula problems listed one by one per sheet; the rest are counted in one loss.
@@ -149,6 +149,10 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         DateSystem::Date1900
     };
     let mut halted: Option<&'static str> = None;
+    // The cells of each sheet read, for the labels and values of the parameters.
+    let mut facts: Vec<SheetFacts> = Vec::new();
+    // Some formula cells were not read or not listed.
+    let mut incomplete = false;
     for sheet in &wb.sheets {
         // The part calamine reads for this sheet: the first of its sheets with this name
         // (its own lookup), joined from that sheet's relationship. calamine keeps the path
@@ -231,6 +235,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             }
         };
         cell_losses(&mut out, &q, &cells);
+        incomplete |= cells.error.is_some();
         match cells.stop {
             Some(Stop::Time) => halted = Some("time limit reached"),
             Some(Stop::Elements) => halted = Some("element limit reached"),
@@ -313,6 +318,8 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             halted = Some("element limit reached");
         }
         format_losses(&mut out, &q, &fmt);
+        drop(fmt);
+        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles));
         if !parts.hidden_rows.is_empty() {
             blocks.push(note(format!(
                 "Hidden rows: {}.",
@@ -374,8 +381,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         );
     }
     embedded(&mut out, &wb, &vba, &formulas);
-    // The logic inputs stay with the formulas for the workbook logic pass.
-    drop(formulas);
+    let state = ReadState {
+        wb: &wb,
+        incomplete: incomplete || halted.is_some(),
+    };
+    crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
 }
 
@@ -481,22 +491,11 @@ impl Formatter<'_> {
 
     /// The cached value of a formula cell as a typed value.
     fn cached(&self, c: &RawCell) -> Option<Value> {
-        match &c.val {
-            Val::Empty => None,
-            Val::Num(v) => {
-                let styled = self
-                    .styles
-                    .get(&(c.row, c.col))
-                    .and_then(|s| self.wb.styles.number_format(*s));
-                match styled.map(numfmt::kind_of) {
-                    Some(NumKind::Percent) => Some(Value::percent(*v)),
-                    _ => Some(Value::number(*v, None)),
-                }
-            }
-            Val::Text(s) | Val::Error(s) => Some(Value::Text { value: s.clone() }),
-            Val::Iso(s) => Some(Value::DateTime { value: s.clone() }),
-            Val::Bool(b) => Some(Value::Bool { value: *b }),
-        }
+        let code = self
+            .styles
+            .get(&(c.row, c.col))
+            .and_then(|s| self.wb.styles.number_format(*s));
+        crate::logic::cell_value(&c.val, code)
     }
 }
 
@@ -848,6 +847,7 @@ fn sheet_formulas(
             formulas.add_constant(sheet, c.row, c.col);
         }
     }
+    formulas.unindexed_formulas += dropped.0 + lost_shared.len() as u64;
     if let (n, Some((r, c))) = dropped {
         out.loss(
             format!("{q}!{}", grid::a1(r, c)),

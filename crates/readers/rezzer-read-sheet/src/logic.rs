@@ -3,14 +3,25 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Formulas of cells and defined names, read through formulakit, plus the inputs of the
-//! workbook logic index (formulas, constants, names and tables).
+//! workbook logic index (formulas, constants, names and tables), and the workbook logic
+//! pass: roles, pattern groups, parameters with units and the dependency graph.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
 
-use formulakit::logic::{FormulaId, TableArea, Workbook};
+use formulakit::logic::{FormulaId, GroupGraph, ParamCell, Role as KitRole, TableArea, Workbook};
 use formulakit::{Analysis, CellPos, Dialect, Ref, anchor_of, quote_sheet};
-use rezzer_model::{Anchor, Formula, FormulaKind, Value};
+use rezzer_limits::{Budget, contain};
+use rezzer_model::{
+    Anchor, Edge, Formula, FormulaKind, Graph, LossReason, Node, Parameter, Role, Severity, Value,
+};
 use sheetparts::DefinedName;
+use sheetparts::numfmt::{self, NumKind};
+use sheetparts::ooxml::{CalcMode, WorkbookParts};
+
+use crate::Out;
+use crate::grid::{RawCell, Val};
+use crate::units;
 
 /// Excel's own maximum length of a formula, in characters. Longer texts are refused.
 pub(crate) const MAX_FORMULA_CHARS: usize = 8_192;
@@ -20,11 +31,7 @@ const LATEX_CACHE: usize = 65_536;
 
 /// What the logic pass of the workbook needs: every formula, constant cell, defined name
 /// and table, fed to formulakit's index in workbook order, plus which model formula each
-/// index entry is. Built here and kept for the logic pass, which runs `finish` on it.
-#[allow(
-    dead_code,
-    reason = "read by the workbook logic pass (roles, patterns, graph)"
-)]
+/// index entry is. [`workbook_logic`] runs `finish` on it.
 pub(crate) struct LogicInputs {
     pub workbook: Workbook,
     /// Position in `Facets.formulas` and the id formulakit gave the formula.
@@ -109,6 +116,17 @@ pub(crate) struct Formulas {
     user_seen: HashSet<String>,
     pub inputs: LogicInputs,
     pub meter: TextMeter,
+    /// Cells a `CONVERT` call reads as its value, by (uppercase sheet, row, column), with
+    /// the unit it converts from.
+    convert_units: HashMap<(String, u32, u32), String>,
+    /// Cells a defined name refers to on its own, with the first such name.
+    named_cells: HashMap<(String, u32, u32), String>,
+    /// Defined names whose whole text is a number: anchor, name and value.
+    literal_names: Vec<(String, String, Value)>,
+    /// Formula cells and names the logic index does not know (not analyzed, not kept), so
+    /// a cell may be read by more formulas than the index sees.
+    pub unindexed_formulas: u64,
+    pub unindexed_names: u64,
 }
 
 impl Formulas {
@@ -137,6 +155,11 @@ impl Formulas {
                 formula_ids: Vec::new(),
             },
             meter: TextMeter::new(max_text),
+            convert_units: HashMap::new(),
+            named_cells: HashMap::new(),
+            literal_names: Vec::new(),
+            unindexed_formulas: 0,
+            unindexed_names: 0,
         }
     }
 
@@ -285,6 +308,28 @@ impl Formulas {
         }
     }
 
+    /// Remembers the unit of each cell a `CONVERT` call in `display` converts: the first
+    /// argument must be one plain cell and the second a text literal Excel knows as a unit.
+    fn note_convert(&mut self, sheet: &str, at: CellPos, display: &str) {
+        for args in calls_of(display, "CONVERT") {
+            let [value, from, _to] = args.as_slice() else {
+                continue;
+            };
+            let Some(unit) = text_literal(from).filter(|u| units::is_convert_unit(u)) else {
+                continue;
+            };
+            let Ok(a) = formulakit::analyze(&format!("={}", value.trim()), Dialect::Excel, at)
+            else {
+                continue;
+            };
+            if let Some((target, pos)) = plain_cell(&a, Some(sheet)) {
+                self.convert_units
+                    .entry((target.to_uppercase(), pos.row, pos.col))
+                    .or_insert(unit);
+            }
+        }
+    }
+
     /// The model formula of one cell. `text` is the stored text without `=`; `index` is the
     /// position the formula will take in `Facets.formulas`.
     #[allow(clippy::too_many_arguments)]
@@ -322,6 +367,7 @@ impl Formulas {
         formula.cached = cached;
         let mut problem = None;
         if too_long(text) {
+            self.unindexed_formulas += 1;
             notes.push(format!(
                 "longer than {MAX_FORMULA_CHARS} characters, Excel's maximum: not analyzed"
             ));
@@ -360,6 +406,9 @@ impl Formulas {
                         }
                     }
                     self.note_user_functions(&a, &anchor);
+                    if a.functions.iter().any(|f| f == "CONVERT") {
+                        self.note_convert(sheet, CellPos { row, col }, &a.display);
+                    }
                     let id = self
                         .inputs
                         .workbook
@@ -367,6 +416,7 @@ impl Formulas {
                     self.inputs.formula_ids.push((index, id));
                 }
                 Err(e) => {
+                    self.unindexed_formulas += 1;
                     notes.push(e.to_string());
                     problem = Some(FormulaProblem {
                         anchor: anchor.clone(),
@@ -423,12 +473,15 @@ impl Formulas {
             notes.push("not calculated in file".to_string());
         }
         // The logic index sees the inputs the table reads.
-        if let Ok(a) = formulakit::analyze(&expression, Dialect::Excel, CellPos { row, col }) {
-            let id = self
-                .inputs
-                .workbook
-                .add_formula(sheet, CellPos { row, col }, &a);
-            self.inputs.formula_ids.push((index, id));
+        match formulakit::analyze(&expression, Dialect::Excel, CellPos { row, col }) {
+            Ok(a) => {
+                let id = self
+                    .inputs
+                    .workbook
+                    .add_formula(sheet, CellPos { row, col }, &a);
+                self.inputs.formula_ids.push((index, id));
+            }
+            Err(_) => self.unindexed_formulas += 1,
         }
         Formula {
             anchor: Anchor(format!("{q}!{}", crate::grid::a1(row, col))),
@@ -448,6 +501,7 @@ impl Formulas {
 
     /// A defined name whose text is not kept: the logic index still knows the name.
     pub fn name_not_kept(&mut self, n: &DefinedName) {
+        self.unindexed_names += 1;
         self.inputs
             .workbook
             .add_name(&n.name, n.scope.as_deref(), None);
@@ -498,6 +552,7 @@ impl Formulas {
                 ),
                 unreadable: false,
             });
+            self.unindexed_names += 1;
             self.inputs
                 .workbook
                 .add_name(&n.name, n.scope.as_deref(), None);
@@ -518,11 +573,23 @@ impl Formulas {
                         }
                     }
                     self.note_user_functions(&a, &anchor);
+                    if let Some((sheet, pos)) = plain_cell(&a, n.scope.as_deref()) {
+                        self.named_cells
+                            .entry((sheet.to_uppercase(), pos.row, pos.col))
+                            .or_insert_with(|| n.name.clone());
+                    }
+                    if a.refs.is_empty()
+                        && a.functions.is_empty()
+                        && let Some(v) = literal_number(&n.refers_to)
+                    {
+                        self.literal_names.push((anchor.clone(), n.name.clone(), v));
+                    }
                     self.inputs
                         .workbook
                         .add_name(&n.name, n.scope.as_deref(), Some(&a));
                 }
                 Err(e) => {
+                    self.unindexed_names += 1;
                     notes.push(e.to_string());
                     problem = Some(FormulaProblem {
                         anchor: anchor.clone(),
@@ -574,23 +641,23 @@ pub(crate) fn lambda_params(text: &str) -> Option<Vec<String>> {
 /// The arguments of a call, given the text after its `(`. `None` when the closing `)` is not
 /// the end of the text.
 fn top_level_args(text: &str) -> Option<Vec<String>> {
+    let (args, rest) = call_args(text)?;
+    rest.trim().is_empty().then_some(args)
+}
+
+/// The arguments of a call, given the text after its `(`, and the text after its `)`.
+/// `None` when the call is not closed.
+fn call_args(text: &str) -> Option<(Vec<String>, &str)> {
     let mut depth = 0usize;
     let mut args = Vec::new();
     let mut current = String::new();
-    let mut chars = text.chars();
-    let mut closed = false;
-    while let Some(c) = chars.next() {
-        if closed {
-            if c.is_whitespace() {
-                continue;
-            }
-            return None;
-        }
+    let mut chars = text.char_indices();
+    while let Some((i, c)) = chars.next() {
         match c {
             '"' | '\'' => {
                 current.push(c);
                 // Quoted text or sheet name; a doubled quote stays inside.
-                for d in chars.by_ref() {
+                for (_, d) in chars.by_ref() {
                     current.push(d);
                     if d == c {
                         break;
@@ -607,11 +674,694 @@ fn top_level_args(text: &str) -> Option<Vec<String>> {
             }
             ')' => {
                 args.push(std::mem::take(&mut current));
-                closed = true;
+                return Some((args, &text[i + 1..]));
             }
             ',' if depth == 0 => args.push(std::mem::take(&mut current)),
             _ => current.push(c),
         }
     }
-    closed.then_some(args)
+    None
+}
+
+/// The arguments of every call of `function` in a formula text, outside text literals and
+/// quoted sheet names.
+fn calls_of(text: &str, function: &str) -> Vec<Vec<String>> {
+    let mut out = Vec::new();
+    let mut quote: Option<char> = None;
+    let mut prev: Option<char> = None;
+    for (i, c) in text.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            prev = Some(c);
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            quote = Some(c);
+        } else if !prev.is_some_and(|p| p.is_alphanumeric() || p == '_' || p == '.')
+            && let Some(head) = text.get(i..i + function.len() + 1)
+            && head
+                .get(..function.len())
+                .is_some_and(|h| h.eq_ignore_ascii_case(function))
+            && head.ends_with('(')
+            && let Some((args, _)) = call_args(&text[i + function.len() + 1..])
+        {
+            out.push(args);
+        }
+        prev = Some(c);
+    }
+    out
+}
+
+/// The text of a string literal argument (`"mi"`), with doubled quotes undone.
+fn text_literal(arg: &str) -> Option<String> {
+    let inner = arg.trim().strip_prefix('"')?.strip_suffix('"')?;
+    let text = inner.replace("\"\"", "\"");
+    (!text.is_empty()).then_some(text)
+}
+
+/// The one cell a formula consists of (`=B5`, `=$L$3`, `=z!$L$3`), with its sheet. A
+/// reference without a sheet points into `sheet`; `None` when there is none to point to.
+fn plain_cell(a: &Analysis, sheet: Option<&str>) -> Option<(String, CellPos)> {
+    let [
+        Ref::Cell {
+            sheet: span, pos, ..
+        },
+    ] = a.refs.as_slice()
+    else {
+        return None;
+    };
+    if !a.functions.is_empty() || span.as_ref().is_some_and(|s| s.last.is_some()) {
+        return None;
+    }
+    let target = match span {
+        Some(s) => s.first.clone(),
+        None => sheet?.to_string(),
+    };
+    let cell = crate::grid::a1(pos.row, pos.col);
+    let shown = a.display.trim_start_matches('=').replace('$', "");
+    let alone = shown == cell || shown == format!("{}!{cell}", quote_sheet(&target));
+    alone.then_some((target, *pos))
+}
+
+/// The value of a name whose whole text is one number (`0.05`, `=-3`, `1.5E-3`, `5%`).
+fn literal_number(text: &str) -> Option<Value> {
+    let t = text.trim().trim_start_matches('=').trim();
+    let (digits, percent) = match t.strip_suffix('%') {
+        Some(d) => (d.trim_end(), true),
+        None => (t, false),
+    };
+    let body = digits.strip_prefix(['-', '+']).unwrap_or(digits);
+    if !body.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+        || !body
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'E' | 'e' | '+' | '-'))
+    {
+        return None;
+    }
+    let v: f64 = digits.parse().ok().filter(|v: &f64| v.is_finite())?;
+    Some(if percent {
+        Value::percent(v / 100.0)
+    } else {
+        Value::number(v, None)
+    })
+}
+
+/// The cells of one sheet the logic pass looks at for labels, values and number formats.
+pub(crate) struct SheetFacts {
+    pub name: String,
+    /// Sorted by row, then column, each position once (formula texts dropped).
+    pub cells: Vec<RawCell>,
+    /// Style index of each cell that has one.
+    pub styles: HashMap<(u32, u32), u32>,
+}
+
+impl SheetFacts {
+    pub fn new(
+        name: &str,
+        mut cells: Vec<RawCell>,
+        styles: HashMap<(u32, u32), u32>,
+    ) -> SheetFacts {
+        // Only whether a cell holds a formula matters here; the texts are in the facet.
+        for c in &mut cells {
+            if c.formula.is_some() {
+                c.formula = Some(String::new());
+            }
+        }
+        SheetFacts {
+            name: name.to_string(),
+            cells,
+            styles,
+        }
+    }
+}
+
+/// How the workbook was read, for the logic pass.
+pub(crate) struct ReadState<'a> {
+    pub wb: &'a WorkbookParts,
+    /// Some sheet or part of one was not read, or some formula cells were not listed.
+    pub incomplete: bool,
+}
+
+/// Labels longer than this are text, not labels.
+const MAX_LABEL: usize = 200;
+
+/// Empty cells a label or header may be away from its value.
+const LABEL_GAP: u32 = 3;
+
+/// The kind of edge in the dependency graph: `from` feeds `to` (`to` reads `from`).
+const EDGE_KIND: &str = "feeds";
+
+/// The workbook logic: roles, pattern groups, parameters, the dependency graph and the
+/// stored-results warning. Runs after every sheet and name has been read.
+pub(crate) fn workbook_logic(
+    out: &mut Out,
+    formulas: Formulas,
+    sheets: Vec<SheetFacts>,
+    state: ReadState,
+    budget: &Budget,
+) {
+    stale_results(out, state.wb);
+    let Formulas {
+        inputs,
+        convert_units,
+        named_cells,
+        literal_names,
+        unindexed_formulas,
+        unindexed_names,
+        tables,
+        ..
+    } = formulas;
+    let LogicInputs {
+        workbook,
+        formula_ids,
+    } = inputs;
+    let stop = || budget.check_time().is_err();
+    let logic = match contain(AssertUnwindSafe(|| workbook.finish(&stop))) {
+        Ok(l) => l,
+        Err(panic) => {
+            out.loss(
+                "document",
+                format!("roles, patterns, parameters and the dependency graph not worked out: internal error: {panic}"),
+                LossReason::Internal,
+                Severity::Warning,
+            );
+            return;
+        }
+    };
+    let mut facet_of: Vec<Option<usize>> = Vec::new();
+    for (index, id) in &formula_ids {
+        let i = id.0 as usize;
+        if facet_of.len() <= i {
+            facet_of.resize(i + 1, None);
+        }
+        facet_of[i] = Some(*index);
+    }
+    let facet = |id: FormulaId| facet_of.get(id.0 as usize).copied().flatten();
+
+    // A formula the index does not know may read any cell: no cell is surely a result.
+    let mut gaps = Vec::new();
+    match unindexed_formulas {
+        0 => {}
+        1 => gaps.push("1 formula could not be analyzed".to_string()),
+        n => gaps.push(format!("{n} formulas could not be analyzed")),
+    }
+    match unindexed_names {
+        0 => {}
+        1 => gaps.push("1 defined name could not be analyzed".to_string()),
+        n => gaps.push(format!("{n} defined names could not be analyzed")),
+    }
+    if state.incomplete {
+        gaps.push("not every formula cell was read".to_string());
+    }
+    let certain = gaps.is_empty();
+    if !certain {
+        out.loss(
+            "document",
+            format!(
+                "the workbook logic is incomplete: {}; no formula is marked as a result and read counts may be low",
+                gaps.join("; ")
+            ),
+            LossReason::Uncertain,
+            Severity::Warning,
+        );
+    }
+
+    let formulas_facet = &mut out.doc.facets.formulas;
+    for (id, role) in &logic.roles {
+        let role = match role {
+            KitRole::Constant => Role::Constant,
+            KitRole::Intermediate => Role::Intermediate,
+            KitRole::Result if certain => Role::Result,
+            KitRole::Result => continue,
+        };
+        if let Some(f) = facet(*id).and_then(|i| formulas_facet.get_mut(i)) {
+            f.role = Some(role);
+        }
+    }
+    for g in &logic.groups {
+        if g.members.len() < 2 {
+            continue;
+        }
+        let range = Anchor(format!("{}!{}", quote_sheet(&g.sheet), g.area));
+        for m in &g.members {
+            if let Some(f) = facet(*m).and_then(|i| formulas_facet.get_mut(i)) {
+                f.pattern = Some(g.id.clone());
+                // An array, spill or data table keeps the area it fills.
+                if f.range.is_none() {
+                    f.range = Some(range.clone());
+                }
+            }
+        }
+    }
+    if logic.stopped {
+        let kept = if logic.parameters.is_empty() {
+            "patterns and constant formulas are kept; other roles, parameters and the dependency graph are not set"
+        } else {
+            "roles, patterns and parameters are kept; the dependency graph is not set"
+        };
+        out.loss(
+            "document",
+            format!("time limit reached while the workbook logic was worked out: {kept}"),
+            LossReason::Limit,
+            Severity::Warning,
+        );
+    }
+
+    let mut params = cell_parameters(
+        &logic.parameters,
+        &sheets,
+        state.wb,
+        &convert_units,
+        &named_cells,
+    );
+    params.extend(name_parameters(&out.doc.facets.formulas, literal_names));
+    let total = params.len();
+    for (i, p) in params.into_iter().enumerate() {
+        if let Err(hit) = budget.add_elements(1) {
+            out.loss(
+                "document",
+                format!("{hit}: {} of {total} parameters not listed", total - i),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+            break;
+        }
+        out.doc.facets.parameters.push(p);
+    }
+
+    if !logic.stopped
+        && !logic.graph.nodes.is_empty()
+        && let Some(g) = dependency_graph(out, &logic.graph, &tables, budget)
+    {
+        out.doc.facets.graphs.push(g);
+    }
+}
+
+/// One `Uncertain` warning when the stored results may not match the formulas: manual
+/// calculation, iterative calculation or formulas without a stored result.
+fn stale_results(out: &mut Out, wb: &WorkbookParts) {
+    let mut why = Vec::new();
+    if wb.calc.mode == CalcMode::Manual {
+        why.push("calculation is set to manual".to_string());
+    }
+    if wb.calc.iterate {
+        why.push("iterative calculation is on".to_string());
+    }
+    let missing = out
+        .doc
+        .facets
+        .formulas
+        .iter()
+        .filter(|f| {
+            f.cached.is_none() && !matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
+        })
+        .count();
+    match missing {
+        0 => {}
+        1 => why.push("1 formula has no stored result".to_string()),
+        n => why.push(format!("{n} formulas have no stored result")),
+    }
+    if !why.is_empty() {
+        out.loss(
+            "document",
+            format!("stored results may be old: {}", why.join("; ")),
+            LossReason::Uncertain,
+            Severity::Warning,
+        );
+    }
+}
+
+/// The texts around a value: the label to its left, the text right beside it (where a unit
+/// sits in `Diameter | 10.0 | m`) and the header above it.
+#[derive(Clone, Copy, Default)]
+struct Around<'a> {
+    left: Option<&'a str>,
+    beside: Option<&'a str>,
+    header: Option<&'a str>,
+}
+
+/// The texts around each wanted cell. The label to the left and the header above are at
+/// most [`LABEL_GAP`] empty cells away; the header is the first text cell above a run of
+/// value or formula cells, so every value in a column under `t (m)` finds it. The text
+/// beside is the next cell to the right. One sweep over the sorted cells.
+fn labels_of<'a>(
+    cells: &'a [RawCell],
+    wanted: &HashSet<(u32, u32)>,
+) -> HashMap<(u32, u32), Around<'a>> {
+    let text_of = |c: &'a RawCell| match &c.val {
+        Val::Text(t) if c.formula.is_none() && !c.shared_unknown && !c.text_dropped => {
+            Some(t.as_str())
+        }
+        _ => None,
+    };
+    let label = |t: &'a str| (t.len() <= MAX_LABEL && !t.trim().is_empty()).then_some(t);
+    // Per column: the last row with a cell, and the header for the cells below it.
+    let mut columns: HashMap<u32, (u32, Option<&'a str>)> = HashMap::new();
+    let mut out = HashMap::new();
+    for (i, c) in cells.iter().enumerate() {
+        let header = columns
+            .get(&c.col)
+            .filter(|(last, _)| c.row - last - 1 <= LABEL_GAP)
+            .and_then(|(_, h)| *h);
+        let text = text_of(c);
+        if wanted.contains(&(c.row, c.col)) {
+            let left = i
+                .checked_sub(1)
+                .and_then(|j| cells.get(j))
+                .filter(|p| p.row == c.row && c.col - p.col - 1 <= LABEL_GAP)
+                .and_then(text_of)
+                .and_then(label);
+            let beside = cells
+                .get(i + 1)
+                .filter(|n| n.row == c.row && n.col == c.col + 1)
+                .and_then(text_of);
+            out.insert(
+                (c.row, c.col),
+                Around {
+                    left,
+                    beside,
+                    header,
+                },
+            );
+        }
+        let below = match text {
+            Some(t) => label(t),
+            None if c.val == Val::Empty && c.formula.is_none() => None,
+            None => header,
+        };
+        columns.insert(c.col, (c.row, below));
+    }
+    out
+}
+
+/// The value of a cell as a typed value; a number with a percent format is a percent.
+pub(crate) fn cell_value(val: &Val, code: Option<&str>) -> Option<Value> {
+    match val {
+        Val::Empty => None,
+        Val::Num(v) => match code.map(numfmt::kind_of) {
+            Some(NumKind::Percent) => Some(Value::percent(*v)),
+            _ => Some(Value::number(*v, None)),
+        },
+        Val::Text(s) | Val::Error(s) => Some(Value::Text { value: s.clone() }),
+        Val::Iso(s) => Some(Value::DateTime { value: s.clone() }),
+        Val::Bool(b) => Some(Value::Bool { value: *b }),
+    }
+}
+
+/// Parameters for the constant cells formulas read, with label, value, name and unit.
+fn cell_parameters(
+    found: &[ParamCell],
+    sheets: &[SheetFacts],
+    wb: &WorkbookParts,
+    convert_units: &HashMap<(String, u32, u32), String>,
+    named_cells: &HashMap<(String, u32, u32), String>,
+) -> Vec<Parameter> {
+    let mut out = Vec::with_capacity(found.len());
+    let mut start = 0;
+    while start < found.len() {
+        let sheet = &found[start].sheet;
+        let end = found[start..]
+            .iter()
+            .position(|p| &p.sheet != sheet)
+            .map_or(found.len(), |n| start + n);
+        let group = &found[start..end];
+        start = end;
+        let upper = sheet.to_uppercase();
+        let facts = sheets
+            .iter()
+            .find(|s| &s.name == sheet)
+            .or_else(|| sheets.iter().find(|s| s.name.to_uppercase() == upper));
+        let wanted: HashSet<(u32, u32)> = group.iter().map(|p| (p.at.row, p.at.col)).collect();
+        let labels = facts
+            .map(|f| labels_of(&f.cells, &wanted))
+            .unwrap_or_default();
+        let q = quote_sheet(sheet);
+        for p in group {
+            let (row, col) = (p.at.row, p.at.col);
+            let cell = facts.and_then(|f| {
+                f.cells
+                    .binary_search_by_key(&(row, col), |c| (c.row, c.col))
+                    .ok()
+                    .map(|i| &f.cells[i])
+            });
+            let code = facts
+                .and_then(|f| f.styles.get(&(row, col)))
+                .and_then(|s| wb.styles.number_format(*s));
+            let value = cell.and_then(|c| cell_value(&c.val, code));
+            // Units and column headers describe quantities. Above a text value the text is
+            // as likely the value before it (`g`, `sg`, `lbm`) as a header.
+            let quantity = matches!(value, Some(Value::Number { .. } | Value::Percent { .. }));
+            let mut around = labels.get(&(row, col)).copied().unwrap_or_default();
+            if !quantity {
+                around.beside = None;
+                around.header = None;
+            }
+            let (left_label, left_unit) = around.left.map(units::split_label).unwrap_or_default();
+            let (head_label, head_unit) = around.header.map(units::split_label).unwrap_or_default();
+            // `Diameter | 10.0 | m`: a unit right after the value belongs to the label row.
+            let beside_unit = around
+                .beside
+                .map(str::trim)
+                .filter(|t| units::is_unit(t, true))
+                .map(str::to_string);
+            let key = (upper.clone(), row, col);
+            let unit = left_unit
+                .filter(|_| quantity)
+                .or(beside_unit)
+                .map(|u| (u, "label"))
+                .or_else(|| {
+                    code.filter(|_| quantity)
+                        .and_then(units::from_number_format)
+                        .map(|u| (u, "number-format"))
+                })
+                .or_else(|| {
+                    convert_units
+                        .get(&key)
+                        .filter(|_| quantity)
+                        .map(|u| (u.clone(), "convert"))
+                })
+                .or_else(|| head_unit.map(|u| (u, "header")));
+            let (unit, unit_source) = match unit {
+                Some((u, s)) => (Some(u), Some(s.to_string())),
+                None => (None, None),
+            };
+            out.push(Parameter {
+                anchor: Anchor(format!("{q}!{}", crate::grid::a1(row, col))),
+                name: named_cells.get(&key).cloned(),
+                label: left_label.or(head_label),
+                value,
+                unit,
+                unit_source,
+                read_by: p.read_by,
+            });
+        }
+    }
+    out
+}
+
+/// Parameters for defined names whose whole text is a number; read by the cell formulas
+/// that name them.
+fn name_parameters(facet: &[Formula], literal: Vec<(String, String, Value)>) -> Vec<Parameter> {
+    if literal.is_empty() {
+        return Vec::new();
+    }
+    // A formula may write the name in another case than its definition.
+    let mut counts: HashMap<String, u32> = literal
+        .iter()
+        .map(|(a, _, _)| (a.to_uppercase(), 0))
+        .collect();
+    for f in facet {
+        if matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda)) {
+            continue;
+        }
+        for r in &f.references {
+            if r.0.starts_with("name:")
+                && let Some(n) = counts.get_mut(&r.0.to_uppercase())
+            {
+                *n = n.saturating_add(1);
+            }
+        }
+    }
+    literal
+        .iter()
+        .map(|(anchor, name, value)| Parameter {
+            anchor: Anchor(anchor.clone()),
+            name: Some(name.clone()),
+            label: None,
+            value: Some(value.clone()),
+            unit: None,
+            unit_source: None,
+            read_by: counts.get(&anchor.to_uppercase()).copied().unwrap_or(0),
+        })
+        .collect()
+}
+
+/// The group-level dependency graph. Node anchors are set where they resolve: groups,
+/// formulas, parameter blocks and other workbooks always, names and tables when the
+/// workbook defines them.
+fn dependency_graph(
+    out: &mut Out,
+    graph: &GroupGraph,
+    tables: &[TableLoc],
+    budget: &Budget,
+) -> Option<Graph> {
+    let size = (graph.nodes.len() + graph.edges.len()) as u64;
+    if let Err(hit) = budget.add_elements(size) {
+        out.loss(
+            "document",
+            format!(
+                "{hit}: the dependency graph ({} nodes, {} edges) not listed",
+                graph.nodes.len(),
+                graph.edges.len()
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
+        return None;
+    }
+    let names: HashMap<String, &str> = out
+        .doc
+        .facets
+        .formulas
+        .iter()
+        .filter(|f| matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda)))
+        .map(|f| (f.anchor.0.to_uppercase(), f.anchor.0.as_str()))
+        .collect();
+    let nodes = graph
+        .nodes
+        .iter()
+        .map(|(id, label, kind)| {
+            let anchor = match kind.as_str() {
+                "name" => match label.strip_prefix("table:") {
+                    Some(t) => tables
+                        .iter()
+                        .find(|x| x.name.to_uppercase() == t.to_uppercase())
+                        .map(|x| format!("table:{}", x.name)),
+                    None => names.get(&label.to_uppercase()).map(|a| a.to_string()),
+                },
+                _ => Some(label.clone()),
+            };
+            Node {
+                id: id.clone(),
+                label: label.clone(),
+                kind: Some(kind.clone()),
+                anchor: anchor.map(Anchor),
+            }
+        })
+        .collect();
+    let edges = graph
+        .edges
+        .iter()
+        .map(|(from, to)| Edge {
+            from: from.clone(),
+            to: to.clone(),
+            kind: EDGE_KIND.to_string(),
+            anchor: None,
+        })
+        .collect();
+    Some(Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes,
+        edges,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use rezzer_limits::Limits;
+    use rezzer_model::{Confidence, Detection, Document, FormatId, SourceInfo};
+
+    use super::*;
+
+    fn out() -> Out {
+        Out::new(Document::new(SourceInfo {
+            path: None,
+            name: "t.xlsx".into(),
+            sha256: String::new(),
+            size: 0,
+            format: FormatId::Xlsx,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "test".into(),
+            },
+            modified: None,
+            encoding: None,
+            reader: None,
+        }))
+    }
+
+    /// A1:A3 values and B1:B3 copies of `=A1*2`.
+    fn copies(out: &mut Out) -> Formulas {
+        let mut formulas = Formulas::new(&[], u64::MAX);
+        for row in 0..3 {
+            formulas.add_constant("S", row, 0);
+            let index = out.doc.facets.formulas.len();
+            let (f, problem) = formulas.cell(
+                "S",
+                row,
+                1,
+                &format!("A{}*2", row + 1),
+                FormulaKind::Cell,
+                None,
+                Some(Value::number(2.0, None)),
+                index,
+            );
+            assert!(problem.is_none());
+            out.doc.facets.formulas.push(f);
+        }
+        formulas
+    }
+
+    #[test]
+    fn stopped_logic_keeps_patterns_and_says_so() {
+        let mut out = out();
+        let formulas = copies(&mut out);
+        let wb = WorkbookParts::default();
+        let budget = Budget::new(Limits::default());
+        budget.cancel();
+        let state = ReadState {
+            wb: &wb,
+            incomplete: false,
+        };
+        workbook_logic(&mut out, formulas, Vec::new(), state, &budget);
+        let doc = &out.doc;
+        for f in &doc.facets.formulas {
+            assert_eq!(f.pattern.as_deref(), Some("p1"));
+            assert_eq!(f.range.as_ref().map(|a| a.0.as_str()), Some("S!B1:B3"));
+            assert_eq!(f.role, None);
+        }
+        assert!(doc.facets.parameters.is_empty());
+        assert!(doc.facets.graphs.is_empty());
+        assert!(
+            doc.losses.iter().any(|l| l.why == LossReason::Limit
+                && l.what
+                    .starts_with("time limit reached while the workbook logic")),
+            "{:#?}",
+            doc.losses
+        );
+        assert!(out.partial);
+    }
+
+    #[test]
+    fn convert_calls_and_literals() {
+        let calls = calls_of(
+            "=A1+convert(B1,\"m\",\"ft\")*CONVERT(C1,\"g\",\"kg\")",
+            "CONVERT",
+        );
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], ["B1", "\"m\"", "\"ft\""]);
+        assert!(calls_of("=\"CONVERT(B1,1,2)\"&MYCONVERT(B1,1,2)", "CONVERT").is_empty());
+        assert_eq!(text_literal("\"a\"\"b\""), Some("a\"b".into()));
+        assert_eq!(text_literal("B1"), None);
+        assert_eq!(literal_number("0.05"), Some(Value::number(0.05, None)));
+        assert_eq!(literal_number("=-3"), Some(Value::number(-3.0, None)));
+        assert_eq!(literal_number("5%"), Some(Value::percent(0.05)));
+        assert_eq!(literal_number("1.5E-3"), Some(Value::number(0.0015, None)));
+        for t in ["inf", "NaN", "A1", "1+2", "\"5\"", ""] {
+            assert_eq!(literal_number(t), None, "{t}");
+        }
+    }
 }

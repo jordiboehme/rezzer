@@ -14,6 +14,7 @@
 mod grid;
 mod logic;
 mod package;
+mod units;
 mod xlsx;
 
 use rezzer_limits::Budget;
