@@ -243,7 +243,13 @@ fn corpus_manifest_matches_the_files() {
     use sha2::{Digest, Sha256};
     let manifest = std::fs::read_to_string(corpus_dir().join("MANIFEST.md")).unwrap();
     let mut listed = std::collections::BTreeMap::new();
-    for line in manifest.lines().filter(|l| l.starts_with("| web-text/")) {
+    for line in manifest.lines().filter(|l| {
+        l.starts_with("| ")
+            && l[2..]
+                .split(" |")
+                .next()
+                .is_some_and(|c| c.contains('/') && !c.contains(' '))
+    }) {
         let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
         assert_eq!(cells.len(), 4, "bad row: {line}");
         assert!(
@@ -255,7 +261,13 @@ fn corpus_manifest_matches_the_files() {
     }
     let mut problems = Vec::new();
     for file in corpus_files() {
-        let rel = format!("web-text/{}", file.file_name().unwrap().to_string_lossy());
+        let rel = file
+            .strip_prefix(corpus_dir())
+            .unwrap()
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("/");
         let hash = hex::encode(Sha256::digest(std::fs::read(&file).unwrap()));
         match listed.remove(&rel) {
             None => problems.push(format!("{rel}: not in MANIFEST.md")),
