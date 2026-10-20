@@ -503,7 +503,7 @@ fn xlsm_end_to_end_exit_0() {
         .arg(&book)
         .assert()
         .code(0)
-        .stdout(predicate::str::contains("format: xlsm"));
+        .stdout(predicate::str::contains("format: xlsm").and(predicate::str::contains("## Logic")));
 }
 
 #[test]
