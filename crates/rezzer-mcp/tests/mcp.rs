@@ -157,6 +157,7 @@ async fn rez_requires_exactly_one_input() {
             message.contains("exactly one of path, file or source"),
             "{message}"
         );
+        assert!(!message.ends_with('.'), "{message}");
     }
     // No arguments at all is the same rule.
     let result = client
@@ -222,7 +223,7 @@ async fn rez_source_is_not_available_yet() {
     .await;
     let s = structured(&result);
     assert_eq!(s["status"], "failed");
-    assert_eq!(s["message"], "The source archive is not available yet.");
+    assert_eq!(s["message"], "The source archive is not available yet");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -469,6 +470,7 @@ async fn wrong_types_are_failed_results_with_structured_content() {
         assert_eq!(s["pages"], 0, "{args}");
         let message = s["message"].as_str().unwrap();
         assert!(message.starts_with(field), "{args}: {message}");
+        assert!(!message.ends_with('.'), "{args}: {message}");
         assert_eq!(text(&result), message);
     }
     let result = call(&client, "inspect", json!({ "path": 5 })).await;
@@ -507,14 +509,14 @@ async fn rez_input_schema_types_format_and_marks_the_file() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn bad_base64_message_has_one_period() {
+async fn bad_base64_message_has_no_final_period() {
     let client = connect(config()).await;
     let result = call(&client, "rez", json!({ "file": "data:;base64,YW$j" })).await;
     let message = structured(&result)["message"].as_str().unwrap().to_string();
     assert!(message.contains("base64"), "{message}");
     assert!(
-        message.ends_with('.') && !message.ends_with(".."),
-        "{message}"
+        !message.ends_with('.'),
+        "error messages end without a period, as on the CLI: {message}"
     );
 }
 

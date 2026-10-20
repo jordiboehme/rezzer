@@ -17,11 +17,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 /// Message for a `source` reference, until the source archive exists.
-pub const SOURCE_NOT_AVAILABLE: &str = "The source archive is not available yet.";
+pub const SOURCE_NOT_AVAILABLE: &str = "The source archive is not available yet";
 /// Message for an `mcp-file:` reference.
-pub const MCP_FILE_NOT_SUPPORTED: &str = "mcp-file references are not supported yet.";
+pub const MCP_FILE_NOT_SUPPORTED: &str = "mcp-file references are not supported yet";
 /// Message when not exactly one input is given.
-pub const EXACTLY_ONE_INPUT: &str = "Give exactly one of path, file or source.";
+pub const EXACTLY_ONE_INPUT: &str = "Give exactly one of path, file or source";
 
 /// The file name used for a data: URI without `;name=`.
 const DEFAULT_NAME: &str = "file";
@@ -75,7 +75,7 @@ impl RezParams {
             None => None,
             Some(value) => Some(integer(&value).ok_or_else(|| {
                 format!(
-                    "page must be an integer (1 or higher), not {}.",
+                    "page must be an integer (1 or higher), not {}",
                     shown(&value)
                 )
             })?),
@@ -88,7 +88,7 @@ impl RezParams {
                     .map(|item| match item {
                         Value::String(name) => Ok(name),
                         other => Err(format!(
-                            "sections must be a list of section names, but it holds {}.",
+                            "sections must be a list of section names, but it holds {}",
                             shown(&other)
                         )),
                     })
@@ -96,7 +96,7 @@ impl RezParams {
             ),
             Some(other) => {
                 return Err(format!(
-                    "sections must be a list of section names, not {}.",
+                    "sections must be a list of section names, not {}",
                     shown(&other)
                 ));
             }
@@ -139,7 +139,7 @@ fn string(args: &mut Map<String, Value>, key: &str) -> Result<Option<String>, St
     match take(args, key) {
         None => Ok(None),
         Some(Value::String(s)) => Ok(Some(s)),
-        Some(other) => Err(format!("{key} must be a string, not {}.", shown(&other))),
+        Some(other) => Err(format!("{key} must be a string, not {}", shown(&other))),
     }
 }
 
@@ -210,13 +210,13 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
         None | Some("markdown") => OutputKind::Markdown,
         Some("json") => OutputKind::Json,
         Some(other) => {
-            return rez_failed(format!("format must be markdown or json, not {other:?}."));
+            return rez_failed(format!("format must be markdown or json, not {other:?}"));
         }
     };
     let page = match params.page {
         None => 1,
         Some(n) if n >= 1 => usize::try_from(n).unwrap_or(usize::MAX),
-        Some(n) => return rez_failed(format!("page must be 1 or higher, not {n}.")),
+        Some(n) => return rez_failed(format!("page must be 1 or higher, not {n}")),
     };
     let sections = match params.sections.take() {
         None => None,
@@ -226,7 +226,7 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(sections) => Some(sections),
-            Err(message) => return rez_failed(format!("{message}.")),
+            Err(message) => return rez_failed(message),
         },
     };
     let request = Request {
@@ -277,7 +277,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         return rez_failed(
             result
                 .message
-                .unwrap_or_else(|| "The file could not be read.".to_string()),
+                .unwrap_or_else(|| "The file could not be read".to_string()),
         );
     };
     let rendered = match output {
@@ -289,7 +289,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         let message = result
             .message
             .clone()
-            .unwrap_or_else(|| "The file was read, but no output came out of it.".to_string());
+            .unwrap_or_else(|| "The file was read, but no output came out of it".to_string());
         let structured = RezOutput {
             status: "failed",
             page: None,
@@ -327,7 +327,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
     };
     let Some(text) = text.filter(|_| page <= pages) else {
         let noun = if pages == 1 { "page" } else { "pages" };
-        let message = format!("page {page} does not exist: the output has {pages} {noun}.");
+        let message = format!("page {page} does not exist: the output has {pages} {noun}");
         structured.status = "failed";
         structured.page = None;
         structured.message = Some(message.clone());
@@ -402,7 +402,7 @@ pub fn inspect(pipeline: &Pipeline, args: Map<String, Value>) -> Answer {
         Err(message) => return simple_failed(message),
     };
     let Some(path) = params.path else {
-        return simple_failed("inspect needs a path.".to_string());
+        return simple_failed("inspect needs a path".to_string());
     };
     let info = match pipeline.inspect(Path::new(&path)) {
         Ok(info) => info,
@@ -489,12 +489,12 @@ pub fn parse_file_uri(uri: String, max: u64) -> Result<FileData, String> {
     }
     if !starts_with_ignore_case(trimmed, "data:") {
         return Err(
-            "file must be a data: URI, for example data:text/csv;name=a.csv;base64,<data>."
+            "file must be a data: URI, for example data:text/csv;name=a.csv;base64,<data>"
                 .to_string(),
         );
     }
     let Some((header, data)) = trimmed["data:".len()..].split_once(',') else {
-        return Err("the data: URI has no comma before the data.".to_string());
+        return Err("the data: URI has no comma before the data".to_string());
     };
     let tokens: Vec<&str> = header.split(';').map(str::trim).collect();
     let mut mime = None;
@@ -512,7 +512,7 @@ pub fn parse_file_uri(uri: String, max: u64) -> Result<FileData, String> {
         {
             let decoded = percent_encoding::percent_decode_str(value.trim())
                 .decode_utf8()
-                .map_err(|_| "the name in the data: URI is not valid UTF-8.".to_string())?;
+                .map_err(|_| "the name in the data: URI is not valid UTF-8".to_string())?;
             name = Some(file_name(&decoded));
         }
     }
@@ -594,7 +594,7 @@ fn decode_base64(data: &[u8], size: usize) -> Result<Vec<u8>, String> {
             }
             base64::DecodeError::InvalidPadding => "the padding is not valid".to_string(),
         };
-        format!("the base64 data in the data: URI is not valid: {detail}.")
+        format!("the base64 data in the data: URI is not valid: {detail}")
     };
     // decode_vec reserves its estimate, at most two bytes over the exact size.
     let mut out = Vec::with_capacity(size + 3);
@@ -734,7 +734,7 @@ mod tests {
             err.contains(&format!("at symbol {}", BASE64_CHUNK + 5)),
             "{err}"
         );
-        assert!(err.ends_with("not base64."), "{err}");
+        assert!(err.ends_with("not base64"), "{err}");
     }
 
     #[test]

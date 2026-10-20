@@ -146,7 +146,7 @@ impl RezzerServer {
                 } else {
                     "was cancelled"
                 };
-                tools::simple_failed(format!("The call {reason}."))
+                tools::simple_failed(format!("The call {reason}"))
             });
         into_result(answer)
     }
