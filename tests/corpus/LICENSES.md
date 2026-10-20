@@ -919,3 +919,101 @@ Source of the text: https://raw.githubusercontent.com/alokpalai/underground-tunn
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
+
+## PDF corpus (`pdf/`)
+
+The PDF files were downloaded on 2026-10-19 (and checked again on 2026-10-20) from the raw form of the pinned commit URLs in `MANIFEST.md` and left byte for byte unchanged. Each SHA-256 was checked against `docs/spike-2026-10-19/MANIFEST-pdf.md`. The two large files that are only in `remote.tsv` are not in the repo.
+
+### Attribution and share-alike license (CC BY-SA 4.0)
+
+License text: https://creativecommons.org/licenses/by-sa/4.0/legalcode . Source: the py-pdf sample-files repository, https://github.com/py-pdf/sample-files/tree/02b8203bf416db3dbdb03438bc8278dfcb0555f3 . The README of the repository says: "Every PDF in this repository is under the Creative Commons Attribution-ShareAlike License (CC-BY-SA-4.0)." The files are not changed. Authors are the contributors of the repository, named in its history and in the document properties of each file. Files: `pdf/pypdf-annotated.pdf`, `pypdf-arabic-habibi.pdf`, `pypdf-attachment.pdf`, `pypdf-libreoffice-form.pdf`, `pypdf-multicolumn.pdf`, `pypdf-outline.pdf`, `pypdf-xmp.pdf`, `pypdf-ocg-layers.pdf`. The share-alike term applies to these files and to adaptations of them, not to Rezzer code that only reads them.
+
+### Attribution license (CC BY 4.0)
+
+License text: https://creativecommons.org/licenses/by/4.0/legalcode . `pdf/arxiv-2408.09869-docling-report.pdf` (remote only): "Docling Technical Report", arXiv:2408.09869v5, https://arxiv.org/abs/2408.09869 , by Christoph Auer and others (IBM Research), licensed CC BY 4.0 according to the arXiv record. The file is not changed.
+
+### Public domain
+
+- `pdf/irs-f1040-2025.pdf`: Form 1040 (2025), Internal Revenue Service, https://www.irs.gov/pub/irs-pdf/f1040.pdf . Work of the US government, public domain.
+- `pdf/nist-sp800-53r5.pdf` (remote only): NIST Special Publication 800-53 Revision 5, https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf . Work of the US government (NIST), public domain.
+- `pdf/pdfbox-sf1199a-direct-deposit.pdf`: Standard Form 1199A, US Department of the Treasury. Work of the US government, public domain. It was found in the Apache PDFBox test resources.
+- `pdf/scan-truman-letter-nara.pdf`: letter from Harry S. Truman to Eleanor Roosevelt, National Archives and Records Administration via the Digital Public Library of America, public domain on Wikimedia Commons (page named in `MANIFEST.md`).
+- `pdf/pdfbox-poems-article-threads.pdf` has public domain poems (Goethe and others) as text. The file itself is an Apache PDFBox test resource (Apache-2.0).
+
+### Apache-2.0 sources
+
+The license text is the Apache License 2.0 above (section "Spreadsheet corpus").
+
+- pdf.js test files (Apache-2.0): `pdf/pdfjs-*.pdf`. Source: https://github.com/mozilla/pdf.js/tree/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/test/pdfs . Copyright Mozilla and individual contributors; the annotation files were made for the pdf.js test suite by Tim van der Meij. The repository has no NOTICE file at this commit (https://raw.githubusercontent.com/mozilla/pdf.js/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/NOTICE returns "not found"), so there is no notice text to include. License: https://raw.githubusercontent.com/mozilla/pdf.js/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/LICENSE .
+- qpdf test files (Apache-2.0): `pdf/qpdf-*.pdf`. Source: https://github.com/qpdf/qpdf/tree/4eba95899886e851cc41d76886483b347612f2a8/qpdf/qtest/qpdf . Copyright Jay Berkenbilt and Manfred Holger. NOTICE: `NOTICE.md` of the repository, reproduced below.
+- Apache PDFBox test resources (Apache-2.0): `pdf/pdfbox-*.pdf`. Source: https://github.com/apache/pdfbox/tree/ccb7498b942d99d7644f4c1d14906b646f814d84 . Copyright The Apache Software Foundation. NOTICE: `NOTICE.txt` of the repository, reproduced below.
+
+NOTICE of qpdf (section 4(d) of the license), source: https://raw.githubusercontent.com/qpdf/qpdf/4eba95899886e851cc41d76886483b347612f2a8/NOTICE.md
+
+    qpdf is copyright (c) 2005-2021 Jay Berkenbilt, 2022-2026 Jay Berkenbilt and Manfred Holger
+    
+    Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+    
+      http://www.apache.org/licenses/LICENSE-2.0
+    
+    Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+    
+    Versions of qpdf prior to version 7 were released under the terms of version 2.0 of the Artistic License. At your option, you may continue to consider qpdf to be licensed under those terms. Please see the manual for additional information.
+    
+    The qpdf distribution includes a copy of [qtest](https://qtest.sourceforge.io), which is released under the terms of the [version 2.0 of the Artistic license](https://opensource.org/licenses/Artistic-2.0), which can be found at https://opensource.org/licenses/Artistic-2.0.
+    
+    The Rijndael encryption implementation used as the basis for AES encryption and decryption support comes from Philip J. Erdelsky's public domain implementation.  The files `libqpdf/rijndael.cc` and `libqpdf/qpdf/rijndael.h` remain in the public domain.  They were obtained from
+    * http://www.efgh.com/software/rijndael.htm
+    * http://www.efgh.com/software/rijndael.txt
+    
+    The embedded sha2 code comes from sphlib 3.0
+    * http://www.saphir2.com/sphlib/
+    
+    That code has the following license:
+      ```
+      Copyright (c) 2007-2011  Projet RNRT SAPHIR
+    
+      Permission is hereby granted, free of charge, to any person obtaining
+      a copy of this software and associated documentation files (the
+      "Software"), to deal in the Software without restriction, including
+      without limitation the rights to use, copy, modify, merge, publish,
+      distribute, sublicense, and/or sell copies of the Software, and to
+      permit persons to whom the Software is furnished to do so, subject to
+      the following conditions:
+    
+      The above copyright notice and this permission notice shall be included
+      in all copies or substantial portions of the Software.
+    
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+      MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+      IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+      CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+      TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+      SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+      ```
+
+NOTICE of Apache PDFBox (section 4(d) of the license), source: https://raw.githubusercontent.com/apache/pdfbox/ccb7498b942d99d7644f4c1d14906b646f814d84/NOTICE.txt
+
+    Apache PDFBox
+    Copyright 2014 The Apache Software Foundation
+    
+    This product includes software developed at
+    The Apache Software Foundation (http://www.apache.org/).
+    
+    Based on source code originally developed in the PDFBox and 
+    FontBox projects.
+    
+    Copyright (c) 2002-2007, www.pdfbox.org
+    
+    Based on source code originally developed in the PaDaF project.
+    Copyright (c) 2010 Atos Worldline SAS
+    
+    Includes the Adobe Glyph List
+    Copyright 1997, 1998, 2002, 2007, 2010 Adobe Systems Incorporated.
+    
+    Includes the Zapf Dingbats Glyph List
+    Copyright 2002, 2010 Adobe Systems Incorporated.
+    
+    Includes OSXAdapter
+    Copyright (C) 2003-2007 Apple, Inc., All Rights Reserved

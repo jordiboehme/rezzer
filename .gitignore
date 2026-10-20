@@ -8,3 +8,5 @@
 /fuzz/corpus
 /fuzz/artifacts
 *.snap.new
+/tests/corpus/pdf/nist-sp800-53r5.pdf
+/tests/corpus/pdf/arxiv-2408.09869-docling-report.pdf

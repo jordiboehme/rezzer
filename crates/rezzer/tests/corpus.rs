@@ -375,6 +375,69 @@ fn office_corpus_matches_manifest() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
+/// Every file in `pdf/` is listed in MANIFEST.md with its full SHA-256, every `pdf/` row has a
+/// file, and no file is over 2 MB. The two large files that are not in the repo are listed in
+/// `remote.tsv` only: they may be absent, and when present they must match their hash.
+#[test]
+fn pdf_corpus_matches_manifest() {
+    let mut listed = manifest_rows();
+    listed.retain(|k, _| k.starts_with("pdf/"));
+    assert_eq!(listed.len(), 32, "expected 32 pdf rows");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(corpus_dir().join("pdf"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    let remote = remote_rows();
+    let mut problems = Vec::new();
+    for file in &files {
+        let rel = relative(file);
+        if let Some(expected) = remote.get(&rel) {
+            if sha256_of(file) != *expected {
+                problems.push(format!("{rel}: hash differs from remote.tsv"));
+            }
+            continue;
+        }
+        let len = std::fs::metadata(file).unwrap().len();
+        if len > 2 * 1024 * 1024 {
+            problems.push(format!("{rel}: {len} bytes, over 2 MB"));
+        }
+        match listed.remove(&rel) {
+            None => problems.push(format!("{rel}: not in MANIFEST.md")),
+            Some(h) if h.len() != 64 => problems.push(format!("{rel}: not a full SHA-256")),
+            Some(h) if h != sha256_of(file) => problems.push(format!("{rel}: hash differs")),
+            Some(_) => {}
+        }
+    }
+    problems.extend(listed.keys().map(|k| format!("{k}: no such file")));
+    for name in [
+        "pdf/nist-sp800-53r5.pdf",
+        "pdf/arxiv-2408.09869-docling-report.pdf",
+    ] {
+        if !remote.contains_key(name) {
+            problems.push(format!("{name}: not in remote.tsv"));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The `pdf/` rows of `remote.tsv` (path, SHA-256): large files that are fetched, not committed.
+fn remote_rows() -> std::collections::BTreeMap<String, String> {
+    let list = std::fs::read_to_string(corpus_dir().join("remote.tsv")).unwrap();
+    let mut rows = std::collections::BTreeMap::new();
+    for line in list
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let cells: Vec<&str> = line.split('\t').collect();
+        assert_eq!(cells.len(), 3, "bad remote.tsv row: {line}");
+        assert!(cells[1].starts_with("https://"), "not https: {line}");
+        assert_eq!(cells[2].len(), 64, "not a full SHA-256: {line}");
+        rows.insert(cells[0].to_string(), cells[2].to_string());
+    }
+    rows
+}
+
 // The spreadsheet corpus: what each workbook proves. The checks read the model JSON (and the
 // Markdown only for what exists only there), so a change of layout does not break them.
 
