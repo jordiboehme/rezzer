@@ -227,11 +227,7 @@ pub(crate) fn build(
     };
     let mut budget = Budget::new(limits, stop, bytes.len());
     let mut issues = Vec::new();
-    // A chain with no entry for the catalog it names is no better than a damaged one.
-    let chain = read_chain(bytes, base, &mut budget)?.filter(|c| {
-        matches!(c.trailer.get(b"Root"), Ok(Object::Reference(r)) if c.table.contains_key(&r.0))
-    });
-    let (table, trailer, scanned) = match chain {
+    let (table, trailer, scanned) = match read_chain(bytes, base, &mut budget)? {
         Some(chain) => {
             issues.extend(chain.issues);
             (chain.table, chain.trailer, None)
@@ -248,11 +244,12 @@ pub(crate) fn build(
         }
     };
     let mut store = Store::new(bytes, base, table, budget, scanned);
-    if !matches!(trailer.get(b"Root"), Ok(Object::Reference(_))) {
+    let Ok(Object::Reference(root)) = trailer.get(b"Root") else {
         return Err(OpenError::Damaged(
             "the file has no document catalog".into(),
         ));
-    }
+    };
+    store.root = Some(*root);
     let mut encryption = None;
     if let Some((crypt, enc)) = crypt::setup(&mut store, &trailer, password)? {
         store.crypt = Some(crypt);

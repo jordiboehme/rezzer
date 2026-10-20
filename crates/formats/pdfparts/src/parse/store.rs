@@ -41,6 +41,9 @@ pub(crate) struct Store<'a> {
     lengths: HashMap<ObjectId, Option<i64>>,
     /// The header found at each position read so far.
     headers: HashMap<usize, Option<ObjectId>>,
+    /// The catalog the trailer names. When the table cannot give it, the file is scanned for
+    /// it, as for an entry that points at another object.
+    pub root: Option<ObjectId>,
     pub issues: Vec<Issue>,
 }
 
@@ -64,6 +67,7 @@ impl<'a> Store<'a> {
             busy: HashSet::new(),
             lengths: HashMap::new(),
             headers: HashMap::new(),
+            root: None,
             issues: Vec::new(),
         };
         if scanned.is_some() {
@@ -96,6 +100,7 @@ impl<'a> Store<'a> {
             return Ok(None);
         }
         let mut tried = None;
+        let root = self.root == Some(id);
         match self.entry(id.0) {
             Some(Entry::Normal { pos, generation }) if generation == id.1 => {
                 if let Some(o) = self.top(id, pos, true)? {
@@ -104,10 +109,14 @@ impl<'a> Store<'a> {
                 tried = Some(pos);
             }
             Some(Entry::Compressed { container, .. }) if id.1 == 0 => {
-                return self.member(id.0, container);
+                let found = self.member(id.0, container)?;
+                if found.is_some() || !root {
+                    return Ok(found);
+                }
             }
-            Some(_) => return Ok(None),
-            None if self.scanned.is_none() => return Ok(None),
+            Some(_) if !root => return Ok(None),
+            Some(_) => {}
+            None if self.scanned.is_none() && !root => return Ok(None),
             None => {}
         }
         match self.scanned_pos(id)? {

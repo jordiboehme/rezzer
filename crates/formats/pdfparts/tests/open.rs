@@ -759,3 +759,50 @@ fn table_without_the_catalog_is_rebuilt() {
         pdf.issues()
     );
 }
+
+#[test]
+fn catalog_with_another_generation_is_rebuilt() {
+    // The table lists object 1 with generation 1, the trailer names 1 0 R.
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let one = out.len();
+    out.extend(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    let two = out.len();
+    out.extend(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    let three = out.len();
+    out.extend(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n");
+    let x = out.len();
+    out.extend(
+        format!(
+            "xref\n0 4\n0000000000 65535 f \n{one:010} 00001 n \n{two:010} 00000 n \n{three:010} 00000 n \n"
+        )
+        .as_bytes(),
+    );
+    out.extend(format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes());
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(
+        pdf.issues().iter().any(|i| i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
+    );
+}
+
+#[test]
+fn catalog_missing_from_its_object_stream_is_rebuilt() {
+    // The table puts the catalog in an object stream that does not hold it; the catalog is a
+    // plain object in the file.
+    let mut raw = common::Raw::new();
+    raw.junk(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    raw.object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    raw.object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>");
+    raw.object_stream(10, &[(5, b"null")]);
+    raw.member(1, 10, 1);
+    let out = raw.finish(1, "");
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(
+        pdf.issues().iter().any(|i| i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
+    );
+}
