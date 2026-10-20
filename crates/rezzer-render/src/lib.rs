@@ -113,7 +113,18 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let mut out = frontmatter::render(doc, completeness, opts);
     let title = frontmatter::title(doc).trim();
     out.push('\n');
-    out.push_str(&blocks::heading_line(1, &blocks::line_text(title)));
+    // The heading that became the title keeps its links.
+    let title_line = match doc.body.first() {
+        Some(Block::Heading {
+            level: 1, inlines, ..
+        }) if plain_text(inlines, 0).trim() == title => {
+            blocks::inlines(inlines, blocks::Mode::Line)
+                .trim()
+                .to_string()
+        }
+        _ => blocks::line_text(title),
+    };
+    out.push_str(&blocks::heading_line(1, &title_line));
     out.push('\n');
 
     let mut parts: Vec<String> = Vec::new();

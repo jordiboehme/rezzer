@@ -1820,8 +1820,68 @@ fn wikilinks_with_formatting_in_the_text_fall_back() {
 #[test]
 fn plain_wikilinks_in_any_script_are_written() {
     assert!(
-        render_inline(wiki_link("Straße/日本語 note-1_x.md#Sec, it's", "Straße"))
-            .ends_with("[[Straße/日本語 note-1_x.md#Sec, it's|Straße]]")
+        render_inline(wiki_link("Straße/日本語 note-1x.md#Sec, it's", "Straße"))
+            .ends_with("[[Straße/日本語 note-1x.md#Sec, it's|Straße]]")
     );
     assert!(!render_inline(wiki_link("http://x", "http://x")).contains("[["));
+}
+
+fn plain_link(target: &str, text: &str) -> Inline {
+    Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: false,
+        wiki: false,
+        inlines: vec![txt(text)],
+    }
+}
+
+#[test]
+fn headings_keep_their_links() {
+    let mut d = doc();
+    d.properties.title = Some("H a".into());
+    d.body = vec![
+        Block::Heading {
+            level: 1,
+            inlines: vec![txt("H "), plain_link("https://b.example/x", "a")],
+            anchor: Some(Anchor("h:h-a".into())),
+        },
+        Block::Heading {
+            level: 2,
+            inlines: vec![txt("Sub "), plain_link("https://b.example/y", "b")],
+            anchor: None,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\n# H [a](https://b.example/x)\n"), "{md}");
+    assert!(md.contains("\n## Sub [b](https://b.example/y)\n"), "{md}");
+}
+
+#[test]
+fn underscores_keep_a_wikilink_from_being_written() {
+    for name in ["_b_", "__init__", "a_b"] {
+        let out = render_inline(wiki_link(name, name));
+        assert!(!out.contains("[["), "{out}");
+    }
+}
+
+#[test]
+fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
+    let mut d = doc();
+    d.body = vec![Block::Table {
+        caption: None,
+        header_rows: 0,
+        role: None,
+        rows: vec![vec![
+            Cell::new(vec![wiki_link("x", "y")]),
+            Cell::new(vec![wiki_link("same", "same")]),
+        ]],
+        alignments: Vec::new(),
+        anchor: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(!md.contains("[[x|y]]"), "{md}");
+    let row = md.lines().find(|l| l.contains("same")).expect("row");
+    assert_eq!(row.matches(" | ").count(), 1, "{row}");
+    assert!(row.contains("[[same]]"), "{row}");
 }

@@ -296,7 +296,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 }
                 return;
             }
-            if *wiki && let Some(written) = wikilink(target, content) {
+            if *wiki && let Some(written) = wikilink(target, content, mode) {
                 out.push_str(&written);
                 return;
             }
@@ -1412,16 +1412,16 @@ fn column_letter(mut index: usize) -> String {
 }
 
 /// Characters allowed in a wikilink written as `[[...]]`: letters and digits of any script,
-/// space and `- _ . / # ' ,`. Nothing here has a Markdown or HTML meaning inside `[[ ]]`.
+/// space and `- . / # ' ,` (no `_`: it can mean emphasis). Nothing here has a Markdown or HTML meaning inside `[[ ]]`.
 fn wiki_plain(text: &str) -> bool {
     text.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '/' | '#' | '\'' | ','))
+        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '/' | '#' | '\'' | ','))
 }
 
 /// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None unless the
 /// target (without a `:`) and the text are plain (see [`wiki_plain`]) and the text has no
 /// formatting, image or code; the link is then written as a normal, escaped link.
-fn wikilink(target: &str, content: &[Inline]) -> Option<String> {
+fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
     let mut text = String::new();
     for inline in content {
         match inline {
@@ -1440,6 +1440,9 @@ fn wikilink(target: &str, content: &[Inline]) -> Option<String> {
     }
     if text.is_empty() || text == target {
         Some(format!("[[{target}]]"))
+    } else if mode == Mode::Cell {
+        // The `|` of `[[target|text]]` would split the table cell.
+        None
     } else {
         Some(format!("[[{target}|{text}]]"))
     }
