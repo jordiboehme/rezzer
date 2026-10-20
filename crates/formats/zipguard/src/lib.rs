@@ -12,7 +12,7 @@
 //! assert!(Archive::open(b"not a zip", Limits::default()).is_err());
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::{self, Cursor, Read};
 
@@ -26,7 +26,8 @@ pub struct Limits {
     pub max_entries: usize,
     /// Most unpacked bytes of one entry.
     pub max_entry_bytes: u64,
-    /// Most unpacked bytes over all reads of this archive.
+    /// Most unpacked bytes of the whole archive: the sum over its distinct entries. An
+    /// entry read again counts once.
     pub max_total_bytes: u64,
     /// Most unpacked bytes per compressed byte of one entry.
     pub max_ratio: u64,
@@ -78,7 +79,10 @@ pub struct Archive<'a> {
     names: Vec<String>,
     index: HashSet<String>,
     limits: Limits,
+    /// The sum of `seen`.
     unpacked: u64,
+    /// The most bytes unpacked so far from each entry.
+    seen: HashMap<String, u64>,
 }
 
 impl<'a> Archive<'a> {
@@ -112,6 +116,7 @@ impl<'a> Archive<'a> {
             index,
             limits,
             unpacked: 0,
+            seen: HashMap::new(),
         })
     }
 
@@ -137,7 +142,8 @@ impl<'a> Archive<'a> {
         self.pump(name, None)
     }
 
-    /// Bytes unpacked so far by `read` and `measure`.
+    /// Bytes unpacked so far by `read` and `measure`, each entry counted once: a second
+    /// read of an entry adds only what it unpacks beyond the first, normally nothing.
     pub fn unpacked(&self) -> u64 {
         self.unpacked
     }
@@ -147,7 +153,11 @@ impl<'a> Archive<'a> {
             return Err(ZipError::Missing(name.to_string()));
         }
         let limits = self.limits;
-        let remaining = limits.max_total_bytes.saturating_sub(self.unpacked);
+        // What this entry unpacked before is already counted, so a re-read may use it again.
+        let before = self.seen.get(name).copied().unwrap_or(0);
+        let remaining = limits
+            .max_total_bytes
+            .saturating_sub(self.unpacked - before);
         let mut file = self.zip.by_name(name).map_err(|e| match e {
             RawError::FileNotFound => ZipError::Missing(name.to_string()),
             other => entry_error(name, other),
@@ -204,7 +214,10 @@ impl<'a> Archive<'a> {
                 out.extend_from_slice(&buf[..n]);
             }
         }
-        self.unpacked = self.unpacked.saturating_add(count);
+        if count > before {
+            self.unpacked = self.unpacked.saturating_add(count - before);
+            self.seen.insert(name.to_string(), count);
+        }
         match failure {
             Some(err) => Err(err),
             None => Ok(count),

@@ -4,6 +4,7 @@ zipguard opens a ZIP archive that you do not trust and keeps it inside limits.
 
 - Limits for the number of entries, the size of one entry, the size of all entries together and the compression ratio
 - The limits count the bytes that are really unpacked. A size written in the archive header is never believed
+- Each entry counts once toward the total, even when you read it again
 - Names with `..`, absolute paths or a NUL byte are refused
 - An archive that can be read in two ways is refused: two entries with the same name, a local header that names another file than the central directory, or entries that overlap
 - Encrypted entries are reported, never read

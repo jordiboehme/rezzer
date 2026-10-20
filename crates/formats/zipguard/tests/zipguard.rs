@@ -48,7 +48,8 @@ fn reads_a_stored_and_a_deflated_entry() {
     assert_eq!(archive.read("a.txt").unwrap(), b"stored");
     assert_eq!(archive.read("dir/b.txt").unwrap(), text.as_bytes());
     assert_eq!(archive.measure("dir/b.txt").unwrap(), text.len() as u64);
-    assert_eq!(archive.unpacked(), (6 + 2 * text.len()) as u64);
+    // Each entry counts once, however often it is read.
+    assert_eq!(archive.unpacked(), (6 + text.len()) as u64);
     assert_eq!(
         archive.read("nope"),
         Err(ZipError::Missing("nope".to_string()))
@@ -125,6 +126,27 @@ fn total_budget_spans_entries() {
     assert_eq!(archive.measure("a").unwrap(), 600);
     assert!(matches!(archive.read("b"), Err(ZipError::Limit { .. })));
     assert_eq!(archive.unpacked(), 1000);
+}
+
+#[test]
+fn each_entry_counts_once() {
+    let bytes = build(&[
+        ("a", &[1u8; 600], CompressionMethod::Stored),
+        ("b", &[2u8; 390], CompressionMethod::Stored),
+    ]);
+    let limits = Limits {
+        max_total_bytes: 1000,
+        ..Limits::default()
+    };
+    let mut archive = Archive::open(&bytes, limits).unwrap();
+    assert_eq!(archive.measure("a").unwrap(), 600);
+    assert_eq!(archive.measure("b").unwrap(), 390);
+    // The archive is near its total limit, and its entries can still be read again.
+    for _ in 0..3 {
+        assert_eq!(archive.read("a").unwrap().len(), 600);
+        assert_eq!(archive.read("b").unwrap().len(), 390);
+    }
+    assert_eq!(archive.unpacked(), 990);
 }
 
 #[test]
