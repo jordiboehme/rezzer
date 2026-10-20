@@ -9,7 +9,8 @@
 //! see those bytes.
 //!
 //! Every value is charged a fixed [`VALUE_COST`] plus the bytes of its strings, names and
-//! stream data against `max_object_bytes`, and counted against `max_items`.
+//! stream data against `max_object_bytes`. `max_items` bounds one structure: the items of
+//! one array or dictionary, or the members listed in one object stream.
 
 mod crypt;
 mod lexer;
@@ -93,14 +94,10 @@ impl<'a> Budget<'a> {
     }
 
     fn add(&mut self, cost: u64) -> Result<(), Fail> {
+        // Values are counted for the record only: their memory is bounded by
+        // `max_object_bytes`, so the number of pages or fields has no cap of its own.
         self.items += 1;
         self.bytes = self.bytes.saturating_add(cost);
-        if self.items > self.limits.max_items {
-            return Err(Fail::Stop(OpenError::Limit(format!(
-                "the file has more than {} values",
-                self.limits.max_items
-            ))));
-        }
         self.check()?;
         if self.items >= self.next_poll {
             self.next_poll += POLL_EVERY;

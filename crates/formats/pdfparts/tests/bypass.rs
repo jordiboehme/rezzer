@@ -17,8 +17,12 @@ fn never() -> bool {
     false
 }
 
+/// The memory tests keep the objects to 256 MiB, so the process stays under its bound.
 fn limits() -> Limits {
-    Limits::default()
+    Limits {
+        max_object_bytes: 256 << 20,
+        ..Limits::default()
+    }
 }
 
 fn open(bytes: &[u8]) -> Result<Pdf, OpenError> {
@@ -479,4 +483,35 @@ fn deep_nesting_matches_lopdf() {
     assert_eq!(doc.get_object(s).unwrap().as_str().unwrap().len(), 301);
     let again = open(pdf.canonical()).unwrap();
     assert_eq!(again.canonical(), pdf.canonical());
+}
+
+#[test]
+fn many_values_under_the_byte_budget_open() {
+    // Three arrays of a million numbers each: more than 2M values in the file, but each
+    // array is under max_items and all of them are under max_object_bytes.
+    let array = |n: usize| {
+        let mut s = String::from("[");
+        for _ in 0..n {
+            s.push_str("0 ");
+        }
+        s.push(']');
+        s
+    };
+    let extra: Vec<(u64, String)> = (0..3).map(|i| (10 + i, array(1_000_000))).collect();
+    let bytes = classic_with(10, &extra);
+    let bytes =
+        String::from_utf8(bytes)
+            .unwrap()
+            .replacen("/Big 10 0 R", "/Big [10 0 R 11 0 R 12 0 R]", 1);
+    let pdf = Pdf::open(bytes.as_bytes(), None, &Limits::default(), &never).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    let debug = format!("{pdf:?}");
+    eprintln!("{debug}");
+    let values: usize = debug
+        .split("values: ")
+        .nth(1)
+        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap();
+    assert!(values > 2_000_000, "{values}");
 }

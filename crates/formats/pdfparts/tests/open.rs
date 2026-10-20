@@ -487,7 +487,11 @@ fn max_rss_bytes() -> u64 {
 #[test]
 fn objstm_bomb_is_bounded() {
     let bytes = objstm_bomb();
-    let err = open(&bytes, None).unwrap_err();
+    let limits = Limits {
+        max_object_bytes: 256 << 20,
+        ..Limits::default()
+    };
+    let err = Pdf::open(&bytes, None, &limits, &never).unwrap_err();
     assert!(matches!(err, OpenError::Limit(_)), "{err:?}");
     let rss = max_rss_bytes();
     eprintln!("max RSS {} MB", rss / 1_000_000);

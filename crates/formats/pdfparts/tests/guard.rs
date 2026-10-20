@@ -18,7 +18,12 @@ fn never() -> bool {
 }
 
 fn open(bytes: &[u8]) -> Result<Pdf, OpenError> {
-    Pdf::open(bytes, None, &Limits::default(), &never)
+    // The memory tests keep the objects to 256 MiB, so the process stays under its bound.
+    let limits = Limits {
+        max_object_bytes: 256 << 20,
+        ..Limits::default()
+    };
+    Pdf::open(bytes, None, &limits, &never)
 }
 
 /// Writes `n` copies of `byte` into `w` in chunks, so the plain data is never held.

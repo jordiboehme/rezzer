@@ -258,6 +258,12 @@ impl<'a> Store<'a> {
         let data = unpredict(data, last_parms(&s.dict));
         let int = |d: &Dictionary, k: &[u8]| d.get(k).ok().and_then(|o| o.as_i64().ok());
         let count = int(&s.dict, b"N").unwrap_or(0).max(0) as u64;
+        if count > self.budget.limits.max_items as u64 {
+            return Err(OpenError::Limit(format!(
+                "object stream {c} lists more than {} members",
+                self.budget.limits.max_items
+            )));
+        }
         let first = int(&s.dict, b"First").unwrap_or(0).max(0) as usize;
         // Object number to offset, for the members the table puts here. A member at the index
         // the table names wins over another with the same number.

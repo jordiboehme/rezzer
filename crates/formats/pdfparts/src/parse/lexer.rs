@@ -167,7 +167,12 @@ impl<'a> Lexer<'a> {
                             return Ok(Object::Array(items));
                         }
                         None => return Err(Fail::Bad("an array is not closed")),
-                        _ => items.push(self.value(budget, depth + 1)?),
+                        _ => {
+                            if items.len() >= budget.limits.max_items {
+                                return Err(too_many(budget));
+                            }
+                            items.push(self.value(budget, depth + 1)?);
+                        }
                     }
                 }
             }
@@ -210,6 +215,9 @@ impl<'a> Lexer<'a> {
                         continue;
                     }
                     let v = self.value(budget, depth + 1)?;
+                    if dict.len() >= budget.limits.max_items {
+                        return Err(too_many(budget));
+                    }
                     dict.set(key, v);
                 }
                 None => return Err(Fail::Bad("a dictionary is not closed")),
@@ -409,6 +417,13 @@ impl<'a> Lexer<'a> {
         }
         Some(self.i)
     }
+}
+
+fn too_many(budget: &Budget) -> Fail {
+    Fail::Stop(crate::OpenError::Limit(format!(
+        "an array or dictionary has more than {} items",
+        budget.limits.max_items
+    )))
 }
 
 fn hex_digit(c: u8) -> Option<u8> {

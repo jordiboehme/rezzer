@@ -43,8 +43,8 @@ pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
 pub struct Limits {
     /// Deepest nesting of a tree (page tree, outline, number and name trees, XML).
     pub max_depth: usize,
-    /// Most items: the values parsed from the whole file, and the entries, events or objects
-    /// of one walk (trees, XML, references).
+    /// Most items in one structure: one walk (tree entries, XML events, objects visited), one
+    /// array or dictionary, or the members of one object stream.
     pub max_items: usize,
     /// Most bytes one stream may unpack to.
     pub max_stream_bytes: u64,
@@ -68,7 +68,7 @@ impl Default for Limits {
             max_total_bytes: 4 << 30,
             max_ratio: 100,
             max_revisions: 64,
-            max_object_bytes: 512 << 20,
+            max_object_bytes: 1 << 30,
         }
     }
 }
