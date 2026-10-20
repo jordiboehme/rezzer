@@ -443,3 +443,128 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+#[test]
+fn validations_at_spreadsheet_level_are_resolved() {
+    // Real files put content-validations beside the tables, not inside one.
+    let xml = content(
+        "",
+        "<table:content-validations>\
+         <table:content-validation table:name=\"val1\" table:condition=\"of:cell-content-is-whole-number()\">\
+         <table:help-message table:display=\"true\"><text:p>Whole</text:p></table:help-message>\
+         </table:content-validation></table:content-validations>\
+         <table:table table:name=\"A\"><table:table-row>\
+         <table:table-cell table:content-validation-name=\"val1\"/>\
+         <table:table-cell table:content-validation-name=\"nope\"/>\
+         </table:table-row></table:table>\
+         <table:table table:name=\"B\"><table:table-row><table:table-cell/>\
+         <table:table-cell table:content-validation-name=\"val1\"/></table:table-row></table:table>",
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &Limits::default());
+    let a = sheet(&parts, "A");
+    assert_eq!(a.validations.len(), 1);
+    assert_eq!(a.validations[0].range, "A1");
+    assert_eq!(a.validations[0].kind, "whole");
+    assert_eq!(a.validations[0].prompt.as_deref(), Some("Whole"));
+    let b = sheet(&parts, "B");
+    assert_eq!(b.validations.len(), 1);
+    assert_eq!(b.validations[0].range, "B1");
+    assert!(
+        parts
+            .issues
+            .iter()
+            .any(|i| i.what.contains("nope") && i.kind == IssueKind::Damaged),
+        "{:?}",
+        parts.issues
+    );
+}
+
+#[test]
+fn u64_max_counts_do_not_overflow() {
+    let m = u64::MAX;
+    let parts = one_sheet(
+        "<style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"N\"/>\
+         <number:number-style style:name=\"N\"><number:number/></number:number-style>",
+        &format!(
+            "<table:table-column/><table:table-column table:number-columns-repeated=\"{m}\" table:visibility=\"collapse\"/>\
+             <table:table-row/>\
+             <table:table-row table:number-rows-repeated=\"{m}\" table:visibility=\"collapse\">\
+             <table:table-cell/><table:table-cell table:number-columns-repeated=\"{m}\" office:value-type=\"float\" table:style-name=\"ce1\"/>\
+             </table:table-row>\
+             <table:table-row table:number-rows-repeated=\"{m}\"><table:table-cell office:value-type=\"float\"/></table:table-row>"
+        ),
+    );
+    let s = sheet(&parts, "S");
+    assert_eq!(
+        s.hidden_cols,
+        vec![RowSpan {
+            first: 1,
+            last: 16383
+        }]
+    );
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
+
+#[test]
+fn hostile_style_maps_are_bounded() {
+    let maps: String = (0..300)
+        .map(|_| "<style:map style:condition=\"value()&gt;0\" style:apply-style-name=\"N\"/>")
+        .collect();
+    let parts = one_sheet(
+        &format!(
+            "<number:number-style style:name=\"N\"><number:number number:decimal-places=\"2\"/>{maps}</number:number-style>\
+             <style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"N\"/>"
+        ),
+        "<table:table-row><table:table-cell table:style-name=\"ce1\" office:value-type=\"float\"/></table:table-row>",
+    );
+    for (_, code) in &sheet(&parts, "S").cell_formats {
+        assert!(code.len() <= 255, "{} bytes", code.len());
+    }
+    assert!(
+        parts
+            .issues
+            .iter()
+            .any(|i| i.kind == IssueKind::Unsupported)
+    );
+}
+
+#[test]
+fn huge_digit_attributes_are_capped() {
+    let big = "9000000000000000000";
+    let parts = one_sheet(
+        &format!(
+            "<number:number-style style:name=\"E\"><number:scientific-number number:min-exponent-digits=\"{big}\" number:min-integer-digits=\"{big}\"/></number:number-style>\
+             <number:number-style style:name=\"F\"><number:fraction number:min-numerator-digits=\"{big}\" number:min-denominator-digits=\"{big}\"/></number:number-style>\
+             <style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"E\"/>\
+             <style:style style:name=\"ce2\" style:family=\"table-cell\" style:data-style-name=\"F\"/>"
+        ),
+        "<table:table-row><table:table-cell table:style-name=\"ce1\" office:value-type=\"float\"/>\
+         <table:table-cell table:style-name=\"ce2\" office:value-type=\"float\"/></table:table-row>",
+    );
+    for (_, code) in &sheet(&parts, "S").cell_formats {
+        assert!(code.len() <= 255, "{} bytes", code.len());
+    }
+}
+
+#[test]
+fn repeated_notes_are_charged_by_size() {
+    let note = "x".repeat(10_000);
+    let parts = one_sheet(
+        "",
+        &format!(
+            "<table:table-row><table:table-cell table:number-columns-repeated=\"16384\">\
+             <office:annotation><text:p>{note}</text:p></office:annotation></table:table-cell></table:table-row>"
+        ),
+    );
+    let s = sheet(&parts, "S");
+    assert!(s.annotations.len() < 1000, "{}", s.annotations.len());
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
+
+#[test]
+fn bad_repeat_attributes_give_few_issues() {
+    let cells = "<table:table-cell table:number-columns-repeated=\"x\"/>".repeat(1000);
+    let parts = one_sheet("", &format!("<table:table-row>{cells}</table:table-row>"));
+    assert!(parts.issues.len() <= 3, "{}", parts.issues.len());
+    assert!(parts.issues.iter().any(|i| i.what.contains("1000")));
+}

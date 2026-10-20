@@ -224,7 +224,7 @@ impl StyleBook {
         if let Some(hit) = self.code_cache.get(name) {
             return hit.clone();
         }
-        let code = match self.build(name, 0) {
+        let code = match self.build(name) {
             Ok(c) => Some(c),
             Err(why) => {
                 issues.push(Issue::new(
@@ -239,24 +239,43 @@ impl StyleBook {
         code
     }
 
-    fn build(&self, name: &str, depth: usize) -> Result<String, String> {
+    /// A data style as one format code. The styles its maps apply are used by their own
+    /// parts only (their maps are not followed), at most two maps are taken and the code is at
+    /// most 255 characters, as in the OOXML reader.
+    fn build(&self, name: &str) -> Result<String, String> {
         let style = self
             .data
             .get(name)
             .ok_or_else(|| format!("no data style {name}"))?;
         let base = body(style)?;
-        if style.maps.is_empty() || depth > 2 {
-            return Ok(base);
+        let code = if style.maps.is_empty() {
+            base
+        } else if style.maps.len() > 2 {
+            return Err(format!(
+                "{} conditions (two are possible)",
+                style.maps.len()
+            ));
+        } else {
+            let mut sections = Vec::new();
+            for (cond, apply) in &style.maps {
+                let cond = condition(cond).ok_or_else(|| format!("condition {cond}"))?;
+                let applied = self
+                    .data
+                    .get(apply)
+                    .ok_or_else(|| format!("no data style {apply}"))?;
+                sections.push(format!("[{cond}]{}", body(applied)?));
+            }
+            sections.push(base);
+            sections.join(";")
+        };
+        if code.chars().count() > MAX_CODE {
+            return Err(format!("the code is longer than {MAX_CODE} characters"));
         }
-        let mut sections = Vec::new();
-        for (cond, apply) in &style.maps {
-            let cond = condition(cond).ok_or_else(|| format!("condition {cond}"))?;
-            sections.push(format!("[{cond}]{}", self.build(apply, depth + 1)?));
-        }
-        sections.push(base);
-        Ok(sections.join(";"))
+        Ok(code)
     }
 }
+
+const MAX_CODE: usize = 255;
 
 /// `value()>=0` becomes `>=0`.
 fn condition(raw: &str) -> Option<String> {
@@ -291,16 +310,20 @@ fn body(style: &DataStyle) -> Result<String, String> {
             "scientific-number" => {
                 out.push_str(&number(p));
                 out.push_str("E+");
-                out.push_str(&"0".repeat(p.number("min-exponent-digits").unwrap_or(1).max(1)));
+                out.push_str(
+                    &"0".repeat(p.number("min-exponent-digits").unwrap_or(1).clamp(1, 30)),
+                );
             }
             "fraction" => {
                 out.push_str("# ");
-                out.push_str(&"?".repeat(p.number("min-numerator-digits").unwrap_or(1).max(1)));
+                out.push_str(
+                    &"?".repeat(p.number("min-numerator-digits").unwrap_or(1).clamp(1, 30)),
+                );
                 out.push('/');
                 match p.number("denominator-value") {
-                    Some(d) if d > 0 => out.push_str(&d.to_string()),
+                    Some(d) if d > 0 => out.push_str(&d.min(1_000_000).to_string()),
                     _ => out.push_str(
-                        &"?".repeat(p.number("min-denominator-digits").unwrap_or(1).max(1)),
+                        &"?".repeat(p.number("min-denominator-digits").unwrap_or(1).clamp(1, 30)),
                     ),
                 }
             }

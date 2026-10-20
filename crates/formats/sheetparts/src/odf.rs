@@ -17,6 +17,8 @@
 mod rules;
 mod styles;
 
+use std::collections::{BTreeMap, HashMap};
+
 use zipguard::Archive;
 
 use crate::a1::a1;
@@ -93,6 +95,7 @@ pub fn read(zip: &mut Archive<'_>, limits: &Limits, stop: &dyn Fn() -> bool) -> 
     let props = read_meta(&mut ctx);
     let mut issues = ctx.issues;
     issues.append(&mut content.issues);
+    content.summary(&mut issues);
     OdsParts {
         sheets: content.sheets,
         names: content.names,
@@ -122,7 +125,6 @@ impl Rect {
 
 #[derive(Default)]
 struct ValDef {
-    name: String,
     condition: String,
     prompt: String,
     error: String,
@@ -163,10 +165,6 @@ struct SheetState {
     row_style: Option<String>,
     rows_clamped: bool,
     cols_clamped: bool,
-    vals: Vec<ValDef>,
-    val_now: Option<usize>,
-    msg: Option<Msg>,
-    msg_para: Option<String>,
     cell: Option<Rect>,
     ann: AnnState,
 }
@@ -182,24 +180,14 @@ struct Content {
     used: u64,
     limit: u64,
     exhausted: bool,
-}
-
-fn repeat(e: &Elem, key: &str, issues: &mut Vec<Issue>) -> u64 {
-    match e.attr(key) {
-        None => 1,
-        Some(v) => match v.trim().parse::<u64>() {
-            Ok(0) => 1,
-            Ok(n) => n,
-            Err(_) => {
-                issues.push(Issue::new(
-                    CONTENT,
-                    IssueKind::Damaged,
-                    format!("{key}=\"{v}\" is not a count"),
-                ));
-                1
-            }
-        },
-    }
+    bad_counts: u64,
+    first_bad: String,
+    vals: Vec<ValDef>,
+    val_index: HashMap<String, usize>,
+    val_now: Option<usize>,
+    msg: Option<Msg>,
+    msg_para: Option<String>,
+    unknown_vals: BTreeMap<String, u64>,
 }
 
 fn hidden(e: &Elem) -> bool {
@@ -225,6 +213,45 @@ impl Content {
             used: 0,
             limit,
             exhausted: false,
+            bad_counts: 0,
+            first_bad: String::new(),
+            vals: Vec::new(),
+            val_index: HashMap::new(),
+            val_now: None,
+            msg: None,
+            msg_para: None,
+            unknown_vals: BTreeMap::new(),
+        }
+    }
+
+    /// Problems that can repeat a million times are said once with a count.
+    fn summary(&self, issues: &mut Vec<Issue>) {
+        if self.bad_counts > 0 {
+            issues.push(Issue::new(
+                CONTENT,
+                IssueKind::Damaged,
+                format!(
+                    "{} repeat attributes are not counts, the first is {}: they count as 1",
+                    self.bad_counts, self.first_bad
+                ),
+            ));
+        }
+        for (name, cells) in self.unknown_vals.iter().take(10) {
+            issues.push(Issue::new(
+                CONTENT,
+                IssueKind::Damaged,
+                format!("{cells} cells name the validation {name}, which is not defined"),
+            ));
+        }
+        if self.unknown_vals.len() > 10 {
+            issues.push(Issue::new(
+                CONTENT,
+                IssueKind::Damaged,
+                format!(
+                    "{} more validation names are not defined",
+                    self.unknown_vals.len() - 10
+                ),
+            ));
         }
     }
 
@@ -233,6 +260,25 @@ impl Content {
     }
 
     /// Counts `n` listed cells against the item limit. False once the limit is hit.
+    /// A repeat count, at least 1 and at most 4,194,304: more is past the sheet anyway, and the
+    /// bound keeps all position arithmetic far from overflow. Bad values are counted and
+    /// reported once at the end.
+    fn repeat(&mut self, e: &Elem, key: &str) -> u64 {
+        match e.attr(key) {
+            None => 1,
+            Some(v) => match v.trim().parse::<u64>() {
+                Ok(n) => n.clamp(1, 1 << 22),
+                Err(_) => {
+                    self.bad_counts += 1;
+                    if self.bad_counts == 1 {
+                        self.first_bad = format!("{key}=\"{v}\"");
+                    }
+                    1
+                }
+            },
+        }
+    }
+
     fn charge(&mut self, n: u64) -> bool {
         if self.exhausted {
             return false;
@@ -278,7 +324,29 @@ impl Content {
             self.named(e);
             return;
         }
-        if self.skip_tables > 0 || self.cur.is_none() {
+        if self.skip_tables > 0 {
+            return;
+        }
+        match e.name.as_str() {
+            "content-validation" => {
+                self.validation(e);
+                return;
+            }
+            "help-message" | "error-message" => {
+                self.msg = Some(if e.name == "help-message" {
+                    Msg::Help
+                } else {
+                    Msg::Error
+                });
+                return;
+            }
+            "p" if self.msg.is_some() && !empty => {
+                self.msg_para = Some(String::new());
+                return;
+            }
+            _ => {}
+        }
+        if self.cur.is_none() {
             return;
         }
         if self.cur.as_ref().is_some_and(|s| s.ann.open) {
@@ -294,23 +362,6 @@ impl Content {
                 }
             }
             "table-cell" | "covered-table-cell" => self.cell(e, empty),
-            "content-validation" => self.validation(e),
-            "help-message" | "error-message" => {
-                if let Some(s) = &mut self.cur {
-                    s.msg = Some(if e.name == "help-message" {
-                        Msg::Help
-                    } else {
-                        Msg::Error
-                    });
-                }
-            }
-            "p" => {
-                if let Some(s) = &mut self.cur
-                    && s.msg.is_some()
-                {
-                    s.msg_para = Some(String::new());
-                }
-            }
             "annotation" if !empty => {
                 if let Some(s) = &mut self.cur
                     && let Some(rect) = s.cell
@@ -335,7 +386,37 @@ impl Content {
             }
             return;
         }
-        if self.skip_tables > 0 || self.cur.is_none() {
+        if self.skip_tables > 0 {
+            return;
+        }
+        match name {
+            "p" if self.msg_para.is_some() => {
+                if let (Some(para), Some(i), Some(msg)) =
+                    (self.msg_para.take(), self.val_now, self.msg)
+                {
+                    let target = if msg == Msg::Help {
+                        &mut self.vals[i].prompt
+                    } else {
+                        &mut self.vals[i].error
+                    };
+                    if !target.is_empty() {
+                        target.push('\n');
+                    }
+                    target.push_str(&para);
+                }
+                return;
+            }
+            "help-message" | "error-message" => {
+                self.msg = None;
+                return;
+            }
+            "content-validation" => {
+                self.val_now = None;
+                return;
+            }
+            _ => {}
+        }
+        if self.cur.is_none() {
             return;
         }
         if self.cur.as_ref().is_some_and(|s| s.ann.open) {
@@ -349,37 +430,16 @@ impl Content {
                     s.cell = None;
                 }
             }
-            "p" => {
-                if let Some(s) = &mut self.cur
-                    && let (Some(para), Some(i), Some(msg)) = (s.msg_para.take(), s.val_now, s.msg)
-                {
-                    let target = if msg == Msg::Help {
-                        &mut s.vals[i].prompt
-                    } else {
-                        &mut s.vals[i].error
-                    };
-                    if !target.is_empty() {
-                        target.push('\n');
-                    }
-                    target.push_str(&para);
-                }
-            }
-            "help-message" | "error-message" => {
-                if let Some(s) = &mut self.cur {
-                    s.msg = None;
-                }
-            }
-            "content-validation" => {
-                if let Some(s) = &mut self.cur {
-                    s.val_now = None;
-                }
-            }
             _ => {}
         }
     }
 
     fn text(&mut self, t: &str) {
         if self.skip_tables > 0 {
+            return;
+        }
+        if let Some(p) = &mut self.msg_para {
+            p.push_str(t);
             return;
         }
         let Some(s) = &mut self.cur else { return };
@@ -390,8 +450,6 @@ impl Content {
                 (None, Some(false)) => s.ann.author.push_str(t),
                 _ => {}
             }
-        } else if let Some(p) = &mut s.msg_para {
-            p.push_str(t);
         }
     }
 
@@ -420,10 +478,6 @@ impl Content {
             row_style: None,
             rows_clamped: false,
             cols_clamped: false,
-            vals: Vec::new(),
-            val_now: None,
-            msg: None,
-            msg_para: None,
             cell: None,
             ann: AnnState::default(),
         });
@@ -432,10 +486,11 @@ impl Content {
     fn end_sheet(&mut self) {
         let Some(mut s) = self.cur.take() else { return };
         let mut unknown = Vec::new();
-        for v in s.vals.drain(..) {
+        for v in &mut self.vals {
             if v.rects.is_empty() {
                 continue;
             }
+            let rects = std::mem::take(&mut v.rects);
             let rule = parse_condition(&v.condition).unwrap_or_else(|| {
                 unknown.push(v.condition.clone());
                 rules::Rule {
@@ -444,14 +499,14 @@ impl Content {
                 }
             });
             s.sheet.validations.push(Validation {
-                range: v.rects.iter().map(|r| r.a1()).collect::<Vec<_>>().join(" "),
+                range: rects.iter().map(|r| r.a1()).collect::<Vec<_>>().join(" "),
                 kind: rule.kind,
                 operator: rule.operator,
                 formula1: rule.formula1,
                 formula2: rule.formula2,
                 list: rule.list,
-                prompt: (!v.prompt.is_empty()).then_some(v.prompt),
-                error: (!v.error.is_empty()).then_some(v.error),
+                prompt: (!v.prompt.is_empty()).then(|| v.prompt.clone()),
+                error: (!v.error.is_empty()).then(|| v.error.clone()),
             });
         }
         for c in unknown {
@@ -493,7 +548,7 @@ impl Content {
     }
 
     fn column(&mut self, e: &Elem) {
-        let rep = repeat(e, "number-columns-repeated", &mut self.issues);
+        let rep = self.repeat(e, "number-columns-repeated");
         let Some(s) = &mut self.cur else { return };
         if s.in_row {
             return;
@@ -532,7 +587,7 @@ impl Content {
     }
 
     fn row(&mut self, e: &Elem) {
-        let rep = repeat(e, "number-rows-repeated", &mut self.issues);
+        let rep = self.repeat(e, "number-rows-repeated");
         let Some(s) = &mut self.cur else { return };
         s.in_row = true;
         s.col = 0;
@@ -561,7 +616,7 @@ impl Content {
     }
 
     fn cell(&mut self, e: &Elem, empty: bool) {
-        let rep = repeat(e, "number-columns-repeated", &mut self.issues);
+        let rep = self.repeat(e, "number-columns-repeated");
         let covered = e.name == "covered-table-cell";
         let Some(s) = &mut self.cur else { return };
         if !s.in_row {
@@ -605,10 +660,11 @@ impl Content {
         if !empty {
             s.cell = Some(rect);
         }
-        if let Some(name) = e.attr("content-validation-name")
-            && let Some(i) = s.vals.iter().position(|d| d.name == name)
-        {
-            add_rect(&mut s.vals[i].rects, rect);
+        if let Some(name) = e.attr("content-validation-name") {
+            match self.val_index.get(name) {
+                Some(&i) => add_rect(&mut self.vals[i].rects, rect),
+                None => *self.unknown_vals.entry(name.to_string()).or_insert(0) += 1,
+            }
         }
         if e.attr("value-type").is_some() || e.attr("formula").is_some() {
             let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
@@ -651,6 +707,10 @@ impl Content {
             let Some(code) = self.book.format_of(&style, &mut self.issues) else {
                 continue;
             };
+            let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(c1 - c0 + 1);
+            if !self.charge(cells.saturating_mul(code.len() as u64 / 32)) {
+                return;
+            }
             let Some(s) = &mut self.cur else { return };
             for r in rect.r0..=rect.r1 {
                 for c in c0..=c1 {
@@ -663,13 +723,13 @@ impl Content {
     }
 
     fn validation(&mut self, e: &Elem) {
-        let Some(s) = &mut self.cur else { return };
-        s.vals.push(ValDef {
-            name: e.attr("name").unwrap_or("").to_string(),
+        let name = e.attr("name").unwrap_or("").to_string();
+        self.vals.push(ValDef {
             condition: e.attr("condition").unwrap_or("").to_string(),
             ..ValDef::default()
         });
-        s.val_now = Some(s.vals.len() - 1);
+        self.val_now = Some(self.vals.len() - 1);
+        self.val_index.insert(name, self.vals.len() - 1);
     }
 
     fn annotation_event(&mut self, e: &Elem, empty: bool) {
@@ -722,10 +782,11 @@ impl Content {
                 let ann = std::mem::take(&mut s.ann);
                 let Some(rect) = ann.rect else { return };
                 let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
-                if !self.charge(cells) {
+                let text = ann.paras.join("\n");
+                // Every copy of the text counts, so a long note on a wide repeat hits the limit.
+                if !self.charge(cells.saturating_mul(1 + text.len() as u64 / 16)) {
                     return;
                 }
-                let text = ann.paras.join("\n");
                 let trimmed = |v: String| {
                     let v = v.trim().to_string();
                     (!v.is_empty()).then_some(v)
