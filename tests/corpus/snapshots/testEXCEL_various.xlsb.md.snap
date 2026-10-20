@@ -1,0 +1,147 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "testEXCEL_various.xlsb"
+resource: "<corpus>/office/testEXCEL_various.xlsb"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "8c600e97d719b0266dcfb49c1872feb8d10c6ed12bc768ff16ace7dae555ebfc"
+source_size: 22715
+format: xlsb
+detected_by: "zip with [Content_Types].xml main part binary spreadsheet"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 2
+authors: ["Allison, Timothy B."]
+created: "2017-03-09T12:24:26Z"
+modified: "2017-03-10T14:58:49Z"
+---
+
+# testEXCEL\_various.xlsb
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| mySheet1 | sheet | 35 rows x 5 columns | result |  |
+
+- Sheets: 1
+- Formulas: 3
+- Parameters: 1
+- Names: 1
+- Embedded: 3
+- Not read: 2
+- Last changed: 2017-03-10T14:58:49Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| last\_modified\_by | Allison, Timothy B. |
+
+## mySheet1
+
+|  |  |  |  |  |
+| --- | --- | --- | --- | --- |
+| String | This is a string |  |  |  |
+| integer | 13 |  |  |  |
+| float | 13.12112313 |  |  |  |
+| currency | 3.03 |  |  |  |
+| percent | 0.2 |  |  |  |
+| float 2 | 13.12131231 |  |  |  |
+| long int | 1.23457E+14 |  |  |  |
+| longer int | 1.23457E+15 |  |  |  |
+| fraction | 0.25 |  |  |  |
+| date | 2017-03-09 |  |  |  |
+| comment | contents |  |  |  |
+| hyperlink | tika\_link |  |  |  |
+| formula | 4 | 2 |  |  |
+| formulaErr | #NAME? |  |  |  |
+| formulaFloat | 0.5 |  | March | April |
+| customFormat1 | 46/1963 | merchant1 | 1 | 3 |
+| customFormat2 | 3/128 | merchant2 | 2 | 4 |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  | text test |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  | the |  |  |  |
+|  |  |  |  |  |
+|  |  |  |  |  |
+|  | the |  | quick |  |
+|  |  |  |  |  |
+|  | comment6 |  |  |  |
+
+## Logic
+
+### mySheet1
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| C13 |  |  | 2 |  |  | 2 |
+
+#### Formulas
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B13 | 1 | `=C13*2` | C13 |  | 4 | $`\mathrm{C13} \cdot 2`$ |
+| B14 | 1 | `=COS(NA)` | name:NA |  | #NAME? | $`\operatorname{COS}(\mathrm{NA})`$ |
+| B15 | 1 | `=1/C13` | C13 |  | 0.5 | $`\frac{1}{\mathrm{C13}}`$ |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| NA | workbook | name |  |  |  | the file gives no formula text for this name that is read (for XLSB: an add-in or external name) |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Round boxes are parameters, hexagons are names.
+```mermaid
+flowchart LR
+    n0["mySheet1!B13"]
+    n1["mySheet1!B14"]
+    n2["mySheet1!B15"]
+    n3(["mySheet1!C13"])
+    n4{{"name:NA"}}
+    n5(["mySheet1!C13"])
+    n3 --> n0
+    n4 --> n1
+    n5 --> n2
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| VBA module | Module1 | VBA module, never run |
+| VBA module | Sheet1 | VBA module, never run |
+| VBA module | ThisWorkbook | VBA module, never run |
+
+## Embedded
+
+| Kind | Name | Detail | Target |
+| --- | --- | --- | --- |
+| macro | Module1 | VBA module, never run |  |
+| macro | Sheet1 | VBA module, never run |  |
+| macro | ThisWorkbook | VBA module, never run |  |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| document | not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links | unsupported | info |
+| document | the workbook logic is incomplete: 1 defined name could not be analyzed; no formula is marked as a result and read counts may be low | uncertain | warning |

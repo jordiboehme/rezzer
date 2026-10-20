@@ -1,0 +1,820 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "tunnel_design_calculations.xlsx"
+resource: "<corpus>/office/tunnel_design_calculations.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "efab83e86b0294f631b0ed072adcbfe953def83a9fb7652a2618408715080cdc"
+source_size: 20090
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["openpyxl"]
+language: "en"
+created: "2026-08-24T17:20:00Z"
+modified: "2026-08-24T17:24:13Z"
+---
+
+# tunnel\_design\_calculations.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Design\_Basis | sheet | 32 rows x 2 columns |  |  |
+| Structural\_Lining | sheet | 74 rows x 6 columns | result |  |
+| Ventilation | sheet | 39 rows x 3 columns | result |  |
+| Drainage | sheet | 45 rows x 6 columns | result |  |
+
+- Sheets: 4
+- Formulas: 86
+- Patterns: 1
+- Parameters: 65
+- Results: 9
+- Last changed: 2026-08-24T17:24:13Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | HP |
+
+## Design\_Basis
+
+|  |  |
+| --- | --- |
+| UNDERGROUND TUNNEL STRUCTURAL ANALYSIS |  |
+| Conceptual design calculations - structural stability, drainage, ventilation \& safety |  |
+|  |  |
+| PROJECT DESCRIPTION | PROJECT DESCRIPTION |
+| Project type | Two-lane single-tube underground road tunnel (conceptual design) |
+| Prepared by | Alok |
+| Tools used | AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets) |
+| Scope | Structural lining stability, ventilation, drainage, and life-safety checks at concept stage |
+| Disclaimer | Preliminary / conceptual calculations for a portfolio project. NOT for construction use. |
+|  |  |
+| KEY GEOMETRIC PARAMETERS (shared across sheets) | KEY GEOMETRIC PARAMETERS (shared across sheets) |
+| Excavated (bored) diameter | 10.0 m |
+| Tunnel length | 800 m |
+| Overburden depth to crown | 25 m |
+| Ground type | Weathered rock / dense soil (assumed) |
+| Traffic | Two-lane, design-hour volume 1200 veh/hr |
+|  |  |
+| DESIGN CODES / REFERENCES USED (conceptual guidance) | DESIGN CODES / REFERENCES USED (conceptual guidance) |
+| - IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance | - IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance |
+| - IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) | - IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) |
+| - IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) | - IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) |
+| - PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) | - PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) |
+| - Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) | - Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) |
+| - Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) | - Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) |
+| - Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires | - Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires |
+|  |  |
+| HOW TO USE THIS WORKBOOK | HOW TO USE THIS WORKBOOK |
+| - Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. | - Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. |
+| - Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. | - Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. |
+| - Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. | - Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. |
+| - Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. | - Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. |
+| - These mirror the Python scripts in /python (same method \& formulas) for cross-verification. | - These mirror the Python scripts in /python (same method \& formulas) for cross-verification. |
+
+Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B23, A24:B24, A25:B25, A27:B27, A28:B28, A29:B29, A30:B30, A31:B31, A32:B32
+
+## Structural\_Lining
+
+|  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- |
+| STRUCTURAL STABILITY - TUNNEL LINING CHECK |  |  |  |  |  |
+| Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check |  |  |  |  |  |
+|  |  |  |  |  |  |
+| INPUTS | INPUTS | INPUTS |  |  |  |
+| Excavated diameter, D | 10 | m |  |  |  |
+| Trial lining thickness, t | 0.35 | m |  |  |  |
+| Overburden depth, H | 25 | m |  |  |  |
+| Unit weight of ground, gamma | 22 | kN/m3 |  |  |  |
+| Friction angle, phi | 30 | deg |  |  |  |
+| Cohesion, c | 20 | kPa |  |  |  |
+| Concrete grade, fck | 30 | MPa |  |  |  |
+| Steel grade, fy | 500 | MPa |  |  |  |
+| Target Factor of Safety | 2 | - |  |  |  |
+|  |  |  |  |  |  |
+| TERZAGHI LOOSENING PRESSURE | TERZAGHI LOOSENING PRESSURE | TERZAGHI LOOSENING PRESSURE |  |  |  |
+| Tunnel radius, R | 5.00 | m |  |  |  |
+| Loosening zone width, B1 | 7.89 | m |  |  |  |
+| At-rest coeff., K0 = 1-sin(phi) | 0.50 | - |  |  |  |
+| tan(phi) | 0.58 | - |  |  |  |
+| Terzaghi vertical pressure, Pv | 194.15 | kPa |  |  |  |
+| Lower-bound floor (0.3\*gamma\*D) | 66.00 | kPa |  |  |  |
+| Design vertical pressure, Pv | 194.15 | kPa |  |  |  |
+| Lateral pressure at springline, Ph = K0\*Pv | 97.08 | kPa |  |  |  |
+|  |  |  |  |  |  |
+| RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) | RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) | RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) |  |  |  |
+| Mean pressure, p\_mean | 145.62 | kPa |  |  |  |
+| Deviatoric pressure, p\_dev | 48.54 | kPa |  |  |  |
+| Thrust at crown, N(0) | 485.38 | kN/m |  |  |  |
+| Thrust at springline, N(90) | 970.77 | kN/m |  |  |  |
+| Max ring thrust, N\_max | 970.77 | kN/m |  |  |  |
+| Moment at crown, M(0) | 606.73 | kNm/m |  |  |  |
+| Moment at springline, M(90) | 606.73 | kNm/m |  |  |  |
+| Max ring moment, M\_max | 606.73 | kNm/m |  |  |  |
+|  |  |  |  |  |  |
+| RCC LINING SECTION CHECK (1 m wide strip) | RCC LINING SECTION CHECK (1 m wide strip) | RCC LINING SECTION CHECK (1 m wide strip) |  |  |  |
+| Section area, A = 1 x t | 0.350 | m2 |  |  |  |
+| Section modulus, Z = 1 x t^2/6 | 0.020 | m3 |  |  |  |
+| Axial stress = N\_max/A /1000 | 2.77 | MPa |  |  |  |
+| Bending stress = M\_max/Z /1000 | 29.72 | MPa |  |  |  |
+| Combined max compressive stress | 32.49 | MPa |  |  |  |
+| Combined stress, opposite fibre | -26.94 | MPa |  |  |  |
+| Permissible stress = 0.33 fck | 9.90 | MPa |  |  |  |
+| Factor of Safety (actual) | 0.30 | - |  |  |  |
+| Status | NOT SAFE - increase thickness |  |  |  |  |
+| Note: net tension on inner fibre - provide crack-control reinforcement | Note: net tension on inner fibre - provide crack-control reinforcement | Note: net tension on inner fibre - provide crack-control reinforcement |  |  |  |
+|  |  |  |  |  |  |
+| LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) | LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) | LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) |  |  |  |
+|  |  |  |  | t (m) | FOS |
+|  |  |  |  | 0.15 | 0.06 |
+|  |  |  |  | 0.2 | 0.10 |
+|  |  |  |  | 0.25 | 0.16 |
+|  |  |  |  | 0.3 | 0.23 |
+|  |  |  |  | 0.35 | 0.30 |
+|  |  |  |  | 0.4 | 0.39 |
+|  |  |  |  | 0.45 | 0.49 |
+|  |  |  |  | 0.5 | 0.60 |
+|  |  |  |  | 0.55 | 0.72 |
+|  |  |  |  | 0.6 | 0.84 |
+|  |  |  |  | 0.65 | 0.98 |
+|  |  |  |  | 0.7 | 1.12 |
+|  |  |  |  | 0.75 | 1.27 |
+|  |  |  |  | 0.8 | 1.43 |
+|  |  |  |  | 0.85 | 1.60 |
+|  |  |  |  | 0.9 | 1.78 |
+|  |  |  |  | 0.95 | 1.96 |
+|  |  |  |  | 1 | 2.15 |
+|  |  |  |  | 1.05 | 2.34 |
+|  |  |  |  | 1.1 | 2.54 |
+|  |  |  |  | 1.15 | 2.75 |
+|  |  |  |  | 1.2 | 2.97 |
+|  |  |  |  | 1.25 | 3.19 |
+|  |  |  |  | 1.3 | 3.41 |
+|  |  |  |  |  |  |
+| Min. lining thickness for target FOS | 1 | m |  |  |  |
+
+Merged cells: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
+
+## Ventilation
+
+|  |  |  |
+| --- | --- | --- |
+| LONGITUDINAL VENTILATION DESIGN CHECK |  |  |
+| Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control |  |  |
+|  |  |  |
+| INPUTS | INPUTS | INPUTS |
+| Tunnel length, L | 800 | m |
+| Tunnel diameter, D | 10 | m |
+| Design-hour traffic volume | 1200 | veh/hr |
+| Heavy diesel vehicle share | 0.1 | fraction |
+| CO emission factor - LMV | 8 | g/km/veh |
+| CO emission factor - HDV | 12 | g/km/veh |
+| Permissible CO (15-min) | 100 | ppm |
+| Design fire heat release rate | 30 | MW |
+| Air density | 1.2 | kg/m3 |
+| Specific heat of air | 1.005 | kJ/kg.K |
+| Ambient temperature | 298 | K |
+| Darcy friction factor | 0.02 | - |
+| Jet fan thrust (each) | 1500 | N |
+|  |  |  |
+| GEOMETRY | GEOMETRY | GEOMETRY |
+| Cross-sectional area, A = pi.D^2/4 | 78.54 | m2 |
+| Hydraulic diameter (circular = D) | 10.00 | m |
+|  |  |  |
+| CO DILUTION - FRESH AIR DEMAND | CO DILUTION - FRESH AIR DEMAND | CO DILUTION - FRESH AIR DEMAND |
+| Heavy diesel vehicles | 120 | veh/hr |
+| Light vehicles | 1080 | veh/hr |
+| Total CO emission rate | 2.2400 | g/s |
+| Permissible CO, mass basis | 0.1145 | g/m3 |
+| Fresh air required, Q | 19.56 | m3/s |
+| Required velocity (CO dilution) | 0.25 | m/s |
+|  |  |  |
+| CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) | CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) | CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) |
+| Critical velocity, Vc | 2.18 | m/s |
+| Governing design velocity | 2.18 | m/s |
+| Comfort/safety check (1-10 m/s) | OK |  |
+|  |  |  |
+| JET FAN COUNT | JET FAN COUNT | JET FAN COUNT |
+| Friction pressure loss, dP | 4.58 | Pa |
+| Total thrust required | 359.85 | N |
+| No. of jet fans required | 1 | nos |
+
+Merged cells: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
+
+## Drainage
+
+|  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- |
+| DRAINAGE SYSTEM SIZING |  |  |  |  |  |
+| Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check |  |  |  |  |  |
+|  |  |  |  |  |  |
+| INPUTS | INPUTS | INPUTS |  |  |  |
+| Tunnel length, L | 800 | m |  |  |  |
+| Longitudinal gradient | 0.005 | fraction |  |  |  |
+| Seepage rate assumed | 0.02 | l/s per m |  |  |  |
+| Runoff coefficient, C | 0.85 | - |  |  |  |
+| Design rainfall intensity, i | 75 | mm/hr |  |  |  |
+| Portal catchment area | 0.6 | ha |  |  |  |
+| Manning's roughness, n | 0.013 | - |  |  |  |
+| Trial pipe diameter | 0.3 | m |  |  |  |
+| Sump retention time | 10 | min |  |  |  |
+| Pump duty factor | 1.25 | - |  |  |  |
+|  |  |  |  |  |  |
+| INFLOW ESTIMATES | INFLOW ESTIMATES | INFLOW ESTIMATES |  |  |  |
+| Groundwater seepage inflow | 16.00 | l/s |  |  |  |
+| Portal rainfall runoff (Rational Method) | 106.25 | l/s |  |  |  |
+| Total design drain flow | 122.25 | l/s |  |  |  |
+|  |  |  |  |  |  |
+| INVERT DRAIN PIPE SIZING (Manning's, full-bore) | INVERT DRAIN PIPE SIZING (Manning's, full-bore) | INVERT DRAIN PIPE SIZING (Manning's, full-bore) |  |  |  |
+| Pipe area | 0.0707 | m2 |  |  |  |
+| Hydraulic radius, R = D/4 | 0.0750 | m |  |  |  |
+| Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2) | 68.38 | l/s |  |  |  |
+| Trial pipe status | UNDERSIZED - increase diameter |  |  |  |  |
+|  |  |  |  |  |  |
+| STANDARD PIPE SIZE CHECK | STANDARD PIPE SIZE CHECK | STANDARD PIPE SIZE CHECK |  |  |  |
+|  |  |  |  | D (m) | Capacity (l/s) |
+|  |  |  |  | 0.15 | 10.77 |
+|  |  |  |  | 0.2 | 23.19 |
+|  |  |  |  | 0.25 | 42.05 |
+|  |  |  |  | 0.3 | 68.38 |
+|  |  |  |  | 0.4 | 147.26 |
+|  |  |  |  | 0.45 | 201.60 |
+|  |  |  |  | 0.5 | 267.00 |
+|  |  |  |  | 0.6 | 434.17 |
+|  |  |  |  | 0.75 | 787.21 |
+|  |  |  |  | 0.9 | 1280.08 |
+|  |  |  |  |  |  |
+| Minimum standard pipe size required | 0.4 | m |  |  |  |
+|  |  |  |  |  |  |
+| SUMP \& PUMP SIZING | SUMP \& PUMP SIZING | SUMP \& PUMP SIZING |  |  |  |
+| Peak design inflow to sump | 152.81 | l/s |  |  |  |
+| Required sump volume | 91.69 | m3 |  |  |  |
+| Required pump capacity | 152.81 | l/s |  |  |  |
+
+Merged cells: A4:C4, A16:C16, A21:C21, A27:C27, A42:C42
+
+## Logic
+
+### Structural\_Lining
+
+#### Parameters
+
+A row with a cell range stands for values next to each other that play one part.
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| B5 |  | Excavated diameter, D | 10 | m | cell beside | 2 |
+| B6 |  | Trial lining thickness, t | 0.35 | m | cell beside | 2 |
+| B7 |  | Overburden depth, H | 25 | m | cell beside | 1 |
+| B8 |  | Unit weight of ground, gamma | 22 | kN/m3 | cell beside | 2 |
+| B9 |  | Friction angle, phi | 30 | deg | cell beside | 3 |
+| B10 |  | Cohesion, c | 20 | kPa | cell beside | 1 |
+| B11 |  | Concrete grade, fck | 30 | MPa | cell beside | 1 |
+| B13 |  | Target Factor of Safety | 2 |  |  | 2 |
+| E49:E72 |  | t | 0.15, 0.2, 0.25 ..., 1.3 (24 values) | m | column header | 2 each |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B16 | 1 | `=B5/2` | B5 | intermediate | 5 | $`\frac{\mathrm{B5}}{2}`$ |
+| B17 | 1 | `=B16+B16*TAN(RADIANS(45-B9/2))` | B16, B9 | intermediate | 7.886751346 | $`\mathrm{B16}+\mathrm{B16} \cdot \operatorname{TAN}(\operatorname{RADIANS}(45-\frac{\mathrm{B9}}{2}))`$ |
+| B18 | 1 | `=1-SIN(RADIANS(B9))` | B9 | intermediate | 0.5 | $`1-\operatorname{SIN}(\operatorname{RADIANS}(\mathrm{B9}))`$ |
+| B19 | 1 | `=TAN(RADIANS(B9))` | B9 | intermediate | 0.577350269 | $`\operatorname{TAN}(\operatorname{RADIANS}(\mathrm{B9}))`$ |
+| B20 | 1 | `=(B17*(B8-2*B10/B17)/(2*B18*B19))*(1-EXP(-2*B18*B19*B7/B17))` | B17, B8, B10, B18, B19, B7 | intermediate | 194.153664019 | $`\frac{\mathrm{B17} \cdot (\mathrm{B8}-\frac{2 \cdot \mathrm{B10}}{\mathrm{B17}})}{2 \cdot \mathrm{B18} \cdot \mathrm{B19}} \cdot (1-\operatorname{EXP}(\frac{-2 \cdot \mathrm{B18} \cdot \mathrm{B19} \cdot \mathrm{B7}}{\mathrm{B17}}))`$ |
+| B21 | 1 | `=0.3*B8*B5` | B8, B5 | intermediate | 66 | $`0.3 \cdot \mathrm{B8} \cdot \mathrm{B5}`$ |
+| B22 | 1 | `=MAX(B20,B21)` | B20, B21 | intermediate | 194.153664019 | $`\operatorname{MAX}(\mathrm{B20}, \mathrm{B21})`$ |
+| B23 | 1 | `=B18*B22` | B18, B22 | intermediate | 97.07683201 | $`\mathrm{B18} \cdot \mathrm{B22}`$ |
+| B26 | 1 | `=(B22+B23)/2` | B22, B23 | intermediate | 145.615248014 | $`\frac{\mathrm{B22}+\mathrm{B23}}{2}`$ |
+| B27 | 1 | `=(B22-B23)/2` | B22, B23 | intermediate | 48.538416005 | $`\frac{\mathrm{B22}-\mathrm{B23}}{2}`$ |
+| B28 | 1 | `=B16*(B26-B27)` | B16, B26, B27 | intermediate | 485.384160048 | $`\mathrm{B16} \cdot (\mathrm{B26}-\mathrm{B27})`$ |
+| B29 | 1 | `=B16*(B26+B27)` | B16, B26, B27 | intermediate | 970.768320096 | $`\mathrm{B16} \cdot (\mathrm{B26}+\mathrm{B27})`$ |
+| B30, B33 | 2 | `=MAX(ABS(B28),ABS(B29))` | B28, B29 | intermediate | 970.768320096 | $`\operatorname{MAX}(\operatorname{ABS}(\mathrm{B28}), \operatorname{ABS}(\mathrm{B29}))`$ |
+| B31 | 1 | `=B16^2*B27/2` | B16, B27 | intermediate | 606.73020006 | $`\frac{\mathrm{B16}^{2} \cdot \mathrm{B27}}{2}`$ |
+| B32 | 1 | `=-B16^2*B27/2` | B16, B27 | intermediate | 606.73020006 | $`\frac{(-\mathrm{B16})^{2} \cdot \mathrm{B27}}{2}`$ |
+| B36 | 1 | `=1*B6` | B6 | intermediate | 0.35 | $`1 \cdot \mathrm{B6}`$ |
+| B37 | 1 | `=1*B6^2/6` | B6 | intermediate | 0.020416667 | $`\frac{1 \cdot \mathrm{B6}^{2}}{6}`$ |
+| B38 | 1 | `=(B30/B36)/1000` | B30, B36 | intermediate | 2.773623772 | $`\frac{\frac{\mathrm{B30}}{\mathrm{B36}}}{1000}`$ |
+| B39 | 1 | `=(B33/B37)/1000` | B33, B37 | intermediate | 29.717397554 | $`\frac{\frac{\mathrm{B33}}{\mathrm{B37}}}{1000}`$ |
+| B40 | 1 | `=B38+B39` | B38, B39 | intermediate | 32.491021326 |  |
+| B41 | 1 | `=B38-B39` | B38, B39 | intermediate | -26.943773782 |  |
+| B42 | 1 | `=0.33*B11` | B11 | intermediate | 9.9 | $`0.33 \cdot \mathrm{B11}`$ |
+| B43 | 1 | `=B42/B40` | B42, B40 | intermediate | 0.304699563 | $`\frac{\mathrm{B42}}{\mathrm{B40}}`$ |
+| B44 | 1 | `=IF(B43>=B13,"SAFE","NOT SAFE - increase thickness")` | B43, B13 | result | NOT SAFE - increase thickness | $`\operatorname{IF}(\mathrm{B43} \geq \mathrm{B13}, \text{"SAFE"}, \text{"NOT SAFE - increase thickness"})`$ |
+| A45 | 1 | `=IF(B41<0,"Note: net tension on inner fibre - provide crack-control reinforcement","No net tension")` | B41 | result | Note: net tension on inner fibre - provide crack-control reinforcement | $`\operatorname{IF}(\mathrm{B41}<0, \text{"Note: net tension on inner fibre - provide crack-control reinforcement"}, \text{"No net tension"})`$ |
+| F49 | 1 | `=B42/((B30/(1*E49))/1000+(B33/(1*E49^2/6))/1000)` | B42, B30, E49, B33 | intermediate | 0.058835237 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E49}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E49}^{2}}{6}}}{1000}}`$ |
+| F50 | 1 | `=B42/((B30/(1*E50))/1000+(B33/(1*E50^2/6))/1000)` | B42, B30, E50, B33 | intermediate | 0.103271978 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E50}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E50}^{2}}{6}}}{1000}}`$ |
+| F51 | 1 | `=B42/((B30/(1*E51))/1000+(B33/(1*E51^2/6))/1000)` | B42, B30, E51, B33 | intermediate | 0.159345435 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E51}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E51}^{2}}{6}}}{1000}}`$ |
+| F52 | 1 | `=B42/((B30/(1*E52))/1000+(B33/(1*E52^2/6))/1000)` | B42, B30, E52, B33 | intermediate | 0.226624618 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E52}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E52}^{2}}{6}}}{1000}}`$ |
+| F53 | 1 | `=B42/((B30/(1*E53))/1000+(B33/(1*E53^2/6))/1000)` | B42, B30, E53, B33 | intermediate | 0.304699563 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E53}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E53}^{2}}{6}}}{1000}}`$ |
+| F54 | 1 | `=B42/((B30/(1*E54))/1000+(B33/(1*E54^2/6))/1000)` | B42, B30, E54, B33 | intermediate | 0.393180061 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E54}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E54}^{2}}{6}}}{1000}}`$ |
+| F55 | 1 | `=B42/((B30/(1*E55))/1000+(B33/(1*E55^2/6))/1000)` | B42, B30, E55, B33 | intermediate | 0.491694484 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E55}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E55}^{2}}{6}}}{1000}}`$ |
+| F56 | 1 | `=B42/((B30/(1*E56))/1000+(B33/(1*E56^2/6))/1000)` | B42, B30, E56, B33 | intermediate | 0.599888696 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E56}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E56}^{2}}{6}}}{1000}}`$ |
+| F57 | 1 | `=B42/((B30/(1*E57))/1000+(B33/(1*E57^2/6))/1000)` | B42, B30, E57, B33 | intermediate | 0.717425027 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E57}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E57}^{2}}{6}}}{1000}}`$ |
+| F58 | 1 | `=B42/((B30/(1*E58))/1000+(B33/(1*E58^2/6))/1000)` | B42, B30, E58, B33 | intermediate | 0.843981337 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E58}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E58}^{2}}{6}}}{1000}}`$ |
+| F59 | 1 | `=B42/((B30/(1*E59))/1000+(B33/(1*E59^2/6))/1000)` | B42, B30, E59, B33 | intermediate | 0.979250126 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E59}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E59}^{2}}{6}}}{1000}}`$ |
+| F60 | 1 | `=B42/((B30/(1*E60))/1000+(B33/(1*E60^2/6))/1000)` | B42, B30, E60, B33 | intermediate | 1.122937715 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E60}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E60}^{2}}{6}}}{1000}}`$ |
+| F61 | 1 | `=B42/((B30/(1*E61))/1000+(B33/(1*E61^2/6))/1000)` | B42, B30, E61, B33 | intermediate | 1.274763478 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E61}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E61}^{2}}{6}}}{1000}}`$ |
+| F62 | 1 | `=B42/((B30/(1*E62))/1000+(B33/(1*E62^2/6))/1000)` | B42, B30, E62, B33 | intermediate | 1.434459122 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E62}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E62}^{2}}{6}}}{1000}}`$ |
+| F63 | 1 | `=B42/((B30/(1*E63))/1000+(B33/(1*E63^2/6))/1000)` | B42, B30, E63, B33 | intermediate | 1.601768022 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E63}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E63}^{2}}{6}}}{1000}}`$ |
+| F64 | 1 | `=B42/((B30/(1*E64))/1000+(B33/(1*E64^2/6))/1000)` | B42, B30, E64, B33 | intermediate | 1.776444589 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E64}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E64}^{2}}{6}}}{1000}}`$ |
+| F65 | 1 | `=B42/((B30/(1*E65))/1000+(B33/(1*E65^2/6))/1000)` | B42, B30, E65, B33 | intermediate | 1.958253683 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E65}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E65}^{2}}{6}}}{1000}}`$ |
+| F66 | 1 | `=B42/((B30/(1*E66))/1000+(B33/(1*E66^2/6))/1000)` | B42, B30, E66, B33 | intermediate | 2.146970068 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E66}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E66}^{2}}{6}}}{1000}}`$ |
+| F67 | 1 | `=B42/((B30/(1*E67))/1000+(B33/(1*E67^2/6))/1000)` | B42, B30, E67, B33 | intermediate | 2.342377891 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E67}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E67}^{2}}{6}}}{1000}}`$ |
+| F68 | 1 | `=B42/((B30/(1*E68))/1000+(B33/(1*E68^2/6))/1000)` | B42, B30, E68, B33 | intermediate | 2.544270199 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E68}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E68}^{2}}{6}}}{1000}}`$ |
+| F69 | 1 | `=B42/((B30/(1*E69))/1000+(B33/(1*E69^2/6))/1000)` | B42, B30, E69, B33 | intermediate | 2.752448489 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E69}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E69}^{2}}{6}}}{1000}}`$ |
+| F70 | 1 | `=B42/((B30/(1*E70))/1000+(B33/(1*E70^2/6))/1000)` | B42, B30, E70, B33 | intermediate | 2.966722276 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E70}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E70}^{2}}{6}}}{1000}}`$ |
+| F71 | 1 | `=B42/((B30/(1*E71))/1000+(B33/(1*E71^2/6))/1000)` | B42, B30, E71, B33 | intermediate | 3.186908695 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E71}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E71}^{2}}{6}}}{1000}}`$ |
+| F72 | 1 | `=B42/((B30/(1*E72))/1000+(B33/(1*E72^2/6))/1000)` | B42, B30, E72, B33 | intermediate | 3.412832123 | $`\frac{\mathrm{B42}}{\frac{\frac{\mathrm{B30}}{1 \cdot \mathrm{E72}}}{1000}+\frac{\frac{\mathrm{B33}}{\frac{1 \cdot \mathrm{E72}^{2}}{6}}}{1000}}`$ |
+| B74 | 1 | `=IFERROR(INDEX(E49:E72,COUNTIF(F49:F72,"<"&B13)+1),"Increase table range")` | E49:E72, F49:F72, B13 | result | 1 | $`\operatorname{IFERROR}(\operatorname{INDEX}(\mathrm{E49{:}E72}, \operatorname{COUNTIF}(\mathrm{F49{:}F72}, \text{"<"} \mathbin{\&} \mathrm{B13})+1), \text{"Increase table range"})`$ |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| B44 | `=IF(B43>=B13,"SAFE","NOT SAFE - increase thickness")` | NOT SAFE - increase thickness |
+| A45 | `=IF(B41<0,"Note: net tension on inner fibre - provide crack-control reinforcement","No net tension")` | Note: net tension on inner fibre - provide crack-control reinforcement |
+| B74 | `=IFERROR(INDEX(E49:E72,COUNTIF(F49:F72,"<"&B13)+1),"Increase table range")` | 1 |
+
+### Ventilation
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| B5 |  | Tunnel length, L | 800 | m | cell beside | 2 |
+| B6 |  | Tunnel diameter, D | 10 | m | cell beside | 2 |
+| B7 |  | Design-hour traffic volume | 1200 |  |  | 2 |
+| B8 |  | Heavy diesel vehicle share | 0.1 |  |  | 2 |
+| B9 |  | CO emission factor - LMV | 8 |  |  | 1 |
+| B10 |  | CO emission factor - HDV | 12 |  |  | 1 |
+| B11 |  | Permissible CO (15-min) | 100 | ppm | cell beside | 1 |
+| B12 |  | Design fire heat release rate | 30 | MW | cell beside | 1 |
+| B13 |  | Air density | 1.2 | kg/m3 | cell beside | 2 |
+| B14 |  | Specific heat of air | 1.005 | kJ/kg.K | cell beside | 1 |
+| B15 |  | Ambient temperature | 298 | K | cell beside | 1 |
+| B16 |  | Darcy friction factor | 0.02 |  |  | 1 |
+| B17 |  | Jet fan thrust (each) | 1500 | N | cell beside | 1 |
+
+#### Formulas
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B20 | 1 | `=PI()*B6^2/4` | B6 | intermediate | 78.53981634 | $`\frac{\pi \cdot \mathrm{B6}^{2}}{4}`$ |
+| B21 | 1 | `=B6` | B6 | intermediate | 10 |  |
+| B24 | 1 | `=B7*B8` | B7, B8 | intermediate | 120 | $`\mathrm{B7} \cdot \mathrm{B8}`$ |
+| B25 | 1 | `=B7*(1-B8)` | B7, B8 | intermediate | 1080 | $`\mathrm{B7} \cdot (1-\mathrm{B8})`$ |
+| B26 | 1 | `=((B25*B9)+(B24*B10))*(B5/1000)/3600` | B25, B9, B24, B10, B5 | intermediate | 2.24 | $`\frac{(\mathrm{B25} \cdot \mathrm{B9}+\mathrm{B24} \cdot \mathrm{B10}) \cdot \frac{\mathrm{B5}}{1000}}{3600}`$ |
+| B27 | 1 | `=(B11*(28/24.45))/1000` | B11 | intermediate | 0.114519427 | $`\frac{\mathrm{B11} \cdot \frac{28}{24.45}}{1000}`$ |
+| B28 | 1 | `=B26/B27` | B26, B27 | intermediate | 19.56 | $`\frac{\mathrm{B26}}{\mathrm{B27}}`$ |
+| B29 | 1 | `=B28/B20` | B28, B20 | intermediate | 0.249045655 | $`\frac{\mathrm{B28}}{\mathrm{B20}}`$ |
+| B32 | 1 | `=(9.81*B12*1000/(B13*B14*B15*B20))^(1/3)` | B12, B13, B14, B15, B20 | intermediate | 2.184635247 | $`(\frac{9.81 \cdot \mathrm{B12} \cdot 1000}{\mathrm{B13} \cdot \mathrm{B14} \cdot \mathrm{B15} \cdot \mathrm{B20}})^{\frac{1}{3}}`$ |
+| B33 | 1 | `=MAX(B29,B32)` | B29, B32 | intermediate | 2.184635247 | $`\operatorname{MAX}(\mathrm{B29}, \mathrm{B32})`$ |
+| B34 | 1 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | B33 | result | OK | $`\operatorname{IF}(\operatorname{AND}(\mathrm{B33} \geq 1, \mathrm{B33} \leq 10), \text{"OK"}, \text{"CHECK RANGE"})`$ |
+| B37 | 1 | `=B16*(B5/B21)*(B13*B33^2/2)` | B16, B5, B21, B13, B33 | intermediate | 4.581725916 | $`\mathrm{B16} \cdot \frac{\mathrm{B5}}{\mathrm{B21}} \cdot \frac{\mathrm{B13} \cdot \mathrm{B33}^{2}}{2}`$ |
+| B38 | 1 | `=B37*B20` | B37, B20 | intermediate | 359.847911931 | $`\mathrm{B37} \cdot \mathrm{B20}`$ |
+| B39 | 1 | `=ROUNDUP(B38/B17,0)` | B38, B17 | result | 1 | $`\operatorname{ROUNDUP}(\frac{\mathrm{B38}}{\mathrm{B17}}, 0)`$ |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| B34 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | OK |
+| B39 | `=ROUNDUP(B38/B17,0)` | 1 |
+
+### Drainage
+
+#### Parameters
+
+A row with a cell range stands for values next to each other that play one part.
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| B5 |  | Tunnel length, L | 800 | m | cell beside | 1 |
+| B6 |  | Longitudinal gradient | 0.005 |  |  | 11 |
+| B7 |  | Seepage rate assumed | 0.02 |  |  | 1 |
+| B8 |  | Runoff coefficient, C | 0.85 |  |  | 1 |
+| B9 |  | Design rainfall intensity, i | 75 | mm/hr | cell beside | 1 |
+| B10 |  | Portal catchment area | 0.6 | ha | cell beside | 1 |
+| B11 |  | Manning's roughness, n | 0.013 |  |  | 11 |
+| B12 |  | Trial pipe diameter | 0.3 | m | cell beside | 2 |
+| B13 |  | Sump retention time | 10 | min | cell beside | 1 |
+| B14 |  | Pump duty factor | 1.25 |  |  | 1 |
+| E29:E38 |  | D | 0.15, 0.2, 0.25 ..., 0.9 (10 values) | m | column header | 2 each |
+
+#### Formulas
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B17 | 1 | `=B7*B5` | B7, B5 | intermediate | 16 | $`\mathrm{B7} \cdot \mathrm{B5}`$ |
+| B18 | 1 | `=B8*B9*B10/360*1000` | B8, B9, B10 | intermediate | 106.25 | $`\frac{\mathrm{B8} \cdot \mathrm{B9} \cdot \mathrm{B10}}{360} \cdot 1000`$ |
+| B19 | 1 | `=B17+B18` | B17, B18 | intermediate | 122.25 |  |
+| B22 | 1 | `=PI()*B12^2/4` | B12 | intermediate | 0.070685835 | $`\frac{\pi \cdot \mathrm{B12}^{2}}{4}`$ |
+| B23 | 1 | `=B12/4` | B12 | intermediate | 0.075 | $`\frac{\mathrm{B12}}{4}`$ |
+| B24 | 1 | `=(1/B11)*B22*B23^(2/3)*B6^0.5*1000` | B11, B22, B23, B6 | intermediate | 68.377762105 | $`\frac{1}{\mathrm{B11}} \cdot \mathrm{B22} \cdot \mathrm{B23}^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| B25 | 1 | `=IF(B24>=B19,"OK - adequate","UNDERSIZED - increase diameter")` | B24, B19 | result | UNDERSIZED - increase diameter | $`\operatorname{IF}(\mathrm{B24} \geq \mathrm{B19}, \text{"OK - adequate"}, \text{"UNDERSIZED - increase diameter"})`$ |
+| F29 | 1 | `=(1/B11)*(PI()*E29^2/4)*(E29/4)^(2/3)*B6^0.5*1000` | B11, E29, B6 | intermediate | 10.768822728 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E29}^{2}}{4} \cdot (\frac{\mathrm{E29}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F30 | 1 | `=(1/B11)*(PI()*E30^2/4)*(E30/4)^(2/3)*B6^0.5*1000` | B11, E30, B6 | intermediate | 23.191999453 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E30}^{2}}{4} \cdot (\frac{\mathrm{E30}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F31 | 1 | `=(1/B11)*(PI()*E31^2/4)*(E31/4)^(2/3)*B6^0.5*1000` | B11, E31, B6 | intermediate | 42.049892849 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E31}^{2}}{4} \cdot (\frac{\mathrm{E31}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F32 | 1 | `=(1/B11)*(PI()*E32^2/4)*(E32/4)^(2/3)*B6^0.5*1000` | B11, E32, B6 | intermediate | 68.377762105 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E32}^{2}}{4} \cdot (\frac{\mathrm{E32}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F33 | 1 | `=(1/B11)*(PI()*E33^2/4)*(E33/4)^(2/3)*B6^0.5*1000` | B11, E33, B6 | intermediate | 147.260017319 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E33}^{2}}{4} \cdot (\frac{\mathrm{E33}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F34 | 1 | `=(1/B11)*(PI()*E34^2/4)*(E34/4)^(2/3)*B6^0.5*1000` | B11, E34, B6 | intermediate | 201.600485541 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E34}^{2}}{4} \cdot (\frac{\mathrm{E34}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F35 | 1 | `=(1/B11)*(PI()*E35^2/4)*(E35/4)^(2/3)*B6^0.5*1000` | B11, E35, B6 | intermediate | 267.000176572 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E35}^{2}}{4} \cdot (\frac{\mathrm{E35}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F36 | 1 | `=(1/B11)*(PI()*E36^2/4)*(E36/4)^(2/3)*B6^0.5*1000` | B11, E36, B6 | intermediate | 434.171725987 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E36}^{2}}{4} \cdot (\frac{\mathrm{E36}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F37 | 1 | `=(1/B11)*(PI()*E37^2/4)*(E37/4)^(2/3)*B6^0.5*1000` | B11, E37, B6 | intermediate | 787.205716879 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E37}^{2}}{4} \cdot (\frac{\mathrm{E37}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| F38 | 1 | `=(1/B11)*(PI()*E38^2/4)*(E38/4)^(2/3)*B6^0.5*1000` | B11, E38, B6 | intermediate | 1280.083291299 | $`\frac{1}{\mathrm{B11}} \cdot \frac{\pi \cdot \mathrm{E38}^{2}}{4} \cdot (\frac{\mathrm{E38}}{4})^{\frac{2}{3}} \cdot \mathrm{B6}^{0.5} \cdot 1000`$ |
+| B40 | 1 | `=IFERROR(INDEX(E29:E38,COUNTIF(F29:F38,"<"&B19)+1),"Increase table range")` | E29:E38, F29:F38, B19 | result | 0.4 | $`\operatorname{IFERROR}(\operatorname{INDEX}(\mathrm{E29{:}E38}, \operatorname{COUNTIF}(\mathrm{F29{:}F38}, \text{"<"} \mathbin{\&} \mathrm{B19})+1), \text{"Increase table range"})`$ |
+| B43 | 1 | `=B19*B14` | B19, B14 | intermediate | 152.8125 | $`\mathrm{B19} \cdot \mathrm{B14}`$ |
+| B44 | 1 | `=(B43/1000)*(B13*60)` | B43, B13 | result | 91.6875 | $`\frac{\mathrm{B43}}{1000} \cdot \mathrm{B13} \cdot 60`$ |
+| B45 | 1 | `=B43` | B43 | result | 152.8125 |  |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| B25 | `=IF(B24>=B19,"OK - adequate","UNDERSIZED - increase diameter")` | UNDERSIZED - increase diameter |
+| B40 | `=IFERROR(INDEX(E29:E38,COUNTIF(F29:F38,"<"&B19)+1),"Increase table range")` | 0.4 |
+| B44 | `=(B43/1000)*(B13*60)` | 91.6875 |
+| B45 | `=B43` | 152.8125 |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters.
+```mermaid
+flowchart LR
+    n0["Structural_Lining!B16"]
+    n1["Structural_Lining!B17"]
+    n2["Structural_Lining!B18"]
+    n3["Structural_Lining!B19"]
+    n4["Structural_Lining!B20"]
+    n5["Structural_Lining!B21"]
+    n6["Structural_Lining!B22"]
+    n7["Structural_Lining!B23"]
+    n8["Structural_Lining!B26"]
+    n9["Structural_Lining!B27"]
+    n10["Structural_Lining!B28"]
+    n11["Structural_Lining!B29"]
+    n12[["Structural_Lining!B30:B33, 2 formulas"]]
+    n13["Structural_Lining!B31"]
+    n14["Structural_Lining!B32"]
+    n15["Structural_Lining!B36"]
+    n16["Structural_Lining!B37"]
+    n17["Structural_Lining!B38"]
+    n18["Structural_Lining!B39"]
+    n19["Structural_Lining!B40"]
+    n20["Structural_Lining!B41"]
+    n21["Structural_Lining!B42"]
+    n22["Structural_Lining!B43"]
+    n23["Structural_Lining!B44"]
+    n24["Structural_Lining!A45"]
+    n25["Structural_Lining!F49"]
+    n26["Structural_Lining!F50"]
+    n27["Structural_Lining!F51"]
+    n28["Structural_Lining!F52"]
+    n29["Structural_Lining!F53"]
+    n30["Structural_Lining!F54"]
+    n31["Structural_Lining!F55"]
+    n32["Structural_Lining!F56"]
+    n33["Structural_Lining!F57"]
+    n34["Structural_Lining!F58"]
+    n35["Structural_Lining!F59"]
+    n36["Structural_Lining!F60"]
+    n37["Structural_Lining!F61"]
+    n38["Structural_Lining!F62"]
+    n39["Structural_Lining!F63"]
+    n40["Structural_Lining!F64"]
+    n41["Structural_Lining!F65"]
+    n42["Structural_Lining!F66"]
+    n43["Structural_Lining!F67"]
+    n44["Structural_Lining!F68"]
+    n45["Structural_Lining!F69"]
+    n46["Structural_Lining!F70"]
+    n47["Structural_Lining!F71"]
+    n48["Structural_Lining!F72"]
+    n49["Structural_Lining!B74"]
+    n50["Ventilation!B20"]
+    n51["Ventilation!B21"]
+    n52["Ventilation!B24"]
+    n53["Ventilation!B25"]
+    n54["Ventilation!B26"]
+    n55["Ventilation!B27"]
+    n56["Ventilation!B28"]
+    n57["Ventilation!B29"]
+    n58["Ventilation!B32"]
+    n59["Ventilation!B33"]
+    n60["Ventilation!B34"]
+    n61["Ventilation!B37"]
+    n62["Ventilation!B38"]
+    n63["Ventilation!B39"]
+    n64["Drainage!B17"]
+    n65["Drainage!B18"]
+    n66["Drainage!B19"]
+    n67["Drainage!B22"]
+    n68["Drainage!B23"]
+    n69["Drainage!B24"]
+    n70["Drainage!B25"]
+    n71["Drainage!F29"]
+    n72["Drainage!F30"]
+    n73["Drainage!F31"]
+    n74["Drainage!F32"]
+    n75["Drainage!F33"]
+    n76["Drainage!F34"]
+    n77["Drainage!F35"]
+    n78["Drainage!F36"]
+    n79["Drainage!F37"]
+    n80["Drainage!F38"]
+    n81["Drainage!B40"]
+    n82["Drainage!B43"]
+    n83["Drainage!B44"]
+    n84["Drainage!B45"]
+    n85(["Structural_Lining!B5"])
+    n86(["Structural_Lining!B9"])
+    n87(["Structural_Lining!B9"])
+    n88(["Structural_Lining!B9"])
+    n89(["Structural_Lining!B7:B10"])
+    n90(["Structural_Lining!B5:B8"])
+    n91(["Structural_Lining!B6"])
+    n92(["Structural_Lining!B6"])
+    n93(["Structural_Lining!B11"])
+    n94(["Structural_Lining!B13"])
+    n95(["Structural_Lining!E49"])
+    n96(["Structural_Lining!E50"])
+    n97(["Structural_Lining!E51"])
+    n98(["Structural_Lining!E52"])
+    n99(["Structural_Lining!E53"])
+    n100(["Structural_Lining!E54"])
+    n101(["Structural_Lining!E55"])
+    n102(["Structural_Lining!E56"])
+    n103(["Structural_Lining!E57"])
+    n104(["Structural_Lining!E58"])
+    n105(["Structural_Lining!E59"])
+    n106(["Structural_Lining!E60"])
+    n107(["Structural_Lining!E61"])
+    n108(["Structural_Lining!E62"])
+    n109(["Structural_Lining!E63"])
+    n110(["Structural_Lining!E64"])
+    n111(["Structural_Lining!E65"])
+    n112(["Structural_Lining!E66"])
+    n113(["Structural_Lining!E67"])
+    n114(["Structural_Lining!E68"])
+    n115(["Structural_Lining!E69"])
+    n116(["Structural_Lining!E70"])
+    n117(["Structural_Lining!E71"])
+    n118(["Structural_Lining!E72"])
+    n119(["Structural_Lining!B13:E72"])
+    n120(["Ventilation!B6"])
+    n121(["Ventilation!B6"])
+    n122(["Ventilation!B7:B8"])
+    n123(["Ventilation!B7:B8"])
+    n124(["Ventilation!B5:B10"])
+    n125(["Ventilation!B11"])
+    n126(["Ventilation!B12:B15"])
+    n127(["Ventilation!B5:B16"])
+    n128(["Ventilation!B17"])
+    n129(["Drainage!B5:B7"])
+    n130(["Drainage!B8:B10"])
+    n131(["Drainage!B12"])
+    n132(["Drainage!B12"])
+    n133(["Drainage!B6:B11"])
+    n134(["Drainage!B6:E29"])
+    n135(["Drainage!B6:E30"])
+    n136(["Drainage!B6:E31"])
+    n137(["Drainage!B6:E32"])
+    n138(["Drainage!B6:E33"])
+    n139(["Drainage!B6:E34"])
+    n140(["Drainage!B6:E35"])
+    n141(["Drainage!B6:E36"])
+    n142(["Drainage!B6:E37"])
+    n143(["Drainage!B6:E38"])
+    n144(["Drainage!E29:E38"])
+    n145(["Drainage!B14"])
+    n146(["Drainage!B13"])
+    n0 --> n1
+    n0 --> n10
+    n0 --> n11
+    n0 --> n13
+    n0 --> n14
+    n1 --> n4
+    n2 --> n4
+    n2 --> n7
+    n3 --> n4
+    n4 --> n6
+    n5 --> n6
+    n6 --> n7
+    n6 --> n8
+    n6 --> n9
+    n7 --> n8
+    n7 --> n9
+    n8 --> n10
+    n8 --> n11
+    n9 --> n10
+    n9 --> n11
+    n9 --> n13
+    n9 --> n14
+    n10 --> n12
+    n11 --> n12
+    n12 --> n17
+    n12 --> n18
+    n12 --> n25
+    n12 --> n26
+    n12 --> n27
+    n12 --> n28
+    n12 --> n29
+    n12 --> n30
+    n12 --> n31
+    n12 --> n32
+    n12 --> n33
+    n12 --> n34
+    n12 --> n35
+    n12 --> n36
+    n12 --> n37
+    n12 --> n38
+    n12 --> n39
+    n12 --> n40
+    n12 --> n41
+    n12 --> n42
+    n12 --> n43
+    n12 --> n44
+    n12 --> n45
+    n12 --> n46
+    n12 --> n47
+    n12 --> n48
+    n13 --> n12
+    n14 --> n12
+    n15 --> n17
+    n16 --> n18
+    n17 --> n19
+    n17 --> n20
+    n18 --> n19
+    n18 --> n20
+    n19 --> n22
+    n20 --> n24
+    n21 --> n22
+    n21 --> n25
+    n21 --> n26
+    n21 --> n27
+    n21 --> n28
+    n21 --> n29
+    n21 --> n30
+    n21 --> n31
+    n21 --> n32
+    n21 --> n33
+    n21 --> n34
+    n21 --> n35
+    n21 --> n36
+    n21 --> n37
+    n21 --> n38
+    n21 --> n39
+    n21 --> n40
+    n21 --> n41
+    n21 --> n42
+    n21 --> n43
+    n21 --> n44
+    n21 --> n45
+    n21 --> n46
+    n21 --> n47
+    n21 --> n48
+    n22 --> n23
+    n25 --> n49
+    n26 --> n49
+    n27 --> n49
+    n28 --> n49
+    n29 --> n49
+    n30 --> n49
+    n31 --> n49
+    n32 --> n49
+    n33 --> n49
+    n34 --> n49
+    n35 --> n49
+    n36 --> n49
+    n37 --> n49
+    n38 --> n49
+    n39 --> n49
+    n40 --> n49
+    n41 --> n49
+    n42 --> n49
+    n43 --> n49
+    n44 --> n49
+    n45 --> n49
+    n46 --> n49
+    n47 --> n49
+    n48 --> n49
+    n50 --> n57
+    n50 --> n58
+    n50 --> n62
+    n51 --> n61
+    n52 --> n54
+    n53 --> n54
+    n54 --> n56
+    n55 --> n56
+    n56 --> n57
+    n57 --> n59
+    n58 --> n59
+    n59 --> n60
+    n59 --> n61
+    n61 --> n62
+    n62 --> n63
+    n64 --> n66
+    n65 --> n66
+    n66 --> n70
+    n66 --> n81
+    n66 --> n82
+    n67 --> n69
+    n68 --> n69
+    n69 --> n70
+    n71 --> n81
+    n72 --> n81
+    n73 --> n81
+    n74 --> n81
+    n75 --> n81
+    n76 --> n81
+    n77 --> n81
+    n78 --> n81
+    n79 --> n81
+    n80 --> n81
+    n82 --> n83
+    n82 --> n84
+    n85 --> n0
+    n86 --> n1
+    n87 --> n2
+    n88 --> n3
+    n89 --> n4
+    n90 --> n5
+    n91 --> n15
+    n92 --> n16
+    n93 --> n21
+    n94 --> n23
+    n95 --> n25
+    n96 --> n26
+    n97 --> n27
+    n98 --> n28
+    n99 --> n29
+    n100 --> n30
+    n101 --> n31
+    n102 --> n32
+    n103 --> n33
+    n104 --> n34
+    n105 --> n35
+    n106 --> n36
+    n107 --> n37
+    n108 --> n38
+    n109 --> n39
+    n110 --> n40
+    n111 --> n41
+    n112 --> n42
+    n113 --> n43
+    n114 --> n44
+    n115 --> n45
+    n116 --> n46
+    n117 --> n47
+    n118 --> n48
+    n119 --> n49
+    n120 --> n50
+    n121 --> n51
+    n122 --> n52
+    n123 --> n53
+    n124 --> n54
+    n125 --> n55
+    n126 --> n58
+    n127 --> n61
+    n128 --> n63
+    n129 --> n64
+    n130 --> n65
+    n131 --> n67
+    n132 --> n68
+    n133 --> n69
+    n134 --> n71
+    n135 --> n72
+    n136 --> n73
+    n137 --> n74
+    n138 --> n75
+    n139 --> n76
+    n140 --> n77
+    n141 --> n78
+    n142 --> n79
+    n143 --> n80
+    n144 --> n81
+    n145 --> n82
+    n146 --> n83
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| calculation | workbook | automatic, iterative calculation off |

@@ -1,0 +1,24 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "contains": "| Inventory | A1:C5 | Item, Type, Quantity |"
+  },
+  {
+    "contains": "| Sales\\_Bob | A7:B11 | Item, Units |"
+  }
+]

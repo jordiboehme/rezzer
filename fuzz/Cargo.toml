@@ -20,6 +20,12 @@ rezzer-read-csv = { path = "../crates/readers/rezzer-read-csv" }
 rezzer-read-text = { path = "../crates/readers/rezzer-read-text" }
 textenc = { path = "../crates/formats/textenc" }
 csvsniff = { path = "../crates/formats/csvsniff" }
+zipguard = { path = "../crates/formats/zipguard" }
+formulakit = { path = "../crates/formats/formulakit" }
+sheetparts = { path = "../crates/formats/sheetparts" }
+rezzer-read-sheet = { path = "../crates/readers/rezzer-read-sheet" }
+# Builds the small packages of the part reader targets (stored entries only).
+zip = { version = "=9.0.5", default-features = false }
 
 # Not part of the workspace: cargo-fuzz needs nightly.
 [workspace]
@@ -72,6 +78,41 @@ bench = false
 [[bin]]
 name = "text_read"
 path = "fuzz_targets/text_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "formulakit_analyze"
+path = "fuzz_targets/formulakit_analyze.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sheetparts_ooxml"
+path = "fuzz_targets/sheetparts_ooxml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sheetparts_odf"
+path = "fuzz_targets/sheetparts_odf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zipguard_open"
+path = "fuzz_targets/zipguard_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sheet_reader"
+path = "fuzz_targets/sheet_reader.rs"
 test = false
 doc = false
 bench = false

@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/properties/custom/MyCustomString/value",
+    "equals": "MyStringValue"
+  },
+  {
+    "pointer": "/properties/custom/myCustomNumber/value",
+    "equals": 3.0
+  }
+]

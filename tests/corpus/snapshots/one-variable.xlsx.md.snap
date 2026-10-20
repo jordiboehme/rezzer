@@ -1,0 +1,118 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "one-variable.xlsx"
+resource: "<corpus>/office/one-variable.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "97b284e9800fbf8e3a64be33877d98763a857ba1087858bd2d156f2dd89252ae"
+source_size: 9018
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["Kohei Yoshida"]
+created: "2013-11-01T13:03:11Z"
+modified: "2013-11-01T13:48:39Z"
+---
+
+# one-variable.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| One-Var | sheet | 11 rows x 9 columns | result |  |
+
+- Sheets: 1
+- Formulas: 5
+- Parameters: 2
+- Results: 4
+- Last changed: 2013-11-01T13:48:39Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | Kohei Yoshida |
+
+## One-Var
+
+|  |  |  |  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | B | =A\*B |  |  |  |  |  |  |
+| 1 | 2 | 2 |  |  |  |  |  |  |
+|  |  |  |  |  |  |  |  |  |
+| Var A | 2 |  | Var B | 10 | 20 | 30 | 40 | 50 |
+| 1 | 2 |  | 2 | 10 | 20 | 30 | 40 | 50 |
+| 2 | 4 |  |  |  |  |  |  |  |
+| 3 | 6 |  |  |  |  |  |  |  |
+| 4 | 8 |  |  |  |  |  |  |  |
+| 5 | 10 |  |  |  |  |  |  |  |
+| 6 | 12 |  |  |  |  |  |  |  |
+| 7 | 14 |  |  |  |  |  |  |  |
+
+## Logic
+
+### One-Var
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A2 |  | A | 1 |  |  | 2 |
+| B2 |  | B | 2 |  |  | 2 |
+
+#### Formulas
+
+| Cells | Count | Formula | Reads | Role | Value | Note | Math |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C2 | 1 | `=A2*B2` | A2, B2 | intermediate | 2 |  | $`\mathrm{A2} \cdot \mathrm{B2}`$ |
+| B4 | 1 | `=C2` | C2 | result | 2 |  |  |
+| B5:B11 | 1 | `=TABLE(,A2)` | A2 | result | 2 | what-if data table: column input A2 |  |
+| D5 | 1 | `=C2` | C2 | result | 2 |  |  |
+| E5:I5 | 1 | `=TABLE(B2,)` | B2 | result | 10 | what-if data table: row input B2 |  |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| B4 | `=C2` | 2 |
+| B5:B11 | `=TABLE(,A2)` | 2 |
+| D5 | `=C2` | 2 |
+| E5:I5 | `=TABLE(B2,)` | 10 |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Round boxes are parameters.
+```mermaid
+flowchart LR
+    n0["'One-Var'!C2"]
+    n1["'One-Var'!B4"]
+    n2["'One-Var'!B5"]
+    n3["'One-Var'!D5"]
+    n4["'One-Var'!E5"]
+    n5(["'One-Var'!A2:B2"])
+    n6(["'One-Var'!A2"])
+    n7(["'One-Var'!B2"])
+    n0 --> n1
+    n0 --> n3
+    n5 --> n0
+    n6 --> n2
+    n7 --> n4
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| data table | 'One-Var'!B5:B11 | `=TABLE(,A2)` what-if data table: column input A2 |
+| data table | 'One-Var'!E5:I5 | `=TABLE(B2,)` what-if data table: row input B2 |
+| calculation | workbook | automatic, iterative calculation off |

@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 5
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 2
+  },
+  {
+    "contains": "| data table | 'One-Var'!B5:B11 | `=TABLE(,A2)` what-if data table: column input A2 |"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 10
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 7
+  },
+  {
+    "contains": "| Temperature | workbook | LAMBDA | `LAMBDA(temp, (5/9) * (temp-32))` |"
+  }
+]

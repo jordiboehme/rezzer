@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsb"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 4
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 3
+  },
+  {
+    "pointer": "/body/0/title",
+    "equals": "mySheet1"
+  }
+]

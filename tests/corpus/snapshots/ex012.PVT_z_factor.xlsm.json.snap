@@ -1,0 +1,1573 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "z",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "z!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Упражнения по работе с макросами Unifloc VBA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "версия",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7.40",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Проверка расчета z фактора с использоваием унифлок VBA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "gg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.75",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "zcor",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            [
+              {
+                "anchor": "z!A12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!B12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!C12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!D12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!E12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!F12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!G12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!H12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!I12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!J12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!K12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "z!L12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              "<25 more items>"
+            ],
+            "<93 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Charts",
+          "header_rows": 1,
+          "role": "chart",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Chart",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Title",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Series",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "scatter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "dz/dp",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "z!$E$85: z!$F$85:$AK$85; z!$E$86: z!$F$86:$AK$86; z!$E$87: z!$F$87:$AK$87; z!$E$88: z!$F$88:$AK$88; z!$E$89: z!$F$89:$AK$89; z!$E$90: z!$F$90:$AK$90; z!$E$91: z!$F$91:$AK$91; z!$E$92: z!$F$92:$AK$92; z!$E$93: z!$F$93:$AK$93; z!$E$94: z!$F$94:$AK$94; z!$E$95: z!$F$95:$AK$95; z!$E$96: z!$F$96:$AK$96; z!$E$97: z!$F$97:$AK$97; z!$E$98: z!$F$98:$AK$98; z!$E$99: z!$F$99:$AK$99; z!$E$100: z!$F$100:$AK$100; z!$E$101: z!$F$101:$AK$101; z!$E$102: z!$F$102:$AK$102; z!$E$103: z!$F$103:$AK$103; z!$E$104: z!$F$104:$AK$104; z!$E$105: z!$F$105:$AK$105",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "scatter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "dz/dt",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "z!$E$62: z!$F$62:$AK$62; z!$E$63: z!$F$63:$AK$63; z!$E$64: z!$F$64:$AK$64; z!$E$65: z!$F$65:$AK$65; z!$E$66: z!$F$66:$AK$66; z!$E$67: z!$F$67:$AK$67; z!$E$68: z!$F$68:$AK$68; z!$E$69: z!$F$69:$AK$69; z!$E$70: z!$F$70:$AK$70; z!$E$71: z!$F$71:$AK$71; z!$E$72: z!$F$72:$AK$72; z!$E$73: z!$F$73:$AK$73; z!$E$74: z!$F$74:$AK$74; z!$E$75: z!$F$75:$AK$75; z!$E$76: z!$F$76:$AK$76; z!$E$77: z!$F$77:$AK$77; z!$E$78: z!$F$78:$AK$78; z!$E$79: z!$F$79:$AK$79; z!$E$80: z!$F$80:$AK$80; z!$E$81: z!$F$81:$AK$81; z!$E$82: z!$F$82:$AK$82",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "scatter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "z factor",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "z!$E$38: z!$F$38:$AK$38; z!$E$39: z!$F$39:$AK$39; z!$E$40: z!$F$40:$AK$40; z!$E$41: z!$F$41:$AK$41; z!$E$42: z!$F$42:$AK$42; z!$E$43: z!$F$43:$AK$43; z!$E$44: z!$F$44:$AK$44; z!$E$45: z!$F$45:$AK$45; z!$E$46: z!$F$46:$AK$46; z!$E$47: z!$F$47:$AK$47; z!$E$48: z!$F$48:$AK$48; z!$E$49: z!$F$49:$AK$49; z!$E$50: z!$F$50:$AK$50; z!$E$51: z!$F$51:$AK$51; z!$E$52: z!$F$52:$AK$52; z!$E$53: z!$F$53:$AK$53; z!$E$54: z!$F$54:$AK$54; z!$E$55: z!$F$55:$AK$55; z!$E$56: z!$F$56:$AK$56; z!$E$57: z!$F$57:$AK$57; z!$E$58: z!$F$58:$AK$58",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "z",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "embedded": [
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "Module1"
+      },
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "Лист1"
+      },
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "ЭтаКнига"
+      },
+      {
+        "detail": "[1] in formulas, never opened",
+        "kind": "add-in",
+        "name": "UniflocVBA_7.xlam",
+        "target": "file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam"
+      },
+      {
+        "detail": "[2] in formulas, never opened",
+        "kind": "add-in",
+        "name": "UniflocVBA_7.xlam",
+        "target": "/projects/unifloc_vba/UniflocVBA_7.xlam"
+      },
+      {
+        "detail": "file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam",
+        "kind": "user-function",
+        "name": "[1]!unf_version"
+      },
+      {
+        "detail": "file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam",
+        "kind": "user-function",
+        "name": "[1]!unf_pvt_Zgas_d"
+      },
+      {
+        "detail": "/projects/unifloc_vba/UniflocVBA_7.xlam",
+        "kind": "user-function",
+        "name": "[2]!unf_pvt_Zgas_d"
+      },
+      {
+        "detail": "file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam",
+        "kind": "user-function",
+        "name": "[1]!unf_pvt_dZdt"
+      },
+      {
+        "detail": "file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam",
+        "kind": "user-function",
+        "name": "[1]!unf_pvt_dZdp"
+      }
+    ],
+    "formulas": [
+      {
+        "anchor": "z!G1",
+        "cached": {
+          "type": "text",
+          "value": "7.40"
+        },
+        "dialect": "excel",
+        "expression": "=[1]!unf_version()",
+        "kind": "cell",
+        "latex": "\\text{[1]!unf\\_version}()",
+        "role": "constant"
+      },
+      {
+        "anchor": "z!F36",
+        "cached": {
+          "type": "number",
+          "value": 0.1
+        },
+        "dialect": "excel",
+        "expression": "=F35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{F35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!F35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!G36",
+        "cached": {
+          "type": "number",
+          "value": 1.0
+        },
+        "dialect": "excel",
+        "expression": "=G35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{G35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!G35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!H36",
+        "cached": {
+          "type": "number",
+          "value": 1.9
+        },
+        "dialect": "excel",
+        "expression": "=H35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{H35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!H35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!I36",
+        "cached": {
+          "type": "number",
+          "value": 2.8
+        },
+        "dialect": "excel",
+        "expression": "=I35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{I35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!I35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!J36",
+        "cached": {
+          "type": "number",
+          "value": 3.7
+        },
+        "dialect": "excel",
+        "expression": "=J35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{J35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!J35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!K36",
+        "cached": {
+          "type": "number",
+          "value": 4.6
+        },
+        "dialect": "excel",
+        "expression": "=K35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{K35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!K35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!L36",
+        "cached": {
+          "type": "number",
+          "value": 5.5
+        },
+        "dialect": "excel",
+        "expression": "=L35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{L35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!L35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!M36",
+        "cached": {
+          "type": "number",
+          "value": 6.4
+        },
+        "dialect": "excel",
+        "expression": "=M35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{M35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!M35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!N36",
+        "cached": {
+          "type": "number",
+          "value": 7.3
+        },
+        "dialect": "excel",
+        "expression": "=N35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{N35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!N35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!O36",
+        "cached": {
+          "type": "number",
+          "value": 8.2
+        },
+        "dialect": "excel",
+        "expression": "=O35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{O35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!O35"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "z!P36",
+        "cached": {
+          "type": "number",
+          "value": 9.1
+        },
+        "dialect": "excel",
+        "expression": "=P35/10",
+        "kind": "shared",
+        "latex": "\\frac{\\mathrm{P35}}{10}",
+        "pattern": "p1",
+        "range": "z!F36:AK36",
+        "references": [
+          "z!P35"
+        ],
+        "role": "intermediate"
+      },
+      "<2123 more items>"
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "p1",
+            "kind": "feeds",
+            "to": "p4"
+          },
+          {
+            "from": "p1",
+            "kind": "feeds",
+            "to": "f2"
+          },
+          {
+            "from": "p1",
+            "kind": "feeds",
+            "to": "p6"
+          },
+          {
+            "from": "p1",
+            "kind": "feeds",
+            "to": "p8"
+          },
+          {
+            "from": "p2",
+            "kind": "feeds",
+            "to": "p4"
+          },
+          {
+            "from": "p2",
+            "kind": "feeds",
+            "to": "f2"
+          },
+          {
+            "from": "p2",
+            "kind": "feeds",
+            "to": "p6"
+          },
+          {
+            "from": "p2",
+            "kind": "feeds",
+            "to": "p8"
+          },
+          {
+            "from": "p3",
+            "kind": "feeds",
+            "to": "p5"
+          },
+          {
+            "from": "p5",
+            "kind": "feeds",
+            "to": "p7"
+          },
+          {
+            "from": "v1",
+            "kind": "feeds",
+            "to": "p1"
+          },
+          {
+            "from": "v2",
+            "kind": "feeds",
+            "to": "p2"
+          },
+          "<11 more items>"
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "z!G1",
+            "id": "f1",
+            "kind": "formula",
+            "label": "z!G1"
+          },
+          {
+            "anchor": "z!F36:AK36",
+            "id": "p1",
+            "kind": "group",
+            "label": "z!F36:AK36"
+          },
+          {
+            "anchor": "z!D38:D58",
+            "id": "p2",
+            "kind": "group",
+            "label": "z!D38:D58"
+          },
+          {
+            "anchor": "z!E38:E58",
+            "id": "p3",
+            "kind": "group",
+            "label": "z!E38:E58"
+          },
+          {
+            "anchor": "z!F38:AK58",
+            "id": "p4",
+            "kind": "group",
+            "label": "z!F38:AK58"
+          },
+          {
+            "anchor": "z!I39",
+            "id": "f2",
+            "kind": "formula",
+            "label": "z!I39"
+          },
+          {
+            "anchor": "z!E62:E82",
+            "id": "p5",
+            "kind": "group",
+            "label": "z!E62:E82"
+          },
+          {
+            "anchor": "z!F62:AK82",
+            "id": "p6",
+            "kind": "group",
+            "label": "z!F62:AK82"
+          },
+          {
+            "anchor": "z!E85:E105",
+            "id": "p7",
+            "kind": "group",
+            "label": "z!E85:E105"
+          },
+          {
+            "anchor": "z!F85:AK105",
+            "id": "p8",
+            "kind": "group",
+            "label": "z!F85:AK105"
+          },
+          {
+            "anchor": "z!F35:AK35",
+            "id": "v1",
+            "kind": "parameters",
+            "label": "z!F35:AK35"
+          },
+          {
+            "anchor": "z!C38:C58",
+            "id": "v2",
+            "kind": "parameters",
+            "label": "z!C38:C58"
+          },
+          "<5 more items>"
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "z!L3",
+        "label": "gg",
+        "name": "gg",
+        "read_by": 2016,
+        "value": {
+          "type": "number",
+          "value": 0.75
+        }
+      },
+      {
+        "anchor": "z!L4",
+        "label": "zcor",
+        "name": "zcor",
+        "read_by": 2016,
+        "value": {
+          "type": "number",
+          "value": 2.0
+        }
+      },
+      {
+        "anchor": "z!F35",
+        "label": "P",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 1.0
+        }
+      },
+      {
+        "anchor": "z!G35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 10.0
+        }
+      },
+      {
+        "anchor": "z!H35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 19.0
+        }
+      },
+      {
+        "anchor": "z!I35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 28.0
+        }
+      },
+      {
+        "anchor": "z!J35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 37.0
+        }
+      },
+      {
+        "anchor": "z!K35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 46.0
+        }
+      },
+      {
+        "anchor": "z!L35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 55.0
+        }
+      },
+      {
+        "anchor": "z!M35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 64.0
+        }
+      },
+      {
+        "anchor": "z!N35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 73.0
+        }
+      },
+      {
+        "anchor": "z!O35",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 82.0
+        }
+      },
+      "<43 more items>"
+    ],
+    "rules": [
+      {
+        "anchor": "z!F38:AK107",
+        "detail": "colorScale (priority 1)",
+        "kind": "conditional-format"
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Formulas",
+        "2133"
+      ],
+      [
+        "Patterns",
+        "8"
+      ],
+      [
+        "Parameters",
+        "55"
+      ],
+      [
+        "Results",
+        "2037"
+      ],
+      [
+        "Names",
+        "2"
+      ],
+      [
+        "External links",
+        "2"
+      ],
+      [
+        "Embedded",
+        "10"
+      ],
+      [
+        "Last changed",
+        "2025-02-28T05:19:13Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "z",
+        "kind": "sheet",
+        "name": "z",
+        "role": "result",
+        "size": "105 rows x 37 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "Ринат Хабибуллин"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2020-04-28T06:34:49Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "rnt"
+      }
+    },
+    "language": "en",
+    "modified": {
+      "type": "date_time",
+      "value": "2025-02-28T05:19:13Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml macro-enabled"
+    },
+    "format": "xlsm",
+    "modified": "<modified>",
+    "name": "ex012.PVT_z_factor.xlsm",
+    "path": "<corpus>/office/ex012.PVT_z_factor.xlsm",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "7bd2d64555c861c2c611bfe09c4471716b99cd36c77cde040a0c8bd3b719226b",
+    "size": 129660
+  }
+}

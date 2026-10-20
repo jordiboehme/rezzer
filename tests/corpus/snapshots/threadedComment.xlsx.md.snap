@@ -1,0 +1,60 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "threadedComment.xlsx"
+resource: "<corpus>/office/threadedComment.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "47f1813c00f19e88e202f5915b419a0c2e5e2768f95524af0cb11634612d5158"
+source_size: 9175
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+created: "2026-03-24T09:25:20Z"
+modified: "2026-04-07T14:14:38Z"
+---
+
+# threadedComment.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Sheet1 | sheet | 1 paragraph |  |  |
+
+- Sheets: 1
+- Comments: 2
+- Last changed: 2026-04-07T14:14:38Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel Online |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | Mike Kaganski |
+
+## Sheet1
+
+The sheet is empty.
+
+## Annotations
+
+- **note** by Mike Kaganski at `Sheet1!A5`
+
+  Mike Kaganski:\
+  sdadasd
+
+- **comment** by Mike Kaganski on 2026-03-24T09:25:49.80 at `Sheet1!A2` :status[Open]{yellow}
+
+  a comment on A2
+
+  - **comment** by Mike Kaganski on 2026-04-07T14:14:05.49 at `Sheet1!A2`
+
+    A reply

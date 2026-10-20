@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "contains": "Hidden rows: 8 to 11, 15 to 16, 21 to 23, 28 to 31."
+  }
+]

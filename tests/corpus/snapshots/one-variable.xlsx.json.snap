@@ -1,0 +1,1006 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "'One-Var'",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "'One-Var'!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "A",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "B",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "=A*B",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Var A",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Var B",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "20",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "40",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "20",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "40",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I6",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I7",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I8",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I9",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I10",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!C11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!D11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!E11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!F11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!G11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!H11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!I11",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "One-Var",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "'One-Var'!C2",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=A2*B2",
+        "kind": "cell",
+        "latex": "\\mathrm{A2} \\cdot \\mathrm{B2}",
+        "references": [
+          "'One-Var'!A2",
+          "'One-Var'!B2"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "'One-Var'!B4",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=C2",
+        "kind": "cell",
+        "references": [
+          "'One-Var'!C2"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "'One-Var'!B5",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=TABLE(,A2)",
+        "kind": "data_table",
+        "note": "what-if data table: column input A2",
+        "range": "'One-Var'!B5:B11",
+        "references": [
+          "'One-Var'!A2"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "'One-Var'!D5",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=C2",
+        "kind": "cell",
+        "references": [
+          "'One-Var'!C2"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "'One-Var'!E5",
+        "cached": {
+          "type": "number",
+          "value": 10.0
+        },
+        "dialect": "excel",
+        "expression": "=TABLE(B2,)",
+        "kind": "data_table",
+        "note": "what-if data table: row input B2",
+        "range": "'One-Var'!E5:I5",
+        "references": [
+          "'One-Var'!B2"
+        ],
+        "role": "result"
+      }
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f2"
+          },
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f4"
+          },
+          {
+            "from": "v1",
+            "kind": "feeds",
+            "to": "f1"
+          },
+          {
+            "from": "v2",
+            "kind": "feeds",
+            "to": "f3"
+          },
+          {
+            "from": "v3",
+            "kind": "feeds",
+            "to": "f5"
+          }
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "'One-Var'!C2",
+            "id": "f1",
+            "kind": "formula",
+            "label": "'One-Var'!C2"
+          },
+          {
+            "anchor": "'One-Var'!B4",
+            "id": "f2",
+            "kind": "formula",
+            "label": "'One-Var'!B4"
+          },
+          {
+            "anchor": "'One-Var'!B5",
+            "id": "f3",
+            "kind": "formula",
+            "label": "'One-Var'!B5"
+          },
+          {
+            "anchor": "'One-Var'!D5",
+            "id": "f4",
+            "kind": "formula",
+            "label": "'One-Var'!D5"
+          },
+          {
+            "anchor": "'One-Var'!E5",
+            "id": "f5",
+            "kind": "formula",
+            "label": "'One-Var'!E5"
+          },
+          {
+            "anchor": "'One-Var'!A2:B2",
+            "id": "v1",
+            "kind": "parameters",
+            "label": "'One-Var'!A2:B2"
+          },
+          {
+            "anchor": "'One-Var'!A2",
+            "id": "v2",
+            "kind": "parameters",
+            "label": "'One-Var'!A2"
+          },
+          {
+            "anchor": "'One-Var'!B2",
+            "id": "v3",
+            "kind": "parameters",
+            "label": "'One-Var'!B2"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "'One-Var'!A2",
+        "label": "A",
+        "read_by": 2,
+        "value": {
+          "type": "number",
+          "value": 1.0
+        }
+      },
+      {
+        "anchor": "'One-Var'!B2",
+        "label": "B",
+        "read_by": 2,
+        "value": {
+          "type": "number",
+          "value": 2.0
+        }
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Formulas",
+        "5"
+      ],
+      [
+        "Parameters",
+        "2"
+      ],
+      [
+        "Results",
+        "4"
+      ],
+      [
+        "Last changed",
+        "2013-11-01T13:48:39Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "'One-Var'",
+        "kind": "sheet",
+        "name": "One-Var",
+        "role": "result",
+        "size": "11 rows x 9 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "Kohei Yoshida"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2013-11-01T13:03:11Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "Kohei Yoshida"
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2013-11-01T13:48:39Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "one-variable.xlsx",
+    "path": "<corpus>/office/one-variable.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "97b284e9800fbf8e3a64be33877d98763a857ba1087858bd2d156f2dd89252ae",
+    "size": 9018
+  }
+}

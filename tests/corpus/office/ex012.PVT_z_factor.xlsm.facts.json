@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsm"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 2135
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 55
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 10
+  },
+  {
+    "contains": "| L3 | gg | gg | 0.75 |  |  | 2016 |"
+  }
+]

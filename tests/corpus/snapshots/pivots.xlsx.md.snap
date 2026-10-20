@@ -1,0 +1,271 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "pivots.xlsx"
+resource: "<corpus>/office/pivots.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "632407ef8f5a5b45d93781b78b303c662aeea83c11d43e04ce5b07da96595235"
+source_size: 34944
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["joel gilmore"]
+language: "en"
+created: "2025-09-13T10:14:06Z"
+modified: "2025-11-24T17:58:07Z"
+---
+
+# pivots.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| PivotSheet1 | sheet | 5 rows x 6 columns |  |  |
+| PivotSheet2 | sheet | 11 rows x 4 columns |  |  |
+| PivotSheet3 | sheet | 7 rows x 3 columns |  |  |
+| PivotSheet4 | sheet | 9 rows x 2 columns |  |  |
+| DataSheet | sheet | 11 rows x 10 columns | result |  |
+| DataSheet2 | sheet | 11 rows x 10 columns | result |  |
+
+- Sheets: 6
+- Formulas: 22
+- Patterns: 2
+- Parameters: 40
+- Results: 20
+- Last changed: 2025-11-24T17:58:07Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Macintosh Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | joel gilmore |
+
+## PivotSheet1
+
+|  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- |
+| Date | (Multiple Items) |  |  |  |  |
+|  |  |  |  |  |  |
+| Row Labels | Sum of Size | Average of Value | Count of Size | Sum of Value x 2 | &lt;------------ calculated field |
+| yellow | 6.25552 | 8.333333333 | 3 | 25.54830581 |  |
+| Grand Total | 6.25552 | 8.333333333 | 3 | 25.54830581 |  |
+
+**Pivot tables**
+
+| Pivot table | Location | Source |
+| --- | --- | --- |
+| PivotTable1 | A3:E5 | DataSheet!A1:J11 |
+
+## PivotSheet2
+
+|  |  |  |  |
+| --- | --- | --- | --- |
+| Name | (All) |  |  |
+|  |  |  |  |
+| Sum of Size | Column Labels |  |  |
+| Row Labels | blue | yellow | Grand Total |
+| 5 |  | 2.22452 | 2.22452 |
+| 5 |  | 2.22452 | 2.22452 |
+| Group1 | 11.067 | 5.0731 | 16.1401 |
+| 10 | 4.882 | 0 | 4.882 |
+| 15 | 3.121 | 5.0731 | 8.1941 |
+| 20 | 3.064 |  | 3.064 |
+| Grand Total | 11.067 | 7.29762 | 18.36462 |
+
+**Pivot tables**
+
+| Pivot table | Location | Source |
+| --- | --- | --- |
+| PivotTable2 | A3:D11 | DataSheet!A1:J11 |
+
+## PivotSheet3
+
+|  |  |  |
+| --- | --- | --- |
+| Date | (Multiple Items) |  |
+|  |  |  |
+| Row Labels | Count of Value2 | &lt;--------  grouped field as value |
+| f | 1 |  |
+| h | 1 |  |
+| j | 1 |  |
+| Grand Total | 3 |  |
+
+**Pivot tables**
+
+| Pivot table | Location | Source |
+| --- | --- | --- |
+| PivotTable1 | A3:B7 | DataSheet!A1:J11 |
+
+## PivotSheet4
+
+|  |  |
+| --- | --- |
+| Row Labels | Sum of Value |
+| blue | 75 |
+| yellow | 40 |
+| Grand Total | 115 |
+|  |  |
+| Row Labels | Sum of Value |
+| blue | 75 |
+| yellow | 50 |
+| Grand Total | 125 |
+
+**Pivot tables**
+
+| Pivot table | Location | Source |
+| --- | --- | --- |
+| PivotTable5 | A1:B4 | DataSheet2!A1:J11 |
+| PivotTable6 | A6:B9 | DataSheet!A1:J11 |
+
+## DataSheet
+
+|  |  |  |  |  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
+| 1 | a | blue | 10 | 1.78 | 11-01-24 | 5.617977528 | TRUE |  |  |
+| 2 | b | blue | 20 | 2.012 | 01-04-24 | 9.940357853 | TRUE |  | 2.012 |
+| 3 | c | blue | 15 | 3.121 | 01-31-24 | 4.806151874 | TRUE |  | 02-01-24 |
+| 4 | d | blue | 20 | 1.052 | 01-21-24 | 19.01140684 | TRUE |  | #DIV/0! |
+| 5 | e | blue | 10 | 3.102 | 02-01-24 | 3.223726628 | TRUE |  | 3.102 |
+| 6 | f | yellow | 5 | 1.02 | 01-01-24 | 4.901960784 | FALSE |  | 20 |
+| 7 | g | yellow | 10 | 0 | 01-11-24 | #DIV/0! | FALSE |  | TRUE |
+| 8 | h | yellow | 15 | 4.031 | 01-01-99 | 3.721161002 | FALSE |  | 5 |
+| 9 | i | yellow | 15 | 1.0421 | 12-01-24 | 14.39401209 | FALSE |  | 10 |
+| 10 | j | yellow | 5 | 1.20452 | 01-01-24 | 4.151031116 | FALSE |  | blue |
+
+## DataSheet2
+
+|  |  |  |  |  |  |  |  |  |  |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
+| 1 | a | blue | 20 | 1.78 | 11-01-24 | 11.23595506 | TRUE |  |  |
+| 2 | b | blue | 20 | 2.012 | 01-04-24 | 9.940357853 | TRUE |  | 2.012 |
+| 3 | c | blue | 20 | 3.121 | 01-31-24 | 6.408202499 | TRUE |  | 02-01-24 |
+| 4 | d | blue | 10 | 1.052 | 01-21-24 | 9.505703422 | TRUE |  | #DIV/0! |
+| 5 | e | blue | 5 | 3.102 | 02-01-24 | 1.611863314 | TRUE |  | 3.102 |
+| 6 | f | yellow | 10 | 1.02 | 01-01-24 | 9.803921569 | FALSE |  | 20 |
+| 7 | g | yellow | 5 | 0 | 01-11-24 | #DIV/0! | FALSE |  | TRUE |
+| 8 | h | yellow | 5 | 4.031 | 01-01-99 | 1.240387001 | FALSE |  | 5 |
+| 9 | i | yellow | 15 | 1.0421 | 12-01-24 | 14.39401209 | FALSE |  | 10 |
+| 10 | j | yellow | 5 | 1.20452 | 01-01-24 | 4.151031116 | FALSE |  | blue |
+
+## Logic
+
+### DataSheet
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| D2 |  | blue | 10 |  |  | 1 |
+| E2 |  | Size | 1.78 |  |  | 1 |
+| D3 |  | blue | 20 |  |  | 1 |
+| E3 |  | Size | 2.012 |  |  | 1 |
+| D4 |  | blue | 15 |  |  | 1 |
+| E4 |  | Size | 3.121 |  |  | 1 |
+| D5 |  | blue | 20 |  |  | 1 |
+| E5 |  | Size | 1.052 |  |  | 1 |
+| D6 |  | blue | 10 |  |  | 1 |
+| E6 |  | Size | 3.102 |  |  | 1 |
+| D7 |  | yellow | 5 |  |  | 1 |
+| E7 |  | Size | 1.02 |  |  | 1 |
+| D8 |  | yellow | 10 |  |  | 1 |
+| E8 |  | Size | 0 |  |  | 1 |
+| D9 |  | yellow | 15 |  |  | 1 |
+| E9 |  | Size | 4.031 |  |  | 1 |
+| D10 |  | yellow | 15 |  |  | 1 |
+| E10 |  | Size | 1.0421 |  |  | 1 |
+| D11 |  | yellow | 5 |  |  | 1 |
+| E11 |  | Size | 1.20452 |  |  | 1 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2:G11 | 10 | `=D2/E2` | D2, E2 | result | 5.617977528 | $`\frac{\mathrm{D2}}{\mathrm{E2}}`$ |
+| J5 | 1 | `=1/0` |  | constant | #DIV/0! | $`\frac{1}{0}`$ |
+
+#### Results
+
+For formulas copied over several cells the first cell is shown.
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| G2:G11 | `=D2/E2` | 5.617977528 |
+
+### DataSheet2
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| D2 |  | blue | 20 |  |  | 1 |
+| E2 |  | Size | 1.78 |  |  | 1 |
+| D3 |  | blue | 20 |  |  | 1 |
+| E3 |  | Size | 2.012 |  |  | 1 |
+| D4 |  | blue | 20 |  |  | 1 |
+| E4 |  | Size | 3.121 |  |  | 1 |
+| D5 |  | blue | 10 |  |  | 1 |
+| E5 |  | Size | 1.052 |  |  | 1 |
+| D6 |  | blue | 5 |  |  | 1 |
+| E6 |  | Size | 3.102 |  |  | 1 |
+| D7 |  | yellow | 10 |  |  | 1 |
+| E7 |  | Size | 1.02 |  |  | 1 |
+| D8 |  | yellow | 5 |  |  | 1 |
+| E8 |  | Size | 0 |  |  | 1 |
+| D9 |  | yellow | 5 |  |  | 1 |
+| E9 |  | Size | 4.031 |  |  | 1 |
+| D10 |  | yellow | 15 |  |  | 1 |
+| E10 |  | Size | 1.0421 |  |  | 1 |
+| D11 |  | yellow | 5 |  |  | 1 |
+| E11 |  | Size | 1.20452 |  |  | 1 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2:G11 | 10 | `=D2/E2` | D2, E2 | result | 11.235955056 | $`\frac{\mathrm{D2}}{\mathrm{E2}}`$ |
+| J5 | 1 | `=1/0` |  | constant | #DIV/0! | $`\frac{1}{0}`$ |
+
+#### Results
+
+For formulas copied over several cells the first cell is shown.
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| G2:G11 | `=D2/E2` | 11.235955056 |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters.
+```mermaid
+flowchart LR
+    n0[["DataSheet!G2:G11, 10 formulas"]]
+    n1["DataSheet!J5"]
+    n2[["DataSheet2!G2:G11, 10 formulas"]]
+    n3["DataSheet2!J5"]
+    n4(["DataSheet!D2:E11"])
+    n5(["DataSheet2!D2:E11"])
+    n4 --> n0
+    n5 --> n2
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| calculation | workbook | automatic, iterative calculation off |

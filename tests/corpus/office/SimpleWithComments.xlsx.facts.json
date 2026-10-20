@@ -1,0 +1,30 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/annotations/0/anchor",
+    "equals": "Sheet1!B1"
+  },
+  {
+    "pointer": "/facets/annotations/0/author",
+    "equals": "Yegor Kozlov"
+  }
+]

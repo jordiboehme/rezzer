@@ -1,0 +1,30 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 4
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/embedded/0/kind",
+    "equals": "external-workbook"
+  },
+  {
+    "pointer": "/facets/embedded/0/target",
+    "equals": "data.xlsx"
+  },
+  {
+    "pointer": "/facets/formulas/0/references/0",
+    "equals": "ext:[1]Sheet1!A1"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 2
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 6
+  },
+  {
+    "pointer": "/facets/parameters",
+    "absent": true
+  },
+  {
+    "pointer": "/facets/formulas/0/kind",
+    "equals": "spill"
+  },
+  {
+    "pointer": "/facets/formulas/0/range",
+    "equals": "DynamicArrays!A3:B12"
+  },
+  {
+    "contains": "| volatile function | RANDARRAY | in 1 formula: DynamicArrays!A19 |"
+  }
+]

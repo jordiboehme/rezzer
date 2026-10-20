@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 14
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 509
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 157
+  },
+  {
+    "pointer": "/body/1/title",
+    "equals": "Weight"
+  },
+  {
+    "pointer": "/facets/formulas/0/expression",
+    "equals": "=CONVERT(1,B2,$B$2)"
+  },
+  {
+    "contains": "| B2 |  | Gram | g |  |  | 31 |"
+  }
+]

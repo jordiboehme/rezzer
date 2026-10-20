@@ -1,0 +1,2308 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "Design_Basis",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "Design_Basis!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "UNDERGROUND TUNNEL STRUCTURAL ANALYSIS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Conceptual design calculations - structural stability, drainage, ventilation & safety",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A4",
+                "col_span": 2,
+                "inlines": [
+                  {
+                    "text": "PROJECT DESCRIPTION",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Project type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Two-lane single-tube underground road tunnel (conceptual design)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Prepared by",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Alok",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tools used",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Scope",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Structural lining stability, ventilation, drainage, and life-safety checks at concept stage",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Disclaimer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Preliminary / conceptual calculations for a portfolio project. NOT for construction use.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B10",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A11",
+                "col_span": 2,
+                "inlines": [
+                  {
+                    "text": "KEY GEOMETRIC PARAMETERS (shared across sheets)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Excavated (bored) diameter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10.0 m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<20 more items>"
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Design_Basis",
+      "type": "section"
+    },
+    {
+      "anchor": "Structural_Lining",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "STRUCTURAL STABILITY - TUNNEL LINING CHECK",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A4",
+                "col_span": 3,
+                "inlines": [
+                  {
+                    "text": "INPUTS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F4",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Excavated diameter, D",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F5",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Trial lining thickness, t",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.35",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F6",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Overburden depth, H",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F7",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit weight of ground, gamma",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "22",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kN/m3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F8",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Friction angle, phi",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "deg",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F9",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Cohesion, c",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "20",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F10",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Concrete grade, fck",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F11",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Steel grade, fy",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "500",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!D12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!E12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F12",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            "<62 more items>"
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Structural_Lining",
+      "type": "section"
+    },
+    {
+      "anchor": "Ventilation",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "Ventilation!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "LONGITUDINAL VENTILATION DESIGN CHECK",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A4",
+                "col_span": 3,
+                "inlines": [
+                  {
+                    "text": "INPUTS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tunnel length, L",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "800",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tunnel diameter, D",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Design-hour traffic volume",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1200",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "veh/hr",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Heavy diesel vehicle share",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "fraction",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CO emission factor - LMV",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "g/km/veh",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CO emission factor - HDV",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "g/km/veh",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Permissible CO (15-min)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "100",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ppm",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Design fire heat release rate",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MW",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<27 more items>"
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Ventilation",
+      "type": "section"
+    },
+    {
+      "anchor": "Drainage",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "Drainage!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "DRAINAGE SYSTEM SIZING",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A4",
+                "col_span": 3,
+                "inlines": [
+                  {
+                    "text": "INPUTS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F4",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tunnel length, L",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "800",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F5",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Longitudinal gradient",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.005",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "fraction",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F6",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Seepage rate assumed",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.02",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "l/s per m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F7",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Runoff coefficient, C",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.85",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F8",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Design rainfall intensity, i",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "75",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "mm/hr",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F9",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Portal catchment area",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F10",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Manning's roughness, n",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.013",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F11",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Trial pipe diameter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!D12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!E12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F12",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            "<33 more items>"
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Drainage",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "Structural_Lining!B16",
+        "cached": {
+          "type": "number",
+          "value": 5.0
+        },
+        "dialect": "excel",
+        "expression": "=B5/2",
+        "kind": "cell",
+        "latex": "\\frac{\\mathrm{B5}}{2}",
+        "references": [
+          "Structural_Lining!B5"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B17",
+        "cached": {
+          "type": "number",
+          "value": 7.886751345948129
+        },
+        "dialect": "excel",
+        "expression": "=B16+B16*TAN(RADIANS(45-B9/2))",
+        "kind": "cell",
+        "latex": "\\mathrm{B16}+\\mathrm{B16} \\cdot \\operatorname{TAN}(\\operatorname{RADIANS}(45-\\frac{\\mathrm{B9}}{2}))",
+        "references": [
+          "Structural_Lining!B16",
+          "Structural_Lining!B9"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B18",
+        "cached": {
+          "type": "number",
+          "value": 0.5
+        },
+        "dialect": "excel",
+        "expression": "=1-SIN(RADIANS(B9))",
+        "kind": "cell",
+        "latex": "1-\\operatorname{SIN}(\\operatorname{RADIANS}(\\mathrm{B9}))",
+        "references": [
+          "Structural_Lining!B9"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B19",
+        "cached": {
+          "type": "number",
+          "value": 0.5773502691896257
+        },
+        "dialect": "excel",
+        "expression": "=TAN(RADIANS(B9))",
+        "kind": "cell",
+        "latex": "\\operatorname{TAN}(\\operatorname{RADIANS}(\\mathrm{B9}))",
+        "references": [
+          "Structural_Lining!B9"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B20",
+        "cached": {
+          "type": "number",
+          "value": 194.15366401923717
+        },
+        "dialect": "excel",
+        "expression": "=(B17*(B8-2*B10/B17)/(2*B18*B19))*(1-EXP(-2*B18*B19*B7/B17))",
+        "kind": "cell",
+        "latex": "\\frac{\\mathrm{B17} \\cdot (\\mathrm{B8}-\\frac{2 \\cdot \\mathrm{B10}}{\\mathrm{B17}})}{2 \\cdot \\mathrm{B18} \\cdot \\mathrm{B19}} \\cdot (1-\\operatorname{EXP}(\\frac{-2 \\cdot \\mathrm{B18} \\cdot \\mathrm{B19} \\cdot \\mathrm{B7}}{\\mathrm{B17}}))",
+        "references": [
+          "Structural_Lining!B17",
+          "Structural_Lining!B8",
+          "Structural_Lining!B10",
+          "Structural_Lining!B18",
+          "Structural_Lining!B19",
+          "Structural_Lining!B7"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B21",
+        "cached": {
+          "type": "number",
+          "value": 66.0
+        },
+        "dialect": "excel",
+        "expression": "=0.3*B8*B5",
+        "kind": "cell",
+        "latex": "0.3 \\cdot \\mathrm{B8} \\cdot \\mathrm{B5}",
+        "references": [
+          "Structural_Lining!B8",
+          "Structural_Lining!B5"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B22",
+        "cached": {
+          "type": "number",
+          "value": 194.15366401923717
+        },
+        "dialect": "excel",
+        "expression": "=MAX(B20,B21)",
+        "kind": "cell",
+        "latex": "\\operatorname{MAX}(\\mathrm{B20}, \\mathrm{B21})",
+        "references": [
+          "Structural_Lining!B20",
+          "Structural_Lining!B21"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B23",
+        "cached": {
+          "type": "number",
+          "value": 97.07683200961858
+        },
+        "dialect": "excel",
+        "expression": "=B18*B22",
+        "kind": "cell",
+        "latex": "\\mathrm{B18} \\cdot \\mathrm{B22}",
+        "references": [
+          "Structural_Lining!B18",
+          "Structural_Lining!B22"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B26",
+        "cached": {
+          "type": "number",
+          "value": 145.6152480144279
+        },
+        "dialect": "excel",
+        "expression": "=(B22+B23)/2",
+        "kind": "cell",
+        "latex": "\\frac{\\mathrm{B22}+\\mathrm{B23}}{2}",
+        "references": [
+          "Structural_Lining!B22",
+          "Structural_Lining!B23"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B27",
+        "cached": {
+          "type": "number",
+          "value": 48.53841600480929
+        },
+        "dialect": "excel",
+        "expression": "=(B22-B23)/2",
+        "kind": "cell",
+        "latex": "\\frac{\\mathrm{B22}-\\mathrm{B23}}{2}",
+        "references": [
+          "Structural_Lining!B22",
+          "Structural_Lining!B23"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B28",
+        "cached": {
+          "type": "number",
+          "value": 485.384160048093
+        },
+        "dialect": "excel",
+        "expression": "=B16*(B26-B27)",
+        "kind": "cell",
+        "latex": "\\mathrm{B16} \\cdot (\\mathrm{B26}-\\mathrm{B27})",
+        "references": [
+          "Structural_Lining!B16",
+          "Structural_Lining!B26",
+          "Structural_Lining!B27"
+        ],
+        "role": "intermediate"
+      },
+      {
+        "anchor": "Structural_Lining!B29",
+        "cached": {
+          "type": "number",
+          "value": 970.7683200961858
+        },
+        "dialect": "excel",
+        "expression": "=B16*(B26+B27)",
+        "kind": "cell",
+        "latex": "\\mathrm{B16} \\cdot (\\mathrm{B26}+\\mathrm{B27})",
+        "references": [
+          "Structural_Lining!B16",
+          "Structural_Lining!B26",
+          "Structural_Lining!B27"
+        ],
+        "role": "intermediate"
+      },
+      "<74 more items>"
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f2"
+          },
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f11"
+          },
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f12"
+          },
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f13"
+          },
+          {
+            "from": "f1",
+            "kind": "feeds",
+            "to": "f14"
+          },
+          {
+            "from": "f2",
+            "kind": "feeds",
+            "to": "f5"
+          },
+          {
+            "from": "f3",
+            "kind": "feeds",
+            "to": "f5"
+          },
+          {
+            "from": "f3",
+            "kind": "feeds",
+            "to": "f8"
+          },
+          {
+            "from": "f4",
+            "kind": "feeds",
+            "to": "f5"
+          },
+          {
+            "from": "f5",
+            "kind": "feeds",
+            "to": "f7"
+          },
+          {
+            "from": "f6",
+            "kind": "feeds",
+            "to": "f7"
+          },
+          {
+            "from": "f7",
+            "kind": "feeds",
+            "to": "f8"
+          },
+          "<195 more items>"
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "Structural_Lining!B16",
+            "id": "f1",
+            "kind": "formula",
+            "label": "Structural_Lining!B16"
+          },
+          {
+            "anchor": "Structural_Lining!B17",
+            "id": "f2",
+            "kind": "formula",
+            "label": "Structural_Lining!B17"
+          },
+          {
+            "anchor": "Structural_Lining!B18",
+            "id": "f3",
+            "kind": "formula",
+            "label": "Structural_Lining!B18"
+          },
+          {
+            "anchor": "Structural_Lining!B19",
+            "id": "f4",
+            "kind": "formula",
+            "label": "Structural_Lining!B19"
+          },
+          {
+            "anchor": "Structural_Lining!B20",
+            "id": "f5",
+            "kind": "formula",
+            "label": "Structural_Lining!B20"
+          },
+          {
+            "anchor": "Structural_Lining!B21",
+            "id": "f6",
+            "kind": "formula",
+            "label": "Structural_Lining!B21"
+          },
+          {
+            "anchor": "Structural_Lining!B22",
+            "id": "f7",
+            "kind": "formula",
+            "label": "Structural_Lining!B22"
+          },
+          {
+            "anchor": "Structural_Lining!B23",
+            "id": "f8",
+            "kind": "formula",
+            "label": "Structural_Lining!B23"
+          },
+          {
+            "anchor": "Structural_Lining!B26",
+            "id": "f9",
+            "kind": "formula",
+            "label": "Structural_Lining!B26"
+          },
+          {
+            "anchor": "Structural_Lining!B27",
+            "id": "f10",
+            "kind": "formula",
+            "label": "Structural_Lining!B27"
+          },
+          {
+            "anchor": "Structural_Lining!B28",
+            "id": "f11",
+            "kind": "formula",
+            "label": "Structural_Lining!B28"
+          },
+          {
+            "anchor": "Structural_Lining!B29",
+            "id": "f12",
+            "kind": "formula",
+            "label": "Structural_Lining!B29"
+          },
+          "<135 more items>"
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "Structural_Lining!B5",
+        "label": "Excavated diameter, D",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 10.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B6",
+        "label": "Trial lining thickness, t",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 0.35
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B7",
+        "label": "Overburden depth, H",
+        "read_by": 1,
+        "unit": "m",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 25.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B8",
+        "label": "Unit weight of ground, gamma",
+        "read_by": 2,
+        "unit": "kN/m3",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 22.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B9",
+        "label": "Friction angle, phi",
+        "read_by": 3,
+        "unit": "deg",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 30.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B10",
+        "label": "Cohesion, c",
+        "read_by": 1,
+        "unit": "kPa",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 20.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B11",
+        "label": "Concrete grade, fck",
+        "read_by": 1,
+        "unit": "MPa",
+        "unit_source": "unit-cell",
+        "value": {
+          "type": "number",
+          "value": 30.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!B13",
+        "label": "Target Factor of Safety",
+        "read_by": 2,
+        "value": {
+          "type": "number",
+          "value": 2.0
+        }
+      },
+      {
+        "anchor": "Structural_Lining!E49",
+        "label": "t",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "header",
+        "value": {
+          "type": "number",
+          "value": 0.15
+        }
+      },
+      {
+        "anchor": "Structural_Lining!E50",
+        "label": "t",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "header",
+        "value": {
+          "type": "number",
+          "value": 0.2
+        }
+      },
+      {
+        "anchor": "Structural_Lining!E51",
+        "label": "t",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "header",
+        "value": {
+          "type": "number",
+          "value": 0.25
+        }
+      },
+      {
+        "anchor": "Structural_Lining!E52",
+        "label": "t",
+        "read_by": 2,
+        "unit": "m",
+        "unit_source": "header",
+        "value": {
+          "type": "number",
+          "value": 0.3
+        }
+      },
+      "<53 more items>"
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "4"
+      ],
+      [
+        "Formulas",
+        "86"
+      ],
+      [
+        "Patterns",
+        "1"
+      ],
+      [
+        "Parameters",
+        "65"
+      ],
+      [
+        "Results",
+        "9"
+      ],
+      [
+        "Last changed",
+        "2026-08-24T17:24:13Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "Design_Basis",
+        "kind": "sheet",
+        "name": "Design_Basis",
+        "size": "32 rows x 2 columns"
+      },
+      {
+        "id": "Structural_Lining",
+        "kind": "sheet",
+        "name": "Structural_Lining",
+        "role": "result",
+        "size": "74 rows x 6 columns"
+      },
+      {
+        "id": "Ventilation",
+        "kind": "sheet",
+        "name": "Ventilation",
+        "role": "result",
+        "size": "39 rows x 3 columns"
+      },
+      {
+        "id": "Drainage",
+        "kind": "sheet",
+        "name": "Drainage",
+        "role": "result",
+        "size": "45 rows x 6 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "openpyxl"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2026-08-24T17:20:00Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "HP"
+      }
+    },
+    "language": "en",
+    "modified": {
+      "type": "date_time",
+      "value": "2026-08-24T17:24:13Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "tunnel_design_calculations.xlsx",
+    "path": "<corpus>/office/tunnel_design_calculations.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "efab83e86b0294f631b0ed072adcbfe953def83a9fb7652a2618408715080cdc",
+    "size": 20090
+  }
+}

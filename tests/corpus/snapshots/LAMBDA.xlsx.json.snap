@@ -1,0 +1,808 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "Sheet1",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "Sheet1!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "<= on cell",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Because it's in the Impossible that you find reality",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "<=more complex lambda",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Temps",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Fahrenheit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "42",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "<= this was the question all along!",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-17.77777778",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G5",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "100",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "37.77777778",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G6",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G7",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-23.33333333",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!E8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!F8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!G8",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Sheet1",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "Sheet1!A1",
+        "cached": {
+          "type": "number",
+          "value": 6.0
+        },
+        "dialect": "excel",
+        "expression": "=LAMBDA(x, x+1)(5)",
+        "kind": "spill",
+        "latex": "\\operatorname{LAMBDA}(\\mathrm{x}, \\mathrm{x}+1)(5)",
+        "original": "=_xlfn.LAMBDA(_xlpm.x, _xlpm.x+1)(5)",
+        "range": "Sheet1!A1",
+        "role": "constant"
+      },
+      {
+        "anchor": "Sheet1!A2",
+        "cached": {
+          "type": "number",
+          "value": 5.0
+        },
+        "dialect": "excel",
+        "expression": "=LAMBDA(x,y, SQRT(x*x+y*y))(3,4)",
+        "kind": "spill",
+        "latex": "\\operatorname{LAMBDA}(\\mathrm{x}, \\mathrm{y}, \\sqrt{\\mathrm{x} \\cdot \\mathrm{x}+\\mathrm{y} \\cdot \\mathrm{y}})(3, 4)",
+        "original": "=_xlfn.LAMBDA(_xlpm.x,_xlpm.y, SQRT(_xlpm.x*_xlpm.x+_xlpm.y*_xlpm.y))(3,4)",
+        "range": "Sheet1!A2",
+        "role": "constant"
+      },
+      {
+        "anchor": "Sheet1!F2",
+        "cached": {
+          "type": "number",
+          "value": 9.0
+        },
+        "dialect": "excel",
+        "expression": "=CountWords(F1)",
+        "kind": "spill",
+        "latex": "\\operatorname{CountWords}(\\mathrm{F1})",
+        "range": "Sheet1!F2",
+        "references": [
+          "Sheet1!F1"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "Sheet1!F4",
+        "cached": {
+          "type": "number",
+          "value": 42.0
+        },
+        "dialect": "excel",
+        "expression": "=LET(area, LAMBDA(x,y,x*y), area(D1,E1))",
+        "kind": "spill",
+        "latex": "\\operatorname{LET}(\\mathrm{area}, \\operatorname{LAMBDA}(\\mathrm{x}, \\mathrm{y}, \\mathrm{x} \\cdot \\mathrm{y}), \\operatorname{area}(\\mathrm{D1}, \\mathrm{E1}))",
+        "original": "=_xlfn.LET(_xlpm.area, _xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x*_xlpm.y), _xlpm.area(D1,E1))",
+        "range": "Sheet1!F4",
+        "references": [
+          "Sheet1!D1",
+          "Sheet1!E1"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "Sheet1!B5",
+        "cached": {
+          "type": "number",
+          "value": -17.77777777777778
+        },
+        "dialect": "excel",
+        "expression": "=Temperature(A5)",
+        "kind": "spill",
+        "latex": "\\operatorname{Temperature}(\\mathrm{A5})",
+        "pattern": "p1",
+        "range": "Sheet1!B5",
+        "references": [
+          "Sheet1!A5"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "Sheet1!B6",
+        "cached": {
+          "type": "number",
+          "value": 37.77777777777778
+        },
+        "dialect": "excel",
+        "expression": "=Temperature(A6)",
+        "kind": "spill",
+        "latex": "\\operatorname{Temperature}(\\mathrm{A6})",
+        "pattern": "p1",
+        "range": "Sheet1!B6",
+        "references": [
+          "Sheet1!A6"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "Sheet1!B7",
+        "cached": {
+          "type": "number",
+          "value": 10.0
+        },
+        "dialect": "excel",
+        "expression": "=Temperature(A7)",
+        "kind": "spill",
+        "latex": "\\operatorname{Temperature}(\\mathrm{A7})",
+        "pattern": "p1",
+        "range": "Sheet1!B7",
+        "references": [
+          "Sheet1!A7"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "Sheet1!B8",
+        "cached": {
+          "type": "number",
+          "value": -23.333333333333336
+        },
+        "dialect": "excel",
+        "expression": "=Temperature(A8)",
+        "kind": "spill",
+        "latex": "\\operatorname{Temperature}(\\mathrm{A8})",
+        "pattern": "p1",
+        "range": "Sheet1!B8",
+        "references": [
+          "Sheet1!A8"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "name:CountWords",
+        "dialect": "excel",
+        "expression": "LAMBDA(text, LEN(TRIM(text)) - LEN(SUBSTITUTE(TRIM(text), \" \", \"\")) + 1)",
+        "kind": "lambda",
+        "note": "parameters: text",
+        "original": "_xlfn.LAMBDA(_xlpm.text, LEN(TRIM(_xlpm.text)) - LEN(SUBSTITUTE(TRIM(_xlpm.text), \" \", \"\")) + 1)"
+      },
+      {
+        "anchor": "name:Temperature",
+        "dialect": "excel",
+        "expression": "LAMBDA(temp, (5/9) * (temp-32))",
+        "kind": "lambda",
+        "note": "parameters: temp; Fahrenheit",
+        "original": "_xlfn.LAMBDA(_xlpm.temp, (5/9) * (_xlpm.temp-32))"
+      }
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "v1",
+            "kind": "feeds",
+            "to": "f3"
+          },
+          {
+            "from": "v2",
+            "kind": "feeds",
+            "to": "f4"
+          },
+          {
+            "from": "v3",
+            "kind": "feeds",
+            "to": "p1"
+          }
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "Sheet1!A1",
+            "id": "f1",
+            "kind": "formula",
+            "label": "Sheet1!A1"
+          },
+          {
+            "anchor": "Sheet1!A2",
+            "id": "f2",
+            "kind": "formula",
+            "label": "Sheet1!A2"
+          },
+          {
+            "anchor": "Sheet1!F2",
+            "id": "f3",
+            "kind": "formula",
+            "label": "Sheet1!F2"
+          },
+          {
+            "anchor": "Sheet1!F4",
+            "id": "f4",
+            "kind": "formula",
+            "label": "Sheet1!F4"
+          },
+          {
+            "anchor": "Sheet1!B5:B8",
+            "id": "p1",
+            "kind": "group",
+            "label": "Sheet1!B5:B8"
+          },
+          {
+            "anchor": "Sheet1!F1",
+            "id": "v1",
+            "kind": "parameters",
+            "label": "Sheet1!F1"
+          },
+          {
+            "anchor": "Sheet1!D1:E1",
+            "id": "v2",
+            "kind": "parameters",
+            "label": "Sheet1!D1:E1"
+          },
+          {
+            "anchor": "Sheet1!A5:A8",
+            "id": "v3",
+            "kind": "parameters",
+            "label": "Sheet1!A5:A8"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "Sheet1!D1",
+        "label": "<= on cell",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 7.0
+        }
+      },
+      {
+        "anchor": "Sheet1!E1",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 6.0
+        }
+      },
+      {
+        "anchor": "Sheet1!F1",
+        "read_by": 1,
+        "value": {
+          "type": "text",
+          "value": "Because it's in the Impossible that you find reality"
+        }
+      },
+      {
+        "anchor": "Sheet1!A5",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 0.0
+        }
+      },
+      {
+        "anchor": "Sheet1!A6",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 100.0
+        }
+      },
+      {
+        "anchor": "Sheet1!A7",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 50.0
+        }
+      },
+      {
+        "anchor": "Sheet1!A8",
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": -10.0
+        }
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Formulas",
+        "8"
+      ],
+      [
+        "Patterns",
+        "1"
+      ],
+      [
+        "Parameters",
+        "7"
+      ],
+      [
+        "Results",
+        "6"
+      ],
+      [
+        "Names",
+        "2"
+      ],
+      [
+        "Last changed",
+        "2026-04-29T12:02:54Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "Sheet1",
+        "kind": "sheet",
+        "name": "Sheet1",
+        "role": "result",
+        "size": "8 rows x 7 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "microsoft-image@theuniverse.today"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2026-04-29T11:51:34Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Macintosh Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "microsoft-image@theuniverse.today"
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2026-04-29T12:02:54Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "LAMBDA.xlsx",
+    "path": "<corpus>/office/LAMBDA.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "6fda1c171601204eb5ce8d9b2a48706c5a60adbd6d60d59d13db5a24675f01bb",
+    "size": 10383
+  }
+}

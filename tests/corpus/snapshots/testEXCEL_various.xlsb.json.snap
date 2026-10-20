@@ -1,0 +1,726 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "mySheet1",
+      "blocks": [
+        {
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "anchor": "mySheet1!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "String",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "This is a string",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D1",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E1",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D2",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E2",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "float",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13.12112313",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E3",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "currency",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3.03",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D4",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E4",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "percent",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D5",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E5",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "float 2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13.12131231",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D6",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E6",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "long int",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.23457E+14",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D7",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E7",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "longer int",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.23457E+15",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D8",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E8",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "fraction",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D9",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E9",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2017-03-09",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D10",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E10",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "comment",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "contents",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D11",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E11",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "mySheet1!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "hyperlink",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "tika_link",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!C12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!D12",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "mySheet1!E12",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ],
+            "<23 more items>"
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "mySheet1",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "embedded": [
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "Module1"
+      },
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "Sheet1"
+      },
+      {
+        "detail": "VBA module, never run",
+        "kind": "macro",
+        "name": "ThisWorkbook"
+      }
+    ],
+    "formulas": [
+      {
+        "anchor": "mySheet1!B13",
+        "cached": {
+          "type": "number",
+          "value": 4.0
+        },
+        "dialect": "excel",
+        "expression": "=C13*2",
+        "kind": "cell",
+        "latex": "\\mathrm{C13} \\cdot 2",
+        "references": [
+          "mySheet1!C13"
+        ]
+      },
+      {
+        "anchor": "mySheet1!B14",
+        "cached": {
+          "type": "text",
+          "value": "#NAME?"
+        },
+        "dialect": "excel",
+        "expression": "=COS(NA)",
+        "kind": "cell",
+        "latex": "\\operatorname{COS}(\\mathrm{NA})",
+        "references": [
+          "name:NA"
+        ]
+      },
+      {
+        "anchor": "mySheet1!B15",
+        "cached": {
+          "type": "number",
+          "value": 0.5
+        },
+        "dialect": "excel",
+        "expression": "=1/C13",
+        "kind": "cell",
+        "latex": "\\frac{1}{\\mathrm{C13}}",
+        "references": [
+          "mySheet1!C13"
+        ]
+      },
+      {
+        "anchor": "name:NA",
+        "dialect": "excel",
+        "expression": "",
+        "kind": "name",
+        "note": "the file gives no formula text for this name that is read (for XLSB: an add-in or external name)"
+      }
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "v1",
+            "kind": "feeds",
+            "to": "f1"
+          },
+          {
+            "from": "n1",
+            "kind": "feeds",
+            "to": "f2"
+          },
+          {
+            "from": "v2",
+            "kind": "feeds",
+            "to": "f3"
+          }
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "mySheet1!B13",
+            "id": "f1",
+            "kind": "formula",
+            "label": "mySheet1!B13"
+          },
+          {
+            "anchor": "mySheet1!B14",
+            "id": "f2",
+            "kind": "formula",
+            "label": "mySheet1!B14"
+          },
+          {
+            "anchor": "mySheet1!B15",
+            "id": "f3",
+            "kind": "formula",
+            "label": "mySheet1!B15"
+          },
+          {
+            "anchor": "mySheet1!C13",
+            "id": "v1",
+            "kind": "parameters",
+            "label": "mySheet1!C13"
+          },
+          {
+            "anchor": "name:NA",
+            "id": "n1",
+            "kind": "name",
+            "label": "name:NA"
+          },
+          {
+            "anchor": "mySheet1!C13",
+            "id": "v2",
+            "kind": "parameters",
+            "label": "mySheet1!C13"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "mySheet1!C13",
+        "read_by": 2,
+        "value": {
+          "type": "number",
+          "value": 2.0
+        }
+      }
+    ]
+  },
+  "losses": [
+    {
+      "location": "document",
+      "severity": "info",
+      "what": "not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links",
+      "why": "unsupported"
+    },
+    {
+      "location": "document",
+      "severity": "warning",
+      "what": "the workbook logic is incomplete: 1 defined name could not be analyzed; no formula is marked as a result and read counts may be low",
+      "why": "uncertain"
+    }
+  ],
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Formulas",
+        "3"
+      ],
+      [
+        "Parameters",
+        "1"
+      ],
+      [
+        "Names",
+        "1"
+      ],
+      [
+        "Embedded",
+        "3"
+      ],
+      [
+        "Not read",
+        "2"
+      ],
+      [
+        "Last changed",
+        "2017-03-10T14:58:49Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "mySheet1",
+        "kind": "sheet",
+        "name": "mySheet1",
+        "role": "result",
+        "size": "35 rows x 5 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "Allison, Timothy B."
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2017-03-09T12:24:26Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "Allison, Timothy B."
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2017-03-10T14:58:49Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part binary spreadsheet"
+    },
+    "format": "xlsb",
+    "modified": "<modified>",
+    "name": "testEXCEL_various.xlsb",
+    "path": "<corpus>/office/testEXCEL_various.xlsb",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "8c600e97d719b0266dcfb49c1872feb8d10c6ed12bc768ff16ace7dae555ebfc",
+    "size": 22715
+  }
+}

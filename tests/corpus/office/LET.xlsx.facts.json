@@ -1,0 +1,26 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "pointer": "/body",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas",
+    "len": 6
+  },
+  {
+    "pointer": "/facets/parameters",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/formulas/0/expression",
+    "equals": "=LET(x,1,SUM(x,3))"
+  },
+  {
+    "pointer": "/facets/formulas/0/references",
+    "absent": true
+  }
+]
