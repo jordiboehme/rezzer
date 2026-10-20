@@ -7,19 +7,26 @@
 //!
 //! Every call that runs answers with one text block (the page, the JSON or the message) and
 //! a structured object. Bad input is a result with status `failed` and `isError` set, never
-//! a protocol error. The pipeline is synchronous and runs on tokio's blocking pool. Nothing
-//! but the protocol goes to stdout.
+//! a protocol error. The pipeline is synchronous and runs on tokio's blocking pool. A cancel
+//! from the client, or the end of the connection, stops a running read at its next budget
+//! check. Nothing but the protocol goes to stdout.
 
 pub mod tools;
 
 use std::sync::Arc;
 
+use rezzer_pipeline::CancelToken;
 use rezzer_pipeline::Pipeline;
+use rmcp::handler::server::common::schema_for_type;
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
-use rmcp::service::ServerInitializeError;
-use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Implementation, JsonObject, ServerCapabilities, ServerConfig,
+};
+use rmcp::service::{RequestContext, ServerInitializeError};
+use rmcp::transport::IntoTransport;
+use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
+use serde_json::{Value, json};
+use tokio::sync::watch;
 
 use crate::tools::{Answer, InspectParams, RezParams};
 
@@ -36,14 +43,25 @@ Call rez with a local path. Long results come in pages.";
 pub struct RezzerServer {
     pipeline: Arc<Pipeline>,
     tool_router: ToolRouter<Self>,
+    /// Set to true when the connection is over; running reads then stop.
+    stop: Arc<watch::Sender<bool>>,
 }
 
 #[tool_router]
 impl RezzerServer {
     pub fn new(pipeline: Arc<Pipeline>) -> Self {
+        let mut tool_router = Self::tool_router();
+        let max_file_bytes = pipeline.config().limits.max_file_bytes;
+        if let Some(route) = tool_router.map.get_mut("rez") {
+            route.attr.input_schema = Arc::new(rez_input_schema(max_file_bytes));
+        }
+        if let Some(route) = tool_router.map.get_mut("inspect") {
+            route.attr.input_schema = schema_for_type::<InspectParams>();
+        }
         RezzerServer {
             pipeline,
-            tool_router: Self::tool_router(),
+            tool_router,
+            stop: Arc::new(watch::channel(false).0),
         }
     }
 
@@ -53,19 +71,21 @@ impl RezzerServer {
     )]
     async fn rez(
         &self,
-        Parameters(params): Parameters<RezParams>,
+        args: JsonObject,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        Ok(self.blocking(move |p| tools::rez(p, params)).await)
+        let cancel = CancelToken::default();
+        let watcher = self.cancel_on_end(&context, cancel.clone());
+        let result = self.blocking(move |p| tools::rez(p, args, cancel)).await;
+        watcher.abort();
+        Ok(result)
     }
 
     #[tool(
         description = "Show the detected format of a local file, the detection evidence, its size, its SHA-256 and the reader that would read it, without reading it. Input: path."
     )]
-    async fn inspect(
-        &self,
-        Parameters(params): Parameters<InspectParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        Ok(self.blocking(move |p| tools::inspect(p, params)).await)
+    async fn inspect(&self, args: JsonObject) -> Result<CallToolResult, ErrorData> {
+        Ok(self.blocking(move |p| tools::inspect(p, args)).await)
     }
 
     #[tool(
@@ -76,7 +96,41 @@ impl RezzerServer {
     }
 }
 
+/// The input schema of `rez`: [`RezParams`] with the `file` property marked for the MCP
+/// file extension draft (`x-mcp-file`), so a client that supports it can attach a file.
+fn rez_input_schema(max_file_bytes: u64) -> JsonObject {
+    let mut schema = schema_for_type::<RezParams>().as_ref().clone();
+    if let Some(Value::Object(file)) = schema.get_mut("properties").and_then(|p| p.get_mut("file"))
+    {
+        file.insert("x-mcp-file".into(), json!({ "maxSize": max_file_bytes }));
+    }
+    schema
+}
+
 impl RezzerServer {
+    /// Sets `cancel` when the client cancels this request or the connection ends. The
+    /// returned task is aborted when the call is done.
+    fn cancel_on_end(
+        &self,
+        context: &RequestContext<RoleServer>,
+        cancel: CancelToken,
+    ) -> tokio::task::JoinHandle<()> {
+        let request = context.ct.clone();
+        let mut stop = self.stop.subscribe();
+        tokio::spawn(async move {
+            tokio::select! {
+                () = request.cancelled() => {}
+                _ = stop.wait_for(|stopped| *stopped) => {}
+            }
+            cancel.cancel();
+        })
+    }
+
+    /// Stops the reads that are still running: called when the connection is over.
+    pub fn stop_running_reads(&self) {
+        self.stop.send_replace(true);
+    }
+
     /// Runs `work` on the blocking pool and turns its answer into a tool result. A panic
     /// that escapes the pipeline's own containment is a failed result too.
     async fn blocking(
@@ -118,18 +172,29 @@ impl ServerHandler for RezzerServer {
     }
 }
 
-/// Serves the tools on stdin and stdout until the client closes the connection. A client
-/// that closes stdin before a session starts (only `server/discover`, or nothing at all) is
-/// a normal end, not an error.
+/// Serves the tools on stdin and stdout until the client closes the connection.
 pub async fn serve_stdio(pipeline: Arc<Pipeline>) -> anyhow::Result<()> {
-    let service = match RezzerServer::new(pipeline)
-        .serve(rmcp::transport::stdio())
-        .await
-    {
+    serve(pipeline, rmcp::transport::stdio()).await
+}
+
+/// Serves the tools on `transport` until the client closes the connection. A client that
+/// closes before a session starts (only `server/discover`, or nothing at all) is a normal
+/// end, not an error. When the connection is over (after rmcp's grace time for answers
+/// still being written), reads that are still running are told to stop.
+pub async fn serve<T, E, A>(pipeline: Arc<Pipeline>, transport: T) -> anyhow::Result<()>
+where
+    T: IntoTransport<RoleServer, E, A>,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let server = RezzerServer::new(pipeline);
+    let stopper = server.clone();
+    let service = match server.serve(transport).await {
         Ok(service) => service,
         Err(ServerInitializeError::ConnectionClosed(_)) => return Ok(()),
         Err(e) => return Err(e.into()),
     };
-    service.waiting().await?;
+    let quit = service.waiting().await;
+    stopper.stop_running_reads();
+    quit?;
     Ok(())
 }

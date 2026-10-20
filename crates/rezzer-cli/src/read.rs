@@ -21,8 +21,7 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
             OutputKind::Markdown
         },
         sections: args.sections.clone(),
-        password: None,
-        generated_at: None,
+        ..Request::default()
     };
     let result = pipeline.run_path(&args.path, &req);
     if result.document.is_none() {

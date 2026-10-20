@@ -106,6 +106,9 @@ fn run(cli: Cli, registry: Registry) -> Result<ExitCode, String> {
     }
 }
 
+/// How long `rezzer mcp` waits at exit for blocking work that is still running.
+const MCP_SHUTDOWN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Serves MCP on stdio until the client closes stdin. Errors go to stderr; stdout carries
 /// only the protocol.
 fn mcp(config: Config, registry: Registry) -> Result<ExitCode, String> {
@@ -114,9 +117,10 @@ fn mcp(config: Config, registry: Registry) -> Result<ExitCode, String> {
         .enable_all()
         .build()
         .map_err(|e| format!("cannot start the MCP server: {e}"))?;
-    runtime
-        .block_on(rezzer_mcp::serve_stdio(pipeline))
-        .map_err(|e| format!("MCP server: {e}"))?;
+    let served = runtime.block_on(rezzer_mcp::serve_stdio(pipeline));
+    // Reads still running were told to stop; give them a short time, then exit anyway.
+    runtime.shutdown_timeout(MCP_SHUTDOWN_WAIT);
+    served.map_err(|e| format!("MCP server: {e}"))?;
     Ok(ExitCode::SUCCESS)
 }
 

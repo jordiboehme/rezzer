@@ -10,7 +10,7 @@ rezzer-model = { path = "../rezzer-model" }
 rezzer-pipeline = { path = "../rezzer-pipeline" }
 rezzer-render = { path = "../rezzer-render" }
 rmcp = { workspace = true, features = ["server", "macros", "transport-io"] }
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 schemars.workspace = true
@@ -19,6 +19,7 @@ base64.workspace = true
 percent-encoding.workspace = true
 
 [dev-dependencies]
+rezzer-limits = { path = "../rezzer-limits" }
 rezzer-read-text = { path = "../readers/rezzer-read-text" }
 rezzer-read-markdown = { path = "../readers/rezzer-read-markdown" }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv" }

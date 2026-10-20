@@ -6,11 +6,17 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use rezzer_model::Registry;
+use rezzer_limits::Budget;
+use rezzer_model::{
+    Completeness, Document, FormatId, ReadOptions, ReadOutcome, Reader, Registry, Source,
+    source_info,
+};
 use rezzer_pipeline::{Config, Pipeline};
-use rmcp::model::{CallToolRequestParams, CallToolResult};
-use rmcp::service::RunningService;
+use rmcp::model::{CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest};
+use rmcp::service::{PeerRequestOptions, RunningService};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{Value, json};
 
@@ -31,14 +37,16 @@ fn config() -> Config {
 }
 
 async fn connect(config: Config) -> RunningService<RoleClient, ()> {
-    let pipeline = Arc::new(Pipeline::new(config, registry()));
+    connect_to(Pipeline::new(config, registry())).await
+}
+
+async fn connect_to(pipeline: Pipeline) -> RunningService<RoleClient, ()> {
+    let pipeline = Arc::new(pipeline);
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
     tokio::spawn(async move {
-        let service = rezzer_mcp::RezzerServer::new(pipeline)
-            .serve(server_io)
+        rezzer_mcp::serve(pipeline, server_io)
             .await
-            .expect("the server starts");
-        let _ = service.waiting().await;
+            .expect("the server runs");
     });
     ().serve(client_io).await.expect("the client connects")
 }
@@ -220,13 +228,7 @@ async fn rez_source_is_not_available_yet() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rez_second_page() {
     let dir = tempfile::tempdir().unwrap();
-    let mut markdown = String::from("# Long\n\n");
-    for i in 0..400 {
-        markdown.push_str(&format!("## Part {i}\n\n"));
-        markdown.push_str(&"Words in a paragraph that fills the page. ".repeat(20));
-        markdown.push_str("\n\n");
-    }
-    let path = write(dir.path(), "long.md", &markdown);
+    let path = write(dir.path(), "long.md", &long_markdown());
     let client = connect(config()).await;
     let first = call(&client, "rez", json!({ "path": path })).await;
     let pages = structured(&first)["pages"].as_u64().unwrap();
@@ -418,5 +420,213 @@ async fn rez_declares_an_output_schema() {
     assert_eq!(
         properties["status"]["enum"],
         json!(["complete", "partial", "failed"])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lenient_page_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "long.md", &long_markdown());
+    let client = connect(config()).await;
+    for page in [json!(2), json!(2.0), json!("2"), json!(" 2 ")] {
+        let result = call(&client, "rez", json!({ "path": path, "page": page })).await;
+        let s = structured(&result);
+        assert_eq!(s["status"], "complete", "{page}: {s}");
+        assert_eq!(s["page"], 2, "{page}");
+    }
+    let huge = call(
+        &client,
+        "rez",
+        json!({ "path": path, "page": 18446744073709551616.0 }),
+    )
+    .await;
+    let s = structured(&huge);
+    assert_eq!(s["status"], "failed", "{s}");
+    assert!(
+        s["message"].as_str().unwrap().contains("does not exist"),
+        "{s}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_types_are_failed_results_with_structured_content() {
+    let client = connect(config()).await;
+    for (args, field) in [
+        (json!({ "path": 5 }), "path"),
+        (json!({ "file": true }), "file"),
+        (json!({ "source": [] }), "source"),
+        (json!({ "path": "a", "page": 1.5 }), "page"),
+        (json!({ "path": "a", "page": "two" }), "page"),
+        (json!({ "path": "a", "page": true }), "page"),
+        (json!({ "path": "a", "sections": "content" }), "sections"),
+        (json!({ "path": "a", "sections": [1] }), "sections"),
+        (json!({ "path": "a", "format": 5 }), "format"),
+    ] {
+        let result = call(&client, "rez", args.clone()).await;
+        assert_eq!(result.is_error, Some(true), "{args}");
+        let s = structured(&result);
+        assert_eq!(s["status"], "failed", "{args}: {s}");
+        assert_eq!(s["pages"], 0, "{args}");
+        let message = s["message"].as_str().unwrap();
+        assert!(message.starts_with(field), "{args}: {message}");
+        assert_eq!(text(&result), message);
+    }
+    let result = call(&client, "inspect", json!({ "path": 5 })).await;
+    let s = structured(&result);
+    assert_eq!(s["status"], "failed", "{s}");
+    assert!(s["message"].as_str().unwrap().starts_with("path"), "{s}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_input_schema_types_format_and_marks_the_file() {
+    let mut cfg = config();
+    cfg.limits.max_file_bytes = 1234;
+    let client = connect(cfg).await;
+    let tools = client.list_all_tools().await.unwrap();
+    let rez = tools.iter().find(|t| t.name == "rez").unwrap();
+    let properties = rez.input_schema["properties"].as_object().unwrap();
+    let format = &properties["format"];
+    assert_eq!(format["type"], "string", "{format}");
+    assert_eq!(format["enum"], json!(["markdown", "json"]));
+    assert_eq!(format["default"], "markdown");
+    let required = rez.input_schema.get("required");
+    assert!(
+        required.is_none_or(|r| !r.as_array().unwrap().contains(&json!("format"))),
+        "{required:?}"
+    );
+    assert_eq!(properties["page"]["type"], json!(["integer", "null"]));
+    let file = &properties["file"];
+    assert_eq!(file["format"], "uri", "{file}");
+    assert_eq!(file["x-mcp-file"]["maxSize"], 1234, "{file}");
+    assert!(properties["path"].get("x-mcp-file").is_none());
+    let inspect = tools.iter().find(|t| t.name == "inspect").unwrap();
+    assert_eq!(
+        inspect.input_schema["properties"]["path"]["type"],
+        json!(["string", "null"])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bad_base64_message_has_one_period() {
+    let client = connect(config()).await;
+    let result = call(&client, "rez", json!({ "file": "data:;base64,YW$j" })).await;
+    let message = structured(&result)["message"].as_str().unwrap().to_string();
+    assert!(message.contains("base64"), "{message}");
+    assert!(
+        message.ends_with('.') && !message.ends_with(".."),
+        "{message}"
+    );
+}
+
+/// A text reader that runs until its budget stops it, and says whether a cancel did.
+struct Slow {
+    started: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Reader for Slow {
+    fn id(&self) -> &'static str {
+        "slow"
+    }
+    fn version(&self) -> &'static str {
+        "0.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, _opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
+        self.started.store(true, Ordering::SeqCst);
+        let end = Instant::now() + Duration::from_secs(60);
+        while budget.check_time().is_ok() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.cancelled
+            .store(budget.is_cancelled(), Ordering::SeqCst);
+        ReadOutcome {
+            document: Document::new(source_info(src)),
+            completeness: Completeness::Partial,
+        }
+    }
+}
+
+fn slow_pipeline() -> (Pipeline, Arc<AtomicBool>, Arc<AtomicBool>) {
+    let started = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut registry = Registry::new();
+    registry.register(Box::new(Slow {
+        started: started.clone(),
+        cancelled: cancelled.clone(),
+    }));
+    (Pipeline::new(config(), registry), started, cancelled)
+}
+
+async fn wait_for(flag: &AtomicBool, within: Duration) -> bool {
+    let end = Instant::now() + within;
+    while Instant::now() < end {
+        if flag.load(Ordering::SeqCst) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    false
+}
+
+fn rez_request(args: Value) -> ClientRequest {
+    ClientRequest::CallToolRequest(CallToolRequest::new(
+        CallToolRequestParams::new("rez").with_arguments(args.as_object().unwrap().clone()),
+    ))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancel_stops_a_long_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let (pipeline, started, cancelled) = slow_pipeline();
+    let client = connect_to(pipeline).await;
+    let handle = client
+        .peer()
+        .send_cancellable_request(
+            rez_request(json!({ "path": path })),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        wait_for(&started, Duration::from_secs(10)).await,
+        "the read started"
+    );
+    handle.cancel(None).await.unwrap();
+    assert!(
+        wait_for(&cancelled, Duration::from_secs(5)).await,
+        "the cancel reached the budget"
+    );
+    // The server goes on serving.
+    let result = call(&client, "formats", json!({})).await;
+    assert!(text(&result).contains("slow"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disconnect_stops_a_long_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let (pipeline, started, cancelled) = slow_pipeline();
+    let client = connect_to(pipeline).await;
+    let _handle = client
+        .peer()
+        .send_cancellable_request(
+            rez_request(json!({ "path": path })),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        wait_for(&started, Duration::from_secs(10)).await,
+        "the read started"
+    );
+    client.cancel().await.unwrap();
+    // rmcp gives running calls up to 5 s to answer after the client is gone.
+    assert!(
+        wait_for(&cancelled, Duration::from_secs(10)).await,
+        "the disconnect reached the budget"
     );
 }

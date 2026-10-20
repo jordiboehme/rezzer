@@ -400,6 +400,26 @@ fn page_size_is_not_part_of_the_cache_key() {
 }
 
 #[test]
+fn a_cancelled_request_stops_the_reader_and_is_not_cached() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_text::TextReader));
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let req = request();
+    req.cancel.cancel();
+    let text: String = (0..1100).map(|i| format!("Paragraph {i}.\n\n")).collect();
+    let out = pipeline.run_bytes("long.txt", text.into_bytes(), None, &req);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let doc = out.document.unwrap();
+    assert!(
+        doc.losses.iter().any(|l| l.why == LossReason::Limit),
+        "{:?}",
+        doc.losses
+    );
+    assert!(cache_files(dir.path()).is_empty());
+}
+
+#[test]
 fn a_time_cut_is_not_cached() {
     let dir = tempfile::tempdir().unwrap();
     let mut registry = Registry::new();

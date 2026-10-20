@@ -29,6 +29,7 @@ use rezzer_model::{
 use rezzer_render::RenderOptions;
 
 pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, config_path_from};
+pub use rezzer_limits::CancelToken;
 pub use rezzer_render::OutputSection;
 
 use crate::cache::Cache;
@@ -71,6 +72,9 @@ pub struct Request {
     pub password: Option<String>,
     /// RFC 3339 time for `generated.at`. When None: [`GENERATED_AT_ENV`], else now.
     pub generated_at: Option<String>,
+    /// Cancelling it stops the reader at its next budget check; the result is then partial
+    /// with a limit loss and is not cached.
+    pub cancel: CancelToken,
 }
 
 impl fmt::Debug for Request {
@@ -80,6 +84,7 @@ impl fmt::Debug for Request {
             .field("sections", &self.sections)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("generated_at", &self.generated_at)
+            .field("cancelled", &self.cancel.is_cancelled())
             .finish()
     }
 }
@@ -351,7 +356,7 @@ impl Pipeline {
         let Some(reader) = self.registry.for_format(src.format) else {
             return (unsupported(src), Completeness::Partial, None, true);
         };
-        let budget = Budget::new(self.config.limits.clone());
+        let budget = Budget::with_cancel(self.config.limits.clone(), req.cancel.clone());
         let opts = ReadOptions {
             password: req.password.clone(),
         };

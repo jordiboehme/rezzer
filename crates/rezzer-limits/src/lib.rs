@@ -6,6 +6,7 @@
 
 use std::fmt;
 use std::panic::{AssertUnwindSafe, UnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -82,6 +83,21 @@ impl fmt::Display for LimitHit {
 
 impl std::error::Error for LimitHit {}
 
+/// A cancel flag shared between the one who may cancel (a server, a signal handler) and a
+/// [`Budget`]. Clones share the flag.
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
 /// Running counters for one conversion. Shareable between threads.
 #[derive(Debug)]
 pub struct Budget {
@@ -89,17 +105,23 @@ pub struct Budget {
     start: Instant,
     unpacked: AtomicU64,
     depth: AtomicU32,
-    cancelled: AtomicBool,
+    cancelled: CancelToken,
 }
 
 impl Budget {
     pub fn new(limits: Limits) -> Budget {
+        Budget::with_cancel(limits, CancelToken::default())
+    }
+
+    /// A budget that is cancelled when `cancel` is: [`Budget::check_time`] then fails with
+    /// the limit `cancelled`, so the reader stops at its next check.
+    pub fn with_cancel(limits: Limits, cancel: CancelToken) -> Budget {
         Budget {
             limits,
             start: Instant::now(),
             unpacked: AtomicU64::new(0),
             depth: AtomicU32::new(0),
-            cancelled: AtomicBool::new(false),
+            cancelled: cancel,
         }
     }
 
@@ -162,11 +184,11 @@ impl Budget {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancelled.cancel();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
+        self.cancelled.is_cancelled()
     }
 }
 

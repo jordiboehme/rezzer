@@ -1017,6 +1017,7 @@ dependencies = [
  "anyhow",
  "base64",
  "percent-encoding",
+ "rezzer-limits",
  "rezzer-model",
  "rezzer-pipeline",
  "rezzer-read-csv",

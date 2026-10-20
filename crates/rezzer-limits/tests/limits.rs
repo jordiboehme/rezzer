@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use rezzer_limits::{Budget, Limits, contain};
+use rezzer_limits::{Budget, CancelToken, Limits, contain};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -138,4 +138,19 @@ fn limits_serde_roundtrip_with_seconds() {
     let partial: Limits = serde_json::from_str(r#"{"max_depth": 5}"#).unwrap();
     assert_eq!(partial.max_depth, 5);
     assert_eq!(partial.max_ratio, 100);
+}
+
+#[test]
+fn a_shared_cancel_token_stops_the_budget() {
+    let token = CancelToken::default();
+    let b = Budget::with_cancel(Limits::default(), token.clone());
+    assert!(b.check_time().is_ok());
+    assert!(!token.is_cancelled());
+    token.cancel();
+    assert!(b.is_cancelled());
+    assert_eq!(b.check_time().unwrap_err().limit, "cancelled");
+    // Cancelling through the budget is seen by every holder of the token.
+    let other = CancelToken::default();
+    Budget::with_cancel(Limits::default(), other.clone()).cancel();
+    assert!(other.is_cancelled());
 }
