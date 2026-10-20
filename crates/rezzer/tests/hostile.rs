@@ -169,5 +169,12 @@ fn nul_and_empty_inputs_do_not_panic() {
             result.document.is_some() || result.message.is_some(),
             "{name}"
         );
+        if name == "empty.md" || name == "lone.md" {
+            assert_ne!(
+                result.completeness,
+                Completeness::Failed,
+                "{name}: {result:?}"
+            );
+        }
     }
 }
