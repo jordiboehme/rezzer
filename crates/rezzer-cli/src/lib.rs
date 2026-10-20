@@ -84,9 +84,11 @@ pub fn main(registry: Registry) -> ExitCode {
             };
         }
     };
-    match run(cli, registry) {
-        Ok(code) => code,
-        Err(message) => fail(&message),
+    // Panics outside the pipeline's own containment still end as one line and exit 1.
+    match rezzer_limits::contain(std::panic::AssertUnwindSafe(|| run(cli, registry))) {
+        Ok(Ok(code)) => code,
+        Ok(Err(message)) => fail(&message),
+        Err(panic) => fail(&format!("internal error: {panic}")),
     }
 }
 

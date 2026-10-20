@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 rezzer-model = { path = "../rezzer-model" }
+rezzer-limits = { path = "../rezzer-limits" }
 rezzer-pipeline = { path = "../rezzer-pipeline" }
 rezzer-render = { path = "../rezzer-render" }
 clap = { workspace = true, features = ["derive"] }

@@ -7,7 +7,8 @@
 //!
 //! The key is the SHA-256 of a canonical JSON object (sorted keys) with the source hash, the
 //! Rezzer and model versions, the request without `generated_at`, and what else changes the
-//! document: the detected format (the name and MIME hints can change it), the reader id and
+//! document: the file name (readers use it, for example as the CSV sheet name, and it is a
+//! detection hint), the detected format (a MIME hint can change it), the reader id and
 //! version (the reader set depends on cargo features), the limits and the disabled enrich
 //! passes. Entries are written atomically (temporary file, then rename). An entry that does
 //! not parse is ignored and rewritten. The cache is best effort: a write that fails is
@@ -116,6 +117,7 @@ pub(crate) fn key(
     });
     let material = json!({
         "sha256": src.sha256,
+        "name": src.name,
         "rezzer": VERSION,
         "model_version": MODEL_VERSION,
         "format": rezzer_render::format_name(src.format),

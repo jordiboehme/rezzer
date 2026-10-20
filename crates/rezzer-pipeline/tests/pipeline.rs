@@ -182,11 +182,13 @@ fn cache_hit_skips_reader() {
 }
 
 #[test]
-fn cache_hit_takes_name_and_path_from_the_current_source() {
+fn cache_hit_takes_the_path_from_the_current_source() {
     let dir = tempfile::tempdir().unwrap();
     let files = tempfile::tempdir().unwrap();
-    let a = files.path().join("a.txt");
-    let b = files.path().join("b.txt");
+    std::fs::create_dir_all(files.path().join("one")).unwrap();
+    std::fs::create_dir_all(files.path().join("two")).unwrap();
+    let a = files.path().join("one/x.txt");
+    let b = files.path().join("two/x.txt");
     std::fs::write(&a, "hello\n").unwrap();
     std::fs::write(&b, "hello\n").unwrap();
     let (registry, calls) = counting(false);
@@ -195,8 +197,23 @@ fn cache_hit_takes_name_and_path_from_the_current_source() {
     let out = pipeline.run_path(&b, &request());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let doc = out.document.unwrap();
-    assert_eq!(doc.source.name, "b.txt");
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
+}
+
+#[test]
+fn the_file_name_is_part_of_the_cache_key() {
+    // The CSV reader names its sheet after the file: a renamed copy must not get the old name.
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_csv::CsvReader));
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let bytes = b"a,b\n1,2\n3,4\n";
+    pipeline.run_bytes("first.csv", bytes.to_vec(), None, &request());
+    let out = pipeline.run_bytes("second.csv", bytes.to_vec(), None, &request());
+    let md = out.markdown_pages.concat();
+    assert!(md.contains("| second |"), "{md}");
+    assert!(!md.contains("first"), "{md}");
+    assert_eq!(cache_files(dir.path()).len(), 2);
 }
 
 #[test]

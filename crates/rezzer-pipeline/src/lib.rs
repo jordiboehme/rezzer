@@ -238,10 +238,9 @@ impl Pipeline {
         if let (Some(cache), Some(key)) = (cache, &key)
             && let Some((mut document, completeness)) = cache.get(key, src)
         {
-            // The same bytes under another name or path: the facts of this source count.
+            // The same bytes and name under another path: the facts of this source count.
             let fresh = source_info(src);
             document.source.path = fresh.path;
-            document.source.name = fresh.name;
             document.source.modified = fresh.modified;
             document.source.detection = fresh.detection;
             return (document, completeness, None);
