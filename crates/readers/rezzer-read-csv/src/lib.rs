@@ -104,11 +104,24 @@ impl Reader for CsvReader {
                 }
             }
         };
-        let mut analysis = csvsniff::analyze(text, &dialect, MAX_TABLE_ROWS);
-        if guessed && analysis.rows == 1 {
+        let out_of_time = || budget.check_time().is_err();
+        let mut analysis = csvsniff::analyze_until(text, &dialect, MAX_TABLE_ROWS, &out_of_time);
+        if guessed && analysis.rows == 1 && !analysis.truncated {
             // A single record is most likely a header row.
             dialect.has_header = true;
-            analysis = csvsniff::analyze(text, &dialect, MAX_TABLE_ROWS);
+            analysis = csvsniff::analyze_until(text, &dialect, MAX_TABLE_ROWS, &out_of_time);
+        }
+        if analysis.truncated {
+            partial = true;
+            doc.losses.push(Loss {
+                location: "document".into(),
+                what: format!(
+                    "time limit reached during the analysis, only the first {} rows are counted",
+                    analysis.rows
+                ),
+                why: LossReason::Limit,
+                severity: Severity::Warning,
+            });
         }
         let timed_out = budget.check_time().is_err();
         if timed_out {

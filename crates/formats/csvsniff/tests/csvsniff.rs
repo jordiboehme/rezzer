@@ -556,3 +556,24 @@ fn long_increasing_id_column_is_not_a_part() {
     assert!(a.columns[0].unique_exhausted && !a.columns[0].unique);
     assert!(a.derived.is_empty(), "{:?}", a.derived);
 }
+
+#[test]
+fn analyze_until_stops_early_and_says_so() {
+    let mut text = String::from("id,name\n");
+    for i in 0..50_000 {
+        text.push_str(&format!("{i},n{i}\n"));
+    }
+    let d = sniff(&text).unwrap();
+    let calls = std::cell::Cell::new(0usize);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        true
+    };
+    let a = csvsniff::analyze_until(&text, &d, 1000, &stop);
+    assert!(a.truncated);
+    assert!(a.rows < 50_000, "rows {}", a.rows);
+    assert!(a.quote_problems.is_empty() && a.derived.is_empty());
+    let whole = analyze(&text, &d, 1000);
+    assert!(!whole.truncated);
+    assert_eq!(whole.rows, 50_000);
+}

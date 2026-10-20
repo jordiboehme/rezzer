@@ -727,15 +727,38 @@ fn find_quote_problems(text: &str, delimiter: u8, quote: u8) -> Vec<QuoteProblem
 /// all rows are still counted and typed. The first 1,000 ragged rows are
 /// listed, `ragged_total` counts them all.
 pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
+    analyze_until(text, dialect, max_rows, &|| false)
+}
+
+/// Records between two calls of the stop callback.
+const STOP_CHECK_EVERY: usize = 4096;
+
+/// Like [`analyze`], but asks `stop` every few thousand records and ends the analysis early
+/// when it returns true (a time limit, a cancel). The result then has `truncated` set: the
+/// row count and column facts cover only the records read so far, and the derived-column and
+/// quote checks are skipped.
+pub fn analyze_until(
+    text: &str,
+    dialect: &Dialect,
+    max_rows: usize,
+    stop: &dyn Fn() -> bool,
+) -> Analysis {
     let text = strip_bom(text);
+    let mut truncated = false;
     let (delimiter, quote) = (dialect.delimiter, dialect.quote);
 
     // Pass 1: field count histogram (no per-cell allocation).
     let mut hist: HashMap<usize, usize> = HashMap::new();
     let mut rdr = reader(text, delimiter, quote);
     let mut byte_rec = csv::ByteRecord::new();
+    let mut seen = 0usize;
     while rdr.read_byte_record(&mut byte_rec).unwrap_or(false) {
         *hist.entry(byte_rec.len()).or_default() += 1;
+        seen += 1;
+        if seen.is_multiple_of(STOP_CHECK_EVERY) && stop() {
+            truncated = true;
+            break;
+        }
     }
     let expected = modal(&hist).map_or(0, |(c, _)| c);
 
@@ -749,7 +772,13 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     let mut rdr = reader(text, delimiter, quote);
     let mut rec = csv::StringRecord::new();
     let mut first = true;
+    let mut seen = 0usize;
     while rdr.read_record(&mut rec).unwrap_or(false) {
+        seen += 1;
+        if seen.is_multiple_of(STOP_CHECK_EVERY) && stop() {
+            truncated = true;
+            break;
+        }
         if rec.len() != expected {
             ragged_total += 1;
             if ragged_rows.len() < MAX_RAGGED_LISTED {
@@ -803,7 +832,7 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
 
     // Pass 3: numeric values of the first `max_rows` rows, for the derived check.
     let checked_rows = rows.min(max_rows);
-    let derived = if checked_rows >= 10 {
+    let derived = if checked_rows >= 10 && !truncated {
         let eligible: Vec<(usize, u8)> = columns
             .iter()
             .enumerate()
@@ -846,8 +875,13 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     } else {
         Vec::new()
     };
-    let quote_problems = find_quote_problems(text, delimiter, quote);
+    let quote_problems = if truncated {
+        Vec::new()
+    } else {
+        find_quote_problems(text, delimiter, quote)
+    };
     Analysis {
+        truncated,
         columns,
         rows,
         ragged_rows,

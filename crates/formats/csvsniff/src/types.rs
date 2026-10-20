@@ -97,6 +97,9 @@ pub struct Derived {
 /// Result of [`crate::analyze`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
+    /// True when [`crate::analyze_until`] was stopped early: the counts and column facts cover
+    /// only the records read so far.
+    pub truncated: bool,
     /// One entry per column (the modal field count; extra cells in longer records are not columns).
     pub columns: Vec<Column>,
     /// Number of data rows (the header is not counted).

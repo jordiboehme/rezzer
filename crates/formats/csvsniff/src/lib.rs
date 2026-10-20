@@ -18,7 +18,7 @@ mod derived;
 mod sniff;
 mod types;
 
-pub use sniff::{analyze, sniff};
+pub use sniff::{analyze, analyze_until, sniff};
 pub use types::{
     Analysis, Column, ColumnKind, Derived, DerivedOp, Dialect, QuoteProblem, RaggedRow,
 };

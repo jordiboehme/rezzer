@@ -64,6 +64,10 @@ fn body_text(body: &[Block]) -> String {
             walk::inlines(list, |i| match i {
                 Inline::Text { text: t, .. } | Inline::Status { text: t, .. } => {
                     for word in t.split_whitespace() {
+                        // One huge text must not be scanned to the end once the sample is full.
+                        if text.len() >= MAX_BYTES {
+                            break;
+                        }
                         let word = word.trim_matches(|c: char| !c.is_alphabetic());
                         if is_word(word) {
                             push_capped(&mut text, word);
