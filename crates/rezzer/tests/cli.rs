@@ -518,3 +518,33 @@ fn xlsx_named_csv_still_reads_as_xlsx() {
         .stdout(predicate::str::contains("format: xlsx"))
         .stdout(predicate::str::contains("## Logic"));
 }
+
+#[test]
+fn password_stdin_sets_password() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    // A run with a password is never cached, which shows the password reached the request.
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .arg("--password-stdin")
+        .write_stdin("secret\r\nignored\n")
+        .assert()
+        .code(0);
+    assert_eq!(env.cache_entries(), 0);
+    env.cmd().arg("read").arg(&md).assert().code(0);
+    assert_eq!(env.cache_entries(), 1);
+}
+
+#[test]
+fn password_stdin_with_dash_is_error() {
+    let env = Env::new();
+    env.cmd()
+        .args(["read", "-", "--password-stdin"])
+        .write_stdin("secret\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--password-stdin needs a file path",
+        ));
+}

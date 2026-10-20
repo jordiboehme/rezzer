@@ -6,7 +6,7 @@
 //! [`Answer`] out. Bad input is an answer with status `failed` and a message that names
 //! the rule, never an error.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
@@ -60,6 +60,14 @@ pub struct RezParams {
     #[serde(default)]
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
+    /// Absolute path of an existing directory. Pictures (for example rendered PDF pages) are
+    /// written to `<output_dir>/<file name>.assets/` and the Markdown links to them. Without
+    /// it nothing is written.
+    #[serde(default)]
+    pub output_dir: Option<String>,
+    /// The password of an encrypted file. It is never stored or cached.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 fn format_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -122,6 +130,8 @@ impl RezParams {
             sections,
             math,
             format: string(&mut args, "format")?,
+            output_dir: string(&mut args, "output_dir")?,
+            password: string(&mut args, "password")?,
         })
     }
 }
@@ -243,10 +253,24 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
             Err(message) => return rez_failed(message),
         },
     };
+    let output_dir = match params.output_dir.take() {
+        None => None,
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if !dir.is_absolute() || !dir.is_dir() {
+                return rez_failed(
+                    "output_dir must be an absolute path of an existing directory".to_string(),
+                );
+            }
+            Some(dir)
+        }
+    };
     let request = Request {
         output,
         sections,
         math: params.math.unwrap_or(true),
+        password: params.password.take(),
+        output_dir,
         cancel,
         ..Request::default()
     };
@@ -281,6 +305,11 @@ pub struct RezOutput {
     pub sha256: Option<String>,
     /// How many parts of the file could not be read fully.
     pub losses: usize,
+    /// How many pictures the file has (extracted or not).
+    pub assets: usize,
+    /// Ids of the pictures Rezzer cannot interpret, for the calling agent to look at. With
+    /// `output_dir` they are files in the bundle.
+    pub needs_vision: Vec<String>,
     /// Why the call failed or what went wrong, in one line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -312,6 +341,8 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             format: Some(rezzer_render::format_name(document.source.format)),
             sha256: Some(document.source.sha256.clone()),
             losses: document.losses.len(),
+            assets: document.assets.len(),
+            needs_vision: needs_vision(document),
             message: Some(message.clone()),
         };
         return Answer {
@@ -338,6 +369,8 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         format: Some(rezzer_render::format_name(document.source.format)),
         sha256: Some(document.source.sha256.clone()),
         losses: document.losses.len(),
+        assets: document.assets.len(),
+        needs_vision: needs_vision(document),
         message: result.message.clone(),
     };
     let Some(text) = text.filter(|_| page <= pages) else {
@@ -389,6 +422,8 @@ fn rez_failed(message: String) -> Answer {
         format: None,
         sha256: None,
         losses: 0,
+        assets: 0,
+        needs_vision: Vec::new(),
         message: Some(message.clone()),
     };
     Answer {
@@ -396,6 +431,15 @@ fn rez_failed(message: String) -> Answer {
         text: message,
         failed: true,
     }
+}
+
+fn needs_vision(document: &rezzer_model::Document) -> Vec<String> {
+    document
+        .assets
+        .iter()
+        .filter(|a| a.needs_vision)
+        .map(|a| a.id.clone())
+        .collect()
 }
 
 fn to_value(output: &RezOutput) -> Value {

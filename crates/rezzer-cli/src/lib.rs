@@ -51,9 +51,12 @@ struct ReadArgs {
     /// The file to read.
     path: PathBuf,
     /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
-    /// for example budget.xlsx.md.
+    /// for example budget.xlsx.md. Pictures go to <DIR>/<file name>.assets/.
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
+    /// Read the password of an encrypted file from the first line of stdin. Needs a file path.
+    #[arg(long)]
+    password_stdin: bool,
     /// Print the document model as JSON instead of Markdown.
     #[arg(long)]
     json: bool,

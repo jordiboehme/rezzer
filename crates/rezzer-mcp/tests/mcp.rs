@@ -706,3 +706,72 @@ async fn rez_math_option_drops_the_math_column() {
     assert_eq!(s["status"], "failed");
     assert!(s["message"].as_str().unwrap().contains("math"), "{s}");
 }
+
+/// A text reader that returns two assets, one of them for the calling agent to look at.
+struct Pictures;
+
+impl Reader for Pictures {
+    fn id(&self) -> &'static str {
+        "pictures"
+    }
+    fn version(&self) -> &'static str {
+        "0.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        let mut document = Document::new(source_info(src));
+        for (id, needs_vision) in [("page-1", true), ("page-2", false)] {
+            document.assets.push(rezzer_model::Asset {
+                id: id.into(),
+                path: None,
+                sha256: "0".repeat(64),
+                mime: "image/png".into(),
+                caption: None,
+                alt: None,
+                needs_vision,
+            });
+        }
+        ReadOutcome {
+            blobs: Vec::new(),
+            document,
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_reports_needs_vision_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let mut registry = Registry::new();
+    registry.register(Box::new(Pictures));
+    let client = connect_to(Pipeline::new(config(), registry)).await;
+    let result = call(&client, "rez", json!({ "path": path })).await;
+    let s = structured(&result);
+    assert_eq!(s["assets"], 2, "{s}");
+    assert_eq!(s["needs_vision"], json!(["page-1"]), "{s}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_output_dir_must_be_absolute() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let client = connect(config()).await;
+    for bad in ["relative/out".to_string(), {
+        dir.path().join("missing").to_string_lossy().into_owned()
+    }] {
+        let result = call(&client, "rez", json!({ "path": path, "output_dir": bad })).await;
+        let s = structured(&result);
+        assert_eq!(s["status"], "failed", "{s}");
+        assert!(s["message"].as_str().unwrap().contains("output_dir"), "{s}");
+    }
+    let ok = call(
+        &client,
+        "rez",
+        json!({ "path": path, "output_dir": dir.path().to_string_lossy(), "password": "x" }),
+    )
+    .await;
+    assert_eq!(structured(&ok)["status"], "complete");
+}

@@ -9,8 +9,8 @@ use std::time::{Duration, SystemTime};
 
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions, ReadOutcome, Reader,
-    Registry, Source, source_info,
+    Asset, Blob, Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions,
+    ReadOutcome, Reader, Registry, Source, source_info,
 };
 use rezzer_pipeline::{Config, OutputKind, OutputSection, Pipeline, Request};
 
@@ -791,4 +791,156 @@ fn inspect_keeps_the_open_error_kind() {
         matches!(err, rezzer_detect::OpenError::TooLarge { .. }),
         "{err:?}"
     );
+}
+
+/// A text reader that returns one asset per id with a blob each, and records whether
+/// extraction was asked for.
+struct Pictures {
+    ids: Vec<&'static str>,
+    extract: Arc<AtomicUsize>,
+}
+
+impl Reader for Pictures {
+    fn id(&self) -> &'static str {
+        "pictures"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        if opts.extract_assets {
+            self.extract.fetch_add(1, Ordering::SeqCst);
+        }
+        let mut doc = Document::new(source_info(src));
+        let mut blobs = Vec::new();
+        for id in &self.ids {
+            doc.assets.push(Asset {
+                id: id.to_string(),
+                path: None,
+                sha256: "0".repeat(64),
+                mime: "image/png".to_string(),
+                caption: None,
+                alt: None,
+                needs_vision: true,
+            });
+            blobs.push(Blob {
+                asset: id.to_string(),
+                bytes: vec![1, 2, 3],
+            });
+        }
+        ReadOutcome {
+            blobs,
+            document: doc,
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+fn pictures(ids: &[&'static str]) -> (Registry, Arc<AtomicUsize>) {
+    let extract = Arc::new(AtomicUsize::new(0));
+    let mut registry = Registry::new();
+    registry.register(Box::new(Pictures {
+        ids: ids.to_vec(),
+        extract: extract.clone(),
+    }));
+    (registry, extract)
+}
+
+#[test]
+fn blobs_written_to_bundle_and_paths_set() {
+    let (registry, extract) = pictures(&["page-1", "page-2"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(extract.load(Ordering::SeqCst), 1);
+    let doc = res.document.unwrap();
+    let paths: Vec<_> = doc.assets.iter().map(|a| a.path.clone().unwrap()).collect();
+    assert_eq!(
+        paths,
+        ["scan.txt.assets/page-1.png", "scan.txt.assets/page-2.png"]
+    );
+    for p in &paths {
+        assert_eq!(std::fs::read(out.path().join(p)).unwrap(), [1, 2, 3]);
+    }
+    let md = res.markdown_pages.concat();
+    assert!(md.contains("scan.txt.assets/page-1.png"), "{md}");
+}
+
+#[test]
+fn no_output_dir_means_no_files_and_no_extract() {
+    let (registry, extract) = pictures(&["page-1"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &request());
+    assert_eq!(extract.load(Ordering::SeqCst), 0);
+    assert!(res.document.unwrap().assets[0].path.is_none());
+}
+
+#[test]
+fn output_dir_read_is_not_cached() {
+    let cache = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let (registry, extract) = pictures(&["page-1"]);
+    let pipeline = Pipeline::new(config(Some(cache.path())), registry);
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(extract.load(Ordering::SeqCst), 2);
+    assert!(cache_files(cache.path()).is_empty());
+}
+
+#[test]
+fn bundle_name_cannot_escape_output_dir() {
+    assert_eq!(rezzer_pipeline::bundle_name("../x.pdf"), "x.pdf");
+    assert_eq!(rezzer_pipeline::bundle_name("a/b.pdf"), "b.pdf");
+    assert_eq!(rezzer_pipeline::bundle_name(".hidden"), "_hidden");
+    assert_eq!(rezzer_pipeline::bundle_name("C:\\evil.pdf"), "evil.pdf");
+    assert_eq!(rezzer_pipeline::bundle_name(""), "file");
+    assert_eq!(rezzer_pipeline::bundle_name("a b\u{e4}.pdf"), "a_b_.pdf");
+    assert_eq!(rezzer_pipeline::bundle_name(&"a".repeat(500)).len(), 120);
+
+    let (registry, _) = pictures(&["page-1"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let req = Request {
+        output_dir: Some(out.clone()),
+        ..request()
+    };
+    pipeline.run_bytes("../x.txt", b"x".to_vec(), None, &req);
+    assert!(out.join("x.txt.assets/page-1.png").exists());
+    assert!(!root.path().join("x.txt.assets").exists());
+}
+
+#[test]
+fn bad_asset_id_is_not_written() {
+    let (registry, _) = pictures(&["../evil", "ok-1"]);
+    let pipeline = Pipeline::new(config(None), registry);
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let req = Request {
+        output_dir: Some(out.clone()),
+        ..request()
+    };
+    let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    let doc = res.document.unwrap();
+    assert!(doc.assets[0].path.is_none());
+    assert_eq!(
+        doc.assets[1].path.as_deref(),
+        Some("scan.txt.assets/ok-1.png")
+    );
+    assert!(!root.path().join("evil.png").exists());
+    assert!(!out.join("scan.txt.assets/evil.png").exists());
+    assert!(doc.losses.iter().any(|l| l.why == LossReason::Internal));
 }
