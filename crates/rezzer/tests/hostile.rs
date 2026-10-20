@@ -62,6 +62,8 @@ unsafe impl GlobalAlloc for Counting {
 static ALLOCATOR: Counting = Counting;
 
 /// Runs `f` and returns its result with the peak heap it added on this thread, in bytes.
+/// The measure covers the calling thread only: memory that a reader allocates on another
+/// thread is not seen. Every reader runs on the calling thread today.
 fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     let base = CURRENT.with(Cell::get);
     PEAK.with(|p| p.set(base));
@@ -488,13 +490,8 @@ fn number_rows(rows: u32) -> String {
     out
 }
 
-#[test]
-fn xlsx_zip_bomb_is_partial() {
-    // The package fits every limit: each entry, the ratio and the unpacked total. But the
-    // unpacked meter counts every read of a part (the package check, the part reader and
-    // calamine), so the big sheets take it past the limit while they are read: the first
-    // sheets are read, the rest is a Limit loss. This pins how the unpacked limit counts
-    // today.
+/// Four sheets, three of them big (20,000 rows of numbers each), and their unpacked size.
+fn big_book() -> (Vec<u8>, u64) {
     let big = worksheet("", &number_rows(20_000), "");
     let sheets = [
         ("Small", small_worksheet()),
@@ -502,10 +499,11 @@ fn xlsx_zip_bomb_is_partial() {
         ("Big2", big.clone()),
         ("Big3", big),
     ];
-    let limit = 8 * MB as u64;
     let unpacked: usize = sheets.iter().map(|(_, xml)| xml.len()).sum();
-    assert!((unpacked as u64) < limit, "{unpacked} bytes of sheets");
-    let book = xlsx(&sheets);
+    (xlsx(&sheets), unpacked as u64)
+}
+
+fn sheet_pipeline_with_unpacked(limit: u64) -> Pipeline {
     let mut config = Config {
         cache: false,
         ..Config::default()
@@ -513,39 +511,69 @@ fn xlsx_zip_bomb_is_partial() {
     config.limits.max_unpacked_bytes = limit;
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
-    let p = Pipeline::new(config, registry);
-    let (result, peak, took) = measured(&p, "bomb.xlsx", book);
+    Pipeline::new(config, registry)
+}
+
+#[test]
+fn xlsx_unpacked_limit_counts_each_part_once() {
+    // The limit is the real unpacked size of the package plus a little room for its small
+    // parts. The readers read some parts more than once; that must not count again.
+    let (book, unpacked) = big_book();
+    let p = sheet_pipeline_with_unpacked(unpacked + 64 * 1024);
+    let (result, peak, took) = measured(&p, "big.xlsx", book);
     eprintln!(
-        "xlsx_zip_bomb_is_partial: peak heap {} MB in {took:?}: {:?}",
+        "xlsx_unpacked_limit_counts_each_part_once: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
         losses(&result)
     );
     assert_eq!(
         result.completeness,
-        Completeness::Partial,
+        Completeness::Complete,
+        "{:?}",
+        losses(&result)
+    );
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("## Small") && md.contains("## Big3"), "{md}");
+    assert!(peak < 512 * MB, "peak heap {peak} bytes");
+}
+
+#[test]
+fn xlsx_over_unpacked_limit_is_refused() {
+    // Every entry fits the ratio, but together the sheets unpack to more than the limit.
+    // The package check measures every entry first, so nothing is read and the loss says
+    // why.
+    let (book, unpacked) = big_book();
+    let p = sheet_pipeline_with_unpacked(unpacked - 1);
+    let (result, peak, took) = measured(&p, "bomb.xlsx", book);
+    eprintln!(
+        "xlsx_over_unpacked_limit_is_refused: peak heap {} MB in {took:?}: {:?}",
+        peak / MB,
+        losses(&result)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Failed,
         "{:?}",
         losses(&result)
     );
     assert!(
         losses(&result)
             .iter()
-            .any(|l| l.starts_with("Limit") && l.contains("sheet not read: unpacked limit reached")),
+            .any(|l| l.starts_with("Limit") && l.contains("unpacked")),
         "{:?}",
         losses(&result)
     );
-    let md = result.markdown_pages.join("");
-    assert!(md.contains("## Small") && md.contains("| 7 | 14 |"), "{md}");
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
 }
 
 #[test]
 fn xlsx_zip_bomb_is_refused() {
-    // One sheet of 256 MB of spaces packs into a few hundred kilobytes: far over the 100:1
+    // One sheet of 64 MB of spaces packs into well under a megabyte: far over the 100:1
     // ratio. The read stops before the sheet is unpacked and says why.
     let mut sheet = format!(
         "<worksheet xmlns=\"{MAIN_NS}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>BOMB"
     );
-    sheet.extend(std::iter::repeat_n(' ', 256 * MB));
+    sheet.extend(std::iter::repeat_n(' ', 64 * MB));
     sheet.push_str("</t></is></c></row></sheetData></worksheet>");
     let book = xlsx(&[("Small", small_worksheet()), ("Bomb", sheet)]);
     let p = sheet_pipeline();

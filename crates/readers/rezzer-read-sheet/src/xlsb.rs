@@ -33,12 +33,6 @@ use crate::xlsx::{
 /// The parts calamine reads by these fixed names.
 const WORKBOOK: &str = "xl/workbook.bin";
 const WORKBOOK_RELS: &str = "xl/_rels/workbook.bin.rels";
-const OPEN_PARTS: [&str; 4] = [
-    "xl/sharedStrings.bin",
-    "xl/styles.bin",
-    WORKBOOK_RELS,
-    WORKBOOK,
-];
 const VBA_PART: &str = "xl/vbaProject.bin";
 
 /// What is not read from an XLSB workbook, said once per file.
@@ -263,7 +257,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         Ok(p) => p,
         Err(refusal) => return refuse(out, refusal),
     };
-    let mut charged = zip.unpacked();
     let part_limits = sheetparts::Limits {
         max_depth: usize::try_from(lim.max_depth).unwrap_or(usize::MAX),
         max_items: usize::try_from(lim.max_elements).unwrap_or(usize::MAX),
@@ -272,9 +265,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         Ok(c) => c,
         Err(refusal) => return refuse(out, refusal),
     };
-    if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
-        return refuse(out, (LossReason::Limit, hit.to_string()));
-    }
     // calamine parses the formulas of the defined names when it opens the workbook.
     let widths = widths(&book);
     // It also copies a sheet name for every 3D reference entry.
@@ -337,11 +327,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             ),
         );
     }
-    for part in OPEN_PARTS {
-        if let Err(hit) = pkg.charge(budget, part) {
-            return refuse(out, (LossReason::Limit, format!("{part}: {hit}")));
-        }
-    }
     let mut cal = match contain(AssertUnwindSafe(|| Xlsb::new(Cursor::new(bytes)))) {
         Ok(Ok(c)) => c,
         Ok(Err(XlsbError::Password)) => {
@@ -387,9 +372,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
 
     let (props, issues) = read_doc_props(&mut zip, &part_limits, &stop);
     issues_to_losses(&mut out, &issues);
-    if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
-        return refuse(out, (LossReason::Limit, hit.to_string()));
-    }
     let system = if cal.has_1904_epoch() {
         DateSystem::Date1904
     } else {
@@ -405,7 +387,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
 
     let has_vba = pkg.contains(VBA_PART);
     let vba = if has_vba {
-        vba_modules(&mut out, &pkg, &mut cal, VBA_PART, budget)
+        vba_modules(&mut out, &mut cal, VBA_PART)
     } else {
         Vba::default()
     };
@@ -483,11 +465,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         let scan = zip
             .read(&entry.part)
             .map_err(|e| (zip_reason(&e), e.to_string()))
-            .and_then(|b| {
-                charge_reads(&zip, &mut charged, budget)
-                    .map_err(|hit| (LossReason::Limit, hit.to_string()))?;
-                biff12::scan_sheet(&b, widths).map_err(|e| (LossReason::Damaged, e))
-            });
+            .and_then(|b| biff12::scan_sheet(&b, widths).map_err(|e| (LossReason::Damaged, e)));
         let scan = match scan {
             Ok(s) => s,
             Err((why, what)) => {
@@ -508,18 +486,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         };
 
         // Values: calamine unpacks the sheet once for them.
-        if let Err(hit) = pkg.charge(budget, &entry.part) {
-            out.loss(
-                q.as_str(),
-                format!("sheet not read: {hit}"),
-                LossReason::Limit,
-                Severity::Warning,
-            );
-            blocks.push(note("This sheet was not read."));
-            out.doc.body.push(section(&entry.name, &q, blocks));
-            halted = Some("unpacked limit reached");
-            continue;
-        }
         let mut dates: HashMap<(u32, u32), u32> = HashMap::new();
         let read = contain(AssertUnwindSafe(|| {
             read_values(&mut cal, &entry.name, budget, &mut dates)
@@ -562,34 +528,21 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             );
             incomplete = true;
         } else if !scan.formulas.is_empty() && halted.is_none() {
-            match pkg.charge(budget, &entry.part) {
-                Ok(()) => {
-                    let read = contain(AssertUnwindSafe(|| {
-                        read_formulas(&mut cal, &entry.name, &scan, &mut formulas, budget)
-                    }));
-                    match read {
-                        Ok(p) => pass = p,
-                        Err(panic) => {
-                            out.loss(
-                                q.as_str(),
-                                format!(
-                                    "formulas not read: the formula reader stopped with an internal error: {panic}"
-                                ),
-                                LossReason::Internal,
-                                Severity::Warning,
-                            );
-                            incomplete = true;
-                        }
-                    }
-                }
-                Err(hit) => {
+            let read = contain(AssertUnwindSafe(|| {
+                read_formulas(&mut cal, &entry.name, &scan, &mut formulas, budget)
+            }));
+            match read {
+                Ok(p) => pass = p,
+                Err(panic) => {
                     out.loss(
                         q.as_str(),
-                        format!("formulas not read: {hit}"),
-                        LossReason::Limit,
+                        format!(
+                            "formulas not read: the formula reader stopped with an internal error: {panic}"
+                        ),
+                        LossReason::Internal,
                         Severity::Warning,
                     );
-                    halted = Some("unpacked limit reached");
+                    incomplete = true;
                 }
             }
         }
@@ -677,18 +630,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
     crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
-}
-
-/// Charges what zipguard unpacked since the last call to the budget.
-fn charge_reads(
-    zip: &Archive,
-    charged: &mut u64,
-    budget: &Budget,
-) -> Result<(), rezzer_limits::LimitHit> {
-    let now = zip.unpacked();
-    let delta = now.saturating_sub(*charged);
-    *charged = now;
-    budget.add_unpacked(delta)
 }
 
 /// The format key of a date calamine found: date, date and time, time of day, duration.

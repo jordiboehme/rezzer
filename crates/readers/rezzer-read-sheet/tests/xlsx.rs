@@ -367,9 +367,10 @@ fn damaged_sheet_xml_is_partial_with_loss() {
 }
 
 #[test]
-fn part_over_unpacked_limit_is_skipped_with_loss() {
-    // Every entry fits the preflight, but reading the big sheet would take the unpacked
-    // total past the limit: that sheet is skipped, the one before it is read.
+fn parts_read_again_do_not_count_again() {
+    // The package unpacks to less than half the limit. The reader reads the big sheet more
+    // than once (for its logic, its cells and its merged cells), and each entry counts once,
+    // so the whole workbook is read.
     let mut rows = String::new();
     for r in 1..=5_000 {
         rows.push_str(&format!(
@@ -377,7 +378,7 @@ fn part_over_unpacked_limit_is_skipped_with_loss() {
         ));
     }
     let big = ws("", &rows, "");
-    assert!(big.len() > 200_000);
+    assert!(big.len() > 200_000 && big.len() < 250_000);
     let small = ws("", "<row r=\"1\"><c r=\"A1\"><v>7</v></c></row>", "");
     let limits = Limits {
         max_unpacked_bytes: 500_000,
@@ -392,13 +393,13 @@ fn part_over_unpacked_limit_is_skipped_with_loss() {
         limits,
     );
     let doc = &out.document;
-    assert_eq!(out.completeness, Completeness::Partial);
-    assert!(
-        has_loss(doc, LossReason::Limit, "Big", "sheet not read"),
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
         "{:#?}",
         doc.losses
     );
-    assert!(cell_text(doc, "Big!A1").is_none());
+    assert_eq!(cell_text(doc, "Big!A1").as_deref(), Some("1"));
     assert_eq!(cell_text(doc, "Small!A1").as_deref(), Some("7"));
 }
 

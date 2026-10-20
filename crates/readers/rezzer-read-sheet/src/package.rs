@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use quick_xml::Reader;
 use quick_xml::events::Event;
-use rezzer_limits::{Budget, LimitHit};
+use rezzer_limits::Budget;
 use rezzer_model::LossReason;
 use sheetparts::ooxml::WorkbookParts;
 use zipguard::{Archive, ZipError};
@@ -41,7 +41,8 @@ fn key(name: &str) -> String {
 
 impl Package {
     /// Measures every entry of the archive (entry size and ratio through zipguard) and
-    /// charges it to the budget. Entries whose names differ only in case are refused.
+    /// charges it to the budget, once: this is the only charge of unpacked bytes, so the
+    /// unpacked limit bounds what the package really unpacks to. Entries whose names differ only in case are refused.
     pub fn preflight(zip: &mut Archive, budget: &Budget) -> Result<Package, Refusal> {
         let names: Vec<String> = zip.names().iter().map(|n| n.to_string()).collect();
         let mut sizes = HashMap::new();
@@ -68,19 +69,9 @@ impl Package {
         Ok(Package { sizes })
     }
 
-    /// The measured size of a part as calamine looks it up; 0 when it is not there.
-    pub fn size(&self, part: &str) -> u64 {
-        self.sizes.get(&key(part)).copied().unwrap_or(0)
-    }
-
     /// Whether the package has this entry, looked up as calamine does.
     pub fn contains(&self, part: &str) -> bool {
         self.sizes.contains_key(&key(part))
-    }
-
-    /// Charges one more unpacking of `part` (calamine reads parts again) to the budget.
-    pub fn charge(&self, budget: &Budget, part: &str) -> Result<(), LimitHit> {
-        budget.add_unpacked(self.size(part))
     }
 }
 

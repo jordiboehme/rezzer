@@ -18,7 +18,7 @@ use calamine::{Data, Ods, OdsError, Reader as _};
 use formulakit::quote_sheet;
 use quick_xml::Reader;
 use quick_xml::events::Event;
-use rezzer_limits::{Budget, LimitHit, contain};
+use rezzer_limits::{Budget, contain};
 use rezzer_model::{
     Anchor, Annotation, Embedded, FormulaKind, LossReason, ReadOutcome, Severity, StatusColor,
 };
@@ -87,11 +87,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             return out.failed();
         }
     };
-    let pkg = match Package::preflight(&mut zip, budget) {
-        Ok(p) => p,
-        Err(refusal) => return refuse(out, refusal),
-    };
-    let mut charged = zip.unpacked();
+    // The preflight measures every entry once and charges it to the budget; later reads of
+    // a part are not charged again.
+    if let Err(refusal) = Package::preflight(&mut zip, budget) {
+        return refuse(out, refusal);
+    }
     let damaged = |what: String| (LossReason::Damaged, what);
 
     // The parts calamine opens by these exact names; case variants were refused above.
@@ -130,9 +130,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         Ok(c) => c,
         Err(e) => return refuse(out, (zip_reason(&e), format!("{CONTENT}: {e}"))),
     };
-    if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
-        return refuse(out, (LossReason::Limit, hit.to_string()));
-    }
     if let Err(why) = odscan::canonical(&content, &stop) {
         return refuse(out, damaged(why));
     }
@@ -161,15 +158,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
     let parts = odf::read(&mut zip, &part_limits, &stop);
     issues_to_losses(&mut out, &parts.issues);
-    if let Err(hit) = charge_reads(&zip, &mut charged, budget) {
-        return refuse(out, (LossReason::Limit, hit.to_string()));
-    }
 
-    for part in [MIMETYPE, MANIFEST, CONTENT] {
-        if let Err(hit) = pkg.charge(budget, part) {
-            return refuse(out, (LossReason::Limit, format!("{part}: {hit}")));
-        }
-    }
     let mut cal = match contain(AssertUnwindSafe(|| Ods::new(Cursor::new(bytes)))) {
         Ok(Ok(c)) => c,
         Ok(Err(OdsError::Password)) => {
@@ -410,14 +399,6 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
     crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
-}
-
-/// Charges what zipguard unpacked since the last call to the budget.
-fn charge_reads(zip: &Archive, charged: &mut u64, budget: &Budget) -> Result<(), LimitHit> {
-    let now = zip.unpacked();
-    let delta = now.saturating_sub(*charged);
-    *charged = now;
-    budget.add_unpacked(delta)
 }
 
 /// The formula text of each formula cell (None when the formula text limit was reached).
