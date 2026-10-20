@@ -95,6 +95,7 @@ pub struct Parameter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_source: Option<String>,
     /// How many formulas read this parameter.
+    #[serde(default)]
     pub read_by: u32,
 }
 

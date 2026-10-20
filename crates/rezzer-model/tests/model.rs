@@ -491,6 +491,8 @@ fn plain_fields_default_when_missing() {
     assert!(matches!(l, Block::List { ordered: false, .. }));
     let a: Asset = serde_json::from_str(r#"{"id":"a","sha256":"00","mime":"image/png"}"#).unwrap();
     assert!(!a.needs_vision);
+    let p: Parameter = serde_json::from_str(r#"{"anchor":"S!A1"}"#).unwrap();
+    assert_eq!(p.read_by, 0);
     let i: Inline = serde_json::from_str(r#"{"type":"link","target":"x"}"#).unwrap();
     assert!(matches!(
         i,
