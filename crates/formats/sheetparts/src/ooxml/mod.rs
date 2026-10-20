@@ -4,11 +4,18 @@
 
 //! The parts of an OOXML workbook (xlsx, xlsm) that give cells their meaning.
 
+mod comments;
+mod objects;
 mod props;
+mod sheet;
 mod styles;
 mod workbook;
 
 pub use props::DocProps;
+pub use sheet::{
+    AttrKind, Chart, CondFormat, FormulaAttr, Note, Pivot, SheetParts, TableInfo, Thread,
+    Validation, read_sheet,
+};
 pub use styles::Styles;
 pub use workbook::{
     CalcMode, CalcSettings, DefinedName, ExternalLink, Person, SheetInfo, SheetState,
