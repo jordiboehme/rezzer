@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use decode::Cap;
-pub(crate) use decode::{Measure, cap_words, filters_with, measure_bytes, stream_filters, unpack};
+pub(crate) use decode::{
+    Filter, Measure, cap_words, filters_with, measure_bytes, stream_filters, unpack,
+};
 
 use crate::pagetree::{self, PageNode, ResourcesKey};
 use crate::{Issue, IssueKind, Limits, OpenError};

@@ -9,7 +9,7 @@ use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 
-use crate::objects::{get, get_dict, get_text, pdf_date, reference};
+use crate::objects::{get, get_date, get_dict, get_text, reference};
 use crate::{Issue, IssueKind, Pdf};
 
 /// A date as written in the file and, when it parses, in ISO 8601.
@@ -67,12 +67,7 @@ impl Pdf {
             return Info::default();
         };
         let text = |k: &[u8]| get_text(doc, info, k);
-        let date = |k: &[u8]| {
-            text(k).map(|raw| PdfDate {
-                iso: pdf_date(&raw),
-                raw,
-            })
-        };
+        let date = |k: &[u8]| get_date(doc, info, k);
         Info {
             title: text(b"Title"),
             author: text(b"Author"),

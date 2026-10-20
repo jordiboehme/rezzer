@@ -143,7 +143,7 @@ fn roman(mut v: u64, lower: bool) -> String {
 const PREFIX_MAX: usize = 256;
 
 /// "1 page" or "N pages".
-fn pages_word(n: usize) -> String {
+pub(crate) fn pages_word(n: usize) -> String {
     if n == 1 {
         "1 page".into()
     } else {
@@ -152,7 +152,7 @@ fn pages_word(n: usize) -> String {
 }
 
 /// The first page numbers of a list, then how many more there are.
-fn page_list(pages: &[u32]) -> String {
+pub(crate) fn page_list(pages: &[u32]) -> String {
     const SHOWN: usize = 20;
     let mut s: Vec<String> = pages.iter().take(SHOWN).map(u32::to_string).collect();
     if pages.len() > SHOWN {

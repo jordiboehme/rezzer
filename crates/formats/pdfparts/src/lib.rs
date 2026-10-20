@@ -6,7 +6,8 @@
 //!
 //! A PDF library gives you objects. This crate reads what they mean: document metadata (Info
 //! and XMP), language, pages with their labels, sizes and images, the outline, named
-//! destinations and links.
+//! destinations, links, annotations, the structure tree, embedded files, layers and article
+//! threads.
 //!
 //! [`Pdf::open`] parses the file with its own bounded parser, keeps only the objects the
 //! document reaches, and writes them as canonical bytes ([`Pdf::canonical`]): a plain PDF with a
@@ -22,21 +23,27 @@
 //! assert_eq!(pdf_date("D:20151230152248+01'00'").as_deref(), Some("2015-12-30T15:22:48+01:00"));
 //! ```
 
+mod annots;
+mod extras;
 mod guard;
 mod meta;
 mod nav;
 pub mod objects;
 mod pagetree;
 mod parse;
+mod structure;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use lopdf::{Document, ObjectId};
 
+pub use annots::Annot;
+pub use extras::{EmbeddedFile, Layer, Thread};
 pub use meta::{Info, PdfDate};
 pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
+pub use structure::{StructElem, StructTree};
 
 /// Bounds for reading one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +172,8 @@ pub struct Pdf {
     verdict: guard::Verdict,
     unsafe_tree: bool,
     issues: Mutex<IssueLog>,
+    /// The structure tree, read on first use.
+    structure: OnceLock<Option<structure::Built>>,
 }
 
 /// Issues in the order found, each once.
@@ -250,6 +259,7 @@ impl Pdf {
             verdict,
             unsafe_tree: tree.unsafe_tree,
             issues: Mutex::new(log),
+            structure: OnceLock::new(),
         })
     }
 

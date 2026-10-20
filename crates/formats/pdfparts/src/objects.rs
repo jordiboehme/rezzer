@@ -332,3 +332,11 @@ fn walk_node<'a>(
     }
     true
 }
+
+/// A date value: the text as written and, when it parses, ISO 8601.
+pub(crate) fn get_date(doc: &Document, d: &Dictionary, key: &[u8]) -> Option<crate::PdfDate> {
+    get_text(doc, d, key).map(|raw| crate::PdfDate {
+        iso: pdf_date(&raw),
+        raw,
+    })
+}
