@@ -675,17 +675,64 @@ fn broken_values_do_not_end_the_open() {
         let grouped = damaged
             .iter()
             .any(|i| i.what.contains("too many broken values"));
-        if endobj {
-            // Each broken note costs a bounded read, so each one is named.
-            let named = damaged
-                .iter()
-                .filter(|i| i.what.contains("string is not closed"))
-                .count();
-            assert_eq!(named, k as usize, "{damaged:?}");
-            assert!(!grouped, "{damaged:?}");
-        } else {
-            assert!(grouped, "{damaged:?}");
-        }
+        // Each broken note is read again only up to the next object, so its reads stay
+        // within its own bytes and each one is named.
+        let named = damaged
+            .iter()
+            .filter(|i| i.what.contains("string is not closed"))
+            .count();
+        assert_eq!(named, k as usize, "{damaged:?}");
+        assert!(!grouped, "{damaged:?}");
     }
     assert_rss_bounded();
+}
+
+#[test]
+fn members_are_read_after_broken_values() {
+    // Many notes whose `/Contents` never closes and that have no `endobj`, then two valid
+    // annotations in an object stream with no separator between them.
+    let k = 4000;
+    let mut raw = common::Raw::new();
+    let notes: Vec<String> = (0..k).map(|i| format!("{} 0 R", 100 + i)).collect();
+    raw.object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    raw.object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    raw.object(
+        3,
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{} 50 0 R] >>",
+            notes.join(" ")
+        ),
+    );
+    for i in 0..k {
+        raw.unclosed(
+            100 + i,
+            &format!("<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (broken {i} >>"),
+        );
+    }
+    let members: [&[u8]; 2] = [
+        b"<</Type/Annot/Subtype/Text/Rect[0 0 1 1]/Contents(fine)/Popup 51 0 R>>",
+        b"<</Type/Annot/Subtype/Popup/Rect[0 0 1 1]>>",
+    ];
+    let head = format!("50 0 51 {} ", members[0].len());
+    let mut plain = head.clone().into_bytes();
+    plain.extend(members.concat());
+    let dict = format!(
+        "/Type /ObjStm /N 2 /First {} /Filter /FlateDecode",
+        head.len()
+    );
+    raw.stream(60, &dict, &common::zlib(&plain));
+    raw.member(50, 60, 0);
+    raw.member(51, 60, 1);
+    let bytes = raw.finish(1, "");
+    let start = Instant::now();
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    eprintln!("{} KB, {:?}", bytes.len() / 1024, start.elapsed());
+    assert_eq!(pdf.page_count(), 1);
+    let doc = lopdf::Document::load_mem(pdf.canonical()).unwrap();
+    let fine = doc.get_object((50, 0)).unwrap().as_dict().unwrap();
+    assert_eq!(
+        fine.get(b"Contents").unwrap().as_str().unwrap(),
+        b"fine".as_slice()
+    );
+    assert!(doc.get_object((51, 0)).is_ok());
 }

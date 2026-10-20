@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use lopdf::{Object, ObjectId, Stream};
 
-use super::lexer::{Lexer, find};
+use super::lexer::{Lexer, find, is_delimiter, is_space};
 use super::{Budget, Fail};
 
 /// An object read up to its value. For a stream, `stream` is where its data starts.
@@ -35,8 +35,8 @@ pub(crate) fn header_at(
 /// values was spent. Such objects share one issue.
 pub(crate) const NOT_READ: &str = "not read: too many broken values";
 
-/// How far past its start a value that ran into its natural end is read again. A broken
-/// value costs at most its natural span plus this.
+/// How far past the first read a value that ran into its natural end is read again when no
+/// next start is known. A broken value then costs at most its natural span plus this.
 const RETRY_WINDOW: usize = 64 << 10;
 
 /// The positions where the keyword `obj` starts, found once per stretch of the file.
@@ -45,6 +45,8 @@ pub(crate) struct Ends {
     /// Stretches searched so far: from a start to the next `obj` (or the end of the file),
     /// with no `obj` starting in between.
     spans: BTreeMap<usize, usize>,
+    /// Where objects and cross-reference sections start, from the table or a scan, in order.
+    starts: Vec<usize>,
 }
 
 impl Ends {
@@ -77,47 +79,95 @@ impl Ends {
         self.spans.insert(p, e);
         e
     }
+
+    /// Adds known starts of objects and cross-reference sections.
+    pub fn add_starts(&mut self, starts: impl IntoIterator<Item = usize>) {
+        self.starts.extend(starts);
+        self.starts.sort_unstable();
+        self.starts.dedup();
+    }
+
+    /// The first known start after `p`.
+    pub fn start_after(&self, p: usize) -> Option<usize> {
+        let i = self.starts.partition_point(|&s| s <= p);
+        self.starts.get(i).copied()
+    }
 }
 
-/// Reads a value at `pos` with `read`, first only up to `end`, where the value should end.
-/// Returns the value and where it ends.
+/// Where a value should end, and how far it is read again when it runs into that end.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limit {
+    /// Where the value should end: the next `obj`, member start or `trailer`.
+    pub end: usize,
+    /// `end` is the start of the next member of an object stream, so a value that reaches it
+    /// is whole.
+    pub member: bool,
+    /// The next start of an object or member after `end`. A second read stops there; without
+    /// it, [`RETRY_WINDOW`] past `end`.
+    pub next: Option<usize>,
+}
+
+/// A value read up to `lim` that ends there is whole when the byte at `lim` ends any token or
+/// when the value closes itself.
+fn whole(bytes: &[u8], lim: usize) -> bool {
+    let at = bytes.get(lim).copied();
+    let value = &bytes[..lim];
+    at.is_some_and(|c| is_space(c) || is_delimiter(c))
+        || value.ends_with(b"]")
+        || value.ends_with(b">>")
+        || value.ends_with(b")")
+}
+
+/// Reads a value at `pos` with `read`, first only up to `limit.end`, where the value should
+/// end. Returns the value and where it ends.
 ///
 /// A broken value (a string that never closes) could otherwise read to the end of the file
 /// each time, so the bytes it reads count against the bound for broken values, and what it
-/// was charged as values is given back. A value that runs into `end` is read again without
-/// it, up to [`RETRY_WINDOW`] and while that bound lasts, since a valid value may hold the
-/// bytes that `end` stands for.
-/// Once the bound is spent, a value that fails or runs into `end` is not read: it gives
+/// was charged as values is given back, so a value is charged once. A value that runs into
+/// the end and is not whole there is read again without it, up to `limit.next` and while that
+/// bound lasts, since a valid value may hold the bytes that the end stands for. The second
+/// read never stops before the first one did.
+/// Once the bound is spent, a value that fails or runs into the end is not read: it gives
 /// [`NOT_READ`] and is counted in [`Budget::not_read`].
 pub(crate) fn bounded<'b, T>(
     bytes: &'b [u8],
     pos: usize,
-    end: usize,
+    limit: Limit,
     budget: &mut Budget,
     read: impl Fn(&mut Lexer<'b>, &mut Budget) -> Result<T, Fail>,
 ) -> Result<(T, usize), Fail> {
     let spent = budget.failed_left() == 0;
-    let mut lim = end.min(bytes.len());
+    let mut lim = limit.end.min(bytes.len());
     let mut again = false;
     loop {
         let mut l = Lexer::new(&bytes[..lim], pos);
-        let charged = budget.bytes;
+        let (items, charged) = (budget.items, budget.bytes);
         let v = read(&mut l, budget);
         budget.skipped(l.skipped)?;
-        let cut = !again && l.i >= lim && lim < bytes.len();
+        let ran_in = !again && l.i >= lim && lim < bytes.len();
+        let cut = ran_in && !(v.is_ok() && (limit.member || whole(bytes, lim)));
         let why = match v {
             Ok(v) if !cut => return Ok((v, l.i)),
             Err(Fail::Stop(e)) => return Err(Fail::Stop(e)),
             Ok(_) => None,
             Err(Fail::Bad(why)) => Some(why),
         };
+        budget.items = items;
         budget.bytes = charged;
         budget.failed(l.i - pos);
         if cut && !spent && budget.failed_left() > 0 {
-            again = true;
-            let window = budget.failed_left().min(RETRY_WINDOW);
-            lim = bytes.len().min(pos.saturating_add(window));
-            continue;
+            let next = limit
+                .next
+                .filter(|&n| n > lim)
+                .unwrap_or(lim.saturating_add(RETRY_WINDOW));
+            let next = next
+                .min(pos.saturating_add(budget.failed_left()))
+                .min(bytes.len());
+            if next > lim {
+                again = true;
+                lim = next;
+                continue;
+            }
         }
         return match why {
             Some(why) if !spent => Err(Fail::Bad(why)),
@@ -131,7 +181,8 @@ pub(crate) fn bounded<'b, T>(
 
 /// Reads the header and the value of the object at `pos`, and finds out whether stream data
 /// follows. White space and comments it skips count as work. The value should end before
-/// the next `obj` (of `endobj` or of the next header).
+/// the next `obj` (of `endobj` or of the next header), and is read again at most up to the
+/// next known object start.
 pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<Head, Fail> {
     let mut l = Lexer::new(bytes, pos);
     let id = l.header();
@@ -140,7 +191,12 @@ pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<H
         return Err(Fail::Bad("there is no object header at its offset"));
     };
     let end = budget.ends.next(bytes, l.i);
-    let (value, at) = bounded(bytes, l.i, end, budget, |l, b| l.value(b, 0))?;
+    let limit = Limit {
+        end,
+        member: false,
+        next: budget.ends.start_after(end),
+    };
+    let (value, at) = bounded(bytes, l.i, limit, budget, |l, b| l.value(b, 0))?;
     let stream = match value {
         Object::Dictionary(_) => {
             let mut l = Lexer::new(bytes, at);
@@ -263,6 +319,48 @@ mod tests {
         let s = s.as_stream().unwrap();
         assert_eq!(s.content, b"abc");
         assert_eq!(s.dict.get(b"Length").unwrap().as_i64().unwrap(), 3);
+    }
+
+    #[test]
+    fn whole_values_at_the_limit_are_kept_when_the_bound_is_spent() {
+        let limits = Limits::default();
+        let file = b"<</A 1>>[1 2]/Xobj (a)2 0 obj";
+        let mut budget = Budget::new(&limits, &|| false, file.len());
+        budget.failed = budget.max_failed;
+        let mut read = |pos: usize, end: usize, member: bool| {
+            let limit = Limit {
+                end,
+                member,
+                next: None,
+            };
+            bounded(file, pos, limit, &mut budget, |l, b| l.value(b, 0))
+        };
+        // Members that touch the next member start, and values that close themselves.
+        assert!(read(0, 8, true).is_ok());
+        assert!(read(8, 13, false).is_ok());
+        assert!(read(19, 22, false).is_ok());
+        // A name cut inside `Xobj` is not whole, and is not read again.
+        assert_eq!(read(13, 16, false).unwrap_err(), Fail::Bad(NOT_READ));
+        // A number at the limit is whole before white space.
+        assert_eq!(read(22, 23, false).unwrap().1, 23);
+        assert_eq!(budget.not_read, 1);
+    }
+
+    #[test]
+    fn a_cut_value_is_charged_once() {
+        let limits = Limits::default();
+        let file = b"[(a obj) 1 2] 9 0 obj";
+        let mut budget = Budget::new(&limits, &|| false, file.len());
+        let limit = Limit {
+            end: 5,
+            member: false,
+            next: Some(14),
+        };
+        let (v, at) = bounded(file, 0, limit, &mut budget, |l, b| l.value(b, 0)).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 3);
+        assert_eq!(at, 13);
+        // The array and its three items, once.
+        assert_eq!(budget.items, 4);
     }
 
     #[test]

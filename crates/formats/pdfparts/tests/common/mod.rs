@@ -101,6 +101,12 @@ impl Raw {
         self.out.extend(b"\nendobj\n");
     }
 
+    /// Writes object `n` without `endobj`.
+    pub fn unclosed(&mut self, n: u32, body: &str) {
+        self.entries.insert(n, (1, self.out.len() as u64, 0));
+        self.out.extend(format!("{n} 0 obj\n{body}\n").as_bytes());
+    }
+
     pub fn object(&mut self, n: u32, body: &str) {
         self.object_with_header(&format!("{n} 0 obj"), n, body.as_bytes());
     }

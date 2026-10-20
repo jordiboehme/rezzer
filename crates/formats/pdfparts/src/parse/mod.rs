@@ -252,11 +252,13 @@ pub(crate) fn build(
     let mut issues = Vec::new();
     let (table, trailer, scanned) = match read_chain(bytes, base, &mut budget)? {
         Some(chain) => {
+            budget.ends.add_starts(chain.starts());
             issues.extend(chain.issues);
             (chain.table, chain.trailer, None)
         }
         None => {
             let found = rebuild(bytes, &mut budget)?;
+            budget.ends.add_starts(found.starts());
             let trailer = scan_trailer(bytes, &found, &mut budget)?;
             let table: HashMap<u32, Entry> = found
                 .table
@@ -383,6 +385,7 @@ fn scan_trailer(
         ..*budget.limits
     };
     let mut look = Budget::new(&look_limits, budget.stop, bytes.len());
+    look.ends.add_starts(found.starts());
     let spent = |look: &Budget, e: OpenError| {
         if look.spent() {
             OpenError::Limit(
@@ -421,7 +424,12 @@ fn scan_trailer(
         let end = match starts.binary_search(&l.i) {
             Ok(i) | Err(i) => starts.get(i).copied().unwrap_or(bytes.len()),
         };
-        let d = object::bounded(bytes, l.i, end, &mut look, |l, b| {
+        let limit = object::Limit {
+            end,
+            member: false,
+            next: None,
+        };
+        let d = object::bounded(bytes, l.i, limit, &mut look, |l, b| {
             l.i += 2;
             l.dictionary(b, 0)
         });

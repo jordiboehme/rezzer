@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use super::crypt::Crypt;
 use super::lexer::Lexer;
-use super::object::{NOT_READ, bounded, finish, head_at, header_at, length_ref};
+use super::object::{Limit, NOT_READ, bounded, finish, head_at, header_at, length_ref};
 use super::predict::{last_parms, unpredict};
 use super::xref::{Entry, rebuild, unpack_stream};
 use super::{Budget, Fail};
@@ -144,6 +144,7 @@ impl<'a> Store<'a> {
     fn scanned_pos(&mut self, id: ObjectId) -> Result<Option<usize>, OpenError> {
         if self.scanned.is_none() {
             let found = rebuild(self.bytes, &mut self.budget)?;
+            self.budget.ends.add_starts(found.starts());
             self.note_rebuilt();
             self.scanned = Some(found.table);
         }
@@ -348,12 +349,15 @@ impl<'a> Store<'a> {
                 self.damaged((m, 0), why);
                 continue;
             }
-            let end = match starts.binary_search(&at) {
-                Ok(i) => starts.get(i + 1).copied().unwrap_or(data.len()),
-                Err(i) => starts.get(i).copied().unwrap_or(data.len()),
+            let after = |p: usize| starts.get(starts.partition_point(|&s| s <= p)).copied();
+            let end = after(at).unwrap_or(data.len());
+            let limit = Limit {
+                end,
+                member: true,
+                next: Some(after(end).unwrap_or(data.len())),
             };
             // Members may overlap, so the bytes each one reads count as work.
-            match bounded(&data, at, end, &mut self.budget, |l, b| l.value(b, 0)) {
+            match bounded(&data, at, limit, &mut self.budget, |l, b| l.value(b, 0)) {
                 Ok((v, _)) => {
                     self.members.insert(m, v);
                 }

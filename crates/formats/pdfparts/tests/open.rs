@@ -857,3 +857,115 @@ fn values_may_hold_the_obj_keyword() {
         .unwrap();
     assert_eq!(info[0].as_str().unwrap(), b"a 9 0 obj".as_slice());
 }
+
+/// An object stream with no separator between its members, as most writers make them.
+/// Object 4 is an array of `n` numbers and is followed by object 5. Returns the file and the
+/// length of object 4.
+fn abutting_members(n: usize) -> (Vec<u8>, usize) {
+    let numbers: Vec<String> = (0..n).map(|i| (i % 1000).to_string()).collect();
+    let big = format!("[{}]", numbers.join(" "));
+    let members: [(u32, &[u8]); 5] = [
+        (1, b"<</Type/Catalog/Pages 2 0 R/Big 4 0 R/Other 5 0 R>>"),
+        (2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+        (3, b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>"),
+        (4, big.as_bytes()),
+        (5, b"<</Note(after big)>>"),
+    ];
+    let mut head = String::new();
+    let mut body: Vec<u8> = Vec::new();
+    for (m, data) in members {
+        head.push_str(&format!("{m} {} ", body.len()));
+        body.extend(data);
+    }
+    let first = head.len();
+    let mut plain = head.into_bytes();
+    plain.extend(body);
+    let mut raw = common::Raw::new();
+    let dict = format!("/Type /ObjStm /N 5 /First {first} /Filter /FlateDecode");
+    raw.stream(6, &dict, &common::zlib(&plain));
+    for (i, (m, _)) in members.iter().enumerate() {
+        raw.member(*m, 6, i as u32);
+    }
+    (raw.finish(1, ""), big.len())
+}
+
+#[test]
+fn members_without_separators_are_read() {
+    for (n, size) in [(10_000, 38_901), (20_000, 77_801), (40_000, 155_601)] {
+        let (bytes, len) = abutting_members(n);
+        assert_eq!(len, size);
+        let pdf = open(&bytes, None).unwrap();
+        assert_eq!(pdf.page_count(), 1);
+        assert!(pdf.issues().is_empty(), "{n}: {:?}", pdf.issues());
+        let doc = Document::load_mem(pdf.canonical()).unwrap();
+        let big = doc.get_object((4, 0)).unwrap().as_array().unwrap();
+        assert_eq!(big.len(), n);
+        let note = doc.get_object((5, 0)).unwrap().as_dict().unwrap();
+        assert_eq!(
+            note.get(b"Note").unwrap().as_str().unwrap(),
+            b"after big".as_slice()
+        );
+    }
+}
+
+#[test]
+fn large_value_with_the_obj_keyword_is_read() {
+    // A name tree leaf of more than 64 KiB whose keys hold `obj`, as LaTeX writes them.
+    let n = 3000;
+    let pairs: Vec<String> = (0..n)
+        .map(|i| format!("(cite.objdet{i:05}) [3 0 R /XYZ 0 0 0]"))
+        .collect();
+    let leaf = format!("<< /Names [{}] >>", pairs.join(" "));
+    assert!(leaf.len() > 100_000);
+    let objects: [&[u8]; 4] = [
+        b"<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+        leaf.as_bytes(),
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offs.push(out.len());
+        out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend(*body);
+        out.extend(b"\nendobj\n");
+    }
+    let at = out.len();
+    out.extend(b"xref\n0 5\n0000000000 65535 f \n");
+    for o in &offs {
+        out.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{at}\n%%EOF\n").as_bytes());
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    let names = doc.get_object((4, 0)).unwrap().as_dict().unwrap();
+    let names = names.get(b"Names").unwrap().as_array().unwrap();
+    assert_eq!(names.len(), 2 * n);
+    assert_eq!(names[0].as_str().unwrap(), b"cite.objdet00000".as_slice());
+}
+
+/// The number of values the open parsed, from the debug output.
+fn values_of(pdf: &Pdf) -> usize {
+    format!("{pdf:?}")
+        .split("values: ")
+        .nth(1)
+        .and_then(|s| s.split(',').next())
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn values_charged_once() {
+    // Each value is counted once, also when its first read is cut and read again.
+    let pdf = open(&corpus("irs-f1040-2025.pdf"), None).unwrap();
+    assert_eq!(values_of(&pdf), 42_558);
+    let nist = corpus_dir().join("nist-sp800-53r5.pdf");
+    if nist.exists() {
+        let pdf = open(&std::fs::read(nist).unwrap(), None).unwrap();
+        assert_eq!(values_of(&pdf), 1_043_799);
+    }
+}

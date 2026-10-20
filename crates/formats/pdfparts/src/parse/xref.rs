@@ -44,6 +44,15 @@ pub(crate) struct Chain {
 }
 
 impl Chain {
+    /// Where the objects of the table and the sections read start.
+    pub fn starts(&self) -> impl Iterator<Item = usize> + '_ {
+        let objects = self.table.values().filter_map(|e| match e {
+            Entry::Normal { pos, .. } => Some(*pos),
+            Entry::Compressed { .. } => None,
+        });
+        objects.chain(self.starts.iter().copied())
+    }
+
     fn add(&mut self, n: u32, e: Entry) {
         if n > 0 {
             self.table.entry(n).or_insert(e);
@@ -387,6 +396,14 @@ pub(crate) struct Rebuilt {
     pub table: HashMap<u32, (usize, u16)>,
     /// Positions right after each `trailer` keyword.
     pub trailers: Vec<usize>,
+}
+
+impl Rebuilt {
+    /// Where the objects found and the trailers start.
+    pub fn starts(&self) -> impl Iterator<Item = usize> + '_ {
+        let objects = self.table.values().map(|&(pos, _)| pos);
+        objects.chain(self.trailers.iter().copied())
+    }
 }
 
 /// Finds every `N G obj` header with one forward pass over the file. White space and comments
