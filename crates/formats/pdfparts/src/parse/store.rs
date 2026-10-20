@@ -18,6 +18,11 @@ use super::xref::{Entry, rebuild, unpack_stream};
 use super::{Budget, Fail};
 use crate::{Issue, IssueKind, OpenError};
 
+/// The highest object number ISO 32000-1 allows (Annex C). Higher numbers are taken as
+/// missing: lopdf's writer adds one to the highest number it writes and walks every number
+/// up to it.
+pub(crate) const OBJECT_MAX: u32 = 8_388_607;
+
 /// The text of the issue a rebuilt table gives.
 pub(crate) const REBUILT: &str = "the cross-reference table is damaged, rebuilt from a file scan";
 
@@ -84,6 +89,9 @@ impl<'a> Store<'a> {
 
     /// Reads object `id`. `None` when it is missing or damaged (with an issue for damage).
     pub fn load(&mut self, id: ObjectId) -> Result<Option<Object>, OpenError> {
+        if id.0 > OBJECT_MAX {
+            return Ok(None);
+        }
         let mut tried = None;
         match self.entry(id.0) {
             Some(Entry::Normal { pos, generation }) if generation == id.1 => {

@@ -201,6 +201,9 @@ fn page_tree_cycle_is_damaged() {
     // its own bound. The tree is marked unsafe for other parsers.
     assert!(!pdf.pages().is_empty());
     assert!(pdf.unsafe_page_tree());
+    // lopdf numbers the pages of the canonical copy the same way.
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    assert_eq!(doc.get_pages().len() as u32, pdf.page_count());
     let issues = pdf.issues();
     assert!(
         issues

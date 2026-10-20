@@ -283,6 +283,8 @@ fn duplicate_kid_numbers_pages_like_lopdf() {
     assert_eq!(pdf.pages().len(), 4);
     assert_eq!(pdf.refused_pages(), &[4]);
     assert!(pdf.unsafe_page_tree());
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    assert_eq!(doc.get_pages().len(), 4);
 }
 
 #[test]

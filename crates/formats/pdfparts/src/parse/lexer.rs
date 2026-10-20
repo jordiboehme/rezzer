@@ -31,6 +31,10 @@ fn is_regular(c: u8) -> bool {
 /// Reals are kept within this size, so lopdf reads back the number lopdf's writer prints.
 const REAL_MAX: f64 = 1e15;
 
+/// The deepest nesting of arrays and dictionaries that is kept. lopdf reads at most 100
+/// levels, so anything kept here must stay well below that.
+pub(crate) const NESTING_MAX: usize = 64;
+
 /// A cursor over PDF bytes.
 #[derive(Debug, Clone)]
 pub(crate) struct Lexer<'a> {
@@ -115,7 +119,7 @@ impl<'a> Lexer<'a> {
 
     /// Reads one value.
     pub fn value(&mut self, budget: &mut Budget, depth: usize) -> Result<Object, Fail> {
-        if depth > budget.max_depth {
+        if depth > budget.max_depth.min(NESTING_MAX) {
             return Err(Fail::Bad("values are nested too deeply"));
         }
         self.skip();
@@ -130,9 +134,16 @@ impl<'a> Lexer<'a> {
                 Ok(Object::Name(name))
             }
             b'(' => {
-                let s = self.literal()?;
+                let (s, deep) = self.literal()?;
                 budget.value(s.len())?;
-                Ok(Object::String(s, StringFormat::Literal))
+                // lopdf's writer keeps balanced parentheses as they are, and lopdf reads at
+                // most 100 levels of them, so a deep string is written as hex.
+                let format = if deep {
+                    StringFormat::Hexadecimal
+                } else {
+                    StringFormat::Literal
+                };
+                Ok(Object::String(s, format))
             }
             b'<' if self.b.get(self.i + 1) == Some(&b'<') => {
                 self.i += 2;
@@ -230,11 +241,13 @@ impl<'a> Lexer<'a> {
         out
     }
 
-    /// A literal string (7.3.4.2): nested parentheses, escapes, line ends as `\n`.
-    fn literal(&mut self) -> Result<Vec<u8>, Fail> {
+    /// A literal string (7.3.4.2): nested parentheses, escapes, line ends as `\n`. The flag
+    /// says the parentheses nest deeper than [`NESTING_MAX`].
+    fn literal(&mut self) -> Result<(Vec<u8>, bool), Fail> {
         self.i += 1;
         let mut out = Vec::new();
         let mut depth = 1usize;
+        let mut deep = false;
         loop {
             let Some(c) = self.peek() else {
                 return Err(Fail::Bad("a string is not closed"));
@@ -243,12 +256,13 @@ impl<'a> Lexer<'a> {
             match c {
                 b'(' => {
                     depth += 1;
+                    deep |= depth > NESTING_MAX;
                     out.push(c);
                 }
                 b')' => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(out);
+                        return Ok((out, deep));
                     }
                     out.push(c);
                 }

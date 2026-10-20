@@ -406,3 +406,77 @@ fn label_prefix_decode_time() {
     assert_eq!(labels[0].label.as_ref().map(|l| l.len()), Some(257));
     assert!(took.as_millis() < 1000, "{took:?}");
 }
+
+/// A classic file whose catalog uses object `n` as `/Big`, and `extra` objects (number, body).
+fn classic_with(n: u64, extra: &[(u64, String)]) -> Vec<u8> {
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offs = Vec::new();
+    let mut objects = vec![
+        (
+            1u64,
+            format!("<< /Type /Catalog /Pages 2 0 R /Big {n} 0 R >>"),
+        ),
+        (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string()),
+        (
+            3,
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_string(),
+        ),
+    ];
+    objects.extend(extra.iter().cloned());
+    for (k, body) in &objects {
+        offs.push((*k, out.len()));
+        out.extend(format!("{k} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    let x = out.len();
+    out.extend(b"xref\n0 1\n0000000000 65535 f \n");
+    for (k, at) in &offs {
+        out.extend(format!("{k} 1\n{at:010} 00000 n \n").as_bytes());
+    }
+    let size = objects.iter().map(|o| o.0).max().unwrap() + 1;
+    out.extend(
+        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn huge_object_numbers_are_bounded() {
+    for n in [4_294_967_295u64, 4_000_000_000] {
+        let bytes = classic_with(n, &[(n, "<< /A 1 >>".to_string())]);
+        let start = Instant::now();
+        let pdf = open(&bytes).unwrap();
+        assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+        let doc = Document::load_mem(pdf.canonical()).unwrap();
+        assert_eq!(doc.get_pages().len(), 1);
+    }
+}
+
+#[test]
+fn deep_nesting_matches_lopdf() {
+    // lopdf reads at most 100 levels of arrays, dictionaries and string parentheses.
+    let deep = format!("{}{}", "[".repeat(150), "]".repeat(150));
+    let parens = format!("({}x{})", "(".repeat(150), ")".repeat(150));
+    let bytes = classic_with(9, &[(9, deep), (10, parens.clone())]);
+    let bytes = {
+        // The catalog also uses object 10.
+        let s = String::from_utf8(bytes).unwrap();
+        s.replacen("/Big 9 0 R", "/Big 9 0 R /Str 10 0 R", 1)
+    };
+    // The offsets after the catalog moved, so the table is rebuilt from a scan.
+    let pdf = open(bytes.as_bytes()).unwrap();
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    // Every object of the canonical copy is read by lopdf too.
+    for (&n, entry) in &doc.reference_table.entries {
+        if let lopdf::xref::XrefEntry::Normal { generation, .. } = entry {
+            assert!(
+                doc.objects.contains_key(&(n, *generation)),
+                "object {n} is lost"
+            );
+        }
+    }
+    let catalog = doc.catalog().unwrap();
+    let s = catalog.get(b"Str").unwrap().as_reference().unwrap();
+    assert_eq!(doc.get_object(s).unwrap().as_str().unwrap().len(), 301);
+    let again = open(pdf.canonical()).unwrap();
+    assert_eq!(again.canonical(), pdf.canonical());
+}
