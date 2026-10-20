@@ -1,0 +1,287 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::path::PathBuf;
+
+use lopdf::{Document, Object, dictionary};
+use pdfparts::{IssueKind, Limits, LinkTarget, Pdf};
+
+fn never() -> bool {
+    false
+}
+
+fn open_bytes(bytes: &[u8]) -> Pdf {
+    Pdf::open(bytes, None, &Limits::default(), &never).unwrap()
+}
+
+fn corpus(name: &str) -> Pdf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/corpus/pdf")
+        .join(name);
+    open_bytes(&std::fs::read(path).unwrap())
+}
+
+#[test]
+fn page_labels_roman_and_arabic() {
+    let pdf = corpus("qpdf-page-labels-and-outlines.pdf");
+    let pages = pdf.pages();
+    assert_eq!(pages.len(), 30);
+    let labels: Vec<Option<&str>> = pages.iter().take(14).map(|p| p.label.as_deref()).collect();
+    let expected = [
+        "", "", "i", "ii", "iii", "iv", "v", "", "", "vi", "vii", "", "2", "3",
+    ];
+    assert_eq!(labels, expected.map(Some).to_vec());
+    // Later ranges: decimal from 16059, roman from 50 and 54.
+    assert_eq!(pages[22].label.as_deref(), Some("16059"));
+    assert_eq!(pages[23].label.as_deref(), Some("l"));
+    assert_eq!(pages[29].label.as_deref(), Some("liv"));
+    assert_eq!(pages[0].number, 1);
+    assert_eq!(pages[29].number, 30);
+    assert!(pages[0].has_fonts);
+    assert!(pages[0].width > 0.0 && pages[0].height > 0.0);
+}
+
+#[test]
+fn pages_without_labels_have_none() {
+    let pdf = corpus("pypdf-outline.pdf");
+    assert!(pdf.pages().iter().all(|p| p.label.is_none()));
+}
+
+/// A document with `n` pages and the given /PageLabels number tree.
+fn labelled(n: usize, labels: Object) -> Pdf {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let kids: Vec<Object> = (0..n)
+        .map(|_| {
+            doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            })
+            .into()
+        })
+        .collect();
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => n as i64 }),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+        "PageLabels" => labels,
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    open_bytes(&out)
+}
+
+#[test]
+fn page_label_styles() {
+    let pdf = labelled(
+        8,
+        Object::Dictionary(dictionary! {
+            "Nums" => vec![
+                1.into(), Object::Dictionary(dictionary! { "S" => "A" }),
+                3.into(), Object::Dictionary(dictionary! { "S" => "a", "St" => 26 }),
+                5.into(), Object::Dictionary(dictionary! { "S" => "R", "St" => 1999, "P" => Object::string_literal("App-") }),
+                6.into(), Object::Dictionary(dictionary! {}),
+            ],
+        }),
+    );
+    let labels: Vec<Option<String>> = pdf.pages().into_iter().map(|p| p.label).collect();
+    assert_eq!(
+        labels,
+        vec![
+            None,
+            Some("A".into()),
+            Some("B".into()),
+            Some("z".into()),
+            Some("aa".into()),
+            Some("App-MCMXCIX".into()),
+            Some(String::new()),
+            Some(String::new()),
+        ]
+    );
+}
+
+#[test]
+fn outline_levels_and_pages() {
+    let pdf = corpus("qpdf-page-labels-and-outlines.pdf");
+    let outline = pdf.outline();
+    assert_eq!(outline.len(), 11, "{outline:?}");
+    let levels: Vec<u8> = outline.iter().map(|o| o.level).collect();
+    assert_eq!(levels, vec![1, 2, 3, 4, 4, 3, 4, 2, 3, 3, 1]);
+    // Each title names its 0-based target page after "->".
+    for item in &outline {
+        let n: u32 = item
+            .title
+            .split("-> ")
+            .nth(1)
+            .and_then(|r| r.split(':').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap();
+        assert_eq!(item.page, Some(n + 1), "{item:?}");
+        assert_eq!(item.uri, None);
+    }
+}
+
+#[test]
+fn outline_cycle_is_damaged() {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let outlines = doc.new_object_id();
+    let a = doc.new_object_id();
+    let b = doc.new_object_id();
+    doc.objects.insert(
+        a,
+        Object::Dictionary(dictionary! {
+            "Title" => Object::string_literal("A"), "Parent" => outlines, "Next" => b,
+            "Dest" => vec![page_id.into(), "Fit".into()],
+        }),
+    );
+    doc.objects.insert(
+        b,
+        Object::Dictionary(dictionary! {
+            "Title" => Object::string_literal("B"), "Parent" => outlines, "Next" => a, "First" => a,
+        }),
+    );
+    doc.objects.insert(
+        outlines,
+        Object::Dictionary(dictionary! { "Type" => "Outlines", "First" => a }),
+    );
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog", "Pages" => pages_id, "Outlines" => outlines,
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let outline = pdf.outline();
+    assert_eq!(outline.len(), 2, "{outline:?}");
+    assert_eq!(outline[0].page, Some(1));
+    // A second call gives the same result and does not repeat the issue.
+    assert_eq!(pdf.outline(), outline);
+    let cycles = pdf
+        .issues()
+        .into_iter()
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("cycle"))
+        .count();
+    assert_eq!(cycles, 1, "{:?}", pdf.issues());
+}
+
+#[test]
+fn named_dests_and_links() {
+    let pdf = corpus("pypdf-outline.pdf");
+    let dests = pdf.named_destinations();
+    assert!(
+        dests.contains(&("section.1".to_string(), Some(2))),
+        "{dests:?}"
+    );
+    assert!(dests.iter().all(|(_, page)| page.is_some()), "{dests:?}");
+    let links = pdf.links();
+    assert_eq!(links.len(), 9, "{links:?}");
+    assert!(links.iter().all(|l| l.page == 1));
+    assert_eq!(
+        links[0].target,
+        LinkTarget::Named("section.1".to_string(), Some(2))
+    );
+    assert!(links[0].rect[2] > links[0].rect[0]);
+    assert_eq!(pdf.outline().len(), 9);
+}
+
+#[test]
+fn uri_link_listed_not_followed() {
+    let pdf = corpus("pdfjs-annotation-link-text-popup.pdf");
+    let links = pdf.links();
+    assert_eq!(links.len(), 1, "{links:?}");
+    match &links[0].target {
+        LinkTarget::Uri(uri) => assert!(uri.starts_with("http"), "{uri}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn link_actions_are_listed() {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let link = |action: lopdf::Dictionary| {
+        Object::Dictionary(dictionary! {
+            "Type" => "Annot", "Subtype" => "Link",
+            "Rect" => vec![10.into(), 20.into(), 30.into(), 40.into()],
+            "A" => action,
+        })
+    };
+    let annots = vec![
+        link(
+            dictionary! { "S" => "GoToR", "F" => Object::string_literal("other.pdf"), "D" => vec![2.into(), "Fit".into()] },
+        ),
+        link(
+            dictionary! { "S" => "Launch", "F" => dictionary! { "Type" => "Filespec", "UF" => Object::string_literal("run.exe") } },
+        ),
+        link(dictionary! { "S" => "JavaScript", "JS" => Object::string_literal("app.alert(1)") }),
+        link(dictionary! { "S" => "GoTo", "D" => vec![page_id.into(), "Fit".into()] }),
+        Object::Dictionary(dictionary! {
+            "Subtype" => "Link",
+            "Rect" => vec![1.into(), 2.into(), 3.into(), 4.into()],
+            "Dest" => vec![0.into(), "Fit".into()],
+        }),
+    ];
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => annots,
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let targets: Vec<LinkTarget> = pdf.links().into_iter().map(|l| l.target).collect();
+    assert_eq!(
+        targets,
+        vec![
+            LinkTarget::Remote {
+                file: "other.pdf".into(),
+                page: Some(3)
+            },
+            LinkTarget::Launch("run.exe".into()),
+            LinkTarget::Other("JavaScript".into()),
+            LinkTarget::Page(1),
+            LinkTarget::Page(1),
+        ]
+    );
+    assert_eq!(pdf.links()[0].rect, [10.0, 20.0, 30.0, 40.0]);
+}
+
+#[test]
+fn page_images_are_listed() {
+    let pdf = corpus("scan-truman-letter-nara.pdf");
+    let pages = pdf.pages();
+    assert!(pages.iter().any(|p| !p.images.is_empty()), "{pages:?}");
+    let image = &pages.iter().find(|p| !p.images.is_empty()).unwrap().images[0];
+    assert!(image.width > 100 && image.height > 100, "{image:?}");
+    assert!(matches!(image.components, 1 | 3 | 4), "{image:?}");
+}

@@ -14,6 +14,7 @@ members = [
     "crates/formats/zipguard",
     "crates/formats/formulakit",
     "crates/formats/sheetparts",
+    "crates/formats/pdfparts",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
@@ -62,6 +63,9 @@ percent-encoding = "=2.3.2"
 formualizer-parse = { version = "=4.0.0", default-features = false }
 quick-xml = "=0.42.0"
 calamine = { version = "=0.37.0", default-features = false }
+lopdf = { version = "=0.45.0", default-features = false }
+weezl = "=0.2.1"
+brotli-decompressor = "=5.0.3"
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.

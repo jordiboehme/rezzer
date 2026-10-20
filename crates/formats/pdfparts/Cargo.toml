@@ -1,0 +1,25 @@
+[package]
+name = "pdfparts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The object layer of a PDF file with a stream guard: metadata, pages, labels, outline and links"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/pdfparts"
+readme = "README.md"
+keywords = ["pdf", "metadata", "outline", "xmp", "parser"]
+categories = ["parser-implementations"]
+
+[dependencies]
+lopdf.workspace = true
+flate2 = { workspace = true, features = ["zlib-rs"] }
+quick-xml.workspace = true
+weezl.workspace = true
+brotli-decompressor.workspace = true
+
+[dev-dependencies]
+# The shipped binary also links pdf-inspector, which turns on lopdf's rayon feature. The tests
+# run the same threaded load.
+lopdf = { workspace = true, features = ["rayon"] }
+libc.workspace = true
