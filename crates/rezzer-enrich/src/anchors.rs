@@ -74,7 +74,7 @@ impl Pass for Anchors {
             .map(|(location, anchor)| Loss {
                 location,
                 what: format!("reference to {anchor} not found"),
-                why: LossReason::Damaged,
+                why: LossReason::Uncertain,
                 severity: Severity::Warning,
             })
             .collect();
@@ -85,7 +85,7 @@ impl Pass for Anchors {
                     "{} more references to missing anchors are not listed",
                     total - MAX_LOSSES
                 ),
-                why: LossReason::Damaged,
+                why: LossReason::Uncertain,
                 severity: Severity::Warning,
             });
         }

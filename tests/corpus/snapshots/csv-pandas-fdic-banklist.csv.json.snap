@@ -1479,7 +1479,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-pandas-fdic-banklist",
         "kind": "sheet",
         "name": "csv-pandas-fdic-banklist",
-        "size": "507 rows x 7 columns"
+        "size": "506 rows x 7 columns"
       }
     ]
   },

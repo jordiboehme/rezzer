@@ -306,7 +306,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-spectrum-quotes_and_newlines",
         "kind": "sheet",
         "name": "csv-spectrum-quotes_and_newlines",
-        "size": "3 rows x 2 columns"
+        "size": "2 rows x 2 columns"
       }
     ]
   },

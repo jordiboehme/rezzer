@@ -1479,7 +1479,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-semicolon-latin1-dwd-stations",
         "kind": "sheet",
         "name": "csv-semicolon-latin1-dwd-stations",
-        "size": "1092 rows x 7 columns"
+        "size": "1091 rows x 7 columns"
       }
     ]
   },

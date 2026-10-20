@@ -24,7 +24,7 @@ losses: 0
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-datahub-co2-fossil-global | sheet | 276 rows x 8 columns | result |  |
+| csv-datahub-co2-fossil-global | sheet | 275 rows x 8 columns | result |  |
 
 - Formulas: 1
 

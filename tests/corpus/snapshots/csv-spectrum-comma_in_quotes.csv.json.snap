@@ -520,7 +520,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-spectrum-comma_in_quotes",
         "kind": "sheet",
         "name": "csv-spectrum-comma_in_quotes",
-        "size": "2 rows x 5 columns"
+        "size": "1 row x 5 columns"
       }
     ]
   },

@@ -35,6 +35,24 @@ impl Pass for Overview {
         let mut parts: Vec<OverviewPart> = Vec::new();
         let mut owner: HashMap<&str, usize> = HashMap::new();
         let mut by_id: HashMap<String, usize> = HashMap::new();
+        // The reader's row and column counts describe the sheet only when there is one.
+        let sheets = sections
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Section {
+                        kind: SectionKind::Sheet,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let totals = if sheets == 1 {
+            reader_totals(doc)
+        } else {
+            None
+        };
         for (i, section) in sections.iter().enumerate() {
             let Block::Section {
                 kind,
@@ -67,7 +85,7 @@ impl Pass for Overview {
                 id,
                 name,
                 kind: kind_words(*kind).to_string(),
-                size: size(section),
+                size: size(section, totals),
                 role: None,
                 reads: Vec::new(),
             });
@@ -155,24 +173,55 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     }
 }
 
-/// `<n> rows x <m> columns` for a sheet that starts with a table, else the paragraph count.
-fn size(section: &Block) -> String {
+/// For a sheet: `<n> rows x <m> columns`, data rows without header rows, from the first table
+/// without a role (a table a reader generated, such as a summary, is not the sheet's data).
+/// When the document has only this one sheet and the reader gave `rows` and `columns`
+/// properties, those are the size and the rows in the table are noted as shown when fewer.
+/// For any other part: the paragraph count.
+fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
     let Block::Section { kind, blocks, .. } = section else {
         return String::new();
     };
-    if *kind == SectionKind::Sheet
-        && let Some(Block::Table { rows, .. }) = blocks.first()
-    {
-        let columns = rows
-            .iter()
-            .map(|r| r.iter().map(|c| c.col_span.max(1) as usize).sum::<usize>())
-            .max()
-            .unwrap_or(0);
-        return format!(
-            "{} x {}",
-            plural(rows.len(), "row", "rows"),
-            plural(columns, "column", "columns")
-        );
+    if *kind == SectionKind::Sheet {
+        let table = blocks.iter().find_map(|b| match b {
+            Block::Table {
+                rows,
+                header_rows,
+                role: None,
+                ..
+            } => Some((rows, *header_rows)),
+            _ => None,
+        });
+        let shown = table.map(|(rows, header)| {
+            let columns = rows
+                .iter()
+                .map(|r| r.iter().map(|c| c.col_span.max(1) as usize).sum::<usize>())
+                .max()
+                .unwrap_or(0);
+            (rows.len().saturating_sub(header), columns)
+        });
+        match (totals, shown) {
+            (Some((rows, columns)), shown) => {
+                let base = format!(
+                    "{} x {}",
+                    plural(rows, "row", "rows"),
+                    plural(columns, "column", "columns")
+                );
+                return match shown {
+                    Some((n, _)) if n >= rows => base,
+                    Some((n, _)) => format!("{base} ({n} shown)"),
+                    None => format!("{base} (none shown)"),
+                };
+            }
+            (None, Some((rows, columns))) => {
+                return format!(
+                    "{} x {}",
+                    plural(rows, "row", "rows"),
+                    plural(columns, "column", "columns")
+                );
+            }
+            (None, None) => {}
+        }
     }
     let mut paragraphs = 0;
     walk::blocks(blocks, |b| {
@@ -182,6 +231,17 @@ fn size(section: &Block) -> String {
         true
     });
     plural(paragraphs, "paragraph", "paragraphs")
+}
+
+/// The `rows` and `columns` counts a reader put in the properties, when both are whole numbers.
+fn reader_totals(doc: &Document) -> Option<(usize, usize)> {
+    let count = |key: &str| match doc.properties.custom.get(key) {
+        Some(Value::Number { value, .. }) if *value >= 0.0 && value.fract() == 0.0 => {
+            Some(*value as usize)
+        }
+        _ => None,
+    };
+    Some((count("rows")?, count("columns")?))
 }
 
 /// The facts in display order; counts that are zero are left out.

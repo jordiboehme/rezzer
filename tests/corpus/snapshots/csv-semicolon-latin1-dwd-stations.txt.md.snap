@@ -25,7 +25,7 @@ language: "de"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-semicolon-latin1-dwd-stations | sheet | 1092 rows x 7 columns |  |  |
+| csv-semicolon-latin1-dwd-stations | sheet | 1091 rows x 7 columns |  |  |
 
 ## Properties
 

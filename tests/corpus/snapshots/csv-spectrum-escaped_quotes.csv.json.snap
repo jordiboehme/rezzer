@@ -292,7 +292,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-spectrum-escaped_quotes",
         "kind": "sheet",
         "name": "csv-spectrum-escaped_quotes",
-        "size": "3 rows x 2 columns"
+        "size": "2 rows x 2 columns"
       }
     ]
   },

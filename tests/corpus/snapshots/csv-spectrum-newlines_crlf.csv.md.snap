@@ -24,7 +24,7 @@ losses: 0
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-newlines\_crlf | sheet | 4 rows x 3 columns |  |  |
+| csv-spectrum-newlines\_crlf | sheet | 3 rows x 3 columns |  |  |
 
 ## Properties
 

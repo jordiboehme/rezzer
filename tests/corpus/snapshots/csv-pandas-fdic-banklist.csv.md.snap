@@ -25,7 +25,7 @@ language: "en"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-pandas-fdic-banklist | sheet | 507 rows x 7 columns |  |  |
+| csv-pandas-fdic-banklist | sheet | 506 rows x 7 columns |  |  |
 
 ## Properties
 

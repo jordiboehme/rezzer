@@ -124,7 +124,8 @@ fn dangling_reference_becomes_loss() {
     assert_eq!(d.losses.len(), 1, "{:?}", d.losses);
     let l = &d.losses[0];
     assert_eq!(l.what, "reference to gone not found");
-    assert_eq!(l.why, LossReason::Damaged);
+    // A broken reference is no content left unread: uncertain, not damaged.
+    assert_eq!(l.why, LossReason::Uncertain);
     assert_eq!(l.severity, Severity::Warning);
 }
 
@@ -286,7 +287,8 @@ fn overview_lists_sections_and_counts() {
     assert_eq!(o.parts.len(), 3);
     assert_eq!(o.parts[0].name, "Input");
     assert_eq!(o.parts[0].kind, "sheet");
-    assert_eq!(o.parts[0].size, "10 rows x 3 columns");
+    // Ten table rows, one of them the header.
+    assert_eq!(o.parts[0].size, "9 rows x 3 columns");
     assert_eq!(o.parts[0].role, Some(Role::Input));
     assert!(o.parts[0].reads.is_empty());
     assert_eq!(o.parts[1].role, Some(Role::Result));
@@ -577,4 +579,57 @@ fn csv_of_english_sentences_is_english() {
     let mut d = read_csv(csv.as_bytes());
     enrich(&mut d, &only(&[]));
     assert_eq!(d.properties.language.as_deref(), Some("en"));
+}
+
+fn custom_number(d: &mut Document, key: &str, n: f64) {
+    d.properties
+        .custom
+        .insert(key.into(), rezzer_model::Value::number(n, None));
+}
+
+#[test]
+fn a_single_sheet_takes_its_size_from_the_reader() {
+    let mut d = doc();
+    d.body.push(sheet("data", 11, 4));
+    custom_number(&mut d, "rows", 30_000.0);
+    custom_number(&mut d, "columns", 6.0);
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    assert_eq!(o.parts[0].size, "30000 rows x 6 columns (10 shown)");
+}
+
+#[test]
+fn a_sheet_with_every_row_shown_has_no_shown_note() {
+    let mut d = doc();
+    d.body.push(sheet("data", 10, 9));
+    custom_number(&mut d, "rows", 9.0);
+    custom_number(&mut d, "columns", 9.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.overview.unwrap().parts[0].size, "9 rows x 9 columns");
+}
+
+#[test]
+fn a_summary_table_is_not_the_sheet_data() {
+    // After a time cut the sheet holds only the reader's Columns table.
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("data".into()),
+        anchor: Some(a("data")),
+        blocks: vec![Block::Table {
+            caption: Some("Columns".into()),
+            header_rows: 1,
+            role: Some("summary".into()),
+            rows: vec![vec![Cell::new(vec![txt("Column")])]; 5],
+            alignments: vec![],
+            anchor: None,
+        }],
+    });
+    custom_number(&mut d, "rows", 4094.0);
+    custom_number(&mut d, "columns", 2.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(
+        d.overview.unwrap().parts[0].size,
+        "4094 rows x 2 columns (none shown)"
+    );
 }

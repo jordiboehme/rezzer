@@ -429,7 +429,7 @@ source: crates/rezzer/tests/corpus.rs
         "id": "csv-spectrum-newlines_crlf",
         "kind": "sheet",
         "name": "csv-spectrum-newlines_crlf",
-        "size": "4 rows x 3 columns"
+        "size": "3 rows x 3 columns"
       }
     ]
   },

@@ -1697,7 +1697,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "csv-datahub-co2-fossil-global",
         "role": "result",
-        "size": "276 rows x 8 columns"
+        "size": "275 rows x 8 columns"
       }
     ]
   },

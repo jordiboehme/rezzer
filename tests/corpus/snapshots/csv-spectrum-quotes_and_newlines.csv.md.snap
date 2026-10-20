@@ -24,7 +24,7 @@ losses: 0
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-quotes\_and\_newlines | sheet | 3 rows x 2 columns |  |  |
+| csv-spectrum-quotes\_and\_newlines | sheet | 2 rows x 2 columns |  |  |
 
 ## Properties
 

@@ -25,7 +25,7 @@ language: "en"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-broken-derived-banklist | sheet | 10 rows x 9 columns |  |  |
+| csv-broken-derived-banklist | sheet | 9 rows x 9 columns |  |  |
 
 - Not read: 4
 

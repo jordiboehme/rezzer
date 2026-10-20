@@ -34,5 +34,9 @@
   {
     "pointer": "/body/0/blocks/1/rows/8/6/inlines/0/text",
     "equals": "only in ragged rows"
+  },
+  {
+    "pointer": "/overview/parts/0/size",
+    "equals": "9 rows x 9 columns"
   }
 ]
