@@ -29,6 +29,10 @@ fn hostile() -> Limits {
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {
+    read_with(bytes, &Budget::new(hostile()))
+}
+
+fn read_with(bytes: &[u8], budget: &Budget) -> ReadOutcome {
     let src = Source {
         path: None,
         name: "file.pdf".into(),
@@ -42,7 +46,7 @@ fn read(bytes: &[u8]) -> ReadOutcome {
         },
         modified: None,
     };
-    PdfReader.read(&src, &ReadOptions::default(), &Budget::new(hostile()))
+    PdfReader.read(&src, &ReadOptions::default(), budget)
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {
@@ -137,7 +141,6 @@ fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
 /// The bound the memory tests hold: a quarter of the hostile memory limit.
 fn assert_rss_under_256_mib() {
     let rss = common::max_rss_bytes();
-    eprintln!("RSSPROBE {} MiB", rss >> 20);
     assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
 }
 
@@ -899,4 +902,184 @@ fn a_very_long_link_over_many_runs_is_bounded() {
         out.document.losses
     );
     assert_rss_under_256_mib();
+}
+
+/// Pages of short lines far apart, one paragraph each: page k has `lines[k]` lines `w<i>.`.
+/// With `uri`, one link with a URI of that many bytes lies over each page.
+fn far_lines(lines: &[usize], uri: Option<usize>) -> Vec<u8> {
+    const GAP: usize = 40;
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let annots = match uri {
+        Some(m) => {
+            let annot = b.add(format!(
+                "<< /Type /Annot /Subtype /Link \
+                 /Rect [-1000000000 -1000000000 1000000000 1000000000] \
+                 /A << /S /URI /URI (http://x/{}) >> >>",
+                "u".repeat(m)
+            ));
+            format!("/Annots [{annot} 0 R]")
+        }
+        None => String::new(),
+    };
+    let mut kids = String::new();
+    for &n in lines {
+        let h = (n + 2) * GAP;
+        let mut c = b"BT /F1 12 Tf ".to_vec();
+        for i in 0..n {
+            c.extend(format!("1 0 0 1 72 {} Tm (w{i}.) Tj ", h - (i + 1) * GAP).as_bytes());
+        }
+        c.extend(b"ET\n");
+        let packed = deflate(&c);
+        let cs = b.stream("/Filter /FlateDecode", &packed);
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] \
+             /Resources << /Font << /F1 {font} 0 R >> >> {annots} /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", lines.len()),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The links in `blocks` and the bytes of their targets.
+fn links_in(blocks: &[Block]) -> (usize, usize) {
+    let (mut n, mut bytes) = (0, 0);
+    for b in blocks {
+        if let Block::Paragraph { inlines, .. } = b {
+            for i in inlines {
+                if let rezzer_model::Inline::Link { target, .. } = i {
+                    n += 1;
+                    bytes += target.len();
+                }
+            }
+        }
+    }
+    (n, bytes)
+}
+
+/// The one Limit loss that says link targets were left out.
+fn link_loss(out: &ReadOutcome) -> &Loss {
+    let found: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(found.len(), 1, "{:?}", out.document.losses);
+    assert!(found[0].what.contains("link"), "{:?}", found[0]);
+    found[0]
+}
+
+#[test]
+fn links_over_many_paragraphs_are_bounded_through_render() {
+    // About 107 KB: 1,250 paragraphs under one link with a 100,000 byte URI. Each paragraph
+    // is a link of its own with its own copy of the target, and the renderer writes each
+    // again.
+    let start = Instant::now();
+    let bytes = far_lines(&[1_250], Some(100_000));
+    assert!(bytes.len() < 120_000, "{}", bytes.len());
+    let out = read(&bytes);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    assert!(!pages.is_empty());
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let t = text(page(&out, 1));
+    assert!(
+        t.contains("w0.") && t.contains("w1249."),
+        "{:?}",
+        out.document.losses
+    );
+    let (n, target_bytes) = links_in(page(&out, 1));
+    assert!(n > 0, "no link kept");
+    assert!(target_bytes <= (512 << 20) / 16, "{target_bytes}");
+    let loss = link_loss(&out);
+    assert!(
+        loss.what.contains(&format!("{} links", 1_250 - n)),
+        "{loss:?}"
+    );
+    drop(pages);
+    drop(md);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn links_over_2000_paragraphs_keep_the_page() {
+    // The link copies once stopped the page and dropped all its blocks.
+    let start = Instant::now();
+    let out = read(&far_lines(&[2_000], Some(100_000)));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let t = text(page(&out, 1));
+    assert!(
+        t.contains("w0.") && t.contains("w1999."),
+        "{:?}",
+        out.document.losses
+    );
+    let (n, _) = links_in(page(&out, 1));
+    let loss = link_loss(&out);
+    assert!(
+        loss.what.contains(&format!("{} links", 2_000 - n)),
+        "{loss:?}"
+    );
+    assert!(loss.what.contains("page 1"), "{loss:?}");
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn an_element_stop_keeps_the_blocks_before_it() {
+    const N: usize = 400;
+    let bytes = far_lines(&[N, 1, 1], None);
+    let full = Budget::new(hostile());
+    let out = read_with(&bytes, &full);
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    // Pages 2 and 3 take four elements each: section, marker, run and block. The elements a
+    // read counts first stand in for an earlier part of a larger read, so the work caps,
+    // which come from the element limit, stay as they are.
+    let at = full.elements() - 8 - N as u64 / 2;
+    let cut = Budget::new(hostile());
+    cut.add_elements(hostile().max_elements - at).expect("room");
+    let out = read_with(&bytes, &cut);
+    let one = page(&out, 1);
+    // The marker and the blocks built before the stop.
+    let kept = one.len() - 1;
+    assert!(kept > 1 && kept < N, "{kept} blocks kept");
+    let t = text(one);
+    assert!(
+        t.contains("w0.") && t.contains(&format!("w{}.", kept - 1)),
+        "{t}"
+    );
+    assert!(!t.contains(&format!("w{kept}.")), "{t}");
+    let cut = losses(&out, LossReason::Limit);
+    assert_eq!(cut.len(), 1, "{:?}", out.document.losses);
+    assert!(
+        cut[0].what.ends_with(&format!(
+            "page 1 from block {} on and pages 2 to 3 are not read",
+            kept + 1
+        )),
+        "{:?}",
+        cut[0]
+    );
 }

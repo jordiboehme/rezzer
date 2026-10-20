@@ -195,6 +195,9 @@ pub(crate) struct Extracted {
     pub failed: Vec<Failure>,
     /// The first page not read because the stop callback said so.
     pub stopped_at: Option<u32>,
+    /// What is left of the bytes the pages may keep ([`Caps::max_kept`]): the room the model's
+    /// copies of link targets may take.
+    pub kept_left: u64,
 }
 
 /// Bounds for reading one page.
@@ -303,6 +306,7 @@ pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bo
             }
         }
     }
+    out.kept_left = reader.kept_left;
     out
 }
 
@@ -636,17 +640,27 @@ impl<'p, 'a> PageReader<'p, 'a> {
             )));
         }
         if dev.layers_out_of_step > 0 {
+            let k = dev.layers_out_of_step;
+            let (s, did, them) = if k == 1 {
+                ("", "does", "its")
+            } else {
+                ("s", "do", "their")
+            };
             notes.push(Note::Unsupported(format!(
-                "{} sequences of hidden layers on page {n} did not match the content walk; \
-                 their text may be in the body",
-                dev.layers_out_of_step
+                "{k} sequence{s} of hidden layers on page {n} {did} not match the content \
+                 walk; {them} text may be in the body"
             )));
         }
         if dev.out_of_step > 0 {
+            let k = dev.out_of_step;
+            let (s, it) = if k == 1 {
+                ("", "the sequence does")
+            } else {
+                ("s", "the sequences do")
+            };
             notes.push(Note::Unsupported(format!(
-                "the ActualText of {} marked content sequences on page {n} is not used: the \
-                 sequences did not match the content walk",
-                dev.out_of_step
+                "the ActualText of {k} marked content sequence{s} on page {n} is not used: \
+                 {it} not match the content walk"
             )));
         }
         if dev.tables_cut {
@@ -1770,6 +1784,45 @@ struct Gl {
     actual: Option<u32>,
 }
 
+/// How a sequence the interpreter opens matches the marks of the walk.
+#[derive(Debug, PartialEq, Eq)]
+enum MarkMatch {
+    /// The mark at `at` is the sequence's own; `skipped_actual` marks with ActualText were
+    /// passed over to reach it.
+    Found { at: usize, skipped_actual: u64 },
+    /// A mark further on looks the same but is not trusted; `actual` says it has ActualText.
+    Refused { actual: bool },
+    /// No mark from `from` on looks the same.
+    None,
+}
+
+/// The mark from `from` on that a sequence with tag hash `want` and `mcid` is. The walk met
+/// the sequences in the order the interpreter meets them, so the next mark is trusted; a
+/// match further on is trusted only with an MCID or for a sequence the walk rewrote for a
+/// switched-off layer, which carries the walk's own tag.
+fn match_mark(marks: &[Mark], from: usize, want: u64, mcid: Option<i32>) -> MarkMatch {
+    let from = from.min(marks.len());
+    let Some(k) = marks[from..]
+        .iter()
+        .position(|m| m.tag == want && m.mcid == mcid)
+    else {
+        return MarkMatch::None;
+    };
+    let at = from + k;
+    let m = &marks[at];
+    if k == 0 || mcid.is_some() || m.layer.is_some() {
+        let skipped_actual = marks[from..at]
+            .iter()
+            .filter(|m| m.actual.is_some())
+            .count() as u64;
+        MarkMatch::Found { at, skipped_actual }
+    } else {
+        MarkMatch::Refused {
+            actual: m.actual.is_some(),
+        }
+    }
+}
+
 /// An open marked content sequence on the device.
 struct Open {
     mcid: Option<u32>,
@@ -2088,27 +2141,25 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let mut actual = None;
         let mut layer = None;
         let mut own_mcid = mcid;
-        let from = self.next_mark.min(self.marks.len());
-        if let Some(k) = self.marks[from..]
-            .iter()
-            .position(|m| m.tag == want && m.mcid == mcid)
-        {
-            let at = from + k;
-            let m = &self.marks[at];
-            // A rewritten switched-off sequence carries the walk's own tag, so a match by tag
-            // further on is still its own.
-            if k == 0 || mcid.is_some() || m.layer.is_some() {
+        match match_mark(self.marks, self.next_mark, want, mcid) {
+            MarkMatch::Found { at, skipped_actual } => {
+                let m = &self.marks[at];
                 actual = m.actual.clone();
                 // A layer comes only from the sequence the walk rewrote, never from a tag
                 // that only looks the same.
                 layer = m.layer;
                 own_mcid = own_mcid.or(m.own_mcid);
                 self.next_mark = at + 1;
-            } else if m.actual.is_some() {
-                self.out_of_step += 1;
+                // The marks passed over are never matched again: their ActualText is not used.
+                self.out_of_step += skipped_actual;
             }
-        } else if self.layer_tags.contains(&want) {
-            self.layers_out_of_step += 1;
+            MarkMatch::Refused { actual: true } => self.out_of_step += 1,
+            MarkMatch::Refused { actual: false } => {}
+            MarkMatch::None => {
+                if self.layer_tags.contains(&want) {
+                    self.layers_out_of_step += 1;
+                }
+            }
         }
         self.open.push(Open {
             mcid: own_mcid.and_then(|m| u32::try_from(m).ok()),
@@ -2935,6 +2986,47 @@ mod tests {
         max_glyphs: 1_000_000,
         max_kept: 1 << 30,
     };
+
+    #[test]
+    fn marks_passed_over_count_their_actual_text() {
+        let mark = |tag: &[u8], mcid: Option<i32>, actual: Option<&str>| Mark {
+            tag: tag_hash(tag),
+            mcid,
+            own_mcid: mcid,
+            actual: actual.map(Rc::from),
+            layer: None,
+        };
+        let marks = [
+            mark(b"Span", None, Some("first")),
+            mark(b"Span", None, None),
+            mark(b"Span", None, Some("third")),
+            mark(b"P", Some(7), Some("own")),
+        ];
+        // The sequence with MCID 7 is trusted further on; two of the marks passed over had
+        // ActualText.
+        assert_eq!(
+            match_mark(&marks, 0, tag_hash(b"P"), Some(7)),
+            MarkMatch::Found {
+                at: 3,
+                skipped_actual: 2
+            }
+        );
+        // The next mark is its own, with nothing passed over.
+        assert_eq!(
+            match_mark(&marks, 0, tag_hash(b"Span"), None),
+            MarkMatch::Found {
+                at: 0,
+                skipped_actual: 0
+            }
+        );
+        // Without an MCID a match further on is refused.
+        let refused = [mark(b"P", None, None), mark(b"Span", None, Some("x"))];
+        assert_eq!(
+            match_mark(&refused, 0, tag_hash(b"Span"), None),
+            MarkMatch::Refused { actual: true }
+        );
+        assert_eq!(match_mark(&marks, 0, tag_hash(b"Q"), None), MarkMatch::None);
+    }
 
     #[test]
     fn scanned_page_needs_ocr() {

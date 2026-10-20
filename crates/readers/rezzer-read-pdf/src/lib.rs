@@ -28,7 +28,7 @@ use rezzer_model::{
     source_info,
 };
 
-use layout::{Context, PageText, Run, Style, Tables};
+use layout::{Context, LinkRoom, PageText, Run, Style, Tables};
 use text::{Caps, Extracted, Fail, Failure, Note, PageItems};
 
 /// Reads PDF files.
@@ -137,6 +137,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
         pages: read,
         failed,
         stopped_at,
+        kept_left,
     } = extracted;
     let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
@@ -159,6 +160,9 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
         None
     };
     let tables = Tables::default();
+    // The model's link targets share what is left of the bytes the pages could keep.
+    let links = LinkRoom::new(kept_left);
+    let last = pages.last().map_or(0, |p| p.number);
     let mut halted = false;
     for info in pages {
         let n = info.number;
@@ -168,7 +172,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             if !halted {
                 out.loss(
                     format!("p{n}"),
-                    format!("{hit}: this and the later pages are not read"),
+                    format!("{hit}: {} not read", pages_from(n, last)),
                     LossReason::Limit,
                     Severity::Warning,
                 );
@@ -191,6 +195,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 roles: &roles,
                 budget,
                 tables: &tables,
+                links: &links,
             };
             if items.links_cut {
                 out.loss(
@@ -204,19 +209,38 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             notes(n, &items, out);
             let height = frame_height(info, Some(&items));
             let laid = layout::page_blocks(n, height, std::mem::take(&mut items.runs), &cx);
+            let kept = laid.blocks.len();
             blocks.extend(laid.blocks);
-            let mut stop = laid.stop;
+            // What a stop cuts: the page from the first block not built on, or its hidden text.
+            let mut stop = laid.stop.map(|hit| {
+                let what = match (kept, pages_after(n, last)) {
+                    (0, _) => format!("{} not read", pages_from(n, last)),
+                    (k, None) => format!("page {n} from block {} on is not read", k + 1),
+                    (k, Some(later)) => {
+                        format!("page {n} from block {} on and {later} not read", k + 1)
+                    }
+                };
+                (hit, what)
+            });
             if stop.is_none() {
                 match invisible(n, &items, budget, out) {
                     Ok(Some(callout)) => blocks.push(callout),
                     Ok(None) => {}
-                    Err(hit) => stop = Some(hit),
+                    Err(hit) => {
+                        let what = match pages_after(n, last) {
+                            None => format!("the hidden text of page {n} is not read"),
+                            Some(later) => {
+                                format!("the hidden text of page {n} and {later} not read")
+                            }
+                        };
+                        stop = Some((hit, what));
+                    }
                 }
             }
-            if let Some(hit) = stop {
+            if let Some((hit, what)) = stop {
                 out.loss(
                     format!("p{n}"),
-                    format!("{hit}: the rest of this page and the later pages are not read"),
+                    format!("{hit}: {what}"),
                     LossReason::Limit,
                     Severity::Warning,
                 );
@@ -229,6 +253,29 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             anchor: Some(Anchor(format!("p{n}"))),
             blocks,
         });
+    }
+    if let Some((count, first, last)) = links.cut() {
+        let (s, them) = if count == 1 {
+            ("", "its text is")
+        } else {
+            ("s", "their text is")
+        };
+        let pages = if first == last {
+            format!("page {first}")
+        } else {
+            format!("pages {first} to {last}")
+        };
+        out.loss(
+            format!("p{first}"),
+            format!(
+                "the targets of {count} link{s} on {pages} are not kept: the copies of link \
+                 targets take more than the {} bytes left of what the file may keep; {them} \
+                 kept without the link",
+                links.room()
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
     }
     failures(&failed, out);
     if let Some(first) = stopped_at {
@@ -252,6 +299,20 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             Severity::Warning,
         );
     }
+}
+
+/// Pages `first` to `last` as the subject of "not read": "page 3 is", "pages 3 to 9 are".
+fn pages_from(first: u32, last: u32) -> String {
+    if first >= last {
+        format!("page {first} is")
+    } else {
+        format!("pages {first} to {last} are")
+    }
+}
+
+/// The pages after `page` up to `last`, if any, as in [`pages_from`].
+fn pages_after(page: u32, last: u32) -> Option<String> {
+    (page < last).then(|| pages_from(page + 1, last))
 }
 
 /// One loss per run of consecutive pages that failed the same way.

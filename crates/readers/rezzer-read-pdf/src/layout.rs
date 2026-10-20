@@ -10,7 +10,7 @@
 //! reading order; a paragraph ends at a vertical gap over 1.5 times the line height, at a
 //! change of font size and where the text moves up (the next column).
 
-use std::cell::RefCell;
+use std::cell::{Cell as Counter, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -347,9 +347,66 @@ pub(crate) struct Context<'a> {
     pub budget: &'a Budget,
     /// Tagged tables already read, shared by all pages of the file.
     pub tables: &'a Tables,
+    /// The bytes the link targets in the model may take, shared by all pages of the file.
+    pub links: &'a LinkRoom,
 }
 
-/// The blocks of a page, and the limit that stopped them early.
+/// The bytes the copies of link targets in the model may still take. Each link in the model
+/// holds its own copy of its target, and the renderer writes each copy again, so they are
+/// charged by their bytes. Once a copy does not fit, no later link keeps its target: the
+/// text stays, without the link.
+#[derive(Debug)]
+pub(crate) struct LinkRoom {
+    room: u64,
+    left: Counter<u64>,
+    spent: Counter<bool>,
+    /// Links written without their target, and the first and last page with one.
+    cut: Counter<u64>,
+    pages: Counter<Option<(u32, u32)>>,
+}
+
+/// What a copy of a link target costs besides its bytes.
+const LINK_COST: u64 = 64;
+
+impl LinkRoom {
+    pub(crate) fn new(bytes: u64) -> LinkRoom {
+        LinkRoom {
+            room: bytes,
+            left: Counter::new(bytes),
+            spent: Counter::new(false),
+            cut: Counter::new(0),
+            pages: Counter::new(None),
+        }
+    }
+
+    /// Takes room for one copy of `target` on `page`; `false` once the room is spent.
+    fn take(&self, target: &str, page: u32) -> bool {
+        let cost = target.len() as u64 + LINK_COST;
+        if !self.spent.get() && cost <= self.left.get() {
+            self.left.set(self.left.get() - cost);
+            return true;
+        }
+        self.spent.set(true);
+        self.cut.set(self.cut.get() + 1);
+        let (first, _) = self.pages.get().unwrap_or((page, page));
+        self.pages.set(Some((first, page)));
+        false
+    }
+
+    /// The bytes the copies could take at the start.
+    pub(crate) fn room(&self) -> u64 {
+        self.room
+    }
+
+    /// The links written without their target and the pages they stand on, if any.
+    pub(crate) fn cut(&self) -> Option<(u64, u32, u32)> {
+        let (first, last) = self.pages.get()?;
+        Some((self.cut.get(), first, last))
+    }
+}
+
+/// The blocks of a page, and the limit that stopped them early. The blocks are the ones
+/// built before the stop, in reading order.
 pub(crate) struct Laid {
     pub blocks: Vec<Block>,
     pub stop: Option<LimitHit>,
@@ -385,33 +442,25 @@ pub(crate) fn page_blocks(
             None => flow.extend_from_slice(l.runs),
         }
     }
+    // One list of blocks for the whole page, each charged as it is built: a stop keeps the
+    // blocks before it.
     for runs in headers {
-        built.paragraph(runs.iter().collect(), Some("page-header"), cx.budget);
+        built.paragraph(runs.iter().collect(), Some("page-header"), cx);
     }
     let tables = claimed_tables(page, &mut flow);
-    let mut body = Built::default();
     match cx.tree {
-        Some(tree) => tagged(&flow, tree, cx, &mut body),
-        None => untagged(&flow, cx, &mut body),
+        Some(tree) => tagged(&flow, tree, cx, &mut built),
+        None => untagged(&flow, cx, &mut built),
     }
-    built.blocks.extend(body.blocks);
-    built
-        .blocks
-        .extend(tables.into_iter().map(|(_, table)| table));
-    built.stop = built.stop.or(body.stop);
+    for (_, table) in tables {
+        built.push(table, cx.budget);
+    }
     for runs in footers {
-        built.paragraph(runs.iter().collect(), Some("page-footer"), cx.budget);
+        built.paragraph(runs.iter().collect(), Some("page-footer"), cx);
     }
-    let mut blocks = Vec::with_capacity(built.blocks.len());
-    for (k, mut block) in built.blocks.into_iter().enumerate() {
-        if let Err(hit) = cx.budget.add_elements(1) {
-            return Laid {
-                blocks,
-                stop: Some(hit),
-            };
-        }
-        set_anchor(&mut block, Anchor(format!("p{page}:b{}", k + 1)));
-        blocks.push(block);
+    let mut blocks = built.blocks;
+    for (k, block) in blocks.iter_mut().enumerate() {
+        set_anchor(block, Anchor(format!("p{page}:b{}", k + 1)));
     }
     Laid {
         blocks,
@@ -444,47 +493,48 @@ struct Built {
 }
 
 impl Built {
-    /// The inlines of `runs`, or `None` once a limit stopped the page.
-    fn inlines(&mut self, runs: &[&Run], budget: &Budget) -> Option<Vec<Inline>> {
+    /// Adds a block, charged as one element. Past the limit the block is dropped and the page
+    /// stops.
+    fn push(&mut self, block: Block, budget: &Budget) {
+        if self.stop.is_some() {
+            return;
+        }
+        match budget.add_elements(1) {
+            Ok(()) => self.blocks.push(block),
+            Err(hit) => self.stop = Some(hit),
+        }
+    }
+
+    /// The inlines of `runs`, or `None` once a limit stopped the page. Each stretch of runs
+    /// under one link becomes one link with its own copy of the target, charged to the link
+    /// room.
+    fn inlines(&mut self, runs: &[&Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
         if self.stop.is_some() {
             return None;
         }
         let bytes: usize = runs.iter().map(|r| r.text.len() + 1).sum();
-        if let Err(hit) = budget.charge_text(bytes) {
+        if let Err(hit) = cx.budget.charge_text(bytes) {
             self.stop = Some(hit);
             return None;
         }
-        // Each stretch of runs under one link becomes one link with its own copy of the
-        // target: those copies count as elements, one per 64 bytes.
-        let mut link_bytes = 0u64;
-        let mut prev: Option<&Rc<str>> = None;
-        for r in runs {
-            if let Some(u) = &r.uri
-                && !prev.is_some_and(|p| Rc::ptr_eq(p, u))
-            {
-                link_bytes += u.len() as u64;
-            }
-            prev = r.uri.as_ref();
-        }
-        if let Err(hit) = budget.add_elements(link_bytes / 64) {
-            self.stop = Some(hit);
-            return None;
-        }
-        Some(inlines(runs))
+        Some(inlines(runs, cx.links))
     }
 
-    fn paragraph(&mut self, runs: Vec<&Run>, role: Option<&str>, budget: &Budget) {
-        if let Some(inlines) = self.inlines(&runs, budget) {
-            self.blocks.push(Block::Paragraph {
-                inlines,
-                role: role.map(str::to_string),
-                anchor: None,
-            });
+    fn paragraph(&mut self, runs: Vec<&Run>, role: Option<&str>, cx: &Context<'_>) {
+        if let Some(inlines) = self.inlines(&runs, cx) {
+            self.push(
+                Block::Paragraph {
+                    inlines,
+                    role: role.map(str::to_string),
+                    anchor: None,
+                },
+                cx.budget,
+            );
         }
     }
 
-    fn heading(&mut self, level: u8, runs: Vec<&Run>, budget: &Budget) {
-        if let Some(mut inlines) = self.inlines(&runs, budget) {
+    fn heading(&mut self, level: u8, runs: Vec<&Run>, cx: &Context<'_>) {
+        if let Some(mut inlines) = self.inlines(&runs, cx) {
             // Heading fonts are mostly bold; the heading says that already.
             for i in &mut inlines {
                 match i {
@@ -497,11 +547,14 @@ impl Built {
                     _ => {}
                 }
             }
-            self.blocks.push(Block::Heading {
-                level,
-                inlines,
-                anchor: None,
-            });
+            self.push(
+                Block::Heading {
+                    level,
+                    inlines,
+                    anchor: None,
+                },
+                cx.budget,
+            );
         }
     }
 
@@ -511,10 +564,10 @@ impl Built {
         list: Option<usize>,
         ordered: bool,
         runs: Vec<&Run>,
-        budget: &Budget,
+        cx: &Context<'_>,
         open: &mut Option<Option<usize>>,
     ) {
-        let Some(inlines) = self.inlines(&runs, budget) else {
+        let Some(inlines) = self.inlines(&runs, cx) else {
             return;
         };
         let para = Block::paragraph(inlines);
@@ -524,23 +577,28 @@ impl Built {
             items.push(vec![para]);
             return;
         }
-        self.blocks.push(Block::List {
-            ordered,
-            items: vec![vec![para]],
-            anchor: None,
-        });
+        self.push(
+            Block::List {
+                ordered,
+                items: vec![vec![para]],
+                anchor: None,
+            },
+            cx.budget,
+        );
         *open = Some(list);
     }
 }
 
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
-/// after a hyphen. Bold, italic and URI links are kept.
-fn inlines(runs: &[&Run]) -> Vec<Inline> {
+/// after a hyphen. Bold, italic and URI links are kept while `links` has room for their
+/// targets; past it a link's text stays without the link.
+fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
     struct Piece {
         text: String,
         bold: bool,
         italic: bool,
         uri: Option<Rc<str>>,
+        page: u32,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
@@ -568,6 +626,7 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
                 bold: r.bold,
                 italic: r.italic,
                 uri: r.uri.clone(),
+                page: r.page,
             }),
         }
     }
@@ -576,6 +635,9 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
         p.text.truncate(end);
     }
     let mut out = Vec::new();
+    // The target of the link written last without its target: a link that goes on over a
+    // change of style is one link cut, not two.
+    let mut refused: Option<Rc<str>> = None;
     for p in pieces {
         if p.text.is_empty() {
             continue;
@@ -613,6 +675,13 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
                 if !lead.is_empty() {
                     out.push(Inline::plain(lead));
                 }
+                let goes_on = refused.as_ref().is_some_and(|r| Rc::ptr_eq(r, &target));
+                if goes_on || !links.take(&target, p.page) {
+                    out.push(text);
+                    refused = Some(target);
+                    continue;
+                }
+                refused = None;
                 out.push(Inline::Link {
                     target: target.to_string(),
                     title: None,
@@ -621,7 +690,10 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
                     inlines: vec![text],
                 });
             }
-            None => out.push(text),
+            None => {
+                refused = None;
+                out.push(text);
+            }
         }
     }
     out
@@ -690,7 +762,6 @@ fn without_marker(runs: &[&Run], cut: usize) -> Vec<Run> {
 /// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps.
 fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
     let all = lines(flow);
-    let budget = cx.budget;
     let mut i = 0;
     let mut open_list: Option<Option<usize>> = None;
     while i < all.len() && out.stop.is_none() {
@@ -709,7 +780,7 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
                 runs.extend(all[j].runs.iter());
                 j += 1;
             }
-            out.heading(level, runs, budget);
+            out.heading(level, runs, cx);
             open_list = None;
             i = j;
             continue;
@@ -734,7 +805,7 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
             if !joins {
                 open_list = None;
             }
-            out.item(None, ordered, runs, budget, &mut open_list);
+            out.item(None, ordered, runs, cx, &mut open_list);
             i = j;
             continue;
         }
@@ -749,7 +820,7 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
             runs.extend(all[j].runs.iter());
             j += 1;
         }
-        out.paragraph(runs, None, budget);
+        out.paragraph(runs, None, cx);
         i = j;
     }
 }
@@ -884,7 +955,6 @@ fn classify(tree: &StructTree, start: usize) -> (Slot, Option<usize>) {
 
 /// Lays out a tagged page: runs of one element form one block, in reading order.
 fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
-    let budget = cx.budget;
     let mut slots = Vec::with_capacity(flow.len());
     // ActualText of an element replaces the text of all its runs: the first run carries it.
     let mut replaced: HashSet<usize> = HashSet::new();
@@ -937,7 +1007,7 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
             match slot {
                 Slot::Heading(level, _) => {
                     *open = None;
-                    out.heading(level, taken, budget);
+                    out.heading(level, taken, cx);
                 }
                 Slot::Item { list, .. } => {
                     // The label of an item (`Lbl`) is often the bullet or number the list shows
@@ -946,18 +1016,18 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
                     match list_marker(text.trim_start()) {
                         Some((ordered, cut)) => {
                             let owned = without_marker(&taken, cut);
-                            out.item(Some(list), ordered, owned.iter().collect(), budget, open);
+                            out.item(Some(list), ordered, owned.iter().collect(), cx, open);
                         }
-                        None => out.item(Some(list), false, taken, budget, open),
+                        None => out.item(Some(list), false, taken, cx, open),
                     }
                 }
                 Slot::Para(_, role) => {
                     *open = None;
-                    out.paragraph(taken, role, budget);
+                    out.paragraph(taken, role, cx);
                 }
                 Slot::Free => {
                     *open = None;
-                    out.paragraph(taken, None, budget);
+                    out.paragraph(taken, None, cx);
                 }
                 Slot::Cell { .. } => {}
             }
@@ -972,8 +1042,8 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
             current_slot = Slot::Free;
             if tables_done.insert(*table) {
                 open_list = None;
-                if let Some(t) = tagged_table(tree, cx.tables, *table, &cells, budget, out) {
-                    out.blocks.push(t);
+                if let Some(t) = tagged_table(tree, *table, &cells, cx, out) {
+                    out.push(t, cx.budget);
                 }
             }
             continue;
@@ -1055,14 +1125,13 @@ impl Tables {
 /// leading rows made only of `TH` cells. The work is bounded by the cells on the page.
 fn tagged_table(
     tree: &StructTree,
-    tables: &Tables,
     table: usize,
     cells: &HashMap<usize, Vec<&Run>>,
-    budget: &Budget,
+    cx: &Context<'_>,
     out: &mut Built,
 ) -> Option<Block> {
     let elems = &tree.elems;
-    let index = tables.rows(tree, table)?;
+    let index = cx.tables.rows(tree, table)?;
     let mut touched: Vec<usize> = cells
         .keys()
         .filter_map(|c| index.row_of.get(c).copied())
@@ -1081,7 +1150,7 @@ fn tagged_table(
             let inlines = if runs.is_empty() {
                 Vec::new()
             } else {
-                out.inlines(&runs, budget)?
+                out.inlines(&runs, cx)?
             };
             cells_out.push(Cell {
                 inlines,
@@ -1171,7 +1240,7 @@ mod tests {
             })
             .collect();
         let refs: Vec<&Run> = runs.iter().collect();
-        let built = inlines(&refs);
+        let built = inlines(&refs, &LinkRoom::new(u64::MAX));
         assert_eq!(built.len(), 1, "{built:?}");
         match &built[0] {
             Inline::Link {
@@ -1182,6 +1251,37 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn links_past_their_room_keep_their_text() {
+        let a: Rc<str> = Rc::from("https://example.org/a");
+        let b: Rc<str> = Rc::from("https://example.org/a-longer-target");
+        let runs: Vec<Run> = [("one", &a), (" two", &b), (" three", &b), (" four", &a)]
+            .into_iter()
+            .enumerate()
+            .map(|(k, (t, u))| Run {
+                bold: k == 2,
+                uri: Some(u.clone()),
+                ..run(t, 0, 700.0, 10.0)
+            })
+            .collect();
+        let refs: Vec<&Run> = runs.iter().collect();
+        // Room for two copies of `a`, not for `a` and `b`.
+        let room = LinkRoom::new(2 * (a.len() as u64 + LINK_COST));
+        let built = inlines(&refs, &room);
+        assert!(
+            matches!(&built[0], Inline::Link { target, .. } if target == "https://example.org/a"),
+            "{built:?}"
+        );
+        assert!(
+            built[1..].iter().all(|i| !matches!(i, Inline::Link { .. })),
+            "{built:?}"
+        );
+        assert_eq!(rezzer_model::plain_text(&built), "one two three four");
+        // The link over the change of style is one link cut; the last link is cut too, though
+        // it would fit, as the room is spent.
+        assert_eq!(room.cut(), Some((2, 1, 1)));
     }
 
     #[test]
@@ -1220,6 +1320,7 @@ mod tests {
             roles: &|_| None,
             budget: &budget,
             tables: &Tables::default(),
+            links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(1, Some(842.0), runs, &cx);
         let texts: Vec<String> = laid
@@ -1316,6 +1417,7 @@ mod tests {
             roles: &roles,
             budget: &budget,
             tables: &tables,
+            links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(1, Some(842.0), runs, &cx);
         let text = |inlines: &[Inline]| rezzer_model::plain_text(inlines);
@@ -1407,6 +1509,7 @@ mod tests {
                 roles: &roles,
                 budget: &budget,
                 tables: &tables,
+                links: &LinkRoom::new(u64::MAX),
             };
             let laid = page_blocks(page as u32 + 1, None, runs, &cx);
             match laid.blocks.as_slice() {

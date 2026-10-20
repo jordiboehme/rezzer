@@ -1627,6 +1627,7 @@ dependencies = [
  "read-fonts",
  "rezzer-limits",
  "rezzer-model",
+ "rezzer-render",
  "skrifa",
  "unicode-bidi",
 ]

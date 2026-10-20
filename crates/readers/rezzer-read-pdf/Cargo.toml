@@ -20,3 +20,4 @@ unicode-bidi.workspace = true
 [dev-dependencies]
 flate2 = { workspace = true, features = ["zlib-rs"] }
 libc.workspace = true
+rezzer-render = { path = "../../rezzer-render" }
