@@ -38,6 +38,10 @@ fn latex_adds_parentheses_by_precedence() {
     assert_eq!(tex("=A1*-B1"), r"\mathrm{A1} \cdot (-\mathrm{B1})");
     assert_eq!(tex("=(A1/B1)^2"), r"(\frac{\mathrm{A1}}{\mathrm{B1}})^{2}");
     assert_eq!(tex("=A1*10%"), r"\mathrm{A1} \cdot 10\%");
+    // Grouping a reader would otherwise misread.
+    assert_eq!(tex("=(A1=B1)=C1"), r"(\mathrm{A1}=\mathrm{B1})=\mathrm{C1}");
+    assert_eq!(tex("=(2^3)%"), r"(2^{3})\%");
+    assert_eq!(tex("=-(-A1)"), r"-(-\mathrm{A1})");
 }
 
 #[test]
@@ -96,6 +100,8 @@ fn simple_sum_is_not_worth_math() {
         "=5",
         "=-A1",
         "=Sheet1!A1:Sheet1!B2",
+        "=A1&B1",
+        "=A1&\" \"&B1",
     ] {
         assert!(!worth(text), "{text}");
     }
@@ -106,6 +112,7 @@ fn simple_sum_is_not_worth_math() {
         "=A1^2",
         "=ROUND(A1,2)",
         "=A1%",
+        "=A1>B1",
     ] {
         assert!(worth(text), "{text}");
     }

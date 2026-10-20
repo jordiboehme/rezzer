@@ -29,7 +29,7 @@ For a whole workbook, `logic::Workbook` takes every formula, constant cell and d
 - Parameters: constant cells that formulas or names read, with how many formulas read them
 - A dependency graph on group level: groups, single formulas, parameter blocks, names and other workbooks
 
-Ranges are not expanded cell by cell, so `A:A` costs what the sheet holds. A stop callback ends the work early.
+Ranges are not expanded cell by cell, so `A:A` costs what the sheet holds. Tables added with `add_table` let structured references like `Sales[Price]` and `[@Qty]` resolve to cells. A stop callback ends the work early.
 
 `latex` writes a formula as LaTeX math that KaTeX can show (`=B2*C2/1000` becomes `\frac{\mathrm{B2} \cdot \mathrm{C2}}{1000}`). `worth_math` tells if a formula is more than a sum or a single reference. Text from the file is escaped, so it never becomes a TeX command.
 

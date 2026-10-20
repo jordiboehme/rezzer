@@ -6,7 +6,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use formulakit::logic::{FormulaId, Logic, ParamCell, Role, Workbook};
+use formulakit::logic::{FormulaId, Logic, ParamCell, Role, TableArea, Workbook};
 use formulakit::{CellPos, Dialect, analyze};
 
 /// Counts the heap of the thread that allocates, so tests that run side by side do not
@@ -371,23 +371,223 @@ fn many_names_resolve_fast() {
     assert!(logic.parameters.iter().all(|p| p.read_by == 4));
 }
 
-#[test]
-fn stop_in_the_middle_keeps_only_certain_roles() {
+/// 20,000 running totals `=SUM($B$2:Bn)` with constants in column B.
+fn running_totals(rows: u32) -> (Workbook, Vec<FormulaId>) {
     let mut wb = Workbook::new();
-    for row in 1..=20_000u32 {
+    let mut ids = Vec::new();
+    for row in 1..=rows {
         wb.add_constant("S", CellPos { row, col: 1 });
         let at = CellPos { row, col: 2 };
         let a = analyze(&format!("=SUM($B$2:B{})", row + 1), Dialect::Excel, at)
             .expect("formula parses");
-        wb.add_formula("S", at, &a);
+        ids.push(wb.add_formula("S", at, &a));
     }
-    let calls = Cell::new(0u32);
-    let logic = wb.finish(&|| {
-        calls.set(calls.get() + 1);
-        calls.get() > 50
-    });
+    (wb, ids)
+}
+
+#[test]
+fn stop_in_the_middle_keeps_only_certain_roles() {
+    let run = || {
+        let (wb, _) = running_totals(20_000);
+        let calls = Cell::new(0u32);
+        wb.finish(&|| {
+            calls.set(calls.get() + 1);
+            calls.get() > 5
+        })
+    };
+    let logic = run();
     assert!(logic.stopped);
     assert!(logic.roles.iter().all(|(_, r)| *r != Role::Result));
-    assert!(logic.parameters.is_empty());
-    assert!(logic.graph.nodes.is_empty());
+    // Groups need no read work and survive a stop.
+    assert_eq!(logic.groups.len(), 1);
+    assert_eq!(logic.groups[0].area, "C2:C20001");
+    // What survives a stop does not depend on hash order.
+    assert_eq!(logic, run());
+}
+
+#[test]
+fn running_totals_stay_near_linear() {
+    let start = Instant::now();
+    let (wb, ids) = running_totals(100_000);
+    let logic = wb.finish(&never);
+    let took = start.elapsed();
+    eprintln!("running_totals_stay_near_linear: {took:?}");
+    assert!(took < Duration::from_secs(2), "took {took:?}");
+    assert!(!logic.stopped);
+    assert_eq!(logic.groups.len(), 1);
+    assert_eq!(logic.parameters.len(), 100_000);
+    assert_eq!(logic.parameters[0].read_by, 100_000);
+    assert_eq!(logic.parameters[99_999].read_by, 1);
+    assert!(ids.iter().all(|id| role(&logic, *id) == Role::Result));
+    assert_eq!(logic.graph.nodes.len(), 2);
+    assert_eq!(
+        logic.graph.edges,
+        vec![("v1".to_string(), "p1".to_string())]
+    );
+}
+
+#[test]
+fn deep_name_chain_on_a_small_stack() {
+    let worker = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let mut wb = Workbook::new();
+            wb.add_constant("In", at("A1"));
+            let first = analyze("=In!$A$1", Dialect::Excel, at("A1")).expect("ok");
+            wb.add_name("nm_0", None, Some(&first));
+            for k in 1..100_000 {
+                let a = analyze(&format!("=nm_{}", k - 1), Dialect::Excel, at("A1")).expect("ok");
+                wb.add_name(&format!("nm_{k}"), None, Some(&a));
+            }
+            formula(&mut wb, "Calc", "A1", "=nm_99999*2");
+            wb.finish(&never)
+        })
+        .expect("thread starts");
+    let logic = worker.join().expect("no stack overflow");
+    assert_eq!(logic.parameters, vec![param("In", "A1", 1)]);
+}
+
+#[test]
+fn chained_names_memory_is_bounded() {
+    let (logic, peak) = peak_heap(|| {
+        let mut wb = Workbook::new();
+        for k in 0..6_000u32 {
+            wb.add_constant("In", CellPos { row: k, col: 0 });
+            let text = if k == 0 {
+                "=In!$A$1".to_string()
+            } else {
+                format!("=nm_{}+In!$A${}", k - 1, k + 1)
+            };
+            let a = analyze(&text, Dialect::Excel, at("A1")).expect("ok");
+            wb.add_name(&format!("nm_{k}"), None, Some(&a));
+        }
+        formula(&mut wb, "Calc", "A1", "=nm_5999");
+        wb.finish(&never)
+    });
+    eprintln!("chained_names_memory_is_bounded: peak heap {peak} bytes");
+    assert!(peak < 64 * 1024 * 1024, "peak heap {peak} bytes");
+    assert_eq!(logic.parameters.len(), 6_000);
+    assert!(logic.parameters.iter().all(|p| p.read_by == 1));
+}
+
+#[test]
+fn name_cycle_counts_every_cell() {
+    let mut wb = Workbook::new();
+    wb.add_constant("In", at("A1"));
+    wb.add_constant("In", at("A2"));
+    let a = analyze("=B_+In!$A$1", Dialect::Excel, at("A1")).expect("ok");
+    let b = analyze("=A_+In!$A$2", Dialect::Excel, at("A1")).expect("ok");
+    wb.add_name("A_", None, Some(&a));
+    wb.add_name("B_", None, Some(&b));
+    formula(&mut wb, "Calc", "A1", "=A_");
+    formula(&mut wb, "Calc", "A2", "=B_");
+    let logic = wb.finish(&never);
+    assert_eq!(
+        logic.parameters,
+        vec![param("In", "A1", 2), param("In", "A2", 2)]
+    );
+}
+
+#[test]
+fn tables_resolve_to_cells() {
+    let mut wb = Workbook::new();
+    for c in ["A1", "B1", "C1", "A2", "B2", "A3", "B3", "A4", "B4"] {
+        wb.add_constant("S", at(c));
+    }
+    wb.add_table(
+        "Sales",
+        "S",
+        TableArea {
+            start: at("A1"),
+            end: at("C4"),
+            header_rows: 1,
+            totals_rows: 0,
+            columns: vec!["Price".into(), "Qty".into(), "Total".into()],
+        },
+    );
+    let mut rows = Vec::new();
+    for r in 2..=4 {
+        // A formula inside the table may leave out the table name.
+        rows.push(formula(
+            &mut wb,
+            "S",
+            &format!("C{r}"),
+            "=[@Price]*Sales[@qty]",
+        ));
+    }
+    let total = formula(&mut wb, "S", "E1", "=SUM(Sales[Total])");
+    formula(&mut wb, "S", "E2", "=COUNTA(Sales[[#Headers],[Price]])");
+    formula(&mut wb, "S", "E3", "=SUM(Sales[Nope])");
+    let logic = wb.finish(&never);
+    assert!(
+        rows.iter()
+            .all(|id| role(&logic, *id) == Role::Intermediate)
+    );
+    assert_eq!(role(&logic, total), Role::Result);
+    assert_eq!(
+        logic.parameters,
+        vec![
+            param("S", "A1", 1),
+            param("S", "A2", 1),
+            param("S", "B2", 1),
+            param("S", "A3", 1),
+            param("S", "B3", 1),
+            param("S", "A4", 1),
+            param("S", "B4", 1),
+        ]
+    );
+    let nodes: Vec<(&str, &str, &str)> = logic
+        .graph
+        .nodes
+        .iter()
+        .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+        .collect();
+    assert_eq!(
+        nodes,
+        vec![
+            ("f1", "S!E1", "formula"),
+            ("p1", "S!C2:C4", "group"),
+            ("f2", "S!E2", "formula"),
+            ("f3", "S!E3", "formula"),
+            ("v1", "S!A2:B4", "parameters"),
+            ("v2", "S!A1", "parameters"),
+            ("n1", "table:Sales", "name"),
+        ]
+    );
+    assert!(
+        logic
+            .graph
+            .edges
+            .contains(&("p1".to_string(), "f1".to_string()))
+    );
+}
+
+#[test]
+fn bare_table_name_reads_its_data_rows() {
+    let mut wb = Workbook::new();
+    for c in ["A1", "A2", "A3", "A4"] {
+        wb.add_constant("S", at(c));
+    }
+    wb.add_table(
+        "T",
+        "S",
+        TableArea {
+            start: at("A1"),
+            end: at("A4"),
+            header_rows: 1,
+            totals_rows: 1,
+            columns: vec!["v".into()],
+        },
+    );
+    formula(&mut wb, "S", "C1", "=SUM(t)");
+    formula(&mut wb, "S", "C2", "=T[[#Totals],[v]]");
+    let logic = wb.finish(&never);
+    assert_eq!(
+        logic.parameters,
+        vec![
+            param("S", "A2", 1),
+            param("S", "A3", 1),
+            param("S", "A4", 1)
+        ]
+    );
 }

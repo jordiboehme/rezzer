@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use formulakit::{
-    Analysis, CellPos, Dialect, Ref, SheetSpan, Whole, analyze, anchor_of, quote_sheet,
+    Analysis, CellPos, Dialect, Ref, SheetSpan, TableRows, Whole, analyze, anchor_of, quote_sheet,
 };
 
 fn pos(row: u32, col: u32) -> CellPos {
@@ -144,11 +144,26 @@ fn names_tables_and_externals() {
         a.refs,
         vec![Ref::Table {
             name: "Table1".into(),
-            column: Some("c".into())
+            column: Some("c".into()),
+            rows: TableRows::DATA,
         }]
     );
     assert_eq!(anchors(&a, "z"), vec!["table:Table1"]);
     assert_eq!(a.functions, vec!["SUM"]);
+
+    // Row items: all rows, headers only, the formula's own row.
+    let rows = |text: &str| match excel(text).refs.first() {
+        Some(Ref::Table { rows, .. }) => *rows,
+        other => panic!("{other:?}"),
+    };
+    let all = rows("=COUNTA(Table1[[#All],[c]])");
+    assert!(all.headers && all.data && all.totals && !all.this_row);
+    let head = rows("=Table1[[#Headers],[c]]");
+    assert!(head.headers && !head.data && !head.totals);
+    assert!(rows("=Table1[@c]").this_row);
+    assert!(rows("=Table1[[#This Row],[c]]").this_row);
+    // A bare table name is a name to the parser; the workbook logic resolves it.
+    assert!(matches!(excel("=SUM(Table1)").refs[0], Ref::Name { .. }));
 
     let a = excel("=[1]Sheet1!A1");
     assert_eq!(
@@ -462,6 +477,9 @@ fn range_operator_between_refs_folds() {
     let d3 = analyze("=SUM(B3:C3:B10)", Dialect::Excel, pos(2, 3)).unwrap();
     assert_eq!(d2.pattern_key, d3.pattern_key);
     assert_eq!(anchors(&d2, "s"), vec!["s!B2:C9"]);
+    // Sheet names match in any letter case.
+    let a = excel("=SUM(Sheet1!A1:sheet1!B2)");
+    assert_eq!(anchors(&a, "s"), vec!["Sheet1!A1:B2"]);
     // Different sheets are not folded: both ends stay references.
     let a = excel("=SUM(Sheet1!A1:Sheet2!B2)");
     assert_eq!(anchors(&a, "s"), vec!["Sheet1!A1", "Sheet2!B2"]);

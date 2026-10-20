@@ -9,12 +9,13 @@
 use std::ops::Range;
 
 use formualizer_parse::parser::{
-    BinaryOperator, ExternalRefKind, ReferenceType, TableSpecifier, UnaryOperator,
+    BinaryOperator, ExternalRefKind, ReferenceType, SpecialItem, TableRowSpecifier, TableSpecifier,
+    UnaryOperator,
 };
 use formualizer_parse::{ASTNode, ASTNodeType, FormulaDialect, LiteralValue, Parser, ParserLimits};
 
 use crate::ParseError;
-use crate::refs::{CellPos, MAX_COL, MAX_ROW, Ref, SheetSpan, Whole};
+use crate::refs::{CellPos, MAX_COL, MAX_ROW, Ref, SheetSpan, TableRows, Whole};
 
 /// What a reference token names.
 pub(crate) enum Target {
@@ -295,11 +296,28 @@ fn corners(r: &Ref) -> Option<Corners<'_>> {
     }
 }
 
+/// Sheet names are case-insensitive in Excel.
+fn same_sheet(a: Option<&SheetSpan>, b: Option<&SheetSpan>) -> bool {
+    let eq = |x: &str, y: &str| x.to_uppercase() == y.to_uppercase();
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            eq(&a.first, &b.first)
+                && match (&a.last, &b.last) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => eq(x, y),
+                    _ => false,
+                }
+        }
+        _ => false,
+    }
+}
+
 /// The bounding range of two cells or ranges on the same sheet, if they are on one.
 fn bounding(a: &Ref, b: &Ref) -> Option<Ref> {
     let (s1, e1, f1, w1, sh1) = corners(a)?;
     let (s2, e2, f2, w2, sh2) = corners(b)?;
-    if sh1 != sh2 {
+    if !same_sheet(sh1.as_ref(), sh2.as_ref()) {
         return None;
     }
     // Each coordinate keeps the `$` flag of the reference it comes from.
@@ -526,8 +544,67 @@ fn target(reference: &ReferenceType) -> Target {
         ReferenceType::Table(table) => Target::Ref(Ref::Table {
             name: table.name.clone(),
             column: table.specifier.as_ref().and_then(column),
+            rows: table
+                .specifier
+                .as_ref()
+                .and_then(row_items)
+                .unwrap_or(TableRows::DATA),
         }),
         ReferenceType::NamedRange(name) => Target::Name(name.clone()),
+    }
+}
+
+const NO_ROWS: TableRows = TableRows {
+    headers: false,
+    data: false,
+    totals: false,
+    this_row: false,
+};
+
+/// The rows a table specifier names explicitly, if it names any.
+fn row_items(spec: &TableSpecifier) -> Option<TableRows> {
+    let all = TableRows {
+        headers: true,
+        data: true,
+        totals: true,
+        this_row: false,
+    };
+    let only = |f: fn(&mut TableRows)| {
+        let mut r = NO_ROWS;
+        f(&mut r);
+        Some(r)
+    };
+    match spec {
+        TableSpecifier::All
+        | TableSpecifier::SpecialItem(SpecialItem::All)
+        | TableSpecifier::Row(TableRowSpecifier::All) => Some(all),
+        TableSpecifier::Data
+        | TableSpecifier::SpecialItem(SpecialItem::Data)
+        | TableSpecifier::Row(TableRowSpecifier::Data | TableRowSpecifier::Index(_)) => {
+            Some(TableRows::DATA)
+        }
+        TableSpecifier::Headers
+        | TableSpecifier::SpecialItem(SpecialItem::Headers)
+        | TableSpecifier::Row(TableRowSpecifier::Headers) => only(|r| r.headers = true),
+        TableSpecifier::Totals
+        | TableSpecifier::SpecialItem(SpecialItem::Totals)
+        | TableSpecifier::Row(TableRowSpecifier::Totals) => only(|r| r.totals = true),
+        TableSpecifier::SpecialItem(SpecialItem::ThisRow)
+        | TableSpecifier::Row(TableRowSpecifier::Current) => only(|r| r.this_row = true),
+        TableSpecifier::Combination(parts) => {
+            let mut found: Option<TableRows> = None;
+            for p in parts {
+                if let Some(r) = row_items(p) {
+                    let acc = found.get_or_insert(NO_ROWS);
+                    acc.headers |= r.headers;
+                    acc.data |= r.data;
+                    acc.totals |= r.totals;
+                    acc.this_row |= r.this_row;
+                }
+            }
+            found
+        }
+        _ => None,
     }
 }
 

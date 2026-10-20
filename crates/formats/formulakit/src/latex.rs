@@ -60,9 +60,13 @@ fn has_math(node: &Node) -> bool {
             UnOp::Percent | UnOp::Other => true,
         },
         Node::Binary { op, left, right } => match op {
-            BinOp::Add | BinOp::Sub | BinOp::Range | BinOp::Union | BinOp::Intersect => {
-                has_math(left) || has_math(right)
-            }
+            // Joining text with `&` is not math.
+            BinOp::Add
+            | BinOp::Sub
+            | BinOp::Concat
+            | BinOp::Range
+            | BinOp::Union
+            | BinOp::Intersect => has_math(left) || has_math(right),
             _ => true,
         },
         Node::Array(rows) => rows.iter().flatten().any(has_math),
@@ -232,12 +236,13 @@ fn render(node: &Node, src: &str) -> Tex {
                 UnOp::Minus | UnOp::Plus => {
                     let sign = if *op == UnOp::Minus { "-" } else { "+" };
                     Tex {
-                        text: format!("{sign}{}", operand(inner, NEG)),
+                        text: format!("{sign}{}", right(inner, NEG)),
                         prec: NEG,
                         signed: true,
                     }
                 }
-                UnOp::Percent => tex(format!(r"{}\%", operand(inner, PERCENT)), PERCENT),
+                // `(2^3)%`, not `2^{3}\%`, which reads like a percent exponent.
+                UnOp::Percent => tex(format!(r"{}\%", operand(inner, POW + 1)), PERCENT),
                 UnOp::Spill => tex(format!(r"{}\#", operand(inner, ATOM)), ATOM),
                 UnOp::At => tex(format!("@{}", operand(inner, ATOM)), ATOM),
                 // `latex` refuses trees with unknown operators before rendering.
@@ -248,8 +253,10 @@ fn render(node: &Node, src: &str) -> Tex {
             let (l, r) = (render(left, src), render(r, src));
             let infix = |sym: &str, prec: u8, l: Tex, r: Tex, right_min: u8| {
                 let signed = l.signed && l.prec >= prec;
+                // `(A1=B1)=C1` keeps its parentheses: a chain reads like "all equal".
+                let left_min = if prec == CMP { CMP + 1 } else { prec };
                 Tex {
-                    text: format!("{}{sym}{}", operand(l, prec), right(r, right_min)),
+                    text: format!("{}{sym}{}", operand(l, left_min), right(r, right_min)),
                     prec,
                     signed,
                 }

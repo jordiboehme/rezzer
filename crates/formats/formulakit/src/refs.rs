@@ -35,6 +35,27 @@ pub enum Whole {
     Cols,
 }
 
+/// Which rows of a table a structured reference reads: `Table1[c]` reads the data rows,
+/// `Table1[[#All],[c]]` all three parts, `Table1[@c]` the data row of the formula cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TableRows {
+    pub headers: bool,
+    pub data: bool,
+    pub totals: bool,
+    /// Only the row of the formula cell (`@`, `[#This Row]`).
+    pub this_row: bool,
+}
+
+impl TableRows {
+    /// The data rows, what a reference without a row item reads.
+    pub const DATA: TableRows = TableRows {
+        headers: false,
+        data: true,
+        totals: false,
+        this_row: false,
+    };
+}
+
 /// Something a formula reads.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ref {
@@ -58,10 +79,12 @@ pub enum Ref {
     Name { name: String, sheet: Option<String> },
     /// A structured table reference. `name` is empty when a formula inside the table leaves
     /// it out (`[@c]`); the workbook reader knows which table that is. `column` is the
-    /// column (or `first:last` for a column span) when the reference names one.
+    /// column (or `first:last` for a column span) when the reference names one. `rows` tells
+    /// which rows it reads.
     Table {
         name: String,
         column: Option<String>,
+        rows: TableRows,
     },
     /// A reference into another workbook. `book` is written as in the formula: `[1]` (an
     /// index into the workbook's external links) or a path with the file name in brackets.

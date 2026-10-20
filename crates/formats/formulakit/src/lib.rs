@@ -40,7 +40,9 @@ use std::ops::Range;
 
 use engine::{Node, Target};
 pub use latex::{latex, worth_math};
-pub use refs::{CellPos, MAX_COL, MAX_ROW, Ref, SheetSpan, Whole, anchor_of, quote_sheet};
+pub use refs::{
+    CellPos, MAX_COL, MAX_ROW, Ref, SheetSpan, TableRows, Whole, anchor_of, quote_sheet,
+};
 
 /// The syntax a formula is written in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
