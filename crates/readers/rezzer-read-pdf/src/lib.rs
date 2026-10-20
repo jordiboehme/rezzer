@@ -28,7 +28,7 @@ use rezzer_model::{
     source_info,
 };
 
-use layout::{Context, PageText, Run, Style};
+use layout::{Context, PageText, Run, Style, Tables};
 use text::{Extracted, PageItems};
 
 /// Reads PDF files.
@@ -148,9 +148,23 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
     } else {
         None
     };
+    let tables = Tables::default();
     let mut halted = false;
     for info in pages {
         let n = info.number;
+        // The section and its marker.
+        if let Err(hit) = budget.add_elements(2) {
+            // A page that hit the limit already said so.
+            if !halted {
+                out.loss(
+                    format!("p{n}"),
+                    format!("{hit}: this and the later pages are not read"),
+                    LossReason::Limit,
+                    Severity::Warning,
+                );
+            }
+            break;
+        }
         let mut blocks = vec![Block::Paragraph {
             inlines: vec![Inline::Status {
                 text: marker(info),
@@ -166,6 +180,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 tree,
                 roles: &roles,
                 budget,
+                tables: &tables,
             };
             if items.links_cut {
                 out.loss(

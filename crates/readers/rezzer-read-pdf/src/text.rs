@@ -33,7 +33,23 @@ type Link = ([f32; 4], String);
 /// Region that covers any page: PDF pages are at most 14,400 points on a side.
 const WHOLE_PAGE: [f32; 4] = [-14_400.0, -14_400.0, 14_400.0, 14_400.0];
 
-/// What pdf-inspector found on one page.
+/// What the text parser found on one page. Any text layer that fills it must keep this
+/// contract, because the layout has no reading order logic of its own:
+///
+/// - `runs` come in reading order, one column after the other: a column is read to its end
+///   before the next one starts. Text that does not read along the x axis (margin notes,
+///   stamps) comes after the rest of the page.
+/// - The runs of one visual line are next to each other and share [`Run::line`]; line numbers
+///   grow in reading order on the page. `invisible` runs number their lines the same way, in
+///   their own order.
+/// - Inside a line, a run that starts a new word begins with a space; a run that goes on a
+///   word (a kerning split, a style change inside a word) does not. The first run of a line
+///   needs no space.
+/// - Coordinates are points in the visible page box, origin at its lower left corner, `y`
+///   upward, `/Rotate` not applied: `y` lies between 0 and the page height, which running
+///   header and footer detection relies on. When the frame was turned to make the text read
+///   left to right, `turned` is set and the coordinates are not page coordinates.
+/// - Text that puts no glyphs on the page (render mode 3 or 7) is never in `runs`.
 #[derive(Debug, Default)]
 pub(crate) struct PageItems {
     pub page: u32,
@@ -43,15 +59,18 @@ pub(crate) struct PageItems {
     pub images: Vec<[f32; 4]>,
     /// Text that puts no glyphs on the page (render mode 3 or 7), in reading order.
     pub invisible: Vec<Run>,
-    /// Runs in render mode 3 among `invisible`.
+    /// Runs in render mode 3 among `invisible`. The object layer counts the mode 3 text
+    /// operators of the page; the difference is reported as not read.
     pub mode3_runs: u64,
     /// The lines of an invisible text layer (render mode 3) on a page without visible text,
-    /// as an OCR program writes it behind a scan.
+    /// as an OCR program writes it behind a scan. Filled only for pages whose `runs` and
+    /// `invisible` are empty; when it is filled, the page's mode 3 text counts as read.
     pub hidden_layer: Vec<String>,
     /// The page has more URI links than were matched to its runs.
     pub links_cut: bool,
-    /// pdf-inspector turned the page's frame a quarter so its text reads left to right; the
-    /// coordinates are not page coordinates then.
+    /// The text parser turned the page's frame a quarter so its text reads left to right;
+    /// the coordinates are not page coordinates then, and no running header or footer is
+    /// looked for.
     pub turned: bool,
 }
 

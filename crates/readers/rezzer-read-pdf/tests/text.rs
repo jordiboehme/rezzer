@@ -240,6 +240,155 @@ fn repeated_line_inside_the_text_stays_text() {
     }
 }
 
+/// The paragraphs of a page with their roles, without the marker.
+fn roles_of(out: &ReadOutcome, n: u32) -> Vec<(Option<String>, String)> {
+    page(out, n)
+        .iter()
+        .skip(1)
+        .filter_map(|b| match b {
+            Block::Paragraph { inlines, role, .. } => Some((role.clone(), plain_text(inlines))),
+            Block::Heading { inlines, .. } => Some((Some("heading".into()), plain_text(inlines))),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn edge_line_that_is_also_body_text_stays_text() {
+    // As in a control catalog: a table continues over pages 1 to 3 and repeats its column
+    // titles below the running header; a section label ends pages 1 to 3 above the footer.
+    // On page 4 the same lines stand in the middle of the text.
+    let pages: Vec<Page> = (1..=4u32)
+        .map(|n| {
+            let mut c = show("F1", 9.0, 72.0, 815.0, "ACME Control Catalog");
+            if n < 4 {
+                c += &show("F1", 10.0, 72.0, 780.0, "CONTROL NAME");
+                c += &show(
+                    "F1",
+                    10.0,
+                    72.0,
+                    500.0,
+                    &format!("Row text {n} of the table."),
+                );
+                c += &show("F1", 10.0, 72.0, 110.0, "Related Controls: None.");
+            } else {
+                c += &show("F1", 10.0, 72.0, 600.0, "Some text before the table.");
+                c += &show("F1", 10.0, 72.0, 500.0, "CONTROL NAME");
+                c += &show("F1", 10.0, 72.0, 480.0, "Related Controls: None.");
+                c += &show("F1", 10.0, 72.0, 460.0, "Some text after the label.");
+            }
+            c += &show("F1", 9.0, 280.0, 30.0, &format!("Page {n} of 4"));
+            Page::text(c)
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=3u32 {
+        let roles = roles_of(&out, n);
+        assert_eq!(
+            roles.first(),
+            Some(&(Some("page-header".into()), "ACME Control Catalog".into())),
+            "page {n}: {roles:?}"
+        );
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), format!("Page {n} of 4"))),
+            "page {n}: {roles:?}"
+        );
+        for text in ["CONTROL NAME", "Related Controls: None."] {
+            assert!(
+                roles.iter().any(|(r, t)| r.is_none() && t == text),
+                "page {n}: {text} is not body text: {roles:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bare_page_numbers_stay_footers_beside_numbers_in_the_text() {
+    let pages: Vec<Page> = (1..=3u32)
+        .map(|n| {
+            Page::text(format!(
+                "{}{}{}",
+                show(
+                    "F1",
+                    11.0,
+                    72.0,
+                    500.0,
+                    &format!("Body {} words.", ["one", "two", "three"][n as usize - 1])
+                ),
+                show("F1", 11.0, 72.0, 450.0, &format!("{}", n + 4)),
+                show("F1", 9.0, 290.0, 30.0, &n.to_string()),
+            ))
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=3u32 {
+        assert_eq!(
+            roles_of(&out, n).last(),
+            Some(&(Some("page-footer".into()), n.to_string())),
+            "page {n}"
+        );
+    }
+}
+
+#[test]
+fn header_heights_a_fraction_apart_are_one_header() {
+    // On exactly three pages, with middles 0.2 points apart across a multiple of 4 points.
+    let ys = [797.4, 797.6, 797.4];
+    let pages: Vec<Page> = ys
+        .iter()
+        .enumerate()
+        .map(|(i, y)| {
+            Page::text(format!(
+                "{}{}",
+                show("F1", 9.0, 72.0, *y, "ACME Quarterly Report"),
+                show(
+                    "F1",
+                    11.0,
+                    72.0,
+                    500.0,
+                    &format!("Body {} words.", ["one", "two", "three"][i])
+                ),
+            ))
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=3u32 {
+        assert_eq!(
+            roles_of(&out, n).first(),
+            Some(&(Some("page-header".into()), "ACME Quarterly Report".into())),
+            "page {n}"
+        );
+    }
+}
+
+#[test]
+fn page_sections_count_against_the_element_limit() {
+    // The page walk of the open stays under the limit; two elements per page do not.
+    let pages = vec![Page::text(String::new()); 900];
+    let limits = Limits {
+        max_elements: 1_000,
+        ..Limits::default()
+    };
+    let out = read_with(&pdf(&pages, ""), limits);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let sections = out
+        .document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { .. }))
+        .count();
+    assert!(sections <= 500, "{sections} sections");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("elements")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
 #[test]
 fn latex_page_numbers_are_footers() {
     // pdflatex sets the page number about 90 points above the bottom of an A4 page.
