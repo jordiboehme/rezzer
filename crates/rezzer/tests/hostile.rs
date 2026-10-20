@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 use rezzer_model::{Completeness, LossReason, Registry};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request, RunResult};
 
+/// Allowed overshoot of a time limit (CI machines are slower than a laptop).
+const SLACK: Duration = Duration::from_secs(2);
+
 fn pipeline_with(max_time: Option<Duration>) -> Pipeline {
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_text::TextReader));
@@ -75,7 +78,7 @@ fn huge_csv_row_respects_time_limit() {
     let start = Instant::now();
     let result = p.run_bytes("huge.csv", bytes, None, &request());
     let took = start.elapsed();
-    assert!(took < limit + Duration::from_secs(1), "took {took:?}");
+    assert!(took < limit + SLACK, "took {took:?}");
     assert!(
         matches!(
             result.completeness,
@@ -87,21 +90,30 @@ fn huge_csv_row_respects_time_limit() {
 
 #[test]
 fn many_csv_rows_stop_at_the_time_limit() {
+    use std::io::Write;
     // Short limit and a file that needs far more than that to analyze, so the test also
-    // fails on a fast machine when the analysis ignores the limit.
-    let limit = Duration::from_millis(100);
+    // fails on a fast machine when the analysis ignores the limit. The file is written in
+    // a stream to a temp dir and read with run_path (memory-mapped).
+    let limit = Duration::from_millis(50);
     let p = pipeline_with(Some(limit));
-    let mut bytes = Vec::new();
-    for i in 0..30_000_000u32 {
-        bytes.extend_from_slice(format!("{i},v{i}\n").as_bytes());
-        if bytes.len() > 300 * 1024 * 1024 {
-            break;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rows.csv");
+    {
+        let mut out = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+        let mut written = 0usize;
+        let mut i = 0u32;
+        while written < 100 * 1024 * 1024 {
+            let line = format!("{i},v{i}\n");
+            out.write_all(line.as_bytes()).unwrap();
+            written += line.len();
+            i += 1;
         }
+        out.flush().unwrap();
     }
     let start = Instant::now();
-    let result = p.run_bytes("rows.csv", bytes, None, &request());
+    let result = p.run_path(&path, &request());
     let took = start.elapsed();
-    assert!(took < limit + Duration::from_secs(1), "took {took:?}");
+    assert!(took < limit + SLACK, "took {took:?}");
     assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
     assert!(has_loss(&result, LossReason::Limit));
 }

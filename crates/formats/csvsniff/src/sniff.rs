@@ -196,9 +196,26 @@ impl Pick {
     }
 }
 
+/// Sniffing looks at most at this many bytes from the start (and at most [`SAMPLE_RECORDS`]
+/// records), so one huge record cannot make it slow.
+const SNIFF_MAX_BYTES: usize = 1024 * 1024;
+
+/// The first `max` bytes of `text`, cut at a character boundary.
+fn head(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 /// Detects the CSV dialect of already-decoded text.
 ///
-/// Tries tab, semicolon, pipe and comma on the first 200 records and picks
+/// Tries tab, semicolon, pipe and comma on the first 200 records (within the first 1 MiB)
+/// and picks
 /// the delimiter whose most common field count (at least 2) covers the
 /// largest share of records; on equal share and count, the delimiter whose
 /// cells more often look numeric wins, then tab, `;`, `|`, `,` in that order.
@@ -211,7 +228,7 @@ impl Pick {
 /// records exist (a ragged or broken file; `consistent_rows` keeps the real
 /// share). The header flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
-    let text = strip_bom(text);
+    let text = head(strip_bom(text), SNIFF_MAX_BYTES);
     if looks_like_other_format(text) {
         return None;
     }

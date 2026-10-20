@@ -577,3 +577,22 @@ fn analyze_until_stops_early_and_says_so() {
     assert!(!whole.truncated);
     assert_eq!(whole.rows, 50_000);
 }
+
+#[test]
+fn sniff_looks_only_at_the_first_mebibyte() {
+    // A normal start, then a record of 64 MiB: sniffing must not scan it.
+    let mut text = String::from("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
+    text.push_str(&"x".repeat(64 * 1024 * 1024));
+    text.push('\n');
+    let start = std::time::Instant::now();
+    let d = sniff(&text).expect("dialect from the start of the text");
+    assert_eq!(d.delimiter, b',');
+    assert!(
+        start.elapsed() < std::time::Duration::from_millis(150),
+        "{:?}",
+        start.elapsed()
+    );
+    // Multi-byte text cut at the cap must not panic.
+    let wide = "é,ö\n".repeat(400_000);
+    assert!(sniff(&wide).is_some());
+}
