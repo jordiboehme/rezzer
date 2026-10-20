@@ -67,6 +67,16 @@ fn wide(s: &str) -> Vec<u8> {
 
 /// `workbook.bin` with the sheets (name, relationship id) and defined names (name, rgce).
 fn workbook_bin(sheets: &[(&str, &str)], names: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    workbook_bin_with(sheets, names, sheets.len())
+}
+
+/// Like `workbook_bin`, with `entries` 3D reference entries (entry i names sheet i modulo
+/// the sheet count).
+fn workbook_bin_with(
+    sheets: &[(&str, &str)],
+    names: &[(&str, Vec<u8>)],
+    entries: usize,
+) -> Vec<u8> {
     let mut out = rec(0x0083, &[]); // BrtBeginBook
     out.extend(rec(0x0099, &[0; 4])); // BrtWbProp
     out.extend(rec(0x008F, &[])); // BrtBeginBundleShs
@@ -79,11 +89,12 @@ fn workbook_bin(sheets: &[(&str, &str)], names: &[(&str, Vec<u8>)]) -> Vec<u8> {
     }
     out.extend(rec(0x0090, &[])); // BrtEndBundleShs
     // BrtExternSheet: one reference entry per sheet, for 3D references.
-    let mut xti = (sheets.len() as u32).to_le_bytes().to_vec();
-    for i in 0..sheets.len() as i32 {
+    let mut xti = (entries as u32).to_le_bytes().to_vec();
+    for i in 0..entries {
+        let sheet = (i % sheets.len().max(1)) as i32;
         xti.extend(0u32.to_le_bytes());
-        xti.extend(i.to_le_bytes());
-        xti.extend(i.to_le_bytes());
+        xti.extend(sheet.to_le_bytes());
+        xti.extend(sheet.to_le_bytes());
     }
     out.extend(rec(0x016A, &xti));
     for (name, rgce) in names {
@@ -651,6 +662,116 @@ fn xlsb_record_longer_than_its_part_is_refused() {
             .losses
             .iter()
             .any(|l| l.why == LossReason::Damaged && l.what.contains("record")),
+        "{:#?}",
+        out.document.losses
+    );
+}
+
+/// A sheet part with these records inside the sheet data.
+fn sheet_with_records(records: &[Vec<u8>]) -> Vec<u8> {
+    let mut sheet = rec(0x0081, &[]);
+    sheet.extend(rec(0x0094, &[0; 16]));
+    sheet.extend(rec(0x0091, &[]));
+    sheet.extend(rec(0x0000, &[0; 17]));
+    for r in records {
+        sheet.extend(r);
+    }
+    sheet.extend(rec(0x0092, &[]));
+    sheet.extend(rec(0x0082, &[]));
+    sheet
+}
+
+#[test]
+fn xlsb_value_record_shorter_than_its_fields_is_refused() {
+    // A long string cell fills calamine's buffer; the next real cell has only its column
+    // and style, so calamine would read its number from the bytes left over.
+    let mut long = 0u32.to_le_bytes().to_vec();
+    long.extend(0u32.to_le_bytes());
+    long.extend(wide(&"x".repeat(40)));
+    let mut short = 1u32.to_le_bytes().to_vec();
+    short.extend(0u32.to_le_bytes());
+    // A string cell claiming 1,000 characters in a 20-byte record.
+    let mut string = 2u32.to_le_bytes().to_vec();
+    string.extend(0u32.to_le_bytes());
+    string.extend(1_000u32.to_le_bytes());
+    string.extend([b'a', 0, b'b', 0]);
+    for bad in [
+        rec(0x0005, &short),
+        rec(0x0006, &string),
+        rec(0x0002, &short),
+    ] {
+        let sheet = sheet_with_records(&[rec(0x0006, &long), bad]);
+        let out = read_xlsb(xlsb(&[("S", sheet)], &[]));
+        assert_eq!(
+            out.completeness,
+            Completeness::Partial,
+            "{:#?}",
+            out.document.losses
+        );
+        assert!(
+            has_loss(&out.document, LossReason::Damaged, "S", "shorter"),
+            "{:#?}",
+            out.document.losses
+        );
+        assert!(
+            paragraphs(section(&out.document, "S"))
+                .contains(&"This sheet was not read.".to_string())
+        );
+    }
+}
+
+#[test]
+fn xlsb_too_many_3d_reference_entries_are_refused() {
+    let sheet = sheet_bin(&[(0, vec![C::Num(0, 1.0)])]);
+    let book = |entries: usize, name: &str| {
+        zip_of(&[
+            ("_rels/.rels", rels(&[("rId1", BIN_DOC, "xl/workbook.bin")])),
+            (
+                "xl/workbook.bin",
+                workbook_bin_with(&[(name, "rId1")], &[], entries),
+            ),
+            (
+                "xl/_rels/workbook.bin.rels",
+                rels(&[("rId1", BIN_SHEET, "worksheets/sheet1.bin")]),
+            ),
+            ("xl/worksheets/sheet1.bin", sheet.clone()),
+        ])
+    };
+    // More than 65,536 entries. The repeated entries compress far past the ratio limit.
+    let wide_ratio = Limits {
+        max_ratio: 1_000_000,
+        ..Limits::default()
+    };
+    let out = read_as(book(70_000, "S"), "book.xlsb", FormatId::Xlsb, wide_ratio);
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(
+        whole_file_loss(&out, LossReason::Limit, "3D reference entries"),
+        "{:#?}",
+        out.document.losses
+    );
+    // 20,000 copies of a 2,000 character name, over a 16 MB memory limit.
+    let limits = Limits {
+        max_memory_bytes: 16 << 20,
+        max_ratio: 1_000_000,
+        ..Limits::default()
+    };
+    let out = read_as(
+        book(20_000, &"n".repeat(2_000)),
+        "book.xlsb",
+        FormatId::Xlsb,
+        limits.clone(),
+    );
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(
+        whole_file_loss(&out, LossReason::Limit, "memory"),
+        "{:#?}",
+        out.document.losses
+    );
+    // A few entries read.
+    let out = read_as(book(3, "S"), "book.xlsb", FormatId::Xlsb, limits);
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
         "{:#?}",
         out.document.losses
     );

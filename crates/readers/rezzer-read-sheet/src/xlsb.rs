@@ -47,6 +47,9 @@ const NOT_READ: &str = "not read for XLSB: validation, conditional formats, note
 /// The formats Rezzer gives the dates calamine finds, by format key.
 const DATE_CODES: [&str; 4] = ["yyyy-mm-dd", "yyyy-mm-dd hh:mm:ss", "hh:mm:ss", "[h]:mm:ss"];
 
+/// Most 3D reference entries a workbook may list.
+const MAX_EXTERN_ENTRIES: u64 = 65_536;
+
 /// Cells read between two checks of the time limit.
 const CHECK_EVERY: u64 = 1_024;
 
@@ -274,6 +277,34 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     }
     // calamine parses the formulas of the defined names when it opens the workbook.
     let widths = widths(&book);
+    // It also copies a sheet name for every 3D reference entry.
+    if book.extern_entries > MAX_EXTERN_ENTRIES {
+        return refuse(
+            out,
+            (
+                LossReason::Limit,
+                format!(
+                    "{WORKBOOK} lists {} 3D reference entries, more than {MAX_EXTERN_ENTRIES}",
+                    book.extern_entries
+                ),
+            ),
+        );
+    }
+    let extern_bytes = book
+        .extern_entries
+        .saturating_mul(widths.sheet + std::mem::size_of::<String>() as u64);
+    if extern_bytes > lim.max_memory_bytes {
+        return refuse(
+            out,
+            (
+                LossReason::Limit,
+                format!(
+                    "the 3D reference entries would take about {extern_bytes} bytes of memory, more than the memory limit of {} bytes",
+                    lim.max_memory_bytes
+                ),
+            ),
+        );
+    }
     let mut names_text = 0u64;
     let mut names_work = 0u64;
     for (name, rgce) in &book.names {

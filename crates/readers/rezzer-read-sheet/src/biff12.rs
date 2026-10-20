@@ -25,7 +25,10 @@ const MAX_NESTING: usize = 64;
 /// Most bytes of formula text one token stream may produce.
 pub(crate) const MAX_FORMULA_OUT: u64 = 1 << 20;
 
-/// Most bytes calamine's parser may move (copies and inserts) for one token stream.
+/// Most bytes calamine's parser may move (copies and inserts) for one token stream. The
+/// walk counts one copy of the text so far per operator; a function token copies its
+/// arguments twice, so this bound is approximate (within a factor of two), a time bound
+/// rather than an exact one.
 const MAX_WORK: u64 = 1 << 28;
 
 /// Most bytes calamine's parser may move for all defined names together: they are parsed
@@ -131,6 +134,9 @@ pub(crate) struct Book {
     pub sheets: Vec<BookSheet>,
     /// Defined names with their formula tokens, as calamine parses them at open.
     pub names: Vec<(String, Vec<u8>)>,
+    /// The most 3D reference entries (`BrtExternSheet`) one record lists; calamine copies a
+    /// sheet name for each when it opens the workbook.
+    pub extern_entries: u64,
 }
 
 /// Records calamine takes as the end of the defined names.
@@ -174,7 +180,16 @@ pub(crate) fn read_book(bytes: &[u8]) -> Result<Book, String> {
         };
         match kind {
             0x016A => {
-                r.body()?;
+                let body = r.body()?;
+                let count = u32_at(body, 0).ok_or("a 3D reference table record is too short")?;
+                // calamine reads the entries from its buffer, which may hold bytes of an
+                // earlier record past this one.
+                if 4 + 12 * u64::from(count) > body.len() as u64 {
+                    return Err(format!(
+                        "a 3D reference table lists {count} entries, more than its record holds"
+                    ));
+                }
+                book.extern_entries = book.extern_entries.max(u64::from(count));
             }
             0x0027 => {
                 let body = r.body()?;
@@ -256,8 +271,8 @@ impl Walk {
         while let Some((&ptg, rest)) = rgce.split_first() {
             rgce = rest;
             let (skip, out, shift) = match ptg {
-                0x3a | 0x5a | 0x7a => (8, sheet + 16, false),
-                0x3b | 0x5b | 0x7b => (14, sheet + 28, false),
+                0x3a | 0x5a | 0x7a => (8, sheet + 17, false),
+                0x3b | 0x5b | 0x7b => (14, sheet + 34, false),
                 0x3c | 0x5c | 0x7c => (8, sheet + 6, false),
                 0x3d | 0x5d | 0x7d => (14, sheet + 6, false),
                 0x01 => (4, 0, false),
@@ -305,7 +320,7 @@ impl Walk {
                 }
                 0x23 | 0x43 | 0x63 => (4, self.widths.name, false),
                 0x24 | 0x44 | 0x64 => (6, 16, false),
-                0x25 | 0x45 | 0x65 => (12, 28, false),
+                0x25 | 0x45 | 0x65 => (12, 33, false),
                 0x2A | 0x4A | 0x6A => (6, 5, false),
                 0x2B | 0x4B | 0x6B => (12, 5, false),
                 0x29 | 0x49 | 0x69 => {
@@ -389,6 +404,23 @@ fn error_text(code: u8) -> Option<&'static str> {
     })
 }
 
+/// The bytes calamine's cell reader reads from a record of this type: the column and style
+/// of every cell, then the value; a string cell its length and characters.
+fn cell_fields(kind: u16, body: &[u8]) -> Option<usize> {
+    Some(match kind {
+        0x0000 => 4,
+        0x0002 | 0x0007 => 12,
+        0x0003 | 0x0004 | 0x000A => 9,
+        0x0005 | 0x0009 => 16,
+        0x000B => 11,
+        0x0006 | 0x0008 => match u32_at(body, 8) {
+            Some(cch) => 12 + 2 * cch as usize,
+            None => 12,
+        },
+        _ => return None,
+    })
+}
+
 /// The token stream of a formula cell record: (type, body) to rgce, as calamine finds it.
 fn record_tokens(kind: u16, body: &[u8]) -> Option<&[u8]> {
     let at = match kind {
@@ -433,6 +465,17 @@ pub(crate) fn scan_sheet(bytes: &[u8], widths: Widths) -> Result<SheetScan, Stri
     let mut row = 0u32;
     while let Some(rec) = r.next() {
         let (kind, body) = rec?;
+        // calamine reads the fields of a cell record from a buffer that keeps the bytes of
+        // earlier records: a record shorter than its fields would give leftover values.
+        if let Some(need) = cell_fields(kind, body)
+            && body.len() < need
+        {
+            return Err(format!(
+                "a cell record of type {kind:#06x} in row {} is shorter than its fields ({} of {need} bytes)",
+                u64::from(row) + 1,
+                body.len()
+            ));
+        }
         match kind {
             0x0000 => {
                 row = u32_at(body, 0).unwrap_or(0);
@@ -528,6 +571,39 @@ mod tests {
         let (_, work) = check_tokens_within(&rgce, W, u64::MAX).unwrap();
         assert!(work > 1_000);
         assert_eq!(check_tokens_within(&rgce, W, work - 1), Err(Unsafe::Work));
+    }
+
+    #[test]
+    fn text_bounds_cover_the_longest_references() {
+        // A 3D reference: sheet, `!`, `$`, four column letters, `$`, ten row digits.
+        let mut r3d = vec![0x3a, 0, 0];
+        r3d.extend(u32::MAX.to_le_bytes());
+        r3d.extend(u16::MAX.to_le_bytes());
+        assert_eq!(check_tokens(&r3d, W), Ok(31 + 17));
+        let mut a3d = vec![0x3b, 0, 0];
+        a3d.extend([0xFF; 12]);
+        assert_eq!(check_tokens(&a3d, W), Ok(31 + 34));
+        let mut area = vec![0x25];
+        area.extend([0xFF; 12]);
+        assert_eq!(check_tokens(&area, W), Ok(33));
+    }
+
+    #[test]
+    fn short_value_records_are_errors() {
+        let sheet = |cell: Vec<u8>| {
+            let mut b = vec![0x94, 0x01, 16];
+            b.extend([0; 16]);
+            b.extend([0x91, 0x01, 0]);
+            b.extend([0x00, 4, 0, 0, 0, 0]);
+            b.extend(cell);
+            b
+        };
+        // A real number needs 16 bytes, a shared string index 12.
+        assert!(scan_sheet(&sheet(vec![0x05, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W).is_err());
+        assert!(scan_sheet(&sheet(vec![0x07, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W).is_err());
+        let mut ok = vec![0x05, 16];
+        ok.extend([0; 16]);
+        assert!(scan_sheet(&sheet(ok), W).is_ok());
     }
 
     #[test]
