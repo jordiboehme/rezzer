@@ -362,3 +362,92 @@ fn cut_chain_numbering_is_relative() {
         r.issues
     );
 }
+
+/// When the walk is cut by the visit bound, the issues say that the numbers are relative and
+/// give the count as a lower bound.
+#[test]
+fn walk_cut_by_the_bound_is_relative() {
+    let mut file = pages_doc(3, None);
+    for k in 0..1_001u32 {
+        update(
+            &mut file,
+            &[(5, info(&format!("2026010{}120000Z", k % 9 + 1)))],
+            13,
+        );
+    }
+    let limits = Limits {
+        max_items: 1_500,
+        ..Limits::default()
+    };
+    let pdf = Pdf::open(&file, None, &limits, &never).unwrap();
+    let r = pdf.revisions(&never);
+    assert!(
+        r.issues
+            .iter()
+            .any(|i| i.what.contains("count from the oldest save read")),
+        "{:?}",
+        r.issues
+    );
+    assert!(
+        r.issues.iter().any(|i| i.what.contains("at least")),
+        "{:?}",
+        r.issues
+    );
+}
+
+/// An object that cannot be read is counted once, however many saves read it.
+#[test]
+fn unreadable_objects_are_counted_once() {
+    let mut file = base(b"BT (x) Tj ET");
+    update(&mut file, &[(5, info("20260202120000Z"))], 6);
+    let xref = file.windows(6).rposition(|w| w == b"\nxref\n").unwrap();
+    let at = xref + b"\nxref\n5 1\n".len();
+    let off: usize = std::str::from_utf8(&file[at..at + 10])
+        .unwrap()
+        .parse()
+        .unwrap();
+    file[at..at + 10].copy_from_slice(format!("{:010}", off + 3).as_bytes());
+    for k in 0..3 {
+        update(&mut file, &[(6, format!("<< /K {k} >>").into_bytes())], 7);
+    }
+    let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
+    let r = pdf.revisions(&never);
+    assert!(
+        r.issues
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.starts_with("1 object ")),
+        "{:?}",
+        r.issues
+    );
+}
+
+/// A chain cut before any trailer names the catalog keeps its Limit issue and is not called
+/// damaged.
+#[test]
+fn chain_cut_before_the_catalog_is_a_limit() {
+    let mut file = base(b"BT (x) Tj ET");
+    for k in 0..60u32 {
+        update_with(
+            &mut file,
+            &[(5, info(&format!("2026010{}120000Z", k % 9 + 1)))],
+            "/Size 6 /Info 5 0 R",
+        );
+    }
+    let limits = Limits {
+        max_items: 100,
+        ..Limits::default()
+    };
+    let pdf = Pdf::open(&file, None, &limits, &never).unwrap();
+    let issues = pdf.issues();
+    assert_eq!(pdf.page_count(), 1, "{issues:?}");
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.kind == IssueKind::Limit && i.what.contains("not read")),
+        "{issues:?}"
+    );
+    assert!(
+        !issues.iter().any(|i| i.what.contains("rebuilt")),
+        "{issues:?}"
+    );
+}

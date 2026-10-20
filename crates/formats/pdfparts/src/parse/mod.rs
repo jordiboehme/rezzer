@@ -262,7 +262,17 @@ pub(crate) fn build(
     let mut budget = Budget::new(limits, stop, bytes.len());
     let mut issues = Vec::new();
     let mut cut = false;
-    let (table, trailer, scanned) = match read_chain(bytes, base, &mut budget)? {
+    let mut chain = read_chain(bytes, base, &mut budget)?;
+    // Cut before any trailer named the catalog: the file is scanned as for a damaged chain,
+    // but the cause is the limit, and its issue says so.
+    if chain
+        .as_ref()
+        .is_some_and(|c| c.cut && c.trailer.get(b"Root").is_err())
+    {
+        cut = true;
+        issues.extend(chain.take().map(|c| c.issues).unwrap_or_default());
+    }
+    let (table, trailer, scanned) = match chain {
         Some(chain) => {
             budget.ends.add_starts(chain.starts());
             cut = chain.cut;
@@ -283,6 +293,9 @@ pub(crate) fn build(
     };
     let mut store = Store::new(bytes, base, table, budget, scanned);
     store.scan_missing = cut;
+    if cut {
+        store.issues.retain(|i| i.what != store::REBUILT);
+    }
     let Ok(Object::Reference(root)) = trailer.get(b"Root") else {
         return Err(OpenError::Damaged(
             "the file has no document catalog".into(),

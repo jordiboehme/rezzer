@@ -137,8 +137,8 @@ impl Pdf {
             stopped: false,
         };
         run.all(bytes, &mut out);
-        if run.loader.damaged > 0 {
-            let n = run.loader.damaged;
+        if !run.loader.damaged.is_empty() {
+            let n = run.loader.damaged.len();
             run.issues.push(Issue::new(
                 LOCATION,
                 IssueKind::Damaged,
@@ -206,9 +206,18 @@ impl Run<'_, '_> {
 
     fn all(&mut self, bytes: &[u8], out: &mut Revisions) {
         let mut chain = Chain::default();
-        if let Err(Halt(issue)) = self.walk(bytes, &mut chain) {
-            self.issues.push(issue);
-        }
+        // A cut walk leaves the older saves unknown: the numbers are relative to the oldest
+        // save read and the count is a lower bound.
+        let cut = match self.walk(bytes, &mut chain) {
+            Ok(()) => false,
+            Err(Halt(mut issue)) => {
+                if !issue.what.contains(RELATIVE) {
+                    issue.what = format!("{}; {RELATIVE}", issue.what);
+                }
+                self.issues.push(issue);
+                true
+            }
+        };
         let max = self.limits.max_revisions;
         while chain.saves.len() > max {
             let s = chain.saves.pop().expect("a save");
@@ -224,7 +233,8 @@ impl Run<'_, '_> {
                 LOCATION,
                 IssueKind::Limit,
                 format!(
-                    "the file has {} revisions; only the newest {} are compared",
+                    "the file has {}{} revisions; only the newest {} are compared",
+                    if cut { "at least " } else { "" },
                     chain.total,
                     chain.saves.len()
                 ),

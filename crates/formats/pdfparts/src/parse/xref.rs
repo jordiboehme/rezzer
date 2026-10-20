@@ -137,7 +137,9 @@ pub(crate) fn read_chain(
             None => return Ok(None),
         }
     }
-    if chain.trailer.get(b"Root").is_err() {
+    // A chain cut at the work bound before any trailer named the catalog is still returned,
+    // so its Limit issue is kept.
+    if chain.trailer.get(b"Root").is_err() && !chain.cut {
         return Ok(None);
     }
     Ok(Some(chain))

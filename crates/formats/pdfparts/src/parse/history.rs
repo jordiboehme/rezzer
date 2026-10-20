@@ -48,8 +48,8 @@ pub(crate) struct Loader<'a> {
     packed: HashMap<usize, Option<Rc<Packed>>>,
     members: HashMap<(usize, u32), Option<Rc<Object>>>,
     busy: HashSet<usize>,
-    /// Objects that could not be read.
-    pub damaged: usize,
+    /// Objects that could not be read, each once however often it is asked for.
+    pub damaged: HashSet<ObjectId>,
 }
 
 impl<'a> Loader<'a> {
@@ -70,7 +70,7 @@ impl<'a> Loader<'a> {
             packed: HashMap::new(),
             members: HashMap::new(),
             busy: HashSet::new(),
-            damaged: 0,
+            damaged: HashSet::new(),
         }
     }
 
@@ -119,10 +119,10 @@ impl<'a> Loader<'a> {
         }
     }
 
-    fn fail<T>(&mut self, f: Fail) -> Result<Option<T>, OpenError> {
+    fn fail<T>(&mut self, f: Fail, id: ObjectId) -> Result<Option<T>, OpenError> {
         match f {
             Fail::Bad(_) => {
-                self.damaged += 1;
+                self.damaged.insert(id);
                 Ok(None)
             }
             Fail::Stop(e) => Err(e),
@@ -160,7 +160,7 @@ impl<'a> Loader<'a> {
             self.busy.remove(&at);
             return found;
         }
-        self.damaged += 1;
+        self.damaged.insert(id);
         Ok(None)
     }
 
@@ -182,7 +182,7 @@ impl<'a> Loader<'a> {
         }
         let head = match head_at(self.bytes, at, &mut self.budget) {
             Ok(h) => h,
-            Err(f) => return self.fail(f),
+            Err(f) => return self.fail(f, id),
         };
         let r = length_ref(&head);
         self.length_refs.insert(at, r);
@@ -203,13 +203,13 @@ impl<'a> Loader<'a> {
     ) -> Result<Option<Rc<Object>>, OpenError> {
         let mut obj = match finish(self.bytes, head, length, &mut self.budget) {
             Ok((_, o)) => o,
-            Err(f) => return self.fail(f),
+            Err(f) => return self.fail(f, id),
         };
         if let Some(crypt) = self.crypt
             && id != crypt.skip
             && crypt.decrypt(id, &mut obj).is_err()
         {
-            self.damaged += 1;
+            self.damaged.insert(id);
             return Ok(None);
         }
         Ok(Some(Rc::new(obj)))
@@ -255,7 +255,7 @@ impl<'a> Loader<'a> {
             return Ok(None);
         };
         let found = if at >= packed.data.len() {
-            self.damaged += 1;
+            self.damaged.insert((n, 0));
             None
         } else {
             let after = |p: usize| {
@@ -272,7 +272,7 @@ impl<'a> Loader<'a> {
                 l.value(b, 0)
             }) {
                 Ok((v, _)) => Some(Rc::new(v)),
-                Err(f) => self.fail(f)?,
+                Err(f) => self.fail(f, (n, 0))?,
             }
         };
         self.members.insert((pos, index), found.clone());
@@ -298,7 +298,7 @@ impl<'a> Loader<'a> {
                 _ => None,
             }
             .or_else(|| {
-                self.damaged += 1;
+                self.damaged.insert(id);
                 None
             }),
             None => None,
