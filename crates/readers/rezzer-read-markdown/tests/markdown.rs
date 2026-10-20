@@ -991,3 +991,91 @@ fn empty_pothole_in_code_is_left_alone() {
     let json = serde_json::to_string(&out.document.body).unwrap();
     assert_eq!(json.matches("[[x|]]").count(), 2, "{json}");
 }
+
+#[test]
+fn inline_math_in_rezzer_dialect_drops_the_backticks() {
+    let out = read("a $`y^2`$ b and $x$\n");
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("{:?}", out.document.body);
+    };
+    let maths: Vec<&str> = inlines
+        .iter()
+        .filter_map(|i| match i {
+            Inline::Math { latex } => Some(latex.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(maths, ["y^2", "x"]);
+}
+
+#[test]
+fn fragment_links_use_the_heading_slug() {
+    let out = read(
+        "# Hello World\n\n[a](#Hello-World) [b](#hello%20world) [c](#hello-world) [d](#Gr%C3%BC%C3%9Fe!)\n",
+    );
+    let g = &out.document.facets.graphs[0];
+    let ids: Vec<&str> = g.nodes.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, ["self", "h:hello-world", "h:grüße"]);
+    assert_eq!(g.edges.len(), 2);
+    let node = &g.nodes[1];
+    assert_eq!(node.label, "#Hello-World");
+    assert_eq!(node.anchor, Some(Anchor("h:hello-world".into())));
+    let Block::Heading { anchor, .. } = &out.document.body[0] else {
+        panic!()
+    };
+    assert_eq!(anchor, &Some(Anchor("h:hello-world".into())));
+}
+
+#[test]
+fn a_dotted_key_and_a_nested_key_keep_both_values() {
+    let out = read("---\na:\n  b: 1\na.b: 2\n---\n\ntext\n");
+    let custom = &out.document.properties.custom;
+    assert_eq!(custom["a.b"], Value::number(1.0, None));
+    assert_eq!(custom["a.b#2"], Value::number(2.0, None));
+    let losses: Vec<_> = out.document.losses.iter().collect();
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+    assert_eq!(losses[0].severity, rezzer_model::Severity::Warning);
+    assert_eq!(losses[0].location, "frontmatter");
+    assert_eq!(
+        losses[0].what,
+        "key a.b is given twice (as a nested and a dotted key), the second value is kept as a.b#2"
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+    // The frontmatter was read, so it is not kept as text.
+    assert!(
+        !out.document
+            .body
+            .iter()
+            .any(|b| matches!(b, Block::Code { .. })),
+        "{:?}",
+        out.document.body
+    );
+}
+
+#[test]
+fn the_element_budget_stops_the_document_with_a_limit_loss() {
+    let text = "*a* ".repeat(1_000);
+    let budget = Budget::new(Limits {
+        max_elements: 100,
+        ..Limits::default()
+    });
+    let out = MarkdownReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    let limits: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    assert_eq!(
+        limits[0].what,
+        "element limit reached, rest of the document not read"
+    );
+    let Block::Paragraph { inlines, .. } = &out.document.body[0] else {
+        panic!("{:?}", out.document.body);
+    };
+    assert!(inlines.len() <= 100, "{}", inlines.len());
+    assert!(!inlines.is_empty());
+}

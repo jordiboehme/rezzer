@@ -203,6 +203,8 @@ struct Builder<'b> {
     /// Index in `cur` of the first soft break of a possible callout header.
     para_break: Option<usize>,
     time_stopped: bool,
+    /// Set when the element budget ran out; the event loop then stops.
+    elements_stopped: bool,
     footnotes: Vec<(String, Vec<Block>)>,
     heading_slugs: HashMap<String, u32>,
     first_h1: Option<String>,
@@ -236,6 +238,7 @@ impl<'b> Builder<'b> {
             need_line: false,
             para_break: None,
             time_stopped: false,
+            elements_stopped: false,
             footnotes: Vec::new(),
             heading_slugs: HashMap::new(),
             first_h1: None,
@@ -268,6 +271,9 @@ impl<'b> Builder<'b> {
             }
             self.offset = body_start + range.start;
             self.event(event);
+            if self.elements_stopped {
+                break;
+            }
             if self.need_line {
                 self.need_line = false;
                 let end = self.offset.min(text.len());
@@ -305,9 +311,12 @@ impl<'b> Builder<'b> {
             }
             Event::InlineMath(s) => {
                 self.ensure_inline_leaf();
-                self.push_inline(Inline::Math {
-                    latex: s.into_string(),
-                });
+                // Rezzer writes inline math as $`...`$; the backticks are not part of the formula.
+                let latex = match s.strip_prefix('`').and_then(|t| t.strip_suffix('`')) {
+                    Some(inner) => inner.to_string(),
+                    None => s.into_string(),
+                };
+                self.push_inline(Inline::Math { latex });
             }
             Event::DisplayMath(s) => {
                 self.ensure_inline_leaf();
@@ -567,7 +576,9 @@ impl<'b> Builder<'b> {
                 let inlines = std::mem::take(&mut self.cur);
                 self.leaf = Leaf::None;
                 self.display_math = false;
-                if let Some(t) = &mut self.table {
+                if self.charge()
+                    && let Some(t) = &mut self.table
+                {
                     t.row.push(Cell::new(inlines));
                 }
             }
@@ -667,7 +678,24 @@ impl<'b> Builder<'b> {
         }
     }
 
+    /// Charges one model element. False when the element budget ran out with this one: the
+    /// element is dropped and reading stops. Once stopped, the frames still open are closed
+    /// without charge (their number is bounded by the depth limit).
+    fn charge(&mut self) -> bool {
+        if self.elements_stopped {
+            return true;
+        }
+        if self.budget.add_elements(1).is_err() {
+            self.elements_stopped = true;
+            return false;
+        }
+        true
+    }
+
     fn push_inline(&mut self, inline: Inline) {
+        if !self.charge() {
+            return;
+        }
         self.display_math = false;
         match self.inline_stack.last_mut() {
             Some(InlineFrame::Image { alt, .. }) => alt.push_str(&plain_text(&[inline])),
@@ -830,18 +858,22 @@ impl<'b> Builder<'b> {
                         LossReason::Damaged,
                         format!("frontmatter partly read, kept as text: {m}"),
                     ),
+                    FmError::Uncertain(m) => (LossReason::Uncertain, m),
                 })
                 .collect()
         };
-        if !problems.is_empty() {
-            for (why, what) in problems {
-                self.losses.push(Loss {
-                    location: "frontmatter".into(),
-                    what,
-                    why,
-                    severity: Severity::Warning,
-                });
-            }
+        let keep_text = problems
+            .iter()
+            .any(|(why, _)| *why != LossReason::Uncertain);
+        for (why, what) in problems {
+            self.losses.push(Loss {
+                location: "frontmatter".into(),
+                what,
+                why,
+                severity: Severity::Warning,
+            });
+        }
+        if keep_text {
             // The raw text stays visible, cut at the size cap on a character boundary.
             let mut end = raw.len().min(MAX_FRONTMATTER_BYTES);
             while !raw.is_char_boundary(end) {
@@ -858,6 +890,9 @@ impl<'b> Builder<'b> {
     // --- container blocks -----------------------------------------------------------------
 
     fn push_block(&mut self, block: Block) {
+        if !self.charge() {
+            return;
+        }
         match self.stack.last_mut() {
             Some(
                 Frame::Root { blocks }
@@ -1001,7 +1036,14 @@ impl<'b> Builder<'b> {
         if let Some(Frame::Root { blocks }) = self.stack.pop() {
             self.body.extend(blocks);
         }
-        if self.time_stopped {
+        if self.elements_stopped {
+            self.losses.push(Loss {
+                location: "document".into(),
+                what: "element limit reached, rest of the document not read".into(),
+                why: LossReason::Limit,
+                severity: Severity::Warning,
+            });
+        } else if self.time_stopped {
             self.losses.push(Loss {
                 location: "document".into(),
                 what: "rest of the document not read".into(),
@@ -1027,7 +1069,14 @@ impl<'b> Builder<'b> {
                 let id = if frag.starts_with("h:") {
                     frag.to_string()
                 } else {
-                    format!("h:{frag}")
+                    // The same slug as the heading anchors, so `#Hello-World` and
+                    // `#hello%20world` both point to `h:hello-world`.
+                    let slug = slugify(&percent_decode(frag));
+                    if slug.is_empty() {
+                        format!("h:{frag}")
+                    } else {
+                        format!("h:{slug}")
+                    }
                 };
                 let anchor = Some(Anchor(id.clone()));
                 (id, anchor)
@@ -1315,6 +1364,33 @@ fn push_merged(inlines: &mut Vec<Inline>, inline: Inline) {
         return;
     }
     inlines.push(inline);
+}
+
+/// Decodes `%XX` escapes; invalid UTF-8 after decoding becomes U+FFFD, a `%` without two hex
+/// digits stays as it is.
+fn percent_decode(text: &str) -> String {
+    if !text.contains('%') {
+        return text.to_string();
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).and_then(|&b| hex(b)),
+                bytes.get(i + 2).and_then(|&b| hex(b)),
+            )
+        {
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// A heading id the way GitHub builds it: lowercase, spaces to hyphens, punctuation dropped.

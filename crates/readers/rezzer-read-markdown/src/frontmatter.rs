@@ -62,6 +62,9 @@ pub(crate) enum FmError {
     Limit(String),
     /// A part was read and mapped, the rest could not be (an extra YAML document).
     Partly(String),
+    /// Everything was read, but a fact is kept differently than written (a key given twice
+    /// is kept under a second name). The text is not kept as a code block for this.
+    Uncertain(String),
 }
 
 /// The work spent on one frontmatter block and the bytes written into `custom`.
@@ -69,6 +72,11 @@ pub(crate) enum FmError {
 struct Work {
     spent: usize,
     custom_bytes: usize,
+    /// Keys given twice, as (key, the key the second value is kept under).
+    collisions: Vec<(String, String)>,
+    collisions_total: usize,
+    /// The next suffix to try per key given twice, so many repeats stay linear.
+    next_suffix: std::collections::HashMap<String, usize>,
 }
 
 impl Work {
@@ -136,8 +144,22 @@ pub(crate) fn apply(
             "frontmatter is not a mapping of keys to values".into(),
         )),
     }
+    for (key, kept) in &work.collisions {
+        problems.push(FmError::Uncertain(format!(
+            "key {key} is given twice (as a nested and a dotted key), the second value is kept as {kept}"
+        )));
+    }
+    if work.collisions_total > work.collisions.len() {
+        problems.push(FmError::Uncertain(format!(
+            "{} more keys given twice are not listed, each second value is kept with a #2 suffix or higher",
+            work.collisions_total - work.collisions.len()
+        )));
+    }
     problems
 }
+
+/// Keys given twice that get a loss of their own; the rest are counted in one.
+const MAX_COLLISIONS_LISTED: usize = 20;
 
 /// Frontmatter found at the very start of a file.
 pub(crate) struct Split<'a> {
@@ -542,7 +564,21 @@ fn flatten(
                 ));
             }
             work.custom_bytes += bytes;
-            props.custom.insert(key, v);
+            let mut kept = key.clone();
+            if props.custom.contains_key(&kept) {
+                // A nested `a: {b: ..}` and a literal `a.b` give the same key: keep both.
+                let next = work.next_suffix.entry(key.clone()).or_insert(2);
+                while props.custom.contains_key(&format!("{key}#{next}")) {
+                    *next += 1;
+                }
+                kept = format!("{key}#{next}");
+                *next += 1;
+                work.collisions_total += 1;
+                if work.collisions.len() < MAX_COLLISIONS_LISTED {
+                    work.collisions.push((key, kept.clone()));
+                }
+            }
+            props.custom.insert(kept, v);
             Ok(())
         }
     }
