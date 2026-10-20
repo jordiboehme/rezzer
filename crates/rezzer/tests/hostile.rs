@@ -178,3 +178,53 @@ fn nul_and_empty_inputs_do_not_panic() {
         }
     }
 }
+
+/// Writes `unit` repeated `times` times to `name` in a temp dir, in a stream.
+fn streamed(dir: &std::path::Path, name: &str, unit: &[u8], times: usize) -> std::path::PathBuf {
+    use std::io::Write;
+    let path = dir.join(name);
+    let mut out = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+    for _ in 0..times {
+        out.write_all(unit).unwrap();
+    }
+    out.flush().unwrap();
+    path
+}
+
+fn element_limit_loss(result: &RunResult) -> bool {
+    result.document.as_ref().is_some_and(|d| {
+        d.losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.starts_with("element limit reached"))
+    })
+}
+
+#[test]
+fn many_markdown_inlines_stop_at_the_element_limit() {
+    // 1.2 million emphasized words are 2.4 million inlines, over the default of 2 million.
+    let dir = tempfile::tempdir().unwrap();
+    let path = streamed(dir.path(), "inlines.md", b"*a* ", 1_200_000);
+    let result = pipeline_with(None).run_path(&path, &request());
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        result.message
+    );
+    assert!(element_limit_loss(&result));
+}
+
+#[test]
+fn many_text_paragraphs_stop_at_the_element_limit() {
+    // 1.1 million paragraphs are 2.2 million elements.
+    let dir = tempfile::tempdir().unwrap();
+    let path = streamed(dir.path(), "paras.txt", b"a\n\n", 1_100_000);
+    let result = pipeline_with(None).run_path(&path, &request());
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        result.message
+    );
+    assert!(element_limit_loss(&result));
+}
