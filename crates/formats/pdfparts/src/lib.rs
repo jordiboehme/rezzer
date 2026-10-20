@@ -102,7 +102,7 @@ pub enum OpenError {
     NotPdf,
     /// The file is too broken to read.
     Damaged(String),
-    /// The file is encrypted and its user password is not empty.
+    /// The file is encrypted and does not open without a password.
     NeedsPassword,
     /// The given password opens neither as user nor as owner password.
     WrongPassword,
@@ -134,7 +134,8 @@ impl std::error::Error for OpenError {}
 pub struct Encryption {
     /// `AES-128`, `AES-256`, `RC4-40`, `RC4-128` and so on.
     pub method: String,
-    /// The file opens without a password.
+    /// The file opens without a password. The empty string may match the user or the owner
+    /// password; the file does not say which.
     pub empty_user_password: bool,
 }
 
@@ -236,7 +237,9 @@ impl Pdf {
         missing_members(&doc, &mut issues);
         let pages = nav::page_tree(&doc, limits, &mut issues);
         let ids: Vec<ObjectId> = pages.iter().map(|p| p.id).collect();
-        let verdict = guard::measure(&doc, &ids, &pre, limits, stop, &mut issues)?;
+        let roots: Vec<(ObjectId, Option<&Object>)> =
+            pages.iter().map(|p| (p.id, p.resources.as_ref())).collect();
+        let verdict = guard::measure(&doc, &roots, &pre, limits, stop, &mut issues)?;
         let page_numbers = ids
             .iter()
             .enumerate()

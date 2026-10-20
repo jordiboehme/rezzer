@@ -6,7 +6,7 @@ pdfparts reads the object layer of a PDF file. It tells what the file is and how
 - Pages with their physical number, page label (decimal, roman, letters, prefix and start value), size, rotation, fonts and images
 - The outline with levels, titles and target pages. Titles are decoded from PDFDocEncoding or UTF-16 by this crate
 - Named destinations and link annotations. A link to a URI, another file or a program is listed and never followed
-- Encryption: the method, whether the user password is empty, and a decrypted copy of the file for other parsers
+- Encryption: the method, whether the file opens without a password and a decrypted copy of the file for other parsers
 
 ```rust
 use pdfparts::objects::{pdf_date, text_string};

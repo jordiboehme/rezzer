@@ -288,30 +288,113 @@ fn font_bomb_refuses_the_page() {
 }
 
 #[test]
+fn inherited_font_bomb_refuses_the_page() {
+    // The same font bomb, but the resources sit on the page tree node above the page.
+    let packed = zlib(&vec![0u8; 1 << 20]);
+    let bytes = one_page(plain_content(), |doc, pages_id, _| {
+        let file = doc.add_object(
+            Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed).with_compression(false),
+        );
+        let descriptor = doc.add_object(dictionary! {
+            "Type" => "FontDescriptor",
+            "FontName" => "Bomb",
+            "FontFile2" => file,
+        });
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "TrueType",
+            "BaseFont" => "Bomb",
+            "FontDescriptor" => descriptor,
+        });
+        doc.get_dictionary_mut(pages_id).unwrap().set(
+            "Resources",
+            dictionary! { "Font" => dictionary! { "F1" => font } },
+        );
+    });
+    let pdf = open(&bytes, None).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1]);
+}
+
+/// A page whose content stream is about 1 KB of deflate that inflates to 1 MB.
+fn bomb_page() -> Vec<u8> {
+    let packed = zlib(&vec![b' '; 1 << 20]);
+    let content = Stream::new(dictionary! { "Filter" => "FlateDecode" }, packed);
+    one_page(content.with_compression(false), |_, _, _| {})
+}
+
+#[test]
+fn dead_object_stream_does_not_hide_a_bomb() {
+    // A dummy object stream with the id of the bomb, after the end of the file. lopdf ignores
+    // it, so it must not count as the measurement of the real stream.
+    let mut bytes = bomb_page();
+    let doc = Document::load_mem(&bytes).unwrap();
+    let page = doc.page_iter().next().unwrap();
+    let content = doc.get_page_contents(page)[0];
+    bytes.extend(
+        format!(
+            "\n{} {} obj\n<< /Type /ObjStm /N 0 /First 0 /Length 0 >>\nstream\n\nendstream\nendobj\n",
+            content.0, content.1
+        )
+        .as_bytes(),
+    );
+    let pdf = open(&bytes, None).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1]);
+}
+
+#[test]
+fn encrypt_text_does_not_turn_off_the_scan() {
+    let mut bytes = objstm_bomb();
+    bytes.extend(b"%/Encrypt\n");
+    let err = open(&bytes, None).unwrap_err();
+    assert!(matches!(err, OpenError::Limit(_)), "{err:?}");
+}
+
+#[test]
+fn raw_deflate_after_another_filter_is_measured() {
+    // Hex around a deflate stream with a broken zlib header. lopdf retries it as raw deflate
+    // and gets 1 MB, so the guard must count the same.
+    let mut e = flate2::write::DeflateEncoder::new(Vec::new(), Compression::best());
+    e.write_all(&vec![b' '; 1 << 20]).unwrap();
+    let mut data = vec![0xFF, 0xFF];
+    data.extend(e.finish().unwrap());
+    let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
+    let content = Stream::new(
+        dictionary! {
+            "Filter" => vec![Object::Name(b"ASCIIHexDecode".to_vec()), Object::Name(b"FlateDecode".to_vec())],
+        },
+        format!("{hex}>").into_bytes(),
+    );
+    let bytes = one_page(content.with_compression(false), |_, _, _| {});
+    let pdf = open(&bytes, None).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1]);
+}
+
+#[test]
+fn empty_stored_blocks_do_not_hide_a_bomb() {
+    // Thousands of empty stored deflate blocks give no output at first, then the bomb.
+    let mut data = vec![0x78, 0x9C];
+    for _ in 0..20_000 {
+        data.extend([0x00, 0x00, 0x00, 0xFF, 0xFF]);
+    }
+    let mut e = flate2::write::DeflateEncoder::new(Vec::new(), Compression::best());
+    e.write_all(&vec![b' '; 64 << 20]).unwrap();
+    data.extend(e.finish().unwrap());
+    let content = Stream::new(dictionary! { "Filter" => "FlateDecode" }, data);
+    let bytes = one_page(content.with_compression(false), |_, _, _| {});
+    let pdf = open(&bytes, None).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1]);
+}
+
+#[test]
 fn stop_ends_the_open() {
     let bytes = corpus("pypdf-outline.pdf");
     let err = Pdf::open(&bytes, None, &Limits::default(), &|| true).unwrap_err();
     assert!(matches!(err, OpenError::Limit(_)), "{err:?}");
 }
 
-#[cfg(unix)]
-fn max_rss_bytes() -> u64 {
-    // SAFETY: getrusage fills the struct we pass.
-    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
-    let v = ru.ru_maxrss as u64;
-    if cfg!(target_os = "macos") {
-        v
-    } else {
-        v * 1024
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn objstm_bomb_is_bounded() {
-    // An object stream of about 2 MB that inflates to 2 GiB. The zeros are fed in chunks so
-    // building the fixture never holds them.
+/// A document with an object stream of about 2 MB that inflates to 2 GiB.
+fn objstm_bomb() -> Vec<u8> {
+    // The zeros are fed in chunks so building the fixture never holds them.
     let mut e = ZlibEncoder::new(Vec::new(), Compression::best());
     let chunk = vec![0u8; 1 << 20];
     for _ in 0..2048 {
@@ -337,6 +420,26 @@ fn objstm_bomb_is_bounded() {
     });
     let at = bytes.windows(7).position(|w| w == b"/ObjStX").unwrap();
     bytes[at + 6] = b'm';
+    bytes
+}
+
+#[cfg(unix)]
+fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn objstm_bomb_is_bounded() {
+    let bytes = objstm_bomb();
     let err = open(&bytes, None).unwrap_err();
     assert!(matches!(err, OpenError::Limit(_)), "{err:?}");
     let rss = max_rss_bytes();

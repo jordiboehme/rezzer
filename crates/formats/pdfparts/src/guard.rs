@@ -89,11 +89,11 @@ struct Shared<'a> {
 }
 
 /// The end of every chain: counts bytes and keeps none.
-struct Sink<'a, 'b> {
-    shared: &'b Shared<'a>,
+struct Sink<'s> {
+    shared: &'s Shared<'s>,
 }
 
-impl Write for Sink<'_, '_> {
+impl Write for Sink<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s = self.shared;
         let n = s.count.get().saturating_add(buf.len() as u64);
@@ -300,6 +300,89 @@ impl<W: Write> Write for RunStage<W> {
     }
 }
 
+/// Input a Flate stage keeps until its first output byte, so it can replay a stream with a
+/// broken zlib header as raw deflate. No output after this much input counts as over the cap:
+/// lopdf would keep inflating, and the guard cannot keep buffering.
+const PROBE_MAX: usize = 64 * 1024;
+
+/// FlateDecode as a writer stage. Like lopdf, a zlib stream that fails before any output is
+/// tried again as raw deflate from its third byte, at any place in the chain.
+struct FlateStage<'s, W: Write> {
+    inflater: flate2::Decompress,
+    zlib: bool,
+    next: W,
+    buf: Box<[u8]>,
+    probe: Option<Vec<u8>>,
+    done: bool,
+    shared: &'s Shared<'s>,
+}
+
+impl<'s, W: Write> FlateStage<'s, W> {
+    fn new(next: W, shared: &'s Shared<'s>) -> Self {
+        FlateStage {
+            inflater: flate2::Decompress::new(true),
+            zlib: true,
+            next,
+            buf: vec![0; CHUNK].into_boxed_slice(),
+            probe: Some(Vec::new()),
+            done: false,
+            shared,
+        }
+    }
+
+    fn feed(&mut self, mut input: &[u8]) -> io::Result<()> {
+        while !self.done {
+            let (in0, out0) = (self.inflater.total_in(), self.inflater.total_out());
+            let res = self
+                .inflater
+                .decompress(input, &mut self.buf, flate2::FlushDecompress::None);
+            let used = (self.inflater.total_in() - in0) as usize;
+            let made = (self.inflater.total_out() - out0) as usize;
+            input = &input[used.min(input.len())..];
+            if made > 0 {
+                self.probe = None;
+                self.next.write_all(&self.buf[..made])?;
+            }
+            match res {
+                Ok(flate2::Status::StreamEnd) => self.done = true,
+                Ok(_) if used == 0 && made == 0 => break,
+                Ok(_) => {}
+                Err(_) => {
+                    match self.probe.take() {
+                        Some(probe) if self.zlib && probe.len() > 2 => {
+                            self.zlib = false;
+                            self.inflater = flate2::Decompress::new(false);
+                            return self.feed(&probe[2..]);
+                        }
+                        // lopdf keeps what came out before an error.
+                        _ => self.done = true,
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for FlateStage<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(probe) = self.probe.as_mut() {
+            probe.extend_from_slice(buf);
+            if probe.len() > PROBE_MAX {
+                self.shared.over.set(true);
+                return Err(io::Error::other("no output from a long deflate stream"));
+            }
+        }
+        self.feed(buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.feed(&[])?;
+        self.next.flush()
+    }
+}
+
 /// Passes data on unchanged.
 struct Pass<W: Write>(W);
 
@@ -314,18 +397,11 @@ impl<W: Write> Write for Pass<W> {
     }
 }
 
-fn chain<'s>(
-    filters: &[Filter],
-    sink: Box<dyn Write + 's>,
-    raw_deflate_first: bool,
-) -> Box<dyn Write + 's> {
-    let mut w = sink;
-    for (i, f) in filters.iter().enumerate().rev() {
+fn chain<'s>(filters: &[Filter], shared: &'s Shared<'s>) -> Box<dyn Write + 's> {
+    let mut w: Box<dyn Write + 's> = Box::new(Sink { shared });
+    for f in filters.iter().rev() {
         w = match f {
-            Filter::Flate if i == 0 && raw_deflate_first => {
-                Box::new(flate2::write::DeflateDecoder::new(w))
-            }
-            Filter::Flate => Box::new(flate2::write::ZlibDecoder::new(w)),
+            Filter::Flate => Box::new(FlateStage::new(w, shared)),
             Filter::Lzw { early_change } => Box::new(LzwStage::new(w, *early_change)),
             Filter::Ascii85 => Box::new(A85Stage {
                 next: w,
@@ -351,19 +427,16 @@ fn chain<'s>(
     w
 }
 
-fn run(raw: &[u8], filters: &[Filter], shared: &Shared<'_>, raw_deflate_first: bool) -> bool {
-    let mut w = chain(filters, Box::new(Sink { shared }), raw_deflate_first);
-    let mut ok = true;
+/// Feeds `raw` through the chain. Decoding errors end a stage quietly, as in lopdf; only the
+/// sink (over a cap, or stopped) ends the run early.
+fn run<'s>(raw: &[u8], filters: &[Filter], shared: &'s Shared<'s>) {
+    let mut w = chain(filters, shared);
     for piece in raw.chunks(CHUNK) {
         if w.write_all(piece).is_err() {
-            ok = false;
-            break;
+            return;
         }
     }
-    if ok && w.flush().is_err() {
-        ok = false;
-    }
-    ok
+    let _ = w.flush();
 }
 
 /// Decodes `raw` through `filters` into a counting sink. `budget` is what is left of the total.
@@ -390,18 +463,7 @@ pub(crate) fn measure_bytes(
         next_check: Cell::new(STOP_EVERY),
         stop,
     };
-    let ok = run(raw, filters, &shared, false);
-    // lopdf retries a broken zlib stream as raw deflate when nothing came out. Do the same,
-    // so a bomb with a bad header cannot pass here and inflate later.
-    if !ok
-        && !shared.over.get()
-        && !shared.stopped.get()
-        && shared.count.get() == 0
-        && filters.first() == Some(&Filter::Flate)
-        && raw.len() > 2
-    {
-        run(&raw[2..], filters, &shared, true);
-    }
+    run(raw, filters, &shared);
     if shared.stopped.get() {
         return Measure::Stopped;
     }
@@ -472,16 +534,16 @@ pub(crate) fn stream_filters(doc: &Document, dict: &Dictionary) -> Vec<Filter> {
 /// What the raw scan measured before lopdf loaded the file.
 #[derive(Debug, Default)]
 pub(crate) struct Prescan {
-    /// Object streams and cross-reference streams already charged, by object.
+    /// Object streams and cross-reference streams already charged: object, raw length.
     pub measured: HashMap<ObjectId, u64>,
     pub total: u64,
     /// The longest raw object or cross-reference stream seen, measured or not.
     pub largest_raw: u64,
 }
 
-/// Finds `/Type /ObjStm` and `/Type /XRef` streams in the raw bytes and measures them.
-/// Object streams of an encrypted file hold ciphertext and are left to the load (lopdf decodes
-/// them one at a time under its own cap) and to [`measure`].
+/// Finds `/Type /ObjStm` and `/Type /XRef` streams in the raw bytes and measures them. In a
+/// file that looks encrypted, an object stream may hold ciphertext: one over a cap still ends
+/// the open, but one that fits is not charged, so [`measure`] measures its plain text later.
 pub(crate) fn prescan(
     bytes: &[u8],
     limits: &Limits,
@@ -520,14 +582,12 @@ pub(crate) fn prescan(
             let is_objstm = found.kind == b"ObjStm";
             let raw = &bytes[found.data.0..found.data.1];
             out.largest_raw = out.largest_raw.max(raw.len() as u64);
-            if is_objstm && encrypted {
-                continue;
-            }
             let budget = limits.max_total_bytes.saturating_sub(out.total);
             match measure_bytes(raw, &found.filters, limits, budget, stop) {
+                Measure::Fits(_) if is_objstm && encrypted => {}
                 Measure::Fits(n) => {
                     out.total += n;
-                    out.measured.insert(found.id, n);
+                    out.measured.insert(found.id, raw.len() as u64);
                 }
                 Measure::Over(cap) => {
                     let what = if is_objstm {
@@ -561,7 +621,7 @@ pub(crate) struct Verdict {
 /// page that reaches a stream over a cap.
 pub(crate) fn measure(
     doc: &Document,
-    pages: &[ObjectId],
+    pages: &[(ObjectId, Option<&Object>)],
     pre: &Prescan,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
@@ -577,7 +637,11 @@ pub(crate) fn measure(
         let Object::Stream(stream) = obj else {
             continue;
         };
-        if pre.measured.contains_key(&id) {
+        // Skip what the raw scan charged, but only if it is the same stream: a dead object
+        // with the same number must not stand in for a live one.
+        if pre.measured.get(&id) == Some(&(stream.content.len() as u64))
+            && (stream.dict.has_type(b"ObjStm") || stream.dict.has_type(b"XRef"))
+        {
             continue;
         }
         if stop() {
@@ -620,7 +684,7 @@ pub(crate) fn measure(
     // another page, so a link to a refused page does not refuse this one.
     let mut reached: HashSet<ObjectId> = HashSet::new();
     let mut steps = 0usize;
-    for (index, &page_id) in pages.iter().enumerate() {
+    for (index, &(page_id, inherited)) in pages.iter().enumerate() {
         let number = index as u32 + 1;
         let mut hit: Option<ObjectId> = None;
         let mut seen: HashSet<ObjectId> = HashSet::new();
@@ -629,6 +693,10 @@ pub(crate) fn measure(
         seen.insert(page_id);
         if let Some(Object::Dictionary(d)) = page_obj {
             push_values(d, &mut todo, 1);
+        }
+        // Resources inherited from a page tree node above the page.
+        if let Some(res) = inherited {
+            todo.push((res, 1));
         }
         let mut exhausted = false;
         while let Some((obj, depth)) = todo.pop() {
@@ -1181,7 +1249,8 @@ mod tests {
         file.extend(&data);
         file.extend(b"\nendstream\nendobj\n");
         let pre = prescan(&file, &Limits::default(), &never).unwrap();
-        assert_eq!(pre.measured.get(&(7, 0)), Some(&19));
+        assert_eq!(pre.measured.get(&(7, 0)), Some(&(data.len() as u64)));
+        assert_eq!(pre.total, 19);
         assert_eq!(object_header(b"x\n12 0 "), Some((12, 0)));
         assert_eq!(object_header(b"end"), None);
         assert_eq!(object_header(b"a12 0 "), None);

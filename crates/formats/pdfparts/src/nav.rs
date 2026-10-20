@@ -21,7 +21,7 @@ pub(crate) struct PageNode {
     media_box: Option<[f32; 4]>,
     crop_box: Option<[f32; 4]>,
     rotate: i64,
-    resources: Option<Object>,
+    pub resources: Option<Object>,
 }
 
 /// A page with its label, size and what it carries.
