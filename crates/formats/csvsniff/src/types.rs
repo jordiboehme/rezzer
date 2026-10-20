@@ -107,6 +107,19 @@ pub struct Analysis {
     pub ragged_total: usize,
     /// True when a quoted field is still open at the end of the text.
     pub unterminated_quote: bool,
+    /// The first quoted field that is not closed properly, if any (see [`QuoteProblem`]).
+    pub quote_problem: Option<QuoteProblem>,
     /// Observed sum relations between numeric columns.
     pub derived: Vec<Derived>,
+}
+
+/// A quoted field that is not closed properly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuoteProblem {
+    /// Byte offset of the opening quote in the analyzed text.
+    pub offset: usize,
+    /// True when the field is still open at the end of the text (the rest of the text is one
+    /// field); false when it runs over line breaks and ends in a quote that is not at the end of
+    /// a field.
+    pub at_end: bool,
 }

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::derived::{self, MAX_NUMERIC_COLUMNS, NumCol};
-use crate::types::{Analysis, Column, ColumnKind, Dialect, RaggedRow};
+use crate::types::{Analysis, Column, ColumnKind, Dialect, QuoteProblem, RaggedRow};
 
 const CANDIDATES: &[u8; 4] = b",;\t|";
 /// Tie-break order for equally good delimiters (index = priority, lower wins).
@@ -659,30 +659,56 @@ fn identifier_values(acc: &Acc, c: &Column, rows: usize) -> bool {
     years || gapless
 }
 
-/// True when a quoted field is still open at the end of `text`.
-/// Mirrors the csv crate: a quote only opens a field at its start.
-fn has_unterminated_quote(text: &str, delimiter: u8, quote: u8) -> bool {
+/// Scans the quoting like the csv crate does (a quote only opens a field at its start) and
+/// returns the first quoted field that is not closed properly: the byte offset of its opening
+/// quote and whether it is still open at the end of `text`. A field that runs over a line break
+/// and then ends in a quote that is not followed by a delimiter or a line break (the csv crate
+/// reads on without an error) counts as well, with `at_end` false.
+fn find_quote_problem(text: &str, delimiter: u8, quote: u8) -> Option<QuoteProblem> {
     let b = text.as_bytes();
     let (mut i, mut start, mut open) = (0, true, false);
+    let (mut opened_at, mut multiline) = (0, false);
+    let mut first: Option<QuoteProblem> = None;
     while i < b.len() {
         let c = b[i];
         if open {
+            if c == b'\n' {
+                multiline = true;
+            }
             if c == quote {
                 if b.get(i + 1) == Some(&quote) {
                     i += 1;
                 } else {
                     open = false;
+                    let ends_field = match b.get(i + 1) {
+                        None => true,
+                        Some(&n) => n == delimiter || n == b'\n' || n == b'\r',
+                    };
+                    if multiline && !ends_field && first.is_none() {
+                        first = Some(QuoteProblem {
+                            offset: opened_at,
+                            at_end: false,
+                        });
+                    }
                 }
             }
         } else if c == quote && start {
             open = true;
+            multiline = false;
+            opened_at = i;
             start = false;
         } else {
             start = c == delimiter || c == b'\n' || c == b'\r';
         }
         i += 1;
     }
-    open
+    if open {
+        return first.or(Some(QuoteProblem {
+            offset: opened_at,
+            at_end: true,
+        }));
+    }
+    first
 }
 
 /// Analyzes the whole text with a known dialect.
@@ -819,12 +845,14 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
     } else {
         Vec::new()
     };
+    let quote_problem = find_quote_problem(text, delimiter, quote);
     Analysis {
         columns,
         rows,
         ragged_rows,
         ragged_total,
-        unterminated_quote: has_unterminated_quote(text, delimiter, quote),
+        unterminated_quote: quote_problem.is_some_and(|p| p.at_end),
+        quote_problem,
         derived,
     }
 }

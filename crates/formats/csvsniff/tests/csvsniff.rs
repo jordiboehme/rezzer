@@ -9,6 +9,16 @@ fn full(text: &str) -> csvsniff::Analysis {
     analyze(text, &d, 100_000)
 }
 
+fn fixed(text: &str) -> csvsniff::Analysis {
+    let d = csvsniff::Dialect {
+        delimiter: b',',
+        quote: b'"',
+        has_header: true,
+        consistent_rows: 1.0,
+    };
+    analyze(text, &d, 100_000)
+}
+
 #[test]
 fn sniffs_comma() {
     let d = sniff("a,b,c\n1,2,3\n4,5,6\n").unwrap();
@@ -128,6 +138,26 @@ fn ragged_line_counts_embedded_newlines() {
             expected: 3
         }]
     );
+}
+
+#[test]
+fn quote_problem_is_located() {
+    // Open at the end of the text.
+    let text = "a,b\n1,2\n3,\"oops\n4,5\n";
+    let a = fixed(text);
+    let p = a.quote_problem.expect("problem");
+    assert!(p.at_end);
+    assert_eq!(&text[p.offset..p.offset + 5], "\"oops");
+    // Closed by a later quote that is not at the end of a field.
+    let text = "a,b\n1,\"open\n2,3\n4,\"x y\",5\n6,7\n";
+    let a = fixed(text);
+    let p = a.quote_problem.expect("problem");
+    assert!(!p.at_end);
+    assert!(!a.unterminated_quote);
+    assert_eq!(&text[p.offset..p.offset + 5], "\"open");
+    // Proper multi-line and escaped quotes are fine.
+    let a = fixed("a,b\n1,\"ha \n\"\"ha\"\" \nha\"\n3,4\n");
+    assert_eq!(a.quote_problem, None);
 }
 
 #[test]
