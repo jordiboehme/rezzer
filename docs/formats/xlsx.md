@@ -47,6 +47,10 @@ Built on (versions as used in the development version):
 - VBA: module names and the user functions used in formulas. VBA is never run
 - Volatile functions like `RAND` or `OFFSET`
 
+### Labels
+
+A parameter takes its label from the text left of it or from the column header above it. A text on the left that repeats in its column, like a category `blue` in a data table, is a value of the row and not a label. Then the column header is the label. In a list like `Diameter | 10 | m` the name on the left stays the label.
+
 ### Units
 
 A parameter gets a unit only when the file says so. The output names the source of each unit:
@@ -89,7 +93,6 @@ Example from a tunnel design workbook in the test files (shortened):
 - XLSB is a binary format, so Rezzer's XML readers don't apply to it. For XLSB Rezzer gets values, cached results, formulas, defined names, document properties and VBA module names. It does not read validation, conditional formats, notes and threads, names with scope, calculation settings, data tables, number formats beyond dates, merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links. The output lists this under "Not read"
 - User functions from VBA or add-ins can't be evaluated. The output names them and says where they come from
 - Copies of a formula fold only when they have the same form relative to their cell. A copied formula that reads a fixed cell without `$` gets one row per cell
-- A label is taken from the text left of a value or from the column header. In data tables the text on the left is sometimes a value of the row, not a label
 - A formula that fails to parse is shown as text, with a note
 - Encrypted workbooks are reported as encrypted and not read
 - No public test file was found with a very hidden sheet, hidden columns, iterative calculation turned on or a custom percent format. Rezzer reads these, but they are not proven on a real file

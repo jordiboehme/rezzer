@@ -504,6 +504,104 @@ fn full_calc_on_load_and_tables_warn_results_may_be_old() {
     assert!(stale_losses(&read(&book).document).is_empty());
 }
 
+#[test]
+fn pivots_data_values_take_their_column_header() {
+    // `Id | Name | Category | Value | Size`: the category left of a value (`blue`) is a
+    // value of the row, not its label; the column header says what the value is.
+    let out = corpus("pivots.xlsx");
+    let doc = &out.document;
+    for sheet in ["DataSheet", "DataSheet2"] {
+        for r in [2, 6, 7, 11] {
+            let value = param(doc, &format!("{sheet}!D{r}"));
+            assert_eq!(value.label.as_deref(), Some("Value"), "{sheet}!D{r}");
+            let size = param(doc, &format!("{sheet}!E{r}"));
+            assert_eq!(size.label.as_deref(), Some("Size"), "{sheet}!E{r}");
+        }
+    }
+}
+
+/// A headed table with `left` texts in A, values in B and `units` in C, read by a SUM.
+fn headed_table(header: [&str; 3], left: &[&str], units: &[&str]) -> ReadOutcome {
+    let mut rows = vec![row(
+        1,
+        &[
+            text("A1", header[0]),
+            text("B1", header[1]),
+            text("C1", header[2]),
+        ],
+    )];
+    let last = left.len() as u32 + 1;
+    for (i, (l, u)) in left.iter().zip(units).enumerate() {
+        let r = i as u32 + 2;
+        let mut cells = vec![
+            text(&format!("A{r}"), l),
+            num(&format!("B{r}"), 10.0 * r as f64, None),
+        ];
+        if !u.is_empty() {
+            cells.push(text(&format!("C{r}"), u));
+        }
+        if r == 2 {
+            cells.push(formula_cell("D2", &format!("SUM(B2:B{last})"), Some(1.0)));
+        }
+        rows.push(row(r, &cells));
+    }
+    read(&Book::default().sheet("S", &ws("", &rows.concat(), "")))
+}
+
+#[test]
+fn a_parameter_table_keeps_the_label_on_the_left() {
+    // `Parameter | Value | Unit`: each name on the left is the label, the header is not.
+    let out = headed_table(
+        ["Parameter", "Value", "Unit"],
+        &["Diameter", "Length", "Load"],
+        &["m", "m", "kN"],
+    );
+    let doc = &out.document;
+    for (anchor, label, u) in [
+        ("S!B2", "Diameter", "m"),
+        ("S!B3", "Length", "m"),
+        ("S!B4", "Load", "kN"),
+    ] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label.as_deref(), Some(label), "{anchor}");
+        assert_eq!(unit(p), (Some(u), Some("unit-cell")), "{anchor}");
+    }
+}
+
+#[test]
+fn a_category_on_the_left_is_no_label() {
+    // `Color | Value`: a text that repeats in its column is a value of the row, and so is
+    // `yellow`, once in a column of categories.
+    let out = headed_table(
+        ["Color", "Value", "Note"],
+        &["blue", "blue", "yellow", "blue", "blue"],
+        &["", "", "", "", ""],
+    );
+    let doc = &out.document;
+    for anchor in ["S!B2", "S!B3", "S!B4", "S!B5", "S!B6"] {
+        assert_eq!(
+            param(doc, anchor).label.as_deref(),
+            Some("Value"),
+            "{anchor}"
+        );
+    }
+    // Without a header the text on the left is all there is.
+    let rows = [
+        row(
+            1,
+            &[
+                text("A1", "blue"),
+                num("B1", 1.0, None),
+                formula_cell("D1", "SUM(B1:B2)", Some(3.0)),
+            ],
+        ),
+        row(2, &[text("A2", "blue"), num("B2", 2.0, None)]),
+    ]
+    .concat();
+    let out = read(&Book::default().sheet("S", &ws("", &rows, "")));
+    assert_eq!(param(&out.document, "S!B1").label.as_deref(), Some("blue"));
+}
+
 /// Values in B, read by a SUM in D1, with `codes` in column C and the labels in A.
 fn coded_values(header: Option<[&str; 3]>, codes: &[&str]) -> ReadOutcome {
     let mut rows = Vec::new();

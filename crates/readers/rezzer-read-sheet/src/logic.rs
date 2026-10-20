@@ -1108,6 +1108,10 @@ fn stale_results(out: &mut Out, calc: Option<&CalcSettings>) {
 #[derive(Clone, Copy, Default)]
 struct Around<'a> {
     left: Option<&'a str>,
+    /// The text on the left is a value of the row (a category like `blue`), not the name of
+    /// this value: it occurs more than once in its column, or its column is a column of
+    /// categories. A header above wins over it.
+    left_is_value: bool,
     beside: Option<&'a str>,
     header: Option<&'a str>,
 }
@@ -1131,7 +1135,10 @@ const UNIT_HEADERS: &[&str] = &["unit", "units", "uom", "einheit", "einheiten", 
 
 /// The texts around each wanted cell, in one sweep over the sorted cells.
 /// - The label to the left is at most [`LABEL_GAP`] empty cells away; a value or formula in
-///   between stops the search.
+///   between stops the search. Labels name one value each and categories repeat: a text
+///   that occurs more than once in its column, or that stands in a column where at least
+///   half of the texts repeat an earlier one (four texts or more), is marked as a value of
+///   the row.
 /// - The header is the first text above the value when an unbroken run of values or
 ///   formulas joins them (any length, so every value under `t (m)` finds it). Across empty
 ///   cells it is at most [`LABEL_GAP`] rows above. A text right under values of the same
@@ -1143,6 +1150,26 @@ fn labels_of<'a>(
     let label = |t: &'a str| (t.len() <= MAX_LABEL && !t.trim().is_empty()).then_some(t);
     let mut columns: HashMap<u32, Column<'a>> = HashMap::new();
     let mut out = HashMap::new();
+    // How often each text occurs in its column, and how many texts and distinct texts
+    // each column has.
+    let mut in_column: HashMap<(u32, &'a str), u32> = HashMap::new();
+    let mut texts: HashMap<u32, (u32, u32)> = HashMap::new();
+    for c in cells {
+        if let Some(t) = text_of(c) {
+            let n = in_column.entry((c.col, t.trim())).or_default();
+            *n += 1;
+            let column = texts.entry(c.col).or_default();
+            column.0 += 1;
+            if *n == 1 {
+                column.1 += 1;
+            }
+        }
+    }
+    let categories = |col: u32| {
+        texts
+            .get(&col)
+            .is_some_and(|&(all, distinct)| all >= 4 && distinct * 2 <= all)
+    };
     // The verdict on each text run beside values, kept for every cell of the run.
     let mut unit_columns: HashMap<usize, UnitColumn> = HashMap::new();
     for (i, c) in cells.iter().enumerate() {
@@ -1153,12 +1180,14 @@ fn labels_of<'a>(
         let text = text_of(c);
         let data = text.is_none() && !(c.val == Val::Empty && c.formula.is_none());
         if wanted.contains(&(c.row, c.col)) {
-            let left = i
+            let left_cell = i
                 .checked_sub(1)
                 .and_then(|j| cells.get(j))
-                .filter(|p| p.row == c.row && c.col - p.col - 1 <= LABEL_GAP)
-                .and_then(text_of)
-                .and_then(label);
+                .filter(|p| p.row == c.row && c.col - p.col - 1 <= LABEL_GAP);
+            let left = left_cell.and_then(text_of).and_then(label);
+            let left_is_value = left_cell.zip(left).is_some_and(|(p, t)| {
+                in_column.get(&(p.col, t.trim())).copied().unwrap_or(0) > 1 || categories(p.col)
+            });
             let unbroken = near.is_some_and(|s| s.solid && c.row == s.last + 1);
             let header = near
                 .and_then(|s| s.head)
@@ -1191,6 +1220,7 @@ fn labels_of<'a>(
                 (c.row, c.col),
                 Around {
                     left,
+                    left_is_value,
                     beside,
                     header,
                 },
@@ -1366,6 +1396,10 @@ fn cell_parameters<'f>(
             if !quantity {
                 around.beside = None;
                 around.header = None;
+            }
+            // A row value on the left (a category) says less than the column header.
+            if around.left_is_value && around.header.is_some() {
+                around.left = None;
             }
             let (left_label, left_unit) = around.left.map(units::split_label).unwrap_or_default();
             let (head_label, head_unit) = around.header.map(units::split_label).unwrap_or_default();

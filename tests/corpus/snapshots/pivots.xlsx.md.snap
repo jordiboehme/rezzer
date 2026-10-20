@@ -167,25 +167,25 @@ modified: "2025-11-24T17:58:07Z"
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
-| D2 |  | blue | 10 |  |  | 1 |
+| D2 |  | Value | 10 |  |  | 1 |
 | E2 |  | Size | 1.78 |  |  | 1 |
-| D3 |  | blue | 20 |  |  | 1 |
+| D3 |  | Value | 20 |  |  | 1 |
 | E3 |  | Size | 2.012 |  |  | 1 |
-| D4 |  | blue | 15 |  |  | 1 |
+| D4 |  | Value | 15 |  |  | 1 |
 | E4 |  | Size | 3.121 |  |  | 1 |
-| D5 |  | blue | 20 |  |  | 1 |
+| D5 |  | Value | 20 |  |  | 1 |
 | E5 |  | Size | 1.052 |  |  | 1 |
-| D6 |  | blue | 10 |  |  | 1 |
+| D6 |  | Value | 10 |  |  | 1 |
 | E6 |  | Size | 3.102 |  |  | 1 |
-| D7 |  | yellow | 5 |  |  | 1 |
+| D7 |  | Value | 5 |  |  | 1 |
 | E7 |  | Size | 1.02 |  |  | 1 |
-| D8 |  | yellow | 10 |  |  | 1 |
+| D8 |  | Value | 10 |  |  | 1 |
 | E8 |  | Size | 0 |  |  | 1 |
-| D9 |  | yellow | 15 |  |  | 1 |
+| D9 |  | Value | 15 |  |  | 1 |
 | E9 |  | Size | 4.031 |  |  | 1 |
-| D10 |  | yellow | 15 |  |  | 1 |
+| D10 |  | Value | 15 |  |  | 1 |
 | E10 |  | Size | 1.0421 |  |  | 1 |
-| D11 |  | yellow | 5 |  |  | 1 |
+| D11 |  | Value | 5 |  |  | 1 |
 | E11 |  | Size | 1.20452 |  |  | 1 |
 
 #### Formulas
@@ -211,25 +211,25 @@ For formulas copied over several cells the first cell is shown.
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
-| D2 |  | blue | 20 |  |  | 1 |
+| D2 |  | Value | 20 |  |  | 1 |
 | E2 |  | Size | 1.78 |  |  | 1 |
-| D3 |  | blue | 20 |  |  | 1 |
+| D3 |  | Value | 20 |  |  | 1 |
 | E3 |  | Size | 2.012 |  |  | 1 |
-| D4 |  | blue | 20 |  |  | 1 |
+| D4 |  | Value | 20 |  |  | 1 |
 | E4 |  | Size | 3.121 |  |  | 1 |
-| D5 |  | blue | 10 |  |  | 1 |
+| D5 |  | Value | 10 |  |  | 1 |
 | E5 |  | Size | 1.052 |  |  | 1 |
-| D6 |  | blue | 5 |  |  | 1 |
+| D6 |  | Value | 5 |  |  | 1 |
 | E6 |  | Size | 3.102 |  |  | 1 |
-| D7 |  | yellow | 10 |  |  | 1 |
+| D7 |  | Value | 10 |  |  | 1 |
 | E7 |  | Size | 1.02 |  |  | 1 |
-| D8 |  | yellow | 5 |  |  | 1 |
+| D8 |  | Value | 5 |  |  | 1 |
 | E8 |  | Size | 0 |  |  | 1 |
-| D9 |  | yellow | 5 |  |  | 1 |
+| D9 |  | Value | 5 |  |  | 1 |
 | E9 |  | Size | 4.031 |  |  | 1 |
-| D10 |  | yellow | 15 |  |  | 1 |
+| D10 |  | Value | 15 |  |  | 1 |
 | E10 |  | Size | 1.0421 |  |  | 1 |
-| D11 |  | yellow | 5 |  |  | 1 |
+| D11 |  | Value | 5 |  |  | 1 |
 | E11 |  | Size | 1.20452 |  |  | 1 |
 
 #### Formulas
