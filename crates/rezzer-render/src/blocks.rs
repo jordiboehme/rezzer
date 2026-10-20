@@ -279,6 +279,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
         Inline::Link {
             target,
             title,
+            wiki,
             inlines: content,
             ..
         } => {
@@ -293,6 +294,14 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 for inner in &merged {
                     inline_into(inner, line_mode(mode), link_depth + 1, dollars, out);
                 }
+                return;
+            }
+            if *wiki
+                && link_depth == 0
+                && safe_target(target)
+                && let Some(written) = wikilink(target, &flat_text(content))
+            {
+                out.push_str(&written);
                 return;
             }
             if !safe_target(target) {
@@ -1404,4 +1413,18 @@ fn column_letter(mut index: usize) -> String {
         index = index / 26 - 1;
     }
     letters.iter().rev().collect()
+}
+
+/// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None when the
+/// target or the text has `]]`, `|` or a line break (the link is then written normally).
+fn wikilink(target: &str, text: &str) -> Option<String> {
+    let bad = |s: &str| s.contains("]]") || s.contains('|') || s.contains(['\n', '\r']);
+    if target.is_empty() || bad(target) || (text != target && bad(text)) {
+        return None;
+    }
+    if text.is_empty() || text == target {
+        Some(format!("[[{target}]]"))
+    } else {
+        Some(format!("[[{target}|{text}]]"))
+    }
 }
