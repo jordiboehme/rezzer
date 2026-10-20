@@ -11,6 +11,8 @@ use flate2::write::ZlibEncoder;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
 use pdfparts::{Limits, OpenError, Pdf};
 
+mod common;
+
 fn never() -> bool {
     false
 }
@@ -105,10 +107,36 @@ fn with_typed_stream(placeholder: &str, keys: Dictionary, data: Vec<u8>) -> Docu
     doc
 }
 
-fn saved(mut doc: Document) -> Vec<u8> {
+fn saved(doc: &mut Document) -> Vec<u8> {
     let mut out = Vec::new();
     doc.save_to(&mut out).unwrap();
     out
+}
+
+/// Adds an update section whose catalog uses member 900 of the typed stream of `doc`, so the
+/// object stream is part of the document and must be unpacked. `extra` goes into the trailer.
+fn needing_member(bytes: &[u8], doc: &Document, extra: &str) -> Vec<u8> {
+    let pages = doc.catalog().unwrap().get(b"Pages").unwrap();
+    let pages = pages.as_reference().unwrap();
+    let container = doc
+        .objects
+        .iter()
+        .find(|(_, o)| o.as_stream().is_ok_and(|s| s.dict.get(b"First").is_ok()))
+        .map(|(id, _)| *id)
+        .unwrap();
+    common::append_update(
+        bytes,
+        &[(
+            800,
+            format!(
+                "<< /Type /Catalog /Pages {} {} R /Bomb 900 0 R >>",
+                pages.0, pages.1
+            ),
+        )],
+        &[(900, container.0, 0)],
+        800,
+        extra,
+    )
 }
 
 /// Replaces `from` with `to` (same length) once.
@@ -148,26 +176,20 @@ fn assert_limit_bounded(bytes: &[u8]) {
 #[test]
 fn escaped_objstm_name_is_scanned() {
     // `/Obj#53tm` is the name ObjStm written with an escape.
-    let mut bytes = saved(with_typed_stream(
-        "ObjStXYZ",
-        dictionary! {},
-        objstm_bomb_data(),
-    ));
+    let mut doc = with_typed_stream("ObjStXYZ", dictionary! {}, objstm_bomb_data());
+    let mut bytes = saved(&mut doc);
     patch(&mut bytes, b"/ObjStXYZ", b"/Obj#53tm");
-    assert_limit_bounded(&bytes);
+    assert_limit_bounded(&needing_member(&bytes, &doc, ""));
 }
 
 #[test]
 fn padded_objstm_dict_is_scanned() {
     // 70 KB of dictionary before `/Type`.
     let pad = Object::string_literal(vec![b'x'; 70_000]);
-    let mut bytes = saved(with_typed_stream(
-        "ObjStX",
-        dictionary! { "Pad" => pad },
-        objstm_bomb_data(),
-    ));
+    let mut doc = with_typed_stream("ObjStX", dictionary! { "Pad" => pad }, objstm_bomb_data());
+    let mut bytes = saved(&mut doc);
     patch(&mut bytes, b"/ObjStX", b"/ObjStm");
-    assert_limit_bounded(&bytes);
+    assert_limit_bounded(&needing_member(&bytes, &doc, ""));
 }
 
 #[test]
@@ -203,9 +225,12 @@ fn encrypted_objstm_bomb_is_bounded() {
     })
     .unwrap();
     doc.encrypt(&state).unwrap();
-    let mut bytes = saved(doc);
+    let mut bytes = saved(&mut doc);
     patch(&mut bytes, b"/ObjStX", b"/ObjStm");
-    assert_limit_bounded(&bytes);
+    let e = doc.trailer.get(b"Encrypt").unwrap().as_reference().unwrap();
+    let hex = "30313233343536373839616263646566";
+    let extra = format!("/Encrypt {} {} R /ID [<{hex}><{hex}>]", e.0, e.1);
+    assert_limit_bounded(&needing_member(&bytes, &doc, &extra));
 }
 
 #[test]

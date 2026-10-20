@@ -12,7 +12,7 @@ use crate::objects::{
     Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference, resolve,
     text_string, walk_tree,
 };
-use crate::{Issue, IssueKind, Pdf};
+use crate::{Issue, IssueKind, Pdf, pagetree};
 
 /// A page with its label, size and what it carries.
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +183,7 @@ impl Pdf {
         let mut out = Vec::with_capacity(self.pages.len());
         let mut no_box = Vec::new();
         let mut odd_rotation = Vec::new();
+        let mut memo: HashMap<ObjectId, (bool, Vec<ImageInfo>)> = HashMap::new();
         for (i, node) in self.pages.iter().enumerate() {
             let number = i as u32 + 1;
             let media = node.media_box.unwrap_or_else(|| {
@@ -197,12 +198,22 @@ impl Pdf {
                 odd_rotation.push(number);
                 0
             };
-            let mut has_fonts = false;
-            let mut images = Vec::new();
-            if let Some(res) = &node.resources {
-                let mut seen = HashSet::new();
-                self.scan_resources(res, 1, &mut seen, &mut has_fonts, &mut images);
-            }
+            // Pages that share their resources share the result.
+            let (has_fonts, images) = match node.resources_from {
+                Some(owner) => memo
+                    .entry(owner)
+                    .or_insert_with(|| {
+                        let mut has_fonts = false;
+                        let mut images = Vec::new();
+                        if let Some(res) = pagetree::resources(&self.doc, node) {
+                            let mut seen = HashSet::new();
+                            self.scan_resources(res, 1, &mut seen, &mut has_fonts, &mut images);
+                        }
+                        (has_fonts, images)
+                    })
+                    .clone(),
+                None => (false, Vec::new()),
+            };
             out.push(PageInfo {
                 number,
                 label: labels.get(i).cloned().flatten(),
@@ -345,38 +356,61 @@ impl Pdf {
                 })
                 .collect();
         ranges.sort_by_key(|(start, _)| *start);
+        // Each range is decoded once: prefix, style and first value.
+        let ranges: Vec<(u64, String, Option<&[u8]>, u64)> = ranges
+            .into_iter()
+            .map(|(start, range)| {
+                let d = dict(doc, range);
+                let prefix = d
+                    .map(|d| self.label_prefix(d, start, issues))
+                    .unwrap_or_default();
+                let style = d.and_then(|d| get_name(doc, d, b"S"));
+                let first = d
+                    .and_then(|d| get_int(doc, d, b"St"))
+                    .filter(|s| *s >= 1)
+                    .unwrap_or(1) as u64;
+                (start, prefix, style, first)
+            })
+            .collect();
         let mut out = Vec::with_capacity(n);
         let mut r = 0usize;
         for i in 0..n as u64 {
             while r + 1 < ranges.len() && ranges[r + 1].0 <= i {
                 r += 1;
             }
-            let Some(&(start, range)) = ranges.get(r).filter(|(s, _)| *s <= i) else {
+            let Some((start, prefix, style, first)) = ranges.get(r).filter(|g| g.0 <= i) else {
                 out.push(None);
                 continue;
             };
-            let d = dict(doc, range);
-            let mut prefix = d.and_then(|d| get_text(doc, d, b"P")).unwrap_or_default();
-            if prefix.chars().count() > PREFIX_MAX {
-                prefix = prefix.chars().take(PREFIX_MAX).collect();
-                issues.push(Issue::new(
-                    "page labels",
-                    IssueKind::Limit,
-                    format!(
-                        "a label prefix from page {} on is longer than {PREFIX_MAX} characters and is cut",
-                        start + 1
-                    ),
-                ));
-            }
-            let style = d.and_then(|d| get_name(doc, d, b"S"));
-            let first = d
-                .and_then(|d| get_int(doc, d, b"St"))
-                .filter(|s| *s >= 1)
-                .unwrap_or(1) as u64;
             let value = first.saturating_add(i - start);
-            out.push(Some(format!("{prefix}{}", format_label(style, value))));
+            out.push(Some(format!("{prefix}{}", format_label(*style, value))));
         }
         out
+    }
+
+    /// The prefix of a label range, cut to [`PREFIX_MAX`] characters. The raw bytes are cut
+    /// before they are decoded, so a huge prefix costs no more than a short one.
+    fn label_prefix(&self, range: &Dictionary, start: u64, issues: &mut Vec<Issue>) -> String {
+        let Some(Object::String(raw, _)) = get(&self.doc, range, b"P") else {
+            return String::new();
+        };
+        // A character takes at most 4 bytes, plus a byte order mark.
+        let cap = PREFIX_MAX * 4 + 3;
+        let cut_raw = raw.len() > cap;
+        let decoded = text_string(&raw[..raw.len().min(cap)]);
+        let long = cut_raw || decoded.chars().count() > PREFIX_MAX;
+        if !long {
+            return decoded;
+        }
+        issues.push(Issue::new(
+            "page labels",
+            IssueKind::Limit,
+            format!(
+                "a label prefix from page {} on is longer than {PREFIX_MAX} characters and is cut",
+                start + 1
+            ),
+        ));
+        decoded.chars().take(PREFIX_MAX).collect()
     }
 
     /// Named destinations from the `/Dests` name tree and the older catalog `/Dests`

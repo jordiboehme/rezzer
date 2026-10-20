@@ -19,7 +19,15 @@ pub(crate) struct PageNode {
     pub media_box: Option<[f32; 4]>,
     pub crop_box: Option<[f32; 4]>,
     pub rotate: i64,
-    pub resources: Option<Object>,
+    /// The node whose `/Resources` the page uses: the page itself or the nearest ancestor
+    /// that has them. Pages share it instead of holding a copy.
+    pub resources_from: Option<ObjectId>,
+}
+
+/// The `/Resources` of a page, read from the node that holds them.
+pub(crate) fn resources<'a>(doc: &'a Document, node: &PageNode) -> Option<&'a Object> {
+    let owner = doc.objects.get(&node.resources_from?)?;
+    dict(doc, owner)?.get(b"Resources").ok()
 }
 
 /// The pages and whether the tree is safe to hand to a parser with another page walk.
@@ -116,11 +124,12 @@ fn inherit(doc: &Document, id: ObjectId, limits: &Limits) -> PageNode {
         media_box: None,
         crop_box: None,
         rotate: 0,
-        resources: None,
+        resources_from: None,
     };
     let mut rotate = None;
     let mut seen = HashSet::new();
     let mut current = doc.objects.get(&id).and_then(|o| dict(doc, o));
+    let mut current_id = id;
     seen.insert(id);
     while let Some(d) = current {
         if node.media_box.is_none() {
@@ -132,16 +141,20 @@ fn inherit(doc: &Document, id: ObjectId, limits: &Limits) -> PageNode {
         if rotate.is_none() {
             rotate = get_int(doc, d, b"Rotate");
         }
-        if node.resources.is_none() {
-            node.resources = d.get(b"Resources").ok().cloned();
+        if node.resources_from.is_none() && d.get(b"Resources").is_ok() {
+            node.resources_from = Some(current_id);
         }
-        current = d
+        let parent = d
             .get(b"Parent")
             .ok()
             .and_then(reference)
-            .filter(|p| seen.insert(*p) && seen.len() <= limits.max_depth)
+            .filter(|p| seen.insert(*p) && seen.len() <= limits.max_depth);
+        current = parent
             .and_then(|p| doc.objects.get(&p))
             .and_then(|o| dict(doc, o));
+        if let Some(p) = parent {
+            current_id = p;
+        }
     }
     node.rotate = rotate.unwrap_or(0);
     node

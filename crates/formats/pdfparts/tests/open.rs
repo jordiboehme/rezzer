@@ -10,6 +10,8 @@ use flate2::write::ZlibEncoder;
 use lopdf::{Document, Object, ObjectId, Stream, dictionary};
 use pdfparts::{IssueKind, Limits, OpenError, Pdf};
 
+mod common;
+
 fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(corpus_dir().join(name)).unwrap()
 }
@@ -111,7 +113,7 @@ fn opens_corpus_files_without_panic() {
         let _ = (pdf.info(), pdf.xmp(), pdf.language(), pdf.tagged());
         let _ = (pdf.outline(), pdf.named_destinations(), pdf.links());
         eprintln!(
-            "{name}: {} pages, {} bytes unpacked, issues {:?}",
+            "{name}: {} pages, {} bytes unpacked, issues {:?}, {pdf:?}",
             pages.len(),
             pdf.unpacked(),
             pdf.issues()
@@ -132,11 +134,11 @@ fn empty_user_password_opens() {
         assert_eq!(pdf.pages().len(), 30, "{name}");
         assert_eq!(pdf.outline().len(), 11, "{name}");
 
-        // The decrypted copy is a plain PDF the other parsers can read.
-        let plain = pdf.decrypted().expect("decrypted bytes");
-        let reloaded = Document::load_mem(&plain).unwrap();
+        // The canonical copy is a plain PDF the other parsers can read.
+        let plain = pdf.canonical();
+        let reloaded = Document::load_mem(plain).unwrap();
         assert!(reloaded.trailer.get(b"Encrypt").is_err(), "{name}");
-        let again = open(&plain, None).unwrap();
+        let again = open(plain, None).unwrap();
         assert_eq!(again.encryption(), None, "{name}");
         assert_eq!(again.pages().len(), 30, "{name}");
         assert_eq!(again.outline().len(), 11, "{name}");
@@ -144,10 +146,10 @@ fn empty_user_password_opens() {
 }
 
 #[test]
-fn plain_file_has_no_decrypted_copy() {
+fn plain_file_has_a_canonical_copy() {
     let pdf = open(&corpus("pypdf-outline.pdf"), None).unwrap();
     assert_eq!(pdf.encryption(), None);
-    assert!(pdf.decrypted().is_none());
+    assert!(Document::load_mem(pdf.canonical()).is_ok());
 }
 
 #[test]
@@ -175,7 +177,7 @@ fn user_password_opens() {
     assert!(!pdf.pages().is_empty());
     let debug = format!("{pdf:?}");
     assert!(!debug.contains("view"), "{debug}");
-    assert!(pdf.decrypted().is_some());
+    assert!(Document::load_mem(pdf.canonical()).is_ok());
 }
 
 #[test]
@@ -427,8 +429,9 @@ fn objstm_bomb() -> Vec<u8> {
     assert!(packed.len() < 4 << 20, "{}", packed.len());
     // lopdf's writer leaves out object streams, so the type is patched in afterwards. The
     // name has the same length, so the offsets stay right.
-    let mut bytes = one_page(plain_content(), |doc, _, _| {
-        doc.add_object(
+    let mut ids = None;
+    let mut bytes = one_page(plain_content(), |doc, pages, _| {
+        let container = doc.add_object(
             Stream::new(
                 dictionary! {
                     "Type" => "ObjStX",
@@ -440,10 +443,26 @@ fn objstm_bomb() -> Vec<u8> {
             )
             .with_compression(false),
         );
+        ids = Some((pages, container));
     });
     let at = bytes.windows(7).position(|w| w == b"/ObjStX").unwrap();
     bytes[at + 6] = b'm';
-    bytes
+    // An update section makes a member of the object stream part of the document, so the
+    // stream must be unpacked.
+    let (pages, container) = ids.unwrap();
+    common::append_update(
+        &bytes,
+        &[(
+            800,
+            format!(
+                "<< /Type /Catalog /Pages {} {} R /Bomb 900 0 R >>",
+                pages.0, pages.1
+            ),
+        )],
+        &[(900, container.0, 0)],
+        800,
+        "",
+    )
 }
 
 /// Maximum resident set size of the process. It covers lopdf's rayon threads too. It is the
@@ -483,4 +502,176 @@ fn issue_kinds_compare() {
         OpenError::WrongPassword.to_string(),
         "the password is wrong"
     );
+}
+
+fn corpus_names() -> Vec<String> {
+    let mut names: Vec<_> = std::fs::read_dir(corpus_dir())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".pdf"))
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn canonical_bytes_have_no_object_streams_and_reload() {
+    for name in corpus_names() {
+        let bytes = corpus(&name);
+        let password = (name == "qpdf-user-password.pdf").then_some("view");
+        let pdf = open(&bytes, password).unwrap();
+        let canon = pdf.canonical();
+        // A classic table, and lopdf reads the copy with nothing to unpack.
+        assert!(canon.windows(6).any(|w| w == b"\nxref\n"), "{name}");
+        let doc = Document::load_mem(canon).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(doc.trailer.get(b"Encrypt").is_err(), "{name}");
+        assert!(
+            doc.objects
+                .values()
+                .all(|o| !matches!(o.type_name(), Ok(b"ObjStm" | b"XRef"))),
+            "{name}"
+        );
+        assert_eq!(doc.get_pages().len() as u32, pdf.page_count(), "{name}");
+        let again = open(canon, None).unwrap();
+        assert_eq!(again.page_count(), pdf.page_count(), "{name}");
+        assert_eq!(again.info(), pdf.info(), "{name}");
+        assert_eq!(again.outline(), pdf.outline(), "{name}");
+        assert_eq!(again.canonical(), canon, "{name}: the copy is not stable");
+    }
+}
+
+#[test]
+fn bad_xref_is_rebuilt() {
+    let pdf = open(&corpus("qpdf-malformed-bad-xref-entry.pdf"), None).unwrap();
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
+    );
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    let page = doc.page_iter().next().unwrap();
+    let content = doc.get_page_content(page);
+    assert!(
+        content.windows(6).any(|w| w == b"Potato"),
+        "{}",
+        String::from_utf8_lossy(&content)
+    );
+}
+
+/// Every dictionary object with `key`, by id.
+fn with_key(doc: &Document, key: &[u8]) -> Vec<(ObjectId, lopdf::Dictionary)> {
+    doc.objects
+        .iter()
+        .filter_map(|(id, o)| {
+            let d = match o {
+                Object::Dictionary(d) => d,
+                Object::Stream(s) => &s.dict,
+                _ => return None,
+            };
+            d.get(key).is_ok().then(|| (*id, d.clone()))
+        })
+        .collect()
+}
+
+#[test]
+fn signatures_and_form_values_survive() {
+    // The corpus files are trusted test data, so lopdf may read them here for comparison.
+    for name in ["pdfjs-signed.pdf", "irs-f1040-2025.pdf"] {
+        let bytes = corpus(name);
+        let pdf = open(&bytes, None).unwrap();
+        assert_eq!(pdf.original(), bytes.as_slice());
+        let original = Document::load_mem(&bytes).unwrap();
+        let canon = Document::load_mem(pdf.canonical()).unwrap();
+        let sigs = with_key(&original, b"ByteRange");
+        assert!(!sigs.is_empty(), "{name}: no signature dictionary");
+        for (id, sig) in sigs {
+            let copy = canon
+                .get_dictionary(id)
+                .unwrap_or_else(|_| panic!("{name}: signature {id:?} is gone"));
+            assert_eq!(
+                copy.get(b"ByteRange").ok(),
+                sig.get(b"ByteRange").ok(),
+                "{name}"
+            );
+            assert_eq!(
+                copy.get(b"Contents").ok(),
+                sig.get(b"Contents").ok(),
+                "{name}"
+            );
+        }
+    }
+    let bytes = corpus("pypdf-libreoffice-form.pdf");
+    let pdf = open(&bytes, None).unwrap();
+    let original = Document::load_mem(&bytes).unwrap();
+    let canon = Document::load_mem(pdf.canonical()).unwrap();
+    let fields = with_key(&original, b"V");
+    assert!(!fields.is_empty());
+    for (id, field) in fields {
+        let copy = canon.get_dictionary(id).unwrap();
+        assert_eq!(copy.get(b"V").ok(), field.get(b"V").ok(), "field {id:?}");
+    }
+    assert!(canon.catalog().unwrap().get(b"AcroForm").is_ok());
+}
+
+#[test]
+fn encrypted_signature_contents_stay_unchanged() {
+    use lopdf::{EncryptionState, EncryptionVersion, Permissions, StringFormat};
+    // A signature's /Contents is not encrypted (ISO 32000-1, 7.6.1); its /Name is.
+    let contents = Object::String(vec![0x30, 0x82, 0x01, 0x02], StringFormat::Hexadecimal);
+    let mut sig_id = None;
+    let mut field_id = None;
+    let bytes = one_page(plain_content(), |doc, _, page| {
+        let sig = doc.add_object(dictionary! {
+            "Type" => "Sig",
+            "Filter" => "Adobe.PPKLite",
+            "ByteRange" => vec![0.into(), 10.into(), 20.into(), 30.into()],
+            "Contents" => contents.clone(),
+            "Name" => Object::string_literal("Signer"),
+        });
+        // A field whose value is a direct signature dictionary without /Type.
+        let field = doc.add_object(dictionary! {
+            "FT" => "Sig",
+            "T" => Object::string_literal("Sig1"),
+            "V" => dictionary! {
+                "ByteRange" => vec![0.into(), 1.into(), 2.into(), 3.into()],
+                "Contents" => contents.clone(),
+            },
+        });
+        doc.get_dictionary_mut(page)
+            .unwrap()
+            .set("Annots", vec![sig.into(), field.into()]);
+        sig_id = Some(sig);
+        field_id = Some(field);
+        let id = Object::string_literal(b"0123456789abcdef".to_vec());
+        doc.trailer.set("ID", vec![id.clone(), id]);
+        let state = EncryptionState::try_from(EncryptionVersion::V2 {
+            document: doc,
+            owner_password: "owner",
+            user_password: "",
+            key_length: 128,
+            permissions: Permissions::all(),
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+        // lopdf encrypts every string; a signing writer leaves /Contents in the clear.
+        doc.get_dictionary_mut(sig)
+            .unwrap()
+            .set("Contents", contents.clone());
+        let field = doc.get_dictionary_mut(field).unwrap();
+        let mut v = field.get(b"V").unwrap().as_dict().unwrap().clone();
+        v.set("Contents", contents.clone());
+        field.set("V", v);
+    });
+    let pdf = open(&bytes, None).unwrap();
+    assert!(pdf.encryption().is_some());
+    let canon = Document::load_mem(pdf.canonical()).unwrap();
+    let sig = canon.get_dictionary(sig_id.unwrap()).unwrap();
+    assert_eq!(sig.get(b"Contents").unwrap(), &contents);
+    assert_eq!(sig.get(b"Name").unwrap().as_str().unwrap(), b"Signer");
+    let field = canon.get_dictionary(field_id.unwrap()).unwrap();
+    assert_eq!(field.get(b"T").unwrap().as_str().unwrap(), b"Sig1");
+    let v = field.get(b"V").unwrap().as_dict().unwrap();
+    assert_eq!(v.get(b"Contents").unwrap(), &contents);
 }

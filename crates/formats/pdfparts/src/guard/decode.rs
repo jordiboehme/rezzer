@@ -11,13 +11,13 @@
 //! the cap and almost no memory. The stop callback is asked as input is fed and as output
 //! passes the meters.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 
 use lopdf::{Dictionary, Document, Object};
 
 use crate::Limits;
-use crate::objects::{get, resolve};
+use crate::objects::resolve;
 
 /// How often, in bytes moved through the chain, the stop callback is asked.
 const STOP_EVERY: u64 = 1 << 20;
@@ -97,6 +97,8 @@ struct Shared<'a> {
     moved: Cell<u64>,
     next_check: Cell<u64>,
     stop: &'a dyn Fn() -> bool,
+    /// The final output, when the caller wants the data and not only its size.
+    kept: RefCell<Option<Vec<u8>>>,
 }
 
 impl Shared<'_> {
@@ -143,6 +145,9 @@ impl Write for Sink<'_> {
         let n = s.count.get().saturating_add(buf.len() as u64);
         s.count.set(n);
         s.charge(n, true, buf.len())?;
+        if let Some(kept) = s.kept.borrow_mut().as_mut() {
+            kept.extend_from_slice(buf);
+        }
         Ok(buf.len())
     }
 
@@ -509,6 +514,32 @@ pub(crate) fn measure_bytes(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> Measure {
+    decode(raw, filters, limits, budget, stop, false).0
+}
+
+/// Decodes `raw` through `filters` under the same caps and keeps the output. The data is
+/// `None` when the chain holds a filter whose output stays encoded, or a cap was hit.
+pub(crate) fn unpack(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> (Measure, Option<Vec<u8>>) {
+    if filters.contains(&Filter::Opaque) {
+        return (Measure::Fits(0), None);
+    }
+    decode(raw, filters, limits, budget, stop, true)
+}
+
+fn decode(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+    keep: bool,
+) -> (Measure, Option<Vec<u8>>) {
     // The chain ends at the first filter whose output stays encoded.
     let end = filters
         .iter()
@@ -528,15 +559,16 @@ pub(crate) fn measure_bytes(
         moved: Cell::new(0),
         next_check: Cell::new(STOP_EVERY),
         stop,
+        kept: RefCell::new(keep.then(Vec::new)),
     };
     run(raw, filters, &shared);
     if shared.stopped.get() {
-        return Measure::Stopped;
+        return (Measure::Stopped, None);
     }
     if let Some(cap) = shared.over.get() {
-        return Measure::Over(cap);
+        return (Measure::Over(cap), None);
     }
-    Measure::Fits(shared.count.get())
+    (Measure::Fits(shared.count.get()), shared.kept.take())
 }
 
 pub(crate) fn cap_words(cap: Cap, limits: &Limits) -> String {
@@ -558,22 +590,32 @@ pub(crate) fn cap_words(cap: Cap, limits: &Limits) -> String {
 
 /// The filter chain of a loaded stream.
 pub(crate) fn stream_filters(doc: &Document, dict: &Dictionary) -> Vec<Filter> {
-    let names: Vec<Vec<u8>> = match get(doc, dict, b"Filter") {
+    filters_with(dict, &|o| resolve(doc, o))
+}
+
+/// The filter chain of a stream dictionary, with `resolve` for indirect values. Pass
+/// `&|o| Some(o)` to read direct values only.
+pub(crate) fn filters_with<'a>(
+    dict: &'a Dictionary,
+    resolve: &dyn Fn(&'a Object) -> Option<&'a Object>,
+) -> Vec<Filter> {
+    let get = |key: &[u8]| dict.get(key).ok().and_then(resolve);
+    let names: Vec<Vec<u8>> = match get(b"Filter") {
         Some(Object::Name(n)) => vec![n.clone()],
         Some(Object::Array(a)) => a
             .iter()
-            .filter_map(|o| match resolve(doc, o) {
+            .filter_map(|o| match resolve(o) {
                 Some(Object::Name(n)) => Some(n.clone()),
                 _ => None,
             })
             .collect(),
         _ => Vec::new(),
     };
-    let params: Vec<Option<&Dictionary>> = match get(doc, dict, b"DecodeParms") {
+    let params: Vec<Option<&Dictionary>> = match get(b"DecodeParms") {
         Some(Object::Dictionary(d)) => vec![Some(d)],
         Some(Object::Array(a)) => a
             .iter()
-            .map(|o| match resolve(doc, o) {
+            .map(|o| match resolve(o) {
                 Some(Object::Dictionary(d)) => Some(d),
                 _ => None,
             })

@@ -8,10 +8,13 @@
 //! and XMP), language, pages with their labels, sizes and images, the outline, named
 //! destinations and links.
 //!
-//! [`Pdf::open`] measures every stream once before anything else reads the file: a stream that
-//! unpacks past the size or ratio caps is refused, and so is every page that uses it. An
-//! object stream bomb ends the open with [`OpenError::Limit`]. A problem never panics. It
-//! becomes an [`Issue`], and the other parts are still read.
+//! [`Pdf::open`] parses the file with its own bounded parser, keeps only the objects the
+//! document reaches, and writes them as canonical bytes ([`Pdf::canonical`]): a plain PDF with a
+//! classic cross-reference table, no object streams and no encryption. Other parsers get only
+//! those bytes. Every stream is measured once before open returns: a stream that unpacks past
+//! the size or ratio caps is refused, and so is every page that uses it. An object stream bomb
+//! ends the open with [`OpenError::Limit`]. A problem never panics. It becomes an [`Issue`],
+//! and the other parts are still read.
 //!
 //! ```
 //! use pdfparts::objects::{pdf_date, text_string};
@@ -24,12 +27,13 @@ mod meta;
 mod nav;
 pub mod objects;
 mod pagetree;
+mod parse;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Mutex;
 
-use lopdf::{Document, LoadOptions, Object, ObjectId};
+use lopdf::{Document, ObjectId};
 
 pub use meta::{Info, PdfDate};
 pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
@@ -49,6 +53,9 @@ pub struct Limits {
     pub max_ratio: u64,
     /// Most revisions (incremental updates) that are read.
     pub max_revisions: usize,
+    /// Most bytes the parsed objects and the canonical copy may take: every value counts a
+    /// fixed 128 bytes plus its strings, names and stream data.
+    pub max_object_bytes: u64,
 }
 
 impl Default for Limits {
@@ -60,6 +67,7 @@ impl Default for Limits {
             max_total_bytes: 4 << 30,
             max_ratio: 100,
             max_revisions: 64,
+            max_object_bytes: 512 << 20,
         }
     }
 }
@@ -143,6 +151,11 @@ pub struct Encryption {
 /// An open PDF file.
 pub struct Pdf {
     doc: Document,
+    canonical: Vec<u8>,
+    original: Vec<u8>,
+    /// Values parsed and the bytes charged for them and the canonical copy.
+    values: usize,
+    object_bytes: u64,
     limits: Limits,
     encryption: Option<Encryption>,
     /// Page objects in page order; page number = index + 1.
@@ -175,12 +188,11 @@ impl fmt::Debug for Pdf {
             .field("encryption", &self.encryption)
             .field("refused_pages", &self.verdict.refused_pages)
             .field("unpacked", &self.verdict.unpacked)
+            .field("values", &self.values)
+            .field("object_bytes", &self.object_bytes)
             .finish_non_exhaustive()
     }
 }
-
-/// How far into the file the `%PDF-` header may start.
-const HEADER_WINDOW: usize = 1024;
 
 impl Pdf {
     /// Opens a PDF file from memory. `password` is tried as user and as owner password when the
@@ -191,50 +203,16 @@ impl Pdf {
         limits: &Limits,
         stop: &dyn Fn() -> bool,
     ) -> Result<Pdf, OpenError> {
-        let head = &bytes[..bytes.len().min(HEADER_WINDOW)];
+        let head = &bytes[..bytes.len().min(parse::HEADER_WINDOW)];
         if !head.windows(5).any(|w| w == b"%PDF-") {
             return Err(OpenError::NotPdf);
         }
         if stop() {
             return Err(OpenError::Limit("stopped by the caller".into()));
         }
-        // lopdf counts offsets from the first `%PDF-`.
-        let base = bytes.windows(5).position(|w| w == b"%PDF-").unwrap_or(0);
-        let pre = guard::prescan(bytes, base, limits, stop)?;
-        // lopdf inflates object and cross-reference streams while it loads, on several
-        // threads when its rayon feature is on. The scan above has measured them; this fixed
-        // cap bounds each one lopdf decodes all the same.
-        let cap = limits.max_stream_bytes.min(guard::BACKSTOP);
-        let cap = usize::try_from(cap).unwrap_or(usize::MAX);
-        let options = |password: Option<&str>| LoadOptions {
-            password: password.map(str::to_string),
-            max_decompressed_size: Some(cap),
-            ..LoadOptions::default()
-        };
-
-        let mut doc = load(bytes, options(None), password)?;
-        let mut empty_user_password = true;
-        if doc.trailer.get(b"Encrypt").is_ok() {
-            // lopdf could not open it with an empty password.
-            check_handler(&doc)?;
-            let Some(pw) = password else {
-                return Err(OpenError::NeedsPassword);
-            };
-            doc = load(bytes, options(Some(pw)), password)?;
-            if doc.trailer.get(b"Encrypt").is_ok() {
-                return Err(OpenError::WrongPassword);
-            }
-            empty_user_password = false;
-        }
-        let encryption = doc.encryption_state.as_ref().map(|state| Encryption {
-            method: method(state),
-            empty_user_password,
-        });
-        if stop() {
-            return Err(OpenError::Limit("stopped by the caller".into()));
-        }
-
-        let mut issues = Vec::new();
+        let built = parse::build(bytes, password, limits, stop)?;
+        let doc = built.doc;
+        let mut issues = built.issues;
         let catalog_ok = doc
             .trailer
             .get(b"Root")
@@ -248,9 +226,7 @@ impl Pdf {
         }
         let tree = pagetree::page_tree(&doc, limits, &mut issues);
         let pages = tree.pages;
-        let roots: Vec<(ObjectId, Option<&Object>)> =
-            pages.iter().map(|p| (p.id, p.resources.as_ref())).collect();
-        let verdict = guard::measure(&doc, bytes, base, &roots, &pre, limits, stop, &mut issues)?;
+        let verdict = guard::measure(&doc, &pages, built.unpacked, limits, stop, &mut issues)?;
         // A page listed twice keeps its first number.
         let mut page_numbers = HashMap::new();
         for (i, p) in pages.iter().enumerate() {
@@ -262,8 +238,12 @@ impl Pdf {
         }
         Ok(Pdf {
             doc,
+            canonical: built.canonical,
+            original: bytes.to_vec(),
+            values: built.items,
+            object_bytes: built.charged,
             limits: *limits,
-            encryption,
+            encryption: built.encryption,
             pages,
             page_numbers,
             verdict,
@@ -277,22 +257,17 @@ impl Pdf {
         self.encryption.clone()
     }
 
-    /// For an encrypted file, the same document saved without encryption, so other parsers can
-    /// read it. `None` for a plain file.
-    pub fn decrypted(&self) -> Option<Vec<u8>> {
-        self.encryption.as_ref()?;
-        let mut doc = self.doc.clone();
-        doc.encryption_state = None;
-        doc.trailer.remove(b"Encrypt");
-        // The members of object streams are loaded as plain objects; the containers and old
-        // cross-reference streams are not needed in the copy.
-        doc.objects.retain(|_, o| match o {
-            Object::Stream(s) => !(s.dict.has_type(b"ObjStm") || s.dict.has_type(b"XRef")),
-            _ => true,
-        });
-        let mut out = Vec::new();
-        doc.save_to(&mut out).ok()?;
-        Some(out)
+    /// The document as canonical bytes: the objects it reaches, decrypted, with a classic
+    /// cross-reference table and no object streams. Other parsers must read these bytes and
+    /// never the original file.
+    pub fn canonical(&self) -> &[u8] {
+        &self.canonical
+    }
+
+    /// The bytes the file was opened from, for checks that need them as they are (signature
+    /// byte ranges, revisions). They must not be handed to another parser.
+    pub fn original(&self) -> &[u8] {
+        &self.original
     }
 
     /// Pages (1-based) whose streams broke a limit. They must not be handed to other parsers.
@@ -355,87 +330,5 @@ impl Pdf {
     /// The page number of a page object.
     pub(crate) fn page_number(&self, id: ObjectId) -> Option<u32> {
         self.page_numbers.get(&id).copied()
-    }
-}
-
-/// Loads with lopdf and maps its errors. The password never reaches an error text.
-fn load(bytes: &[u8], options: LoadOptions, password: Option<&str>) -> Result<Document, OpenError> {
-    Document::load_mem_with_options(bytes, options).map_err(|e| {
-        use lopdf::Error;
-        match e {
-            Error::InvalidPassword => OpenError::WrongPassword,
-            Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { limit }) => {
-                OpenError::Limit(format!("a stream unpacks to more than {limit} bytes"))
-            }
-            Error::UnsupportedSecurityHandler(name) => OpenError::UnsupportedEncryption(format!(
-                "security handler {}",
-                String::from_utf8_lossy(&name)
-            )),
-            Error::Decryption(d) => {
-                OpenError::UnsupportedEncryption(redact(d.to_string(), password))
-            }
-            Error::Parse(lopdf::ParseError::InvalidFileHeader) => OpenError::NotPdf,
-            other => OpenError::Damaged(redact(other.to_string(), password)),
-        }
-    })
-}
-
-fn redact(text: String, password: Option<&str>) -> String {
-    match password {
-        Some(p) if !p.is_empty() && text.contains(p) => text.replace(p, "***"),
-        _ => text,
-    }
-}
-
-/// Refuses encryption this crate cannot open, before asking for a password.
-fn check_handler(doc: &Document) -> Result<(), OpenError> {
-    let Some(dict) = doc
-        .trailer
-        .get(b"Encrypt")
-        .ok()
-        .and_then(|e| objects::dict(doc, e))
-    else {
-        return Err(OpenError::Damaged(
-            "the encryption dictionary is missing".into(),
-        ));
-    };
-    let filter = objects::get_name(doc, dict, b"Filter").unwrap_or(b"");
-    if filter != b"Standard" {
-        return Err(OpenError::UnsupportedEncryption(format!(
-            "security handler {}",
-            String::from_utf8_lossy(filter)
-        )));
-    }
-    let v = objects::get_int(doc, dict, b"V").unwrap_or(0);
-    let r = objects::get_int(doc, dict, b"R").unwrap_or(0);
-    if !matches!(v, 1 | 2 | 4 | 5) || !(2..=6).contains(&r) {
-        return Err(OpenError::UnsupportedEncryption(format!(
-            "standard security handler version {v} revision {r}"
-        )));
-    }
-    Ok(())
-}
-
-fn method(state: &lopdf::EncryptionState) -> String {
-    let bits = state.key_length().unwrap_or(40);
-    match state.version() {
-        1 => "RC4-40".to_string(),
-        2 | 3 => format!("RC4-{bits}"),
-        4 | 5 => {
-            let name = state.default_stream_filter();
-            let cfm = state
-                .crypt_filters()
-                .get(name)
-                .map(|f| f.method().to_vec())
-                .unwrap_or_else(|| name.to_vec());
-            match cfm.as_slice() {
-                b"AESV2" => "AES-128".to_string(),
-                b"AESV3" => "AES-256".to_string(),
-                b"V2" => format!("RC4-{}", if bits > 40 { bits } else { 128 }),
-                b"Identity" => "none".to_string(),
-                other => String::from_utf8_lossy(other).into_owned(),
-            }
-        }
-        v => format!("unknown (version {v})"),
     }
 }
