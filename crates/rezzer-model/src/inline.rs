@@ -121,8 +121,9 @@ fn is_false(b: &bool) -> bool {
 
 /// The most bytes a link target can take where an output writes it: per character the larger
 /// of the Markdown destination (a space, brackets, parentheses, `<`, `>` and `|` as three
-/// bytes `%XX`, `&` and `\` as two, a control character as three bytes per UTF-8 byte) and
-/// the JSON string (a control character below U+0020 as six bytes `\u00XX`, a quote or
+/// bytes `%XX`, `&` and `\` as two, a control character as three bytes per UTF-8 byte), the
+/// code span an unsafe target is written in (a backtick as three bytes: itself and one in
+/// each of the two longer fences) and the JSON string (a control character below U+0020 as six bytes `\u00XX`, a quote or
 /// backslash as two). This is the worst case every renderer must stay within, so a reader
 /// can charge the copy of a target it puts in the model without knowing the output. It does
 /// not change the target.
@@ -130,7 +131,7 @@ pub fn link_target_written_len(target: &str) -> u64 {
     target
         .chars()
         .map(|c| match c {
-            ' ' | '(' | ')' | '<' | '>' | '[' | ']' | '|' => 3,
+            ' ' | '(' | ')' | '<' | '>' | '[' | ']' | '|' | '`' => 3,
             '"' | '&' | '\\' => 2,
             c if (c as u32) < 0x20 => 6,
             c if c.is_control() => 3 * c.len_utf8() as u64,
@@ -146,6 +147,7 @@ mod written_len_tests {
     #[test]
     fn counts_the_worst_case_per_character() {
         assert_eq!(link_target_written_len("a b"), 5);
+        assert_eq!(link_target_written_len("``"), 6);
         assert_eq!(link_target_written_len("\u{1}"), 6);
         assert_eq!(link_target_written_len("\u{85}"), 6);
         assert_eq!(link_target_written_len("a&\\\""), 7);

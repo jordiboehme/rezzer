@@ -1463,7 +1463,8 @@ fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::destination_char;
+    use super::{Mode, destination_char, inline_into};
+    use rezzer_model::Inline;
 
     #[test]
     fn a_destination_never_takes_more_than_the_model_says() {
@@ -1478,6 +1479,39 @@ mod tests {
                 out.len() as u64 <= rezzer_model::link_target_written_len(&s),
                 "{c:?} is written as {out:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_whole_link_never_takes_more_than_the_model_says_plus_its_overhead() {
+        // Both written forms (destination and code span), block and cell mode, wiki on and
+        // off. The overhead is what the reader charges besides the target: 64 bytes.
+        let prefixes = ["", "http://x/", "javascript:", "mailto:"];
+        let pieces = (0..0x300u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in pieces {
+            for prefix in prefixes {
+                let target = format!("{prefix}{}", c.to_string().repeat(40));
+                for mode in [Mode::Block, Mode::Cell] {
+                    for wiki in [false, true] {
+                        let link = Inline::Link {
+                            target: target.clone(),
+                            title: None,
+                            internal: false,
+                            wiki,
+                            inlines: Vec::new(),
+                        };
+                        let mut out = String::new();
+                        inline_into(&link, mode, 0, false, &mut out);
+                        let allowed = rezzer_model::link_target_written_len(&target) + 64;
+                        assert!(
+                            out.len() as u64 <= allowed,
+                            "{target:?} in {mode:?} wiki {wiki} is written as {out:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

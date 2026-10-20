@@ -912,6 +912,11 @@ fn far_lines(lines: &[usize], uri: Option<usize>) -> Vec<u8> {
 
 /// Like `far_lines`, with a URI made of `m` copies of `piece`, a PDF string body as written.
 fn far_lines_of(lines: &[usize], uri: Option<(usize, &str)>) -> Vec<u8> {
+    far_lines_at(lines, uri, "http://x/")
+}
+
+/// Like `far_lines_of`, with the URI starting with `prefix`.
+fn far_lines_at(lines: &[usize], uri: Option<(usize, &str)>, prefix: &str) -> Vec<u8> {
     const GAP: usize = 40;
     let mut b = Builder::default();
     let catalog = b.reserve();
@@ -922,7 +927,7 @@ fn far_lines_of(lines: &[usize], uri: Option<(usize, &str)>) -> Vec<u8> {
             let annot = b.add(format!(
                 "<< /Type /Annot /Subtype /Link \
                  /Rect [-1000000000 -1000000000 1000000000 1000000000] \
-                 /A << /S /URI /URI (http://x/{}) >> >>",
+                 /A << /S /URI /URI ({prefix}{}) >> >>",
                 piece.repeat(m)
             ));
             format!("/Annots [{annot} 0 R]")
@@ -1022,11 +1027,12 @@ fn links_over_many_paragraphs_are_bounded_through_render() {
     assert_rss_under_256_mib();
 }
 
-/// Reads a 1,250 paragraph file under one link with a 100,000 piece URI, renders it as the
-/// pipeline does (and writes JSON when asked) and checks time, loss and memory.
-fn assert_link_pieces_bounded(piece: &str, json: bool) {
+/// Reads a file of `paras` paragraphs under one link with a URI of `m` copies of `piece` after
+/// `prefix`, renders it as the pipeline does (and writes JSON when asked) and checks time,
+/// loss and memory.
+fn assert_link_pieces_bounded(prefix: &str, piece: &str, paras: usize, m: usize, json: bool) {
     let start = Instant::now();
-    let bytes = far_lines_of(&[1_250], Some((100_000, piece)));
+    let bytes = far_lines_at(&[paras], Some((m, piece)), prefix);
     let out = read(&bytes);
     let md = rezzer_render::render(
         &out.document,
@@ -1047,14 +1053,14 @@ fn assert_link_pieces_bounded(piece: &str, json: bool) {
     );
     let t = text(page(&out, 1));
     assert!(
-        t.contains("w0.") && t.contains("w1249."),
+        t.contains("w0.") && t.contains(&format!("w{}.", paras - 1)),
         "{:?}",
         out.document.losses
     );
     let (n, _) = links_in(page(&out, 1));
     let loss = link_loss(&out);
     assert!(
-        loss.what.contains(&format!("{} links", 1_250 - n)),
+        loss.what.contains(&format!("{} links", paras - n)),
         "{loss:?}"
     );
     drop(pages);
@@ -1064,13 +1070,40 @@ fn assert_link_pieces_bounded(piece: &str, json: bool) {
 #[test]
 fn link_targets_of_spaces_are_charged_by_what_the_renderer_writes() {
     // The renderer writes each space as three bytes.
-    assert_link_pieces_bounded(" ", false);
+    assert_link_pieces_bounded("http://x/", " ", 1_250, 100_000, false);
 }
 
 #[test]
 fn link_targets_of_control_characters_are_bounded_through_json() {
     // The renderer writes each as three bytes, JSON as six.
-    assert_link_pieces_bounded("\\001", true);
+    assert_link_pieces_bounded("http://x/", "\\001", 1_250, 100_000, true);
+}
+
+#[test]
+fn link_targets_of_backticks_in_code_spans_are_bounded_through_json() {
+    // A target with an unsafe scheme is written as a code span, three bytes per backtick.
+    assert_link_pieces_bounded("javascript:", "`", 1_250, 100_000, true);
+}
+
+#[test]
+fn many_short_paragraphs_with_backtick_code_span_targets_are_bounded() {
+    assert_link_pieces_bounded("javascript:", "`", 20_000, 20_000, true);
+}
+
+#[test]
+fn a_target_that_never_fits_is_not_scanned_for_every_paragraph() {
+    // A 12 MB URI of spaces: its length fits the room, its written size (three times as
+    // much) does not. Every paragraph must not scan it again, and the read must stay in time.
+    let start = Instant::now();
+    let out = read(&far_lines_of(&[40_000], Some((12_000_000, " "))));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let (n, _) = links_in(page(&out, 1));
+    assert_eq!(n, 0, "{:?}", out.document.losses);
+    assert_rss_under_256_mib();
 }
 
 #[test]

@@ -363,6 +363,8 @@ pub(crate) struct LinkRoom {
     /// Links written without their target, and the first and last page with one.
     cut: Counter<u64>,
     pages: Counter<Option<(u32, u32)>>,
+    /// The written size of the last few targets met, so a shared target is scanned once.
+    sizes: RefCell<Vec<(Rc<str>, u64)>>,
 }
 
 /// What a copy of a link target costs besides its bytes.
@@ -375,16 +377,31 @@ impl LinkRoom {
             left: Counter::new(bytes),
             cut: Counter::new(0),
             pages: Counter::new(None),
+            sizes: RefCell::new(Vec::new()),
         }
     }
 
+    /// The written size of `target`, scanned once for as long as it is among the last few.
+    fn written(&self, target: &Rc<str>) -> u64 {
+        let mut sizes = self.sizes.borrow_mut();
+        if let Some((_, size)) = sizes.iter().find(|(t, _)| Rc::ptr_eq(t, target)) {
+            return *size;
+        }
+        let size = rezzer_model::link_target_written_len(target);
+        if sizes.len() >= 4 {
+            sizes.remove(0);
+        }
+        sizes.push((target.clone(), size));
+        size
+    }
+
     /// Takes room for one copy of `target` on `page`; `false` when it does not fit.
-    fn take(&self, target: &str, page: u32) -> bool {
+    fn take(&self, target: &Rc<str>, page: u32) -> bool {
         // Every character is written as at least one byte, so a target longer than the room
         // is refused without a scan.
         let floor = target.len() as u64 + LINK_COST;
         if floor <= self.left.get() {
-            let cost = rezzer_model::link_target_written_len(target) + LINK_COST;
+            let cost = self.written(target) + LINK_COST;
             if cost <= self.left.get() {
                 self.left.set(self.left.get() - cost);
                 return true;
@@ -488,6 +505,15 @@ fn set_anchor(block: &mut Block, to: Anchor) {
     }
 }
 
+/// Fails once the time limit is over. A cancel is not looked at here: the walk answers it, and
+/// the pages it read are still laid out.
+fn time_over(budget: &Budget) -> Result<(), LimitHit> {
+    match budget.check_time() {
+        Err(hit) if hit.limit == "time" => Err(hit),
+        _ => Ok(()),
+    }
+}
+
 /// Blocks being built, and the limit that stopped them.
 #[derive(Default)]
 struct Built {
@@ -502,6 +528,10 @@ impl Built {
         if self.stop.is_some() {
             return;
         }
+        if let Err(hit) = time_over(budget) {
+            self.stop = Some(hit);
+            return;
+        }
         match budget.add_elements(1) {
             Ok(()) => self.blocks.push(block),
             Err(hit) => self.stop = Some(hit),
@@ -513,6 +543,10 @@ impl Built {
     /// room.
     fn inlines(&mut self, runs: &[&Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
         if self.stop.is_some() {
+            return None;
+        }
+        if let Err(hit) = time_over(cx.budget) {
+            self.stop = Some(hit);
             return None;
         }
         let bytes: usize = runs.iter().map(|r| r.text.len() + 1).sum();
@@ -1295,9 +1329,9 @@ mod tests {
     fn link_targets_are_charged_by_what_is_written() {
         // Three bytes for a space in Markdown, six for a control character in JSON.
         let room = LinkRoom::new(1_000);
-        assert!(room.take("a b", 1));
+        assert!(room.take(&Rc::from("a b"), 1));
         assert_eq!(room.left.get(), 1_000 - (1 + 3 + 1 + LINK_COST));
-        assert!(room.take("\u{1}", 1));
+        assert!(room.take(&Rc::from("\u{1}"), 1));
         assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
     }
 
