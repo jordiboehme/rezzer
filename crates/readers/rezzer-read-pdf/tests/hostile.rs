@@ -137,6 +137,7 @@ fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
 /// The bound the memory tests hold: a quarter of the hostile memory limit.
 fn assert_rss_under_256_mib() {
     let rss = common::max_rss_bytes();
+    eprintln!("RSSPROBE {} MiB", rss >> 20);
     assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
 }
 
@@ -812,4 +813,90 @@ fn a_switched_off_span_keeps_its_actual_text() {
     assert!(all.contains("Shown instead"), "{all}");
     assert!(!all.contains("xyz"), "{all}");
     assert!(!body_text(page(&out, 1)).contains("Shown instead"));
+}
+
+/// One page with `runs` glyphs each in a run of its own, under one link over the whole page
+/// whose URI has `uri` bytes.
+fn page_under_a_long_link(runs: usize, uri: usize) -> Vec<u8> {
+    let mut c = b"BT /F1 12 Tf 72 700 Td (Before.) Tj 30 Tc 72 600 Td (".to_vec();
+    c.extend(std::iter::repeat_n(b'a', runs));
+    c.extend(b") Tj ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let annot = b.add(format!(
+        "<< /Type /Annot /Subtype /Link /Rect [-1000000000 -1000000000 1000000000 1000000000] \
+         /A << /S /URI /URI (http://x/{}) >> >>",
+        "u".repeat(uri)
+    ));
+    let packed = deflate(&c);
+    let cs = b.stream("/Filter /FlateDecode", &packed);
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Annots [{annot} 0 R] /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_long_link_over_many_runs_is_bounded() {
+    // About 20 KB: 20,000 runs under one link with a 20,000 byte URI.
+    let start = Instant::now();
+    let bytes = page_under_a_long_link(20_000, 20_000);
+    assert!(bytes.len() < 30_000, "{}", bytes.len());
+    let out = read(&bytes);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        text(page(&out, 1)).contains("Before."),
+        "{:?}",
+        out.document.losses
+    );
+    // The runs under the link make one link per paragraph, each with one copy of its target.
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    let mut links = 0;
+    for b in page(&out, 1) {
+        if let Block::Paragraph { inlines, .. } = b {
+            links += inlines
+                .iter()
+                .filter(|i| matches!(i, rezzer_model::Inline::Link { .. }))
+                .count();
+        }
+    }
+    assert!((1..=2).contains(&links), "{links} links");
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_very_long_link_over_many_runs_is_bounded() {
+    // About 100 KB: 50,000 runs under one link with a 100,000 byte URI.
+    let start = Instant::now();
+    let bytes = page_under_a_long_link(50_000, 100_000);
+    assert!(bytes.len() < 120_000, "{}", bytes.len());
+    let out = read(&bytes);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        text(page(&out, 1)).contains("Before."),
+        "{:?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
 }

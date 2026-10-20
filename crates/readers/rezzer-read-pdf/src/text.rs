@@ -133,15 +133,20 @@ impl PageItems {
 
     /// About the memory the items take once their lists are shrunk to fit.
     fn kept_bytes(&mut self) -> u64 {
-        fn runs(list: &mut Vec<Run>) -> u64 {
+        // A link's target is shared by its runs: it counts once.
+        let mut links: HashSet<*const u8> = HashSet::new();
+        let mut runs = |list: &mut Vec<Run>| -> u64 {
             list.shrink_to_fit();
             list.iter()
                 .map(|r| {
-                    (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64
-                        + r.uri.as_ref().map_or(0, |u| u.len() as u64 + 32)
+                    let link = match &r.uri {
+                        Some(u) if links.insert(u.as_ptr()) => u.len() as u64 + 32,
+                        _ => 0,
+                    };
+                    (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64 + link
                 })
                 .sum()
-        }
+        };
         let mut total = runs(&mut self.runs) + runs(&mut self.invisible);
         for (name, list) in &mut self.hidden_layers {
             total += name.len() as u64 + runs(list);
@@ -338,7 +343,7 @@ fn switched_off(doc: &hayro_syntax::Pdf) -> HashSet<ObjectIdentifier> {
 }
 
 /// A URI link box (x0, y0, x1, y1 in user space) and its target.
-type Link = ([f32; 4], String);
+type Link = ([f32; 4], Rc<str>);
 
 /// The URI links of every page, from the object layer. They are never followed.
 fn uri_links(pdf: &Pdf) -> HashMap<u32, Vec<Link>> {
@@ -348,7 +353,7 @@ fn uri_links(pdf: &Pdf) -> HashMap<u32, Vec<Link>> {
             let [a, b, c, d] = link.rect;
             out.entry(link.page)
                 .or_default()
-                .push(([a.min(c), b.min(d), a.max(c), b.max(d)], uri));
+                .push(([a.min(c), b.min(d), a.max(c), b.max(d)], Rc::from(uri)));
         }
     }
     out
@@ -583,6 +588,12 @@ impl<'p, 'a> PageReader<'p, 'a> {
             marks: if use_marks { &marks } else { &[] },
             next_mark: 0,
             out_of_step: 0,
+            layers_out_of_step: 0,
+            layer_tags: marks
+                .iter()
+                .filter(|m| m.layer.is_some())
+                .map(|m| m.tag)
+                .collect(),
             fonts: &self.known.fonts,
             pdf: self.pdf,
             programs: &mut self.programs,
@@ -624,6 +635,13 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  without a ToUnicode mapping count as unmapped"
             )));
         }
+        if dev.layers_out_of_step > 0 {
+            notes.push(Note::Unsupported(format!(
+                "{} sequences of hidden layers on page {n} did not match the content walk; \
+                 their text may be in the body",
+                dev.layers_out_of_step
+            )));
+        }
         if dev.out_of_step > 0 {
             notes.push(Note::Unsupported(format!(
                 "the ActualText of {} marked content sequences on page {n} is not used: the \
@@ -659,10 +677,8 @@ impl<'p, 'a> PageReader<'p, 'a> {
         self.text_buf = text;
         notes.append(&mut items.notes);
         items.notes = notes;
-        // The page's runs were built among many short-lived allocations; copied now, the
-        // kept text sits together and the memory of the build can be used again.
-        items.compact();
-        // What every page keeps until layout counts against one bound for the file.
+        // What every page keeps until layout counts against one bound for the file. It is
+        // measured before anything is copied.
         let cost = items.kept_bytes();
         if cost > self.kept_left {
             let why = format!(
@@ -674,6 +690,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             return fail(why, Fail::Limit);
         }
         self.kept_left -= cost;
+        // The page's runs were built among many short-lived allocations; copied now (within
+        // the bound just charged), the kept text sits together and the memory of the build
+        // can be used again.
+        items.compact();
         Read::Page(Box::new(items))
     }
 }
@@ -1772,6 +1792,10 @@ struct TextDevice<'d> {
     next_mark: usize,
     /// Sequences whose ActualText was not used because they did not match the walk.
     out_of_step: u64,
+    /// Sequences of switched-off layers that did not match the walk.
+    layers_out_of_step: u64,
+    /// The tags the walk gave rewritten switched-off sequences.
+    layer_tags: HashSet<u64>,
     fonts: &'d HashMap<u128, FontInfo>,
     pdf: &'d Pdf,
     programs: &'d mut Programs,
@@ -2071,16 +2095,20 @@ impl<'a> Device<'a> for TextDevice<'_> {
         {
             let at = from + k;
             let m = &self.marks[at];
-            if k == 0 || mcid.is_some() {
+            // A rewritten switched-off sequence carries the walk's own tag, so a match by tag
+            // further on is still its own.
+            if k == 0 || mcid.is_some() || m.layer.is_some() {
                 actual = m.actual.clone();
                 // A layer comes only from the sequence the walk rewrote, never from a tag
                 // that only looks the same.
                 layer = m.layer;
                 own_mcid = own_mcid.or(m.own_mcid);
                 self.next_mark = at + 1;
-            } else if m.actual.is_some() || m.layer.is_some() {
+            } else if m.actual.is_some() {
                 self.out_of_step += 1;
             }
+        } else if self.layer_tags.contains(&want) {
+            self.layers_out_of_step += 1;
         }
         self.open.push(Open {
             mcid: own_mcid.and_then(|m| u32::try_from(m).ok()),

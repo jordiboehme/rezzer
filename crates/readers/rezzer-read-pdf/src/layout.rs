@@ -36,8 +36,9 @@ pub(crate) struct Run {
     pub italic: bool,
     /// The marked content id the run is shown in, for the structure tree.
     pub mcid: Option<u32>,
-    /// The target of a URI link whose box holds the middle of the run.
-    pub uri: Option<String>,
+    /// The target of a URI link whose box holds the middle of the run, shared by all the
+    /// runs of the link.
+    pub uri: Option<Rc<str>>,
     /// The number of the run's line on its page, in reading order. The runs of one line are
     /// next to each other.
     pub line: u32,
@@ -453,6 +454,22 @@ impl Built {
             self.stop = Some(hit);
             return None;
         }
+        // Each stretch of runs under one link becomes one link with its own copy of the
+        // target: those copies count as elements, one per 64 bytes.
+        let mut link_bytes = 0u64;
+        let mut prev: Option<&Rc<str>> = None;
+        for r in runs {
+            if let Some(u) = &r.uri
+                && !prev.is_some_and(|p| Rc::ptr_eq(p, u))
+            {
+                link_bytes += u.len() as u64;
+            }
+            prev = r.uri.as_ref();
+        }
+        if let Err(hit) = budget.add_elements(link_bytes / 64) {
+            self.stop = Some(hit);
+            return None;
+        }
         Some(inlines(runs))
     }
 
@@ -523,7 +540,7 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
         text: String,
         bold: bool,
         italic: bool,
-        uri: Option<String>,
+        uri: Option<Rc<str>>,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
@@ -579,11 +596,25 @@ fn inlines(runs: &[&Run]) -> Vec<Inline> {
         };
         match p.uri {
             Some(target) => {
+                // A link goes on over a change of style: one link, one copy of its target.
+                if let Some(Inline::Link {
+                    target: before,
+                    inlines,
+                    ..
+                }) = out.last_mut()
+                    && before.as_str() == &*target
+                {
+                    if !lead.is_empty() {
+                        inlines.push(Inline::plain(lead));
+                    }
+                    inlines.push(text);
+                    continue;
+                }
                 if !lead.is_empty() {
                     out.push(Inline::plain(lead));
                 }
                 out.push(Inline::Link {
-                    target,
+                    target: target.to_string(),
                     title: None,
                     internal: false,
                     wiki: false,
@@ -1127,6 +1158,30 @@ mod tests {
             runs: &runs,
         }]);
         assert_eq!(BODY_KEPT.with(|k| k.get()), 1_000 / (13 + BODY_KEY_COST));
+    }
+
+    #[test]
+    fn one_link_over_a_change_of_style_is_one_link() {
+        let uri: Rc<str> = Rc::from("https://example.org/long");
+        let runs: Vec<Run> = (0..6)
+            .map(|k| Run {
+                bold: k % 2 == 0,
+                uri: Some(uri.clone()),
+                ..run(if k == 0 { "a" } else { " b" }, 0, 700.0, 10.0)
+            })
+            .collect();
+        let refs: Vec<&Run> = runs.iter().collect();
+        let built = inlines(&refs);
+        assert_eq!(built.len(), 1, "{built:?}");
+        match &built[0] {
+            Inline::Link {
+                target, inlines, ..
+            } => {
+                assert_eq!(target, "https://example.org/long");
+                assert_eq!(rezzer_model::plain_text(inlines), "a b b b b b");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
