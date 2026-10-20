@@ -9,6 +9,7 @@ sheetparts reads the parts of a spreadsheet package that give the cells their me
 - Document properties: core, app and typed custom properties
 - External links (workbook, add-in, DDE, OLE) and the people behind threaded comments
 - Whether the package carries a VBA project. It is never read or run
+- ODF spreadsheets (`odf::read`): hidden sheets, rows and columns, annotations with author and date, validations, number formats built from data styles, named ranges and document metadata. Repeat counts are never expanded
 
 ```rust
 use sheetparts::numfmt;

@@ -1,0 +1,445 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::io::{Cursor, Write};
+use std::time::Instant;
+
+use sheetparts::odf::{self, OdsParts, OdsSheet};
+use sheetparts::{CellPos, IssueKind, Limits, PropValue, RowSpan};
+use zip::CompressionMethod;
+use zip::write::{SimpleFileOptions, ZipWriter};
+use zipguard::Archive;
+
+fn corpus(path: &str) -> Vec<u8> {
+    let full = format!(
+        "{}/../../../tests/corpus/office/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read(&full).unwrap_or_else(|e| panic!("corpus file {full}: {e}"))
+}
+
+fn read_bytes(bytes: &[u8], limits: &Limits) -> OdsParts {
+    let mut archive = Archive::open(bytes, zipguard::Limits::default()).unwrap();
+    odf::read(&mut archive, limits, &|| false)
+}
+
+fn read_file(path: &str) -> OdsParts {
+    read_bytes(&corpus(path), &Limits::default())
+}
+
+const NS: &str = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:number=\"urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:meta=\"urn:oasis:names:tc:opendocument:xmlns:meta:1.0\"";
+
+fn content(styles: &str, tables: &str) -> String {
+    format!(
+        "<office:document-content {NS}><office:automatic-styles>{styles}</office:automatic-styles><office:body><office:spreadsheet>{tables}</office:spreadsheet></office:body></office:document-content>"
+    )
+}
+
+fn package(parts: &[(&str, &str)]) -> Vec<u8> {
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    let o = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    zip.start_file("mimetype", o).unwrap();
+    zip.write_all(b"application/vnd.oasis.opendocument.spreadsheet")
+        .unwrap();
+    for (name, data) in parts {
+        zip.start_file(*name, o).unwrap();
+        zip.write_all(data.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+fn one_sheet(styles: &str, table_inner: &str) -> OdsParts {
+    let xml = content(
+        styles,
+        &format!("<table:table table:name=\"S\">{table_inner}</table:table>"),
+    );
+    read_bytes(&package(&[("content.xml", &xml)]), &Limits::default())
+}
+
+fn sheet<'a>(parts: &'a OdsParts, name: &str) -> &'a OdsSheet {
+    parts
+        .sheets
+        .iter()
+        .find(|s| s.name == name)
+        .unwrap_or_else(|| panic!("no sheet {name}"))
+}
+
+#[test]
+fn hidden_sheet_by_table_style() {
+    let parts = read_file("any_sheets.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let names: Vec<_> = parts.sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Visible", "Hidden", "VeryHidden", "Chart"]);
+    assert!(!sheet(&parts, "Visible").hidden);
+    assert!(sheet(&parts, "Hidden").hidden);
+    // ODF has no very hidden state: the file only says display="false".
+    assert!(sheet(&parts, "VeryHidden").hidden);
+    assert!(!sheet(&parts, "Chart").hidden);
+}
+
+#[test]
+fn hidden_rows_and_cols() {
+    let parts = one_sheet(
+        "",
+        "<table:table-column table:number-columns-repeated=\"2\"/>\
+         <table:table-column table:visibility=\"collapse\" table:number-columns-repeated=\"2\"/>\
+         <table:table-column-group><table:table-column table:visibility=\"collapse\"/></table:table-column-group>\
+         <table:table-column table:visibility=\"visible\"/>\
+         <table:table-row><table:table-cell/></table:table-row>\
+         <table:table-row table:visibility=\"collapse\" table:number-rows-repeated=\"3\"><table:table-cell/></table:table-row>\
+         <table:table-row table:visibility=\"filter\"><table:table-cell/></table:table-row>\
+         <table:table-row table:number-rows-repeated=\"5\"/>\
+         <table:table-header-rows><table:table-row table:visibility=\"collapse\"/></table:table-header-rows>",
+    );
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let s = sheet(&parts, "S");
+    // Columns C, D and E (0-based 2..=4), one merged span.
+    assert_eq!(s.hidden_cols, vec![RowSpan { first: 2, last: 4 }]);
+    // Row 2 to 5 (0-based 1..=4) merged, then row 10 (0-based 9).
+    assert_eq!(
+        s.hidden_rows,
+        vec![
+            RowSpan { first: 1, last: 4 },
+            RowSpan {
+                first: 10,
+                last: 10
+            }
+        ]
+    );
+}
+
+#[test]
+fn annotation_with_author_and_date_at_cell() {
+    let parts = read_file("with-annotation.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let s = &parts.sheets[0];
+    assert_eq!(s.annotations.len(), 1);
+    let a = &s.annotations[0];
+    assert_eq!(a.cell, "A1");
+    assert_eq!(a.author.as_deref(), Some("Marc Schreiber"));
+    assert_eq!(a.date.as_deref(), Some("2024-09-18T18:27:00"));
+    assert_eq!(a.text, "This is annotation of a.1");
+
+    // Position arithmetic: repeated rows and columns, covered cells, several paragraphs.
+    let parts = one_sheet(
+        "",
+        "<table:table-row table:number-rows-repeated=\"4\"/>\
+         <table:table-row>\
+         <table:table-cell table:number-columns-repeated=\"2\"/>\
+         <table:table-cell table:number-columns-spanned=\"2\" office:value-type=\"string\">\
+         <office:annotation><dc:creator></dc:creator><text:p>one</text:p><text:p>two<text:s text:c=\"2\"/>x</text:p></office:annotation>\
+         </table:table-cell>\
+         <table:covered-table-cell/>\
+         <table:table-cell><office:annotation><dc:creator>Ann</dc:creator><dc:date>2025-01-02T03:04:05</dc:date><text:p>five</text:p></office:annotation></table:table-cell>\
+         </table:table-row>",
+    );
+    let s = sheet(&parts, "S");
+    assert_eq!(s.annotations.len(), 2);
+    assert_eq!(s.annotations[0].cell, "C5");
+    assert_eq!(s.annotations[0].author, None);
+    assert_eq!(s.annotations[0].text, "one\ntwo  x");
+    assert_eq!(s.annotations[1].cell, "E5");
+    assert_eq!(s.annotations[1].author.as_deref(), Some("Ann"));
+}
+
+#[test]
+fn validation_rule() {
+    let parts = one_sheet(
+        "",
+        "<table:content-validations>\
+         <table:content-validation table:name=\"val1\" table:condition=\"of:cell-content-is-whole-number() and of:cell-content-is-between(1;10)\" table:allow-empty-cell=\"true\">\
+         <table:help-message table:title=\"Pick\" table:display=\"true\"><text:p>One to ten</text:p></table:help-message>\
+         <table:error-message table:message-type=\"stop\" table:title=\"Bad\" table:display=\"true\"><text:p>Out of range</text:p></table:error-message>\
+         </table:content-validation>\
+         <table:content-validation table:name=\"val2\" table:condition=\"of:cell-content-is-in-list(&quot;a&quot;;&quot;b;c&quot;;&quot;d&quot;)\"/>\
+         <table:content-validation table:name=\"val3\" table:condition=\"of:is-true-formula(AND([.A1]&gt;0;[.B1]&lt;5))\"/>\
+         <table:content-validation table:name=\"val4\" table:condition=\"of:cell-content-text-length-is-not-between(2;4)\"/>\
+         <table:content-validation table:name=\"val5\" table:condition=\"of:cell-content-is-date() and of:cell-content-is-greater-than-or-equal-to(&quot;2020-01-01&quot;)\"/>\
+         <table:content-validation table:name=\"val6\" table:condition=\"of:somethingnew()\"/>\
+         </table:content-validations>\
+         <table:table-row table:number-rows-repeated=\"1048576\">\
+         <table:table-cell table:content-validation-name=\"val1\" table:number-columns-repeated=\"2\"/>\
+         <table:table-cell table:content-validation-name=\"val2\"/>\
+         </table:table-row>",
+    );
+    let s = sheet(&parts, "S");
+    let by = |range: &str| {
+        s.validations
+            .iter()
+            .find(|v| v.range == range)
+            .unwrap_or_else(|| panic!("no validation at {range}: {:?}", s.validations))
+    };
+    let v = by("A1:B1048576");
+    assert_eq!(v.kind, "whole");
+    assert_eq!(v.operator.as_deref(), Some("between"));
+    assert_eq!(v.formula1.as_deref(), Some("1"));
+    assert_eq!(v.formula2.as_deref(), Some("10"));
+    assert_eq!(v.prompt.as_deref(), Some("One to ten"));
+    assert_eq!(v.error.as_deref(), Some("Out of range"));
+    let v = by("C1:C1048576");
+    assert_eq!(v.kind, "list");
+    assert_eq!(
+        v.list.as_deref(),
+        Some(&["a".to_string(), "b;c".to_string(), "d".to_string()][..])
+    );
+    assert_eq!(s.validations.len(), 2);
+
+    // Rules that no cell uses are still rules of the sheet, anchored by name only when used.
+    // Conditions are checked on their own through a one-cell sheet each.
+    let check = |condition: &str| {
+        let xml = format!(
+            "<table:content-validations><table:content-validation table:name=\"v\" table:condition=\"{condition}\"/></table:content-validations>\
+             <table:table-row><table:table-cell table:content-validation-name=\"v\"/></table:table-row>"
+        );
+        let p = one_sheet("", &xml);
+        (sheet(&p, "S").validations.clone(), p.issues)
+    };
+    let (v, _) = check("of:is-true-formula(AND([.A1]&gt;0;[.B1]&lt;5))");
+    assert_eq!(v[0].range, "A1");
+    assert_eq!(v[0].kind, "custom");
+    assert_eq!(v[0].formula1.as_deref(), Some("AND([.A1]>0;[.B1]<5)"));
+    let (v, _) = check("of:cell-content-text-length-is-not-between(2;4)");
+    assert_eq!(v[0].kind, "textLength");
+    assert_eq!(v[0].operator.as_deref(), Some("notBetween"));
+    let (v, _) = check(
+        "of:cell-content-is-date() and of:cell-content-is-greater-than-or-equal-to(&quot;2020-01-01&quot;)",
+    );
+    assert_eq!(v[0].kind, "date");
+    assert_eq!(v[0].operator.as_deref(), Some("greaterThanOrEqual"));
+    assert_eq!(v[0].formula1.as_deref(), Some("\"2020-01-01\""));
+    let (v, issues) = check("of:somethingnew()");
+    assert_eq!(v[0].kind, "unknown");
+    assert!(issues.iter().any(|i| i.kind == IssueKind::Unsupported));
+}
+
+#[test]
+fn percent_data_style_becomes_format_code() {
+    let styles = "\
+        <number:percentage-style style:name=\"N11\"><number:number number:decimal-places=\"2\" number:min-integer-digits=\"1\"/><number:text>%</number:text></number:percentage-style>\
+        <number:number-style style:name=\"N2\"><number:number number:decimal-places=\"2\" number:min-integer-digits=\"1\" number:grouping=\"true\"/></number:number-style>\
+        <number:date-style style:name=\"D1\"><number:day number:style=\"long\"/><number:text>.</number:text><number:month number:style=\"long\"/><number:text>.</number:text><number:year number:style=\"long\"/></number:date-style>\
+        <number:currency-style style:name=\"C1P0\"><number:number number:decimal-places=\"2\" number:min-integer-digits=\"1\" number:grouping=\"true\"/><number:text> </number:text><number:currency-symbol>EUR</number:currency-symbol></number:currency-style>\
+        <number:currency-style style:name=\"C1\"><number:text>-</number:text><number:number number:decimal-places=\"2\" number:min-integer-digits=\"1\" number:grouping=\"true\"/><number:text> </number:text><number:currency-symbol>EUR</number:currency-symbol><style:map style:condition=\"value()&gt;=0\" style:apply-style-name=\"C1P0\"/></number:currency-style>\
+        <number:time-style style:name=\"T1\" number:truncate-on-overflow=\"false\"><number:hours/><number:text>:</number:text><number:minutes number:style=\"long\"/><number:text>:</number:text><number:seconds number:style=\"long\" number:decimal-places=\"1\"/></number:time-style>\
+        <number:number-style style:name=\"E1\"><number:scientific-number number:decimal-places=\"1\" number:min-integer-digits=\"3\" number:min-exponent-digits=\"1\"/></number:number-style>\
+        <style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"N11\"/>\
+        <style:style style:name=\"ce2\" style:family=\"table-cell\" style:data-style-name=\"N2\"/>\
+        <style:style style:name=\"ce3\" style:family=\"table-cell\" style:parent-style-name=\"ce2\"/>\
+        <style:style style:name=\"ce4\" style:family=\"table-cell\" style:data-style-name=\"D1\"/>\
+        <style:style style:name=\"ce5\" style:family=\"table-cell\" style:data-style-name=\"C1\"/>\
+        <style:style style:name=\"ce6\" style:family=\"table-cell\" style:data-style-name=\"T1\"/>\
+        <style:style style:name=\"ce7\" style:family=\"table-cell\" style:data-style-name=\"E1\"/>";
+    let parts = one_sheet(
+        styles,
+        "<table:table-column table:default-cell-style-name=\"ce2\"/>\
+         <table:table-column table:default-cell-style-name=\"ce1\" table:number-columns-repeated=\"2\"/>\
+         <table:table-row>\
+         <table:table-cell table:style-name=\"ce1\" office:value-type=\"percentage\" office:value=\"0.5\"/>\
+         <table:table-cell office:value-type=\"float\" office:value=\"1\"/>\
+         <table:table-cell table:style-name=\"ce3\" office:value-type=\"float\" office:value=\"2\"/>\
+         <table:table-cell table:style-name=\"ce4\" office:value-type=\"date\"/>\
+         <table:table-cell table:style-name=\"ce5\" office:value-type=\"float\"/>\
+         <table:table-cell table:style-name=\"ce6\" office:value-type=\"time\"/>\
+         <table:table-cell table:style-name=\"ce7\" office:value-type=\"float\"/>\
+         <table:table-cell table:style-name=\"ce1\"/>\
+         </table:table-row>",
+    );
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let f = &sheet(&parts, "S").cell_formats;
+    let at = |col: u32| {
+        f.iter()
+            .find(|(p, _)| *p == CellPos { row: 0, col })
+            .map(|(_, c)| c.as_str())
+    };
+    assert_eq!(at(0), Some("0.00%"));
+    // No cell style: the column default applies.
+    assert_eq!(at(1), Some("0.00%"));
+    // The style has no data style of its own: it comes from the parent.
+    assert_eq!(at(2), Some("#,##0.00"));
+    assert_eq!(at(3), Some("dd\\.mm\\.yyyy"));
+    assert_eq!(at(4), Some("[>=0]#,##0.00 \"EUR\";-#,##0.00 \"EUR\""));
+    assert_eq!(at(5), Some("[h]:mm:ss.0"));
+    assert_eq!(at(6), Some("000.0E+0"));
+    // An empty cell carries no format entry.
+    assert_eq!(at(7), None);
+    assert_eq!(f.len(), 7);
+}
+
+#[test]
+fn meta_props() {
+    let meta = format!(
+        "<office:document-meta {NS}><office:meta>\
+         <meta:initial-creator>Ann</meta:initial-creator>\
+         <meta:creation-date>2024-09-18T18:26:16</meta:creation-date>\
+         <dc:date>2024-09-19T10:00:00</dc:date><dc:creator>Bob</dc:creator>\
+         <dc:title>Budget</dc:title><dc:subject>Money</dc:subject><dc:description>For &amp; about</dc:description>\
+         <meta:keyword>a</meta:keyword><meta:keyword>b</meta:keyword>\
+         <meta:generator>LibreOffice/24.8</meta:generator>\
+         <meta:editing-cycles>2</meta:editing-cycles>\
+         <meta:user-defined meta:name=\"Project\">Apollo</meta:user-defined>\
+         <meta:user-defined meta:name=\"Rate\" meta:value-type=\"float\">1.5</meta:user-defined>\
+         <meta:user-defined meta:name=\"Done\" meta:value-type=\"boolean\">true</meta:user-defined>\
+         <meta:user-defined meta:name=\"Due\" meta:value-type=\"date\">2025-03-01</meta:user-defined>\
+         </office:meta></office:document-meta>"
+    );
+    let xml = content("", "<table:table table:name=\"S\"/>");
+    let bytes = package(&[("content.xml", &xml), ("meta.xml", &meta)]);
+    let parts = read_bytes(&bytes, &Limits::default());
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let p = &parts.props;
+    assert_eq!(p.core["creator"], "Ann");
+    assert_eq!(p.core["created"], "2024-09-18T18:26:16");
+    assert_eq!(p.core["lastModifiedBy"], "Bob");
+    assert_eq!(p.core["modified"], "2024-09-19T10:00:00");
+    assert_eq!(p.core["title"], "Budget");
+    assert_eq!(p.core["subject"], "Money");
+    assert_eq!(p.core["description"], "For & about");
+    assert_eq!(p.core["keywords"], "a, b");
+    assert_eq!(p.app["Application"], "LibreOffice/24.8");
+    assert_eq!(p.app["EditingCycles"], "2");
+    assert_eq!(
+        p.custom,
+        vec![
+            ("Project".to_string(), PropValue::Text("Apollo".to_string())),
+            ("Rate".to_string(), PropValue::Number(1.5)),
+            ("Done".to_string(), PropValue::Bool(true)),
+            (
+                "Due".to_string(),
+                PropValue::DateTime("2025-03-01".to_string())
+            ),
+        ]
+    );
+    // The corpus file has real metadata.
+    let real = read_file("with-annotation.ods");
+    assert_eq!(real.props.core["creator"], "Marc Schreiber");
+    assert!(real.props.app["Application"].starts_with("LibreOffice/"));
+}
+
+#[test]
+fn named_ranges_global_and_local() {
+    let xml = content(
+        "",
+        "<table:named-expressions>\
+         <table:named-range table:name=\"Total\" table:base-cell-address=\"$S.$A$1\" table:cell-range-address=\"$S.$A$1:.$B$2\"/>\
+         <table:named-range table:name=\"Other\" table:cell-range-address=\"$'My Sheet'.$C$3\"/>\
+         <table:named-expression table:name=\"Rate\" table:expression=\"of:=0.19\"/>\
+         </table:named-expressions>\
+         <table:table table:name=\"S\"><table:named-expressions>\
+         <table:named-range table:name=\"Local\" table:cell-range-address=\"$S.$D$4:$S.$D$9\"/>\
+         </table:named-expressions></table:table>",
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &Limits::default());
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let n = |name: &str| parts.names.iter().find(|n| n.name == name).unwrap();
+    assert_eq!(n("Total").refers_to, "S!$A$1:$B$2");
+    assert_eq!(n("Total").scope, None);
+    assert_eq!(n("Other").refers_to, "'My Sheet'!$C$3");
+    assert_eq!(n("Rate").refers_to, "of:=0.19");
+    assert_eq!(n("Local").refers_to, "S!$D$4:$D$9");
+    assert_eq!(n("Local").scope.as_deref(), Some("S"));
+    assert!(!n("Local").hidden);
+
+    let real = read_file("formula-across-sheets.ods");
+    assert_eq!(real.sheets.len(), 3);
+}
+
+#[test]
+fn huge_repeat_counts_do_not_expand() {
+    let start = Instant::now();
+    let xml = content(
+        "",
+        "<table:table table:name=\"S\"><table:table-row table:number-rows-repeated=\"1048576\">\
+         <table:table-cell table:number-columns-repeated=\"16384\"/></table:table-row></table:table>",
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &Limits::default());
+    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+
+    // Content in a repeated row counts its cells against the item limit.
+    let start = Instant::now();
+    let parts = read_file("malformed/issue_594_dos.ods");
+    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert_eq!(parts.sheets.len(), 1);
+    assert!(parts.sheets[0].cell_formats.is_empty());
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+
+    // Counts past the sheet size are clamped and said.
+    let parts = one_sheet(
+        "<style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"N\"/>\
+         <number:number-style style:name=\"N\"><number:number number:decimal-places=\"1\"/></number:number-style>",
+        "<table:table-row table:number-rows-repeated=\"2000000\" table:visibility=\"collapse\"/>\
+         <table:table-row><table:table-cell table:number-columns-repeated=\"99999\"/></table:table-row>",
+    );
+    let s = sheet(&parts, "S");
+    assert_eq!(
+        s.hidden_rows,
+        vec![RowSpan {
+            first: 0,
+            last: 1_048_575
+        }]
+    );
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
+
+#[test]
+fn small_repeated_content_is_listed_per_cell() {
+    let parts = one_sheet(
+        "<style:style style:name=\"ce1\" style:family=\"table-cell\" style:data-style-name=\"N\"/>\
+         <number:number-style style:name=\"N\"><number:number number:decimal-places=\"1\"/></number:number-style>",
+        "<table:table-row table:number-rows-repeated=\"2\">\
+         <table:table-cell table:style-name=\"ce1\" table:number-columns-repeated=\"2\" office:value-type=\"float\"/>\
+         </table:table-row>",
+    );
+    let f = &sheet(&parts, "S").cell_formats;
+    let pos: Vec<_> = f.iter().map(|(p, _)| (p.row, p.col)).collect();
+    assert_eq!(pos, vec![(0, 0), (0, 1), (1, 0), (1, 1)]);
+    assert_eq!(f[0].1, "0.0");
+}
+
+#[test]
+fn broken_parts_become_issues() {
+    let parts = read_bytes(&package(&[]), &Limits::default());
+    assert!(parts.sheets.is_empty());
+    assert!(parts.issues.iter().any(|i| i.part == "content.xml"));
+    let parts = read_bytes(
+        &package(&[("content.xml", "<office:document-content><oops")]),
+        &Limits::default(),
+    );
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Damaged));
+}
+
+#[test]
+fn every_corpus_ods_reads_without_panic() {
+    let dir = format!(
+        "{}/../../../tests/corpus/office",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut seen = 0;
+    for entry in walk(std::path::Path::new(&dir)) {
+        if entry.extension().is_some_and(|e| e == "ods") {
+            let bytes = std::fs::read(&entry).unwrap();
+            let parts = read_bytes(&bytes, &Limits::default());
+            let malformed = entry.to_string_lossy().contains("malformed");
+            if !malformed {
+                assert!(parts.issues.is_empty(), "{entry:?}: {:?}", parts.issues);
+                assert!(!parts.sheets.is_empty(), "{entry:?}");
+            }
+            seen += 1;
+        }
+    }
+    assert!(seen >= 4);
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}

@@ -8,7 +8,7 @@ use super::props::{DocProps, read_props};
 use super::styles::{Styles, read_styles};
 use super::{Ctx, Rel};
 use crate::xml::Ev;
-use crate::{Issue, IssueKind, Limits};
+use crate::{DefinedName, Issue, IssueKind, Limits};
 
 /// Whether a sheet is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,18 +26,6 @@ pub struct SheetInfo {
     pub state: SheetState,
     /// The part name in the package, resolved through the workbook relationships.
     pub part: String,
-}
-
-/// A defined name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DefinedName {
-    pub name: String,
-    /// The sheet name when the name is local to one sheet, `None` for a global name.
-    pub scope: Option<String>,
-    /// The formula text as written, for example `Sheet1!$A$1` or `{"A","B"}`.
-    pub refers_to: String,
-    pub hidden: bool,
-    pub comment: Option<String>,
 }
 
 /// When the workbook recalculates.

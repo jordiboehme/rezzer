@@ -18,7 +18,9 @@
 //! assert_eq!(numfmt::builtin(14), Some("mm-dd-yy"));
 //! ```
 
+mod a1;
 pub mod numfmt;
+pub mod odf;
 pub mod ooxml;
 pub(crate) mod xml;
 
@@ -100,4 +102,16 @@ pub enum PropValue {
         ty: String,
         value: String,
     },
+}
+
+/// A defined name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinedName {
+    pub name: String,
+    /// The sheet name when the name is local to one sheet, `None` for a global name.
+    pub scope: Option<String>,
+    /// The formula text as written, for example `Sheet1!$A$1` or `{"A","B"}`.
+    pub refers_to: String,
+    pub hidden: bool,
+    pub comment: Option<String>,
 }
