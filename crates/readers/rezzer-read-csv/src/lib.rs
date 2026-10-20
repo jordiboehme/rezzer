@@ -19,8 +19,14 @@ use rezzer_model::{
 /// Data rows in the body table. Further rows are analyzed and counted but not shown.
 const MAX_TABLE_ROWS: usize = 10_000;
 
-/// Cells in the body table. Wide files show fewer rows so memory stays bounded.
+/// Cells in the body table after padding. Wide files show fewer rows so memory stays bounded.
 const MAX_TABLE_CELLS: usize = 200_000;
+
+/// Columns in the body table, the renderer's cap. Further fields are counted, not shown.
+const MAX_TABLE_COLUMNS: usize = 1_000;
+
+/// Columns listed in the Columns facts table.
+const MAX_FACT_ROWS: usize = 500;
 
 /// Rows read between two time checks.
 const CHECK_EVERY: usize = 1000;
@@ -204,7 +210,10 @@ impl Reader for CsvReader {
             return finish(doc, partial);
         }
 
-        // The data table: header plus at most MAX_TABLE_ROWS data rows.
+        // The data table: header plus at most MAX_TABLE_ROWS data rows, at most
+        // MAX_TABLE_COLUMNS wide and at most MAX_TABLE_CELLS cells after padding.
+        let header = usize::from(dialect.has_header);
+        let known = analysis.columns.len();
         let mut rows: Vec<Vec<Cell>> = Vec::new();
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(dialect.delimiter)
@@ -213,10 +222,12 @@ impl Reader for CsvReader {
             .flexible(true)
             .from_reader(text.as_bytes());
         let mut rec = csv::StringRecord::new();
-        let ncols = analysis.columns.len().max(1);
-        let shown = MAX_TABLE_ROWS.min(MAX_TABLE_CELLS / ncols).max(1);
-        let wanted = shown + usize::from(dialect.has_header);
-        let mut stopped_at: Option<usize> = None;
+        let wanted = MAX_TABLE_ROWS + header;
+        // The padded width (capped) and the widest record seen (not capped).
+        let (mut width, mut widest) = (0usize, 0usize);
+        // Non-empty data cells per column past the known ones, for the facts table.
+        let mut extra_filled: Vec<usize> = Vec::new();
+        let mut stopped: Option<(usize, &str)> = None;
         while !timed_out && rows.len() < wanted {
             match reader.read_record(&mut rec) {
                 Ok(true) => {}
@@ -233,36 +244,78 @@ impl Reader for CsvReader {
                 }
             }
             if rows.len() % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
-                stopped_at = Some(rows.len() + 1);
+                stopped = Some((rows.len() + 1, "rest of the file not read"));
                 break;
+            }
+            let shown = rec.len().min(MAX_TABLE_COLUMNS);
+            let new_width = width.max(shown);
+            // Padding makes every row as wide as the widest one: count padded cells.
+            if !rows.is_empty() && (rows.len() + 1).saturating_mul(new_width) > MAX_TABLE_CELLS {
+                break;
+            }
+            if budget.add_elements(shown as u64).is_err() {
+                stopped = Some((
+                    rows.len() + 1,
+                    "element limit reached, rest of the file not read",
+                ));
+                break;
+            }
+            width = new_width;
+            widest = widest.max(rec.len());
+            if rows.len() >= header {
+                for (j, v) in rec.iter().enumerate().take(MAX_FACT_ROWS).skip(known) {
+                    if extra_filled.len() <= j - known {
+                        extra_filled.resize(j - known + 1, 0);
+                    }
+                    if !value_empty(v) {
+                        extra_filled[j - known] += 1;
+                    }
+                }
             }
             let row_no = rows.len() + 1; // 1-based, the header is row 1
             let cells = rec
                 .iter()
+                .take(MAX_TABLE_COLUMNS)
                 .enumerate()
                 .map(|(j, v)| anchored(&sheet, j, row_no, cell_inlines(v)))
                 .collect();
             rows.push(cells);
         }
-        if let Some(n) = stopped_at {
+        let data_shown = rows.len().saturating_sub(header);
+        if let Some((n, what)) = stopped {
             partial = true;
             doc.losses.push(Loss {
                 location: format!("row {n}"),
-                what: "rest of the file not read".into(),
+                what: what.into(),
                 why: LossReason::Limit,
                 severity: Severity::Warning,
             });
-        } else if analysis.rows > shown {
+        } else if !timed_out && analysis.rows > data_shown {
+            let what = if analysis.rows == data_shown + 1 {
+                format!("row {} not shown", analysis.rows)
+            } else {
+                format!("rows {} to {} not shown", data_shown + 1, analysis.rows)
+            };
             doc.losses.push(Loss {
                 location: sheet.clone(),
-                what: format!("rows {} to {} not shown", shown + 1, analysis.rows),
+                what,
+                why: LossReason::Limit,
+                severity: Severity::Info,
+            });
+        }
+        if widest > MAX_TABLE_COLUMNS {
+            doc.losses.push(Loss {
+                location: sheet.clone(),
+                what: format!(
+                    "{} columns after column {MAX_TABLE_COLUMNS} not shown",
+                    widest - MAX_TABLE_COLUMNS
+                ),
                 why: LossReason::Limit,
                 severity: Severity::Info,
             });
         }
 
         // Rectangular: pad short rows (and the header) to the widest row.
-        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
         for (i, row) in rows.iter_mut().enumerate() {
             for j in row.len()..width {
                 let label = if dialect.has_header && i == 0 {
@@ -270,23 +323,15 @@ impl Reader for CsvReader {
                 } else {
                     String::new()
                 };
-                row.push(anchored(&sheet, j, i + 1, vec![Inline::plain(&label)]));
+                row.push(anchored(&sheet, j, i + 1, vec![Inline::plain(label)]));
             }
         }
 
         let mut blocks = Vec::new();
-        // The cells are moved into the table; only a small copy of the extra columns is kept.
-        let extra_rows: Vec<Vec<Cell>> = if width > analysis.columns.len() {
-            rows.iter()
-                .map(|r| r.iter().skip(analysis.columns.len()).cloned().collect())
-                .collect()
-        } else {
-            Vec::new()
-        };
         if !timed_out {
             blocks.push(Block::Table {
                 caption: None,
-                header_rows: usize::from(dialect.has_header),
+                header_rows: header,
                 role: None,
                 rows,
                 alignments: Vec::new(),
@@ -294,9 +339,8 @@ impl Reader for CsvReader {
             });
         }
 
-        // The column facts. The column count is the width of the (padded) table.
-        let known = analysis.columns.len();
-        let ncols_total = if timed_out { known } else { width.max(known) };
+        // The column facts. The column count is the widest record, also columns not shown.
+        let ncols_total = if timed_out { known } else { widest.max(known) };
         custom_columns(&mut doc, ncols_total);
         let extra = ncols_total > known;
         let mut head = vec!["Column", "Type", "Unit", "Missing", "Unique", "Key"];
@@ -308,7 +352,7 @@ impl Reader for CsvReader {
                 .map(|h| Cell::new(vec![Inline::plain(*h)]))
                 .collect::<Vec<_>>(),
         ];
-        for c in &analysis.columns {
+        for c in analysis.columns.iter().take(MAX_FACT_ROWS) {
             let unique = if c.unique {
                 "yes"
             } else if c.unique_exhausted {
@@ -335,20 +379,13 @@ impl Reader for CsvReader {
             );
         }
         // Columns that exist only because some rows have more fields than the rest.
-        for j in known..ncols_total {
-            let j_rel = j - known;
-            let (mut missing, mut any) = (0, false);
-            for row in extra_rows.iter().skip(usize::from(dialect.has_header)) {
-                match row.get(j_rel) {
-                    Some(cell) if !cell_empty(cell) => any = true,
-                    _ => missing += 1,
-                }
-            }
+        for j in known..ncols_total.min(MAX_FACT_ROWS) {
+            let filled = extra_filled.get(j - known).copied().unwrap_or(0);
             let values = [
                 format!("Column {}", j + 1),
-                if any { "unknown" } else { "empty" }.to_string(),
+                if filled > 0 { "unknown" } else { "empty" }.to_string(),
                 String::new(),
-                missing.to_string(),
+                (data_shown - filled).to_string(),
                 "not checked".to_string(),
                 "no".to_string(),
                 "only in ragged rows".to_string(),
@@ -359,6 +396,17 @@ impl Reader for CsvReader {
                     .map(|v| Cell::new(vec![Inline::plain(v)]))
                     .collect(),
             );
+        }
+        if ncols_total > MAX_FACT_ROWS {
+            doc.losses.push(Loss {
+                location: sheet.clone(),
+                what: format!(
+                    "columns {} to {ncols_total} not listed in the Columns table",
+                    MAX_FACT_ROWS + 1
+                ),
+                why: LossReason::Limit,
+                severity: Severity::Info,
+            });
         }
         blocks.push(Block::Table {
             caption: Some("Columns".into()),
@@ -406,13 +454,10 @@ fn custom_columns(doc: &mut Document, columns: usize) {
         .insert("columns".into(), Value::number(columns as f64, None));
 }
 
-/// True when a cell has no visible text.
-fn cell_empty(cell: &Cell) -> bool {
-    cell.inlines.iter().all(|i| match i {
-        Inline::Text { text, .. } => text.is_empty(),
-        Inline::LineBreak => true,
-        _ => false,
-    })
+/// True when a field has no visible text: empty, or only whitespace with a line break (which
+/// [`cell_inlines`] turns into a lone line break).
+fn value_empty(value: &str) -> bool {
+    value.is_empty() || (value.trim().is_empty() && value.contains(['\n', '\r']))
 }
 
 /// The inlines of a cell: its text, with each run of whitespace that contains a line break

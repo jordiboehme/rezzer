@@ -270,16 +270,68 @@ fn wide_file_is_capped_by_cells() {
     }
     let out = read(csv.as_bytes());
     let (_, blocks) = tables(&out);
-    // 200,000 / 3,000 = 66 data rows plus the header
-    assert_eq!(widths(blocks[0]).len(), 67);
-    let l = out
+    // The table is capped at 1,000 columns; 200,000 / 1,000 = the header plus 199 data rows.
+    let w = widths(blocks[0]);
+    assert_eq!(w.len(), 200);
+    assert!(w.iter().all(|&x| x == 1_000), "{w:?}");
+    let limits: Vec<_> = out
         .document
         .losses
         .iter()
-        .find(|l| l.why == LossReason::Limit)
-        .unwrap();
-    assert_eq!(l.what, "rows 67 to 200 not shown");
-    assert_eq!(l.severity, Severity::Info);
+        .filter(|l| l.why == LossReason::Limit)
+        .map(|l| (l.what.as_str(), l.severity))
+        .collect();
+    assert_eq!(
+        limits,
+        [
+            ("row 200 not shown", Severity::Info),
+            ("2000 columns after column 1000 not shown", Severity::Info),
+            (
+                "columns 501 to 3000 not listed in the Columns table",
+                Severity::Info
+            ),
+        ]
+    );
+    // The property counts every column, also those not shown.
+    assert_eq!(property(&out, "columns"), Value::number(3000.0, None));
+    assert_eq!(rows_of(blocks[1]).len(), 501);
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn the_element_budget_stops_the_table_with_a_limit_loss() {
+    let mut bytes = b"id,name\n".to_vec();
+    for i in 0..1_000 {
+        bytes.extend_from_slice(format!("{i},n{i}\n").as_bytes());
+    }
+    let budget = Budget::new(Limits {
+        max_elements: 100,
+        ..Limits::default()
+    });
+    let out = CsvReader.read(
+        &source("data.csv", FormatId::Csv, &bytes),
+        &ReadOptions::default(),
+        &budget,
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+    let (_, blocks) = tables(&out);
+    let rows = rows_of(blocks[0]);
+    // 100 elements are 50 rows of two cells: the header and 49 data rows.
+    assert_eq!(rows.len(), 50);
+    let limits: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    assert_eq!(limits[0].location, "row 51");
+    assert_eq!(
+        limits[0].what,
+        "element limit reached, rest of the file not read"
+    );
+    assert_eq!(limits[0].severity, Severity::Warning);
+    assert_eq!(budget.elements(), 102);
 }
 
 #[test]
