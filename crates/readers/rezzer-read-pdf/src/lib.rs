@@ -18,6 +18,8 @@ mod text;
 #[path = "../tests/common/mod.rs"]
 mod fixtures;
 
+use std::collections::HashMap;
+
 use pdfparts::{IssueKind, PageInfo, Pdf};
 use rezzer_limits::Budget;
 use rezzer_model::{
@@ -141,17 +143,19 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
     (!items.is_some_and(|i| i.turned)).then_some(page.height)
 }
 
-/// One page section per page, with the laid out text.
+/// One page section per page, with the laid out text. Pages already read are laid out even
+/// when a stop cut the reading: layout is bounded by the element and text budgets.
 fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget, out: &mut Out) {
     let Extracted {
-        pages: mut read,
+        pages: read,
         failed,
         stopped_at,
     } = extracted;
+    let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
         .iter()
         .filter_map(|items| {
-            let info = pages.iter().find(|p| p.number == items.page)?;
+            let info = info_of.get(&items.page)?;
             Some(PageText {
                 page: items.page,
                 height: frame_height(info, Some(items)),
@@ -160,6 +164,8 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
         })
         .collect();
     let style = Style::new(&texts);
+    drop(texts);
+    let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
     let tree = if pdf.tagged() {
         pdf.struct_tree()
     } else {
@@ -176,17 +182,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             role: Some("page".into()),
             anchor: None,
         }];
-        if !halted && let Err(hit) = budget.check_time() {
-            out.loss(
-                format!("p{n}"),
-                format!("{hit}: the text of this and the later pages is not laid out"),
-                LossReason::Limit,
-                Severity::Warning,
-            );
-            halted = true;
-        }
-        let items = read.iter_mut().find(|i| i.page == n).map(std::mem::take);
-        if let (false, Some(items)) = (halted, items) {
+        if let (false, Some(items)) = (halted, read.remove(&n)) {
             let roles = |mcid: u32| pdf.role_of(n, mcid);
             let cx = Context {
                 style: &style,
@@ -194,6 +190,15 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 roles: &roles,
                 budget,
             };
+            if items.links_cut {
+                out.loss(
+                    format!("p{n}"),
+                    "some URI links are not attached to their text: the page has too many \
+                     links to match",
+                    LossReason::Limit,
+                    Severity::Warning,
+                );
+            }
             let height = frame_height(info, Some(&items));
             let laid = layout::page_blocks(n, height, items.runs, &cx);
             blocks.extend(laid.blocks);
@@ -214,17 +219,6 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 );
                 halted = true;
             }
-        } else if let Some((_, why, panicked)) = failed.iter().find(|f| f.0 == n) {
-            out.loss(
-                format!("p{n}"),
-                format!("text not read: the text parser failed: {why}"),
-                if *panicked {
-                    LossReason::Internal
-                } else {
-                    LossReason::Damaged
-                },
-                Severity::Warning,
-            );
         }
         out.doc.body.push(Block::Section {
             kind: SectionKind::Page,
@@ -233,6 +227,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             blocks,
         });
     }
+    failures(&failed, out);
     if let Some(first) = stopped_at {
         let last = pages.last().map_or(first, |p| p.number);
         out.loss(
@@ -253,6 +248,39 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             LossReason::Limit,
             Severity::Warning,
         );
+    }
+}
+
+/// One loss per run of consecutive pages that failed the same way.
+fn failures(failed: &[(u32, String, bool)], out: &mut Out) {
+    let mut i = 0;
+    while i < failed.len() {
+        let (first, why, panicked) = &failed[i];
+        let mut j = i + 1;
+        while j < failed.len()
+            && failed[j].0 == failed[j - 1].0 + 1
+            && failed[j].1 == *why
+            && failed[j].2 == *panicked
+        {
+            j += 1;
+        }
+        let last = failed[j - 1].0;
+        let pages = if last == *first {
+            format!("page {first}")
+        } else {
+            format!("pages {first} to {last}")
+        };
+        out.loss(
+            format!("p{first}"),
+            format!("text of {pages} not read: the text parser failed: {why}"),
+            if *panicked {
+                LossReason::Internal
+            } else {
+                LossReason::Damaged
+            },
+            Severity::Warning,
+        );
+        i = j;
     }
 }
 
@@ -409,6 +437,52 @@ mod tests {
     use crate::fixtures::{Page, pdf, show};
 
     #[test]
+    fn failures_are_grouped_by_run_of_pages() {
+        let mut out = Out::new(Document::new(source_info(&Source {
+            path: None,
+            name: "f.pdf".into(),
+            bytes: Bytes::Owned(Arc::new(Vec::new())),
+            sha256: "00".repeat(32),
+            size: 0,
+            format: FormatId::Pdf,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "x".into(),
+            },
+            modified: None,
+        })));
+        let bad = |p: u32, why: &str| (p, why.to_string(), false);
+        failures(
+            &[
+                bad(1, "a"),
+                bad(2, "a"),
+                bad(3, "a"),
+                bad(5, "a"),
+                bad(6, "b"),
+            ],
+            &mut out,
+        );
+        let said: Vec<(&str, &str)> = out
+            .doc
+            .losses
+            .iter()
+            .map(|l| (l.location.as_str(), l.what.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    "p1",
+                    "text of pages 1 to 3 not read: the text parser failed: a"
+                ),
+                ("p5", "text of page 5 not read: the text parser failed: a"),
+                ("p6", "text of page 6 not read: the text parser failed: b"),
+            ]
+        );
+        assert!(out.partial);
+    }
+
+    #[test]
     fn time_stop_between_batches_is_partial() {
         let page = Page::text(show("F1", 12.0, 72.0, 700.0, "Some words."));
         let bytes = pdf(&std::iter::repeat_n(page, 70).collect::<Vec<_>>(), "");
@@ -426,12 +500,15 @@ mod tests {
             modified: None,
         };
         let asked = std::cell::Cell::new(0);
-        // The time runs out after the first batch.
+        let budget = Budget::new(Limits::default());
+        // The time runs out after the first batch: from then on the budget says so too.
         let stop = || {
             asked.set(asked.get() + 1);
-            asked.get() > 1
+            if asked.get() > 1 {
+                budget.cancel();
+            }
+            budget.is_cancelled()
         };
-        let budget = Budget::new(Limits::default());
         let out = read_pdf(&PdfReader, &src, &ReadOptions::default(), &budget, &stop);
         assert_eq!(out.completeness, Completeness::Partial);
         let sections = out

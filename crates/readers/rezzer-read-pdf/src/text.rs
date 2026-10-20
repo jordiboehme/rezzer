@@ -9,7 +9,7 @@
 //! [`BATCH`] with a time check between two batches: one batch is the longest stretch a stop
 //! has to wait for.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 
 use pdf_inspector::extractor::group_into_lines_preserving_all_text;
@@ -23,6 +23,12 @@ use crate::layout::Run;
 
 /// Pages per pdf-inspector call.
 pub(crate) const BATCH: usize = 64;
+
+/// Run and link pairs one batch may test for a URI link over a run.
+const LINK_WORK: usize = 16_000_000;
+
+/// A URI link box (x0, y0, x1, y1) and its target.
+type Link = ([f32; 4], String);
 
 /// Region that covers any page: PDF pages are at most 14,400 points on a side.
 const WHOLE_PAGE: [f32; 4] = [-14_400.0, -14_400.0, 14_400.0, 14_400.0];
@@ -40,6 +46,8 @@ pub(crate) struct PageItems {
     /// The lines of an invisible text layer (render mode 3) on a page without visible text,
     /// as an OCR program writes it behind a scan.
     pub hidden_layer: Vec<String>,
+    /// The page has more URI links than were matched to its runs.
+    pub links_cut: bool,
     /// pdf-inspector turned the page's frame a quarter so its text reads left to right; the
     /// coordinates are not page coordinates then.
     pub turned: bool,
@@ -60,24 +68,40 @@ pub(crate) struct Extracted {
 /// so one bad page does not cost its neighbours.
 pub(crate) fn pages(bytes: &[u8], pages: &[u32], stop: &dyn Fn() -> bool) -> Extracted {
     let mut out = Extracted::default();
+    // A failure that a single page repeats is a failure of the file: later batches that fail
+    // the same way are not read again page by page.
+    let mut whole_file: Option<(String, bool)> = None;
     for batch in pages.chunks(BATCH) {
         if stop() {
             out.stopped_at = batch.first().copied();
             return out;
         }
-        match read_batch(bytes, batch) {
-            Ok(found) => out.pages.extend(found),
-            Err(_) => {
-                for &p in batch {
-                    if stop() {
-                        out.stopped_at = Some(p);
-                        return out;
-                    }
-                    match read_batch(bytes, &[p]) {
-                        Ok(found) => out.pages.extend(found),
-                        Err((why, panicked)) => out.failed.push((p, why, panicked)),
-                    }
+        let failure = match read_batch(bytes, batch) {
+            Ok(found) => {
+                out.pages.extend(found);
+                continue;
+            }
+            Err(failure) => failure,
+        };
+        if whole_file.as_ref() == Some(&failure) {
+            out.failed
+                .extend(batch.iter().map(|&p| (p, failure.0.clone(), failure.1)));
+            continue;
+        }
+        for (k, &p) in batch.iter().enumerate() {
+            if stop() {
+                out.stopped_at = Some(p);
+                return out;
+            }
+            match read_batch(bytes, &[p]) {
+                Ok(found) => out.pages.extend(found),
+                Err(single) if k == 0 && single == failure => {
+                    out.failed
+                        .extend(batch.iter().map(|&p| (p, failure.0.clone(), failure.1)));
+                    whole_file = Some(failure);
+                    break;
                 }
+                Err((why, panicked)) => out.failed.push((p, why, panicked)),
             }
         }
     }
@@ -88,6 +112,12 @@ pub(crate) fn pages(bytes: &[u8], pages: &[u32], stop: &dyn Fn() -> bool) -> Ext
         .filter(|p| p.runs.is_empty() && p.invisible.is_empty())
         .map(|p| p.page)
         .collect();
+    let index: HashMap<u32, usize> = out
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.page, i))
+        .collect();
     for batch in bare.chunks(BATCH) {
         if stop() {
             break;
@@ -95,8 +125,8 @@ pub(crate) fn pages(bytes: &[u8], pages: &[u32], stop: &dyn Fn() -> bool) -> Ext
         // A failure here costs only the hidden layer; the page itself was read.
         if let Ok(Ok(found)) = contain(AssertUnwindSafe(|| hidden_layers(bytes, batch))) {
             for (page, lines) in found {
-                if let Some(p) = out.pages.iter_mut().find(|p| p.page == page) {
-                    p.hidden_layer = lines;
+                if let Some(&i) = index.get(&page) {
+                    out.pages[i].hidden_layer = lines;
                 }
             }
         }
@@ -129,22 +159,26 @@ fn read_batch(bytes: &[u8], batch: &[u32]) -> Result<Vec<PageItems>, (String, bo
             ..PageItems::default()
         })
         .collect();
+    let slot_of: HashMap<u32, usize> = batch.iter().enumerate().map(|(i, &p)| (p, i)).collect();
     let mut visible = Vec::new();
     // Text that does not read along the x axis (margin notes, stamps) is laid out after the
     // rest of its page, so it does not cut into the lines it crosses.
     let mut turned = Vec::new();
     let mut hidden = Vec::new();
-    let mut links: Vec<(u32, [f32; 4], String)> = Vec::new();
+    let mut links: HashMap<u32, Vec<Link>> = HashMap::new();
     for item in items {
-        let Some(slot) = by_page.iter_mut().find(|p| p.page == item.page) else {
+        let Some(&slot) = slot_of.get(&item.page) else {
             continue;
         };
         match &item.item_type {
             ItemType::Text if matches!(item.render_mode, Some(3 | 7)) => hidden.push(item),
             ItemType::Text if item.is_horizontal() => visible.push(item),
             ItemType::Text => turned.push(item),
-            ItemType::Image => slot.images.push(rect(&item)),
-            ItemType::Link(url) => links.push((item.page, rect(&item), url.clone())),
+            ItemType::Image => by_page[slot].images.push(rect(&item)),
+            ItemType::Link(url) => links
+                .entry(item.page)
+                .or_default()
+                .push((rect(&item), url.clone())),
             // Form field values come from the object layer.
             ItemType::FormField => {}
         }
@@ -157,27 +191,32 @@ fn read_batch(bytes: &[u8], batch: &[u32]) -> Result<Vec<PageItems>, (String, bo
         )
     }));
     let (visible, turned, hidden) = grouped.map_err(|panic| (panic, true))?;
-    let mut line_no: Vec<(u32, u32)> = Vec::new();
+    let mut line_no: HashMap<u32, u32> = HashMap::new();
+    let mut work = 0usize;
     for (lines, invisible) in [(visible, false), (turned, false), (hidden, true)] {
         for line in lines {
-            let Some(slot) = by_page.iter_mut().find(|p| p.page == line.page) else {
+            let Some(&slot) = slot_of.get(&line.page) else {
                 continue;
             };
-            let n = match line_no.iter_mut().find(|(p, _)| *p == line.page) {
-                Some((_, n)) => {
-                    *n += 1;
-                    *n
-                }
-                None => {
-                    line_no.push((line.page, 0));
-                    0
-                }
-            };
-            let runs = line_runs(&line, n, &links);
-            if invisible {
-                slot.invisible.extend(runs);
+            let n = line_no.entry(line.page).or_insert(0);
+            let number = *n;
+            *n += 1;
+            let page = &mut by_page[slot];
+            let on_page = links.get(&line.page).map_or(&[][..], Vec::as_slice);
+            // Matching runs to links is bounded per batch; past the bound the page is told.
+            let cost = line.items.len().saturating_mul(on_page.len());
+            let on_page = if work.saturating_add(cost) > LINK_WORK {
+                page.links_cut |= !on_page.is_empty();
+                &[][..]
             } else {
-                slot.runs.extend(runs);
+                work += cost;
+                on_page
+            };
+            let runs = line_runs(&line, number, on_page);
+            if invisible {
+                page.invisible.extend(runs);
+            } else {
+                page.runs.extend(runs);
             }
         }
     }
@@ -191,7 +230,7 @@ fn rect(item: &TextItem) -> [f32; 4] {
 
 /// The runs of one line. A run that starts a new word begins with a space, decided the way
 /// pdf-inspector joins the items of a line.
-fn line_runs(line: &TextLine, number: u32, links: &[(u32, [f32; 4], String)]) -> Vec<Run> {
+fn line_runs(line: &TextLine, number: u32, links: &[Link]) -> Vec<Run> {
     let mut runs = Vec::with_capacity(line.items.len());
     for (i, item) in line.items.iter().enumerate() {
         let mut text = item.text.clone();
@@ -202,10 +241,8 @@ fn line_runs(line: &TextLine, number: u32, links: &[(u32, [f32; 4], String)]) ->
         let cy = item.y + item.height / 2.0;
         let uri = links
             .iter()
-            .find(|(page, r, _)| {
-                *page == item.page && cx >= r[0] && cx <= r[2] && cy >= r[1] && cy <= r[3]
-            })
-            .map(|(_, _, url)| url.clone());
+            .find(|(r, _)| cx >= r[0] && cx <= r[2] && cy >= r[1] && cy <= r[3])
+            .map(|(_, url)| url.clone());
         runs.push(Run {
             page: item.page,
             text,

@@ -7,7 +7,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::{Page, pdf, show, zeros_packed};
+use common::{Builder, Page, pdf, show, zeros_packed};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline,
@@ -464,6 +464,51 @@ fn refused_page_is_skipped_with_loss() {
     // Both page sections are there, each with its marker.
     assert_eq!(marker(page(&out, 1)), "Page 1");
     assert_eq!(marker(page(&out, 2)), "Page 2");
+}
+
+#[test]
+fn unsafe_page_tree_is_not_given_to_the_text_parser() {
+    // One page listed twice in /Kids.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream(
+        "",
+        show("F1", 12.0, 72.0, 700.0, "Twice listed.").as_bytes(),
+    );
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R {kid} 0 R] /Count 2 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert!(!all_text(&out).contains("Twice listed."));
+    assert!(
+        out.document.losses.iter().any(|l| l.location == "document"
+            && l.why == LossReason::Damaged
+            && l.severity == Severity::Error
+            && l.what.contains("page tree")),
+        "{:?}",
+        out.document.losses
+    );
+    let sections: Vec<&Block> = out
+        .document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { .. }))
+        .collect();
+    assert!(!sections.is_empty());
+    for (i, _) in sections.iter().enumerate() {
+        let blocks = page(&out, i as u32 + 1);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(marker(blocks), format!("Page {}", i + 1));
+    }
 }
 
 #[test]
