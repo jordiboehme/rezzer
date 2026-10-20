@@ -181,6 +181,64 @@ The spreadsheet files were downloaded on 2026-10-20 from the raw form of the pin
 
 - Apache Tika test documents (Apache-2.0): `office/testEXCEL_custom_props.xlsx`, `testEXCEL_various.xlsb`. Source: https://github.com/apache/tika/tree/043762c6327ff36b3081ce297688e93915c85996 . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/tika/blob/043762c6327ff36b3081ce297688e93915c85996/NOTICE.txt . The license text is the Apache License 2.0 below.
 
+NOTICE of Apache POI (section 4(d) of the license), source: https://raw.githubusercontent.com/apache/poi/04804ac97487ceded07a8231bc106a258109cbeb/legal/NOTICE
+
+    Apache POI
+    Copyright 2003-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (https://www.apache.org/).
+
+    This product contains parts that were originally based on software from BEA.
+    Copyright (c) 2000-2003, BEA Systems, <http://www.bea.com/> (dead link),
+    which was acquired by Oracle Corporation in 2008.
+    <http://www.oracle.com/us/corporate/Acquisitions/bea/index.html>
+    <https://en.wikipedia.org/wiki/BEA_Systems>
+    Note: The ASF Secretary has on hand a Software Grant Agreement (SGA) from
+    BEA Systems, Inc. dated 9 Sep 2003 for XMLBeans signed by their EVP/CFO.
+
+    This product contains W3C XML Schema documents. Copyright 2001-2003 (c)
+    World Wide Web Consortium (Massachusetts Institute of Technology, European
+    Research Consortium for Informatics and Mathematics, Keio University)
+
+    This product contains the chunks_parse_cmds.tbl file from the vsdump program.
+    Copyright (C) 2006-2007 Valek Filippov (frob@df.ru)
+
+    This product contains parts of the eID Applet project
+    <http://eid-applet.googlecode.com> and <https://github.com/e-Contract/eid-applet>.
+    Copyright (c) 2009-2018
+    FedICT (federal ICT department of Belgium), e-Contract.be BVBA (https://www.e-contract.be),
+    Bart Hanssens from FedICT
+
+    ExceptionUtils is derived from `scala.util.control.NonFatal` in scala-library
+    which was released under the Apache 2.0 license.
+
+    Copyright (c) 2002-2023 EPFL
+    Copyright (c) 2011-2023 Lightbend, Inc.
+
+    Scala includes software developed at
+    LAMP/EPFL (https://lamp.epfl.ch/) and
+    Lightbend, Inc. (https://www.lightbend.com/).
+
+NOTICE of Apache Tika, source: https://raw.githubusercontent.com/apache/tika/043762c6327ff36b3081ce297688e93915c85996/NOTICE.txt
+
+    Apache Tika
+    Copyright 2007-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (http://www.apache.org/).
+
+    Copyright 1993-2010 University Corporation for Atmospheric Research/Unidata
+    This software contains code derived from UCAR/Unidata's NetCDF library.
+
+    Tika-parsers component uses CDDL/LGPL dual-licensed dependency: jhighlight (https://github.com/codelibs/jhighlight)
+
+    IPTC Photo Metadata descriptions Copyright 2010 International Press Telecommunications Council.
+
+    Tika-mimetypes.xml includes mimetype definitions that were adapted from the PRONOM Technical Registry
+    by The National Archives (http://www.nationalarchives.gov.uk/PRONOM/Default.aspx). PRONOM is published
+    under the Open Government License 3.0 (http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)
+
 Apache License 2.0, source of the text: https://www.apache.org/licenses/LICENSE-2.0.txt
 
                                      Apache License
