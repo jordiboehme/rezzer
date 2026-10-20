@@ -202,7 +202,6 @@ Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS work today. The other formats
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 
-
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
 
 DWG and closed CAD formats like SolidWorks, Creo, NX, CATIA, Inventor or Fusion 360 come later. Until then Rezzer detects them and asks for a DXF or STEP AP242 export.
