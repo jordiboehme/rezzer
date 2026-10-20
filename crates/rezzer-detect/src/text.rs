@@ -167,7 +167,7 @@ fn classify(
     if let Some(f) = openscad(body) {
         return f;
     }
-    if let Some(f) = markdown_syntax(&lines) {
+    if let Some(f) = markdown_syntax(name, &lines) {
         return f;
     }
     if let Some(d) = csvsniff::sniff(body) {
@@ -648,7 +648,7 @@ fn markdown_frontmatter(lines: &[&str]) -> Option<Found> {
     ))
 }
 
-fn markdown_syntax(lines: &[&str]) -> Option<Found> {
+fn markdown_syntax(name: &str, lines: &[&str]) -> Option<Found> {
     let mut kinds = Vec::new();
     let is_hash = |l: &str| l.starts_with('#');
     // The closing frontmatter fence counts as a blank line before a heading, but only when
@@ -680,6 +680,19 @@ fn markdown_syntax(lines: &[&str]) -> Option<Found> {
     }) {
         kinds.push("fenced code");
     }
+    // A pipe table (header row, delimiter row) is a strong signal: with a heading, a list or
+    // prose it is Markdown, not `|` separated data, and so is a lone table in a .md file.
+    if pipe_table(lines) {
+        let prose = lines.iter().any(|l| prose_line(l));
+        let md_ext = extension(name).is_some_and(|e| e == "md" || e == "markdown");
+        if !kinds.is_empty() || prose || md_ext {
+            kinds.push("pipe table");
+        }
+        if kinds.len() == 1 {
+            // Only the table: nothing else to agree with it, the extension decided.
+            kinds.push("extension");
+        }
+    }
     if kinds.len() < 2 {
         return None;
     }
@@ -688,6 +701,33 @@ fn markdown_syntax(lines: &[&str]) -> Option<Found> {
         Confidence::Likely,
         format!("markdown syntax: {}", kinds.join(", ")),
     ))
+}
+
+/// A pipe table: a line with `|`, then a delimiter row such as `| --- | :---: |`.
+fn pipe_table(lines: &[&str]) -> bool {
+    lines
+        .windows(2)
+        .any(|w| w[0].contains('|') && delimiter_row(w[1]))
+}
+
+fn delimiter_row(line: &str) -> bool {
+    let t = line.trim();
+    if !t.contains('|') || !t.contains('-') {
+        return false;
+    }
+    let cells: Vec<&str> = t.trim_matches('|').split('|').collect();
+    cells.iter().all(|c| {
+        let c = c.trim().trim_start_matches(':').trim_end_matches(':');
+        !c.is_empty() && c.bytes().all(|b| b == b'-')
+    })
+}
+
+/// A line of prose: at least four words, no `|`, not a heading, list item or code fence.
+fn prose_line(line: &str) -> bool {
+    let t = line.trim();
+    !t.contains('|')
+        && !t.starts_with(['#', '-', '*', '+', '`', '~', '>'])
+        && t.split_whitespace().count() >= 4
 }
 
 fn ordered_item(t: &str) -> bool {

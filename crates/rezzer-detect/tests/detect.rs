@@ -242,6 +242,32 @@ fn markdown_by_headings_and_lists() {
 }
 
 #[test]
+fn markdown_with_a_pipe_table_is_not_csv() {
+    let text = b"# Results\n\nThe numbers below came from the last run of the suite.\n\n| name | value |\n| --- | :---: |\n| a | 1 |\n| b | 2 |\n";
+    let (f, d) = detect("results.md", text);
+    assert_eq!(f, FormatId::Markdown, "{}", d.evidence);
+    // Heading and table without a file name hint.
+    assert_eq!(
+        detect("x", b"# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n").0,
+        FormatId::Markdown
+    );
+    // Prose and table.
+    let prose =
+        b"Some words about the table that follows here.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n";
+    assert_eq!(detect("x.txt", prose).0, FormatId::Markdown);
+    // The extension wins when only the table is there.
+    assert_eq!(
+        detect("t.md", b"| a | b |\n| --- | --- |\n| 1 | 2 |\n").0,
+        FormatId::Markdown
+    );
+    // Pipe separated data without a delimiter row stays CSV.
+    assert_eq!(
+        detect("t.txt", b"a|b|c\n1|2|3\n4|5|6\n7|8|9\n").0,
+        FormatId::Csv
+    );
+}
+
+#[test]
 fn dwg_version_detected() {
     let mut bytes = b"AC1032".to_vec();
     bytes.extend_from_slice(&[0u8; 128]);
