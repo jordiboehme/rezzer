@@ -1514,4 +1514,34 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_link_target_in_json_never_takes_more_than_the_model_says() {
+        let link = |target: String| Inline::Link {
+            target,
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: Vec::new(),
+        };
+        let size = |target: String| {
+            serde_json::to_string_pretty(&link(target))
+                .expect("the model serializes")
+                .len() as u64
+        };
+        let empty = size(String::new());
+        let pieces = (0..0x300u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in pieces {
+            for prefix in ["", "http://x/", "javascript:"] {
+                let target = format!("{prefix}{}", c.to_string().repeat(40));
+                let written = size(target.clone()) - empty;
+                assert!(
+                    written <= rezzer_model::link_target_written_len(&target),
+                    "{target:?} is written as {written} bytes in JSON"
+                );
+            }
+        }
+    }
 }

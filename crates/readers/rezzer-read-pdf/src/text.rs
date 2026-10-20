@@ -34,7 +34,7 @@ use read_fonts::ps::cff::CffFontRef;
 use skrifa::{FontRef, MetadataProvider};
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
-use crate::layout::Run;
+use crate::layout::{Run, UriTarget};
 
 /// Glyphs and device calls between two questions to the stop callback.
 const POLL: u64 = 4096;
@@ -134,13 +134,13 @@ impl PageItems {
     /// About the memory the items take once their lists are shrunk to fit.
     fn kept_bytes(&mut self) -> u64 {
         // A link's target is shared by its runs: it counts once.
-        let mut links: HashSet<*const u8> = HashSet::new();
+        let mut links: HashSet<*const UriTarget> = HashSet::new();
         let mut runs = |list: &mut Vec<Run>| -> u64 {
             list.shrink_to_fit();
             list.iter()
                 .map(|r| {
                     let link = match &r.uri {
-                        Some(u) if links.insert(u.as_ptr()) => u.len() as u64 + 32,
+                        Some(u) if links.insert(Rc::as_ptr(u)) => u.uri.len() as u64 + 64,
                         _ => 0,
                     };
                     (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64 + link
@@ -347,7 +347,7 @@ fn switched_off(doc: &hayro_syntax::Pdf) -> HashSet<ObjectIdentifier> {
 }
 
 /// A URI link box (x0, y0, x1, y1 in user space) and its target.
-type Link = ([f32; 4], Rc<str>);
+type Link = ([f32; 4], Rc<UriTarget>);
 
 /// The URI links of every page, from the object layer. They are never followed.
 fn uri_links(pdf: &Pdf) -> HashMap<u32, Vec<Link>> {
@@ -355,9 +355,10 @@ fn uri_links(pdf: &Pdf) -> HashMap<u32, Vec<Link>> {
     for link in pdf.links() {
         if let LinkTarget::Uri(uri) = link.target {
             let [a, b, c, d] = link.rect;
-            out.entry(link.page)
-                .or_default()
-                .push(([a.min(c), b.min(d), a.max(c), b.max(d)], Rc::from(uri)));
+            out.entry(link.page).or_default().push((
+                [a.min(c), b.min(d), a.max(c), b.max(d)],
+                UriTarget::new(&uri),
+            ));
         }
     }
     out

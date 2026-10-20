@@ -958,6 +958,59 @@ fn far_lines_at(lines: &[usize], uri: Option<(usize, &str)>, prefix: &str) -> Ve
     b.finish(catalog)
 }
 
+/// One tall page of `n` lines `gap` points apart with `k` one-letter words each, and `k` link
+/// stripes, each over one column of words and with a URI of its own: `http://x/<j>/` and
+/// `len` spaces. Lines `gap` apart that close form one paragraph.
+fn stripes(n: usize, gap: usize, k: usize, len: usize) -> Vec<u8> {
+    let h = (n + 2) * gap;
+    let mut c = b"BT /F1 12 Tf ".to_vec();
+    for i in 0..n {
+        for j in 0..k {
+            c.extend(
+                format!("1 0 0 1 {} {} Tm (a) Tj ", 72 + 60 * j, h - (i + 1) * gap).as_bytes(),
+            );
+        }
+    }
+    c.extend(b"ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut annots = String::new();
+    for j in 0..k {
+        let x = 72 + 60 * j;
+        let a = b.add(format!(
+            "<< /Type /Annot /Subtype /Link /Rect [{} -1000000000 {} 1000000000] \
+             /A << /S /URI /URI (http://x/{j}/{}) >> >>",
+            x as i64 - 5,
+            x + 30,
+            " ".repeat(len)
+        ));
+        annots.push_str(&format!("{a} 0 R "));
+    }
+    let packed = deflate(&c);
+    let cs = b.stream("/Filter /FlateDecode", &packed);
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {} {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Annots [{annots}] /Contents {cs} 0 R >>",
+        72 + 60 * k + 72
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// A loss that says the time ran out, if there is one.
+fn time_loss(out: &ReadOutcome) -> Option<&Loss> {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit && l.what.contains("time limit"))
+}
+
 /// The links in `blocks` and the bytes of their targets.
 fn links_in(blocks: &[Block]) -> (usize, usize) {
     let (mut n, mut bytes) = (0, 0);
@@ -1103,6 +1156,50 @@ fn a_target_that_never_fits_is_not_scanned_for_every_paragraph() {
     );
     let (n, _) = links_in(page(&out, 1));
     assert_eq!(n, 0, "{:?}", out.document.losses);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn alternating_long_targets_are_scanned_once_each() {
+    // 24,000 paragraphs, five link stripes with a 3 MB URI of spaces each: the length of each
+    // fits the room, its written size does not.
+    let start = Instant::now();
+    let out = read(&stripes(24_000, 40, 5, 3_000_000));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(time_loss(&out).is_none(), "{:?}", out.document.losses);
+    assert_eq!(links_in(page(&out, 1)).0, 0);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn stripes_in_one_paragraph_stop_near_the_time_limit_with_agreeing_losses() {
+    // 120,000 runs in one paragraph. A short time limit: the read ends near it, and a time
+    // stop that drops the block does not leave a loss that says its text is kept.
+    let start = Instant::now();
+    let budget = Budget::new(Limits {
+        max_time: Duration::from_secs(3),
+        ..hostile()
+    });
+    let out = read_with(&stripes(24_000, 14, 5, 3_000_000), &budget);
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    if time_loss(&out).is_some() {
+        assert!(
+            !out.document
+                .losses
+                .iter()
+                .any(|l| l.what.contains("kept without the link")),
+            "{:?}",
+            out.document.losses
+        );
+    }
     assert_rss_under_256_mib();
 }
 

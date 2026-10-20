@@ -38,10 +38,27 @@ pub(crate) struct Run {
     pub mcid: Option<u32>,
     /// The target of a URI link whose box holds the middle of the run, shared by all the
     /// runs of the link.
-    pub uri: Option<Rc<str>>,
+    pub uri: Option<Rc<UriTarget>>,
     /// The number of the run's line on its page, in reading order. The runs of one line are
     /// next to each other.
     pub line: u32,
+}
+
+/// The target of a URI link, with the most bytes its copy can be written as. The size is
+/// computed once, when the link is read, and shared with every run of the link.
+#[derive(Debug, PartialEq)]
+pub(crate) struct UriTarget {
+    pub uri: Box<str>,
+    pub written: u64,
+}
+
+impl UriTarget {
+    pub(crate) fn new(uri: &str) -> Rc<UriTarget> {
+        Rc::new(UriTarget {
+            uri: uri.into(),
+            written: rezzer_model::link_target_written_len(uri),
+        })
+    }
 }
 
 /// Share of the page height at the top and the bottom where running headers and footers sit.
@@ -363,8 +380,13 @@ pub(crate) struct LinkRoom {
     /// Links written without their target, and the first and last page with one.
     cut: Counter<u64>,
     pages: Counter<Option<(u32, u32)>>,
-    /// The written size of the last few targets met, so a shared target is scanned once.
-    sizes: RefCell<Vec<(Rc<str>, u64)>>,
+}
+
+/// The room counts at one point.
+struct LinkMark {
+    left: u64,
+    cut: u64,
+    pages: Option<(u32, u32)>,
 }
 
 /// What a copy of a link target costs besides its bytes.
@@ -377,40 +399,35 @@ impl LinkRoom {
             left: Counter::new(bytes),
             cut: Counter::new(0),
             pages: Counter::new(None),
-            sizes: RefCell::new(Vec::new()),
         }
-    }
-
-    /// The written size of `target`, scanned once for as long as it is among the last few.
-    fn written(&self, target: &Rc<str>) -> u64 {
-        let mut sizes = self.sizes.borrow_mut();
-        if let Some((_, size)) = sizes.iter().find(|(t, _)| Rc::ptr_eq(t, target)) {
-            return *size;
-        }
-        let size = rezzer_model::link_target_written_len(target);
-        if sizes.len() >= 4 {
-            sizes.remove(0);
-        }
-        sizes.push((target.clone(), size));
-        size
     }
 
     /// Takes room for one copy of `target` on `page`; `false` when it does not fit.
-    fn take(&self, target: &Rc<str>, page: u32) -> bool {
-        // Every character is written as at least one byte, so a target longer than the room
-        // is refused without a scan.
-        let floor = target.len() as u64 + LINK_COST;
-        if floor <= self.left.get() {
-            let cost = self.written(target) + LINK_COST;
-            if cost <= self.left.get() {
-                self.left.set(self.left.get() - cost);
-                return true;
-            }
+    fn take(&self, target: &UriTarget, page: u32) -> bool {
+        let cost = target.written + LINK_COST;
+        if cost <= self.left.get() {
+            self.left.set(self.left.get() - cost);
+            return true;
         }
         self.cut.set(self.cut.get() + 1);
         let (first, _) = self.pages.get().unwrap_or((page, page));
         self.pages.set(Some((first, page)));
         false
+    }
+
+    /// The counts now, to go back to if the block they were taken for is dropped.
+    fn mark(&self) -> LinkMark {
+        LinkMark {
+            left: self.left.get(),
+            cut: self.cut.get(),
+            pages: self.pages.get(),
+        }
+    }
+
+    fn restore(&self, mark: LinkMark) {
+        self.left.set(mark.left);
+        self.cut.set(mark.cut);
+        self.pages.set(mark.pages);
     }
 
     /// The bytes the copies could take at the start.
@@ -473,7 +490,7 @@ pub(crate) fn page_blocks(
         None => untagged(&flow, cx, &mut built),
     }
     for (_, table) in tables {
-        built.push(table, cx.budget);
+        built.push(table, cx);
     }
     for runs in footers {
         built.paragraph(runs.iter().collect(), Some("page-footer"), cx);
@@ -505,6 +522,9 @@ fn set_anchor(block: &mut Block, to: Anchor) {
     }
 }
 
+/// How many runs or pieces of one block go by between two looks at the clock.
+const CHECK_EVERY: usize = 1024;
+
 /// Fails once the time limit is over. A cancel is not looked at here: the walk answers it, and
 /// the pages it read are still laid out.
 fn time_over(budget: &Budget) -> Result<(), LimitHit> {
@@ -519,23 +539,31 @@ fn time_over(budget: &Budget) -> Result<(), LimitHit> {
 struct Built {
     blocks: Vec<Block>,
     stop: Option<LimitHit>,
+    /// The link room before the block now being built, to go back to if it is dropped.
+    mark: Option<LinkMark>,
 }
 
 impl Built {
     /// Adds a block, charged as one element. Past the limit the block is dropped and the page
     /// stops.
-    fn push(&mut self, block: Block, budget: &Budget) {
+    fn push(&mut self, block: Block, cx: &Context<'_>) {
+        let mark = self.mark.take();
         if self.stop.is_some() {
             return;
         }
-        if let Err(hit) = time_over(budget) {
-            self.stop = Some(hit);
-            return;
-        }
-        match budget.add_elements(1) {
+        match time_over(cx.budget).and_then(|()| cx.budget.add_elements(1)) {
             Ok(()) => self.blocks.push(block),
-            Err(hit) => self.stop = Some(hit),
+            Err(hit) => self.drop_block(hit, mark, cx),
         }
+    }
+
+    /// Stops the page at `hit`. The link counts of the dropped block go back, so no loss says
+    /// the text of a link is kept when the block is not.
+    fn drop_block(&mut self, hit: LimitHit, mark: Option<LinkMark>, cx: &Context<'_>) {
+        if let Some(mark) = mark {
+            cx.links.restore(mark);
+        }
+        self.stop = Some(hit);
     }
 
     /// The inlines of `runs`, or `None` once a limit stopped the page. Each stretch of runs
@@ -554,7 +582,17 @@ impl Built {
             self.stop = Some(hit);
             return None;
         }
-        Some(inlines(runs, cx.links))
+        if self.mark.is_none() {
+            self.mark = Some(cx.links.mark());
+        }
+        match inlines(runs, cx.links, cx.budget) {
+            Ok(built) => Some(built),
+            Err(hit) => {
+                let mark = self.mark.take();
+                self.drop_block(hit, mark, cx);
+                None
+            }
+        }
     }
 
     fn paragraph(&mut self, runs: Vec<&Run>, role: Option<&str>, cx: &Context<'_>) {
@@ -565,7 +603,7 @@ impl Built {
                     role: role.map(str::to_string),
                     anchor: None,
                 },
-                cx.budget,
+                cx,
             );
         }
     }
@@ -590,7 +628,7 @@ impl Built {
                     inlines,
                     anchor: None,
                 },
-                cx.budget,
+                cx,
             );
         }
     }
@@ -612,6 +650,8 @@ impl Built {
             && let Some(Block::List { items, .. }) = self.blocks.last_mut()
         {
             items.push(vec![para]);
+            // The item joins a list that is kept already.
+            self.mark = None;
             return;
         }
         self.push(
@@ -620,7 +660,7 @@ impl Built {
                 items: vec![vec![para]],
                 anchor: None,
             },
-            cx.budget,
+            cx,
         );
         *open = Some(list);
     }
@@ -629,17 +669,20 @@ impl Built {
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
 /// after a hyphen. Bold, italic and URI links are kept while `links` has room for their
 /// targets; past it a link's text stays without the link.
-fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
+fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inline>, LimitHit> {
     struct Piece {
         text: String,
         bold: bool,
         italic: bool,
-        uri: Option<Rc<str>>,
+        uri: Option<Rc<UriTarget>>,
         page: u32,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
-    for r in runs {
+    for (k, r) in runs.iter().enumerate() {
+        if k % CHECK_EVERY == 0 {
+            time_over(budget)?;
+        }
         let new_line = last.is_some_and(|l| l != (r.page, r.line));
         let mut text = if last.is_none() || new_line {
             r.text.trim_start().to_string()
@@ -674,8 +717,11 @@ fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
     let mut out = Vec::new();
     // The target of the link written last without its target: a link that goes on over a
     // change of style is one link cut, not two.
-    let mut refused: Option<Rc<str>> = None;
-    for p in pieces {
+    let mut refused: Option<Rc<UriTarget>> = None;
+    for (k, p) in pieces.into_iter().enumerate() {
+        if k % CHECK_EVERY == 0 {
+            time_over(budget)?;
+        }
         if p.text.is_empty() {
             continue;
         }
@@ -701,7 +747,7 @@ fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
                     inlines,
                     ..
                 }) = out.last_mut()
-                    && before.as_str() == &*target
+                    && before.as_str() == &*target.uri
                 {
                     if !lead.is_empty() {
                         inlines.push(Inline::plain(lead));
@@ -720,7 +766,7 @@ fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
                 }
                 refused = None;
                 out.push(Inline::Link {
-                    target: target.to_string(),
+                    target: target.uri.to_string(),
                     title: None,
                     internal: false,
                     wiki: false,
@@ -733,7 +779,7 @@ fn inlines(runs: &[&Run], links: &LinkRoom) -> Vec<Inline> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
@@ -1080,7 +1126,7 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
             if tables_done.insert(*table) {
                 open_list = None;
                 if let Some(t) = tagged_table(tree, *table, &cells, cx, out) {
-                    out.push(t, cx.budget);
+                    out.push(t, cx);
                 }
             }
             continue;
@@ -1268,7 +1314,7 @@ mod tests {
 
     #[test]
     fn one_link_over_a_change_of_style_is_one_link() {
-        let uri: Rc<str> = Rc::from("https://example.org/long");
+        let uri = UriTarget::new("https://example.org/long");
         let runs: Vec<Run> = (0..6)
             .map(|k| Run {
                 bold: k % 2 == 0,
@@ -1277,7 +1323,12 @@ mod tests {
             })
             .collect();
         let refs: Vec<&Run> = runs.iter().collect();
-        let built = inlines(&refs, &LinkRoom::new(u64::MAX));
+        let built = inlines(
+            &refs,
+            &LinkRoom::new(u64::MAX),
+            &Budget::new(rezzer_limits::Limits::default()),
+        )
+        .unwrap();
         assert_eq!(built.len(), 1, "{built:?}");
         match &built[0] {
             Inline::Link {
@@ -1292,8 +1343,8 @@ mod tests {
 
     #[test]
     fn links_past_their_room_keep_their_text() {
-        let a: Rc<str> = Rc::from("https://example.org/a");
-        let b: Rc<str> = Rc::from("https://example.org/a-longer-target");
+        let a = UriTarget::new("https://example.org/a");
+        let b = UriTarget::new("https://example.org/a-longer-target");
         let runs: Vec<Run> = [("one", &a), (" two", &b), (" three", &b), (" four", &a)]
             .into_iter()
             .enumerate()
@@ -1305,8 +1356,8 @@ mod tests {
             .collect();
         let refs: Vec<&Run> = runs.iter().collect();
         // Room for two copies of `a`, not for `a` and `b`.
-        let room = LinkRoom::new(2 * (a.len() as u64 + LINK_COST));
-        let built = inlines(&refs, &room);
+        let room = LinkRoom::new(2 * (a.written + LINK_COST));
+        let built = inlines(&refs, &room, &Budget::new(rezzer_limits::Limits::default())).unwrap();
         assert!(
             matches!(&built[0], Inline::Link { target, .. } if target == "https://example.org/a"),
             "{built:?}"
@@ -1329,10 +1380,44 @@ mod tests {
     fn link_targets_are_charged_by_what_is_written() {
         // Three bytes for a space in Markdown, six for a control character in JSON.
         let room = LinkRoom::new(1_000);
-        assert!(room.take(&Rc::from("a b"), 1));
+        assert!(room.take(&UriTarget::new("a b"), 1));
         assert_eq!(room.left.get(), 1_000 - (1 + 3 + 1 + LINK_COST));
-        assert!(room.take(&Rc::from("\u{1}"), 1));
+        assert!(room.take(&UriTarget::new("\u{1}"), 1));
         assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
+    }
+
+    #[test]
+    fn a_dropped_block_gives_back_its_link_counts() {
+        let a = UriTarget::new("https://example.org/a");
+        let runs = vec![Run {
+            uri: Some(a),
+            ..run("link", 0, 700.0, 10.0)
+        }];
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        // No room for the target, and no element for the block: the block is dropped, and
+        // the cut link with it.
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_elements: 0,
+            ..rezzer_limits::Limits::default()
+        });
+        let room = LinkRoom::new(0);
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &room,
+        };
+        let mut built = Built::default();
+        built.paragraph(runs.iter().collect(), None, &cx);
+        assert!(built.blocks.is_empty());
+        assert!(built.stop.is_some());
+        assert_eq!(room.cut(), None);
     }
 
     #[test]
