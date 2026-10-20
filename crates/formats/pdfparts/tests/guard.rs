@@ -285,7 +285,7 @@ fn duplicate_kid_numbers_pages_like_lopdf() {
         vec![p1.into(), p2.into(), p1.into(), b.into()]
     });
     let pdf = open(&bytes).unwrap();
-    assert_eq!(pdf.pages().len(), 4);
+    assert_eq!(pdf.pages(&never).len(), 4);
     assert_eq!(pdf.refused_pages(), &[4]);
     assert!(pdf.unsafe_page_tree());
     let doc = Document::load_mem(pdf.canonical()).unwrap();
@@ -303,7 +303,7 @@ fn untyped_page_is_skipped_like_lopdf() {
         vec![untyped.into(), p2.into()]
     });
     let pdf = open(&bytes).unwrap();
-    assert_eq!(pdf.pages().len(), 1);
+    assert_eq!(pdf.pages(&never).len(), 1);
     assert!(pdf.unsafe_page_tree());
 }
 

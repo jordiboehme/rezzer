@@ -25,10 +25,13 @@ impl Crypt {
     /// dictionary is not encrypted (7.6.1) and stays as it is.
     pub fn decrypt(&self, id: ObjectId, obj: &mut Object) -> Result<(), DecryptionError> {
         let mut kept = Vec::new();
-        take_signatures(obj, false, &mut kept);
+        // A file that holds the placeholder itself gets no special handling.
+        if !holds_placeholder(obj) {
+            take_signatures(obj, false, &mut kept);
+        }
         let result = decrypt_object(&self.state, id, obj);
         let mut kept = kept.into_iter();
-        put_signatures(obj, false, &mut kept);
+        put_signatures(obj, &mut kept);
         result
     }
 }
@@ -42,54 +45,56 @@ fn is_signature_field(d: &Dictionary) -> bool {
     matches!(d.get(b"FT"), Ok(Object::Name(n)) if n == b"Sig")
 }
 
-/// Moves the `/Contents` of every signature dictionary inside `obj` out, in walk order.
-fn take_signatures(obj: &mut Object, signature: bool, kept: &mut Vec<Object>) {
-    match obj {
-        Object::Dictionary(d) => take_in(d, signature, kept),
-        Object::Stream(s) => take_in(&mut s.dict, signature, kept),
-        Object::Array(a) => a.iter_mut().for_each(|o| take_signatures(o, false, kept)),
-        _ => {}
-    }
-}
+/// Stands in for a signature's `/Contents` while the object is decrypted. lopdf never changes
+/// a name, and the walk that puts the values back looks for exactly this one.
+const PLACEHOLDER: &[u8] = b"\0pdfparts signature contents";
 
-fn take_in(d: &mut Dictionary, signature: bool, kept: &mut Vec<Object>) {
+/// Moves the `/Contents` string of every signature dictionary inside `obj` out, in walk order,
+/// and leaves [`PLACEHOLDER`] in its place. Other shapes of `/Contents` are left alone.
+fn take_signatures(obj: &mut Object, signature: bool, kept: &mut Vec<Object>) {
+    let d = match obj {
+        Object::Dictionary(d) => d,
+        Object::Stream(s) => &mut s.dict,
+        Object::Array(a) => {
+            a.iter_mut().for_each(|o| take_signatures(o, false, kept));
+            return;
+        }
+        _ => return,
+    };
     if (signature || is_signature(d))
         && let Ok(c) = d.get_mut(b"Contents")
+        && matches!(c, Object::String(..))
     {
-        kept.push(std::mem::replace(c, Object::Null));
+        kept.push(std::mem::replace(c, Object::Name(PLACEHOLDER.to_vec())));
     }
     let field = is_signature_field(d);
     for (k, v) in d.iter_mut() {
-        if k == b"Contents" && !matches!(v, Object::Dictionary(_) | Object::Array(_)) {
-            continue;
-        }
         take_signatures(v, field && k == b"V", kept);
     }
 }
 
-/// Puts the values [`take_signatures`] moved out back, in the same walk order.
-fn put_signatures(obj: &mut Object, signature: bool, kept: &mut impl Iterator<Item = Object>) {
+fn holds_placeholder(obj: &Object) -> bool {
     match obj {
-        Object::Dictionary(d) => put_in(d, signature, kept),
-        Object::Stream(s) => put_in(&mut s.dict, signature, kept),
-        Object::Array(a) => a.iter_mut().for_each(|o| put_signatures(o, false, kept)),
-        _ => {}
+        Object::Dictionary(d) => d.iter().any(|(_, v)| holds_placeholder(v)),
+        Object::Stream(s) => s.dict.iter().any(|(_, v)| holds_placeholder(v)),
+        Object::Array(a) => a.iter().any(holds_placeholder),
+        Object::Name(n) => n.as_slice() == PLACEHOLDER,
+        _ => false,
     }
 }
 
-fn put_in(d: &mut Dictionary, signature: bool, kept: &mut impl Iterator<Item = Object>) {
-    if (signature || is_signature(d))
-        && let Ok(c) = d.get_mut(b"Contents")
-        && let Some(v) = kept.next()
-    {
-        *c = v;
-    }
-    let field = is_signature_field(d);
-    for (k, v) in d.iter_mut() {
-        if k == b"Contents" && !matches!(v, Object::Dictionary(_) | Object::Array(_)) {
-            continue;
+/// Puts the values [`take_signatures`] moved out back where it left [`PLACEHOLDER`].
+fn put_signatures(obj: &mut Object, kept: &mut impl Iterator<Item = Object>) {
+    match obj {
+        Object::Dictionary(d) => d.iter_mut().for_each(|(_, v)| put_signatures(v, kept)),
+        Object::Stream(s) => s.dict.iter_mut().for_each(|(_, v)| put_signatures(v, kept)),
+        Object::Array(a) => a.iter_mut().for_each(|o| put_signatures(o, kept)),
+        Object::Name(n) if n.as_slice() == PLACEHOLDER => {
+            if let Some(v) = kept.next() {
+                *obj = v;
+            }
         }
-        put_signatures(v, field && k == b"V", kept);
+        _ => {}
     }
 }
 
@@ -217,5 +222,67 @@ fn method(state: &EncryptionState) -> String {
             }
         }
         v => format!("unknown (version {v})"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lopdf::{StringFormat, dictionary};
+
+    fn text(s: &str) -> Object {
+        Object::String(s.as_bytes().to_vec(), StringFormat::Literal)
+    }
+
+    /// Changes every string, as decryption would.
+    fn scramble(obj: &mut Object) {
+        match obj {
+            Object::String(s, _) => s.iter_mut().for_each(|b| *b ^= 0x55),
+            Object::Dictionary(d) => d.iter_mut().for_each(|(_, v)| scramble(v)),
+            Object::Array(a) => a.iter_mut().for_each(scramble),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn signature_contents_of_any_shape_stay_aligned() {
+        // A signature whose /Contents is a dictionary that holds another signature, then an
+        // array, then a plain signature.
+        let inner = dictionary! { "Type" => "Sig", "Contents" => text("inner") };
+        let mut obj = Object::Array(vec![
+            Object::Dictionary(dictionary! { "Type" => "Sig", "Contents" => inner }),
+            Object::Dictionary(
+                dictionary! { "ByteRange" => vec![0.into()], "Contents" => vec![text("a")] },
+            ),
+            Object::Dictionary(
+                dictionary! { "Type" => "Sig", "Contents" => text("last"), "Name" => text("n") },
+            ),
+        ]);
+        let mut kept = Vec::new();
+        take_signatures(&mut obj, false, &mut kept);
+        assert_eq!(kept.len(), 2);
+        scramble(&mut obj);
+        put_signatures(&mut obj, &mut kept.into_iter());
+        let a = obj.as_array().unwrap();
+        let first = a[0]
+            .as_dict()
+            .unwrap()
+            .get(b"Contents")
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        assert_eq!(first.get(b"Contents").unwrap(), &text("inner"));
+        let last = a[2].as_dict().unwrap();
+        assert_eq!(last.get(b"Contents").unwrap(), &text("last"));
+        assert_ne!(last.get(b"Name").unwrap(), &text("n"));
+        // An array /Contents is not a signature value and is decrypted like anything else.
+        let second = a[1]
+            .as_dict()
+            .unwrap()
+            .get(b"Contents")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_ne!(second[0], text("a"));
     }
 }

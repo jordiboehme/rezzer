@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use super::crypt::Crypt;
 use super::lexer::Lexer;
-use super::object::{finish, head_at, length_ref};
+use super::object::{finish, head_at, header_at, length_ref};
 use super::predict::{last_parms, unpredict};
 use super::xref::{Entry, rebuild, unpack_stream};
 use super::{Budget, Fail};
@@ -39,6 +39,8 @@ pub(crate) struct Store<'a> {
     unpacked: HashSet<u32>,
     busy: HashSet<u32>,
     lengths: HashMap<ObjectId, Option<i64>>,
+    /// The header found at each position read so far.
+    headers: HashMap<usize, Option<ObjectId>>,
     pub issues: Vec<Issue>,
 }
 
@@ -61,6 +63,7 @@ impl<'a> Store<'a> {
             unpacked: HashSet::new(),
             busy: HashSet::new(),
             lengths: HashMap::new(),
+            headers: HashMap::new(),
             issues: Vec::new(),
         };
         if scanned.is_some() {
@@ -113,6 +116,16 @@ impl<'a> Store<'a> {
         }
     }
 
+    /// The header at `pos`, read once per position.
+    fn header(&mut self, pos: usize) -> Result<Option<ObjectId>, OpenError> {
+        if let Some(h) = self.headers.get(&pos) {
+            return Ok(*h);
+        }
+        let h = header_at(self.bytes, pos, &mut self.budget).map_err(Fail::into_open)?;
+        self.headers.insert(pos, h);
+        Ok(h)
+    }
+
     /// Where a scan of the file finds object `id`. The table pointed at something else, so
     /// the scan is made now if it was not made yet.
     fn scanned_pos(&mut self, id: ObjectId) -> Result<Option<usize>, OpenError> {
@@ -129,6 +142,9 @@ impl<'a> Store<'a> {
 
     /// The integer value of the plain object `r` at `pos`, if that is what is there.
     fn int_at(&mut self, r: ObjectId, pos: usize) -> Result<Option<Option<i64>>, OpenError> {
+        if self.header(pos)? != Some(r) {
+            return Ok(None);
+        }
         match head_at(self.bytes, pos, &mut self.budget) {
             Ok(head) if head.id == r && head.stream.is_none() => Ok(Some(head.value.as_i64().ok())),
             Ok(_) | Err(Fail::Bad(_)) => Ok(None),
@@ -151,12 +167,20 @@ impl<'a> Store<'a> {
             if at >= self.bytes.len() {
                 continue;
             }
+            // The header is read first, so an entry that points at another object costs
+            // nothing more than its header.
+            if self.header(at)? != Some(id) {
+                continue;
+            }
             match head_at(self.bytes, at, &mut self.budget) {
-                Ok(head) if head.id == id => {
+                Ok(head) => {
                     found = Some(head);
                     break;
                 }
-                Ok(_) | Err(Fail::Bad(_)) => {}
+                Err(Fail::Bad(why)) => {
+                    self.damaged(id, why);
+                    return Ok(None);
+                }
                 Err(Fail::Stop(e)) => return Err(e),
             }
         }

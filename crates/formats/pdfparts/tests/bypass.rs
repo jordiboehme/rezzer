@@ -359,7 +359,7 @@ fn resources_clone_per_page() {
     eprintln!("file {} KB", bytes.len() / 1024);
     let start = Instant::now();
     let pdf = open(&bytes).unwrap();
-    let pages = pdf.pages();
+    let pages = pdf.pages(&never);
     eprintln!("took {:?}", start.elapsed());
     assert_eq!(pages.len(), 500);
     assert!(pages[0].has_fonts);
@@ -403,7 +403,7 @@ fn label_prefix_decode_time() {
     );
     let pdf = open(&out).unwrap();
     let start = Instant::now();
-    let labels = pdf.pages();
+    let labels = pdf.pages(&never);
     let took = start.elapsed();
     eprintln!("pages() took {took:?}");
     assert_eq!(labels.len(), pages);

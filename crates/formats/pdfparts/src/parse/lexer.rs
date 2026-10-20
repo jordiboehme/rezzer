@@ -40,11 +40,13 @@ pub(crate) const NESTING_MAX: usize = 64;
 pub(crate) struct Lexer<'a> {
     pub b: &'a [u8],
     pub i: usize,
+    /// Bytes of white space and comments skipped so far.
+    pub skipped: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(b: &'a [u8], i: usize) -> Lexer<'a> {
-        Lexer { b, i }
+        Lexer { b, i, skipped: 0 }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -53,6 +55,12 @@ impl<'a> Lexer<'a> {
 
     /// Skips white space and comments.
     pub fn skip(&mut self) {
+        let from = self.i;
+        self.skip_inner();
+        self.skipped += self.i - from;
+    }
+
+    fn skip_inner(&mut self) {
         while let Some(c) = self.peek() {
             if is_space(c) {
                 self.i += 1;

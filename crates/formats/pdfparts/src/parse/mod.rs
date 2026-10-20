@@ -337,8 +337,14 @@ fn scan_trailer(
         .map(|(&n, &(pos, g))| (pos, n, g))
         .collect();
     by_pos.sort_unstable_by(|a, b| b.cmp(a));
-    for (pos, n, g) in by_pos {
-        let head = match object::head_at(bytes, pos, budget) {
+    for (k, (pos, n, g)) in by_pos.into_iter().enumerate() {
+        if k % 1024 == 0 {
+            budget.poll().map_err(Fail::into_open)?;
+        }
+        // A look ahead: the object is dropped right away and read again (and charged) only
+        // if the document uses it. Its own scratch budget still bounds it.
+        let mut look = Budget::new(budget.limits, budget.stop, bytes.len());
+        let head = match object::head_at(bytes, pos, &mut look) {
             Ok(h) => h,
             Err(Fail::Bad(_)) => continue,
             Err(Fail::Stop(e)) => return Err(e),

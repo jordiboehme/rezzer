@@ -25,7 +25,7 @@ fn corpus(name: &str) -> Pdf {
 #[test]
 fn page_labels_roman_and_arabic() {
     let pdf = corpus("qpdf-page-labels-and-outlines.pdf");
-    let pages = pdf.pages();
+    let pages = pdf.pages(&never);
     assert_eq!(pages.len(), 30);
     let labels: Vec<Option<&str>> = pages.iter().take(14).map(|p| p.label.as_deref()).collect();
     let expected = [
@@ -45,7 +45,7 @@ fn page_labels_roman_and_arabic() {
 #[test]
 fn pages_without_labels_have_none() {
     let pdf = corpus("pypdf-outline.pdf");
-    assert!(pdf.pages().iter().all(|p| p.label.is_none()));
+    assert!(pdf.pages(&never).iter().all(|p| p.label.is_none()));
 }
 
 /// A document with `n` pages and the given /PageLabels number tree.
@@ -90,7 +90,7 @@ fn page_label_styles() {
             ],
         }),
     );
-    let labels: Vec<Option<String>> = pdf.pages().into_iter().map(|p| p.label).collect();
+    let labels: Vec<Option<String>> = pdf.pages(&never).into_iter().map(|p| p.label).collect();
     assert_eq!(
         labels,
         vec![
@@ -279,7 +279,7 @@ fn link_actions_are_listed() {
 #[test]
 fn page_images_are_listed() {
     let pdf = corpus("scan-truman-letter-nara.pdf");
-    let pages = pdf.pages();
+    let pages = pdf.pages(&never);
     assert!(pages.iter().any(|p| !p.images.is_empty()), "{pages:?}");
     let image = &pages.iter().find(|p| !p.images.is_empty()).unwrap().images[0];
     assert!(image.width > 100 && image.height > 100, "{image:?}");
@@ -295,7 +295,7 @@ fn long_label_prefix_is_cut() {
             "Nums" => vec![0.into(), Object::Dictionary(dictionary! { "S" => "D", "P" => Object::string_literal(prefix) })],
         }),
     );
-    let pages = pdf.pages();
+    let pages = pdf.pages(&never);
     let label = pages[2].label.as_deref().unwrap();
     assert_eq!(label, format!("{}3", "p".repeat(256)));
     let limits: Vec<_> = pdf
@@ -326,7 +326,7 @@ fn page_issues_are_grouped() {
     let mut out = Vec::new();
     doc.save_to(&mut out).unwrap();
     let pdf = open_bytes(&out);
-    assert_eq!(pdf.pages().len(), 50);
+    assert_eq!(pdf.pages(&never).len(), 50);
     let boxes: Vec<_> = pdf
         .issues()
         .into_iter()

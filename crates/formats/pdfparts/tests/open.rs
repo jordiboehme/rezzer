@@ -101,7 +101,7 @@ fn opens_corpus_files_without_panic() {
         let bytes = corpus(name);
         let password = (name == "qpdf-user-password.pdf").then_some("view");
         let pdf = open(&bytes, password).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let pages = pdf.pages();
+        let pages = pdf.pages(&never);
         assert!(!pages.is_empty(), "{name}: no pages");
         assert!(
             pdf.refused_pages().is_empty(),
@@ -131,7 +131,7 @@ fn empty_user_password_opens() {
         let enc = pdf.encryption().expect("encrypted");
         assert_eq!(enc.method, method, "{name}");
         assert!(enc.empty_user_password, "{name}");
-        assert_eq!(pdf.pages().len(), 30, "{name}");
+        assert_eq!(pdf.pages(&never).len(), 30, "{name}");
         assert_eq!(pdf.outline().len(), 11, "{name}");
 
         // The canonical copy is a plain PDF the other parsers can read.
@@ -140,7 +140,7 @@ fn empty_user_password_opens() {
         assert!(reloaded.trailer.get(b"Encrypt").is_err(), "{name}");
         let again = open(plain, None).unwrap();
         assert_eq!(again.encryption(), None, "{name}");
-        assert_eq!(again.pages().len(), 30, "{name}");
+        assert_eq!(again.pages(&never).len(), 30, "{name}");
         assert_eq!(again.outline().len(), 11, "{name}");
     }
 }
@@ -174,7 +174,7 @@ fn user_password_opens() {
     let enc = pdf.encryption().unwrap();
     assert_eq!(enc.method, "AES-256");
     assert!(!enc.empty_user_password);
-    assert!(!pdf.pages().is_empty());
+    assert!(!pdf.pages(&never).is_empty());
     let debug = format!("{pdf:?}");
     assert!(!debug.contains("view"), "{debug}");
     assert!(Document::load_mem(pdf.canonical()).is_ok());
@@ -199,7 +199,7 @@ fn page_tree_cycle_is_damaged() {
     let pdf = open(&bytes, None).unwrap();
     // Page numbers follow lopdf, which yields the page again while it walks the cycle, up to
     // its own bound. The tree is marked unsafe for other parsers.
-    assert!(!pdf.pages().is_empty());
+    assert!(!pdf.pages(&never).is_empty());
     assert!(pdf.unsafe_page_tree());
     // lopdf numbers the pages of the canonical copy the same way.
     let doc = Document::load_mem(pdf.canonical()).unwrap();
@@ -222,7 +222,7 @@ fn huge_count_is_bounded() {
     });
     let start = std::time::Instant::now();
     let pdf = open(&bytes, None).unwrap();
-    assert_eq!(pdf.pages().len(), 1);
+    assert_eq!(pdf.pages(&never).len(), 1);
     assert!(start.elapsed().as_secs() < 5);
 }
 
@@ -250,7 +250,7 @@ fn deep_page_tree_is_limited() {
     let pdf = Pdf::open(&bytes, None, &limits, &never).unwrap();
     // lopdf's own depth bound is 256, so it still finds the page; the bounded check does not
     // and marks the tree unsafe.
-    assert_eq!(pdf.pages().len(), 1);
+    assert_eq!(pdf.pages(&never).len(), 1);
     assert!(pdf.unsafe_page_tree());
     assert!(
         pdf.issues().iter().any(|i| i.kind == IssueKind::Limit),

@@ -5,6 +5,7 @@
 //! Pages, page labels, the outline, named destinations and links.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
@@ -29,8 +30,9 @@ pub struct PageInfo {
     pub rotation: u16,
     /// The page or one of its forms uses a font.
     pub has_fonts: bool,
-    /// Images the page draws through its resources.
-    pub images: Vec<ImageInfo>,
+    /// Images the page draws through its resources. Pages that share their resources share
+    /// this list.
+    pub images: Arc<[ImageInfo]>,
 }
 
 /// An image XObject.
@@ -177,15 +179,23 @@ struct OutlineWalk<'a> {
 
 impl Pdf {
     /// All pages in order, with labels, sizes, rotation, fonts and images.
-    pub fn pages(&self) -> Vec<PageInfo> {
+    pub fn pages(&self, stop: &dyn Fn() -> bool) -> Vec<PageInfo> {
         let mut issues = Vec::new();
         let labels = self.labels(&mut issues);
         let mut out = Vec::with_capacity(self.pages.len());
         let mut no_box = Vec::new();
         let mut odd_rotation = Vec::new();
-        let mut memo: HashMap<ObjectId, (bool, Vec<ImageInfo>)> = HashMap::new();
+        let mut memo: HashMap<ObjectId, (bool, Arc<[ImageInfo]>)> = HashMap::new();
         for (i, node) in self.pages.iter().enumerate() {
             let number = i as u32 + 1;
+            if stop() {
+                issues.push(Issue::new(
+                    "document",
+                    IssueKind::Limit,
+                    format!("stopped by the caller; pages from {number} on are not listed"),
+                ));
+                break;
+            }
             let media = node.media_box.unwrap_or_else(|| {
                 no_box.push(number);
                 [0.0, 0.0, 612.0, 792.0]
@@ -209,10 +219,21 @@ impl Pdf {
                             let mut seen = HashSet::new();
                             self.scan_resources(res, 1, &mut seen, &mut has_fonts, &mut images);
                         }
-                        (has_fonts, images)
+                        if images.len() > self.limits.max_items {
+                            images.truncate(self.limits.max_items);
+                            issues.push(Issue::new(
+                                &format!("page {number}"),
+                                IssueKind::Limit,
+                                format!(
+                                    "the page resources hold more than {} images; the rest are not listed",
+                                    self.limits.max_items
+                                ),
+                            ));
+                        }
+                        (has_fonts, Arc::from(images))
                     })
                     .clone(),
-                None => (false, Vec::new()),
+                None => (false, Arc::from(Vec::new())),
             };
             out.push(PageInfo {
                 number,
@@ -286,6 +307,8 @@ impl Pdf {
                 continue;
             };
             match get_name(doc, xd, b"Subtype") {
+                // One more than the limit is kept, so the caller can tell it was hit.
+                Some(b"Image") if images.len() > self.limits.max_items => return,
                 Some(b"Image") => images.push(ImageInfo {
                     width: get_int(doc, xd, b"Width")
                         .unwrap_or(0)

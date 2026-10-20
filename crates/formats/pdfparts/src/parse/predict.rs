@@ -52,7 +52,8 @@ fn tiff(mut data: Vec<u8>, row: usize, bpp: usize) -> Vec<u8> {
 
 fn png(data: &[u8], row: usize, bpp: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
-    let mut prev = vec![0u8; row];
+    // A row is never longer than the data, whatever /Columns says.
+    let mut prev = vec![0u8; row.min(data.len())];
     for chunk in data.chunks(row + 1) {
         let kind = chunk[0];
         let cur = &chunk[1..];
@@ -103,6 +104,12 @@ mod tests {
         // Row 1 with filter None, row 2 with filter Up.
         let data = vec![0, 1, 2, 3, 2, 1, 1, 1];
         assert_eq!(unpredict(data, Some(&parms)), vec![1, 2, 3, 2, 3, 4]);
+    }
+
+    #[test]
+    fn huge_columns_cost_no_more_than_the_data() {
+        let parms = dictionary! { "Predictor" => 12, "Columns" => 1 << 24, "Colors" => 32, "BitsPerComponent" => 16 };
+        assert_eq!(unpredict(vec![2, 7, 7], Some(&parms)), vec![7, 7]);
     }
 
     #[test]

@@ -17,19 +17,37 @@ pub(crate) struct Head {
     pub stream: Option<usize>,
 }
 
+/// Reads only the `N G obj` header at `pos`. White space and comments it skips count as work.
+pub(crate) fn header_at(
+    bytes: &[u8],
+    pos: usize,
+    budget: &mut Budget,
+) -> Result<Option<ObjectId>, Fail> {
+    let mut l = Lexer::new(bytes, pos);
+    let id = l.header();
+    budget.work(l.skipped)?;
+    Ok(id)
+}
+
 /// Reads the header and the value of the object at `pos`, and finds out whether stream data
-/// follows.
+/// follows. White space and comments it skips count as work.
 pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<Head, Fail> {
     let mut l = Lexer::new(bytes, pos);
     let Some(id) = l.header() else {
+        budget.work(l.skipped)?;
         return Err(Fail::Bad("there is no object header at its offset"));
     };
-    let value = l.value(budget, 0)?;
+    let value = l.value(budget, 0);
     let stream = match value {
-        Object::Dictionary(_) => l.stream_start(),
+        Ok(Object::Dictionary(_)) => l.stream_start(),
         _ => None,
     };
-    Ok(Head { id, value, stream })
+    budget.work(l.skipped)?;
+    Ok(Head {
+        id,
+        value: value?,
+        stream,
+    })
 }
 
 /// The `/Length` of a stream that is a reference.

@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lopdf::{Dictionary, Object};
+use lopdf::{Dictionary, Object, ObjectId};
 
 use super::lexer::{Lexer, is_delimiter, is_space, rfind};
 use super::object::object_at;
@@ -34,6 +34,11 @@ pub(crate) struct Chain {
     /// `/Root`, `/Info`, `/Encrypt` and `/ID` from the newest trailer that has them.
     pub trailer: Dictionary,
     pub issues: Vec<Issue>,
+    /// Where each section read so far starts, after white space and comments, and the
+    /// cross-reference streams read so far. An offset that leads to one of them again is
+    /// skipped, so no section is read or unpacked twice.
+    starts: HashSet<usize>,
+    streams: HashSet<ObjectId>,
 }
 
 impl Chain {
@@ -131,7 +136,15 @@ fn section(
             continue;
         }
         let mut l = Lexer::new(bytes, pos);
+        l.skip();
+        budget.work(l.i - pos).map_err(Fail::into_open)?;
+        let start = l.i;
+        if chain.starts.contains(&start) {
+            // Read already through another offset: the chain ends here.
+            return Ok(Some(None));
+        }
         if l.keyword(b"xref") {
+            chain.starts.insert(start);
             return classic(bytes, base, l, budget, chain);
         }
         if let Some(prev) = stream_section(bytes, base, pos, budget, chain)? {
@@ -230,7 +243,21 @@ fn stream_section(
     budget: &mut Budget,
     chain: &mut Chain,
 ) -> Result<Option<Option<u64>>, OpenError> {
-    let ((n, g), obj) = match object_at(bytes, pos, budget, &mut |_| None) {
+    let mut l = Lexer::new(bytes, pos);
+    l.skip();
+    budget.work(l.i - pos).map_err(Fail::into_open)?;
+    let start = l.i;
+    if chain.starts.contains(&start) {
+        return Ok(Some(None));
+    }
+    let Some(id) = l.header() else {
+        return Ok(None);
+    };
+    if !chain.streams.insert(id) {
+        return Ok(Some(None));
+    }
+    chain.starts.insert(start);
+    let (_, obj) = match object_at(bytes, start, budget, &mut |_| None) {
         Ok(found) => found,
         Err(f) => return fail(f),
     };
@@ -313,7 +340,6 @@ fn stream_section(
             }
         }
     }
-    let _ = (n, g);
     chain.merge(dict);
     Ok(Some(int(dict, b"Prev").and_then(|v| u64::try_from(v).ok())))
 }
@@ -332,7 +358,10 @@ pub(crate) fn unpack_stream(
         .saturating_sub(budget.unpacked);
     match unpack(&stream.content, &filters, &tight, left, budget.stop) {
         (Measure::Fits(n), data) => {
+            // The unpacked bytes count against the object budget for good, even after the
+            // buffer is dropped: freed large buffers may stay resident.
             budget.unpacked += n;
+            budget.charge(n).map_err(Fail::into_open)?;
             Ok(data)
         }
         (Measure::Over(cap), _) => Err(OpenError::Limit(format!(

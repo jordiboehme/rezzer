@@ -29,6 +29,9 @@ pub(crate) const BACKSTOP: u64 = 64 << 20;
 /// How many pages are checked between two calls of the stop callback.
 const PAGES_PER_POLL: usize = 256;
 
+/// How many objects are walked between two calls of the stop callback.
+const OBJECTS_PER_POLL: usize = 4096;
+
 fn stopped() -> OpenError {
     OpenError::Limit("stopped by the caller".into())
 }
@@ -149,30 +152,16 @@ fn refuse(
     stop: &dyn Fn() -> bool,
     issues: &mut Vec<Issue>,
 ) -> Result<(Vec<u32>, HashSet<ObjectId>), OpenError> {
-    let everything = |issues: &mut Vec<Issue>| {
-        issues.push(Issue::new(
-            "document",
-            IssueKind::Limit,
-            format!(
-                "the file has more than {} references to check; every page is refused",
-                limits.max_items
-            ),
-        ));
-        (
-            (1..=pages.len() as u32).collect::<Vec<u32>>(),
-            bad.keys().copied().collect::<HashSet<ObjectId>>(),
-        )
-    };
+    // Every reference is a value the parser charged against the object budget, so the
+    // reverse map is bounded by that budget and needs no count of its own.
     let mut back: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    let mut edges = 0usize;
     let mut refs = Vec::new();
-    for (&src, obj) in &doc.objects {
+    for (k, (&src, obj)) in doc.objects.iter().enumerate() {
+        if k % OBJECTS_PER_POLL == 0 && stop() {
+            return Err(stopped());
+        }
         refs.clear();
         refs_in(obj, 0, limits, &mut refs);
-        edges += refs.len();
-        if edges > limits.max_items {
-            return Ok(everything(issues));
-        }
         for r in &refs {
             back.entry(*r).or_default().push(src);
         }
@@ -211,10 +200,6 @@ fn refuse(
                     refs.clear();
                     if let Some(res) = pagetree::resources(doc, node) {
                         refs_in(res, 0, limits, &mut refs);
-                    }
-                    edges += refs.len();
-                    if edges > limits.max_items {
-                        return Ok(everything(issues));
                     }
                     *e.insert(refs.iter().find_map(|r| origin.get(r).copied()))
                 }
