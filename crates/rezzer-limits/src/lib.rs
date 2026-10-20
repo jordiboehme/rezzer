@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Size, depth and time limits that every reader enforces, plus panic containment.
+//! Size, depth, element and time limits that every reader enforces, plus panic containment.
 
 use std::fmt;
 use std::panic::{AssertUnwindSafe, UnwindSafe, catch_unwind};
@@ -23,11 +23,17 @@ pub struct Limits {
     pub max_ratio: u32,
     pub max_depth: u32,
     /// In config files this is a whole number of seconds; sub-second parts are dropped on
-    /// serialization.
+    /// serialization. It bounds reading inside the readers and the enrich checks, not
+    /// opening, hashing, rendering or serialization.
     #[serde(with = "duration_secs")]
     pub max_time: Duration,
+    /// Memory cap, enforced where memory is countable. Readers bound the memory of the
+    /// document they build through [`Limits::max_elements`].
     pub max_memory_bytes: u64,
     pub page_tokens: usize,
+    /// Model elements (blocks, inlines, table cells) one read may build. This is how readers
+    /// bound the memory of the document model; on a hit the reader stops with a `Limit` loss.
+    pub max_elements: u64,
 }
 
 impl Default for Limits {
@@ -40,6 +46,7 @@ impl Default for Limits {
             max_time: Duration::from_secs(120),
             max_memory_bytes: 2 * GIB,
             page_tokens: 20_000,
+            max_elements: 2_000_000,
         }
     }
 }
@@ -105,6 +112,7 @@ pub struct Budget {
     start: Instant,
     unpacked: AtomicU64,
     depth: AtomicU32,
+    elements: AtomicU64,
     cancelled: CancelToken,
 }
 
@@ -121,6 +129,7 @@ impl Budget {
             start: Instant::now(),
             unpacked: AtomicU64::new(0),
             depth: AtomicU32::new(0),
+            elements: AtomicU64::new(0),
             cancelled: cancel,
         }
     }
@@ -166,6 +175,32 @@ impl Budget {
             });
         }
         Ok(())
+    }
+
+    /// Adds `n` model elements (blocks, inlines, cells) to the running count and checks
+    /// [`Limits::max_elements`]. Once over the limit every later call fails too.
+    pub fn add_elements(&self, n: u64) -> Result<(), LimitHit> {
+        let previous = self
+            .elements
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |t| {
+                Some(t.saturating_add(n))
+            })
+            .unwrap_or(u64::MAX);
+        let total = previous.saturating_add(n);
+        if total > self.limits.max_elements {
+            return Err(LimitHit {
+                limit: "elements",
+                value: total,
+                max: self.limits.max_elements,
+                unit: "count",
+            });
+        }
+        Ok(())
+    }
+
+    /// The model elements counted so far.
+    pub fn elements(&self) -> u64 {
+        self.elements.load(Ordering::Relaxed)
     }
 
     /// Enters one nesting level. The level is left when the guard is dropped.

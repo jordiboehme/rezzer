@@ -18,6 +18,7 @@ fn defaults_match_spec() {
     assert_eq!(l.max_time, Duration::from_secs(120));
     assert_eq!(l.max_memory_bytes, 2 * GIB);
     assert_eq!(l.page_tokens, 20_000);
+    assert_eq!(l.max_elements, 2_000_000);
 }
 
 #[test]
@@ -153,4 +154,36 @@ fn a_shared_cancel_token_stops_the_budget() {
     let other = CancelToken::default();
     Budget::with_cancel(Limits::default(), other.clone()).cancel();
     assert!(other.is_cancelled());
+}
+
+#[test]
+fn element_budget_hits_after_max() {
+    let b = Budget::new(Limits {
+        max_elements: 10,
+        ..Limits::default()
+    });
+    assert!(b.add_elements(4).is_ok());
+    assert!(b.add_elements(6).is_ok());
+    let hit = b.add_elements(1).unwrap_err();
+    assert_eq!(hit.limit, "elements");
+    assert_eq!(hit.value, 11);
+    assert_eq!(hit.max, 10);
+    assert_eq!(hit.unit, "count");
+    // Stays over the limit.
+    assert!(b.add_elements(0).is_err());
+    assert_eq!(b.elements(), 11);
+}
+
+#[test]
+fn element_budget_saturates() {
+    let b = Budget::new(Limits::default());
+    assert!(b.add_elements(u64::MAX).is_err());
+    assert!(b.add_elements(u64::MAX).is_err());
+    assert_eq!(b.elements(), u64::MAX);
+}
+
+#[test]
+fn max_elements_reads_from_config() {
+    let l: Limits = serde_json::from_str(r#"{"max_elements": 7}"#).unwrap();
+    assert_eq!(l.max_elements, 7);
 }
