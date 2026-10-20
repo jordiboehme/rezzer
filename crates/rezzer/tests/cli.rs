@@ -227,6 +227,33 @@ fn sections_limit_the_output() {
         .stderr(predicate::str::contains("bogus"));
 }
 
+#[cfg(feature = "fmt-xlsx")]
+#[test]
+fn no_math_drops_the_math_column() {
+    let env = Env::new();
+    let book = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office/tunnel_design_calculations.xlsx");
+    let logic = |extra: &[&str]| {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&book)
+            .args(["--sections", "logic"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let with = logic(&[]);
+    assert!(with.contains("| Value | Math |"), "{with}");
+    assert!(with.contains("$`"), "{with}");
+    let without = logic(&["--no-math"]);
+    assert!(without.contains("### Structural\\_Lining"), "{without}");
+    assert!(!without.contains("Math"), "{without}");
+    assert!(!without.contains("$`"), "{without}");
+}
+
 #[test]
 fn output_dir_writes_markdown_and_json() {
     let env = Env::new();

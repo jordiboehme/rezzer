@@ -5,12 +5,15 @@
 //! The sections after the content: Logic, Annotations, Changes, Embedded and Not read.
 //! Each returns `None` when it has nothing to show.
 
+use std::collections::HashMap;
+
 use rezzer_model::{
     Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
 };
 
 use crate::blocks::{self, Ctx, MAX_DEPTH, Mode, cell_text, code_span, pipe_table};
 use crate::mermaid;
+use crate::workbook;
 
 fn header(cols: &[&str]) -> Vec<String> {
     cols.iter().map(|c| (*c).to_string()).collect()
@@ -25,10 +28,10 @@ pub(crate) fn role_name(role: Role) -> &'static str {
     }
 }
 
-fn formula_row(f: &Formula, with_note: bool) -> Vec<String> {
+fn formula_row(f: &Formula, with_note: bool, math: bool) -> Vec<String> {
     let mut expr = String::new();
     code_span(&f.expression, Mode::Cell, &mut expr);
-    if let Some(latex) = f.latex.as_deref().filter(|l| !l.trim().is_empty()) {
+    if let Some(latex) = f.latex.as_deref().filter(|l| math && !l.trim().is_empty()) {
         expr.push(' ');
         expr.push_str(&blocks::inlines(
             &[Inline::Math {
@@ -66,7 +69,7 @@ fn dialect_words(dialect: &str) -> String {
 
 /// A line naming the dialects, then the table. The `Note` column is there only when a
 /// formula of the group has a note.
-fn formula_table(list: &[&Formula]) -> String {
+fn formula_table(list: &[&Formula], math: bool) -> String {
     let mut dialects: Vec<&str> = Vec::new();
     for f in list {
         if !dialects.contains(&f.dialect.as_str()) {
@@ -79,7 +82,10 @@ fn formula_table(list: &[&Formula]) -> String {
         .map(|d| dialect_words(d))
         .collect();
     let with_note = list.iter().any(|f| f.note.is_some());
-    let rows: Vec<Vec<String>> = list.iter().map(|f| formula_row(f, with_note)).collect();
+    let rows: Vec<Vec<String>> = list
+        .iter()
+        .map(|f| formula_row(f, with_note, math))
+        .collect();
     let mut cols = vec!["Cells", "Formula", "Reads", "Role", "Value"];
     if with_note {
         cols.push("Note");
@@ -95,46 +101,47 @@ fn formula_table(list: &[&Formula]) -> String {
     }
 }
 
-/// `## Logic`: formulas without a pattern (one table per dialect), then one table per
-/// pattern (in order of first appearance), then the graphs.
-pub(crate) fn logic(doc: &Document) -> Option<String> {
+/// `## Logic`. A workbook gets its logic per sheet ([`workbook::logic`]); any other document
+/// gets formulas without a pattern (one table per dialect), then one table per pattern (in
+/// order of first appearance), then the graphs. Without `math` no LaTeX is written.
+pub(crate) fn logic(doc: &Document, math: bool) -> Option<String> {
+    if workbook::is_workbook(doc) {
+        return workbook::logic(doc, math);
+    }
     let formulas = &doc.facets.formulas;
     let graphs = &doc.facets.graphs;
     if formulas.is_empty() && graphs.is_empty() {
         return None;
     }
     let mut parts = vec!["## Logic".to_string()];
-    let mut dialects: Vec<&str> = Vec::new();
-    for f in formulas.iter().filter(|f| f.pattern.is_none()) {
-        if !dialects.contains(&f.dialect.as_str()) {
-            dialects.push(&f.dialect);
-        }
-    }
-    for d in dialects {
-        let single: Vec<&Formula> = formulas
-            .iter()
-            .filter(|f| f.pattern.is_none() && f.dialect == d)
-            .collect();
-        parts.push(formula_table(&single));
-    }
-    let mut patterns: Vec<&str> = Vec::new();
+    // One pass: formulas without a pattern by dialect, the others by pattern, each list in
+    // order of first appearance.
+    let mut singles: Vec<(&str, Vec<&Formula>)> = Vec::new();
+    let mut groups: Vec<(&str, Vec<&Formula>)> = Vec::new();
+    let mut single_at: HashMap<&str, usize> = HashMap::new();
+    let mut group_at: HashMap<&str, usize> = HashMap::new();
     for f in formulas {
-        if let Some(p) = f.pattern.as_deref()
-            && !patterns.contains(&p)
-        {
-            patterns.push(p);
+        let (key, lists, at) = match f.pattern.as_deref() {
+            Some(p) => (p, &mut groups, &mut group_at),
+            None => (f.dialect.as_str(), &mut singles, &mut single_at),
+        };
+        match at.get(key) {
+            Some(&i) => lists[i].1.push(f),
+            None => {
+                at.insert(key, lists.len());
+                lists.push((key, vec![f]));
+            }
         }
     }
-    for p in patterns {
-        let group: Vec<&Formula> = formulas
-            .iter()
-            .filter(|f| f.pattern.as_deref() == Some(p))
-            .collect();
+    for (_, single) in &singles {
+        parts.push(formula_table(single, math));
+    }
+    for (p, group) in &groups {
         parts.push(blocks::heading_line(
             3,
             &format!("Pattern: {}", blocks::line_text(p)),
         ));
-        parts.push(formula_table(&group));
+        parts.push(formula_table(group, math));
     }
     for g in graphs {
         parts.push(mermaid::render(g));

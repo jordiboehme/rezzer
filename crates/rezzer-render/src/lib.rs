@@ -23,6 +23,7 @@ mod frontmatter;
 mod mermaid;
 mod overview;
 mod paging;
+mod workbook;
 
 use rezzer_model::{Block, Completeness, Document, plain_text};
 
@@ -96,7 +97,7 @@ pub fn format_name(format: rezzer_model::FormatId) -> String {
     frontmatter::format_name(format)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RenderOptions {
     /// The sections to write; `None` writes all. Frontmatter and title are always written.
     pub sections: Option<Vec<OutputSection>>,
@@ -105,6 +106,20 @@ pub struct RenderOptions {
     pub rezzer_version: String,
     /// `rezzer://sha256/<hash>/<name>` when the archive is on.
     pub archive_ref: Option<String>,
+    /// Show formulas also as LaTeX math (the `Math` column of `## Logic`). Default true.
+    pub math: bool,
+}
+
+impl Default for RenderOptions {
+    fn default() -> RenderOptions {
+        RenderOptions {
+            sections: None,
+            generated_at: String::new(),
+            rezzer_version: String::new(),
+            archive_ref: None,
+            math: true,
+        }
+    }
 }
 
 /// Renders a document as OKF Markdown.
@@ -138,7 +153,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         parts.push(content(doc, title));
     }
     if want(OutputSection::Logic) {
-        parts.extend(facets::logic(doc));
+        parts.extend(facets::logic(doc, opts.math));
     }
     let ctx = Ctx {
         assets: &doc.assets,

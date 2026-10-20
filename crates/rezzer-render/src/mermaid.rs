@@ -140,6 +140,57 @@ pub(crate) fn render(graph: &Graph) -> String {
     out
 }
 
+/// The opening and closing marks of a node's shape: groups of copied formulas as double
+/// boxes, parameters round, names as hexagons, anything else a box.
+fn shape(kind: Option<&str>) -> (&'static str, &'static str) {
+    match kind {
+        Some("group") => ("[[", "]]"),
+        Some("parameters") => ("([", "])"),
+        Some("name") => ("{{", "}}"),
+        _ => ("[", "]"),
+    }
+}
+
+/// A graph that fits the caps as a fence, nodes shaped by kind with ids `n0`, `n1`, ... in
+/// node order (a repeated id is the same node). Edges of kind `feeds` or without a kind get
+/// no label. A line after the fence says how many edges point to unknown nodes.
+pub(crate) fn flowchart(graph: &Graph, text: &dyn Fn(&rezzer_model::Node) -> String) -> String {
+    let mut ids: HashMap<&str, usize> = HashMap::new();
+    let mut lines = vec!["flowchart LR".to_string()];
+    for node in graph.nodes.iter().take(MAX_NODES) {
+        if ids.contains_key(node.id.as_str()) {
+            continue;
+        }
+        let n = ids.len();
+        ids.insert(node.id.as_str(), n);
+        let (open, close) = shape(node.kind.as_deref());
+        lines.push(format!("    n{n}{open}\"{}\"{close}", label(&text(node))));
+    }
+    let mut dangling = 0;
+    for edge in graph.edges.iter().take(MAX_EDGES) {
+        let (Some(from), Some(to)) = (ids.get(edge.from.as_str()), ids.get(edge.to.as_str()))
+        else {
+            dangling += 1;
+            continue;
+        };
+        let kind = edge.kind.trim();
+        if kind.is_empty() || kind == "feeds" {
+            lines.push(format!("    n{from} --> n{to}"));
+        } else {
+            lines.push(format!("    n{from} -->|\"{}\"| n{to}", label(kind)));
+        }
+    }
+    let mut out = format!("```mermaid\n{}\n```", lines.join("\n"));
+    if dangling == 1 {
+        out.push_str("\n1 edge points to a node that is not in the graph and is left out.");
+    } else if dangling > 1 {
+        out.push_str(&format!(
+            "\n{dangling} edges point to nodes that are not in the graph and are left out."
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

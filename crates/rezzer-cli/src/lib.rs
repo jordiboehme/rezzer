@@ -67,6 +67,9 @@ struct ReadArgs {
     /// Do not use the result cache.
     #[arg(long)]
     no_cache: bool,
+    /// Do not show formulas as LaTeX math in the Logic section.
+    #[arg(long)]
+    no_math: bool,
 }
 
 /// Runs the command line with the readers of this build.

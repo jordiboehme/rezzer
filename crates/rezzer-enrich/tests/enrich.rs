@@ -681,3 +681,111 @@ fn workbook_names_and_external_references_resolve() {
         ]
     );
 }
+
+#[test]
+fn workbook_overview_counts() {
+    let mut d = doc();
+    d.source.format = FormatId::Xlsx;
+    let hidden = |name: &str, state: &str| Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some(name.into()),
+        anchor: Some(a(name)),
+        blocks: vec![Block::Paragraph {
+            inlines: vec![Inline::Status {
+                text: state.into(),
+                color: rezzer_model::StatusColor::Grey,
+            }],
+            role: Some("status".into()),
+            anchor: None,
+        }],
+    };
+    d.body = vec![
+        sheet("Input", 3, 2),
+        sheet("Calc", 3, 2),
+        hidden("Old", "hidden"),
+        hidden("Secret", "very hidden"),
+    ];
+    let with = |f: Formula, role: Option<Role>, pattern: Option<&str>| Formula {
+        role,
+        pattern: pattern.map(Into::into),
+        kind: Some(rezzer_model::FormulaKind::Cell),
+        ..f
+    };
+    d.facets.formulas = vec![
+        with(formula("Calc!A1", &["Input!A1"]), Some(Role::Result), None),
+        with(
+            formula("Calc!A2", &["Input!A2"]),
+            Some(Role::Intermediate),
+            Some("p1"),
+        ),
+        with(
+            formula("Calc!A3", &["Input!A3"]),
+            Some(Role::Intermediate),
+            Some("p1"),
+        ),
+        Formula {
+            kind: Some(rezzer_model::FormulaKind::Name),
+            ..formula("name:rate", &["Input!A1"])
+        },
+        Formula {
+            kind: Some(rezzer_model::FormulaKind::Lambda),
+            ..formula("name:Twice", &[])
+        },
+    ];
+    d.facets.parameters = vec![rezzer_model::Parameter {
+        anchor: a("Input!A1"),
+        name: None,
+        label: None,
+        value: None,
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+    }];
+    d.facets.annotations = vec![Annotation {
+        kind: "comment".into(),
+        author: None,
+        date: None,
+        anchor: Some(a("Calc!A1")),
+        quoted: None,
+        body: vec![txt("check")],
+        replies: Vec::new(),
+        resolved: None,
+    }];
+    let embedded = |kind: &str| rezzer_model::Embedded {
+        kind: kind.into(),
+        name: "x".into(),
+        detail: None,
+        target: None,
+    };
+    d.facets.embedded = vec![
+        embedded("external-workbook"),
+        embedded("add-in"),
+        embedded("macro"),
+    ];
+    d.facets.graphs.push(Graph {
+        id: "dependencies".into(),
+        kind: "dependency".into(),
+        nodes: vec![],
+        edges: vec![],
+    });
+    enrich(&mut d, &only(&[]));
+    let facts: Vec<(String, String)> = d.overview.expect("overview").facts;
+    let facts: Vec<(&str, &str)> = facts
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(
+        facts,
+        vec![
+            ("Sheets", "4 (hidden: Old, Secret)"),
+            ("Formulas", "3"),
+            ("Patterns", "1"),
+            ("Parameters", "1"),
+            ("Results", "1"),
+            ("Names", "2"),
+            ("Comments", "1"),
+            ("External links", "2"),
+            ("Embedded", "3"),
+        ]
+    );
+}

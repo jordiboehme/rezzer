@@ -10,10 +10,11 @@
 //! `Costs!A1:B9` it is the sheet part. A part with formulas is a `result`; a part that other
 //! parts read from and that has no formulas is an `input`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rezzer_model::{
-    Block, Document, Inline, Overview as Model, OverviewPart, Role, SectionKind, Value,
+    Block, Document, FormatId, FormulaKind, Inline, Overview as Model, OverviewPart, Role,
+    SectionKind, Value,
 };
 
 use crate::anchors::{collect, sheet_prefixes};
@@ -244,16 +245,116 @@ fn reader_totals(doc: &Document) -> Option<(usize, usize)> {
     Some((count("rows")?, count("columns")?))
 }
 
-/// The facts in display order; counts that are zero are left out.
-fn facts(doc: &Document) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
+/// True for the workbook formats, whose facts count the spreadsheet logic.
+fn is_workbook(doc: &Document) -> bool {
+    matches!(
+        doc.source.format,
+        FormatId::Xlsx | FormatId::Xlsm | FormatId::Xlsb | FormatId::Ods | FormatId::Xls
+    )
+}
+
+/// A sheet section whose first block is the reader's `hidden` or `very hidden` status.
+fn is_hidden_sheet(block: &Block) -> bool {
+    let Block::Section { blocks, .. } = block else {
+        return false;
+    };
+    match blocks.first() {
+        Some(Block::Paragraph { inlines, role, .. }) if role.as_deref() == Some("status") => {
+            inlines.iter().any(|i| {
+                matches!(i, Inline::Status { text, .. } if text == "hidden" || text == "very hidden")
+            })
+        }
+        _ => false,
+    }
+}
+
+/// The workbook counts: sheets (hidden ones named), formulas (cells, not names), patterns,
+/// parameters, results, names, comments and external links.
+fn workbook_facts(doc: &Document, out: &mut Vec<(String, String)>) {
+    let sheets: Vec<&Block> = doc
+        .body
+        .iter()
+        .filter(|b| {
+            matches!(
+                b,
+                Block::Section {
+                    kind: SectionKind::Sheet,
+                    ..
+                }
+            )
+        })
+        .collect();
+    if !sheets.is_empty() {
+        let hidden: Vec<String> = sheets
+            .iter()
+            .filter(|b| is_hidden_sheet(b))
+            .filter_map(|b| match b {
+                Block::Section { title, anchor, .. } => title
+                    .clone()
+                    .or_else(|| anchor.as_ref().map(|a| a.0.clone())),
+                _ => None,
+            })
+            .collect();
+        let value = if hidden.is_empty() {
+            sheets.len().to_string()
+        } else {
+            format!("{} (hidden: {})", sheets.len(), hidden.join(", "))
+        };
+        out.push(("Sheets".into(), value));
+    }
+    let is_name = |f: &&rezzer_model::Formula| {
+        matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
+            || f.anchor.0.starts_with("name:")
+    };
+    let formulas = &doc.facets.formulas;
+    let patterns: HashSet<&str> = formulas
+        .iter()
+        .filter_map(|f| f.pattern.as_deref())
+        .collect();
     let mut count = |label: &str, n: usize| {
         if n > 0 {
             out.push((label.to_string(), n.to_string()));
         }
     };
-    count("Formulas", doc.facets.formulas.len());
-    count("Graphs", doc.facets.graphs.len());
+    count("Formulas", formulas.iter().filter(|f| !is_name(f)).count());
+    count("Patterns", patterns.len());
+    count("Parameters", doc.facets.parameters.len());
+    count(
+        "Results",
+        formulas
+            .iter()
+            .filter(|f| !is_name(f) && f.role == Some(Role::Result))
+            .count(),
+    );
+    count("Names", formulas.iter().filter(is_name).count());
+    count("Comments", doc.facets.annotations.len());
+    count(
+        "External links",
+        doc.facets
+            .embedded
+            .iter()
+            .filter(|e| e.kind == "external-workbook" || e.kind == "add-in")
+            .count(),
+    );
+}
+
+/// The facts in display order; counts that are zero are left out. A workbook gets its own
+/// counts first and no graph count (its one graph is the dependency graph in Logic).
+fn facts(doc: &Document) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let workbook = is_workbook(doc);
+    if workbook {
+        workbook_facts(doc, &mut out);
+    }
+    let mut count = |label: &str, n: usize| {
+        if n > 0 {
+            out.push((label.to_string(), n.to_string()));
+        }
+    };
+    if !workbook {
+        count("Formulas", doc.facets.formulas.len());
+        count("Graphs", doc.facets.graphs.len());
+    }
     count(
         "Links",
         doc.facets
@@ -264,7 +365,9 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .count(),
     );
     count("Images", images(doc));
-    count("Annotations", doc.facets.annotations.len());
+    if !workbook {
+        count("Annotations", doc.facets.annotations.len());
+    }
     count("Changes", doc.facets.timeline.len());
     count("Embedded", doc.facets.embedded.len());
     count("Not read", doc.losses.len());

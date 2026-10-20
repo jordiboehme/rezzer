@@ -63,11 +63,14 @@ pub enum OutputKind {
 }
 
 /// Options of one run. Debug hides the password.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Request {
     pub output: OutputKind,
     /// The sections to render; `None` renders all.
     pub sections: Option<Vec<OutputSection>>,
+    /// Show formulas also as LaTeX math. Default true. Only changes rendering, so it is not
+    /// part of the cache key.
+    pub math: bool,
     /// Used for encrypted files. A run with a password is never cached, so no decrypted
     /// content lands in the cache.
     pub password: Option<String>,
@@ -78,11 +81,25 @@ pub struct Request {
     pub cancel: CancelToken,
 }
 
+impl Default for Request {
+    fn default() -> Request {
+        Request {
+            output: OutputKind::default(),
+            sections: None,
+            math: true,
+            password: None,
+            generated_at: None,
+            cancel: CancelToken::default(),
+        }
+    }
+}
+
 impl fmt::Debug for Request {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Request")
             .field("output", &self.output)
             .field("sections", &self.sections)
+            .field("math", &self.math)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("generated_at", &self.generated_at)
             .field("cancelled", &self.cancel.is_cancelled())
@@ -269,6 +286,7 @@ impl Pipeline {
             generated_at: generated_at(req),
             rezzer_version: VERSION.to_string(),
             archive_ref: None,
+            math: req.math,
         };
         let page_tokens = self.config.limits.page_tokens;
         let rendered = panics::contained(|| {
