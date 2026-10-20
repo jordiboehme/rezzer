@@ -49,7 +49,7 @@ Built on (versions as used in the development version):
 
 ### Labels
 
-A parameter takes its label from the text left of it or from the column header above it. A text on the left that repeats in its column, like a category `blue` in a data table, is a value of the row and not a label. The same is true for any text in a column with at least four texts where at least half of them repeat. Then the column header is the label. A text with a unit, like `Load [kN]`, always stays the label, with its unit. In a list like `Diameter | 10 | m` the name on the left stays the label.
+A parameter takes its label from the text left of it or from the column header above it. A text on the left that repeats in its column, like a category `blue` in a data table, is a value of the row and not a label. The same is true for any text in a column with at least four texts where at least half of them repeat. Then the column header is the label. A label with a unit in brackets, like `Load [kN]`, always stays the label, with its unit. A bare unit like `kg` or a size like `DN 50 mm` can still be a value of the row. In a list like `Diameter | 10 | m` the name on the left stays the label.
 
 ### Units
 

@@ -263,27 +263,8 @@ pub(crate) fn is_convert_unit(s: &str) -> bool {
 /// word before it (`Mass (m)` is a variable); a bare trailing word (`Type A`) is never a unit.
 pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
     let t = text.trim();
-    let clean = |s: &str| {
-        let s = s.trim().trim_end_matches([',', ':', ';']).trim();
-        (!s.is_empty()).then(|| s.to_string())
-    };
-    for (open, close) in [('(', ')'), ('[', ']')] {
-        if let Some(inner) = t.strip_suffix(close)
-            && let Some(start) = inner.rfind(open)
-        {
-            let unit = inner[start + open.len_utf8()..].trim();
-            let before = &inner[..start];
-            let single_ok =
-                close == ']' || (ROUND_ONE.contains(&unit) && !initial_of_last_word(before, unit));
-            let known = if close == ']' {
-                is_bracketed_unit(unit)
-            } else {
-                is_unit(unit, single_ok)
-            };
-            if known {
-                return (clean(before), Some(unit.to_string()));
-            }
-        }
+    if let Some((label, unit)) = split_bracketed(t) {
+        return (label, Some(unit));
     }
     if let Some((before, unit)) = t.rsplit_once(' ') {
         let unit = unit.trim();
@@ -304,6 +285,44 @@ pub(crate) fn split_label(text: &str) -> (Option<String>, Option<String>) {
         return (None, Some(t.to_string()));
     }
     (clean(t), None)
+}
+
+/// A label part and the unit in brackets at its end (`Load [kN]`, `Excavated diameter (m)`),
+/// by the bracket rules of [`split_label`]. The label part may be missing (`(m)`).
+fn split_bracketed(t: &str) -> Option<(Option<String>, String)> {
+    for (open, close) in [('(', ')'), ('[', ']')] {
+        if let Some(inner) = t.strip_suffix(close)
+            && let Some(start) = inner.rfind(open)
+        {
+            let unit = inner[start + open.len_utf8()..].trim();
+            let before = &inner[..start];
+            let single_ok =
+                close == ']' || (ROUND_ONE.contains(&unit) && !initial_of_last_word(before, unit));
+            let known = if close == ']' {
+                is_bracketed_unit(unit)
+            } else {
+                is_unit(unit, single_ok)
+            };
+            if known {
+                return Some((clean(before), unit.to_string()));
+            }
+        }
+    }
+    None
+}
+
+/// Whether `text` is a label with a word part and a unit in brackets after it, like
+/// `Load [kN]`: the name of a quantity, not a value. A bare unit (`kg`), a number with a unit
+/// (`DN 50 mm`) or other text is not.
+pub(crate) fn is_bracketed_label(text: &str) -> bool {
+    split_bracketed(text.trim())
+        .and_then(|(label, _)| label)
+        .is_some_and(|l| l.chars().any(char::is_alphabetic))
+}
+
+fn clean(s: &str) -> Option<String> {
+    let s = s.trim().trim_end_matches([',', ':', ';']).trim();
+    (!s.is_empty()).then(|| s.to_string())
 }
 
 /// Whether a one-letter `unit` is the first letter of the last word of `before`.

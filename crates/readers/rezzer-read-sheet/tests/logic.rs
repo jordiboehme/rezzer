@@ -587,6 +587,40 @@ fn a_repeated_label_with_a_unit_keeps_label_and_unit() {
 }
 
 #[test]
+fn a_repeated_size_on_the_left_is_a_row_value() {
+    // `Pipe | Pressure [bar]`: `DN 50 mm` is a number with a unit, a value of the row. The
+    // header gives the label and its unit.
+    let out = headed_table(
+        ["Pipe", "Pressure [bar]", "Note"],
+        &["DN 50 mm", "DN 50 mm", "DN 80 mm"],
+        &["", "", ""],
+    );
+    let doc = &out.document;
+    for anchor in ["S!B2", "S!B3"] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label.as_deref(), Some("Pressure"), "{anchor}");
+        assert_eq!(unit(p), (Some("bar"), Some("header")), "{anchor}");
+    }
+}
+
+#[test]
+fn a_column_of_bare_units_gives_no_unit() {
+    // `Material | Value` with `kg` and `m` repeated: bare units in a category column are
+    // values of the row. The file states no unit for the values.
+    let out = headed_table(
+        ["Material", "Value", "Note"],
+        &["kg", "kg", "m", "kg", "kg"],
+        &["", "", "", "", ""],
+    );
+    let doc = &out.document;
+    for anchor in ["S!B2", "S!B3", "S!B4", "S!B5", "S!B6"] {
+        let p = param(doc, anchor);
+        assert_eq!(p.label.as_deref(), Some("Value"), "{anchor}");
+        assert_eq!(unit(p), (None, None), "{anchor}");
+    }
+}
+
+#[test]
 fn a_category_on_the_left_is_no_label() {
     // `Color | Value`: a text that repeats in its column is a value of the row, and so is
     // `yellow`, once in a column of categories.

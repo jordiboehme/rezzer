@@ -1397,13 +1397,16 @@ fn cell_parameters<'f>(
                 around.beside = None;
                 around.header = None;
             }
-            let (mut left_label, left_unit) =
-                around.left.map(units::split_label).unwrap_or_default();
-            // A row value on the left (a category) says less than the column header. A text
-            // with a unit, like `Load [kN]`, names a quantity, so it is never a row value.
-            if around.left_is_value && around.header.is_some() && left_unit.is_none() {
-                left_label = None;
+            // A row value on the left (a category) says less than the column header. A label
+            // with a unit in brackets, like `Load [kN]`, names a quantity, so it is never a
+            // row value; a bare unit or a size like `DN 50 mm` can be one.
+            if around.left_is_value
+                && around.header.is_some()
+                && !around.left.is_some_and(units::is_bracketed_label)
+            {
+                around.left = None;
             }
+            let (left_label, left_unit) = around.left.map(units::split_label).unwrap_or_default();
             let (head_label, head_unit) = around.header.map(units::split_label).unwrap_or_default();
             let key = (upper.clone(), row, col);
             let mut found_units: Vec<(String, &str)> = Vec::new();
