@@ -19,4 +19,6 @@ mod sniff;
 mod types;
 
 pub use sniff::{analyze, sniff};
-pub use types::{Analysis, Column, ColumnKind, Derived, DerivedOp, Dialect, QuoteProblem, RaggedRow};
+pub use types::{
+    Analysis, Column, ColumnKind, Derived, DerivedOp, Dialect, QuoteProblem, RaggedRow,
+};
