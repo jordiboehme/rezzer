@@ -41,9 +41,11 @@ impl Styles {
 pub(super) fn read_styles(ctx: &mut Ctx<'_, '_>, part: &str) -> Styles {
     let mut styles = Styles::default();
     let mut in_cell_xfs = false;
+    let mut in_num_fmts = false;
     ctx.scan(part, true, &mut |ev, _| match ev {
         Ev::Start(e) | Ev::Empty(e) => match e.name.as_str() {
-            "numFmt" => {
+            "numFmts" => in_num_fmts = matches!(ev, Ev::Start(_)),
+            "numFmt" if in_num_fmts => {
                 if let (Some(id), Some(code)) = (
                     e.attr("numFmtId").and_then(|v| v.parse().ok()),
                     e.attr("formatCode"),
@@ -58,6 +60,7 @@ pub(super) fn read_styles(ctx: &mut Ctx<'_, '_>, part: &str) -> Styles {
             _ => {}
         },
         Ev::End("cellXfs") => in_cell_xfs = false,
+        Ev::End("numFmts") => in_num_fmts = false,
         _ => {}
     });
     styles

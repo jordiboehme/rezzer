@@ -110,6 +110,10 @@ pub fn format_with(code: &str, value: f64, system: DateSystem) -> Formatted {
     if !value.is_finite() {
         return plain("#NUM!", NumKind::General);
     }
+    // Excel allows 255 characters in a code; anything longer is not a format.
+    if code.chars().count() > 255 {
+        return plain(&general(value), NumKind::General);
+    }
     let sections: Vec<Section> = split_sections(code)
         .into_iter()
         .map(parse_section)
@@ -1091,7 +1095,7 @@ fn render_date(section: &Section, value: f64, system: DateSystem) -> Formatted {
         (ms + unit_ms / 2) / unit_ms * unit_ms
     };
     let mut days = value.floor();
-    if days > 2_958_465.0 * 1e6 {
+    if days > 2_958_465.0 {
         return plain("####", NumKind::Date);
     }
     let mut day_ms = round_to_unit((value - days) * 86_400_000.0);

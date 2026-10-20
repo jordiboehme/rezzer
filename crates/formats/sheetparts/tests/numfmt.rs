@@ -197,6 +197,19 @@ fn hostile_inputs_do_not_panic() {
             let _ = format(code, value);
         }
     }
+    for value in [2e11, 3e11, 1e15, 2_958_466.0, -1e12] {
+        for code in ["yyyy-mm-dd", "h:mm", "[h]:mm:ss", "mmm d, yyyy h:mm:ss.000"] {
+            let _ = format(code, value);
+            let _ = format_with(code, value, DateSystem::Date1904);
+        }
+    }
+    assert_eq!(text("yyyy-mm-dd", 2e11), "####");
+    assert_eq!(text("h:mm", 3e11), "####");
+    let started = std::time::Instant::now();
+    let _ = format(&format!("0.{}", "0".repeat(100_000)), 1.5);
+    let _ = format(&"#,##0".repeat(50_000), 1.5);
+    assert_eq!(text(&format!("0.{}", "0".repeat(300)), 1.5), "1.5");
+    assert!(started.elapsed().as_secs() < 2);
     let long = "0".repeat(10_000);
     let _ = format(&long, 1.0);
     let _ = format(&"[".repeat(100), 1.0);

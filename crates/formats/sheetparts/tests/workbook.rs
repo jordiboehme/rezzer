@@ -368,6 +368,7 @@ fn styles_resolve_number_formats() {
             format!(
                 "<styleSheet xmlns=\"{NS}\"><numFmts count=\"1\"><numFmt numFmtId=\"164\" formatCode=\"0.0&quot; m&quot;\"/></numFmts>\
                  <cellStyleXfs count=\"1\"><xf numFmtId=\"9\"/></cellStyleXfs>\
+                 <dxfs count=\"1\"><dxf><numFmt numFmtId=\"164\" formatCode=\"0.000000\"/></dxf></dxfs>\
                  <cellXfs count=\"3\"><xf numFmtId=\"164\"/><xf numFmtId=\"10\"/><xf numFmtId=\"200\"/></cellXfs></styleSheet>"
             ),
         )],
