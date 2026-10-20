@@ -30,6 +30,25 @@ pub(crate) fn resources<'a>(doc: &'a Document, node: &PageNode) -> Option<&'a Ob
     dict(doc, owner)?.get(b"Resources").ok()
 }
 
+/// What pages with the same resources have in common, for work done once per resources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ResourcesKey {
+    /// `/Resources` is a reference to this object. Pages may name it from different nodes.
+    Object(ObjectId),
+    /// `/Resources` is a dictionary held directly by this node.
+    Owner(ObjectId),
+}
+
+/// The key of a page's resources: the object `/Resources` refers to, or the node that holds
+/// them as a dictionary.
+pub(crate) fn resources_key(doc: &Document, node: &PageNode) -> Option<ResourcesKey> {
+    let owner = node.resources_from?;
+    match doc.dereference(resources(doc, node)?) {
+        Ok((Some(id), _)) => Some(ResourcesKey::Object(id)),
+        _ => Some(ResourcesKey::Owner(owner)),
+    }
+}
+
 /// The pages and whether the tree is safe to hand to a parser with another page walk.
 pub(crate) struct PageTree {
     pub pages: Vec<PageNode>,

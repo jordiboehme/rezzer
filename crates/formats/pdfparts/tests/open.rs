@@ -682,3 +682,80 @@ fn encrypted_signature_contents_stay_unchanged() {
     let v = field.get(b"V").unwrap().as_dict().unwrap();
     assert_eq!(v.get(b"Contents").unwrap(), &contents);
 }
+
+/// A cross-reference stream section with one subsection per entry, as object 9 every time.
+fn xref_stream_section(out: &mut Vec<u8>, entries: &[(u32, usize)], prev: Option<usize>) -> usize {
+    let index: String = entries.iter().map(|(n, _)| format!("{n} 1 ")).collect();
+    let mut data = Vec::new();
+    for (_, off) in entries {
+        data.push(1u8);
+        data.extend((*off as u32).to_be_bytes());
+    }
+    let prev = prev.map(|p| format!(" /Prev {p}")).unwrap_or_default();
+    let at = out.len();
+    out.extend(
+        format!(
+            "9 0 obj\n<< /Type /XRef /W [1 4 0] /Index [{index}] /Size 10 /Root 1 0 R{prev} /Length {} >>\nstream\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    out.extend(&data);
+    out.extend(b"\nendstream\nendobj\n");
+    at
+}
+
+#[test]
+fn update_may_move_the_xref_stream_object() {
+    // The update writes its cross-reference stream as object 9 again, at a new place.
+    let mut out = b"%PDF-1.5\n".to_vec();
+    let mut offs = Vec::new();
+    for (n, body) in [
+        (1, "<< /Type /Catalog /Pages 2 0 R >>"),
+        (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        (3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>"),
+    ] {
+        offs.push((n, out.len()));
+        out.extend(format!("{n} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    let x1 = xref_stream_section(&mut out, &offs, None);
+    out.extend(format!("startxref\n{x1}\n%%EOF\n").as_bytes());
+    let four = out.len();
+    out.extend(b"4 0 obj\n<< /Title (updated) >>\nendobj\n");
+    let at = out.len();
+    let x2 = xref_stream_section(&mut out, &[(4, four), (9, at)], Some(x1));
+    out.extend(format!("startxref\n{x2}\n%%EOF\n").as_bytes());
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(
+        !pdf.issues().iter().any(|i| i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
+    );
+}
+
+#[test]
+fn table_without_the_catalog_is_rebuilt() {
+    // The table is well formed but has no entry for the catalog it names.
+    let mut out = b"%PDF-1.4\n".to_vec();
+    out.extend(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    let two = out.len();
+    out.extend(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    let three = out.len();
+    out.extend(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n");
+    let x = out.len();
+    out.extend(
+        format!("xref\n0 1\n0000000000 65535 f \n2 2\n{two:010} 00000 n \n{three:010} 00000 n \n")
+            .as_bytes(),
+    );
+    out.extend(format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes());
+    let pdf = open(&out, None).unwrap();
+    assert_eq!(pdf.page_count(), 1);
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.contains("rebuilt")),
+        "{:?}",
+        pdf.issues()
+    );
+}

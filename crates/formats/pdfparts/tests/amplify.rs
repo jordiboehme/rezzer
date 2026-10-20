@@ -3,11 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Small files that make the reader repeat or keep work: the same stream read through many
-//! offsets, many large object streams, shared images on many pages, many entries that point at
-//! the wrong object, and many references.
+//! offsets, many large object streams, shared images, forms and links on many pages, many
+//! entries that point at the wrong object, many references, overlapping pieces that the
+//! catalog search or the members of an object stream read again and again.
 
 mod common;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{assert_rss_bounded, zlib_fill};
@@ -322,4 +324,287 @@ fn rebuilt_files_are_charged_once() {
         rebuilt < intact + intact / 4,
         "intact {intact}, rebuilt {rebuilt}"
     );
+}
+
+/// `pages` pages that each name one shared `/Resources` object with `images` images.
+fn shared_resources_object(pages: usize, images: usize) -> Vec<u8> {
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    let kids: String = (0..pages).map(|p| format!("{} 0 R ", p + 4)).collect();
+    c.object(
+        2,
+        format!("<< /Type /Pages /MediaBox [0 0 612 792] /Kids [{kids}] /Count {pages} >>")
+            .as_bytes(),
+    );
+    let mut res = String::from("<< /XObject << ");
+    for i in 0..images {
+        res.push_str(&format!("/i{i}<</Subtype/Image/Width 1/Height 1>>"));
+    }
+    res.push_str(" >> >>");
+    c.object(3, res.as_bytes());
+    for p in 0..pages {
+        c.object(
+            p as u32 + 4,
+            b"<< /Type /Page /Parent 2 0 R /Resources 3 0 R >>",
+        );
+    }
+    c.finish("")
+}
+
+#[test]
+fn shared_resources_object_is_scanned_once() {
+    let bytes = shared_resources_object(2000, 50_000);
+    eprintln!("file {} KB", bytes.len() / 1024);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let start = Instant::now();
+    let pages = pdf.pages(&deadline(Duration::from_secs(2)));
+    eprintln!("pages() took {:?}", start.elapsed());
+    assert_eq!(pages.len(), 2000);
+    assert_eq!(pages[1999].images.len(), 50_000);
+    assert!(Arc::ptr_eq(&pages[0].images, &pages[1999].images));
+    assert_rss_bounded();
+}
+
+#[test]
+fn shared_form_images_are_bounded() {
+    // Every page has its own small /Resources that names one shared form with 50,000 images.
+    let pages = 2000;
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    let kids: String = (0..pages).map(|p| format!("{} 0 R ", p + 4)).collect();
+    c.object(
+        2,
+        format!("<< /Type /Pages /MediaBox [0 0 612 792] /Kids [{kids}] /Count {pages} >>")
+            .as_bytes(),
+    );
+    let mut form = String::from("<< /Subtype /Form /Resources << /XObject << ");
+    for i in 0..50_000 {
+        form.push_str(&format!("/i{i}<</Subtype/Image/Width 1/Height 1>>"));
+    }
+    form.push_str(" >> >> /Length 0 >>\nstream\n\nendstream");
+    c.object(3, form.as_bytes());
+    for p in 0..pages {
+        c.object(
+            p as u32 + 4,
+            b"<< /Type /Page /Parent 2 0 R /Resources << /XObject << /F 3 0 R >> >> >>",
+        );
+    }
+    let bytes = c.finish("");
+    eprintln!("file {} KB", bytes.len() / 1024);
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let start = Instant::now();
+    let pages = pdf.pages(&deadline(Duration::from_secs(5)));
+    let took = start.elapsed();
+    eprintln!("pages() took {took:?}");
+    assert_eq!(pages.len(), 2000);
+    assert_eq!(pages[0].images.len(), 50_000);
+    assert!(took < Duration::from_secs(2), "{took:?}");
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Limit && i.what.contains("images")),
+        "{:?}",
+        pdf.issues()
+    );
+    assert_rss_bounded();
+}
+
+#[test]
+fn shared_link_text_is_bounded() {
+    // One link with a 1 MB address on every one of 1000 pages.
+    let pages = 1000;
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    let kids: String = (0..pages).map(|p| format!("{} 0 R ", p + 5)).collect();
+    c.object(
+        2,
+        format!("<< /Type /Pages /MediaBox [0 0 612 792] /Kids [{kids}] /Count {pages} >>")
+            .as_bytes(),
+    );
+    let mut link = b"<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI (".to_vec();
+    link.extend(vec![b'a'; 1 << 20]);
+    link.extend(b") >> >>");
+    c.object(3, &link);
+    c.object(4, b"[3 0 R]");
+    for p in 0..pages {
+        c.object(
+            p as u32 + 5,
+            b"<< /Type /Page /Parent 2 0 R /Annots 4 0 R >>",
+        );
+    }
+    let bytes = c.finish("");
+    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    let links = pdf.links();
+    eprintln!("{} links", links.len());
+    assert_rss_bounded();
+    assert!(!links.is_empty());
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Limit && i.what.contains("link")),
+        "{:?}",
+        pdf.issues()
+    );
+}
+
+/// `k` pieces that each open a literal string and never close it (`(` alone, inside an object
+/// dictionary or inside a trailer), with no usable table, so the catalog must be looked for.
+fn nested_strings(k: u32, shape: &str, close: bool) -> Vec<u8> {
+    let mut b = b"%PDF-1.4\n".to_vec();
+    b.extend(b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+    b.extend(b"2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n");
+    for n in 0..k {
+        match shape {
+            "object" => b.extend(format!("{} 0 obj (", n + 3).as_bytes()),
+            "dict" => b.extend(format!("{} 0 obj << /A (", n + 3).as_bytes()),
+            _ => b.extend(b"trailer << /A ("),
+        }
+    }
+    if close {
+        b.extend(vec![b')'; k as usize]);
+    }
+    b.extend(b"\nstartxref\n999999999\n%%EOF\n");
+    b
+}
+
+#[test]
+fn catalog_look_ahead_is_linear() {
+    for shape in ["object", "dict", "trailer"] {
+        for close in [false, true] {
+            let bytes = nested_strings(60_000, shape, close);
+            let start = Instant::now();
+            let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
+            let took = start.elapsed();
+            eprintln!(
+                "{shape}, close {close}: {} KB, {took:?}, {:?}",
+                bytes.len() / 1024,
+                result.as_ref().map(|p| p.page_count())
+            );
+            assert!(took < Duration::from_secs(2), "{took:?}");
+            match result {
+                Ok(pdf) => assert_eq!(pdf.page_count(), 0),
+                Err(OpenError::Limit(why)) => assert!(why.contains("catalog"), "{why}"),
+                Err(e) => panic!("{e:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn xref_stream_header_zeros_decode_once() {
+    // Sixteen /XRefStm offsets into the leading zeros of one cross-reference stream header.
+    let k = 16;
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    c.object(2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    c.object(3, b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>");
+    let x = c.out.len();
+    let mut data = zlib_fill(0, (64 << 20) - 1);
+    data.extend(vec![b' '; 700 << 10]);
+    c.out.extend(
+        format!(
+            "000000000000000009 0 obj\n<< /Type /XRef /W [1 0 0] /Index [0 1] /Size 10 /Filter /FlateDecode /Length {} >>\nstream\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    c.out.extend(&data);
+    c.out.extend(b"\nendstream\nendobj\n");
+    let mut prev: Option<usize> = None;
+    for i in 0..k {
+        let at = c.out.len();
+        let mut t = format!(
+            "xref\n0 0\ntrailer\n<< /Size 10 /Root 1 0 R /XRefStm {}",
+            x + i
+        );
+        if let Some(p) = prev {
+            t.push_str(&format!(" /Prev {p}"));
+        }
+        t.push_str(" >>\n");
+        c.out.extend(t.as_bytes());
+        prev = Some(at);
+    }
+    let bytes = c.finish(&format!("/Prev {}", prev.unwrap()));
+    let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(20)));
+    assert_rss_bounded();
+    let pdf = result.unwrap();
+    assert_eq!(pdf.page_count(), 1);
+}
+
+#[test]
+fn white_space_runs_have_their_own_message() {
+    // 100 entries point at different places in 5 MB of white space before a wrong header.
+    let r = 100usize;
+    let w = 5usize << 20;
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let refs: String = (0..r).map(|k| format!("{} 0 R ", k + 3)).collect();
+    let one = out.len();
+    out.extend(
+        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /X [{refs}] >>\nendobj\n").as_bytes(),
+    );
+    let two = out.len();
+    out.extend(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+    let run = out.len();
+    out.extend(vec![b' '; w]);
+    out.extend(b"999999 0 obj null\nendobj\n");
+    let x = out.len();
+    let n = r + 3;
+    out.extend(format!("xref\n0 {n}\n0000000000 65535 f \n").as_bytes());
+    out.extend(format!("{one:010} 00000 n \n{two:010} 00000 n \n").as_bytes());
+    for k in 0..r {
+        out.extend(format!("{:010} 00000 n \n", run + k * (w / r)).as_bytes());
+    }
+    out.extend(format!("trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes());
+    let err = Pdf::open(&out, None, &limits(), &deadline(Duration::from_secs(10))).unwrap_err();
+    let OpenError::Limit(why) = err else {
+        panic!("{err:?}");
+    };
+    assert!(why.contains("white space"), "{why}");
+}
+
+#[test]
+fn object_stream_members_share_one_work_bound() {
+    // 100,000 members of one object stream all start at 60 MiB of spaces before `null`.
+    let n = 100_000u32;
+    let mut c = Classic::new();
+    c.object(1, b"<< /Type /Catalog /Pages 2 0 R /X 1000 0 R >>");
+    c.object(2, b"<< /Type /Pages /Kids [] /Count 0 >>");
+    let mut head = String::new();
+    for i in 0..n {
+        head.push_str(&format!("{} 0 ", 1000 + i));
+    }
+    let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    std::io::Write::write_all(&mut e, head.as_bytes()).unwrap();
+    common::fill(&mut e, b' ', 60 << 20);
+    std::io::Write::write_all(&mut e, b"null").unwrap();
+    let mut z = e.finish().unwrap();
+    // Padding keeps the stream under the ratio limit.
+    z.extend(vec![b' '; 700 << 10]);
+    let mut body = format!(
+        "<< /Type /ObjStm /N {n} /First {} /Filter /FlateDecode /Length {} >>\nstream\n",
+        head.len(),
+        z.len()
+    )
+    .into_bytes();
+    body.extend(&z);
+    body.extend(b"\nendstream");
+    c.object(10, &body);
+    let bytes = c.finish("");
+    let members: Vec<(u32, u32, u32)> = (0..n).map(|i| (1000 + i, 10, i)).collect();
+    let bytes = common::append_update(&bytes, &[], &members, 1, "");
+    eprintln!("file {} KB", bytes.len() / 1024);
+    let start = Instant::now();
+    let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
+    let took = start.elapsed();
+    eprintln!(
+        "open took {took:?}: {:?}",
+        result.as_ref().map(|p| p.page_count())
+    );
+    assert!(took < Duration::from_secs(2), "{took:?}");
+    match result {
+        Ok(pdf) => assert_eq!(pdf.page_count(), 0),
+        Err(OpenError::Limit(why)) => assert!(why.contains("white space"), "{why}"),
+        Err(e) => panic!("{e:?}"),
+    }
+    assert_rss_bounded();
 }

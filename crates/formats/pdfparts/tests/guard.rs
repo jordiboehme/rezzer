@@ -348,3 +348,26 @@ fn shared_fonts_do_not_exhaust_the_refusal_walk() {
     let pdf = open(&bytes).unwrap();
     assert_eq!(pdf.refused_pages(), &[400]);
 }
+
+#[test]
+fn pages_naming_one_bad_resources_object_are_all_refused() {
+    // Three pages name one /Resources object whose image is a bomb; a fourth has none.
+    let bytes = save(|doc, pages| {
+        let bomb = doc.add_object(Stream::new(
+            dictionary! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
+                "Filter" => "FlateDecode",
+            },
+            // Zeros unpack more than 100 times their size.
+            zlib_fill(0, 64 << 20),
+        ));
+        let res = doc.add_object(dictionary! { "XObject" => dictionary! { "Im" => bomb } });
+        let mut kids: Vec<Object> = (0..3)
+            .map(|_| page(doc, pages, dictionary! { "Resources" => res }).into())
+            .collect();
+        kids.push(page(doc, pages, dictionary! {}).into());
+        kids
+    });
+    let pdf = open(&bytes).unwrap();
+    assert_eq!(pdf.refused_pages(), &[1, 2, 3]);
+}

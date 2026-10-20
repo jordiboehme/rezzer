@@ -19,7 +19,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 use decode::Cap;
 pub(crate) use decode::{Measure, cap_words, filters_with, measure_bytes, stream_filters, unpack};
 
-use crate::pagetree::{self, PageNode};
+use crate::pagetree::{self, PageNode, ResourcesKey};
 use crate::{Issue, IssueKind, Limits, OpenError};
 
 /// The most an object stream or a cross-reference stream may unpack to. It never depends on
@@ -181,8 +181,9 @@ fn refuse(
             }
         }
     }
-    // What the resources held by each node reach, worked out once per node.
-    let mut inherited: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
+    // What each page's resources reach, worked out once per resources object (or per node
+    // that holds them as a dictionary).
+    let mut inherited: HashMap<ResourcesKey, Option<ObjectId>> = HashMap::new();
     let mut refused = Vec::new();
     let mut used = HashSet::new();
     for (index, node) in pages.iter().enumerate() {
@@ -192,9 +193,9 @@ fn refuse(
         let number = index as u32 + 1;
         let mut hit = origin.get(&node.id).copied();
         if hit.is_none()
-            && let Some(owner) = node.resources_from
+            && let Some(key) = pagetree::resources_key(doc, node)
         {
-            hit = match inherited.entry(owner) {
+            hit = match inherited.entry(key) {
                 Entry::Occupied(e) => *e.get(),
                 Entry::Vacant(e) => {
                     refs.clear();

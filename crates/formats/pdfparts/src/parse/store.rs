@@ -322,7 +322,14 @@ impl<'a> Store<'a> {
                 self.damaged((m, 0), "the member lies outside its object stream");
                 continue;
             }
-            match Lexer::new(&data, at).value(&mut self.budget, 0) {
+            // Members may overlap, so the bytes each one reads count as work.
+            let mut l = Lexer::new(&data, at);
+            let v = l.value(&mut self.budget, 0);
+            self.budget.skipped(l.skipped).map_err(Fail::into_open)?;
+            if v.is_err() {
+                self.budget.failed(l.i - at).map_err(Fail::into_open)?;
+            }
+            match v {
                 Ok(v) => {
                     self.members.insert(m, v);
                 }

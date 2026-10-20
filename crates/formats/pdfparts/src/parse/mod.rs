@@ -36,7 +36,8 @@ pub(crate) const VALUE_COST: u64 = 128;
 /// What one cross-reference entry costs.
 const ENTRY_COST: u64 = 32;
 
-/// How many times the file length the searches for `endstream` may read in total.
+/// How many times the file length (and the length of unpacked object streams) the searches
+/// for `endstream`, skipped white space and broken values may read in total.
 const WORK_FACTOR: usize = 8;
 
 /// How often, in charged values, the stop callback is asked.
@@ -136,13 +137,39 @@ impl<'a> Budget<'a> {
 
     /// Counts bytes read while looking for the end of a stream.
     pub fn work(&mut self, n: usize) -> Result<(), Fail> {
+        self.count_work(n, "its streams have no usable length")
+    }
+
+    /// Counts white space and comments skipped. They share the bound with [`Budget::work`].
+    pub fn skipped(&mut self, n: usize) -> Result<(), Fail> {
+        self.count_work(n, "it has too much white space or too many comments")
+    }
+
+    /// Counts bytes read by a value that turned out broken. A broken value is not charged
+    /// as a value, so this bounds how often the same bytes are read in vain.
+    pub fn failed(&mut self, n: usize) -> Result<(), Fail> {
+        self.count_work(n, "too many of its values are broken")
+    }
+
+    fn count_work(&mut self, n: usize, why: &str) -> Result<(), Fail> {
         self.work = self.work.saturating_add(n);
         if self.work > self.max_work {
-            return Err(Fail::Stop(OpenError::Limit(
-                "the file is too irregular: its streams have no usable length".into(),
-            )));
+            return Err(Fail::Stop(OpenError::Limit(format!(
+                "the file is too irregular: {why}"
+            ))));
         }
         Ok(())
+    }
+
+    /// Raises the work bound for `n` more bytes to read, as unpacked streams add them.
+    pub fn more_work(&mut self, n: u64) {
+        let n = usize::try_from(n).unwrap_or(usize::MAX);
+        self.max_work = self.max_work.saturating_add(n.saturating_mul(WORK_FACTOR));
+    }
+
+    /// The work or byte bound was hit.
+    pub fn spent(&self) -> bool {
+        self.work > self.max_work || self.bytes > self.limits.max_object_bytes
     }
 
     /// Asks the stop callback.
@@ -200,7 +227,11 @@ pub(crate) fn build(
     };
     let mut budget = Budget::new(limits, stop, bytes.len());
     let mut issues = Vec::new();
-    let (table, trailer, scanned) = match read_chain(bytes, base, &mut budget)? {
+    // A chain with no entry for the catalog it names is no better than a damaged one.
+    let chain = read_chain(bytes, base, &mut budget)?.filter(|c| {
+        matches!(c.trailer.get(b"Root"), Ok(Object::Reference(r)) if c.table.contains_key(&r.0))
+    });
+    let (table, trailer, scanned) = match chain {
         Some(chain) => {
             issues.extend(chain.issues);
             (chain.table, chain.trailer, None)
@@ -298,13 +329,41 @@ impl Write for Capped {
     }
 }
 
+/// How many bytes per byte of the file the look ahead for the trailer and the catalog may
+/// charge in total: a value costs [`VALUE_COST`] and takes at least one byte and a separator.
+const LOOK_FACTOR: u64 = VALUE_COST;
+
 /// The trailer of a file whose table was rebuilt: the newest `trailer` dictionary, else the
 /// newest cross-reference stream dictionary, else the newest catalog.
+///
+/// This is a look ahead: the values are dropped right away, and objects are read again (and
+/// charged) only if the document uses them. All of it shares one work and byte bound that
+/// grows with the file length, so pieces that overlap (a string that never closes swallows
+/// the rest of the file) cannot make it quadratic.
 fn scan_trailer(
     bytes: &[u8],
     found: &xref::Rebuilt,
     budget: &mut Budget,
 ) -> Result<Dictionary, OpenError> {
+    let len = bytes.len() as u64;
+    let look_limits = Limits {
+        max_object_bytes: budget
+            .limits
+            .max_object_bytes
+            .min(len.saturating_mul(LOOK_FACTOR).saturating_add(1 << 20)),
+        ..*budget.limits
+    };
+    let mut look = Budget::new(&look_limits, budget.stop, bytes.len());
+    let spent = |look: &Budget, e: OpenError| {
+        if look.spent() {
+            OpenError::Limit(
+                "the cross-reference table is damaged and the file is too irregular to find its catalog"
+                    .into(),
+            )
+        } else {
+            e
+        }
+    };
     let mut trailer = Dictionary::new();
     let merge = |trailer: &mut Dictionary, d: &Dictionary| {
         for key in [b"Root".as_slice(), b"Info", b"Encrypt", b"ID"] {
@@ -315,17 +374,32 @@ fn scan_trailer(
             }
         }
     };
-    for &at in found.trailers.iter().rev() {
+    for (k, &at) in found.trailers.iter().rev().enumerate() {
+        if k % 1024 == 0 {
+            look.poll().map_err(Fail::into_open)?;
+        }
         let mut l = Lexer::new(bytes, at);
         l.skip();
+        if let Err(Fail::Stop(e)) = look.skipped(l.skipped) {
+            return Err(spent(&look, e));
+        }
         if !bytes[l.i..].starts_with(b"<<") {
             continue;
         }
         l.i += 2;
-        match l.dictionary(budget, 0) {
+        let charged = l.skipped;
+        let d = l.dictionary(&mut look, 0);
+        let mut counted = look.skipped(l.skipped - charged);
+        if d.is_err() && counted.is_ok() {
+            counted = look.failed(l.i - at);
+        }
+        if let Err(Fail::Stop(e)) = counted {
+            return Err(spent(&look, e));
+        }
+        match d {
             Ok(d) => merge(&mut trailer, &d),
             Err(Fail::Bad(_)) => {}
-            Err(Fail::Stop(e)) => return Err(e),
+            Err(Fail::Stop(e)) => return Err(spent(&look, e)),
         }
     }
     if trailer.get(b"Root").is_ok() {
@@ -339,15 +413,23 @@ fn scan_trailer(
     by_pos.sort_unstable_by(|a, b| b.cmp(a));
     for (k, (pos, n, g)) in by_pos.into_iter().enumerate() {
         if k % 1024 == 0 {
-            budget.poll().map_err(Fail::into_open)?;
+            look.poll().map_err(Fail::into_open)?;
         }
-        // A look ahead: the object is dropped right away and read again (and charged) only
-        // if the document uses it. Its own scratch budget still bounds it.
-        let mut look = Budget::new(budget.limits, budget.stop, bytes.len());
+        // Only a dictionary can be a catalog or a cross-reference stream, so nothing else is
+        // parsed.
+        let mut l = Lexer::new(bytes, pos);
+        let header = l.header();
+        l.skip();
+        if let Err(Fail::Stop(e)) = look.skipped(l.skipped) {
+            return Err(spent(&look, e));
+        }
+        if header.is_none() || !bytes[l.i..].starts_with(b"<<") {
+            continue;
+        }
         let head = match object::head_at(bytes, pos, &mut look) {
             Ok(h) => h,
             Err(Fail::Bad(_)) => continue,
-            Err(Fail::Stop(e)) => return Err(e),
+            Err(Fail::Stop(e)) => return Err(spent(&look, e)),
         };
         let Object::Dictionary(d) = &head.value else {
             continue;

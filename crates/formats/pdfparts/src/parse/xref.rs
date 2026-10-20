@@ -9,10 +9,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lopdf::{Dictionary, Object, ObjectId};
+use lopdf::{Dictionary, Object};
 
 use super::lexer::{Lexer, is_delimiter, is_space, rfind};
-use super::object::object_at;
+use super::object::{finish, head_at};
 use super::predict::{last_parms, unpredict};
 use super::{Budget, Fail, stopped};
 use crate::guard::{BACKSTOP, Measure, cap_words, filters_with, unpack};
@@ -34,11 +34,13 @@ pub(crate) struct Chain {
     /// `/Root`, `/Info`, `/Encrypt` and `/ID` from the newest trailer that has them.
     pub trailer: Dictionary,
     pub issues: Vec<Issue>,
-    /// Where each section read so far starts, after white space and comments, and the
-    /// cross-reference streams read so far. An offset that leads to one of them again is
-    /// skipped, so no section is read or unpacked twice.
+    /// Where each section read so far starts, after white space and comments, and where the
+    /// data of each cross-reference stream read so far starts. An offset that leads to one of
+    /// them again is skipped, so no section is read or unpacked twice. Every header that
+    /// leads to one stream (leading zeros, a header inside the digits of another) shares its
+    /// data start, while an update that writes the stream object again puts it elsewhere.
     starts: HashSet<usize>,
-    streams: HashSet<ObjectId>,
+    streams: HashSet<usize>,
 }
 
 impl Chain {
@@ -137,7 +139,7 @@ fn section(
         }
         let mut l = Lexer::new(bytes, pos);
         l.skip();
-        budget.work(l.i - pos).map_err(Fail::into_open)?;
+        budget.skipped(l.i - pos).map_err(Fail::into_open)?;
         let start = l.i;
         if chain.starts.contains(&start) {
             // Read already through another offset: the chain ends here.
@@ -245,19 +247,23 @@ fn stream_section(
 ) -> Result<Option<Option<u64>>, OpenError> {
     let mut l = Lexer::new(bytes, pos);
     l.skip();
-    budget.work(l.i - pos).map_err(Fail::into_open)?;
+    budget.skipped(l.i - pos).map_err(Fail::into_open)?;
     let start = l.i;
     if chain.starts.contains(&start) {
         return Ok(Some(None));
     }
-    let Some(id) = l.header() else {
+    let head = match head_at(bytes, start, budget) {
+        Ok(head) => head,
+        Err(f) => return fail(f),
+    };
+    let Some(data_start) = head.stream else {
         return Ok(None);
     };
-    if !chain.streams.insert(id) {
+    if !chain.streams.insert(data_start) {
         return Ok(Some(None));
     }
     chain.starts.insert(start);
-    let (_, obj) = match object_at(bytes, start, budget, &mut |_| None) {
+    let (_, obj) = match finish(bytes, head, None, budget) {
         Ok(found) => found,
         Err(f) => return fail(f),
     };
@@ -362,6 +368,8 @@ pub(crate) fn unpack_stream(
             // buffer is dropped: freed large buffers may stay resident.
             budget.unpacked += n;
             budget.charge(n).map_err(Fail::into_open)?;
+            // Reading the unpacked bytes is work like reading the file.
+            budget.more_work(n);
             Ok(data)
         }
         (Measure::Over(cap), _) => Err(OpenError::Limit(format!(

@@ -13,6 +13,7 @@ use crate::objects::{
     Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference, resolve,
     text_string, walk_tree,
 };
+use crate::pagetree::ResourcesKey;
 use crate::{Issue, IssueKind, Pdf, pagetree};
 
 /// A page with its label, size and what it carries.
@@ -82,6 +83,20 @@ pub enum LinkTarget {
     Launch(String),
     /// Another action, by its type (`JavaScript`, `SubmitForm`, `Named` and so on).
     Other(String),
+}
+
+impl LinkTarget {
+    /// Bytes of text the target holds.
+    fn text_len(&self) -> usize {
+        match self {
+            LinkTarget::Page(_) => 0,
+            LinkTarget::Named(s, _)
+            | LinkTarget::Uri(s)
+            | LinkTarget::Launch(s)
+            | LinkTarget::Other(s) => s.len(),
+            LinkTarget::Remote { file, .. } => file.len(),
+        }
+    }
 }
 
 pub(crate) fn rect(doc: &Document, obj: Option<&Object>) -> Option<[f32; 4]> {
@@ -168,6 +183,16 @@ fn format_label(style: Option<&[u8]>, value: u64) -> String {
     }
 }
 
+/// What one call of [`Pdf::pages`] may still do.
+struct Scan {
+    /// Resource entries (images, forms and other objects) left to visit.
+    left: usize,
+    /// An entry was not visited because none were left.
+    cut: bool,
+    /// The page whose resources ran out of entries first.
+    cut_at: Option<u32>,
+}
+
 /// Where one outline walk stands.
 struct OutlineWalk<'a> {
     pdf: &'a Pdf,
@@ -185,7 +210,15 @@ impl Pdf {
         let mut out = Vec::with_capacity(self.pages.len());
         let mut no_box = Vec::new();
         let mut odd_rotation = Vec::new();
-        let mut memo: HashMap<ObjectId, (bool, Arc<[ImageInfo]>)> = HashMap::new();
+        // Pages with the same resources share the result.
+        let mut memo: HashMap<ResourcesKey, (bool, Arc<[ImageInfo]>)> = HashMap::new();
+        // Resource entries the whole call may still visit. Different resources can name one
+        // shared form, so a bound per resources alone would not do.
+        let mut scan = Scan {
+            left: self.limits.max_items,
+            cut: false,
+            cut_at: None,
+        };
         for (i, node) in self.pages.iter().enumerate() {
             let number = i as u32 + 1;
             if stop() {
@@ -208,31 +241,31 @@ impl Pdf {
                 odd_rotation.push(number);
                 0
             };
-            // Pages that share their resources share the result.
-            let (has_fonts, images) = match node.resources_from {
-                Some(owner) => memo
-                    .entry(owner)
-                    .or_insert_with(|| {
+            let (has_fonts, images) = match pagetree::resources_key(&self.doc, node) {
+                Some(key) => match memo.get(&key) {
+                    Some(found) => found.clone(),
+                    None => {
                         let mut has_fonts = false;
                         let mut images = Vec::new();
                         if let Some(res) = pagetree::resources(&self.doc, node) {
                             let mut seen = HashSet::new();
-                            self.scan_resources(res, 1, &mut seen, &mut has_fonts, &mut images);
+                            self.scan_resources(
+                                res,
+                                1,
+                                &mut seen,
+                                &mut scan,
+                                &mut has_fonts,
+                                &mut images,
+                            );
                         }
-                        if images.len() > self.limits.max_items {
-                            images.truncate(self.limits.max_items);
-                            issues.push(Issue::new(
-                                &format!("page {number}"),
-                                IssueKind::Limit,
-                                format!(
-                                    "the page resources hold more than {} images; the rest are not listed",
-                                    self.limits.max_items
-                                ),
-                            ));
+                        if scan.cut && scan.cut_at.is_none() {
+                            scan.cut_at = Some(number);
                         }
-                        (has_fonts, Arc::from(images))
-                    })
-                    .clone(),
+                        let found = (has_fonts, Arc::from(images));
+                        memo.insert(key, found.clone());
+                        found
+                    }
+                },
                 None => (false, Arc::from(Vec::new())),
             };
             out.push(PageInfo {
@@ -244,6 +277,16 @@ impl Pdf {
                 has_fonts,
                 images,
             });
+        }
+        if let Some(from) = scan.cut_at {
+            issues.push(Issue::new(
+                "document",
+                IssueKind::Limit,
+                format!(
+                    "the page resources hold more than {} images and forms in all; from page {from} on, images may be missing",
+                    self.limits.max_items
+                ),
+            ));
         }
         if !no_box.is_empty() {
             issues.push(Issue::new(
@@ -276,6 +319,7 @@ impl Pdf {
         res: &Object,
         depth: usize,
         seen: &mut HashSet<ObjectId>,
+        scan: &mut Scan,
         has_fonts: &mut bool,
         images: &mut Vec<ImageInfo>,
     ) {
@@ -298,6 +342,11 @@ impl Pdf {
             return;
         };
         for (_, x) in xobjects.iter() {
+            if scan.left == 0 {
+                scan.cut = true;
+                return;
+            }
+            scan.left -= 1;
             if let Some(id) = reference(x)
                 && !seen.insert(id)
             {
@@ -307,8 +356,6 @@ impl Pdf {
                 continue;
             };
             match get_name(doc, xd, b"Subtype") {
-                // One more than the limit is kept, so the caller can tell it was hit.
-                Some(b"Image") if images.len() > self.limits.max_items => return,
                 Some(b"Image") => images.push(ImageInfo {
                     width: get_int(doc, xd, b"Width")
                         .unwrap_or(0)
@@ -320,7 +367,7 @@ impl Pdf {
                 }),
                 Some(b"Form") => {
                     if let Ok(inner) = xd.get(b"Resources") {
-                        self.scan_resources(inner, depth + 1, seen, has_fonts, images);
+                        self.scan_resources(inner, depth + 1, seen, scan, has_fonts, images);
                     }
                 }
                 _ => {}
@@ -541,6 +588,10 @@ impl Pdf {
         let mut issues = Vec::new();
         let names = self.name_map(&mut issues);
         let mut out = Vec::new();
+        // Pages may share their annotations, and each link copies its text. In a file that
+        // shares nothing the text of all links is less than its objects take, so that bounds
+        // the copies.
+        let mut text_left = self.object_bytes;
         for (i, node) in self.pages.iter().enumerate() {
             let page = i as u32 + 1;
             let Some(pd) = doc.objects.get(&node.id).and_then(|o| dict(doc, o)) else {
@@ -573,6 +624,19 @@ impl Pdf {
                 let Some(target) = target else {
                     continue;
                 };
+                let text = target.text_len() as u64;
+                if text > text_left {
+                    issues.push(Issue::new(
+                        "document",
+                        IssueKind::Limit,
+                        format!(
+                            "the links repeat more text than the file holds; links from page {page} on are not listed"
+                        ),
+                    ));
+                    self.note(issues);
+                    return out;
+                }
+                text_left -= text;
                 out.push(Link {
                     page,
                     rect: rect(doc, ad.get(b"Rect").ok()).unwrap_or([0.0; 4]),

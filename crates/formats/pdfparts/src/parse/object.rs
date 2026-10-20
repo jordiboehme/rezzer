@@ -25,7 +25,7 @@ pub(crate) fn header_at(
 ) -> Result<Option<ObjectId>, Fail> {
     let mut l = Lexer::new(bytes, pos);
     let id = l.header();
-    budget.work(l.skipped)?;
+    budget.skipped(l.skipped)?;
     Ok(id)
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn header_at(
 pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<Head, Fail> {
     let mut l = Lexer::new(bytes, pos);
     let Some(id) = l.header() else {
-        budget.work(l.skipped)?;
+        budget.skipped(l.skipped)?;
         return Err(Fail::Bad("there is no object header at its offset"));
     };
     let value = l.value(budget, 0);
@@ -42,7 +42,10 @@ pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<H
         Ok(Object::Dictionary(_)) => l.stream_start(),
         _ => None,
     };
-    budget.work(l.skipped)?;
+    budget.skipped(l.skipped)?;
+    if value.is_err() {
+        budget.failed(l.i - pos)?;
+    }
     Ok(Head {
         id,
         value: value?,
@@ -102,6 +105,7 @@ pub(crate) fn finish(
 }
 
 /// Reads the whole object at `pos`; `length` resolves an indirect `/Length`.
+#[cfg(test)]
 pub(crate) fn object_at(
     bytes: &[u8],
     pos: usize,
