@@ -1,0 +1,154 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "text": "The Project Gutenberg EBook of Die Verwandlung, by Franz Kafka",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "This eBook is for the use of anyone anywhere at no cost and with\nalmost no restrictions whatsoever.  You may copy it, give it away or\nre-use it under the terms of the Project Gutenberg License included\nwith this eBook or online at www.gutenberg.org",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Title: Die Verwandlung",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Author: Franz Kafka",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Release Date: August 21, 2007 [EBook #22367]",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Language: German",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Character set encoding: ISO-8859-1",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "*** START OF THIS PROJECT GUTENBERG EBOOK DIE VERWANDLUNG ***",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Produced by Jana Srna, Alexander Bauer and the Online\nDistributed Proofreading Team at http://www.pgdp.net",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "                          DIE VERWANDLUNG",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "                                VON",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "                            FRANZ KAFKA",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<160 more items>"
+      ],
+      "kind": "other",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "part:1",
+        "kind": "other",
+        "name": "Part 1",
+        "size": "172 paragraphs"
+      }
+    ]
+  },
+  "properties": {
+    "language": "de"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "text (windows-1252)"
+    },
+    "encoding": "windows-1252",
+    "format": "text",
+    "modified": "<modified>",
+    "name": "text-latin1-gutenberg-verwandlung.txt",
+    "path": "<corpus>/web-text/text-latin1-gutenberg-verwandlung.txt",
+    "reader": {
+      "id": "text",
+      "version": "0.1.0"
+    },
+    "sha256": "fe91c871104780ce5a8fe3e12e79b757f6fb5ffa28ed83d6186e618fb3bf344a",
+    "size": 143353
+  }
+}

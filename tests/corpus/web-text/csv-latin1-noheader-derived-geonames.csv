@@ -1,0 +1,83 @@
+AT.09,Vienna,Vienna,2761367
+AT.08,Vorarlberg,Vorarlberg,2762300
+AT.07,Tyrol,Tyrol,2763586
+AT.06,Styria,Styria,2764581
+AT.05,Salzburg,Salzburg,2766823
+AT.04,Upper Austria,Upper Austria,2769848
+AT.03,Lower Austria,Lower Austria,2770542
+AT.02,Carinthia,Carinthia,2774686
+AT.01,Burgenland,Burgenland,2781194
+CH.ZH,Zurich,Zurich,2657895
+CH.ZG,Zug,Zug,2657907
+CH.VD,Vaud,Vaud,2658182
+CH.VS,Valais,Valais,2658205
+CH.UR,Uri,Uri,2658226
+CH.TI,Ticino,Ticino,2658370
+CH.TG,Thurgau,Thurgau,2658372
+CH.SO,Solothurn,Solothurn,2658563
+CH.SZ,Schwyz,Schwyz,2658664
+CH.SH,Schaffhausen,Schaffhausen,2658760
+CH.SG,Saint Gallen,Saint Gallen,2658821
+CH.OW,Obwalden,Obwalden,2659315
+CH.NW,Nidwalden,Nidwalden,2659471
+CH.NE,Neuchâtel,Neuchatel,2659495
+CH.LU,Lucerne,Lucerne,2659810
+CH.JU,Jura,Jura,2660207
+CH.GR,Grisons,Grisons,2660522
+CH.GL,Glarus,Glarus,2660593
+CH.GE,Geneva,Geneva,2660645
+CH.FR,Fribourg,Fribourg,2660717
+CH.BE,Bern,Bern,2661551
+CH.BS,Basel-City,Basel-City,2661602
+CH.BL,Basel-Landschaft,Basel-Landschaft,2661603
+CH.AR,Appenzell Ausserrhoden,Appenzell Ausserrhoden,2661739
+CH.AI,Appenzell Innerrhoden,Appenzell Innerrhoden,2661741
+CH.AG,Aargau,Aargau,2661876
+DE.15,Thuringia,Thuringia,2822542
+DE.10,Schleswig-Holstein,Schleswig-Holstein,2838632
+DE.14,Saxony-Anhalt,Saxony-Anhalt,2842565
+DE.13,Saxony,Saxony,2842566
+DE.09,Saarland,Saarland,2842635
+DE.08,Rheinland-Pfalz,Rheinland-Pfalz,2847618
+DE.07,North Rhine-Westphalia,North Rhine-Westphalia,2861876
+DE.06,Lower Saxony,Lower Saxony,2862926
+DE.12,Mecklenburg-Vorpommern,Mecklenburg-Vorpommern,2872567
+DE.05,Hesse,Hesse,2905330
+DE.04,Hamburg,Hamburg,2911297
+DE.03,Bremen,Bremen,2944387
+DE.11,Brandenburg,Brandenburg,2945356
+DE.16,State of Berlin,State of Berlin,2950157
+DE.02,Bavaria,Bavaria,2951839
+DE.01,Baden-Wurttemberg,Baden-Wurttemberg,2953481
+ES.31,Murcia,Murcia,2513413
+ES.CE,Ceuta,Ceuta,2519582
+ES.07,Balearic Islands,Balearic Islands,2521383
+ES.51,Andalusia,Andalusia,2593109
+ES.53,Canary Islands,Canary Islands,2593110
+ES.54,Castille-La Mancha,Castille-La Mancha,2593111
+ES.57,Extremadura,Extremadura,2593112
+ES.60,Valencia,Valencia,2593113
+ES.34,Asturias,Asturias,3114710
+ES.32,Navarre,Navarre,3115609
+ES.29,Madrid,Madrid,3117732
+ES.27,La Rioja,La Rioja,3336897
+ES.39,Cantabria,Cantabria,3336898
+ES.52,Aragon,Aragon,3336899
+ES.55,Castille and León,Castille and Leon,3336900
+ES.56,Catalonia,Catalonia,3336901
+ES.58,Galicia,Galicia,3336902
+ES.59,Basque Country,Basque Country,3336903
+ES.ML,Melilla,Melilla,6362988
+FR.93,Provence-Alpes-Côte d'Azur,Provence-Alpes-Cote d'Azur,2985244
+FR.52,Pays de la Loire,Pays de la Loire,2988289
+FR.11,Île-de-France,Ile-de-France,3012874
+FR.94,Corsica,Corsica,3023519
+FR.24,Centre-Val de Loire,Centre-Val de Loire,3027939
+FR.53,Brittany,Brittany,3030293
+FR.27,Bourgogne-Franche-Comté,Bourgogne-Franche-Comte,11071619
+FR.75,New Aquitaine,New Aquitaine,11071620
+FR.28,Normandy,Normandy,11071621
+FR.44,Grand Est,Grand Est,11071622
+FR.76,Occitanie,Occitanie,11071623
+FR.32,Hauts-de-France,Hauts-de-France,11071624
+FR.84,Auvergne-Rhône-Alpes,Auvergne-Rhone-Alpes,11071625

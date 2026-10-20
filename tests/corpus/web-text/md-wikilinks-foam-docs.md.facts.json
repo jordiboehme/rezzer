@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "markdown"
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "Wikilinks"
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "min_len": 1
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "contains": "block-anchors"
+  },
+  {
+    "contains": "## Creating Wikilinks"
+  }
+]

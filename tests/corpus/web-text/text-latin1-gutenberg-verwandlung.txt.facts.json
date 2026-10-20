@@ -1,0 +1,20 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "text"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "windows-1252"
+  },
+  {
+    "pointer": "/properties/language",
+    "equals": "de"
+  },
+  {
+    "contains": "aus unruhigen Träumen erwachte"
+  },
+  {
+    "contains": "Schläfrigkeit"
+  }
+]

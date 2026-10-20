@@ -1,0 +1,17 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/properties/custom/delimiter/value",
+    "equals": ","
+  },
+  {
+    "pointer": "/properties/custom/columns/value",
+    "equals": 5.0
+  },
+  {
+    "contains": "| John | Doe | 120 any st. | Anytown, WW | 08123 |"
+  }
+]

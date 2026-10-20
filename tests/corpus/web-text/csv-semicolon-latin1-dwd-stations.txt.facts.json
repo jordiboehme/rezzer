@@ -1,0 +1,27 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/properties/custom/delimiter/value",
+    "equals": ";"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "windows-1252"
+  },
+  {
+    "pointer": "/properties/language",
+    "equals": "de"
+  },
+  {
+    "contains": "Baden-Württemberg"
+  },
+  {
+    "contains": "Großenkneten"
+  },
+  {
+    "contains": "Thüringen"
+  }
+]

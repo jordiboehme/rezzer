@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "tsv"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "UTF-8"
+  },
+  {
+    "pointer": "/properties/custom/delimiter/value",
+    "equals": "tab"
+  },
+  {
+    "pointer": "/properties/custom/has_header/value",
+    "equals": false
+  },
+  {
+    "contains": "Sant Julià de Loria"
+  }
+]

@@ -1,0 +1,564 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-spectrum-comma_in_quotes",
+      "blocks": [
+        {
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "first",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "last",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "address",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "city",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!E1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "zip",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "John",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Doe",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "120 any st.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Anytown, WW",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-comma_in_quotes!E2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "08123",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "first",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "last",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "address",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "city",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "zip",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-spectrum-comma_in_quotes",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "csv-spectrum-comma_in_quotes",
+        "kind": "sheet",
+        "name": "csv-spectrum-comma_in_quotes",
+        "size": "2 rows x 5 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 5.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ","
+      },
+      "has_header": {
+        "type": "bool",
+        "value": true
+      },
+      "rows": {
+        "type": "number",
+        "value": 1.0
+      }
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+    },
+    "encoding": "UTF-8",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-spectrum-comma_in_quotes.csv",
+    "path": "<corpus>/web-text/csv-spectrum-comma_in_quotes.csv",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "f7654bf8e69586c8fe7f7f89392d2ed551be0e468e7101187bb482357d9a7815",
+    "size": 68
+  }
+}

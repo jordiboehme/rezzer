@@ -1,0 +1,9 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "contains": "ha \"ha\" ha"
+  }
+]

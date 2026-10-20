@@ -1,0 +1,13 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/properties/custom/rows/value",
+    "equals": 2.0
+  },
+  {
+    "contains": "\"ha\""
+  }
+]

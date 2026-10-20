@@ -1,0 +1,58 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "csv-spectrum-json.csv"
+resource: "<corpus>/web-text/csv-spectrum-json.csv"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "27bebe48687aa0cc5858692c49e390f129b79063cd032caf8e329ca8b5ded355"
+source_size: 65
+format: csv
+detected_by: "extension .csv and 2 fields in every record; content sniffing declined"
+encoding: "UTF-8"
+reader: "csv/0.1.0"
+completeness: complete
+losses: 1
+---
+
+# csv-spectrum-json.csv
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| csv-spectrum-json | sheet | 2 rows x 2 columns |  |  |
+
+- Not read: 1
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| columns | 2 |
+| delimiter | , |
+| has\_header | false |
+| rows | 2 |
+
+## csv-spectrum-json
+
+|  |  |
+| --- | --- |
+| key | val |
+| 1 | {"type": "Point", "coordinates": \[102.0, 0.5\]} |
+
+**Columns**
+
+| Column | Type | Unit | Missing | Unique | Key |
+| --- | --- | --- | --- | --- | --- |
+| Column 1 | text |  | 0 | yes | yes |
+| Column 2 | text |  | 0 | yes | no |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| document | dialect guessed from the file type | uncertain | info |

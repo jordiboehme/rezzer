@@ -1,0 +1,109 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "About the repository README file"
+resource: "<corpus>/web-text/md-yaml-frontmatter-github-docs-about-readmes.md"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "5a3dfd2042720a4cc1f0ff77660cf21714eb98b127932d7a44976663f9509d3b"
+source_size: 3532
+format: markdown
+detected_by: "yaml frontmatter"
+encoding: "UTF-8"
+reader: "markdown/0.1.0"
+completeness: complete
+losses: 0
+language: "en"
+---
+
+# About the repository README file
+
+## Overview
+
+- Graphs: 1
+- Links: 7
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| category | Customize and configure a repository |
+| intro | You can add a README file to your repository to tell other people why your project is useful, what they can do with your project, and how they can use it. |
+| redirect\_from | /articles/section-links-on-readmes-and-blob-pages, /articles/relative-links-in-readmes, /articles/about-readmes, /github/creating-cloning-and-archiving-repositories/about-readmes, /github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes |
+| shortTitle | About READMEs |
+| versions.fpt | \* |
+| versions.ghec | \* |
+| versions.ghes | \* |
+
+## About READMEs
+
+{% data reusables.repositories.about-READMEs %}
+
+For more information about providing guidelines for your project, see [AUTOTITLE](/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project) and [AUTOTITLE](/communities/setting-up-your-project-for-healthy-contributions).
+
+A README is often the first item a visitor will see when visiting your repository. README files typically include information on:
+
+- What the project does
+- Why the project is useful
+- How users can get started with the project
+- Where users can get help with your project
+- Who maintains and contributes to the project
+
+If you put your README file in your repository's hidden `.github`, root, or `docs` directory, {% data variables.product.github %} will recognize and automatically surface your README to repository visitors.
+
+If a repository contains more than one README file, then the file shown is chosen from locations in the following order: the `.github` directory, then the repository's root directory, and finally the `docs` directory.
+
+When your README is viewed on GitHub, any content beyond 500 KiB will be truncated.
+
+{% data reusables.profile.profile-readme %}
+
+## Auto-generated table of contents for markdown files
+
+For the rendered view of any Markdown file in a repository, including README files, {% data variables.product.github %} will automatically generate a table of contents based on section headings. You can view the table of contents for a README file by clicking the "Outline" menu icon {% octicon "list-unordered" aria-label="Table of Contents" %} in the top corner of the rendered page.
+
+## Section links in markdown files and blob pages
+
+{% data reusables.repositories.section-links %}
+
+For more detailed information about section links, see [Section links](/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links).
+
+## Relative links and image paths in markdown files
+
+{% data reusables.repositories.relative-links %}
+
+## Wikis
+
+A README should only contain information necessary for developers to get started using and contributing to your project. Longer documentation is best suited for wikis. For more information, see [AUTOTITLE](/communities/documenting-your-project-with-wikis/about-wikis).
+
+## Further reading
+
+- [AUTOTITLE](/repositories/working-with-files/managing-files/adding-a-file-to-a-repository)
+- [5 tips for making your {% data variables.product.company\_short %} profile page accessible](https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/) in the {% data variables.product.company\_short %} blog {%- ifversion fpt or ghec %}
+- [AUTOTITLE](/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces) {%- endif %}
+
+## Logic
+
+### Graph: links
+
+Kind link, 8 nodes, 7 edges.
+```mermaid
+flowchart LR
+    n_self["About the repository README file"]
+    n__communities_setting_up_your_project_for_healthy_contributions_adding_a_code_of_conduct_to_your_project["/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project"]
+    n__communities_setting_up_your_project_for_healthy_contributions["/communities/setting-up-your-project-for-healthy-contributions"]
+    n__get_started_writing_on_github_getting_started_with_writing_and_formatting_on_github_basic_writing_and_formatting_syntax_section_links["/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#35;section-links"]
+    n__communities_documenting_your_project_with_wikis_about_wikis["/communities/documenting-your-project-with-wikis/about-wikis"]
+    n__repositories_working_with_files_managing_files_adding_a_file_to_a_repository["/repositories/working-with-files/managing-files/adding-a-file-to-a-repository"]
+    n_https___github_blog_2023_10_26_5_tips_for_making_your_github_profile_page_accessible_["https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/"]
+    n__codespaces_setting_up_your_project_for_codespaces_setting_up_your_repository_facilitating_quick_creation_and_resumption_of_codespaces["/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces"]
+    n_self -->|"links_to"| n__communities_setting_up_your_project_for_healthy_contributions_adding_a_code_of_conduct_to_your_project
+    n_self -->|"links_to"| n__communities_setting_up_your_project_for_healthy_contributions
+    n_self -->|"links_to"| n__get_started_writing_on_github_getting_started_with_writing_and_formatting_on_github_basic_writing_and_formatting_syntax_section_links
+    n_self -->|"links_to"| n__communities_documenting_your_project_with_wikis_about_wikis
+    n_self -->|"links_to"| n__repositories_working_with_files_managing_files_adding_a_file_to_a_repository
+    n_self -->|"links_to"| n_https___github_blog_2023_10_26_5_tips_for_making_your_github_profile_page_accessible_
+    n_self -->|"links_to"| n__codespaces_setting_up_your_project_for_codespaces_setting_up_your_repository_facilitating_quick_creation_and_resumption_of_codespaces
+```

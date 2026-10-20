@@ -949,9 +949,11 @@ name = "rezzer"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "insta",
  "predicates",
  "rezzer-cli",
  "rezzer-model",
+ "rezzer-pipeline",
  "rezzer-read-csv",
  "rezzer-read-markdown",
  "rezzer-read-text",

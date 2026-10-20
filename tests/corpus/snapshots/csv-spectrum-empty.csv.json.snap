@@ -1,0 +1,431 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-spectrum-empty",
+      "blocks": [
+        {
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "anchor": "csv-spectrum-empty!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "a",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "b",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "c",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-spectrum-empty!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-spectrum-empty!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-spectrum-empty!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "a",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "b",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "c",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-spectrum-empty",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "csv-spectrum-empty",
+        "kind": "sheet",
+        "name": "csv-spectrum-empty",
+        "size": "3 rows x 3 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 3.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ","
+      },
+      "has_header": {
+        "type": "bool",
+        "value": true
+      },
+      "rows": {
+        "type": "number",
+        "value": 2.0
+      }
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+    },
+    "encoding": "UTF-8",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-spectrum-empty.csv",
+    "path": "<corpus>/web-text/csv-spectrum-empty.csv",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "f868c0f521228d5afc2c21eac9ad98729d2db969b98126105be844856d9b952a",
+    "size": 19
+  }
+}

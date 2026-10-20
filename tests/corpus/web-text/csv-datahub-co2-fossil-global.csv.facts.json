@@ -1,0 +1,14 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/facets/formulas",
+    "min_len": 1,
+    "contains": "Total ="
+  },
+  {
+    "contains": "Total = Gas Fuel"
+  }
+]

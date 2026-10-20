@@ -1,0 +1,23 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "markdown"
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "Abstraction without overhead: traits in Rust"
+  },
+  {
+    "pointer": "/properties/authors",
+    "equals": [
+      "Aaron Turon"
+    ]
+  },
+  {
+    "pointer": "/facets/graphs/0/edges",
+    "min_len": 1
+  },
+  {
+    "contains": "zero-cost abstraction"
+  }
+]

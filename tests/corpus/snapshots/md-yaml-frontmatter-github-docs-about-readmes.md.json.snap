@@ -1,0 +1,413 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "h:about-readmes",
+      "inlines": [
+        {
+          "text": "About READMEs",
+          "type": "text"
+        }
+      ],
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "inlines": [
+        {
+          "text": "{% data reusables.repositories.about-READMEs %}",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "inlines": [
+        {
+          "text": "For more information about providing guidelines for your project, see ",
+          "type": "text"
+        },
+        {
+          "inlines": [
+            {
+              "text": "AUTOTITLE",
+              "type": "text"
+            }
+          ],
+          "internal": true,
+          "target": "/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project",
+          "type": "link"
+        },
+        {
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "inlines": [
+            {
+              "text": "AUTOTITLE",
+              "type": "text"
+            }
+          ],
+          "internal": true,
+          "target": "/communities/setting-up-your-project-for-healthy-contributions",
+          "type": "link"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "inlines": [
+        {
+          "text": "A README is often the first item a visitor will see when visiting your repository. README files typically include information on:",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "items": [
+        [
+          {
+            "inlines": [
+              {
+                "text": "What the project does",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "inlines": [
+              {
+                "text": "Why the project is useful",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "inlines": [
+              {
+                "text": "How users can get started with the project",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "inlines": [
+              {
+                "text": "Where users can get help with your project",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "inlines": [
+              {
+                "text": "Who maintains and contributes to the project",
+                "type": "text"
+              }
+            ],
+            "type": "paragraph"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "inlines": [
+        {
+          "text": "If you put your README file in your repository's hidden ",
+          "type": "text"
+        },
+        {
+          "text": ".github",
+          "type": "code"
+        },
+        {
+          "text": ", root, or ",
+          "type": "text"
+        },
+        {
+          "text": "docs",
+          "type": "code"
+        },
+        {
+          "text": " directory, {% data variables.product.github %} will recognize and automatically surface your README to repository visitors.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "inlines": [
+        {
+          "text": "If a repository contains more than one README file, then the file shown is chosen from locations in the following order: the ",
+          "type": "text"
+        },
+        {
+          "text": ".github",
+          "type": "code"
+        },
+        {
+          "text": " directory, then the repository's root directory, and finally the ",
+          "type": "text"
+        },
+        {
+          "text": "docs",
+          "type": "code"
+        },
+        {
+          "text": " directory.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "inlines": [
+        {
+          "text": "When your README is viewed on GitHub, any content beyond 500 KiB will be truncated.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "inlines": [
+        {
+          "text": "{% data reusables.profile.profile-readme %}",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "anchor": "h:auto-generated-table-of-contents-for-markdown-files",
+      "inlines": [
+        {
+          "text": "Auto-generated table of contents for markdown files",
+          "type": "text"
+        }
+      ],
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "inlines": [
+        {
+          "text": "For the rendered view of any Markdown file in a repository, including README files, {% data variables.product.github %} will automatically generate a table of contents based on section headings. You can view the table of contents for a README file by clicking the \"Outline\" menu icon {% octicon \"list-unordered\" aria-label=\"Table of Contents\" %} in the top corner of the rendered page.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "anchor": "h:section-links-in-markdown-files-and-blob-pages",
+      "inlines": [
+        {
+          "text": "Section links in markdown files and blob pages",
+          "type": "text"
+        }
+      ],
+      "level": 2,
+      "type": "heading"
+    },
+    "<8 more items>"
+  ],
+  "facets": {
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/communities/setting-up-your-project-for-healthy-contributions"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/communities/documenting-your-project-with-wikis/about-wikis"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/repositories/working-with-files/managing-files/adding-a-file-to-a-repository"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/"
+          },
+          {
+            "from": "self",
+            "kind": "links_to",
+            "to": "/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces"
+          }
+        ],
+        "id": "links",
+        "kind": "link",
+        "nodes": [
+          {
+            "id": "self",
+            "kind": "document",
+            "label": "About the repository README file"
+          },
+          {
+            "id": "/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project",
+            "kind": "path",
+            "label": "/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project"
+          },
+          {
+            "id": "/communities/setting-up-your-project-for-healthy-contributions",
+            "kind": "path",
+            "label": "/communities/setting-up-your-project-for-healthy-contributions"
+          },
+          {
+            "id": "/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links",
+            "kind": "path",
+            "label": "/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links"
+          },
+          {
+            "id": "/communities/documenting-your-project-with-wikis/about-wikis",
+            "kind": "path",
+            "label": "/communities/documenting-your-project-with-wikis/about-wikis"
+          },
+          {
+            "id": "/repositories/working-with-files/managing-files/adding-a-file-to-a-repository",
+            "kind": "path",
+            "label": "/repositories/working-with-files/managing-files/adding-a-file-to-a-repository"
+          },
+          {
+            "id": "https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/",
+            "kind": "url",
+            "label": "https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/"
+          },
+          {
+            "id": "/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces",
+            "kind": "path",
+            "label": "/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces"
+          }
+        ]
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Graphs",
+        "1"
+      ],
+      [
+        "Links",
+        "7"
+      ]
+    ]
+  },
+  "properties": {
+    "custom": {
+      "category": {
+        "type": "list",
+        "value": [
+          {
+            "type": "text",
+            "value": "Customize and configure a repository"
+          }
+        ]
+      },
+      "intro": {
+        "type": "text",
+        "value": "You can add a README file to your repository to tell other people why your project is useful, what they can do with your project, and how they can use it."
+      },
+      "redirect_from": {
+        "type": "list",
+        "value": [
+          {
+            "type": "text",
+            "value": "/articles/section-links-on-readmes-and-blob-pages"
+          },
+          {
+            "type": "text",
+            "value": "/articles/relative-links-in-readmes"
+          },
+          {
+            "type": "text",
+            "value": "/articles/about-readmes"
+          },
+          {
+            "type": "text",
+            "value": "/github/creating-cloning-and-archiving-repositories/about-readmes"
+          },
+          {
+            "type": "text",
+            "value": "/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes"
+          }
+        ]
+      },
+      "shortTitle": {
+        "type": "text",
+        "value": "About READMEs"
+      },
+      "versions.fpt": {
+        "type": "text",
+        "value": "*"
+      },
+      "versions.ghec": {
+        "type": "text",
+        "value": "*"
+      },
+      "versions.ghes": {
+        "type": "text",
+        "value": "*"
+      }
+    },
+    "language": "en",
+    "title": "About the repository README file"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "yaml frontmatter"
+    },
+    "encoding": "UTF-8",
+    "format": "markdown",
+    "modified": "<modified>",
+    "name": "md-yaml-frontmatter-github-docs-about-readmes.md",
+    "path": "<corpus>/web-text/md-yaml-frontmatter-github-docs-about-readmes.md",
+    "reader": {
+      "id": "markdown",
+      "version": "0.1.0"
+    },
+    "sha256": "5a3dfd2042720a4cc1f0ff77660cf21714eb98b127932d7a44976663f9509d3b",
+    "size": 3532
+  }
+}

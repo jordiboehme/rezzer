@@ -1,0 +1,16 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/losses",
+    "min_len": 2
+  },
+  {
+    "contains": "row has 9 fields, expected 7"
+  },
+  {
+    "contains": "row has 3 fields, expected 7"
+  }
+]

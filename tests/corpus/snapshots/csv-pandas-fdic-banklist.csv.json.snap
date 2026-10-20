@@ -1,0 +1,1524 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "csv-pandas-fdic-banklist",
+      "blocks": [
+        {
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bank Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "City",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ST",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CERT",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Acquiring Institution",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Closing Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Updated Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Banks of Wisconsin d/b/a Bank of Kenosha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Kenosha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "WI",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "35386",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "North Shore Bank, FSB",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "31-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "31-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Central Arizona Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Scottsdale",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AZ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "34527",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Western State Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "20-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sunrise Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Valdosta",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58185",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Synovus Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "21-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pisgah Community Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Asheville",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "NC",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58701",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Capital Bank, N.A.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Douglas County Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Douglasville",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "21649",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hamilton State Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Parkway Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lenoir",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "NC",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57158",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CertusBank, National Association",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "17-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Chipola Community Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Marianna",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FL",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58034",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "First Federal Bank of Florida",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "19-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Heritage Bank of North Florida",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Orange Park",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FL",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26680",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FirstAtlantic Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "19-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16-May-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "First Federal Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lexington",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "KY",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "29594",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Your Community Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "19-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "23-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Gold Canyon Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Gold Canyon",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AZ",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "58066",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "First Scottsdale Bank, National Association",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9-Apr-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "csv-pandas-fdic-banklist!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Frontier Bank",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "LaGrange",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "GA",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16431",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!E12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "HeritageBank of the South",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!F12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8-Mar-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "csv-pandas-fdic-banklist!G12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "26-Mar-13",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<495 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Columns",
+          "header_rows": 1,
+          "role": "summary",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unit",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Missing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Unique",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Key",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bank Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "City",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "ST",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "CERT",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "integer",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Acquiring Institution",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Closing Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Updated Date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "date",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "csv-pandas-fdic-banklist",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "parts": [
+      {
+        "id": "csv-pandas-fdic-banklist",
+        "kind": "sheet",
+        "name": "csv-pandas-fdic-banklist",
+        "size": "507 rows x 7 columns"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "columns": {
+        "type": "number",
+        "value": 7.0
+      },
+      "delimiter": {
+        "type": "text",
+        "value": ","
+      },
+      "has_header": {
+        "type": "bool",
+        "value": true
+      },
+      "rows": {
+        "type": "number",
+        "value": 506.0
+      }
+    },
+    "language": "en"
+  },
+  "source": {
+    "detection": {
+      "confidence": "likely",
+      "evidence": "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+    },
+    "encoding": "UTF-8",
+    "format": "csv",
+    "modified": "<modified>",
+    "name": "csv-pandas-fdic-banklist.csv",
+    "path": "<corpus>/web-text/csv-pandas-fdic-banklist.csv",
+    "reader": {
+      "id": "csv",
+      "version": "0.1.0"
+    },
+    "sha256": "b33f2443e72c52ed02c8f9bbd4969d69590373f75c1b0f3b07e3693127c48423",
+    "size": 41417
+  }
+}

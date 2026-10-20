@@ -1,0 +1,23 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "csv"
+  },
+  {
+    "pointer": "/source/encoding",
+    "equals": "UTF-8"
+  },
+  {
+    "contains": "losses: 0"
+  },
+  {
+    "pointer": "/body/0/blocks/0/rows",
+    "len": 507
+  },
+  {
+    "contains": "| Banks of Wisconsin d/b/a Bank of Kenosha | Kenosha | WI | 35386 |"
+  },
+  {
+    "contains": "| CERT | integer |  | 0 | yes | yes |"
+  }
+]

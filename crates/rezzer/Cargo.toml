@@ -25,6 +25,8 @@ rezzer-read-csv = { path = "../readers/rezzer-read-csv", optional = true }
 
 [dev-dependencies]
 rezzer-model = { path = "../rezzer-model" }
+rezzer-pipeline = { path = "../rezzer-pipeline" }
+insta.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 serde_json.workspace = true
