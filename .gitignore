@@ -4,3 +4,6 @@
 /AGENTS.md
 /docs/superpowers/
 /.superpowers/
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts

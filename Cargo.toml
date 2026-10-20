@@ -16,6 +16,8 @@ members = [
     "crates/readers/rezzer-read-csv",
     "crates/rezzer",
 ]
+# The fuzz targets are their own cargo-fuzz project (nightly only).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -53,3 +55,11 @@ libc = "=0.2.191"
 flate2 = { version = "=1.1.10", default-features = false }
 base64 = "=0.23.1"
 percent-encoding = "=2.3.2"
+
+# The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
+# measure the build profile, not the limit, so debug and test builds are lightly optimized.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

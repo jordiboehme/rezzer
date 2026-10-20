@@ -1,0 +1,61 @@
+[package]
+name = "rezzer-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MPL-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+rezzer-detect = { path = "../crates/rezzer-detect" }
+rezzer-enrich = { path = "../crates/rezzer-enrich" }
+rezzer-limits = { path = "../crates/rezzer-limits" }
+rezzer-model = { path = "../crates/rezzer-model" }
+rezzer-render = { path = "../crates/rezzer-render" }
+rezzer-read-markdown = { path = "../crates/readers/rezzer-read-markdown" }
+textenc = { path = "../crates/formats/textenc" }
+csvsniff = { path = "../crates/formats/csvsniff" }
+
+# Not part of the workspace: cargo-fuzz needs nightly.
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "detect"
+path = "fuzz_targets/detect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "textenc_decode"
+path = "fuzz_targets/textenc_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "csvsniff"
+path = "fuzz_targets/csvsniff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown_read"
+path = "fuzz_targets/markdown_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "render"
+path = "fuzz_targets/render.rs"
+test = false
+doc = false
+bench = false
