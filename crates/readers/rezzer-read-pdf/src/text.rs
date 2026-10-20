@@ -120,6 +120,41 @@ pub(crate) struct PageItems {
     pub notes: Vec<Note>,
 }
 
+impl PageItems {
+    /// Copies the runs into fresh allocations.
+    fn compact(&mut self) {
+        let copy = |list: &mut Vec<Run>| *list = list.to_vec();
+        copy(&mut self.runs);
+        copy(&mut self.invisible);
+        for (_, list) in &mut self.hidden_layers {
+            copy(list);
+        }
+    }
+
+    /// About the memory the items take once their lists are shrunk to fit.
+    fn kept_bytes(&mut self) -> u64 {
+        fn runs(list: &mut Vec<Run>) -> u64 {
+            list.shrink_to_fit();
+            list.iter()
+                .map(|r| {
+                    (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64
+                        + r.uri.as_ref().map_or(0, |u| u.len() as u64 + 32)
+                })
+                .sum()
+        }
+        let mut total = runs(&mut self.runs) + runs(&mut self.invisible);
+        for (name, list) in &mut self.hidden_layers {
+            total += name.len() as u64 + runs(list);
+        }
+        total += self
+            .hidden_layer
+            .iter()
+            .map(|l| l.len() as u64 + 32)
+            .sum::<u64>();
+        total + 16 * self.images.len() as u64 + 256
+    }
+}
+
 /// A part of a page that was not read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Note {
@@ -166,16 +201,21 @@ pub(crate) struct Caps {
     /// Glyphs one page may build: the interpreter builds every glyph of a show before the
     /// device sees it, so the walk counts shown bytes against this bound first.
     pub max_glyphs: usize,
+    /// Bytes the pages read so far may keep together until they are laid out: runs, their
+    /// text and the other items. Past it, the later pages are not read.
+    pub max_kept: u64,
 }
 
 impl Caps {
     /// The caps for a read with `max_items` and `max_memory` bytes: a page's glyphs cost about
-    /// 600 bytes each until laid out, and may take a quarter of the memory.
+    /// 600 bytes each until laid out and may take a quarter of the memory; what the pages
+    /// keep for layout may take a sixteenth, as building each page leaves memory behind.
     pub(crate) fn new(max_items: usize, max_memory: u64) -> Caps {
         let glyphs = usize::try_from(max_memory / 4 / 600).unwrap_or(usize::MAX);
         Caps {
             max_items,
             max_glyphs: glyphs.max(1_000),
+            max_kept: (max_memory / 16).max(1 << 20),
         }
     }
 }
@@ -348,9 +388,14 @@ struct FontInfo {
 /// A marked content sequence the walk met, in the order the interpreter meets it.
 #[derive(Debug, Clone)]
 struct Mark {
+    /// The tag and MCID the interpreter reports for it, to match the two.
     tag: u64,
     mcid: Option<i32>,
+    /// The MCID of the sequence in the file, kept when the walk rewrote it.
+    own_mcid: Option<i32>,
     actual: Option<Rc<str>>,
+    /// The switched-off layer this sequence opens, when the walk rewrote it to be drawn.
+    layer: Option<usize>,
 }
 
 /// The glyph tables of embedded font programs, shared by every font dictionary that uses a
@@ -376,6 +421,13 @@ struct PageReader<'p, 'a> {
     cache_bytes: u64,
     known: Known,
     programs: Programs,
+    /// The device's glyph and text buffers, reused from page to page.
+    glyph_buf: Vec<Gl>,
+    text_buf: String,
+    /// Bytes the kept pages may still take.
+    kept_left: u64,
+    /// Why the later pages are not read, once the kept pages took all they may.
+    kept_spent: Option<String>,
 }
 
 impl<'p, 'a> PageReader<'p, 'a> {
@@ -402,11 +454,18 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 ..Known::default()
             },
             programs: Programs::default(),
+            glyph_buf: Vec::new(),
+            text_buf: String::new(),
+            kept_left: caps.max_kept,
+            kept_spent: None,
         }
     }
 
     fn page(&mut self, n: u32, page: &Page<'a>, links: &[Link]) -> Read {
         let fail = |why: String, kind: Fail| Read::Failed(Failure { page: n, why, kind });
+        if let Some(why) = &self.kept_spent {
+            return fail(why.clone(), Fail::Limit);
+        }
         let max_bytes = (self.caps.max_items as u64).saturating_mul(BYTES_PER_UNIT);
         let streams = content_streams(page.raw());
         let size: u64 = streams.iter().map(|s| stream_size(self.pdf, s)).sum();
@@ -516,13 +575,13 @@ impl<'p, 'a> PageReader<'p, 'a> {
             self.settings.clone(),
         );
         let mut dev = TextDevice {
-            glyphs: Vec::new(),
-            text: String::new(),
+            glyphs: std::mem::take(&mut self.glyph_buf),
+            text: std::mem::take(&mut self.text_buf),
+            actuals: Vec::new(),
             images: Vec::new(),
             open: Vec::new(),
             marks: if use_marks { &marks } else { &[] },
             next_mark: 0,
-            layers: layers.len(),
             out_of_step: 0,
             fonts: &self.known.fonts,
             pdf: self.pdf,
@@ -578,13 +637,43 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  object limit allows; their glyphs count as unmapped"
             )));
         }
-        let mut items = lay_out(n, &dev.glyphs, &dev.text, links, crop.x0, crop.y0, &layers);
-        items.images = dev.images;
+        let texts = Texts {
+            text: &dev.text,
+            actuals: &dev.actuals,
+        };
+        let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
+        items.images = std::mem::take(&mut dev.images);
         items.mapped = dev.mapped;
         items.unmapped = dev.unmapped;
         items.unmapped_visible = dev.unmapped_visible;
+        // The glyph buffers are kept for the next page: built again for each page, their
+        // memory would not be used again.
+        let (mut glyphs, mut text) = (
+            std::mem::take(&mut dev.glyphs),
+            std::mem::take(&mut dev.text),
+        );
+        drop(dev);
+        glyphs.clear();
+        text.clear();
+        self.glyph_buf = glyphs;
+        self.text_buf = text;
         notes.append(&mut items.notes);
         items.notes = notes;
+        // The page's runs were built among many short-lived allocations; copied now, the
+        // kept text sits together and the memory of the build can be used again.
+        items.compact();
+        // What every page keeps until layout counts against one bound for the file.
+        let cost = items.kept_bytes();
+        if cost > self.kept_left {
+            let why = format!(
+                "the text of the file takes more than the {} bytes it may keep until it is laid \
+                 out",
+                self.caps.max_kept
+            );
+            self.kept_spent = Some(why.clone());
+            return fail(why, Fail::Limit);
+        }
+        self.kept_left -= cost;
         Read::Page(Box::new(items))
     }
 }
@@ -1021,26 +1110,20 @@ impl<'w> Walk<'w> {
                 }
                 true
             }
-            TypedInstruction::TextFont(f) => {
-                let Some(font) = res.get_font(f.0) else {
-                    return true;
-                };
-                let key = font.cache_key();
-                if !self.known.fonts.contains_key(&key) {
-                    let mut info = font_info(&font);
-                    info.program = font_program(&font).map(|s| (s.obj_id(), self.size(&s)));
-                    self.known.fonts.insert(key, info);
+            TypedInstruction::TextFont(f) => match res.get_font(f.0) {
+                Some(font) => self.set_font(&font),
+                None => true,
+            },
+            TypedInstruction::SetGraphicsState(g) => {
+                // An ExtGState may set the font too: `/Font [font size]`.
+                let font = res
+                    .get_ext_g_state(g.0)
+                    .and_then(|d| d.get::<Array<'_>>(b"Font"))
+                    .and_then(|a| a.iter::<Dict<'_>>().next());
+                match font {
+                    Some(font) => self.set_font(&font),
+                    None => true,
                 }
-                let type3 = font.get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Type3");
-                if let Some(gs) = self.gs.last_mut() {
-                    gs.type3 = type3;
-                }
-                if self.charged.insert(key) {
-                    let bytes = self.font_streams(&font);
-                    self.font_bytes = self.font_bytes.saturating_add(bytes);
-                    return self.charge(bytes / BYTES_PER_UNIT);
-                }
-                true
             }
             TypedInstruction::BeginMarkedContentWithProperties(bdc) => {
                 self.bdc(bdc.0, bdc.1, res, top)
@@ -1054,7 +1137,9 @@ impl<'w> Walk<'w> {
                     self.marks.push(Mark {
                         tag: tag_hash(bmc.0),
                         mcid: None,
+                        own_mcid: None,
                         actual: None,
+                        layer: None,
                     });
                 }
                 true
@@ -1153,14 +1238,10 @@ impl<'w> Walk<'w> {
             return true;
         }
         let rewritten = top.is_some_and(|i| self.rewrites.contains_key(&i));
-        let (mcid, actual) = if rewritten {
-            (None, None)
-        } else {
-            (
-                dict_or_stream(props).and_then(|(d, _)| d.get::<i32>(b"MCID")),
-                self.actual_text(props, res),
-            )
-        };
+        // A rewritten sequence reaches the interpreter as `BMC`, without its MCID; the walk
+        // keeps the MCID and the ActualText for it.
+        let own_mcid = dict_or_stream(props).and_then(|(d, _)| d.get::<i32>(b"MCID"));
+        let actual = self.actual_text(props, res);
         if let Some(a) = &actual {
             // The device copies the text once for the sequence.
             if !self.charge(a.len() as u64) {
@@ -1175,8 +1256,10 @@ impl<'w> Walk<'w> {
         }
         self.marks.push(Mark {
             tag: tag_hash(&tag_bytes),
-            mcid,
+            mcid: if rewritten { None } else { own_mcid },
+            own_mcid,
             actual,
+            layer: if rewritten { layer } else { None },
         });
         true
     }
@@ -1199,6 +1282,27 @@ impl<'w> Walk<'w> {
         let found = res.properties.get::<Dict<'_>>(name).and_then(|d| read(&d));
         self.known.properties.insert(id, found.clone());
         found
+    }
+
+    /// A font becomes current (through `Tf` or an ExtGState): its kind decides what its
+    /// glyphs cost, and its streams are charged once per page.
+    fn set_font(&mut self, font: &Dict<'_>) -> bool {
+        let key = font.cache_key();
+        if !self.known.fonts.contains_key(&key) {
+            let mut info = font_info(font);
+            info.program = font_program(font).map(|s| (s.obj_id(), self.size(&s)));
+            self.known.fonts.insert(key, info);
+        }
+        let type3 = font.get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Type3");
+        if let Some(gs) = self.gs.last_mut() {
+            gs.type3 = type3;
+        }
+        if self.charged.insert(key) {
+            let bytes = self.font_streams(font);
+            self.font_bytes = self.font_bytes.saturating_add(bytes);
+            return self.charge(bytes / BYTES_PER_UNIT);
+        }
+        true
     }
 
     /// A color space the interpreter builds may unpack an ICC profile or a lookup table.
@@ -1242,6 +1346,12 @@ impl<'w> Walk<'w> {
             return false;
         }
         let Ok(data) = s.decoded() else {
+            if self.skipping == 0 {
+                self.note(Note::Damaged(format!(
+                    "a form on page {page} does not unpack and is not drawn; its text is not \
+                     read"
+                )));
+            }
             return true;
         };
         // The interpreter does not run a form in hidden content or with its own optional
@@ -1595,7 +1705,24 @@ fn clean_bf(bf: BfString) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
-/// One glyph as the device keeps it. Its text is `text[start..start + len]` of the page.
+/// The text of a page's glyphs: the device's text buffer, and the ActualText strings the
+/// glyphs refer to, kept once each.
+struct Texts<'t> {
+    text: &'t str,
+    actuals: &'t [Rc<str>],
+}
+
+impl Texts<'_> {
+    fn of(&self, g: &Gl) -> &str {
+        match g.actual {
+            Some(i) => self.actuals.get(i as usize).map_or("", |a| a),
+            None => &self.text[g.start as usize..(g.start + g.len) as usize],
+        }
+    }
+}
+
+/// One glyph as the device keeps it. Its text is `text[start..start + len]` of the page, or
+/// the ActualText it refers to.
 #[derive(Debug, Clone, Copy)]
 struct Gl {
     start: u32,
@@ -1619,6 +1746,8 @@ struct Gl {
     vertical: bool,
     /// The glyph goes on the text before it without a space (inside one ActualText span).
     joined: bool,
+    /// The ActualText the glyph stands for, an index into the page's list.
+    actual: Option<u32>,
 }
 
 /// An open marked content sequence on the device.
@@ -1635,12 +1764,12 @@ struct Open {
 struct TextDevice<'d> {
     glyphs: Vec<Gl>,
     text: String,
+    /// ActualText strings the glyphs refer to.
+    actuals: Vec<Rc<str>>,
     images: Vec<[f32; 4]>,
     open: Vec<Open>,
     marks: &'d [Mark],
     next_mark: usize,
-    /// Switched-off layers the walk opened (tags `Rz0` and up).
-    layers: usize,
     /// Sequences whose ActualText was not used because they did not match the walk.
     out_of_step: u64,
     fonts: &'d HashMap<u128, FontInfo>,
@@ -1801,7 +1930,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
         for g in glyphs {
             match &**g {
                 Glyph::Outline(o) => o.glyph_id().to_u32().hash(&mut h),
-                Glyph::Type3(_) => u32::MAX.hash(&mut h),
+                Glyph::Type3(t) => t.cache_key().hash(&mut h),
             }
         }
         let key = h.finish();
@@ -1860,6 +1989,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 layer,
                 vertical: info.vertical,
                 joined: false,
+                actual: None,
             };
             // ActualText of the outermost sequence that has one replaces the glyphs in it.
             if let Some(o) = self.open.iter_mut().find(|o| o.actual.is_some()) {
@@ -1868,8 +1998,12 @@ impl<'a> Device<'a> for TextDevice<'_> {
                     self.push_glyph("", gl);
                 } else {
                     o.used = true;
-                    let actual = o.actual.clone().unwrap_or_else(|| Rc::from(""));
-                    self.push_glyph(&actual, gl);
+                    // The text is referred to, not copied.
+                    if let Some(a) = o.actual.clone() {
+                        gl.actual = u32::try_from(self.actuals.len()).ok();
+                        self.actuals.push(a);
+                    }
+                    self.push_glyph("", gl);
                 }
                 continue;
             }
@@ -1928,26 +2062,28 @@ impl<'a> Device<'a> for TextDevice<'_> {
         // on is trusted only with an MCID; otherwise the glyphs are read.
         let want = tag_hash(tag);
         let mut actual = None;
+        let mut layer = None;
+        let mut own_mcid = mcid;
         let from = self.next_mark.min(self.marks.len());
         if let Some(k) = self.marks[from..]
             .iter()
             .position(|m| m.tag == want && m.mcid == mcid)
         {
             let at = from + k;
+            let m = &self.marks[at];
             if k == 0 || mcid.is_some() {
-                actual = self.marks[at].actual.clone();
+                actual = m.actual.clone();
+                // A layer comes only from the sequence the walk rewrote, never from a tag
+                // that only looks the same.
+                layer = m.layer;
+                own_mcid = own_mcid.or(m.own_mcid);
                 self.next_mark = at + 1;
-            } else if self.marks[at].actual.is_some() {
+            } else if m.actual.is_some() || m.layer.is_some() {
                 self.out_of_step += 1;
             }
         }
-        let layer = tag
-            .strip_prefix(b"Rz")
-            .and_then(|k| std::str::from_utf8(k).ok())
-            .and_then(|k| k.parse::<usize>().ok())
-            .filter(|k| *k < self.layers);
         self.open.push(Open {
-            mcid: mcid.and_then(|m| u32::try_from(m).ok()),
+            mcid: own_mcid.and_then(|m| u32::try_from(m).ok()),
             layer,
             actual,
             used: false,
@@ -2030,11 +2166,13 @@ impl Turn {
 /// Builds the runs of a set of glyphs that all read along +x in the frame `turn`, in content
 /// order: a new run at a change of style, line or a jump; a space inside a run at a word gap.
 /// Each run also keeps where it starts in the frame `page` the page is read in.
-fn fragments(glyphs: &[Gl], text: &str, turn: Turn, page: Turn) -> Vec<Frag> {
-    let mut out: Vec<Frag> = Vec::new();
+fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Frag> {
+    // Sized once: a list grown step by step leaves blocks the allocator does not hand out
+    // again for the next page.
+    let mut out: Vec<Frag> = Vec::with_capacity(glyphs.len());
     for g in glyphs {
         let (x, y) = turn.apply(g.x, g.y);
-        let t = &text[g.start as usize..(g.start + g.len) as usize];
+        let t = text.of(g);
         let size = g.size.max(0.1);
         let adv = g.adv.unwrap_or(size * 0.5);
         if let Some(f) = out.last_mut() {
@@ -2469,10 +2607,16 @@ fn logical_order(units: &[&str]) -> String {
 }
 
 /// Vertical writing: one run per column, glyphs top to bottom, columns from right to left.
-fn vertical_runs(page: u32, glyphs: &[Gl], text: &str, turn: Turn, first_line: u32) -> Vec<Run> {
+fn vertical_runs(
+    page: u32,
+    glyphs: &[Gl],
+    text: &Texts<'_>,
+    turn: Turn,
+    first_line: u32,
+) -> Vec<Run> {
     let mut cols: Vec<(Run, f32)> = Vec::new();
     for g in glyphs {
-        let t = &text[g.start as usize..(g.start + g.len) as usize];
+        let t = text.of(g);
         let size = g.size.max(0.1);
         let (x, y) = turn.apply(g.x, g.y);
         if let Some((c, bottom)) = cols.last_mut()
@@ -2513,8 +2657,8 @@ fn vertical_runs(page: u32, glyphs: &[Gl], text: &str, turn: Turn, first_line: u
 
 /// Runs in reading order for one set of glyphs (visible or invisible), with the frame turn
 /// used: the main text along +x first, then text in other directions, then vertical writing.
-fn runs_of(page: u32, glyphs: &[Gl], text: &str, turn: Turn) -> Vec<Run> {
-    let mut main = Vec::new();
+fn runs_of(page: u32, glyphs: &[Gl], text: &Texts<'_>, turn: Turn) -> Vec<Run> {
+    let mut main = Vec::with_capacity(glyphs.len());
     let mut vertical = Vec::new();
     let mut others: Vec<(Turn, Vec<Gl>)> = Vec::new();
     for g in glyphs {
@@ -2544,7 +2688,7 @@ fn runs_of(page: u32, glyphs: &[Gl], text: &str, turn: Turn) -> Vec<Run> {
             }
         }
     }
-    let mut runs = Vec::new();
+    let mut runs = Vec::with_capacity(main.len());
     let mut line = 0u32;
     let frags = fragments(&main, text, turn, turn);
     for ids in lines_of(&frags, true) {
@@ -2591,7 +2735,7 @@ fn compose(a: Turn, b: Turn) -> Turn {
 fn lay_out(
     page: u32,
     glyphs: &[Gl],
-    text: &str,
+    text: &Texts<'_>,
     links: &[Link],
     x0: f64,
     y0: f64,
@@ -2761,6 +2905,7 @@ mod tests {
     const CAPS: Caps = Caps {
         max_items: 2_000_000,
         max_glyphs: 1_000_000,
+        max_kept: 1 << 30,
     };
 
     #[test]
@@ -2830,6 +2975,7 @@ mod tests {
         let caps = Caps {
             max_items: 1_000,
             max_glyphs: 1_000,
+            max_kept: 1 << 30,
         };
         let found = pages(&pdf, &[1, 2, 3], caps, &|| false);
         let read: Vec<u32> = found.pages.iter().map(|p| p.page).collect();

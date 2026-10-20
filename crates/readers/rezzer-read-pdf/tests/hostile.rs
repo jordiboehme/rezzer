@@ -651,3 +651,165 @@ fn clipping_glyphs_in_a_form_just_under_the_cap_stay_small() {
     assert!(text(page(&out, 1)).contains("WWWW"));
     assert_rss_under_256_mib();
 }
+
+#[test]
+fn type3_font_set_through_a_graphics_state_is_bounded() {
+    // The font comes from an ExtGState's /Font entry, not from Tf.
+    let start = Instant::now();
+    let content = big_show("/G0 gs", b'a', 223_000);
+    let out = read(&one_page(&content, |b, _| {
+        let proc_ = b.stream("", b"500 0 0 0 500 500 d1 0 0 500 500 re f");
+        let f = b.add(format!(
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 500] \
+             /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /a {proc_} 0 R >> \
+             /Encoding << /Type /Encoding /Differences [97 /a] >> /FirstChar 97 \
+             /LastChar 97 /Widths [500] >>"
+        ));
+        (
+            format!("/ExtGState << /G0 << /Font [{f} 0 R 12] >> >>"),
+            String::new(),
+        )
+    }));
+    assert_cut(&out, start);
+}
+
+/// A file of `pages` pages that all share one content stream: `Before.`, then either one
+/// show of `glyphs` glyphs each in a run of its own, or one span whose ActualText is a named
+/// property of `actual` bytes.
+fn many_pages(pages: usize, glyphs: usize, actual: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut c = b"BT /F1 12 Tf 72 700 Td (Before.) Tj 30 Tc 72 600 Td ".to_vec();
+    let props = if actual > 0 {
+        let p = b.add(format!("<< /ActualText ({}) >>", "y".repeat(actual)));
+        c.extend(b"/Span /P1 BDC (x) Tj EMC ");
+        format!("/Properties << /P1 {p} 0 R >>")
+    } else {
+        c.push(b'(');
+        c.extend(std::iter::repeat_n(b'a', glyphs));
+        c.extend(b") Tj ");
+        String::new()
+    };
+    c.extend(b"ET\n");
+    let packed = deflate(&c);
+    let cs = b.stream("/Filter /FlateDecode", &packed);
+    let mut kids = String::new();
+    for _ in 0..pages {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> {props} >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The read keeps page 1, stops keeping text on a later page with one Limit loss that names
+/// the pages not read, and stays small.
+fn assert_file_cut(out: &ReadOutcome, pages: usize, start: Instant) {
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert!(text(page(out, 1)).contains("Before."));
+    let cut: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(cut.len(), 1, "{:?}", out.document.losses);
+    assert!(cut[0].what.contains(&format!("to {pages}")), "{:?}", cut[0]);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn glyphs_spread_over_five_pages_are_bounded() {
+    let start = Instant::now();
+    let out = read(&many_pages(5, 220_000, 0));
+    assert_file_cut(&out, 5, start);
+}
+
+#[test]
+fn glyphs_spread_over_nine_pages_are_bounded() {
+    let start = Instant::now();
+    let out = read(&many_pages(9, 220_000, 0));
+    assert_file_cut(&out, 9, start);
+}
+
+#[test]
+fn glyphs_spread_over_twenty_pages_are_bounded() {
+    let start = Instant::now();
+    let out = read(&many_pages(20, 220_000, 0));
+    assert_file_cut(&out, 20, start);
+}
+
+#[test]
+fn actual_text_used_on_130_pages_is_bounded() {
+    let start = Instant::now();
+    let out = read(&many_pages(130, 0, 1_900_000));
+    assert_file_cut(&out, 130, start);
+}
+
+#[test]
+fn actual_text_used_on_200_pages_is_bounded() {
+    let start = Instant::now();
+    let out = read(&many_pages(200, 0, 1_900_000));
+    assert_file_cut(&out, 200, start);
+}
+
+#[test]
+fn a_real_rz_tag_stays_visible_text() {
+    // The file's own /Rz0 tags look like the tag a switched-off layer is rewritten to.
+    let content = b"/OC /L1 BDC BT /F1 12 Tf 72 700 Td (Hidden words.) Tj ET EMC\n\
+        /Rz0 BMC BT /F1 12 Tf 72 600 Td (Visible page words.) Tj ET EMC\n/X Do\n";
+    let out = read(&with_hidden_group(content, |b, font, _| {
+        let x = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 595 842] \
+                 /Resources << /Font << /F1 {font} 0 R >> >>"
+            ),
+            b"/Rz0 <<>> BDC BT /F1 12 Tf 72 500 Td (Visible form words.) Tj ET EMC",
+        );
+        format!("/XObject << /X {x} 0 R >>")
+    }));
+    let one = page(&out, 1);
+    let body = body_text(one);
+    assert!(body.contains("Visible page words."), "{body}");
+    assert!(body.contains("Visible form words."), "{body}");
+    assert!(!body.contains("Hidden words."), "{body}");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.starts_with("1 run in hidden layer Hidden")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn a_switched_off_span_keeps_its_actual_text() {
+    // An inline property list that names the group (object 4, see `with_hidden_group`) and
+    // carries ActualText for its glyphs.
+    let content = b"BT /F1 12 Tf 72 700 Td (Visible words.) Tj ET\n\
+        /OC << /OC 4 0 R /ActualText (Shown instead) >> BDC \
+        BT /F1 12 Tf 72 600 Td (xyz) Tj ET EMC\n";
+    let out = read(&with_hidden_group(content, |_, _, group| {
+        assert_eq!(group, 4);
+        String::new()
+    }));
+    let all = text(page(&out, 1));
+    assert!(all.contains("Shown instead"), "{all}");
+    assert!(!all.contains("xyz"), "{all}");
+    assert!(!body_text(page(&out, 1)).contains("Shown instead"));
+}
