@@ -164,21 +164,19 @@ impl Reader for CsvReader {
                 severity: Severity::Warning,
             });
         }
-        if let Some(problem) = analysis.quote_problem {
+        for problem in &analysis.quote_problems {
             let place = match record_at(text, &dialect, problem.offset) {
                 Some((n, line)) => format!("record {n} (line {line})"),
                 None => "end of file".to_string(),
             };
             let what = if problem.at_end {
-                format!("unterminated quote at {place}: the rest of the file was read as one cell")
+                "unterminated quote: the rest of the file was read as one cell"
             } else {
-                format!(
-                    "unterminated quote at {place}: the cell ran over the following lines up to a quote inside a later field"
-                )
+                "unterminated quote: the cell ran over the following lines up to a quote inside a later field"
             };
             doc.losses.push(Loss {
                 location: place,
-                what,
+                what: what.into(),
                 why: LossReason::Damaged,
                 severity: Severity::Error,
             });
@@ -232,7 +230,7 @@ impl Reader for CsvReader {
             let cells = rec
                 .iter()
                 .enumerate()
-                .map(|(j, v)| anchored(&sheet, j, row_no, &tidy(v)))
+                .map(|(j, v)| anchored(&sheet, j, row_no, cell_inlines(v)))
                 .collect();
             rows.push(cells);
         }
@@ -262,18 +260,19 @@ impl Reader for CsvReader {
                 } else {
                     String::new()
                 };
-                row.push(anchored(&sheet, j, i + 1, &label));
+                row.push(anchored(&sheet, j, i + 1, vec![plain(&label)]));
             }
         }
 
-        let rows_for_extra: Vec<Vec<String>> = if width > analysis.columns.len() {
+        let mut blocks = Vec::new();
+        // The cells are moved into the table; only a small copy of the extra columns is kept.
+        let extra_rows: Vec<Vec<Cell>> = if width > analysis.columns.len() {
             rows.iter()
-                .map(|r| r.iter().map(cell_text).collect())
+                .map(|r| r.iter().skip(analysis.columns.len()).cloned().collect())
                 .collect()
         } else {
             Vec::new()
         };
-        let mut blocks = Vec::new();
         if !timed_out {
             blocks.push(Block::Table {
                 caption: None,
@@ -322,11 +321,11 @@ impl Reader for CsvReader {
         }
         // Columns that exist only because some rows have more fields than the rest.
         for j in known..ncols_total {
-            let data = rows_for_extra.iter().skip(usize::from(dialect.has_header));
+            let j_rel = j - known;
             let (mut missing, mut any) = (0, false);
-            for row in data {
-                match row.get(j) {
-                    Some(v) if !v.is_empty() => any = true,
+            for row in extra_rows.iter().skip(usize::from(dialect.has_header)) {
+                match row.get(j_rel) {
+                    Some(cell) if !cell_empty(cell) => any = true,
                     _ => missing += 1,
                 }
             }
@@ -374,8 +373,8 @@ impl Reader for CsvReader {
 }
 
 /// A cell with its spreadsheet-style anchor (`sheet!B3`, `row` is 1-based, header is row 1).
-fn anchored(sheet: &str, column: usize, row: usize, text: &str) -> Cell {
-    let mut cell = Cell::new(vec![plain(text)]);
+fn anchored(sheet: &str, column: usize, row: usize, inlines: Vec<Inline>) -> Cell {
+    let mut cell = Cell::new(inlines);
     cell.anchor = Some(Anchor(format!("{sheet}!{}{row}", column_letter(column))));
     cell
 }
@@ -387,29 +386,33 @@ fn custom_columns(doc: &mut Document, columns: usize) {
         .insert("columns".into(), Value::number(columns as f64, None));
 }
 
-/// The text of a cell made by this reader (one text inline).
-fn cell_text(cell: &Cell) -> String {
-    cell.inlines
-        .iter()
-        .map(|i| match i {
-            Inline::Text { text, .. } => text.as_str(),
-            _ => "",
-        })
-        .collect()
+/// True when a cell has no visible text.
+fn cell_empty(cell: &Cell) -> bool {
+    cell.inlines.iter().all(|i| match i {
+        Inline::Text { text, .. } => text.is_empty(),
+        Inline::LineBreak => true,
+        _ => false,
+    })
 }
 
-/// Replaces each run of whitespace that contains a line break with one space.
-fn tidy(value: &str) -> String {
+/// The inlines of a cell: its text, with each run of whitespace that contains a line break
+/// replaced by `Inline::LineBreak` (the renderer writes it as one space inside a table).
+fn cell_inlines(value: &str) -> Vec<Inline> {
     if !value.contains(['\n', '\r']) {
-        return value.to_string();
+        return vec![plain(value)];
     }
-    let mut out = String::with_capacity(value.len());
+    let mut out: Vec<Inline> = Vec::new();
+    let mut text = String::new();
     let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
+    let flush = |run: &mut String, text: &mut String, out: &mut Vec<Inline>| {
         if run.contains(['\n', '\r']) {
-            out.push(' ');
+            if !text.is_empty() {
+                out.push(plain(text));
+                text.clear();
+            }
+            out.push(Inline::LineBreak);
         } else {
-            out.push_str(run);
+            text.push_str(run);
         }
         run.clear();
     };
@@ -417,11 +420,14 @@ fn tidy(value: &str) -> String {
         if c.is_whitespace() {
             run.push(c);
         } else {
-            flush(&mut run, &mut out);
-            out.push(c);
+            flush(&mut run, &mut text, &mut out);
+            text.push(c);
         }
     }
-    flush(&mut run, &mut out);
+    flush(&mut run, &mut text, &mut out);
+    if !text.is_empty() {
+        out.push(plain(&text));
+    }
     out
 }
 

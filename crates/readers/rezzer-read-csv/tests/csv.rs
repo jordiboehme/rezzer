@@ -44,6 +44,7 @@ fn text(cell: &Cell) -> String {
         .iter()
         .map(|i| match i {
             Inline::Text { text, .. } => text.as_str(),
+            Inline::LineBreak => " ",
             other => panic!("unexpected inline {other:?}"),
         })
         .collect()
@@ -378,7 +379,7 @@ fn unterminated_quote_at_the_end_is_an_error_loss() {
     assert_eq!(loss.location, "record 3 (line 3)");
     assert_eq!(
         loss.what,
-        "unterminated quote at record 3 (line 3): the rest of the file was read as one cell"
+        "unterminated quote: the rest of the file was read as one cell"
     );
 }
 
@@ -390,10 +391,7 @@ fn quote_closed_inside_a_later_field_is_reported() {
         .document
         .losses
         .iter()
-        .find(|l| {
-            l.what
-                .starts_with("unterminated quote at record 2 (line 2)")
-        })
+        .find(|l| l.what.starts_with("unterminated quote") && l.location == "record 2 (line 2)")
         .expect("loss");
     assert_eq!(loss.severity, Severity::Error);
 }
@@ -428,4 +426,39 @@ fn newline_runs_in_cells_become_one_space() {
     let rows = rows_of(blocks[0]);
     assert_eq!(rows[1][1], "ha \"ha\" ha");
     assert_eq!(rows[2][1], "x  y");
+}
+
+#[test]
+fn a_mid_file_and_an_end_of_file_quote_each_get_a_loss() {
+    let out = read(b"a,b\n1,2\n2,\"open\n3,4\n4,\"x y\",5\n9,\"oops,1\n7,8\n7,8\n");
+    let places: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.starts_with("unterminated quote"))
+        .map(|l| l.location.as_str())
+        .collect();
+    assert_eq!(places, ["record 3 (line 3)", "record 4 (line 6)"]);
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn line_breaks_stay_in_the_model() {
+    let out = read(b"a,b\n1,\"x \n y\"\n3,4\n");
+    let Block::Section { blocks, .. } = &out.document.body[0] else {
+        panic!()
+    };
+    let Block::Table { rows, .. } = &blocks[0] else {
+        panic!()
+    };
+    let kinds: Vec<&str> = rows[1][1]
+        .inlines
+        .iter()
+        .map(|i| match i {
+            Inline::Text { .. } => "text",
+            Inline::LineBreak => "break",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["text", "break", "text"]);
 }
