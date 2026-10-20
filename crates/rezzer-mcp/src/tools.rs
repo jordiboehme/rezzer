@@ -13,8 +13,8 @@ use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use rezzer_model::{Completeness, Confidence};
 use rezzer_pipeline::{OutputKind, OutputSection, Pipeline, Request, RunResult};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 /// Message for a `source` reference, until the source archive exists.
 pub const SOURCE_NOT_AVAILABLE: &str = "The source archive is not available yet.";
@@ -122,6 +122,27 @@ pub fn rez(pipeline: &Pipeline, params: RezParams) -> Answer {
     rez_answer(result, output, page)
 }
 
+/// The structured content of a `rez` result. Also the tool's output schema.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RezOutput {
+    /// complete, partial or failed.
+    #[schemars(extend("enum" = ["complete", "partial", "failed"]))]
+    pub status: &'static str,
+    /// The page in the text, starting at 1; null when there is none.
+    pub page: Option<usize>,
+    /// How many pages the result has; 0 when nothing could be read.
+    pub pages: usize,
+    /// The detected format of the file, for example csv; null when nothing could be read.
+    pub format: Option<String>,
+    /// SHA-256 of the file, lowercase hex; null when nothing could be read.
+    pub sha256: Option<String>,
+    /// How many parts of the file could not be read fully.
+    pub losses: usize,
+    /// Why the call failed or what went wrong, in one line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// The answer for a run: the requested page (or the JSON), else the reason it failed.
 fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
     let Some(document) = &result.document else {
@@ -131,62 +152,86 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
                 .unwrap_or_else(|| "The file could not be read.".to_string()),
         );
     };
-    let mut structured = Map::new();
-    structured.insert("status".into(), json!(status(result.completeness)));
-    structured.insert(
-        "format".into(),
-        json!(rezzer_render::format_name(document.source.format)),
-    );
-    structured.insert("sha256".into(), json!(document.source.sha256));
-    structured.insert("losses".into(), json!(document.losses.len()));
     let (text, pages) = match (output, &result.json) {
-        (OutputKind::Json, Some(json)) => (Some(json.as_str()), 1),
-        _ => (
-            page.checked_sub(1)
+        (OutputKind::Json, Some(json)) => (Some(json.clone()), 1),
+        _ => {
+            let pages = result.markdown_pages.len();
+            let text = page
+                .checked_sub(1)
                 .and_then(|i| result.markdown_pages.get(i))
-                .map(String::as_str),
-            result.markdown_pages.len(),
-        ),
+                .map(|markdown| with_paging_line(markdown, page, pages));
+            (text, pages)
+        }
     };
-    structured.insert("pages".into(), json!(pages));
+    let mut structured = RezOutput {
+        status: status(result.completeness),
+        page: Some(page),
+        pages,
+        format: Some(rezzer_render::format_name(document.source.format)),
+        sha256: Some(document.source.sha256.clone()),
+        losses: document.losses.len(),
+        message: result.message.clone(),
+    };
     let Some(text) = text.filter(|_| page <= pages) else {
         let noun = if pages == 1 { "page" } else { "pages" };
         let message = format!("page {page} does not exist: the output has {pages} {noun}.");
-        structured.insert("status".into(), json!("failed"));
-        structured.insert("page".into(), Value::Null);
-        structured.insert("message".into(), json!(message));
+        structured.status = "failed";
+        structured.page = None;
+        structured.message = Some(message.clone());
         return Answer {
             text: message,
-            structured: Value::Object(structured),
+            structured: to_value(&structured),
             failed: true,
         };
     };
-    structured.insert("page".into(), json!(page));
-    if let Some(message) = &result.message {
-        structured.insert("message".into(), json!(message));
-    }
     Answer {
-        text: text.to_string(),
-        structured: Value::Object(structured),
+        text,
+        structured: to_value(&structured),
         failed: result.completeness == Completeness::Failed,
     }
 }
 
+/// The Markdown page, unchanged, then for a result of several pages a blank line and one
+/// line that says which page this is and how to get the next one.
+fn with_paging_line(markdown: &str, page: usize, pages: usize) -> String {
+    if pages <= 1 {
+        return markdown.to_string();
+    }
+    let mut text = markdown.to_string();
+    if !text.ends_with("\n\n") {
+        text.push_str(if text.ends_with('\n') { "\n" } else { "\n\n" });
+    }
+    if page < pages {
+        text.push_str(&format!(
+            "Page {page} of {pages}. Call rez again with page: {} for the next page.\n",
+            page + 1
+        ));
+    } else {
+        text.push_str(&format!("Page {pages} of {pages}.\n"));
+    }
+    text
+}
+
 /// A failed `rez` answer without a document: the message is the text.
 fn rez_failed(message: String) -> Answer {
+    let structured = RezOutput {
+        status: "failed",
+        page: None,
+        pages: 0,
+        format: None,
+        sha256: None,
+        losses: 0,
+        message: Some(message.clone()),
+    };
     Answer {
-        structured: json!({
-            "status": "failed",
-            "page": null,
-            "pages": 0,
-            "format": null,
-            "sha256": null,
-            "losses": 0,
-            "message": message,
-        }),
+        structured: to_value(&structured),
         text: message,
         failed: true,
     }
+}
+
+fn to_value(output: &RezOutput) -> Value {
+    serde_json::to_value(output).expect("the rez output serializes")
 }
 
 fn status(completeness: Completeness) -> &'static str {

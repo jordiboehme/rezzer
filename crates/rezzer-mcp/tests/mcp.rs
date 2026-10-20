@@ -327,3 +327,96 @@ async fn formats_lists_the_readers() {
     );
     assert!(text(&result).contains("csv"));
 }
+
+/// Markdown long enough for several pages.
+fn long_markdown() -> String {
+    let mut markdown = String::from("# Long\n\n");
+    for i in 0..400 {
+        markdown.push_str(&format!("## Part {i}\n\n"));
+        markdown.push_str(&"Words in a paragraph that fills the page. ".repeat(20));
+        markdown.push_str("\n\n");
+    }
+    markdown
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paged_results_end_with_a_paging_line_after_the_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "long.md", &long_markdown());
+    // The same pipeline directly, for the pages as the renderer wrote them. Pages after the
+    // first hold no timestamp, so they are the same in both runs.
+    let direct = Pipeline::new(config(), registry())
+        .run_path(Path::new(&path), &rezzer_pipeline::Request::default());
+    let total = direct.markdown_pages.len();
+    assert!(total >= 3, "{total}");
+    let client = connect(config()).await;
+
+    for n in [2, total] {
+        let result = call(&client, "rez", json!({ "path": path, "page": n })).await;
+        let text = text(&result);
+        let page = &direct.markdown_pages[n - 1];
+        let rest = text
+            .strip_prefix(page.as_str())
+            .expect("the text starts with the page, unchanged");
+        let line = if n < total {
+            format!(
+                "Page {n} of {total}. Call rez again with page: {} for the next page.",
+                n + 1
+            )
+        } else {
+            format!("Page {total} of {total}.")
+        };
+        let blank = if page.ends_with("\n\n") {
+            ""
+        } else if page.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
+        assert_eq!(rest, format!("{blank}{line}\n"), "page {n}");
+        assert!(
+            !page.contains("Page "),
+            "the line is not in the page itself"
+        );
+    }
+
+    let first = call(&client, "rez", json!({ "path": path })).await;
+    assert!(
+        text(&first).ends_with(&format!(
+            "\n\nPage 1 of {total}. Call rez again with page: 2 for the next page.\n"
+        )),
+        "{}",
+        &text(&first)[text(&first).len() - 120..]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn single_page_and_json_results_have_no_paging_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.csv", "a,b\n1,2\n");
+    let client = connect(config()).await;
+    let single = call(&client, "rez", json!({ "path": path })).await;
+    assert!(!text(&single).contains("Page 1 of"), "{}", text(&single));
+    let long = write(dir.path(), "long.md", &long_markdown());
+    let json_result = call(&client, "rez", json!({ "path": long, "format": "json" })).await;
+    assert!(!text(&json_result).contains("Page 1 of"));
+    serde_json::from_str::<Value>(text(&json_result)).expect("the text is only the JSON");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_declares_an_output_schema() {
+    let client = connect(config()).await;
+    let tools = client.list_all_tools().await.unwrap();
+    let rez = tools.iter().find(|t| t.name == "rez").unwrap();
+    let schema = rez.output_schema.as_ref().expect("an output schema");
+    let properties = schema["properties"].as_object().expect("properties");
+    for key in [
+        "status", "page", "pages", "format", "sha256", "losses", "message",
+    ] {
+        assert!(properties.contains_key(key), "{key}: {schema:?}");
+    }
+    assert_eq!(
+        properties["status"]["enum"],
+        json!(["complete", "partial", "failed"])
+    );
+}
