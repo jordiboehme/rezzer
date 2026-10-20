@@ -834,7 +834,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "unterminated quote fieldOrange Park,FL,26680,FirstAtlantic Bank,19-Apr-13,16-May-13\nFirst Federal Bank,Lexington,KY,29594,Your Community Bank,19-Apr-13,23-Apr-13\nGold Canyon Bank,Gold Canyon,AZ,58066,First Scottsdale Bank",
+                    "text": "unterminated quote fieldOrange Park,FL,26680,FirstAtlantic Bank,19-Apr-13,16-May-13 First Federal Bank,Lexington,KY,29594,Your Community Bank,19-Apr-13,23-Apr-13 Gold Canyon Bank,Gold Canyon,AZ,58066,First Scottsdale Bank",
                     "type": "text"
                   }
                 ],
@@ -1087,6 +1087,16 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Note",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
               }
             ],
             [
@@ -1145,6 +1155,16 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "yes",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -1211,6 +1231,16 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
               }
             ],
             [
@@ -1269,6 +1299,16 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -1335,6 +1375,16 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
               }
             ],
             [
@@ -1393,6 +1443,16 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -1459,6 +1519,16 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
               }
             ],
             [
@@ -1521,6 +1591,160 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "unknown",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "not checked",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "only in ragged rows",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Column 9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "unknown",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "not checked",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "no",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "only in ragged rows",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
               }
             ]
           ],
@@ -1551,6 +1775,12 @@ source: crates/rezzer/tests/corpus.rs
       "severity": "warning",
       "what": "row has 5 fields, expected 7",
       "why": "damaged"
+    },
+    {
+      "location": "record 9 (line 9)",
+      "severity": "error",
+      "what": "unterminated quote at record 9 (line 9): the cell ran over the following lines up to a quote inside a later field",
+      "why": "damaged"
     }
   ],
   "model_version": 1,
@@ -1558,7 +1788,7 @@ source: crates/rezzer/tests/corpus.rs
     "facts": [
       [
         "Not read",
-        "3"
+        "4"
       ]
     ],
     "parts": [
@@ -1574,7 +1804,7 @@ source: crates/rezzer/tests/corpus.rs
     "custom": {
       "columns": {
         "type": "number",
-        "value": 7.0
+        "value": 9.0
       },
       "delimiter": {
         "type": "text",

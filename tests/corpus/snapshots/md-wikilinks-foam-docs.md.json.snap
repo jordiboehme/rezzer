@@ -155,7 +155,8 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "internal": true,
           "target": "graph-view",
-          "type": "link"
+          "type": "link",
+          "wiki": true
         }
       ],
       "type": "paragraph"

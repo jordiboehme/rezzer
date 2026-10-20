@@ -85,7 +85,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Once upon \na time",
+                    "text": "Once upon a time",
                     "type": "text"
                   }
                 ],

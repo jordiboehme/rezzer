@@ -15,7 +15,7 @@ detected_by: "delimited text (UTF-8), delimiter ',', 70% of rows with the same f
 encoding: "UTF-8"
 reader: "csv/0.1.0"
 completeness: partial
-losses: 3
+losses: 4
 language: "en"
 ---
 
@@ -27,13 +27,13 @@ language: "en"
 | --- | --- | --- | --- | --- |
 | csv-broken-derived-banklist | sheet | 10 rows x 9 columns |  |  |
 
-- Not read: 3
+- Not read: 4
 
 ## Properties
 
 | Key | Value |
 | --- | --- |
-| columns | 7 |
+| columns | 9 |
 | delimiter | , |
 | has\_header | true |
 | rows | 9 |
@@ -54,15 +54,17 @@ language: "en"
 
 **Columns**
 
-| Column | Type | Unit | Missing | Unique | Key |
-| --- | --- | --- | --- | --- | --- |
-| Bank Name | text |  | 0 | yes | yes |
-| City | text |  | 0 | yes | no |
-| ST | text |  | 0 | no | no |
-| CERT | text |  | 1 | yes | no |
-| Acquiring Institution | text |  | 1 | yes | no |
-| Closing Date | date |  | 2 | no | no |
-| Updated Date | date |  | 2 | yes | no |
+| Column | Type | Unit | Missing | Unique | Key | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| Bank Name | text |  | 0 | yes | yes |  |
+| City | text |  | 0 | yes | no |  |
+| ST | text |  | 0 | no | no |  |
+| CERT | text |  | 1 | yes | no |  |
+| Acquiring Institution | text |  | 1 | yes | no |  |
+| Closing Date | date |  | 2 | no | no |  |
+| Updated Date | date |  | 2 | yes | no |  |
+| Column 8 | unknown |  | 8 | not checked | no | only in ragged rows |
+| Column 9 | unknown |  | 8 | not checked | no | only in ragged rows |
 
 ## Not read
 
@@ -71,3 +73,4 @@ language: "en"
 | record 4 (line 4) | row has 9 fields, expected 7 | damaged | warning |
 | record 6 (line 6) | row has 3 fields, expected 7 | damaged | warning |
 | record 9 (line 9) | row has 5 fields, expected 7 | damaged | warning |
+| record 9 (line 9) | unterminated quote at record 9 (line 9): the cell ran over the following lines up to a quote inside a later field | damaged | error |

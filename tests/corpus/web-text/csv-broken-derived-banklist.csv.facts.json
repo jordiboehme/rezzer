@@ -12,5 +12,19 @@
   },
   {
     "contains": "row has 3 fields, expected 7"
+  },
+  {
+    "contains": "unterminated quote at record 9 (line 9)"
+  },
+  {
+    "pointer": "/losses",
+    "min_len": 4
+  },
+  {
+    "pointer": "/properties/custom/columns/value",
+    "equals": 9.0
+  },
+  {
+    "contains": "only in ragged rows"
   }
 ]

@@ -8,6 +8,6 @@
     "equals": 2.0
   },
   {
-    "contains": "\"ha\""
+    "contains": "ha \"ha\" ha"
   }
 ]

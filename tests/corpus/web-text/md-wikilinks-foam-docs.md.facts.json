@@ -17,5 +17,11 @@
   },
   {
     "contains": "## Creating Wikilinks"
+  },
+  {
+    "contains": "Example: [[graph-view]]"
+  },
+  {
+    "contains": "See [[block-anchors]] for full details."
   }
 ]
