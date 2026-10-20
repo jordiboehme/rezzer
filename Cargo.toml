@@ -67,8 +67,17 @@ calamine = { version = "=0.37.0", default-features = false }
 lopdf = { version = "=0.45.0", default-features = false }
 weezl = "=0.2.1"
 brotli-decompressor = "=5.0.3"
-# Never enable its features: they download OCR models.
-pdf-inspector = { version = "=1.25.2", default-features = false }
+# One version for the three hayro crates. hayro-interpret's default features embed the
+# standard 14 font substitutes and the predefined CMaps that text extraction needs.
+hayro = "=0.8.0"
+hayro-interpret = "=0.8.0"
+hayro-syntax = "=0.8.0"
+# The versions hayro-interpret 0.8.0 uses, so its glyph and font types are the same types.
+kurbo = "=0.13.1"
+skrifa = "=0.46.2"
+# skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
+read-fonts = { version = "=0.43.3", features = ["agl"] }
+unicode-bidi = "=0.3.18"
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.

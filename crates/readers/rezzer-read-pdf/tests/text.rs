@@ -619,6 +619,7 @@ fn invisible_text_is_reported_not_mixed() {
         }) => {
             assert_eq!(title, "Invisible text on this page");
             assert!(text(blocks).contains("Clipped words nobody sees"));
+            assert!(text(blocks).contains("Hidden words on a mixed page"));
         }
         other => panic!("no invisible text callout: {other:?}"),
     }
@@ -651,13 +652,13 @@ fn invisible_text_is_reported_not_mixed() {
         .filter(|l| l.severity == Severity::Info && l.what.contains("invisible"))
         .map(|l| l.location.clone())
         .collect();
-    assert_eq!(infos, ["p1", "p1", "p2"], "{:?}", out.document.losses);
-    // The mode 3 run on the mixed page is not given back by the text parser: it is counted.
+    assert_eq!(infos, ["p1", "p2"], "{:?}", out.document.losses);
+    // The mode 3 run on the mixed page is read into the callout: nothing is left unread.
     assert!(
-        out.document.losses.iter().any(|l| l.location == "p1"
-            && l.severity == Severity::Info
-            && l.what
-                .starts_with("1 run of invisible text (render mode 3) not read")),
+        out.document
+            .losses
+            .iter()
+            .all(|l| !l.what.contains("not read")),
         "{:?}",
         out.document.losses
     );

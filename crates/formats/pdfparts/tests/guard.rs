@@ -392,3 +392,20 @@ fn refused_streams_are_empty_in_the_canonical_copy() {
         pdf.canonical().len()
     );
 }
+
+#[test]
+fn unpacked_size_is_the_measured_size() {
+    let bytes = content_page(&["FlateDecode"], zlib_fill(b' ', 5_000));
+    let pdf = open(&bytes).unwrap();
+    // The canonical copy keeps object numbers: find the content stream's number there.
+    let canonical = String::from_utf8_lossy(pdf.canonical()).into_owned();
+    let at = canonical.find("/Contents ").expect("contents key");
+    let number: u32 = canonical[at + 10..]
+        .split_whitespace()
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("object number");
+    assert_eq!(pdf.unpacked_size(number, 0), Some(5_000));
+    assert_eq!(pdf.unpacked_size(number, 1), None);
+    assert_eq!(pdf.unpacked_size(9_999, 0), None);
+}

@@ -58,10 +58,11 @@ pub(crate) struct PageTree {
 /// lopdf's own bound on page tree depth.
 const LOPDF_DEPTH: usize = 256;
 
-/// The pages in the order lopdf's page walk gives them (pdf-inspector numbers pages the same
-/// way), with inherited attributes read along `/Parent`. A separate bounded walk checks the
-/// tree: a cycle, a shared or repeated node, an untyped node, a kid that is not an object or
-/// more depth than the limits allow make it unsafe. `/Count` is never trusted.
+/// The pages in the order lopdf's page walk gives them (depth-first through `/Kids` in order,
+/// as other parsers number pages), with inherited attributes read along `/Parent`. A separate
+/// bounded walk checks the tree: a cycle, a shared or repeated node, an untyped node, a kid
+/// that is not an object or more depth than the limits allow make it unsafe. `/Count` is
+/// never trusted.
 pub(crate) fn page_tree(doc: &Document, limits: &Limits, issues: &mut Vec<Issue>) -> PageTree {
     let has_root = doc
         .trailer

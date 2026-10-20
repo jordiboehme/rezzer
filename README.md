@@ -183,7 +183,7 @@ Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS work today. The other formats
 
 | Format | What Rezzer gets | Built on |
 |---|---|---|
-| [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, signatures, revisions | [lopdf](https://crates.io/crates/lopdf), [pdf-inspector](https://crates.io/crates/pdf-inspector), [hayro](https://crates.io/crates/hayro) |
+| [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, signatures, revisions | [lopdf](https://crates.io/crates/lopdf), [hayro](https://crates.io/crates/hayro) |
 | [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, inputs and results, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [XLS](docs/formats/xls.md) | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
 | [ODS](docs/formats/ods.md) | Values, formulas with references, inputs and results, names, comments, validation | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |

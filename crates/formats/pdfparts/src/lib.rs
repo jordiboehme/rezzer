@@ -26,7 +26,6 @@
 
 mod actions;
 mod annots;
-mod content;
 mod extras;
 mod forms;
 mod guard;
@@ -49,7 +48,6 @@ use lopdf::{Document, ObjectId};
 
 pub use actions::Script;
 pub use annots::Annot;
-pub use content::InvisibleShows;
 pub use extras::{EmbeddedFile, Layer, Thread};
 pub use forms::{Field, FieldKind, Form};
 pub use meta::{Info, PdfDate};
@@ -331,8 +329,8 @@ impl Pdf {
     }
 
     /// The page tree has a cycle, a shared or repeated node, an untyped node or more depth
-    /// than the limits allow. Page numbers here follow lopdf's page walk, which other parsers
-    /// built on lopdf use too; a parser with a different walk may number such a file
+    /// than the limits allow. Page numbers here follow lopdf's page walk, a depth-first walk
+    /// of `/Kids` in order; a parser with a different walk may number such a file
     /// differently, so it must not get the file.
     pub fn unsafe_page_tree(&self) -> bool {
         self.unsafe_tree
@@ -341,6 +339,14 @@ impl Pdf {
     /// Bytes all measured streams unpack to.
     pub fn unpacked(&self) -> u64 {
         self.verdict.unpacked
+    }
+
+    /// Bytes the stream with object number `object` and generation `generation` unpacks to,
+    /// as the guard measured it. `None` when the object is not a measured stream (not a
+    /// stream, refused, or not in the file). The canonical copy keeps the object numbers, so
+    /// another parser can ask before it unpacks a stream of that copy.
+    pub fn unpacked_size(&self, object: u32, generation: u16) -> Option<u64> {
+        self.verdict.sizes.get(&(object, generation)).copied()
     }
 
     /// Every issue found so far: while opening, and by the readers called since.

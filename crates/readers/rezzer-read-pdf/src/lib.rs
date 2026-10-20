@@ -6,7 +6,7 @@
 //! running headers and footers, and the text nobody sees on the page kept apart.
 //!
 //! pdfparts opens the file with its stream guard and gives the object layer: pages, labels
-//! and the structure tree. pdf-inspector reads the text with positions from pdfparts'
+//! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
 //! Scripts and actions are never run, links are never followed.
 
@@ -29,7 +29,7 @@ use rezzer_model::{
 };
 
 use layout::{Context, PageText, Run, Style, Tables};
-use text::{Extracted, PageItems};
+use text::{Caps, Extracted, Fail, Failure, Note, PageItems};
 
 /// Reads PDF files.
 #[derive(Debug, Clone, Copy, Default)]
@@ -53,7 +53,7 @@ impl Reader for PdfReader {
     }
 }
 
-/// Reads a file; `text_stop` is asked between two batches of the text parser.
+/// Reads a file; `text_stop` is asked before each page and while a page is read.
 fn read_pdf(
     reader: &PdfReader,
     src: &Source,
@@ -75,14 +75,20 @@ fn read_pdf(
     out.doc.properties.facts.tagged = Some(pdf.tagged());
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
-    let extracted = extract(&pdf, &pages, &mut out, text_stop);
+    let extracted = extract(&pdf, &pages, budget, &mut out, text_stop);
     lay_out(&pdf, &pages, extracted, budget, &mut out);
     issues(&pdf, &mut out);
     out.finish()
 }
 
 /// Reads the text of the pages the guard let through.
-fn extract(pdf: &Pdf, pages: &[PageInfo], out: &mut Out, stop: &dyn Fn() -> bool) -> Extracted {
+fn extract(
+    pdf: &Pdf,
+    pages: &[PageInfo],
+    budget: &Budget,
+    out: &mut Out,
+    stop: &dyn Fn() -> bool,
+) -> Extracted {
     if pdf.unsafe_page_tree() {
         out.loss(
             "document",
@@ -101,7 +107,10 @@ fn extract(pdf: &Pdf, pages: &[PageInfo], out: &mut Out, stop: &dyn Fn() -> bool
         .map(|p| p.number)
         .filter(|n| !refused.contains(n))
         .collect();
-    text::pages(pdf.canonical(), &wanted, stop)
+    let caps = Caps {
+        max_items: open::limits(budget).max_items,
+    };
+    text::pages(pdf, &wanted, caps, stop)
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
@@ -191,13 +200,11 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                     Severity::Warning,
                 );
             }
+            notes(n, &items, out);
             let height = frame_height(info, Some(&items));
             let laid = layout::page_blocks(n, height, items.runs, &cx);
             blocks.extend(laid.blocks);
             let mut stop = laid.stop;
-            if items.hidden_layer.is_empty() {
-                unread_invisible(pdf, n, items.mode3_runs, budget, out);
-            }
             if stop.is_none() {
                 match invisible(n, &items.invisible, &items.hidden_layer, budget, out) {
                     Ok(Some(callout)) => blocks.push(callout),
@@ -247,57 +254,67 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
 }
 
 /// One loss per run of consecutive pages that failed the same way.
-fn failures(failed: &[(u32, String, bool)], out: &mut Out) {
+fn failures(failed: &[Failure], out: &mut Out) {
     let mut i = 0;
     while i < failed.len() {
-        let (first, why, panicked) = &failed[i];
+        let first = &failed[i];
         let mut j = i + 1;
         while j < failed.len()
-            && failed[j].0 == failed[j - 1].0 + 1
-            && failed[j].1 == *why
-            && failed[j].2 == *panicked
+            && failed[j].page == failed[j - 1].page + 1
+            && failed[j].why == first.why
+            && failed[j].kind == first.kind
         {
             j += 1;
         }
-        let last = failed[j - 1].0;
-        let pages = if last == *first {
-            format!("page {first}")
+        let last = failed[j - 1].page;
+        let pages = if last == first.page {
+            format!("page {}", first.page)
         } else {
-            format!("pages {first} to {last}")
+            format!("pages {} to {last}", first.page)
         };
-        out.loss(
-            format!("p{first}"),
-            format!("text of {pages} not read: the text parser failed: {why}"),
-            if *panicked {
-                LossReason::Internal
-            } else {
-                LossReason::Damaged
-            },
-            Severity::Warning,
-        );
+        let why = &first.why;
+        let (what, reason) = match first.kind {
+            Fail::Damaged => (
+                format!("text of {pages} not read: the text parser failed: {why}"),
+                LossReason::Damaged,
+            ),
+            Fail::Limit => (
+                format!("text of {pages} not read: {why}"),
+                LossReason::Limit,
+            ),
+            Fail::Internal => (
+                format!(
+                    "text of {pages} not read: the text parser stopped with an internal error \
+                     while {why}"
+                ),
+                LossReason::Internal,
+            ),
+        };
+        out.loss(format!("p{}", first.page), what, reason, Severity::Warning);
         i = j;
     }
 }
 
-/// Says how many runs of render mode 3 text the page shows beyond the `read` ones the text
-/// parser gave back. Their text is not read.
-fn unread_invisible(pdf: &Pdf, page: u32, read: u64, budget: &Budget, out: &mut Out) {
-    let found = pdf.invisible_text_shows(page, &|| budget.check_time().is_err());
-    let unread = found.count.saturating_sub(read);
-    if unread == 0 {
-        return;
+/// What the text parser could not read on a page, and the glyphs without a Unicode mapping.
+fn notes(page: u32, items: &PageItems, out: &mut Out) {
+    for note in &items.notes {
+        let (what, why, severity) = match note {
+            Note::Limit(what) => (what, LossReason::Limit, Severity::Warning),
+            Note::Damaged(what) => (what, LossReason::Damaged, Severity::Warning),
+            Note::Unsupported(what) => (what, LossReason::Unsupported, Severity::Info),
+        };
+        out.loss(format!("p{page}"), what.clone(), why, severity);
     }
-    let runs = if unread == 1 { "run" } else { "runs" };
-    let at_least = if found.complete { "" } else { "at least " };
-    out.loss(
-        format!("p{page}"),
-        format!(
-            "{at_least}{unread} {runs} of invisible text (render mode 3) not read: the text \
-             parser does not give back hidden text on a page with visible text"
-        ),
-        LossReason::Unsupported,
-        Severity::Info,
-    );
+    if items.unmapped > 0 {
+        let n = items.unmapped;
+        let glyphs = if n == 1 { "glyph" } else { "glyphs" };
+        out.loss(
+            format!("p{page}"),
+            format!("{n} {glyphs} without a Unicode mapping on page {page}"),
+            LossReason::Unsupported,
+            Severity::Info,
+        );
+    }
 }
 
 /// The folded callout with the text that puts no glyphs on the page, and its Info loss.
@@ -466,7 +483,11 @@ mod tests {
             },
             modified: None,
         })));
-        let bad = |p: u32, why: &str| (p, why.to_string(), false);
+        let bad = |page: u32, why: &str| Failure {
+            page,
+            why: why.to_string(),
+            kind: Fail::Damaged,
+        };
         failures(
             &[
                 bad(1, "a"),
@@ -498,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn time_stop_between_batches_is_partial() {
+    fn time_stop_between_pages_is_partial() {
         let page = Page::text(show("F1", 12.0, 72.0, 700.0, "Some words."));
         let bytes = pdf(&std::iter::repeat_n(page, 70).collect::<Vec<_>>(), "");
         let src = Source {
@@ -516,10 +537,10 @@ mod tests {
         };
         let asked = std::cell::Cell::new(0);
         let budget = Budget::new(Limits::default());
-        // The time runs out after the first batch: from then on the budget says so too.
+        // The time runs out after 64 pages: from then on the budget says so too.
         let stop = || {
             asked.set(asked.get() + 1);
-            if asked.get() > 1 {
+            if asked.get() > 64 {
                 budget.cancel();
             }
             budget.is_cancelled()

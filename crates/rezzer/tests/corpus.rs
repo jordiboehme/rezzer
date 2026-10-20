@@ -382,7 +382,7 @@ fn office_corpus_matches_manifest() {
 fn pdf_corpus_matches_manifest() {
     let mut listed = manifest_rows();
     listed.retain(|k, _| k.starts_with("pdf/"));
-    assert_eq!(listed.len(), 32, "expected 32 pdf rows");
+    assert_eq!(listed.len(), 36, "expected 36 pdf rows");
     let mut files: Vec<PathBuf> = std::fs::read_dir(corpus_dir().join("pdf"))
         .unwrap()
         .map(|e| e.unwrap().path())

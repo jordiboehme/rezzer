@@ -19,7 +19,4 @@ weezl.workspace = true
 brotli-decompressor.workspace = true
 
 [dev-dependencies]
-# The shipped binary also links pdf-inspector, which turns on lopdf's rayon feature. The tests
-# run the same threaded load.
-lopdf = { workspace = true, features = ["rayon"] }
 libc.workspace = true

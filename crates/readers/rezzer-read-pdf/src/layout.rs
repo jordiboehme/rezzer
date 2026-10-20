@@ -65,6 +65,11 @@ const GAP_RATIO: f32 = 1.5;
 /// Font sizes closer than this are the same size.
 const SIZE_SLACK: f32 = 0.5;
 
+/// Bytes of mid-page line texts the style pass keeps to tell running headers from content.
+/// Past it, no more are kept: a header text that also stands mid-page later in a huge file
+/// may then keep its header role.
+const BODY_KEY_BYTES: usize = 32 << 20;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Band {
     Top,
@@ -192,12 +197,17 @@ impl Style {
         // Texts that stand in the middle of some page are content, wherever else they stand.
         // A bare page number is not held against: numbers fill tables too.
         let mut body: HashSet<String> = HashSet::new();
+        let mut body_bytes = 0usize;
         for p in pages {
             for l in lines(p.runs) {
                 if let Some(key) = furniture_key_of(&l, p.height) {
                     seen.entry(key).or_default().push((l.middle(), p.page));
-                } else if p.height.is_some() {
-                    body.insert(furniture_key(&l.text));
+                } else if p.height.is_some() && body_bytes < BODY_KEY_BYTES {
+                    let key = furniture_key(&l.text);
+                    let len = key.len();
+                    if body.insert(key) {
+                        body_bytes += len;
+                    }
                 }
             }
         }
