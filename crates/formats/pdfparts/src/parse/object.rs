@@ -335,8 +335,8 @@ mod tests {
             };
             bounded(file, pos, limit, &mut budget, |l, b| l.value(b, 0))
         };
-        // Members that touch the next member start, and values that close themselves.
-        assert!(read(0, 8, true).is_ok());
+        // Values that close themselves, or end before white space.
+        assert!(read(0, 8, false).is_ok());
         assert!(read(8, 13, false).is_ok());
         assert!(read(19, 22, false).is_ok());
         // A name cut inside `Xobj` is not whole, and is not read again.

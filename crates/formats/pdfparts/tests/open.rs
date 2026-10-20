@@ -969,3 +969,35 @@ fn values_charged_once() {
         assert_eq!(values_of(&pdf), 1_043_799);
     }
 }
+
+#[test]
+fn abutting_number_members_keep_their_values() {
+    // The member `42` is followed by the member `43` with no separator: `4243`.
+    let members: [(u32, &[u8]); 5] = [
+        (1, b"<</Type/Catalog/Pages 2 0 R/A 7 0 R/B 8 0 R>>"),
+        (2, b"<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+        (3, b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>"),
+        (7, b"42"),
+        (8, b"43"),
+    ];
+    let mut head = String::new();
+    let mut body: Vec<u8> = Vec::new();
+    for (m, data) in members {
+        head.push_str(&format!("{m} {} ", body.len()));
+        body.extend(data);
+    }
+    let first = head.len();
+    let mut plain = head.into_bytes();
+    plain.extend(body);
+    let mut raw = common::Raw::new();
+    let dict = format!("/Type /ObjStm /N 5 /First {first} /Filter /FlateDecode");
+    raw.stream(6, &dict, &common::zlib(&plain));
+    for (i, (m, _)) in members.iter().enumerate() {
+        raw.member(*m, 6, i as u32);
+    }
+    let pdf = open(&raw.finish(1, ""), None).unwrap();
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    assert_eq!(doc.get_object((7, 0)).unwrap().as_i64().unwrap(), 42);
+    assert_eq!(doc.get_object((8, 0)).unwrap().as_i64().unwrap(), 43);
+}
