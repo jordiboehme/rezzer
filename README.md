@@ -179,7 +179,7 @@ flowchart LR
 
 ## Formats
 
-Planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
+Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS work today. The other formats are planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
 
 | Format | What Rezzer gets | Built on |
 |---|---|---|
@@ -202,7 +202,6 @@ Planned for the first release. Each format has its own page with what Rezzer ext
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 
-Ready to try today: Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS. The rest are planned.
 
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
 
