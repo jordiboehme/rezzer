@@ -1001,3 +1001,61 @@ fn abutting_number_members_keep_their_values() {
     assert_eq!(doc.get_object((7, 0)).unwrap().as_i64().unwrap(), 42);
     assert_eq!(doc.get_object((8, 0)).unwrap().as_i64().unwrap(), 43);
 }
+
+/// Five objects with a classic table. Object 4 holds `note` in a string. `damaged` points
+/// `startxref` past the table; `stale` points the entry of object 5 at object 2. Both make
+/// the file be scanned.
+fn note_file(note: &str, damaged: bool, stale: bool) -> Vec<u8> {
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R /A 5 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Extra 4 0 R >>".to_string(),
+        format!("<< /Note ({note}) /K 5 >>"),
+        "<< /Five 5 >>".to_string(),
+    ];
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offs.push(out.len());
+        out.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    if stale {
+        offs[4] = offs[1];
+    }
+    let at = out.len();
+    out.extend(b"xref\n0 6\n0000000000 65535 f \n");
+    for o in &offs {
+        out.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    let sx = if damaged { at + 7 } else { at };
+    out.extend(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{sx}\n%%EOF\n").as_bytes());
+    out
+}
+
+#[test]
+fn scan_starts_inside_a_string_do_not_cut_it() {
+    // A scan of the file takes the header and the keyword in these strings as starts.
+    for note in [
+        "the objective of the trailer",
+        "write 90 0 obj then 91 0 obj then endobj",
+    ] {
+        for (damaged, stale) in [(true, false), (false, true)] {
+            let pdf = open(&note_file(note, damaged, stale), None).unwrap();
+            let issues = pdf.issues();
+            assert!(
+                issues
+                    .iter()
+                    .all(|i| !i.what.contains("not closed") && !i.what.contains("missing")),
+                "{note} {damaged} {stale}: {issues:?}"
+            );
+            let doc = Document::load_mem(pdf.canonical()).unwrap();
+            let four = doc.get_object((4, 0)).unwrap().as_dict().unwrap();
+            assert_eq!(
+                four.get(b"Note").unwrap().as_str().unwrap(),
+                note.as_bytes()
+            );
+            assert_eq!(four.get(b"K").unwrap().as_i64().unwrap(), 5);
+            assert!(doc.get_object((5, 0)).is_ok());
+        }
+    }
+}

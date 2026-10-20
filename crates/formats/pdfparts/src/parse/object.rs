@@ -35,8 +35,8 @@ pub(crate) fn header_at(
 /// values was spent. Such objects share one issue.
 pub(crate) const NOT_READ: &str = "not read: too many broken values";
 
-/// How far past the first read a value that ran into its natural end is read again when no
-/// next start is known. A broken value then costs at most its natural span plus this.
+/// How far past the first read a value that ran into its natural end is read at least
+/// again. A known next start further away lengthens the read.
 const RETRY_WINDOW: usize = 64 << 10;
 
 /// The positions where the keyword `obj` starts, found once per stretch of the file.
@@ -102,8 +102,8 @@ pub(crate) struct Limit {
     /// `end` is the start of the next member of an object stream, so a value that reaches it
     /// is whole.
     pub member: bool,
-    /// The next start of an object or member after `end`. A second read stops there; without
-    /// it, [`RETRY_WINDOW`] past `end`.
+    /// The next start of an object or member after `end`. A second read stops there or
+    /// [`RETRY_WINDOW`] past `end`, whichever is further.
     pub next: Option<usize>,
 }
 
@@ -124,9 +124,9 @@ fn whole(bytes: &[u8], lim: usize) -> bool {
 /// A broken value (a string that never closes) could otherwise read to the end of the file
 /// each time, so the bytes it reads count against the bound for broken values, and what it
 /// was charged as values is given back, so a value is charged once. A value that runs into
-/// the end and is not whole there is read again without it, up to `limit.next` and while that
-/// bound lasts, since a valid value may hold the bytes that the end stands for. The second
-/// read never stops before the first one did.
+/// the end and is not whole there is read again without it, up to `limit.next` or
+/// [`RETRY_WINDOW`] past the end, whichever is further, and while that bound lasts, since a
+/// valid value may hold the bytes that the end stands for.
 /// Once the bound is spent, a value that fails or runs into the end is not read: it gives
 /// [`NOT_READ`] and is counted in [`Budget::not_read`].
 pub(crate) fn bounded<'b, T>(
@@ -156,10 +156,9 @@ pub(crate) fn bounded<'b, T>(
         budget.bytes = charged;
         budget.failed(l.i - pos);
         if cut && !spent && budget.failed_left() > 0 {
-            let next = limit
-                .next
-                .filter(|&n| n > lim)
-                .unwrap_or(lim.saturating_add(RETRY_WINDOW));
+            // A start only lengthens the read: a scan may take text inside a string for one.
+            let window = lim.saturating_add(RETRY_WINDOW);
+            let next = limit.next.map_or(window, |n| n.max(window));
             let next = next
                 .min(pos.saturating_add(budget.failed_left()))
                 .min(bytes.len());
@@ -182,7 +181,7 @@ pub(crate) fn bounded<'b, T>(
 /// Reads the header and the value of the object at `pos`, and finds out whether stream data
 /// follows. White space and comments it skips count as work. The value should end before
 /// the next `obj` (of `endobj` or of the next header), and is read again at most up to the
-/// next known object start.
+/// next known object start or the window, whichever is further.
 pub(crate) fn head_at(bytes: &[u8], pos: usize, budget: &mut Budget) -> Result<Head, Fail> {
     let mut l = Lexer::new(bytes, pos);
     let id = l.header();

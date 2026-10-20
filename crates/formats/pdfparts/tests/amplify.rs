@@ -675,14 +675,17 @@ fn broken_values_do_not_end_the_open() {
         let grouped = damaged
             .iter()
             .any(|i| i.what.contains("too many broken values"));
-        // Each broken note is read again only up to the next object, so its reads stay
-        // within its own bytes and each one is named.
-        let named = damaged
-            .iter()
-            .filter(|i| i.what.contains("string is not closed"))
-            .count();
-        assert_eq!(named, k as usize, "{damaged:?}");
-        assert!(!grouped, "{damaged:?}");
+        if endobj {
+            // Each broken note costs a bounded read, so each one is named.
+            let named = damaged
+                .iter()
+                .filter(|i| i.what.contains("string is not closed"))
+                .count();
+            assert_eq!(named, k as usize, "{damaged:?}");
+            assert!(!grouped, "{damaged:?}");
+        } else {
+            assert!(grouped, "{damaged:?}");
+        }
     }
     assert_rss_bounded();
 }
@@ -728,6 +731,14 @@ fn members_are_read_after_broken_values() {
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
     eprintln!("{} KB, {:?}", bytes.len() / 1024, start.elapsed());
     assert_eq!(pdf.page_count(), 1);
+    // The bound for broken values is spent.
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.what.contains("too many broken values")),
+        "{:?}",
+        pdf.issues()
+    );
     let doc = lopdf::Document::load_mem(pdf.canonical()).unwrap();
     let fine = doc.get_object((50, 0)).unwrap().as_dict().unwrap();
     assert_eq!(
