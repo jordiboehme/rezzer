@@ -29,6 +29,10 @@ pub(super) const WINDOW: usize = 1 << 20;
 /// Bytes after a `BI` an inline picture's dictionary must fit in, to tell whether it is one.
 const DICT: usize = 16 << 10;
 
+/// Bytes after a `BI` the scan holds when its window does not tell where the picture ends:
+/// it then decides at the end of the stream, with all of it.
+const HOLD: usize = 16 << 20;
+
 /// Bytes the check of one inline picture's earlier ends may look at.
 const WORK: usize = 16 * WINDOW;
 
@@ -77,6 +81,8 @@ pub(super) struct InlineScan<'c> {
     lex: Lex,
     token: Option<Token>,
     pending: Option<Pending>,
+    /// The `BI` whose end is decided at the end of the stream.
+    hold: Option<usize>,
     check: &'c dyn Fn(&Stream<'_>) -> Result<(), String>,
 }
 
@@ -233,6 +239,7 @@ impl<'c> InlineScan<'c> {
             lex: Lex::Normal,
             token: None,
             pending: None,
+            hold: None,
             check,
         }
     }
@@ -249,6 +256,12 @@ impl<'c> InlineScan<'c> {
     }
 
     fn run(&mut self, last: bool) -> Result<(), String> {
+        if let Some(h) = self.hold {
+            if !last && self.buf.len() - h <= HOLD {
+                return Ok(());
+            }
+            self.hold = None;
+        }
         while self.pos < self.buf.len() {
             let c = self.buf[self.pos];
             match self.lex {
@@ -403,18 +416,29 @@ impl<'c> InlineScan<'c> {
         };
         let (start, end) = (bi + start, bi + start + raw.len());
         drop(raw);
+        let pending = if last {
+            None
+        } else {
+            match self.settle(start, end) {
+                Ok(p) => Some(p),
+                Err(why) if self.buf.len() - bi > HOLD => return Err(why),
+                Err(_) => {
+                    drop(stream);
+                    self.hold = Some(bi);
+                    return Ok(Bi::Wait);
+                }
+            }
+        };
         (self.check)(&stream)?;
         drop(stream);
-        if !last {
-            self.settle(start, end)?;
-        }
+        self.pending = pending;
         Ok(Bi::Done(end + 2))
     }
 
     /// Checks that the end hayro took for data from `start` to `end`, with the window it had,
-    /// is the end it takes with the whole stream, as far as the window tells; what follows the
-    /// end is then followed with [`Self::follow`].
-    fn settle(&mut self, start: usize, end: usize) -> Result<(), String> {
+    /// is the end it takes with the whole stream, as far as the window tells, and returns what
+    /// [`Self::follow`] then follows. `Err` when the window does not tell.
+    fn settle(&self, start: usize, end: usize) -> Result<Pending, String> {
         let unclear =
             || "it has an inline picture whose end cannot be told before a render".to_string();
         let buf = &self.buf;
@@ -459,13 +483,11 @@ impl<'c> InlineScan<'c> {
             }
             p = e + 2;
         }
-        let sure = confirmed(&buf[end + 2..]) == Some(true);
-        self.pending = Some(Pending {
+        Ok(Pending {
             at: end + 2,
             high: false,
-            confirmed: sure,
-        });
-        Ok(())
+            confirmed: confirmed(&buf[end + 2..]) == Some(true),
+        })
     }
 
     /// Follows the content after the end hayro took for the last inline picture up to
@@ -522,6 +544,9 @@ impl<'c> InlineScan<'c> {
         }
         if let Some(p) = &mut self.pending {
             p.at -= keep;
+        }
+        if let Some(h) = &mut self.hold {
+            *h -= keep;
         }
     }
 }
@@ -612,6 +637,28 @@ mod tests {
         let mut c = b"BI /W 4 /H 2 /BPC 8 /CS /G ID \x80EI \xff\x01\x02\x03 EI Q\n".to_vec();
         c.extend(far(b"(cafe) Tj\n"));
         assert_eq!(pictures(&c, 65_536), Ok(vec![9, 2]));
+    }
+
+    /// A picture whose data holds `EI` and a line break, then ASCII85 text the window cannot
+    /// tell is no content, then `more` bytes of drawing.
+    fn unclear(more: usize) -> Vec<u8> {
+        let mut c = b"q BI /W 1 /H 1 /BPC 8 /CS /G ID abc EI\n*$c()EDLW-?R!(*PJCe2@EmODDlN-d,\
+                      AA_Kc'n@8PdE?.,%1B1%r0/4%YT^;g;&.fhTN*QVs6W.\n$xyz EI Q\n"
+            .to_vec();
+        while c.len() < more {
+            c.extend(b"0 0 m 10 10 l S\n");
+        }
+        c
+    }
+
+    #[test]
+    fn an_end_a_window_cannot_tell_is_decided_at_the_end_of_the_stream() {
+        assert_eq!(pictures(&unclear(WINDOW + 200_000), 65_536), Ok(vec![88]));
+        let got = pictures(&unclear(HOLD + 200_000), 65_536);
+        assert!(
+            got.as_ref().is_err_and(|e| e.contains("cannot be told")),
+            "{got:?}"
+        );
     }
 
     #[test]

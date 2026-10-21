@@ -1124,3 +1124,68 @@ fn an_inline_stencil_split_over_two_content_streams_is_counted() {
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("stencil mask"), "{loss:?}");
 }
+
+/// `data` in ASCII85, with a line break after every 75 characters, as Distiller wrote it.
+fn ascii85_lines(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut col = 0;
+    let mut put = |c: u8, out: &mut Vec<u8>| {
+        out.push(c);
+        col += 1;
+        if col == 75 {
+            out.push(b'\n');
+            col = 0;
+        }
+    };
+    for chunk in data.chunks(4) {
+        let mut word = [0u8; 4];
+        word[..chunk.len()].copy_from_slice(chunk);
+        let mut v = u32::from_be_bytes(word);
+        if chunk.len() == 4 && v == 0 {
+            put(b'z', &mut out);
+            continue;
+        }
+        let mut digits = [0u8; 5];
+        for d in digits.iter_mut().rev() {
+            *d = b'!' + (v % 85) as u8;
+            v /= 85;
+        }
+        for &d in &digits[..chunk.len() + 1] {
+            put(d, &mut out);
+        }
+    }
+    out.extend(b"~>");
+    out
+}
+
+#[test]
+fn ascii85_bands_holding_ei_render() {
+    // A scan in four inline bands of about 400 KB of ASCII85 each, wrapped at 75 columns: a
+    // line that ends in `EI` is common in such data.
+    let mut c = Vec::new();
+    let mut state = 11u32;
+    let mut inner = 0;
+    for band in 0..4 {
+        let mut px = vec![0u8; 595 * 200 * 3];
+        for p in px.iter_mut() {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            *p = (state >> 16) as u8;
+        }
+        let data = ascii85_lines(&deflate(&px));
+        inner += data
+            .windows(3)
+            .filter(|w| &w[..2] == b"EI" && w[2] == b'\n')
+            .count();
+        c.extend(
+            format!(
+                "q 595 0 0 200 0 {} cm BI /W 595 /H 200 /CS /RGB /BPC 8 /F [/A85 /Fl] ID ",
+                band * 200
+            )
+            .as_bytes(),
+        );
+        c.extend(data);
+        c.extend(b" EI Q\n");
+    }
+    assert!(inner > 0, "no band holds EI at a line end");
+    assert_rendered(&read_with(&draw_twin_bytes(&c), true));
+}
