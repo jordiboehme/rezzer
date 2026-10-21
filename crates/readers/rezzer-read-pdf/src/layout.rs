@@ -1384,6 +1384,9 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
     // The target of the link written last without its target: a link that goes on over a
     // change of style is one link cut, not two.
     let mut refused: Option<Rc<UriTarget>> = None;
+    // White space after the text of the link written last: inside the link when the link
+    // goes on, else after it.
+    let mut trail = String::new();
     for (k, p) in pieces.into_iter().enumerate() {
         if k % CHECK_EVERY == 0 {
             time_over(budget)?;
@@ -1394,11 +1397,25 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
         // White space at the edge of a link belongs outside it.
         let (inner, lead) = match p.uri {
             Some(_) => {
-                let lead = p.text.len() - p.text.trim_start().len();
-                (p.text[lead..].to_string(), &p.text[..lead])
+                let body = p.text.trim_end();
+                let lead = body.len() - body.trim_start().len();
+                let inner = body[lead..].to_string();
+                let rest = std::mem::replace(&mut trail, p.text[body.len()..].to_string());
+                (inner, rest + &p.text[..lead])
             }
-            None => (p.text.clone(), ""),
+            None => {
+                let rest = std::mem::take(&mut trail);
+                if !rest.is_empty() {
+                    out.push(Inline::plain(rest));
+                }
+                (p.text.clone(), String::new())
+            }
         };
+        if inner.is_empty() {
+            // Only white space in a link: it goes on as the white space after it.
+            trail.insert_str(0, &lead);
+            continue;
+        }
         let text = Inline::Text {
             text: inner,
             emphasis: p.italic,
@@ -1445,6 +1462,8 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
             }
         }
     }
+    // White space after the last link ends the text: it is dropped, as the end of the text
+    // is.
     Ok(out)
 }
 
@@ -1910,6 +1929,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rezzer_model::plain_text(&built), "A B");
+    }
+
+    #[test]
+    fn white_space_at_a_link_end_stands_after_it() {
+        let uri = UriTarget::new("https://example.org/a");
+        let runs: Vec<Run> = [("see ", None), ("example.org ", Some(&uri)), ("now", None)]
+            .into_iter()
+            .map(|(t, u)| Run {
+                uri: u.cloned(),
+                ..run(t, 0, 700.0, 10.0)
+            })
+            .collect();
+        let refs: Vec<&Run> = runs.iter().collect();
+        let built = inlines(
+            &refs,
+            &LinkRoom::new(u64::MAX),
+            &Budget::new(rezzer_limits::Limits::default()),
+        )
+        .unwrap();
+        assert_eq!(built.len(), 4, "{built:?}");
+        match &built[1] {
+            Inline::Link { inlines, .. } => {
+                assert_eq!(rezzer_model::plain_text(inlines), "example.org")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(rezzer_model::plain_text(&built), "see example.org now");
     }
 
     #[test]
