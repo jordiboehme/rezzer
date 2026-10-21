@@ -751,14 +751,23 @@ pub(crate) fn page_blocks(
     if built.tables_as_text > 0 {
         let k = built.tables_as_text;
         let (s, them) = if k == 1 { ("", "its") } else { ("s", "their") };
-        notes.push((
-            format!(
-                "{k} table{s} on page {page} kept as paragraphs: the room for the cells of \
-                 tables is spent; {them} text is kept"
-            ),
-            LossReason::Limit,
-            Severity::Info,
-        ));
+        let mut what = format!(
+            "{k} table{s} on page {page} kept as paragraphs: the room for the cells of tables \
+             is spent; {them} text is kept"
+        );
+        match built.tagged_as_text.as_slice() {
+            [] => {}
+            [b] => what.push_str(&format!(
+                "; the tagged table from p{page}:b{b} on stays paragraphs on its later pages \
+                 too"
+            )),
+            [b, ..] => what.push_str(&format!(
+                "; the {} tagged tables among them, the first from p{page}:b{b} on, stay \
+                 paragraphs on their later pages too",
+                built.tagged_as_text.len()
+            )),
+        }
+        notes.push((what, LossReason::Limit, Severity::Info));
     }
     let mut laid = built.laid(notes);
     let (mut b, mut t) = (0, 0);
@@ -829,6 +838,9 @@ struct Built {
     added: Vec<(usize, usize, usize, Vec<Inline>)>,
     /// Tables whose overhead did not fit and that were laid out as paragraphs.
     tables_as_text: usize,
+    /// Of those, the tagged ones by the place of their first paragraph among the page's
+    /// blocks (`p<N>:b<K>`).
+    tagged_as_text: Vec<usize>,
     /// The link room before the block (or the table row) now being built, to go back to if
     /// it is dropped.
     mark: Option<LinkMark>,
@@ -932,6 +944,19 @@ impl Built {
             return;
         }
         let earlier = plan.tagged.filter(|_| plan.continues);
+        // Text for rows an earlier page began has no overhead (no new cells). It is built
+        // first, so the overhead set aside below stays with the rows it is for.
+        if let Some(t) = earlier {
+            for add in std::mem::take(&mut plan.additions) {
+                self.pending = Pending::Added(t, add.row);
+                self.mark = Some(cx.links.mark());
+                let Some(inlines) = self.cell_inlines(&add.runs, cx) else {
+                    return;
+                };
+                self.mark = None;
+                self.added.push((t, add.row, add.cell, inlines));
+            }
+        }
         // What the table's cells and rows cost beyond their text is set aside at once. When it
         // does not fit, the table's text is laid out as paragraphs: the overhead of a table
         // never stops the text.
@@ -944,14 +969,11 @@ impl Built {
             if cx.links.take_bytes(overhead).is_err() {
                 cx.links.restore(mark);
                 let rows = std::mem::take(&mut plan.rows);
-                self.as_text(rows, cx);
-                if plan.additions.is_empty() {
-                    return;
-                }
-            } else {
-                // The overhead goes back with the table's first row if that is dropped.
-                self.mark = Some(mark);
+                self.as_text(rows, plan.tagged, cx);
+                return;
             }
+            // The overhead goes back with the table's first row if that is dropped.
+            self.mark = Some(mark);
         }
         let table = match earlier {
             Some(t) => TableRef::Earlier(t),
@@ -972,17 +994,6 @@ impl Built {
                 TableRef::Here(here + 1)
             }
         };
-        if let Some(t) = earlier {
-            for add in plan.additions {
-                self.pending = Pending::Added(t, add.row);
-                self.mark = Some(cx.links.mark());
-                let Some(inlines) = self.cell_inlines(&add.runs, cx) else {
-                    return;
-                };
-                self.mark = None;
-                self.added.push((t, add.row, add.cell, inlines));
-            }
-        }
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(plan.rows.len());
         'rows: for (r, row) in plan.rows.into_iter().enumerate() {
             self.pending = Pending::Row(table, r + 1);
@@ -1032,16 +1043,30 @@ impl Built {
     }
 
     /// The text of a table whose overhead does not fit, laid out as paragraphs in reading
-    /// order. The page counts it for one loss.
-    fn as_text(&mut self, rows: Vec<Vec<PlannedCell>>, cx: &Context<'_>) {
+    /// order. The page counts it for one loss. A tagged table (`table`) stays paragraphs on
+    /// its later pages too, and the loss names it by its first paragraph.
+    fn as_text(&mut self, rows: Vec<Vec<PlannedCell>>, table: Option<usize>, cx: &Context<'_>) {
         let mut runs: Vec<Run> = rows.into_iter().flatten().flat_map(|c| c.runs).collect();
         if runs.is_empty() {
             return;
         }
         runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
         self.tables_as_text += 1;
+        let first = self
+            .blocks
+            .iter()
+            .filter(|b| !matches!(b, Block::Table { .. }))
+            .count()
+            + 1;
+        let before = self.blocks.len();
         let free = vec![Slot::Free; runs.len()];
         tagged(&runs, &free, cx, self);
+        if let Some(t) = table {
+            cx.tables.keep_as_text(t);
+            if self.blocks.len() > before {
+                self.tagged_as_text.push(first);
+            }
+        }
     }
 
     /// The inlines of one table cell, charged as an element (its text was charged when the
@@ -2136,6 +2161,117 @@ mod tests {
         );
         assert_eq!(second.added.len(), 1, "{:?}", second.added);
         assert_eq!(second.cut, Some(Cut::Added { table: 1, row: 1 }));
+    }
+
+    #[test]
+    fn a_stop_at_the_first_row_added_to_an_earlier_table_gives_back_its_overhead() {
+        // Page 1 begins the table with row 1. Page 2 adds text to row 1 and begins row 2,
+        // whose text is over the text limit: the stop drops row 2, and the overhead set aside
+        // for it goes back.
+        let (tree, cells) = table_tree(&[&["TD", "TD"], &["TD", "TD"]]);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_text_bytes: 4,
+            ..rezzer_limits::Limits::default()
+        });
+        let tables = Tables::default();
+        let links = LinkRoom::new(10_000);
+        let one = [cells[0][0]];
+        let roles = |m: u32| one.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let first = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["a"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        assert_eq!(first.blocks.len(), 1);
+        let before = (links.left.get(), links.freed.get());
+        let two = [cells[0][1], cells[1][0]];
+        let roles = |m: u32| two.get(m as usize).copied();
+        let cx = Context {
+            roles: &roles,
+            ..cx
+        };
+        let second = page_blocks(
+            2,
+            Some(842.0),
+            tagged_runs(&["c", "a longer cell"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        assert_eq!(second.added.len(), 1, "{:?}", second.added);
+        assert_eq!(
+            second.cut,
+            Some(Cut::Row {
+                table: TableRef::Earlier(1),
+                row: 1
+            })
+        );
+        assert_eq!((links.left.get(), links.freed.get()), before);
+    }
+
+    #[test]
+    fn a_tagged_table_kept_as_paragraphs_stays_text_on_later_pages() {
+        // Room for the overhead of a row, not of a table (TABLE_COST + ROW_COST + CELL_COST):
+        // the table's text is a paragraph on page 1, and its row on page 2, which would fit,
+        // is a paragraph too, not a row for a table that is not kept.
+        let (tree, cells) = table_tree(&[&["TD"], &["TD"]]);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let links = LinkRoom::new(200);
+        let mut laid = Vec::new();
+        for (k, word) in ["first", "second"].into_iter().enumerate() {
+            let owner = [cells[k][0]];
+            let roles = |m: u32| owner.get(m as usize).copied();
+            let cx = Context {
+                style: &style,
+                tree: Some(&tree),
+                roles: &roles,
+                budget: &budget,
+                tables: &tables,
+                in_part: false,
+                links: &links,
+            };
+            laid.push(page_blocks(
+                k as u32 + 1,
+                Some(842.0),
+                tagged_runs(&[word], 700.0),
+                &NOTHING_DRAWN,
+                &cx,
+            ));
+        }
+        for (k, word) in ["first", "second"].into_iter().enumerate() {
+            match laid[k].blocks.as_slice() {
+                [Block::Paragraph { inlines, .. }] => {
+                    assert_eq!(rezzer_model::plain_text(inlines), word);
+                }
+                other => panic!("page {}: {other:?}", k + 1),
+            }
+            assert!(laid[k].continued.is_empty() && laid[k].added.is_empty());
+            assert!(laid[k].stop.is_none());
+        }
+        match laid[0].notes.as_slice() {
+            [(what, LossReason::Limit, Severity::Info)] => {
+                assert!(what.contains("kept as paragraphs"), "{what}");
+                assert!(
+                    what.contains("p1:b1") && what.contains("later pages"),
+                    "{what}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(laid[1].notes.is_empty(), "{:?}", laid[1].notes);
     }
 
     #[test]

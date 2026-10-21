@@ -26,6 +26,9 @@ pub(crate) struct Tables {
     /// has: a row is planned once, and later pages add to its cells.
     built: RefCell<HashMap<(usize, usize), usize>>,
     counts: RefCell<HashMap<usize, usize>>,
+    /// Tagged tables kept as paragraphs because their overhead did not fit: their text on
+    /// every later page stays paragraphs too.
+    as_text: RefCell<HashSet<usize>>,
 }
 
 /// The rows of one tagged table: the `TD` and `TH` cells of each row, the row and column of
@@ -152,6 +155,15 @@ impl Tables {
         *n += 1;
     }
 
+    /// Notes that tagged table `table` is kept as paragraphs for the rest of the file.
+    pub(crate) fn keep_as_text(&self, table: usize) {
+        self.as_text.borrow_mut().insert(table);
+    }
+
+    fn is_text(&self, table: usize) -> bool {
+        self.as_text.borrow().contains(&table)
+    }
+
     fn row_at(&self, table: usize, tr: usize) -> Option<usize> {
         self.built.borrow().get(&(table, tr)).copied()
     }
@@ -200,7 +212,9 @@ fn row_text(cells: &[PlannedCell]) -> String {
 /// the rows that have text on this page. A table that started on an earlier page goes on
 /// there, without the header rows it repeats. A table whose cells on this page mostly have no
 /// text is not used: its runs stay as text, set free, and the reason is returned so the page
-/// can be looked at for tables as if it were untagged.
+/// can be looked at for tables as if it were untagged. A table kept as paragraphs on an earlier
+/// page leaves its runs in the flow, in their cells, so they are laid out as text where they
+/// stand.
 pub(crate) fn tagged(
     page: u32,
     flow: &mut Flow,
@@ -228,6 +242,9 @@ pub(crate) fn tagged(
     let mut fallbacks = Vec::new();
     let mut used: HashMap<usize, Rc<TableRows>> = HashMap::new();
     for &t in &order {
+        if tables.is_text(t) {
+            continue;
+        }
         let Some(index) = tables.rows(tree, t, page, stop) else {
             continue;
         };
@@ -257,9 +274,10 @@ pub(crate) fn tagged(
             cells.entry(cell).or_default().push(r);
         }
     }
-    // A table not used leaves its text as text.
+    // A table not used leaves its text as text. The runs of a table kept as text stay in
+    // their cells: they are laid out as free text, but are content, not running headers.
     for s in &mut flow.slots {
-        if matches!(s, Slot::Cell { .. }) {
+        if matches!(*s, Slot::Cell { table, .. } if !tables.is_text(table)) {
             *s = Slot::Free;
         }
     }

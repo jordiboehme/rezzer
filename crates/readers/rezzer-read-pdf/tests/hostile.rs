@@ -1894,3 +1894,166 @@ fn table_overhead_never_stops_the_text() {
     );
     assert_rss_under_256_mib();
 }
+
+/// A tagged table whose row 1 is on page 1 ("first" and `empty` empty cells) and whose row 2
+/// is on page 2 ("second"), each page with an untagged line after it, then `filler` pages of
+/// 150 untagged lines.
+fn tagged_table_over_two_pages(empty: usize, filler: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let (root, doc, table) = (b.reserve(), b.reserve(), b.reserve());
+    let (tr1, tr2) = (b.reserve(), b.reserve());
+    let (p1, p2) = (b.reserve(), b.reserve());
+    let c1 = b.stream(
+        "",
+        b"/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (first) Tj ET EMC \
+          BT /F1 12 Tf 72 600 Td (plain one) Tj ET",
+    );
+    let c2 = b.stream(
+        "",
+        b"/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (second) Tj ET EMC \
+          BT /F1 12 Tf 72 600 Td (plain two) Tj ET",
+    );
+    for (p, c, k) in [(p1, c1, 0), (p2, c2, 1)] {
+        b.set(
+            p,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {k} \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+            ),
+        );
+    }
+    let ta = b.add(format!("<< /S /TD /P {tr1} 0 R /Pg {p1} 0 R /K 0 >>"));
+    let tb = b.add(format!("<< /S /TD /P {tr2} 0 R /Pg {p2} 0 R /K 0 >>"));
+    let mut tds = vec![ta];
+    for _ in 0..empty {
+        tds.push(b.add(format!("<< /S /TD /P {tr1} 0 R >>")));
+    }
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    b.set(
+        tr1,
+        format!("<< /S /TR /P {table} 0 R /K [{}] >>", refs(&tds)),
+    );
+    b.set(tr2, format!("<< /S /TR /P {table} 0 R /K [{tb} 0 R] >>"));
+    b.set(
+        table,
+        format!("<< /S /Table /P {doc} 0 R /K [{tr1} 0 R {tr2} 0 R] >>"),
+    );
+    b.set(
+        doc,
+        format!("<< /S /Document /P {root} 0 R /K [{table} 0 R] >>"),
+    );
+    let mut text = b"BT /F1 6 Tf ".to_vec();
+    for i in 0..150 {
+        text.extend(
+            format!(
+                "1 0 0 1 20 {} Tm (filler line {i} with some words in it to fill) Tj ",
+                800 - (i % 130) * 6
+            )
+            .as_bytes(),
+        );
+    }
+    text.extend(b"ET");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&text));
+    let mut kids = vec![p1, p2];
+    for _ in 0..filler {
+        kids.push(b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        )));
+    }
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {doc} 0 R \
+             /ParentTree << /Nums [0 [{ta} 0 R] 1 [{tb} 0 R]] >> >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            refs(&kids),
+            kids.len()
+        ),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// The tagged table of [`tagged_table_over_two_pages`] read at 64 MiB, where 150 filler pages
+/// leave its 20,000 empty cells no room.
+fn read_tagged_table_over_two_pages(filler: usize) -> ReadOutcome {
+    let limits = Limits {
+        max_memory_bytes: 64 << 20,
+        ..hostile()
+    };
+    read_with(
+        &tagged_table_over_two_pages(20_000, filler),
+        &Budget::new(limits),
+    )
+}
+
+/// The words of the tables in `blocks`.
+fn table_text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for b in blocks {
+        if let Block::Table { rows, .. } = b {
+            for c in rows.iter().flatten() {
+                out.push_str(&plain_text(&c.inlines));
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_tagged_table_kept_as_paragraphs_keeps_its_later_pages_as_text() {
+    let out = read_tagged_table_over_two_pages(150);
+    assert_eq!(out.document.losses.len(), 1, "{:?}", out.document.losses);
+    let loss = &out.document.losses[0];
+    assert_eq!(
+        (loss.why, loss.severity),
+        (LossReason::Limit, Severity::Info),
+        "{loss:?}"
+    );
+    assert!(loss.what.contains("kept as paragraphs"), "{loss:?}");
+    let one = text(page(&out, 1));
+    assert!(one.contains("first"), "{one:?}");
+    let two = text(page(&out, 2));
+    let (second, plain) = (two.find("second"), two.find("plain two"));
+    assert!(
+        matches!((second, plain), (Some(s), Some(p)) if s < p),
+        "{two:?}"
+    );
+    assert!(table_text(&out.document.body).is_empty());
+    assert!(loss.what.contains("later pages"), "{loss:?}");
+}
+
+#[test]
+fn a_tagged_table_with_room_keeps_both_pages_in_the_table() {
+    // The control: without filler pages the room is not short, and the table holds both rows.
+    let out = read_tagged_table_over_two_pages(0);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("kept as paragraphs")),
+        "{:?}",
+        out.document.losses
+    );
+    let cells = table_text(page(&out, 1));
+    assert!(
+        cells.contains("first") && cells.contains("second"),
+        "{cells:?}"
+    );
+}

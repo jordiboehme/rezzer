@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use pdfparts::{IssueKind, PageInfo, Pdf};
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Anchor, Block, CalloutKind, Completeness, Document, FormatId, Inline, Loss, LossReason,
+    Anchor, Block, CalloutKind, Cell, Completeness, Document, FormatId, Inline, Loss, LossReason,
     ReadOptions, ReadOutcome, Reader, ReaderInfo, SectionKind, Severity, Source, StatusColor,
     source_info,
 };
@@ -243,25 +243,24 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             let first_table = blocks.len();
             let nothing =
                 laid.blocks.is_empty() && laid.continued.is_empty() && laid.added.is_empty();
-            for (table, rows) in laid.continued {
-                if let Some((s, b, _)) = placed.get(&table)
-                    && let Some(Block::Section { blocks, .. }) = out.doc.body.get_mut(*s)
-                    && let Some(Block::Table { rows: kept, .. }) = blocks.get_mut(*b)
-                {
-                    kept.extend(rows);
-                }
-            }
-            for (table, row, cell, inlines) in laid.added {
-                if let Some((s, b, _)) = placed.get(&table)
-                    && let Some(Block::Section { blocks, .. }) = out.doc.body.get_mut(*s)
-                    && let Some(Block::Table { rows, .. }) = blocks.get_mut(*b)
-                    && let Some(kept) = rows.get_mut(row).and_then(|r| r.get_mut(cell))
-                {
-                    if !kept.inlines.is_empty() && !inlines.is_empty() {
-                        kept.inlines.push(Inline::plain(" "));
-                    }
-                    kept.inlines.extend(inlines);
-                }
+            let (orphans, orphaned) =
+                attach(&mut out.doc.body, &placed, laid.continued, laid.added);
+            // The layout builds rows only for tables it placed: a tagged table kept as
+            // paragraphs stays text on its later pages.
+            debug_assert!(
+                orphaned.is_none(),
+                "rows for a table not kept: {orphaned:?}"
+            );
+            if let Some(table) = orphaned {
+                out.loss(
+                    format!("p{n}"),
+                    format!(
+                        "text page {n} adds to {table} is kept as paragraphs at the end of the \
+                         page: the table does not hold its rows"
+                    ),
+                    LossReason::Damaged,
+                    Severity::Warning,
+                );
             }
             let mut tagged = laid.tagged.into_iter();
             for (k, block) in laid.blocks.iter().enumerate() {
@@ -273,6 +272,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 }
             }
             blocks.extend(laid.blocks);
+            blocks.extend(orphans);
             // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {
                 let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
@@ -374,6 +374,80 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
 
 /// Where each tagged table stands: its section and block in the body, and its anchor.
 type Placed = HashMap<usize, (usize, usize, String)>;
+
+/// The rows of the tagged table `table` in `body`, if it is placed.
+fn placed_rows<'a>(
+    body: &'a mut [Block],
+    placed: &Placed,
+    table: usize,
+) -> Option<&'a mut Vec<Vec<Cell>>> {
+    let (s, b, _) = placed.get(&table)?;
+    match body.get_mut(*s)? {
+        Block::Section { blocks, .. } => match blocks.get_mut(*b)? {
+            Block::Table { rows, .. } => Some(rows),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Adds a page's rows and cell text for tagged tables begun on earlier pages to their tables.
+/// What has no table or cell to go to is never dropped: it comes back as paragraphs (a row's
+/// cells joined by a space), with the name of the first table it was for.
+fn attach(
+    body: &mut [Block],
+    placed: &Placed,
+    continued: Vec<(usize, Vec<Vec<Cell>>)>,
+    added: Vec<(usize, usize, usize, Vec<Inline>)>,
+) -> (Vec<Block>, Option<String>) {
+    let mut orphans = Vec::new();
+    let mut orphaned: Option<String> = None;
+    let mut orphan = |table: usize, parts: Vec<Vec<Inline>>, orphans: &mut Vec<Block>| {
+        orphaned.get_or_insert_with(|| match placed.get(&table) {
+            Some((_, _, anchor)) => format!("table {anchor}"),
+            None => "a tagged table begun on an earlier page".to_string(),
+        });
+        let mut inlines: Vec<Inline> = Vec::new();
+        for part in parts
+            .into_iter()
+            .filter(|p| !rezzer_model::plain_text(p).trim().is_empty())
+        {
+            if !inlines.is_empty() {
+                inlines.push(Inline::plain(" "));
+            }
+            inlines.extend(part);
+        }
+        if !inlines.is_empty() {
+            orphans.push(Block::paragraph(inlines));
+        }
+    };
+    for (table, rows) in continued {
+        match placed_rows(body, placed, table) {
+            Some(kept) => kept.extend(rows),
+            None => {
+                for row in rows {
+                    let parts = row.into_iter().map(|c| c.inlines).collect();
+                    orphan(table, parts, &mut orphans);
+                }
+            }
+        }
+    }
+    for (table, row, cell, inlines) in added {
+        let kept = placed_rows(body, placed, table)
+            .and_then(|rows| rows.get_mut(row))
+            .and_then(|r| r.get_mut(cell));
+        match kept {
+            Some(kept) => {
+                if !kept.inlines.is_empty() && !inlines.is_empty() {
+                    kept.inlines.push(Inline::plain(" "));
+                }
+                kept.inlines.extend(inlines);
+            }
+            None => orphan(table, vec![inlines], &mut orphans),
+        }
+    }
+    (orphans, orphaned)
+}
 
 /// What a stop on page `n` cut first, in words that end in "on": "block 4 on", "row 3 of table
 /// p2:t1 on". `rows_of` tells how many rows the table at a section and block holds now.
@@ -656,6 +730,79 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{Page, pdf, show};
+
+    #[test]
+    fn rows_for_a_table_not_placed_are_kept_as_paragraphs() {
+        let cell = |t: &str| Cell {
+            inlines: vec![Inline::plain(t)],
+            row_span: 1,
+            col_span: 1,
+            anchor: None,
+        };
+        let table = Block::Table {
+            caption: None,
+            header_rows: 0,
+            role: None,
+            rows: vec![vec![cell("a")]],
+            alignments: Vec::new(),
+            anchor: None,
+        };
+        let mut body = vec![Block::Section {
+            kind: SectionKind::Page,
+            title: None,
+            anchor: None,
+            blocks: vec![table],
+        }];
+        let placed: Placed = HashMap::from([(1, (0, 0, "p1:t1".to_string()))]);
+        // Table 1 is placed: its row and the text for its cell go to it.
+        let (orphans, orphaned) = attach(
+            &mut body,
+            &placed,
+            vec![(1, vec![vec![cell("b")]])],
+            vec![(1, 0, 0, vec![Inline::plain("c")])],
+        );
+        assert!(orphans.is_empty() && orphaned.is_none());
+        // Table 2 is not, and table 1 has no cell 5: their text comes back as paragraphs.
+        let (orphans, orphaned) = attach(
+            &mut body,
+            &placed,
+            vec![(2, vec![vec![cell("d"), cell("e")], vec![cell("")]])],
+            vec![(1, 0, 5, vec![Inline::plain("f")])],
+        );
+        let texts: Vec<String> = orphans
+            .iter()
+            .map(|b| match b {
+                Block::Paragraph { inlines, .. } => rezzer_model::plain_text(inlines),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, ["d e", "f"]);
+        assert_eq!(
+            orphaned.as_deref(),
+            Some("a tagged table begun on an earlier page")
+        );
+        let (_, orphaned) = attach(
+            &mut body,
+            &placed,
+            Vec::new(),
+            vec![(1, 3, 0, vec![Inline::plain("g")])],
+        );
+        assert_eq!(orphaned.as_deref(), Some("table p1:t1"));
+        match &body[0] {
+            Block::Section { blocks, .. } => match &blocks[0] {
+                Block::Table { rows, .. } => {
+                    let kept: Vec<String> = rows
+                        .iter()
+                        .flatten()
+                        .map(|c| rezzer_model::plain_text(&c.inlines))
+                        .collect();
+                    assert_eq!(kept, ["a c", "b"]);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
 
     #[test]
     fn failures_are_grouped_by_run_of_pages() {
