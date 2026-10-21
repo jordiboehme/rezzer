@@ -1602,10 +1602,7 @@ fn model_table(
             })
             .collect(),
     };
-    let body: Vec<Vec<String>> = grid[head..]
-        .iter()
-        .map(|row| line(row))
-        .collect();
+    let body: Vec<Vec<String>> = grid[head..].iter().map(|row| line(row)).collect();
     let mut out = String::new();
     if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
@@ -1637,9 +1634,8 @@ fn model_table(
         Vec::new()
     };
     if marked || !ranges.is_empty() {
-        let mut note = format!(
-            "Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left."
-        );
+        let mut note =
+            format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
         if !ranges.is_empty() {
             note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
         }

@@ -1667,7 +1667,12 @@ fn merge_note_names_only_shown_rows() {
         anchor: None,
     }]);
     // The cell merged down stands in the header; each shown row below says "same as above".
-    assert_eq!(md.matches("\n| \u{3003} | 0 |").count(), 199, "{}", &md[..300]);
+    assert_eq!(
+        md.matches("\n| \u{3003} | 0 |").count(),
+        199,
+        "{}",
+        &md[..300]
+    );
     assert!(
         md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left.\n"),
         "{}",
