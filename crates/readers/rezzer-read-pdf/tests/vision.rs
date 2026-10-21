@@ -1594,3 +1594,20 @@ fn a_figure_caption_goes_to_its_own_picture() {
         Some("A chart of sales.")
     );
 }
+
+#[test]
+fn a_figure_matched_to_no_picture_stays_as_page_text() {
+    // Two new small pictures and a Figure whose marked content is a line of text: the alt text
+    // is written once as page text at the first picture, and given to no picture.
+    let out = read(&tagged_figure_page(false, true));
+    let shown = lines(page(&out, 1));
+    let text = "Figure (not matched to a picture): A chart of sales.";
+    assert_eq!(shown.iter().filter(|l| *l == text).count(), 1, "{shown:?}");
+    let at = shown.iter().position(|l| l == text).unwrap();
+    assert_eq!(shown[at + 1], "[media page-1-pic-1]", "{shown:?}");
+    assert!(
+        out.document.assets.iter().all(|a| a.caption.is_none()),
+        "{:#?}",
+        out.document.assets
+    );
+}

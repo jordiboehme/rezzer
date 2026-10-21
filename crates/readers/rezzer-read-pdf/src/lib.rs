@@ -771,6 +771,8 @@ impl Pictures {
         let mut crops: Vec<render::Crop> = Vec::new();
         let mut on_page: HashSet<usize> = HashSet::new();
         let mut new: Vec<usize> = Vec::new();
+        // Where the block of the first new picture is in `media`, and its place.
+        let mut first_new: Option<(usize, usize)> = None;
         let mut figured = false;
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
@@ -817,6 +819,7 @@ impl Pictures {
                     self.known.insert(p.id, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
                     new.push(asset);
+                    first_new.get_or_insert((media.len(), spots[i]));
                     asset
                 }
             };
@@ -833,9 +836,30 @@ impl Pictures {
             ));
         }
         // The page's Figure caption, matched to no picture: only a page with one new picture
-        // gives it to that picture.
-        if let ([only], false, Some(text)) = (new.as_slice(), figured, caption) {
-            out.doc.assets[*only].caption = Some(text.clone());
+        // gives it to that picture. With more, it is page text before the first new one, so it
+        // is not lost.
+        match (new.as_slice(), figured, caption) {
+            ([only], false, Some(text)) => out.doc.assets[*only].caption = Some(text.clone()),
+            ([_, _, ..], false, Some(text)) => {
+                let words = format!("Figure (not matched to a picture): {text}");
+                let charged = budget
+                    .add_elements(2)
+                    .and_then(|()| room.take_bytes(words.len() as u64 + PLACE_COST));
+                if let (Ok(()), Some((at, spot))) = (charged, first_new) {
+                    media.insert(at, (spot, Block::paragraph(vec![Inline::plain(words)])));
+                } else {
+                    out.loss(
+                        format!("p{n}"),
+                        format!(
+                            "the alt text of a Figure on page {n} matches no picture and is not \
+                             written: a limit was reached"
+                        ),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    );
+                }
+            }
+            _ => {}
         }
         crops
     }
