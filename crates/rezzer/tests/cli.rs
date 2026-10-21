@@ -730,6 +730,9 @@ fn password_never_in_logs() {
         !without_overview(&stderr).contains(PDF_PASSWORD),
         "{stderr}"
     );
+    // Rezzer logs nothing today, even with RUST_LOG=trace. Empty stderr guards a logger added
+    // later: it must not start to write the password, or anything else, here.
+    assert_eq!(stderr, "", "a read writes nothing to stderr");
 
     let call = serde_json::json!({
         "jsonrpc": "2.0",
@@ -760,5 +763,7 @@ fn password_never_in_logs() {
     for text in [&stdout, &stderr] {
         assert!(!without_overview(text).contains(PDF_PASSWORD), "{text}");
     }
+    // The same guard for the server: it logs nothing to stderr.
+    assert_eq!(stderr, "", "the server writes nothing to stderr");
     assert_eq!(env.cache_entries(), 0);
 }
