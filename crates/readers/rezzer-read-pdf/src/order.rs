@@ -839,6 +839,50 @@ mod tests {
     }
 
     #[test]
+    fn a_run_cut_at_a_link_edge_stays_together_in_its_row() {
+        // Small text of a figure shares the row of a caption; both are cut at the edges of a
+        // link box. Each text stays whole, in the order of where it starts.
+        let part = |text: &str, x: f32, end: f32, y: f32, size: f32, link: Option<u32>| Frag {
+            end,
+            pen: end,
+            size,
+            link,
+            ..frag(text, x, y)
+        };
+        let frags = vec![
+            part("small text wit", 329.6, 397.0, 415.8, 3.0, Some(0)),
+            part("h more", 397.0, 516.9, 415.8, 3.0, None),
+            part("Figure 2: (", 108.0, 295.0, 412.6, 10.0, None),
+            part("example.org", 295.0, 396.3, 412.6, 10.0, Some(0)),
+            part(") left", 396.3, 504.0, 412.6, 10.0, None),
+        ];
+        let lines = lines_of(&frags, true);
+        assert_eq!(lines, [vec![2, 3, 4, 0, 1]]);
+    }
+
+    #[test]
+    fn padding_splits_pieces_but_not_words() {
+        // A label, white space padding past the piece gap, a value: two pieces. A word gap
+        // of one space keeps one piece.
+        let pad = |text: &str, x: f32| Frag {
+            end: x,
+            inked: false,
+            ..frag(text, x, 700.0)
+        };
+        let mut label = frag("Points:", 50.0, 700.0);
+        label.pen = 50.0 + 6.0 * 7.0 + 30.0;
+        label.text.push_str("\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}");
+        let value = frag("1200", 50.0 + 6.0 * 7.0 + 30.0, 700.0);
+        let ps = pieces(&[label, value]);
+        assert_eq!(ps.len(), 2, "{ps:?}");
+        // The piece of the label reaches over its padding.
+        assert_eq!(ps[0].x1, 122.0);
+        let ps = pieces(&[pad(" ", 40.0), frag("word", 43.0, 700.0)]);
+        assert_eq!(ps.len(), 1, "{ps:?}");
+        assert_eq!(collapsed("a\u{a0}\u{a0}\u{a0}b c\u{a0}d"), "a b c\u{a0}d");
+    }
+
+    #[test]
     fn label_value_rows_are_read_row_by_row() {
         let mut frags = Vec::new();
         for (k, (label, value)) in [
