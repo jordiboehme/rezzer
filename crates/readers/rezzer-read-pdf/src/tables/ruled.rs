@@ -299,6 +299,29 @@ pub(super) fn ruled(
         let head = (1..rows)
             .find(|&k| (0..cols).all(|c| covered(&on_y[k], xs[c], xs[c + 1])))
             .unwrap_or(0);
+        // Rows above that rule are the table's header only when they look it: a style of
+        // their own (bold over plain, or another size). A cell over several rows alone makes
+        // no header.
+        let styled = head >= 2 && {
+            let (mut top, mut below): (Vec<&Run>, Vec<&Run>) = (Vec::new(), Vec::new());
+            for &i in &within {
+                let r = &flow.runs[i];
+                let (_, cy) = middle(r);
+                let row = ys.partition_point(|e| *e > cy).saturating_sub(1);
+                if row < head {
+                    top.push(r)
+                } else {
+                    below.push(r)
+                }
+            }
+            let median = |runs: &mut Vec<&Run>| {
+                runs.sort_by(|a, b| a.size.total_cmp(&b.size));
+                runs.get(runs.len() / 2).map_or(0.0, |r| r.size)
+            };
+            let bold =
+                !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
+            !below.is_empty() && (bold || (median(&mut top) - median(&mut below)).abs() > 0.5)
+        };
         // A band of the body that no column rule parts, under a header that has them, is
         // read in the header's columns when its lines hold text in two columns or more.
         if head >= 1 && cols >= 3 {
@@ -447,8 +470,9 @@ pub(super) fn ruled(
             at,
             top: b[3],
             rows: planned_rows,
-            // A header of two rows or more is the grid's; one row is judged by its text.
-            header_rows: if head >= 2 { head } else { 0 },
+            // A header of two rows or more in a style of its own is the grid's; otherwise the
+            // first row is judged by its text.
+            header_rows: if styled { head } else { 0 },
             trs: Vec::new(),
             additions: Vec::new(),
             tagged: None,
@@ -466,6 +490,7 @@ pub(super) fn ruled(
             by_y: &by_y,
             area,
             hs: &hs,
+            stop,
         },
         bands,
         &mut Taken {
@@ -654,8 +679,8 @@ fn open_bands(
 /// For each grid row, the baselines of the lines that start a row in it, going up: empty
 /// when the band is one row. A band of the body whose cells are each one square and of
 /// which at least two hold text is cut when at least two of its lines are anchors: lines
-/// with text in at least half of the cells that hold text in the band, the first of those
-/// cells included.
+/// with text in at least half of the cells that hold text in the band (an empty first cell
+/// included). No band is cut when the rules part most bands into one record each.
 #[allow(clippy::too_many_arguments)]
 fn anchor_rows(
     flow: &Flow,
@@ -668,6 +693,9 @@ fn anchor_rows(
     cell_at: &dyn Fn(f32, f32) -> (usize, usize),
 ) -> Vec<Vec<f32>> {
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); rows];
+    // Bands of the body with text in two cells or more, and of those the ones with two lines
+    // or more that fill the band and start in its first cell.
+    let (mut texted, mut records) = (0usize, 0usize);
     // The runs of each band, by baseline from the top.
     let mut bands: Vec<Vec<(f32, f32, usize)>> = vec![Vec::new(); rows];
     for &i in within {
@@ -703,18 +731,31 @@ fn anchor_rows(
             continue;
         }
         let first = used[0];
-        let anchors: Vec<f32> = lines
-            .iter_mut()
-            .filter_map(|(y, cells)| {
-                cells.sort_unstable();
-                cells.dedup();
-                (2 * cells.len() >= used.len() && cells.first() == Some(&first)).then_some(*y)
-            })
-            .collect();
+        let (mut anchors, mut keyed) = (Vec::new(), 0usize);
+        for (y, cells) in lines.iter_mut() {
+            cells.sort_unstable();
+            cells.dedup();
+            if 2 * cells.len() >= used.len() {
+                anchors.push(*y);
+                if cells.first() == Some(&first) {
+                    keyed += 1;
+                }
+            }
+        }
+        texted += 1;
+        if keyed >= 2 {
+            records += 1;
+        }
         if anchors.len() >= 2 {
             // Kept going up, for a search by baseline.
             out[r] = anchors.into_iter().rev().collect();
         }
+    }
+    // When rules part the body in bands and most of them hold one record (one line that
+    // fills the band and starts in its first cell), the rules part the records: a band with
+    // more such lines is a record whose cells wrap, and is not cut.
+    if texted >= 2 && 2 * records < texted {
+        out.iter_mut().for_each(Vec::clear);
     }
     out
 }

@@ -4379,3 +4379,120 @@ fn a_header_band_over_a_huge_body_is_bounded() {
     assert_quick(start);
     assert!(cells_loss(&out).is_some(), "{:?}", out.document.losses);
 }
+
+/// A one-page file of `content`, deflated, `w` by `h` points, with Helvetica as `/F1` and
+/// Helvetica-Bold as `/F2`.
+fn two_font_page(content: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(content));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_header_band_of_thousands_of_empty_cells_is_bounded() {
+    // A band of three titled cells and 5,700 narrow empty ones over 4,700 lines of three
+    // short pieces, on a page of 14,400 points: the table is only as wide as its titled
+    // columns, quick and small.
+    let start = Instant::now();
+    let (w, top) = (14_400usize, 14_390.0f32);
+    let mut c = b"0.1 w ".to_vec();
+    let mut xs: Vec<f32> = vec![10.0, 30.0, 50.0, 70.0];
+    xs.extend((0..5_700).map(|k| 70.0 + 2.5 * (k + 1) as f32));
+    let end = xs[xs.len() - 1];
+    c.extend(
+        format!(
+            "10 {top} m {end} {top} l S 10 {0} m {end} {0} l S ",
+            top - 3.0
+        )
+        .as_bytes(),
+    );
+    for x in &xs {
+        c.extend(format!("{x} {} m {x} {top} l S ", top - 3.0).as_bytes());
+    }
+    for (k, t) in ["Date", "Text", "Amount"].iter().enumerate() {
+        c.extend(format!("BT /F1 1 Tf {} {} Td ({t}) Tj ET\n", 11 + 20 * k, top - 2.0).as_bytes());
+    }
+    for i in 0..4_700usize {
+        let y = top - 6.0 - 3.0 * i as f32;
+        c.extend(
+            format!("BT /F1 1 Tf 11 {y} Td (a) Tj 20 0 Td (b) Tj 20 0 Td (1) Tj ET\n").as_bytes(),
+        );
+    }
+    let out = read(&two_font_page(&c, w, w));
+    assert_quick(start);
+    let widths: Vec<usize> = page(&out, 1)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table { rows, .. } => rows.iter().map(Vec::len).max(),
+            _ => None,
+        })
+        .collect();
+    assert!(widths.iter().all(|w| *w <= 3), "{widths:?}");
+}
+
+/// A page of `lines` lines of 25 one-letter words in two fonts, with `bands` one-row grids of two
+/// cells, each as tall as the page.
+fn tall_bands(bands: usize, lines: usize) -> Vec<u8> {
+    let w = (bands * 12 + 40).max(612);
+    let h = lines * 12 + 40;
+    let mut c = b"0.2 w ".to_vec();
+    for k in 0..bands {
+        let x = 20 + k * 12;
+        c.extend(
+            format!(
+                "{x} 10 m {} 10 l S {x} {t} m {} {t} l S {x} 10 m {x} {t} l S {} 10 m {} {t} l S \
+                 {} 10 m {} {t} l S ",
+                x + 6,
+                x + 6,
+                x + 3,
+                x + 3,
+                x + 6,
+                x + 6,
+                t = h - 10
+            )
+            .as_bytes(),
+        );
+    }
+    for i in 0..lines {
+        let y = h - 25 - i * 12;
+        c.extend(format!("BT /F1 9 Tf 20 {y} Td ").as_bytes());
+        for j in 0..25 {
+            let f = if j % 2 == 1 { "/F2" } else { "/F1" };
+            c.extend(format!("{f} 9 Tf (a) Tj 15 0 Td ").as_bytes());
+        }
+        c.extend(b"ET\n");
+    }
+    two_font_page(&c, w, h)
+}
+
+#[test]
+fn many_tall_one_row_grids_cost_about_as_much_as_their_text() {
+    // 800 one-row grids of two cells, each as tall as the page, over 8,000 lines of 25 words:
+    // about as quick as the same page without the grids.
+    let start = Instant::now();
+    let _twin = read(&tall_bands(0, 8_000));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = read(&tall_bands(800, 8_000));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(1),
+        "{took:?} against {twin:?}"
+    );
+    // Both files are read in this process, so its peak memory is not that of one read; the
+    // time against the twin is the measure here.
+    assert!(text(page(&out, 1)).contains('a'));
+}

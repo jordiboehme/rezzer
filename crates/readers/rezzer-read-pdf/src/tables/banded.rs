@@ -5,6 +5,8 @@
 //! Tables under a header band: a row of drawn cells (filled or framed) with column titles,
 //! and below it lines of text without rules that stand in the band's columns.
 
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::regions::Seg;
 
@@ -33,6 +35,7 @@ pub(super) struct Shared<'a> {
     pub area: &'a Area<'a>,
     /// The page's horizontal lines, sorted by height.
     pub hs: &'a [Seg],
+    pub stop: &'a dyn Fn() -> bool,
 }
 
 /// What the band search changes: the runs it claims or holds, its refusals and tables.
@@ -50,12 +53,26 @@ pub(super) struct Taken<'a> {
 /// whose table does not hold is refused with a note.
 pub(super) fn banded(sh: &Shared<'_>, mut bands: Vec<Band>, take: &mut Taken<'_>) {
     bands.sort_by(|a, b| b.b[3].total_cmp(&a.b[3]));
+    // A band is at most BAND_HEIGHT times the largest text of the page high: a taller one
+    // is let go before its text is looked at.
+    let largest = sh.flow.runs.iter().map(|r| r.size).fold(0.0f32, f32::max);
     let mut work = 0usize;
     for (k, band) in bands.iter().enumerate() {
+        if k % CHECK_EVERY == CHECK_EVERY - 1 && (sh.stop)() {
+            take.skipped.push(format!(
+                "tables under header bands on page {} are looked for only in part: the time \
+                 limit was reached",
+                sh.page
+            ));
+            break;
+        }
+        if band.b[3] - band.b[1] > BAND_HEIGHT * largest {
+            continue;
+        }
         if work > BAND_WORK {
             take.skipped.push(format!(
                 "tables under header bands on page {} are looked for only in part: the page \
-                 has too many lines below its bands",
+                 has too much text in and below its bands",
                 sh.page
             ));
             break;
@@ -94,13 +111,22 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         let (cx, _) = middle(&flow.runs[i]);
         cx > b[0] && cx < b[2]
     };
+    // The runs in the band's height are counted (a search) and charged before they are
+    // copied.
+    let in_height = sh.by_y.run_y.partition_point(|y| *y < b[3])
+        - sh.by_y.run_y.partition_point(|y| *y <= b[1]);
+    *work += in_height;
+    if *work > BAND_WORK {
+        return;
+    }
     let head: Vec<usize> = sh
         .by_y
         .runs_between(b[1], b[3])
         .into_iter()
         .filter(|&i| inside(i) && free(i, take))
         .collect();
-    let mut titles = vec![String::new(); cols];
+    // The titles of the cells that hold text, by column.
+    let mut titles: BTreeMap<usize, String> = BTreeMap::new();
     for &i in &head {
         let r = &flow.runs[i];
         let (cx, _) = middle(r);
@@ -108,22 +134,16 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             .partition_point(|e| *e < cx)
             .saturating_sub(1)
             .min(cols - 1);
-        titles[c].push_str(r.text.trim());
+        titles.entry(c).or_default().push_str(r.text.trim());
     }
-    let titled: Vec<bool> = titles.iter().map(|t| !t.is_empty()).collect();
+    titles.retain(|_, t| !t.is_empty());
     // Column titles are words: a row of numbers in boxes is a scale or a counter. A band is
     // a line or two high: a taller row of boxes holds blocks of text.
     let size = head
         .iter()
         .map(|&i| flow.runs[i].size)
         .fold(0.0f32, f32::max);
-    if titles
-        .iter()
-        .filter(|t| !t.is_empty() && !numeric(t))
-        .count()
-        < 3
-        || b[3] - b[1] > BAND_HEIGHT * size
-    {
+    if titles.values().filter(|t| !numeric(t)).count() < 3 || b[3] - b[1] > BAND_HEIGHT * size {
         return;
     }
     // The body: lines below the band, from the top.
@@ -206,12 +226,12 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             take.held[i] = true;
         }
     };
-    // Rows: lines with text in at least half of the columns the body uses, the first of them
-    // included; other lines join the row above them.
+    // Rows: lines with text in at least half of the columns the body uses; other lines join
+    // the row above them (lines above the first join the first).
     let mut used: Vec<usize> = body.iter().flat_map(|l| l.2.iter().map(|p| p.0)).collect();
     used.sort_unstable();
     used.dedup();
-    let Some(&first) = used.first() else {
+    if used.is_empty() {
         let why = if misfit {
             "the text below its header does not stand in its columns"
         } else {
@@ -219,14 +239,16 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         };
         refuse(why, take);
         return;
-    };
+    }
     let mut row_of: Vec<usize> = Vec::with_capacity(body.len());
     let mut rows = 0usize;
     for (_, _, placed) in &body {
         let mut c: Vec<usize> = placed.iter().map(|p| p.0).collect();
         c.sort_unstable();
         c.dedup();
-        if 2 * c.len() >= used.len() && c.first() == Some(&first) {
+        // A line that fills half of the columns starts a row, also with an empty first
+        // cell (a date printed once a day); a line that fills less goes on the row above.
+        if 2 * c.len() >= used.len() {
             rows += 1;
         }
         row_of.push(rows.saturating_sub(1));
@@ -236,9 +258,9 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         return;
     }
     // Columns with text in the band or the body; the others are dropped.
-    let kept: Vec<usize> = (0..cols)
-        .filter(|&c| titled[c] || used.binary_search(&c).is_ok())
-        .collect();
+    let mut kept: Vec<usize> = titles.keys().copied().chain(used.iter().copied()).collect();
+    kept.sort_unstable();
+    kept.dedup();
     if (rows + 1).saturating_mul(kept.len()) > MAX_SQUARES {
         take.skipped.push(format!(
             "a table of {} by {} cells under a header band on page {} is not read as a table: \
@@ -255,11 +277,14 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         }
         return;
     }
-    // The text of each body cell, for the tests of a table without rules.
-    let mut texts: Vec<Vec<String>> = vec![vec![String::new(); cols]; rows];
+    // The text of each body cell, for the tests of a table without rules: only the kept
+    // columns, so the table is never as wide as all of the band's cells.
+    let slot = |c: usize| kept.binary_search(&c).ok();
+    let mut texts: Vec<Vec<String>> = vec![vec![String::new(); kept.len()]; rows];
     for ((_, _, placed), &r) in body.iter().zip(&row_of) {
         for (c, ids) in placed {
-            let t = &mut texts[r][*c];
+            let Some(k) = slot(*c) else { continue };
+            let t = &mut texts[r][k];
             for &i in ids {
                 for w in flow.runs[i].text.split_whitespace() {
                     if !t.is_empty() {
@@ -286,7 +311,6 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         return;
     }
     let t = take.tables.len();
-    let slot = |c: usize| kept.binary_search(&c).ok();
     for &i in &head {
         let (cx, _) = middle(&flow.runs[i]);
         let c = xs

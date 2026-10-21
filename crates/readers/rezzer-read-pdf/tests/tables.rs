@@ -1537,3 +1537,131 @@ fn invoice_table_turned_down_or_upside_down() {
     let half = format!("q -1 0 0 -1 842 595 cm\n{}Q\n", invoice_table());
     assert_invoice_table(&read(&sized_page(&half, 842.0, 595.0, "/Rotate 180")));
 }
+
+#[test]
+fn a_cell_over_three_rows_makes_no_header() {
+    // A ruled week plan without a header row whose first cell spans three rows: the records
+    // stay records, the cells under the span say "same as above".
+    let mut c = String::from("0.5 w ");
+    let ys = [700.0, 680.0, 660.0, 640.0, 620.0, 600.0];
+    for (k, y) in ys.iter().enumerate() {
+        let x0 = if [1, 2, 4].contains(&k) { 150.0 } else { 50.0 };
+        c += &format!("{x0} {y} m 400 {y} l S ");
+    }
+    for x in [50.0, 150.0, 250.0, 400.0] {
+        c += &format!("{x} 600 m {x} 700 l S ");
+    }
+    let cells = [
+        (Some("Monday"), "08:00", "Math"),
+        (None, "09:00", "Art"),
+        (None, "10:00", "Music"),
+        (Some("Tuesday"), "08:00", "Sport"),
+        (None, "09:00", "Latin"),
+    ];
+    for (r, (a, b, d)) in cells.iter().enumerate() {
+        let y = ys[r] - 14.0;
+        if let Some(a) = a {
+            c += &show("F1", 9.0, 54.0, y, a);
+        }
+        c += &show("F1", 9.0, 154.0, y, b);
+        c += &show("F1", 9.0, 254.0, y, d);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].0 <= 1, "{found:?}");
+    let md = markdown(&out);
+    assert!(
+        md.contains("| \u{3003} | 09:00 | Art |\n| \u{3003} | 10:00 | Music |\n"),
+        "{md}"
+    );
+    assert!(md.contains("| Monday | 08:00 | Math |"), "{md}");
+}
+
+/// Statement lines whose date is printed only on the first entry of a day, under a header of
+/// three filled cells (`ruled` false) or in a table of column rules without row rules.
+fn blank_dates(ruled: bool) -> String {
+    let xs = [50.0, 150.0, 400.0, 500.0];
+    let mut c = String::new();
+    if ruled {
+        c += "0.5 w 50 700 m 500 700 l S 50 686 m 500 686 l S 50 590 m 500 590 l S ";
+        for x in xs {
+            c += &format!("{x} 590 m {x} 700 l S ");
+        }
+    } else {
+        c += "0.9 g ";
+        for w in xs.windows(2) {
+            c += &format!("{} 686 {} 14 re f ", w[0], w[1] - w[0]);
+        }
+        c += "0 g 0.5 w 50 700 m 500 700 l S 50 686 m 500 686 l S 50 600 m 500 600 l S ";
+    }
+    for (x, t) in xs.iter().zip(["Date", "Text", "Amount"]) {
+        c += &show("F1", 8.0, x + 4.0, 690.0, t);
+    }
+    let rows = [
+        ("2030-01-02", "Coffee", "3.00"),
+        ("", "Bread", "2.00"),
+        ("", "Cheese", "7.50"),
+        ("2030-01-03", "Milk", "1.00"),
+        ("", "Apples", "4.20"),
+        ("2030-01-04", "Tea", "2.80"),
+    ];
+    for (k, (d, t, a)) in rows.iter().enumerate() {
+        let y = 672.0 - 12.0 * k as f32;
+        if !d.is_empty() {
+            c += &show("F1", 8.0, 54.0, y, d);
+        }
+        c += &show("F1", 8.0, 154.0, y, t);
+        c += &show("F1", 8.0, 470.0, y, a);
+    }
+    c
+}
+
+#[test]
+fn lines_with_a_blank_date_are_rows_of_their_own() {
+    for ruled in [false, true] {
+        let out = read(&pdf(&[Page::text(blank_dates(ruled))], ""));
+        let found = tables(page(&out, 1));
+        assert_eq!(found.len(), 1, "ruled {ruled}: {found:?}");
+        let rows = &found[0].1;
+        assert_eq!(rows.len(), 7, "ruled {ruled}: {rows:?}");
+        assert_eq!(rows[1], ["2030-01-02", "Coffee", "3.00"], "ruled {ruled}");
+        assert_eq!(rows[2], ["", "Bread", "2.00"], "ruled {ruled}");
+        assert_eq!(rows[3], ["", "Cheese", "7.50"], "ruled {ruled}");
+        assert_eq!(rows[5], ["", "Apples", "4.20"], "ruled {ruled}");
+    }
+}
+
+#[test]
+fn a_ruled_row_with_wrapped_cells_stays_one_row() {
+    // A fully ruled table of three columns whose second record wraps in two of its three
+    // cells: still one row (the rules part the records).
+    let mut c = String::from("0.5 w ");
+    for y in [700.0, 680.0, 650.0, 630.0] {
+        c += &format!("50 {y} m 410 {y} l S ");
+    }
+    for x in [50.0, 170.0, 290.0, 410.0] {
+        c += &format!("{x} 630 m {x} 700 l S ");
+    }
+    c += &show("F1", 9.0, 56.0, 686.0, "Apples");
+    c += &show("F1", 9.0, 176.0, 686.0, "red and sweet");
+    c += &show("F1", 9.0, 296.0, 686.0, "from the north");
+    c += &show("F1", 9.0, 56.0, 668.0, "Pears");
+    c += &show("F1", 9.0, 176.0, 668.0, "green and");
+    c += &show("F1", 9.0, 296.0, 668.0, "from the");
+    c += &show("F1", 9.0, 176.0, 656.0, "juicy");
+    c += &show("F1", 9.0, 296.0, 656.0, "south");
+    c += &show("F1", 9.0, 56.0, 636.0, "Plums");
+    c += &show("F1", 9.0, 176.0, 636.0, "blue");
+    c += &show("F1", 9.0, 296.0, 636.0, "from the east");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert_eq!(
+        rows[1],
+        ["Pears", "green and juicy", "from the south"],
+        "{rows:?}"
+    );
+}
