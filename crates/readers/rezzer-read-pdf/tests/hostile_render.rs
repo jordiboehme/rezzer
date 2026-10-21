@@ -881,3 +881,84 @@ fn a_large_form_is_scanned_for_inline_pictures_with_a_small_buffer() {
     );
     assert_rss_under_256_mib();
 }
+
+/// A technical drawing: `n` dashed lines of 0 to 300 points at seeded places.
+fn dashed_drawing(n: usize) -> String {
+    let mut c = String::from("0 g 0.5 w [6 3] 0 d\n");
+    let mut s: u64 = 7;
+    for _ in 0..n {
+        let mut r = || {
+            s = s
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (s >> 33) % 560
+        };
+        let (x, y, dx, dy) = (r() + 10, r() + 140, r() % 300, r() % 300);
+        c.push_str(&format!(
+            "{x} {y} m {} {} l S\n",
+            (x + dx).min(585),
+            (y + dy).min(830)
+        ));
+    }
+    c
+}
+
+#[test]
+fn a_drawing_of_two_thousand_dashed_lines_renders() {
+    assert_rendered(&read_with(&draw_twin(&dashed_drawing(2_000)), true));
+}
+
+#[test]
+fn a_form_with_a_thousand_dashed_field_borders_renders() {
+    let mut c = String::from("0 g 1 w [3 2] 0 d\n");
+    for i in 0..1_000 {
+        let (x, y) = (40 + (i % 2) * 270, 20 + (i / 2) * 5 % 800);
+        c.push_str(&format!("{x} {y} 240 18 re S\n"));
+    }
+    assert_rendered(&read_with(&draw_twin(&c), true));
+}
+
+#[test]
+fn dashes_in_one_path_just_under_the_room_render_small() {
+    // 380 full-height lines in one path, stroked once with round caps and dashes of 1 point:
+    // about 152,000 dashes whose outlines are all built at once, just under the room by the
+    // model.
+    let mut c = String::from("1 J [1 1] 0 d\n");
+    for i in 0..380 {
+        let x = 10 + i * 3 / 2;
+        c.push_str(&format!("{x} 21 m {x} 821 l\n"));
+    }
+    c.push_str("S\n");
+    let start = Instant::now();
+    let out = read_with(&draw_twin(&c), true);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_rendered(&out);
+}
+
+#[test]
+fn dashes_in_a_form_drawn_many_times_stay_small() {
+    // A form of 100 full-height lines with dashes of 1 point, drawn 100 times: 4 million
+    // dashes, about 316 MiB of strips when rendered.
+    let start = Instant::now();
+    let mut lines = String::from("[1 1] 0 d\n");
+    for i in 0..100 {
+        lines.push_str(&format!("{} 21 m {} 821 l S\n", 20 + i * 5, 20 + i * 5));
+    }
+    let file = render_twin(595, 842, &"/Dash Do\n".repeat(100), |b| {
+        let form = b.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode",
+            &deflate(lines.as_bytes()),
+        );
+        Extra {
+            xobjects: format!("/Dash {form} 0 R"),
+            ..Extra::default()
+        }
+    });
+    let out = read_with(&file, true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("drawing operations"), "{loss:?}");
+}

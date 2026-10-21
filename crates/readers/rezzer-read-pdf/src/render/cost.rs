@@ -27,7 +27,7 @@
 //! - a Type3 glyph: its content, as drawn;
 //! - every draw call (fill, stroke, clip, glyph, picture, group): what vello keeps for it
 //!   until its target is rendered, from the rows of tiles its path covers (measured, see
-//!   [`DRAW_BASE`]).
+//!   [`DRAW_BASE`]), a dashed stroke by its dashes ([`DASH_BASE`]).
 //!
 //! Stencil masks and inline stencils do not show their data to a device, so
 //! `stencils.rs` checks every stencil a page's render can reach first, unpacking only
@@ -100,16 +100,32 @@ const FILL_ROW: u64 = 64;
 /// Pixel rows in one row of vello's tiles.
 const TILE_ROWS: f64 = 4.0;
 
-// A dashed stroke: kurbo expands the dash pattern into one outline per dash before vello
-// makes strips of each, so every dash is a draw of its own. Measured as above, 300 full-height
-// curves stroked with dashes of 0.05 points (about 2.5 million dashes) took 931 MiB; the model
-// charges each dash as a draw of the rows it spans, plus its expanded path.
+// A dashed stroke: kurbo expands the dashes of the whole path into one outline, which vello
+// fills as one draw (vello_common 0.3.0 flatten.rs). It keeps the draw's base and box rows once,
+// and for each dash the strips of the tiles its outline crosses; while it is drawn it holds
+// each dash's outline, in buffers vello reuses, so the largest stroke's stay. Measured as above
+// (less the page rendered empty, 12 MiB; lines 0.5 points wide, butt caps), bytes a dash:
+// - each line stroked on its own: 1,000 vertical lines of 800 points with `[6 3]` (dashes of 12
+//   pixels) 306, `[12 6]` 590, `[24 12]` 1,133, `[1 1]` 79, round caps `[6 3]` 353; 300 lines
+//   `[0.5 0.5]` 57, `[0.1 0.1]` 12; 2,000 horizontal lines `[6 3]` 160; 1,000 diagonal 228;
+//   lines 5 points wide 566, 40 points wide 943;
+// - all lines in one path, stroked once: `[1 1]` 385, `[0.1 0.1]` (1.2 and 2.4 million dashes)
+//   388 and 385, diagonal 370, round caps `[1 1]` 553; 300 full-height curves with dashes of
+//   0.05 points (about 2.5 million) took 931 MiB.
+// The model is above each: a base and a part for each pixel of the longest dash plus the line
+// width, kept, and the outlines of all dashes of the largest stroke.
 
-/// Bytes of the expanded path of one dash (about five elements).
-const DASH_PATH: u64 = 160;
+/// Bytes each dash keeps, whatever its size.
+const DASH_BASE: u64 = 96;
+
+/// Bytes each dash keeps for each pixel of its length plus the line width.
+const DASH_PIXEL: f64 = 32.0;
+
+/// Bytes the outline of one dash takes while its stroke is drawn.
+const DASH_OUTLINE: u64 = 576;
 
 /// Dashes one stroke may draw; past that, working out the render is refused (the room
-/// refuses far fewer dashes, at about 1 KB each, on the way).
+/// refuses far fewer dashes, at about 700 bytes each, on the way).
 const MAX_DASHES: f64 = 1_000_000.0;
 
 /// What a render's memory goes to.
@@ -165,6 +181,8 @@ struct Level {
     h: u64,
     /// Bytes kept until this target is done.
     kept: u64,
+    /// The largest dash outline this target's renderer built, whose buffers it keeps.
+    outlines: u64,
     /// Soft masks this target's renderer already built.
     masks: HashSet<u128>,
 }
@@ -248,19 +266,24 @@ impl Dry<'_> {
         self.charge(Kind::Drawing, 0, bytes);
     }
 
-    /// What the dashes of a stroke of `device` (device space) keep, when `stroke` has a dash
-    /// pattern: one draw for each dash, of the rows a dash spans, `width` pixels wide.
-    fn dashes(&mut self, device: &BezPath, stroke: &StrokeProps, transform: &Affine, width: f64) {
+    /// What a stroke of `user` (user space, `device` in device space), `width` pixels wide,
+    /// keeps when `stroke` has a dash pattern, as the comment at [`DASH_BASE`] says: one draw
+    /// whose outline is the dashes. False when it has none, so the caller charges the stroke
+    /// as drawn whole.
+    fn dashes(
+        &mut self,
+        (user, device): (&BezPath, &BezPath),
+        stroke: &StrokeProps,
+        transform: &Affine,
+        width: f64,
+    ) -> bool {
         let period: f64 = stroke.dash_array.iter().map(|d| f64::from(d.abs())).sum();
         if !(period.is_finite() && period > 0.0) {
-            return;
+            return false;
         }
-        // The pattern is in user space; its shortest scale gives the most dashes.
-        let (a, b) = x_y_advances(transform);
-        let scale = a.length().min(b.length());
-        let period_px = period * scale;
-        // The control polygon is never shorter than the curve.
-        let length: f64 = device
+        // The renderer dashes the path in user space, where the pattern is; the control
+        // polygon is never shorter than the curve.
+        let length: f64 = user
             .segments()
             .map(|s| match s {
                 kurbo::PathSeg::Line(l) => l.p0.distance(l.p1),
@@ -271,27 +294,35 @@ impl Dry<'_> {
             })
             .sum();
         let per_period = (stroke.dash_array.len() as f64 / 2.0).ceil().max(1.0);
-        let count = if period_px > 0.0 {
-            (length / period_px).ceil() * per_period
-        } else {
-            0.0
-        };
+        let count = (length / period).ceil() * per_period;
         if !count.is_finite() || count > MAX_DASHES {
             Self::unbounded(format!(
                 "it strokes with a dash pattern of more than {MAX_DASHES} dashes, too many to \
                  work out its render first"
             ));
         }
+        let count = count as u64;
+        let (a, b) = x_y_advances(transform);
         let longest = stroke
             .dash_array
             .iter()
             .map(|d| f64::from(d.abs()) * a.length().max(b.length()))
             .fold(0.0, f64::max);
-        let rows = self.rows(0.0, longest + width.max(0.0));
-        let each = DRAW_BASE
-            .saturating_add(rows.saturating_mul(EDGE_ROW * 4 + FILL_ROW))
-            .saturating_add(DASH_PATH);
-        self.charge(Kind::Drawing, 0, (count as u64).saturating_mul(each));
+        // The renderer draws a line at least a pixel wide.
+        let pixels = (longest + width.max(1.0)).min(f64::from(u32::MAX));
+        let each = DASH_BASE.saturating_add((pixels * DASH_PIXEL).ceil() as u64);
+        let (b, pad) = (device.bounding_box(), width.max(0.0));
+        let bytes = DRAW_BASE
+            .saturating_add(self.rows(b.y0 - pad, b.y1 + pad).saturating_mul(FILL_ROW))
+            .saturating_add(count.saturating_mul(each));
+        // The outline buffers grow to the largest stroke and stay.
+        let outlines = count.saturating_mul(DASH_OUTLINE);
+        let more = outlines.saturating_sub(self.level().outlines);
+        if let Some(l) = self.levels.last_mut() {
+            l.outlines = l.outlines.max(outlines);
+        }
+        self.charge(Kind::Drawing, 0, bytes.saturating_add(more));
+        true
     }
 
     /// The box `(0, 0, w, h)` under `transform`, drawn as a path.
@@ -331,6 +362,7 @@ impl Dry<'_> {
             w,
             h,
             kept: 0,
+            outlines: 0,
             masks: HashSet::new(),
         });
         self.charge(kind, 0, target);
@@ -791,11 +823,10 @@ impl<'a> Device<'a> for Dry<'_> {
         if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
             self.draw(&device, None);
         }
-        if width.is_some() {
+        if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) = (mode, width)
+            && !self.dashes((path, &device), s, &props.transform, w)
+        {
             self.draw(&device, width);
-        }
-        if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) = (mode, width) {
-            self.dashes(&device, s, &props.transform, w);
         }
         self.paint(&props.paint, area, stroke);
     }
@@ -840,17 +871,16 @@ impl<'a> Device<'a> for Dry<'_> {
         for g in run.glyphs() {
             if let Glyph::Outline(o) = &**g {
                 self.tick();
-                let device = props.transform * g.transform() * o.outline();
+                let user = g.transform() * o.outline();
+                let device = props.transform * user.clone();
                 if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
                     self.draw(&device, None);
                 }
-                if width.is_some() {
-                    self.draw(&device, width);
-                }
                 if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) =
                     (mode, width)
+                    && !self.dashes((&user, &device), s, &props.transform, w)
                 {
-                    self.dashes(&device, s, &props.transform, w);
+                    self.draw(&device, width);
                 }
             }
             if let Glyph::Type3(t) = &**g {
@@ -927,6 +957,7 @@ pub(crate) fn estimate(
             w,
             h,
             kept: 0,
+            outlines: 0,
             masks: HashSet::new(),
         }],
         alive: 0,
