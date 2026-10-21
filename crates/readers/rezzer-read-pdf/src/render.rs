@@ -63,6 +63,13 @@ const PICTURE_SHARE: f32 = 0.02;
 /// furniture.
 const FURNITURE_SHARE: f32 = 0.25;
 
+/// A picture of at least this many square points (1 cm2) is listed even when it does not make
+/// its page need vision.
+const SMALL_PICTURE: f32 = 803.6;
+
+/// Small pictures whose box the alt text names; past them it says how many more there are.
+const SMALL_LISTED: usize = 10;
+
 /// Pictures that cover more than this part of a page without text make it a scan.
 const SCAN_SHARE: f32 = 0.5;
 
@@ -111,13 +118,24 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -
         let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
         w * h
     };
-    let drawn: Vec<&[f32; 4]> = items.images.iter().filter(|b| visible(b) > 0.0).collect();
-    let covered = (drawn.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
-    // Furniture is small: a picture over a quarter of the page is content wherever it is.
-    let shown: Vec<&[f32; 4]> = drawn
-        .into_iter()
-        .filter(|b| !(skip.contains(&spot(b)) && visible(b) < FURNITURE_SHARE * area))
+    let drawn: Vec<usize> = (0..items.images.len())
+        .filter(|&k| visible(&items.images[k]) > 0.0)
         .collect();
+    let covered = (drawn
+        .iter()
+        .map(|&k| visible(&items.images[k]))
+        .sum::<f32>()
+        / area)
+        .min(1.0);
+    // Furniture is small: a picture over a quarter of the page is content wherever it is.
+    let shown_at: Vec<usize> = drawn
+        .into_iter()
+        .filter(|&k| {
+            let b = &items.images[k];
+            !(skip.contains(&spot(b)) && visible(b) < FURNITURE_SHARE * area)
+        })
+        .collect();
+    let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();
     let pictured = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
     let visible_text = items.mapped > 0;
     let invisible_text = !items.hidden_layer.is_empty() || !items.invisible.is_empty();
@@ -131,17 +149,59 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -
     if !visible_text && invisible_text && covered > SCAN_SHARE {
         words.push("only an invisible text layer".into());
     }
+    let mut first = shown.first().map(|b| **b);
     if !shown.is_empty() && pictured >= PICTURE_SHARE {
         let k = shown.len();
         words.push(format!(
             "{k} {}",
             if k == 1 { "picture" } else { "pictures" }
         ));
+    } else {
+        // Pictures too small to make the page need vision are still not dropped: each one of
+        // at least 1 cm2 is named with its box.
+        let small: Vec<usize> = shown_at
+            .iter()
+            .copied()
+            .filter(|&k| visible(&items.images[k]) >= SMALL_PICTURE)
+            .collect();
+        if let Some(&k) = small.first() {
+            first = Some(items.images[k]);
+            words.push(small_pictures(items, &small));
+        }
     }
     (!words.is_empty()).then(|| Vision {
         alt: words.join(", "),
-        first: shown.first().map(|b| **b),
+        first,
     })
+}
+
+/// The alt text for small pictures `small` of a page: how many, and the box of each of the
+/// first [`SMALL_LISTED`] in points, with a near-square 1-bit or gray one named a likely code.
+fn small_pictures(items: &PageItems, small: &[usize]) -> String {
+    let n = small.len();
+    let mut boxes: Vec<String> = small
+        .iter()
+        .take(SMALL_LISTED)
+        .map(|&k| {
+            let b = items.images[k];
+            let r = |v: f32| v.round() as i64;
+            let mut s = format!("box {}, {} to {}, {}", r(b[0]), r(b[1]), r(b[2]), r(b[3]));
+            let (w, h) = (b[2] - b[0], b[3] - b[1]);
+            let square = (w - h).abs() <= 0.1 * w.max(h);
+            if square && items.images_gray.get(k).copied().unwrap_or(false) {
+                s.push_str(", likely a barcode or QR code, not decoded");
+            }
+            s
+        })
+        .collect();
+    if n > SMALL_LISTED {
+        boxes.push(format!("{} more", n - SMALL_LISTED));
+    }
+    format!(
+        "{n} small {} ({})",
+        if n == 1 { "picture" } else { "pictures" },
+        boxes.join("; ")
+    )
 }
 
 /// The top middle of the first picture, where the run nearest to it is looked for.

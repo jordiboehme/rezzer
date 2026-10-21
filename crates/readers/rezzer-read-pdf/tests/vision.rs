@@ -497,3 +497,54 @@ fn a_fallback_page_that_needs_vision_says_it_is_not_rendered() {
         out.document.losses
     );
 }
+
+#[test]
+fn small_square_picture_is_listed() {
+    // A gray square picture of 85 by 85 points (1.4 % of the page, under the share that makes
+    // a page need vision) between two paragraphs, as a QR code on a ticket.
+    let content = "BT /F1 12 Tf 72 780 Td (Above the code.) Tj ET\n\
+                   q 85 0 0 85 400 600 cm /Im1 Do Q\n\
+                   BT /F1 12 Tf 72 500 Td (Below the code.) Tj ET\n";
+    let out = read(&image_page(595, 842, content, 21, 21, &[0u8; 441]));
+    let a = asset(&out, "page-1");
+    assert!(a.needs_vision);
+    let alt = a.alt.as_deref().unwrap_or_default();
+    assert!(alt.contains("1 small picture"), "{alt}");
+    assert!(alt.contains("400, 600 to 485, 685"), "{alt}");
+    assert!(
+        alt.contains("likely a barcode or QR code, not decoded"),
+        "{alt}"
+    );
+    assert_eq!(
+        lines(page(&out, 1)),
+        [
+            "Page 1",
+            "Above the code.",
+            "[media page-1]",
+            "Below the code."
+        ]
+    );
+    // A small picture that is not near square is listed, but not named a code.
+    let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 85 0 0 40 400 600 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, content, 21, 10, &[0u8; 210]));
+    let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
+    assert!(alt.contains("1 small picture"), "{alt}");
+    assert!(!alt.contains("barcode"), "{alt}");
+    // Eleven small pictures: the first ten are named with their box, then how many more.
+    let mut content = String::from("BT /F1 12 Tf 72 780 Td (Text.) Tj ET\n");
+    for k in 0..11 {
+        content += &format!("q 30 0 0 30 {} 600 cm /Im1 Do Q\n", 40 + 45 * k);
+    }
+    let out = read(&image_page(595, 842, &content, 21, 21, &[0u8; 441]));
+    let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
+    assert!(
+        alt.starts_with("11 small pictures (box 40, 600 to 70, 630"),
+        "{alt}"
+    );
+    assert_eq!(alt.matches("box ").count(), 10, "{alt}");
+    assert!(alt.ends_with("; 1 more)"), "{alt}");
+    // A picture under 1 square centimeter is not listed.
+    let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 20 0 0 20 400 600 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, content, 21, 21, &[0u8; 441]));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
