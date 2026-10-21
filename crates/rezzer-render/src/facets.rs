@@ -477,11 +477,13 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
                     cell_text(&a.id),
                     file,
                     a.caption.as_deref().map(cell_text).unwrap_or_default(),
+                    // Why the picture needs a look, in the reader's words.
+                    a.alt.as_deref().map(cell_text).unwrap_or_default(),
                 ]
             })
             .collect();
         parts.push(pipe_table(
-            &header(&["Picture", "File", "Caption"]),
+            &header(&["Picture", "File", "Caption", "Why"]),
             &[],
             &rows,
         ));

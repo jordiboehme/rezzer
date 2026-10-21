@@ -2743,6 +2743,15 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
         },
     ];
     let md = render(&d, Completeness::Complete, &opts());
+    // The list of pictures that need vision says why each needs a look.
+    assert!(
+        md.contains(
+            "| Picture | File | Caption | Why |\n| --- | --- | --- | --- |\n\
+             | page-3 | not extracted |  | no text layer |\n"
+        ),
+        "{md}"
+    );
+    let md = render(&d, Completeness::Complete, &opts());
     assert!(
         md.contains("Picture page-3 (image/png, no text layer) is not extracted."),
         "{md}"
