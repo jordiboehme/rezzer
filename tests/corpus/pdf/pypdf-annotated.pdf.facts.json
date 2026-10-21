@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "Annotated PDF"
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/annotations/1/quoted",
+    "equals": "Line 1 Line 2"
+  },
+  {
+    "pointer": "/facets/annotations/2/author",
+    "equals": "Lucas"
+  },
+  {
+    "contains": "> [!NOTE] Ink by Lucas"
+  }
+]

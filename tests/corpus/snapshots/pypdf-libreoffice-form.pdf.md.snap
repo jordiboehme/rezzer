@@ -1,0 +1,73 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "pypdf-libreoffice-form.pdf"
+resource: "<corpus>/pdf/pypdf-libreoffice-form.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "9105eeef8c8cafdb141b7edd768a5e08adffe320d1d4f89e1a7112a2b37d1c57"
+source_size: 34186
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 1
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+form_fields: 8
+has_javascript: false
+language: "en-US"
+created: "2022-06-26T10:58:43+02:00"
+---
+
+# pypdf-libreoffice-form.pdf
+
+## Overview
+
+- Pages: 1
+- Form fields: 8
+- Last changed: 2022-06-26T10:58:43+02:00
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| creator | Writer |
+| pdf\_version | 1.5 |
+| producer | LibreOffice 6.4 |
+
+:status[Page 1]{grey}
+
+## Example for a Form
+
+First Name Last Name\
+Birthday
+
+Gender:
+
+Female Male
+
+Nationality:
+
+Agree to privacy policy Other
+
+## Logic
+
+### Form
+
+| Field | Type | Role | Value | Format | Rule | Reads | Flags |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| First Name | text | input | Alice |  |  |  |  |
+| Last Name | text | input |  |  |  |  |  |
+| female | radio | input | Off |  |  |  | no-toggle-to-off |
+| Birthday | text | input |  |  |  |  |  |
+| gdpr | checkbox | input | Off |  |  |  |  |
+| other | checkbox | input | Off |  |  |  |  |
+| First Name\_2 | text | input | Bob |  |  |  | multiline |
+| Nationality | combo | input |  |  |  |  |  |

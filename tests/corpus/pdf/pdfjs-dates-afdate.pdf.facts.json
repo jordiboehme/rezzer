@@ -1,0 +1,34 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 3
+  },
+  {
+    "pointer": "/properties/facts/has_javascript",
+    "equals": true
+  },
+  {
+    "pointer": "/facets/fields/0/format",
+    "equals": "date dd-mmm-yy"
+  },
+  {
+    "pointer": "/facets/fields/1/format",
+    "equals": "time HH:MM:ss"
+  },
+  {
+    "pointer": "/facets/fields/2/format",
+    "equals": "date m/d/yyyy HH:MM"
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 6
+  }
+]

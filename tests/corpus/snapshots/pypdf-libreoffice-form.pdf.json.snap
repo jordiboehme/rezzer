@@ -1,0 +1,279 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "text": "Example for a Form",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "First Name Last Name",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Birthday",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b3",
+          "inlines": [
+            {
+              "text": "Gender:",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b4",
+          "inlines": [
+            {
+              "text": "Female Male",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b5",
+          "inlines": [
+            {
+              "text": "Nationality:",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b6",
+          "inlines": [
+            {
+              "text": "Agree to privacy policy Other",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "fields": [
+      {
+        "anchor": "field:First Name",
+        "kind": "text",
+        "name": "First Name",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": "Alice"
+        }
+      },
+      {
+        "anchor": "field:Last Name",
+        "kind": "text",
+        "name": "Last Name",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      {
+        "anchor": "field:female",
+        "flags": [
+          "no-toggle-to-off"
+        ],
+        "kind": "radio",
+        "name": "female",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": "Off"
+        }
+      },
+      {
+        "anchor": "field:Birthday",
+        "kind": "text",
+        "name": "Birthday",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      {
+        "anchor": "field:gdpr",
+        "kind": "checkbox",
+        "name": "gdpr",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": "Off"
+        }
+      },
+      {
+        "anchor": "field:other",
+        "kind": "checkbox",
+        "name": "other",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": "Off"
+        }
+      },
+      {
+        "anchor": "field:First Name_2",
+        "flags": [
+          "multiline"
+        ],
+        "kind": "text",
+        "name": "First Name_2",
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": "Bob"
+        }
+      },
+      {
+        "anchor": "field:Nationality",
+        "kind": "combo",
+        "name": "Nationality",
+        "options": [
+          "Unknown",
+          "German",
+          "Indonesian",
+          "US-American",
+          "French",
+          "Spanish",
+          "Italian"
+        ],
+        "pages": [
+          1
+        ],
+        "role": "input",
+        "value": {
+          "type": "text",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "1"
+      ],
+      [
+        "Form fields",
+        "8"
+      ],
+      [
+        "Last changed",
+        "2022-06-26T10:58:43+02:00"
+      ]
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2022-06-26T10:58:43+02:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "Writer"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.5"
+      },
+      "producer": {
+        "type": "text",
+        "value": "LibreOffice 6.4"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "form_fields": 8,
+      "has_javascript": false,
+      "pages": 1,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    },
+    "language": "en-US"
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pypdf-libreoffice-form.pdf",
+    "path": "<corpus>/pdf/pypdf-libreoffice-form.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "9105eeef8c8cafdb141b7edd768a5e08adffe320d1d4f89e1a7112a2b37d1c57",
+    "size": 34186
+  }
+}

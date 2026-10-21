@@ -1,0 +1,974 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "Standard Form 1199A",
+              "type": "text"
+            },
+            {
+              "text": " (EG)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "(Rev. June 1987)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b3",
+          "inlines": [
+            {
+              "text": "Prescribed by Treasury",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b4",
+          "inlines": [
+            {
+              "text": "Department",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b5",
+          "inlines": [
+            {
+              "text": "OMB No. 1510-0007",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b6",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "DIRECT DEPOSIT SIGN-UP FORM",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b7",
+          "inlines": [
+            {
+              "text": "Treasury Dept. Cir. 1076",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b8",
+          "inlines": [
+            {
+              "text": "DIRECTIONS",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b9",
+          "inlines": [
+            {
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b10",
+          "inlines": [
+            {
+              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b11",
+          "inlines": [
+            {
+              "text": "mail this form to the financial institution.  The financial institution will",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        "<43 more items>"
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p2",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 2",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b1",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "Standard Form 1199A",
+              "type": "text"
+            },
+            {
+              "text": " (EG)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b2",
+          "inlines": [
+            {
+              "text": "(Rev. June 1987)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b3",
+          "inlines": [
+            {
+              "text": "Prescribed by Treasury",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b4",
+          "inlines": [
+            {
+              "text": "Department",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b5",
+          "inlines": [
+            {
+              "text": "OMB No. 1510-0007",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b6",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "DIRECT DEPOSIT SIGN-UP FORM",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b7",
+          "inlines": [
+            {
+              "text": "Treasury Dept. Cir. 1076",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b8",
+          "inlines": [
+            {
+              "text": "DIRECTIONS",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b9",
+          "inlines": [
+            {
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b10",
+          "inlines": [
+            {
+              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b11",
+          "inlines": [
+            {
+              "text": "mail this form to the financial institution.  The financial institution will",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        "<43 more items>"
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p3",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 3",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b1",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "Standard Form 1199A",
+              "type": "text"
+            },
+            {
+              "text": " (EG)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b2",
+          "inlines": [
+            {
+              "text": "(Rev. June 1987)",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b3",
+          "inlines": [
+            {
+              "text": "Prescribed by Treasury",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b4",
+          "inlines": [
+            {
+              "text": "Department",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b5",
+          "inlines": [
+            {
+              "text": "OMB No. 1510-0007",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b6",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "DIRECT DEPOSIT SIGN-UP FORM",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b7",
+          "inlines": [
+            {
+              "text": "Treasury Dept. Cir. 1076",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b8",
+          "inlines": [
+            {
+              "text": "DIRECTIONS",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b9",
+          "inlines": [
+            {
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b10",
+          "inlines": [
+            {
+              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b11",
+          "inlines": [
+            {
+              "text": "mail this form to the financial institution.  The financial institution will",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        },
+        "<43 more items>"
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p4",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 4",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b1",
+          "inlines": [
+            {
+              "text": "SF 1199A (Back)",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b2",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "BURDEN ESTIMATE STATEMENT",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b3",
+          "inlines": [
+            {
+              "text": "The estimated average burden associated with this collection of information is 10 minutes per respondent or recordkeeper, depending on individual circumstances.  Comments concerning the accuracy of this burden estimate and suggestions for reducing this burden should be directed to the Financial Management Service, Facilities Management Division, Property & Supply Section, Room B-101, 3700 East-West Highway, Hyattsville, MD 20782 or the Office of Management and Budget, Paperwork Reduction Project (1510-0007), Washington, D.C. 20503.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b4",
+          "inlines": [
+            {
+              "text": "PLEASE READ THIS CAREFULLY",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p4:b5",
+          "inlines": [
+            {
+              "text": "All information on this form, including the individual claim number, is required under 31 USC 3322, 31 CFR 209 and/or 210.  The information is confidential and is needed to prove entitlement to payments.  The information will be used to",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p4:b6",
+          "inlines": [
+            {
+              "text": "process payment data from the Federal agency to the financial institution and/or its agent.  Failure to provide the requested",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b7",
+          "inlines": [
+            {
+              "text": "information may affect the processing of this form and may delay or prevent the receipt of payments through the Direct Deposit/Electronic Funds Transfer Program.",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p4:b8",
+          "inlines": [
+            {
+              "text": "INFORMATION FOUND ON CHECKS",
+              "type": "text"
+            },
+            {
+              "text": " Most of the information needed to complete boxes A, C, and F in Section 1 is printed on your government check:",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p4:b9",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "A",
+              "type": "text"
+            },
+            {
+              "text": " Be sure that payee’s name is written exactly as it ap-pears on the check.  Be sure current address is shown.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b10",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "C",
+              "type": "text"
+            },
+            {
+              "text": " Claim numbers and suffixes are printed here on checks beneath the date for the type of payment shown here. Check the Green Book for the location of prefixes and suffixes for other types of payments.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b11",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "F",
+              "type": "text"
+            },
+            {
+              "text": " Type of payment is printed to the left of the amount.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<26 more items>"
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "embedded": [
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Phone format",
+        "text": "AFSpecial_Format(2);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Phone keystroke",
+        "text": "AFSpecial_Keystroke(2);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Prefix for Claim or Payrooo ID Number format",
+        "text": "AFNumber_Format(0, 1, 0, 0, \"\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Prefix for Claim or Payrooo ID Number keystroke",
+        "text": "AFNumber_Keystroke(0, 1, 0, 0, \"\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Allottment Amount format",
+        "text": "AFNumber_Format(2, 0, 0, 0, \"$\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Allottment Amount keystroke",
+        "text": "AFNumber_Keystroke(2, 0, 0, 0, \"$\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check Digit format",
+        "text": "AFNumber_Format(0, 0, 0, 0, \"\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check Digit keystroke",
+        "text": "AFNumber_Keystroke(0, 0, 0, 0, \"\", true);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Bank Rep Phone format",
+        "text": "AFSpecial_Format(2);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Bank Rep Phone keystroke",
+        "text": "AFSpecial_Keystroke(2);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Bank Rep Date format",
+        "text": "AFDate_FormatEx(\"mm/dd/yyyy\");"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Bank Rep Date keystroke",
+        "text": "AFDate_KeystrokeEx(\"mm/dd/yyyy\");"
+      }
+    ],
+    "fields": [
+      {
+        "anchor": "field:Checking/Savings",
+        "flags": [
+          "no-toggle-to-off"
+        ],
+        "kind": "radio",
+        "name": "Checking/Savings",
+        "options": [
+          "Checking",
+          "Savings",
+          "Checking",
+          "Savings",
+          "Checking",
+          "Savings"
+        ],
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:Type of Payment",
+        "flags": [
+          "no-toggle-to-off"
+        ],
+        "kind": "radio",
+        "name": "Type of Payment",
+        "options": [
+          "Social Security",
+          "SSI",
+          "Railroad",
+          "Civil Service",
+          "VA",
+          "Fed Salary",
+          "Mil. Active",
+          "Mil Retire",
+          "Mil. Survivor",
+          "Other",
+          "Social Security",
+          "SSI",
+          "<18 more items>"
+        ],
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:signature.1.joint",
+        "flags": [
+          "multiline",
+          "do-not-spell-check"
+        ],
+        "kind": "text",
+        "name": "signature.1.joint",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:signature.1.employee",
+        "flags": [
+          "multiline",
+          "do-not-spell-check"
+        ],
+        "kind": "text",
+        "name": "signature.1.employee",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:signature.2.joint",
+        "flags": [
+          "multiline",
+          "do-not-spell-check"
+        ],
+        "kind": "text",
+        "name": "signature.2.joint",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:signature.2.employee",
+        "flags": [
+          "multiline",
+          "do-not-spell-check"
+        ],
+        "kind": "text",
+        "name": "signature.2.employee",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:signature.representative",
+        "flags": [
+          "multiline",
+          "do-not-spell-check"
+        ],
+        "kind": "text",
+        "name": "signature.representative",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:Name",
+        "flags": [
+          "do-not-spell-check",
+          "do-not-scroll"
+        ],
+        "kind": "text",
+        "name": "Name",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:Address",
+        "flags": [
+          "do-not-spell-check",
+          "do-not-scroll"
+        ],
+        "kind": "text",
+        "name": "Address",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:City, State, Zip",
+        "flags": [
+          "do-not-spell-check",
+          "do-not-scroll"
+        ],
+        "kind": "text",
+        "name": "City, State, Zip",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "AFSpecial_Format(2);",
+            "trigger": "format",
+            "words": "phone number"
+          },
+          {
+            "script": "AFSpecial_Keystroke(2);",
+            "trigger": "keystroke"
+          }
+        ],
+        "anchor": "field:Phone",
+        "flags": [
+          "do-not-spell-check",
+          "do-not-scroll"
+        ],
+        "format": "phone number",
+        "kind": "text",
+        "name": "Phone",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:Persons Entitled to Payment",
+        "flags": [
+          "do-not-spell-check",
+          "do-not-scroll"
+        ],
+        "kind": "text",
+        "name": "Persons Entitled to Payment",
+        "pages": [
+          1,
+          2,
+          3
+        ],
+        "role": "input"
+      },
+      "<23 more items>"
+    ],
+    "timeline": [
+      {
+        "kind": "revision",
+        "text": "first save",
+        "time": "2009-01-20T08:50:49-05:00"
+      },
+      {
+        "kind": "revision",
+        "text": "10 changes: changed object 153 (Metadata); changed document information; changed object 157 (dictionary); added annotation Widget on page 1; added object 258 (dictionary); added object 259 (dictionary); added annotation Widget on page 2; added object 263 (dictionary); added annotation Widget on page 3; added annotation Widget on page 4",
+        "time": "2015-11-24T14:27:07-05:00"
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "4"
+      ],
+      [
+        "Form fields",
+        "35"
+      ],
+      [
+        "Scripts",
+        "12"
+      ],
+      [
+        "Changes",
+        "2"
+      ],
+      [
+        "Last changed",
+        "2015-11-24T14:27:07-05:00"
+      ]
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "1997-08-27T10:12:22Z"
+    },
+    "custom": {
+      "pdf_version": {
+        "type": "text",
+        "value": "1.6"
+      },
+      "producer": {
+        "type": "text",
+        "value": "Acrobat Distiller 3.0 for Windows"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "form_fields": 35,
+      "has_javascript": true,
+      "pages": 4,
+      "revisions": 2,
+      "signed": false,
+      "tagged": false
+    },
+    "language": "en",
+    "modified": {
+      "type": "date_time",
+      "value": "2015-11-24T14:27:07-05:00"
+    },
+    "title": "Standard Form 1199A, Direct Deposit Sign-up Form, June 1987"
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pdfbox-sf1199a-direct-deposit.pdf",
+    "path": "<corpus>/pdf/pdfbox-sf1199a-direct-deposit.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "61d5dd9542b40b7dcff2e23f217e12d7c930ca2fb7a62cfdd4177711f5b47567",
+    "size": 79004
+  }
+}

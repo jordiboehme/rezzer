@@ -1,0 +1,54 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "scan-truman-letter-nara.pdf"
+resource: "<corpus>/pdf/scan-truman-letter-nara.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "a775d592b0780a097bd41a3738b9ce369a98cc2eabf4831a17251beb9f0cb7fd"
+source_size: 266833
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 1
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+created: "2010-03-10T12:01:52-05:00"
+modified: "2010-03-10T13:43:42-05:00"
+---
+
+# scan-truman-letter-nara.pdf
+
+## Overview
+
+- Pages: 1
+- Images: 1
+- Last changed: 2010-03-10T13:43:42-05:00
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| creator | Adobe Acrobat 9.3.1 |
+| pdf\_version | 1.6 |
+| producer | Adobe Acrobat 9.3.1 Image Conversion Plug-in |
+
+:status[Page 1]{grey}
+
+Picture page-1 (image/png, no text layer, 1 picture) is not extracted. :status[Needs vision]{yellow}
+
+## Embedded
+
+### Pictures that need vision
+
+| Picture | File | Caption | Note |
+| --- | --- | --- | --- |
+| page-1 | not extracted |  | no text layer, 1 picture |

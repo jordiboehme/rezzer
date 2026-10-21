@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 2
+  },
+  {
+    "pointer": "/facets/annotations/0/kind",
+    "equals": "free-text"
+  },
+  {
+    "pointer": "/facets/annotations/0/body/0/text",
+    "equals": "FreeText content"
+  },
+  {
+    "contains": "> [!NOTE] Free-text by Tim van der Meij"
+  }
+]

@@ -1,0 +1,399 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "outline",
+      "blocks": [
+        {
+          "items": [
+            [
+              {
+                "inlines": [
+                  {
+                    "text": "Blank Page, page 1",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ]
+          ],
+          "ordered": false,
+          "type": "list"
+        }
+      ],
+      "kind": "other",
+      "title": "Outline",
+      "type": "section"
+    },
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "text": "Radios",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "Checkboxes",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b3",
+          "inlines": [
+            {
+              "text": "Radio Checkboxes",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "embedded": [
+      {
+        "detail": "javascript, callback",
+        "kind": "script",
+        "name": "document",
+        "text": "function callback(x)\r\n{\r\nthis.getField(\"Field1\").value = event.target.name + \"=\" + event.target.value + \"::\" + x;\r\n}"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Group1 activate",
+        "text": "callback(1);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Group1 activate",
+        "text": "callback(2);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Group1 activate",
+        "text": "callback(3);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Group1 activate",
+        "text": "callback(4);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check1 activate",
+        "text": "callback(5);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check2 activate",
+        "text": "callback(6);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check3 activate",
+        "text": "callback(7);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check4 activate",
+        "text": "callback(8);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check5 activate",
+        "text": "callback(9);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check5 activate",
+        "text": "callback(10);"
+      },
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Check5 activate",
+        "text": "callback(11);"
+      },
+      "<2 more items>"
+    ],
+    "fields": [
+      {
+        "anchor": "field:Field1",
+        "kind": "text",
+        "name": "Field1",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(1);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(2);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(3);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(4);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Group1",
+        "flags": [
+          "no-toggle-to-off"
+        ],
+        "kind": "radio",
+        "name": "Group1",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(5);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Check1",
+        "kind": "checkbox",
+        "name": "Check1",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(6);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Check2",
+        "kind": "checkbox",
+        "name": "Check2",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(7);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Check3",
+        "kind": "checkbox",
+        "name": "Check3",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(8);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Check4",
+        "kind": "checkbox",
+        "name": "Check4",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "callback(9);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(10);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(11);",
+            "trigger": "activate"
+          },
+          {
+            "script": "callback(12);",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Check5",
+        "kind": "checkbox",
+        "name": "Check5",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:NoAct1",
+        "kind": "checkbox",
+        "name": "NoAct1",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "anchor": "field:Group2",
+        "flags": [
+          "no-toggle-to-off"
+        ],
+        "kind": "radio",
+        "name": "Group2",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "var t = this.getField(\"Field1\");\r\nt.value = [this.getField(\"NoAct1\").value,\r\n           this.getField(\"Group2\").value].join(\";\");",
+            "trigger": "activate"
+          }
+        ],
+        "anchor": "field:Button3",
+        "kind": "button",
+        "name": "Button3",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "1"
+      ],
+      [
+        "Form fields",
+        "10"
+      ],
+      [
+        "Scripts",
+        "14"
+      ],
+      [
+        "Last changed",
+        "2021-01-08T06:22:14-08:00"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "outline",
+        "kind": "other",
+        "name": "Outline",
+        "size": "1 paragraph"
+      }
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2020-12-16T05:45:43-08:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "Adobe Acrobat Pro DC 20.13.20074"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.6"
+      },
+      "producer": {
+        "type": "text",
+        "value": "Adobe Acrobat Pro DC 20.13.20074"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "form_fields": 10,
+      "has_javascript": true,
+      "pages": 1,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2021-01-08T06:22:14-08:00"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pdfjs-js-buttons.pdf",
+    "path": "<corpus>/pdf/pdfjs-js-buttons.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "4679ee03ee84b48d8b67ba39975e946de49216ba744a729fa30ef8f32c3ea9ba",
+    "size": 29410
+  }
+}

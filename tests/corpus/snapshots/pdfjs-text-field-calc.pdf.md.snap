@@ -1,0 +1,86 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "pdfjs-text-field-calc.pdf"
+resource: "<corpus>/pdf/pdfjs-text-field-calc.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "b307ec462e469e7fdc7acc2630641f41ef9da4dadf8dd5c736720c60ee19248c"
+source_size: 1797
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 3
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+form_fields: 2
+has_javascript: true
+---
+
+# pdfjs-text-field-calc.pdf
+
+## Overview
+
+- Pages: 3
+- Formulas: 1
+- Graphs: 1
+- Form fields: 2
+- Scripts: 1
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| pdf\_version | 1.7 |
+
+:status[Page 1]{grey}
+
+:status[Page 2]{grey}
+
+:status[Page 3]{grey}
+
+## Logic
+
+### Form
+
+| Field | Type | Role | Value | Format | Rule | Reads | Flags |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Source | text | input |  |  |  |  |  |
+| Mirror | text | result (calc 1) |  |  | script, see below | Source | read-only |
+
+### Graph: form
+
+Kind dependency, 2 nodes, 1 edge.
+```mermaid
+flowchart LR
+    n_f1["Source (input)"]
+    n_f2["Mirror (result, calc 1)"]
+    n_f2 -->|"reads"| n_f1
+```
+
+### Calculations
+
+Mirror, calc 1:
+```javascript
+event.value = this.getField("Source").value;
+```
+
+## Embedded
+
+| Kind | Name | Detail | Target |
+| --- | --- | --- | --- |
+| script | field Mirror calculate | javascript |  |
+
+### Scripts
+
+field Mirror calculate (javascript), listed, not run.
+```javascript
+event.value = this.getField("Source").value;
+```

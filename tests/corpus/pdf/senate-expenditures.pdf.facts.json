@@ -1,0 +1,19 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "contains": "| **DOCUMENT NO.** | **DATE POSTED** | **PAYEE NAME** |"
+  },
+  {
+    "contains": "| DHAW20190001 | 05/03/2019 | CITIBANK - TRAVEL CBA CARD | 03/04/2019 | 03/06/2019 |"
+  },
+  {
+    "contains": "| BAIN, J MATTHEW |"
+  }
+]

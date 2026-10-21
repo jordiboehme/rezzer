@@ -1,0 +1,41 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 4
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 35
+  },
+  {
+    "pointer": "/properties/facts/has_javascript",
+    "equals": true
+  },
+  {
+    "pointer": "/properties/facts/revisions",
+    "equals": 2
+  },
+  {
+    "pointer": "/facets/fields",
+    "len": 35
+  },
+  {
+    "contains": "| Phone | text | input |"
+  },
+  {
+    "contains": "phone number"
+  },
+  {
+    "contains": "number, 2 decimals, \"$\" before the number"
+  },
+  {
+    "contains": "date mm/dd/yyyy"
+  },
+  {
+    "contains": "DIRECT DEPOSIT"
+  }
+]

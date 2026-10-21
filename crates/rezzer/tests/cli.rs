@@ -548,3 +548,161 @@ fn password_stdin_with_dash_is_error() {
             "--password-stdin needs a file path",
         ));
 }
+
+#[cfg(feature = "fmt-pdf")]
+fn pdf_corpus(name: &str) -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/pdf")
+        .join(name)
+}
+
+/// The user password of `pdf/qpdf-user-password.pdf` (see the corpus MANIFEST).
+#[cfg(feature = "fmt-pdf")]
+const PDF_PASSWORD: &str = "view";
+
+/// The text without the word "overview", in lower case: the password `view` must not be in
+/// what is left.
+#[cfg(feature = "fmt-pdf")]
+fn without_overview(text: &str) -> String {
+    text.to_lowercase().replace("overview", "")
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn rezzer_formats_lists_pdf_reader() {
+    let env = Env::new();
+    let out = env.cmd().arg("formats").output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(
+        text.lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>())
+            .any(|r| r[..] == ["pdf", "pdf", version]),
+        "{text}"
+    );
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn pdf_end_to_end_exit_0() {
+    let env = Env::new();
+    // Named .txt: the format is found by content.
+    let file = env.file(
+        "form.txt",
+        &std::fs::read(pdf_corpus("pdfjs-text-field-calc.pdf")).unwrap(),
+    );
+    env.cmd()
+        .arg("read")
+        .arg(&file)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: pdf"))
+        .stdout(predicate::str::contains("completeness: complete"))
+        .stdout(predicate::str::contains("### Form"));
+    assert_eq!(env.cache_entries(), 1);
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn pdf_with_user_password_exits_1_without_password() {
+    let env = Env::new();
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("completeness: failed"))
+        .stdout(predicate::str::contains(
+            "This PDF is protected with a password and is not read.",
+        ));
+    // A wrong password says so and fails too.
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .arg("--password-stdin")
+        .write_stdin("wrong\n")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "The given password does not open this PDF.",
+        ));
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_stdin_reads_protected_pdf() {
+    let env = Env::new();
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .arg("--password-stdin")
+        .write_stdin(format!("{PDF_PASSWORD}\n"))
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("completeness: complete"))
+        .stdout(predicate::str::contains("encrypted: true"))
+        .stdout(predicate::str::contains("pages: 30"));
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_never_in_output_or_cache() {
+    let env = Env::new();
+    let file = pdf_corpus("qpdf-user-password.pdf");
+    let dir = env.root.path().join("out");
+    let mut seen = Vec::new();
+    for extra in [
+        &[][..],
+        &["--json"][..],
+        &["-o", dir.to_str().unwrap(), "--json"][..],
+    ] {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&file)
+            .arg("--password-stdin")
+            .args(extra)
+            .write_stdin(format!("{PDF_PASSWORD}\n"))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{extra:?}");
+        seen.push(String::from_utf8(out.stdout).unwrap());
+        seen.push(String::from_utf8(out.stderr).unwrap());
+    }
+    // The JSON on stdout is the model; it is complete and holds no password.
+    let doc: Document = serde_json::from_str(&seen[2]).unwrap();
+    assert!(!doc.body.is_empty());
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        seen.push(std::fs::read_to_string(entry.unwrap().path()).unwrap());
+    }
+    for text in &seen {
+        assert!(!without_overview(text).contains(PDF_PASSWORD), "{text}");
+    }
+    // A read with a password is never cached.
+    assert_eq!(env.cache_entries(), 0);
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn o_bundle_holds_page_png() {
+    let env = Env::new();
+    let dir = env.root.path().join("out");
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("scan-truman-letter-nara.pdf"))
+        .arg("-o")
+        .arg(&dir)
+        .assert()
+        .code(0)
+        .stdout("");
+    let md = std::fs::read_to_string(dir.join("scan-truman-letter-nara.pdf.md")).unwrap();
+    assert!(
+        md.contains("scan-truman-letter-nara.pdf.assets/page-1.png"),
+        "{md}"
+    );
+    let png = std::fs::read(dir.join("scan-truman-letter-nara.pdf.assets/page-1.png")).unwrap();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    // Reads that extract assets bypass the cache.
+    assert_eq!(env.cache_entries(), 0);
+}

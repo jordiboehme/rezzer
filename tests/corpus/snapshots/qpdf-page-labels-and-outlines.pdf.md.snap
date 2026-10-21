@@ -1,0 +1,175 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "qpdf-page-labels-and-outlines.pdf"
+resource: "<corpus>/pdf/qpdf-page-labels-and-outlines.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: medium
+source_sha256: "08b0f999c02abb75cae0854eb042f4ed75ad0b65017a0a584276b90d5e8194b7"
+source_size: 15986
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 30
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+language: "en"
+---
+
+# qpdf-page-labels-and-outlines.pdf
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Outline | other | 11 paragraphs |  |  |
+
+- Pages: 30
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| pdf\_version | 1.3 |
+
+## Outline
+
+- Isís 1 -> 5: /XYZ null null null, page iv
+  - Amanda 1.1 -> 11: /Fit, page 12 (page 12 of the file)
+    - Isosicle 1.1.1 -> 12: /FitV 100, page 2 (page 13 of the file)
+      - Isosicle 1.1.1.1 -> 18: /XYZ null null null, page 9 (page 19 of the file)
+      - Isosicle 1.1.1.2 -> 19: /XYZ null null null, page 20
+    - Isosicle 1.1.2 -> 12: /XYZ null null null, page 2 (page 13 of the file)
+      - Isosicle 1.1.2.1 -> 22: /XYZ null null null, page 16059
+  - Sandy ÷Σανδι÷ 1.2 -> 13: /FitH 792, page 3
+    - Trepsichord 1.2.1 -> 1: /FitR 66 714 180 770, page 2 (page 2 of the file)
+    - Trepsicle 1.2.2 -> 0: /XYZ null null null, page 1
+- Trepak 2 -> 15: /XYZ 66 756 3, page 6
+
+:status[Page 1]{grey}
+
+Potato 0
+
+:status[Page 2]{grey}
+
+Potato 1
+
+:status[Page i (3)]{grey}
+
+Potato 2
+
+:status[Page ii (4)]{grey}
+
+Potato 3
+
+:status[Page iii (5)]{grey}
+
+Potato 4
+
+:status[Page iv (6)]{grey}
+
+Potato 5
+
+:status[Page v (7)]{grey}
+
+Potato 6
+
+:status[Page 8]{grey}
+
+Potato 7
+
+:status[Page 9]{grey}
+
+Potato 8
+
+:status[Page vi (10)]{grey}
+
+Potato 9
+
+:status[Page vii (11)]{grey}
+
+Potato 10
+
+:status[Page 12]{grey}
+
+Potato 11
+
+:status[Page 2 (13)]{grey}
+
+Potato 12
+
+:status[Page 3 (14)]{grey}
+
+Potato 13
+
+:status[Page 4 (15)]{grey}
+
+Potato 14
+
+:status[Page 6 (16)]{grey}
+
+Potato 15
+
+:status[Page 7 (17)]{grey}
+
+Potato 16
+
+:status[Page 8 (18)]{grey}
+
+Potato 17
+
+:status[Page 9 (19)]{grey}
+
+Potato 18
+
+:status[Page 20]{grey}
+
+Potato 19
+
+:status[Page 12 (21)]{grey}
+
+Potato 20
+
+:status[Page 13 (22)]{grey}
+
+Potato 21
+
+:status[Page 16059 (23)]{grey}
+
+Potato 22
+
+:status[Page l (24)]{grey}
+
+Potato 23
+
+:status[Page li (25)]{grey}
+
+Potato 24
+
+:status[Page lii (26)]{grey}
+
+Potato 25
+
+:status[Page liii (27)]{grey}
+
+Potato 26
+
+:status[Page liv (28)]{grey}
+
+Potato 27
+
+:status[Page lv (29)]{grey}
+
+Potato 28
+
+:status[Page liv (30)]{grey}
+
+Potato 29

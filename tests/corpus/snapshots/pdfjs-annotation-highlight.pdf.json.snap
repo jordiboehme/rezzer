@@ -1,0 +1,131 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "text": "Highlight",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "Lorem ipsum dolor sit amet",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "annotations": [
+      {
+        "anchor": "p1:b2",
+        "author": "Tim van der Meij",
+        "body": [
+          {
+            "text": "Highlight content",
+            "type": "text"
+          }
+        ],
+        "date": "2015-12-30T15:22:48+01:00",
+        "kind": "highlight",
+        "quoted": "Lorem ipsum dolor sit amet"
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "1"
+      ],
+      [
+        "Annotations",
+        "1"
+      ],
+      [
+        "Last changed",
+        "2015-12-30T15:22:49+01:00"
+      ]
+    ]
+  },
+  "properties": {
+    "authors": [
+      "Tim van der Meij"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2015-12-30T15:21:22+01:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "Microsoft® Word 2013"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.5"
+      },
+      "producer": {
+        "type": "text",
+        "value": "Microsoft® Word 2013"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "has_javascript": false,
+      "pages": 1,
+      "revisions": 1,
+      "signed": false,
+      "tagged": true
+    },
+    "language": "nl-NL",
+    "modified": {
+      "type": "date_time",
+      "value": "2015-12-30T15:22:49+01:00"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pdfjs-annotation-highlight.pdf",
+    "path": "<corpus>/pdf/pdfjs-annotation-highlight.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "72b6387356ccfdfb95a0a5eff5e1ceb9b7667019807d7b04abaf64dad7ea143a",
+    "size": 92397
+  }
+}

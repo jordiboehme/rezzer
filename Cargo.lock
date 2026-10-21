@@ -1625,8 +1625,10 @@ name = "rezzer"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "flate2",
  "hex",
  "insta",
+ "libc",
  "predicates",
  "rezzer-cli",
  "rezzer-model",

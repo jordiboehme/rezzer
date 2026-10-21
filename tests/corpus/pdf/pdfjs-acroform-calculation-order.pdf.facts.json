@@ -1,0 +1,28 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/fields/0/name",
+    "equals": "group"
+  },
+  {
+    "pointer": "/facets/fields/0/calc_order",
+    "equals": 1
+  },
+  {
+    "contains": "| group | text | input (calc 1) |"
+  },
+  {
+    "contains": "Hello"
+  }
+]

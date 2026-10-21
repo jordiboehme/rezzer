@@ -1,0 +1,36 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 10
+  },
+  {
+    "pointer": "/properties/facts/has_javascript",
+    "equals": true
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 14
+  },
+  {
+    "pointer": "/facets/embedded/0/name",
+    "equals": "document"
+  },
+  {
+    "pointer": "/facets/embedded/0/text",
+    "contains": "function callback(x)"
+  },
+  {
+    "contains": "listed, not run."
+  },
+  {
+    "contains": "| Button3 | button | input |"
+  }
+]

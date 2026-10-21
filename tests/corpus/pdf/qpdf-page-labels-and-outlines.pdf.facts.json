@@ -1,0 +1,22 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 30
+  },
+  {
+    "contains": ":status[Page i (3)]{grey}"
+  },
+  {
+    "contains": ":status[Page vii (11)]{grey}"
+  },
+  {
+    "contains": "- Isís 1 -> 5: /XYZ null null null, page iv"
+  },
+  {
+    "contains": "page 2 (page 13 of the file)"
+  }
+]

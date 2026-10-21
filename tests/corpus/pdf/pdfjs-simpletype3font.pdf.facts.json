@@ -1,0 +1,22 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/losses",
+    "contains": "6 glyphs without a Unicode mapping on page 1"
+  },
+  {
+    "pointer": "/assets/0/id",
+    "equals": "page-1"
+  },
+  {
+    "pointer": "/assets/0/needs_vision",
+    "equals": true
+  }
+]

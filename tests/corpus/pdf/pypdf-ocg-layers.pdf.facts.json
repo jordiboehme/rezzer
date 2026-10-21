@@ -1,0 +1,22 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/layers",
+    "equals": 6
+  },
+  {
+    "pointer": "/properties/custom/layers/value",
+    "contains": "North Arrow (shown)"
+  },
+  {
+    "pointer": "/properties/custom/layers/value",
+    "contains": "Data Source Attribution (shown)"
+  }
+]

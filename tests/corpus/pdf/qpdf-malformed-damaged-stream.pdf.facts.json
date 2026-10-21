@@ -1,0 +1,21 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "contains": "Potato"
+  },
+  {
+    "pointer": "/losses/0/location",
+    "equals": "p1"
+  },
+  {
+    "pointer": "/losses/0/what",
+    "contains": "stream 5 0 is damaged"
+  }
+]

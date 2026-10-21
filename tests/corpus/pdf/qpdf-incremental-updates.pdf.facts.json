@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/revisions",
+    "equals": 3
+  },
+  {
+    "pointer": "/facets/timeline",
+    "len": 3
+  },
+  {
+    "pointer": "/facets/timeline/2/text",
+    "equals": "1 change: changed page 1 content"
+  },
+  {
+    "contains": "Salad"
+  }
+]

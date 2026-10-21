@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 2
+  },
+  {
+    "pointer": "/facets/annotations/0/kind",
+    "equals": "caret"
+  },
+  {
+    "pointer": "/facets/annotations/1/kind",
+    "equals": "ink"
+  },
+  {
+    "pointer": "/facets/annotations/0/author",
+    "equals": "Tim van der Meij"
+  },
+  {
+    "contains": "> [!NOTE] Caret by Tim van der Meij, 2015-12-20T23:46:04+01:00"
+  }
+]

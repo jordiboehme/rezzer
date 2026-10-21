@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/tagged",
+    "equals": true
+  },
+  {
+    "pointer": "/body/0/blocks/1/type",
+    "equals": "heading"
+  },
+  {
+    "pointer": "/body/0/blocks/1/level",
+    "equals": 1
+  },
+  {
+    "pointer": "/body/0/blocks/3/level",
+    "equals": 2
+  },
+  {
+    "contains": "## Heading 1\n\nThis paragraph 1.\n\n### Heading 2\n\nThis paragraph 2."
+  }
+]

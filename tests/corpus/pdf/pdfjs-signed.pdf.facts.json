@@ -1,0 +1,36 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/signed",
+    "equals": true
+  },
+  {
+    "pointer": "/properties/facts/signatures",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/signatures/0/kind",
+    "equals": "field"
+  },
+  {
+    "pointer": "/facets/signatures/0/anchor",
+    "equals": "field:Signature1"
+  },
+  {
+    "pointer": "/facets/signatures/0/date",
+    "equals": "2026-05-09T00:00:00Z"
+  },
+  {
+    "contains": "| Signature1 | field |  | 2026-05-09T00:00:00Z |"
+  },
+  {
+    "contains": "Expected verification state: VERIFIED"
+  }
+]

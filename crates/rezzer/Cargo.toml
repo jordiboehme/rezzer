@@ -40,3 +40,5 @@ predicates.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
+libc.workspace = true
+flate2 = { workspace = true, features = ["zlib-rs"] }

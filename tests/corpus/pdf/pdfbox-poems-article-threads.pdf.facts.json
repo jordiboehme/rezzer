@@ -1,0 +1,40 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 2
+  },
+  {
+    "pointer": "/properties/facts/revisions",
+    "equals": 2
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "Erlkönig.pages"
+  },
+  {
+    "pointer": "/facets/embedded/0/kind",
+    "equals": "article-thread"
+  },
+  {
+    "pointer": "/facets/embedded/0/name",
+    "equals": "Erlkönig"
+  },
+  {
+    "pointer": "/facets/embedded/1/name",
+    "equals": "Moulière"
+  },
+  {
+    "pointer": "/facets/embedded/1/detail",
+    "equals": "pages 1, 2"
+  },
+  {
+    "contains": "Wer reitet so spät durch Nacht und Wind?"
+  },
+  {
+    "contains": "Drelin, drelin, drelin."
+  }
+]

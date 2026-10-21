@@ -1,0 +1,22 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/annotations/0/kind",
+    "equals": "strikeout"
+  },
+  {
+    "pointer": "/facets/annotations/0/quoted",
+    "equals": "Lorem ipsum dolor sit amet"
+  }
+]
