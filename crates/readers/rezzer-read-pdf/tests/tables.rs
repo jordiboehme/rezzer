@@ -685,9 +685,9 @@ fn ruled_cells(xs: &[f32], tag: &str) -> String {
         c += &format!("{x} 640 m {x} 700 l S ");
     }
     for r in 0..3 {
-        for k in 0..xs.len() - 1 {
+        for (k, x) in xs[..xs.len() - 1].iter().enumerate() {
             let y = 686.0 - 20.0 * r as f32;
-            c += &show("F1", 8.0, xs[k] + 4.0, y, &format!("{tag}{r}{k}"));
+            c += &show("F1", 8.0, x + 4.0, y, &format!("{tag}{r}{k}"));
         }
     }
     c

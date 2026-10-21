@@ -933,7 +933,7 @@ fn loose_justified_columns_read_column_by_column() {
                 november alpha";
     for tw in [
         |_: usize| 5.5f32,
-        |l: usize| if l % 3 == 0 { 6.0 } else { 1.0 },
+        |l: usize| if l.is_multiple_of(3) { 6.0 } else { 1.0 },
     ] {
         let c = justified(50.0, 760.0, 20, 0, tw) + &justified(320.0, 760.0, 20, 3, tw);
         let out = read(&pdf(&[Page::text(c)], ""));
