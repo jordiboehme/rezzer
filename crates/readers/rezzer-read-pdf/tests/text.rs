@@ -854,3 +854,51 @@ fn link_covers_only_its_box() {
         "{md}"
     );
 }
+
+/// A one-page file with Helvetica in WinAnsiEncoding as `/F1`, where byte 240 (octal) is a
+/// no-break space.
+fn win_ansi_page(content: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font =
+        b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn nbsp_padding_splits_pieces() {
+    // Label and value lines, each one string: the label, no-break spaces as padding, the
+    // value.
+    let pad = |n: usize| "\\240".repeat(n);
+    let mut c = String::new();
+    for (k, (label, n, value)) in [
+        ("Points:", 12, "1200"),
+        ("Level:", 13, "Gold"),
+        ("Status:", 12, "Active"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = 700.0 - 14.0 * k as f32;
+        c += &format!("BT /F1 12 Tf 72 {y} Td ({label}{}{value}) Tj ET\n", pad(n));
+    }
+    let out = read(&win_ansi_page(&c));
+    let all = all_text(&out);
+    assert!(!all.contains('\u{a0}'), "{all:?}");
+    // Label and value stand apart: three lines of two pieces in columns are a table.
+    assert_eq!(
+        all, "Page 1\nPoints:|1200|\nLevel:|Gold|\nStatus:|Active|\n",
+        "{all:?}"
+    );
+}

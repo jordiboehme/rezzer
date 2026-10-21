@@ -40,6 +40,11 @@ fn is_rtl(c: char) -> bool {
     matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
 }
 
+/// White space that pads text: a space, a no-break space and the typographic spaces.
+fn is_pad(c: char) -> bool {
+    matches!(c, ' ' | '\u{a0}' | '\u{2000}'..='\u{200a}')
+}
+
 /// A run being built: glyphs of one style next to each other on one baseline.
 #[derive(Debug, Clone)]
 struct Frag {
@@ -50,8 +55,11 @@ struct Frag {
     /// The same start in the page's frame.
     ox: f32,
     oy: f32,
-    /// The end of the last glyph along the baseline.
+    /// The end of the last glyph with ink along the baseline: white space does not move
+    /// it, so padding made of spaces leaves a gap.
     end: f32,
+    /// The end of the last glyph, white space too.
+    pen: f32,
     size: f32,
     bold: bool,
     italic: bool,
@@ -122,7 +130,10 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                 && f.mcid == g.mcid
                 && f.link == g.link
                 && (f.size - size).abs() <= 0.05 * f.size.max(size);
-            let gap = x - f.end;
+            // White space joins the white space or ink before it; ink joins the ink before
+            // it, so a wide stretch of white space between two words splits them.
+            let pad = !t.is_empty() && t.chars().all(is_pad);
+            let gap = x - if pad { f.pen } else { f.end };
             let on_line = (y - f.y).abs() <= 0.25 * f.size.max(size);
             if same_style && on_line && gap >= -0.5 * size && gap <= PIECE_GAP * size {
                 let glued = g.joined
@@ -137,18 +148,23 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                 }
                 f.text.push_str(t);
                 f.chars += t.chars().count();
-                f.end = f.end.max(x + adv);
+                f.pen = f.pen.max(x + adv);
+                if !pad {
+                    f.end = f.end.max(x + adv);
+                }
                 continue;
             }
         }
         let (ox, oy) = page.apply(g.x, g.y);
+        let pad = !t.is_empty() && t.chars().all(is_pad);
         out.push(Frag {
             text: t.to_string(),
             x,
             y,
             ox,
             oy,
-            end: x + adv,
+            end: if pad { x } else { x + adv },
+            pen: x + adv,
             size,
             bold: g.bold,
             italic: g.italic,
@@ -457,15 +473,21 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
 fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::with_capacity(ids.len());
     let mut prev: Option<&Frag> = None;
+    // Whether each run got a space put in before it.
+    let mut spaced: Vec<bool> = Vec::with_capacity(ids.len());
     for &i in ids {
         let f = &frags[i];
-        let mut text = f.text.clone();
+        let mut text = collapsed(&f.text);
+        spaced.push(false);
         if let Some(p) = prev {
             let gap = f.x - p.end;
             let glued =
                 p.text.ends_with(char::is_whitespace) || text.starts_with(char::is_whitespace);
             if !glued && gap > WORD_GAP * f.size.max(p.size) {
                 text.insert(0, ' ');
+                if let Some(s) = spaced.last_mut() {
+                    *s = true;
+                }
             }
         }
         runs.push(Run {
@@ -493,9 +515,9 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         // the logical order back; the text of one glyph (a ligature mapped to several
         // characters) moves as a whole.
         let mut units: Vec<&str> = Vec::new();
-        for (r, &i) in runs.iter().zip(ids) {
+        for (&spaced, &i) in spaced.iter().zip(ids) {
             let f = &frags[i];
-            if r.text.len() > f.text.len() {
+            if spaced {
                 units.push(" ");
             }
             let mut starts: Vec<usize> = f.units.iter().map(|&u| u as usize).collect();
@@ -516,6 +538,46 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         runs = vec![one];
     }
     runs
+}
+
+/// `text` with each stretch of two or more padding spaces made one space.
+fn collapsed(text: &str) -> String {
+    let mut chars = text.chars().peekable();
+    let mut doubled = false;
+    while let Some(c) = chars.next() {
+        if is_pad(c) && chars.peek().is_some_and(|&n| is_pad(n)) {
+            doubled = true;
+            break;
+        }
+    }
+    if !doubled {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut stretch = 0usize;
+    let mut first = ' ';
+    for c in text.chars() {
+        if is_pad(c) {
+            if stretch == 0 {
+                first = c;
+            }
+            stretch += 1;
+            continue;
+        }
+        match stretch {
+            0 => {}
+            1 => out.push(first),
+            _ => out.push(' '),
+        }
+        stretch = 0;
+        out.push(c);
+    }
+    match stretch {
+        0 => {}
+        1 => out.push(first),
+        _ => out.push(' '),
+    }
+    out
 }
 
 /// The units of a visual line in logical order. In the bidi algorithm each unit stands for
@@ -709,6 +771,7 @@ mod tests {
             ox: x,
             oy: y,
             end: x + 6.0 * text.chars().count() as f32,
+            pen: x + 6.0 * text.chars().count() as f32,
             size: 10.0,
             bold: false,
             italic: false,
