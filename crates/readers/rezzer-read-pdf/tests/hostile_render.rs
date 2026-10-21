@@ -1749,3 +1749,79 @@ fn a_payload_of_the_largest_code_is_kept_whole() {
     assert!(took < twin_time * 4 + Duration::from_secs(2), "{took:?}");
     assert_rss_under_256_mib();
 }
+
+/// One page of `w` by `h` points whose content fills the rectangles `cells` in one path.
+fn cells_page(w: u32, h: u32, cells: &[[f32; 4]]) -> Vec<u8> {
+    let mut c = String::from("0 g\n");
+    for r in cells {
+        c += &format!("{} {} {} {} re\n", r[0], r[1], r[2] - r[0], r[3] - r[1]);
+    }
+    c += "f\n";
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let cs = b.stream("/Filter /FlateDecode", &deflate(c.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn many_small_filled_rectangles_are_searched_within_bounds() {
+    // A checkerboard of squares of one point (they touch at their corners: one huge group),
+    // tall thin bars, and squares all at one place (every pair is near), each 200,000 of
+    // them, against a twin of 2,000 squares.
+    let checker = |n: usize| -> Vec<[f32; 4]> {
+        let side = (n as f32 * 2.0).sqrt().ceil() as usize;
+        (0..n)
+            .map(|k| {
+                let (row, col) = (k / (side / 2), (k % (side / 2)) * 2 + (k / (side / 2)) % 2);
+                let (x, y) = (10.0 + col as f32, 10.0 + row as f32);
+                [x, y, x + 1.0, y + 1.0]
+            })
+            .collect()
+    };
+    let bars: Vec<[f32; 4]> = (0..200_000)
+        .map(|k| {
+            let x = 10.0 + (k % 1_000) as f32 * 1.0;
+            let y = 10.0 + (k / 1_000) as f32 * 0.01;
+            [x, y, x + 0.5, y + 290.0]
+        })
+        .collect();
+    let stacked: Vec<[f32; 4]> = (0..200_000).map(|_| [100.0, 100.0, 101.0, 101.0]).collect();
+    let (twin, twin_time) = timed(&cells_page(1_000, 1_000, &checker(2_000)), false, hostile());
+    assert!(
+        twin.document.assets.is_empty(),
+        "{:#?}",
+        twin.document.assets
+    );
+    for (name, cells) in [
+        ("checkerboard", checker(200_000)),
+        ("bars", bars),
+        ("stacked", stacked),
+    ] {
+        let (out, took) = timed(&cells_page(1_000, 1_000, &cells), false, hostile());
+        eprintln!(
+            "twin {twin_time:?}, {name} {took:?}, max RSS {} MiB, losses {:?}",
+            common::max_rss_bytes() >> 20,
+            out.document
+                .losses
+                .iter()
+                .map(|l| &l.what)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            out.document.assets.is_empty(),
+            "{name}: {:#?}",
+            out.document.assets
+        );
+        assert!(took < Duration::from_secs(10), "{name}: {took:?}");
+    }
+    assert_rss_under_256_mib();
+}

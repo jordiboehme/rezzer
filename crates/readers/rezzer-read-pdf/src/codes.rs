@@ -41,11 +41,18 @@ const MIN_MODULE: f32 = 0.15;
 /// A region larger than this on a side, in points, is not a code.
 const MAX_SIDE: f32 = 500.0;
 
-/// Grid cells of the search, in points.
-const GRID: f32 = 12.0;
+/// Grid cells of the search: four times the median narrow side of the rectangles, within
+/// these bounds in points.
+const GRID_MIN: f32 = 0.5;
+const GRID_MAX: f32 = 12.0;
 
-/// Rectangles a grid cell compares with, at most.
-const PER_CELL: usize = 64;
+/// Grid cells one rectangle is entered in or looks at, at most, along each axis.
+const SPAN: i32 = 32;
+
+/// The work of one page's search, at most: entries in the grid and pairs compared. Past
+/// either, the page is not searched (`Err` with the reason).
+const MAX_ENTRIES: usize = 2_000_000;
+const MAX_PAIRS: u64 = 40_000_000;
 
 fn find(parent: &mut [usize], mut i: usize) -> usize {
     while parent[i] != i {
@@ -59,8 +66,9 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 /// a code: at least [`MIN_CELLS`] small rectangles close to each other, that cover between a
 /// quarter and three quarters of their box, the box at least 8 modules on its short side for
 /// a matrix code, or bars of one height for a linear code. At most [`MAX_REGIONS`], the ones
-/// with the most rectangles first.
-pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Vec<VectorCode> {
+/// with the most rectangles first. `Err` says why the page was not searched: its work would
+/// pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
+pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -70,38 +78,56 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Vec<VectorCode> {
         })
         .collect();
     if cells.len() < MIN_CELLS {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    let key = |x: f32, y: f32| ((x / GRID).floor() as i32, (y / GRID).floor() as i32);
+    let short = |c: &[f32; 4]| (c[2] - c[0]).min(c[3] - c[1]);
+    let mut shorts: Vec<f32> = cells.iter().map(short).collect();
+    let mid = shorts.len() / 2;
+    let (_, median, _) = shorts.select_nth_unstable_by(mid, f32::total_cmp);
+    let grid = (*median * 4.0).clamp(GRID_MIN, GRID_MAX);
+    let key = |x: f32, y: f32| ((x / grid).floor() as i32, (y / grid).floor() as i32);
+    let too_much = || {
+        format!(
+            "the page draws more small filled rectangles than are searched ({MAX_ENTRIES} grid \
+             entries or {MAX_PAIRS} pairs)"
+        )
+    };
+    let mut grid_of: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    let mut entries = 0usize;
     for (i, c) in cells.iter().enumerate() {
         let (a, b) = (key(c[0], c[1]), key(c[2], c[3]));
-        for gx in a.0..=b.0.min(a.0 + 30) {
-            for gy in a.1..=b.1.min(a.1 + 30) {
-                grid.entry((gx, gy)).or_default().push(i);
+        for gx in a.0..=b.0.min(a.0 + SPAN) {
+            for gy in a.1..=b.1.min(a.1 + SPAN) {
+                grid_of.entry((gx, gy)).or_default().push(i);
+                entries += 1;
             }
+        }
+        if entries > MAX_ENTRIES {
+            return Err(too_much());
         }
     }
     let mut parent: Vec<usize> = (0..cells.len()).collect();
     // Modules of a matrix code touch or nearly touch. Bars of a linear code stand up to four
     // modules apart (its widest space), next to bars of the same height.
     let bar = |c: &[f32; 4]| c[3] - c[1] >= 4.0 * (c[2] - c[0]);
-    let reach_of = |c: &[f32; 4]| {
-        let short = (c[2] - c[0]).min(c[3] - c[1]);
-        short * if bar(c) { 4.5 } else { 1.5 } + 0.01
-    };
+    let reach_of = |c: &[f32; 4]| short(c) * if bar(c) { 4.5 } else { 1.5 } + 0.01;
+    let mut pairs = 0u64;
     for (i, c) in cells.iter().enumerate() {
         let reach = reach_of(c);
         let (a, b) = (
             key(c[0] - reach, c[1] - reach),
             key(c[2] + reach, c[3] + reach),
         );
-        for gx in a.0..=b.0.min(a.0 + 32) {
-            for gy in a.1..=b.1.min(a.1 + 32) {
-                let Some(list) = grid.get(&(gx, gy)) else {
+        for gx in a.0..=b.0.min(a.0 + SPAN + 2) {
+            for gy in a.1..=b.1.min(a.1 + SPAN + 2) {
+                let Some(list) = grid_of.get(&(gx, gy)) else {
                     continue;
                 };
-                for &j in list.iter().take(PER_CELL) {
+                pairs += list.len() as u64;
+                if pairs > MAX_PAIRS {
+                    return Err(too_much());
+                }
+                for &j in list {
                     if j <= i {
                         continue;
                     }
@@ -127,6 +153,7 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Vec<VectorCode> {
             }
         }
     }
+    drop(grid_of);
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..cells.len() {
         let r = find(&mut parent, i);
@@ -147,7 +174,7 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Vec<VectorCode> {
             .then(a.1.b[0].total_cmp(&b.1.b[0]))
     });
     found.truncate(MAX_REGIONS);
-    found.into_iter().map(|(_, c)| c).collect()
+    Ok(found.into_iter().map(|(_, c)| c).collect())
 }
 
 /// The code region of `members` of `cells`, when it looks like one.
@@ -242,12 +269,12 @@ mod tests {
     #[test]
     fn a_matrix_of_modules_is_a_region_with_its_module_size() {
         let cells = matrix(100.0, 200.0, 2.0);
-        let found = vector_codes(&cells);
+        let found = vector_codes(&cells).expect("searched");
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].b, [100.0, 200.0, 142.0, 242.0]);
         assert_eq!(found[0].module, 2.0);
         // The same code elsewhere is the same code.
-        let moved = vector_codes(&matrix(300.0, 50.0, 2.0));
+        let moved = vector_codes(&matrix(300.0, 50.0, 2.0)).expect("searched");
         assert_eq!(moved[0].id, found[0].id);
     }
 
@@ -260,7 +287,7 @@ mod tests {
             cells.push([x, 100.0, x + w, 130.0]);
             x += w + 0.5 + (k % 2) as f32 * 0.5;
         }
-        let found = vector_codes(&cells);
+        let found = vector_codes(&cells).expect("searched");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].module, 0.5);
     }
@@ -278,12 +305,12 @@ mod tests {
                 ]
             })
             .collect();
-        assert!(vector_codes(&rows).is_empty());
+        assert!(vector_codes(&rows).expect("searched").is_empty());
         // Ten check boxes.
         let boxes: Vec<[f32; 4]> = (0..10)
             .map(|k| [50.0 + k as f32 * 20.0, 100.0, 58.0 + k as f32 * 20.0, 108.0])
             .collect();
-        assert!(vector_codes(&boxes).is_empty());
+        assert!(vector_codes(&boxes).expect("searched").is_empty());
         // A solid block of touching squares covers its whole box.
         let mut solid = Vec::new();
         for r in 0..10 {
@@ -296,6 +323,6 @@ mod tests {
                 ]);
             }
         }
-        assert!(vector_codes(&solid).is_empty());
+        assert!(vector_codes(&solid).expect("searched").is_empty());
     }
 }

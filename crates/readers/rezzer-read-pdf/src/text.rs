@@ -802,6 +802,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             images_id: Vec::new(),
             images_mcid: Vec::new(),
             cells: Vec::new(),
+            cells_cut: false,
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -973,7 +974,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
         items.images_px = std::mem::take(&mut dev.images_px);
-        items.codes = crate::codes::vector_codes(&dev.cells);
+        match crate::codes::vector_codes(&dev.cells) {
+            Ok(codes) => items.codes = codes,
+            Err(why) => notes.push(Note::Unsupported(format!(
+                "codes drawn as paths on page {n} are not looked for: {why}"
+            ))),
+        }
+        if dev.cells_cut {
+            notes.push(Note::Unsupported(format!(
+                "codes drawn as paths on page {n} are looked for only among the first {} small \
+                 filled rectangles",
+                crate::codes::MAX_CELLS
+            )));
+        }
         dev.cells = Vec::new();
         items.images_id = std::mem::take(&mut dev.images_id);
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
@@ -2495,6 +2508,8 @@ struct TextDevice<'d> {
     /// Filled rectangles that may be modules or bars of a code drawn as paths (at most
     /// [`crate::codes::MAX_CELLS`]).
     cells: Vec<[f32; 4]>,
+    /// More filled rectangles were drawn than are kept.
+    cells_cut: bool,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -2979,11 +2994,13 @@ impl<'a> Device<'a> for TextDevice<'_> {
             return;
         }
         let stroke = !matches!(mode, DrawMode::Fill(_));
-        if !stroke && self.cells.len() < crate::codes::MAX_CELLS {
-            let cells = &mut self.cells;
+        if !stroke && !self.cells_cut {
+            let (cells, cut) = (&mut self.cells, &mut self.cells_cut);
             cells_of(path, props.transform, &mut |c| {
                 if cells.len() < crate::codes::MAX_CELLS {
                     cells.push(c);
+                } else {
+                    *cut = true;
                 }
             });
         }

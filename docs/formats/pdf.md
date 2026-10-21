@@ -161,7 +161,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - EAN-8, UPC-E and MaxiCode are not read. The first two give too many false hits, the last one can take minutes on a small picture
 - Codes are read as text or bytes. What a ticket, a payment or a boarding pass code means (EPC QR, Swiss QR bill, UIC 918, IATA BCBP) is read in a later plan
 - A code drawn as one outline path, not as squares or bars, is only found when its page is rendered for vision
-- Without an output directory, a page that draws more than 1,000 pictures is not rendered to look for codes
+- Without an output directory, a page that draws more than 1,000 pictures is not rendered to look for codes. The output says so
 - Equal pictures are found by all of their data. Two copies of one picture with different compression get a file each, and so do two copies in their own objects after the first 65,536 picture objects of a file. A stencil mask drawn in two colors is one picture
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
 - The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so

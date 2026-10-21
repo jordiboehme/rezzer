@@ -2179,3 +2179,32 @@ fn a_small_code_on_a_very_large_page_is_read_at_a_fine_scale() {
     let (w, h) = png_size(blob(&out, "page-1-pic-1"));
     assert!(w >= 120 && h >= 120, "{w} by {h}");
 }
+
+#[test]
+fn dense_vector_codes_are_found() {
+    // Payment codes are often drawn as paths with small modules: a version 4 code at half a
+    // point a module and a version 10 one at one point.
+    let v4 = modules(Symbology::QrCode, &"epc 4711 ".repeat(6));
+    let v10 = modules(
+        Symbology::QrCode,
+        &"spc 0200 1 ch4431999123000889012 ".repeat(7),
+    );
+    assert!(
+        v4.width >= 33 && v10.width >= 57,
+        "{} {}",
+        v4.width,
+        v10.width
+    );
+    for (m, module) in [(&v4, 0.5), (&v10, 1.0)] {
+        let content = format!("{INVOICE}{}", vector_code(m, 300.0, 300.0, module));
+        let out = read(&code_page(&content, &[]));
+        let found: Vec<usize> = out.document.assets.iter().map(|a| a.codes.len()).collect();
+        assert_eq!(
+            found,
+            [1],
+            "{} modules at {module}: {:#?}",
+            m.width,
+            out.document.assets
+        );
+    }
+}

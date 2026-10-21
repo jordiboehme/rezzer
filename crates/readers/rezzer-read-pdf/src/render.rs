@@ -855,12 +855,13 @@ pub(crate) fn render_pages(
         return scans;
     }
     // Without files a page is rendered only to be read for codes: what is not is a gap in
-    // that reading, not in the text.
+    // that reading, not in the text, and the page still says it needs vision.
     let severity = if files {
         Severity::Warning
     } else {
         Severity::Info
     };
+    let reason = |why: LossReason| if files { why } else { LossReason::Unsupported };
     // The renderer opens the file again and holds its own page list while it renders.
     let Some(_list) = crate::text::PageList::of(pdf) else {
         let why = format!(
@@ -873,7 +874,7 @@ pub(crate) fn render_pages(
             out.loss(
                 format!("p{}", need.page),
                 format!("page {} {}: {why}", need.page, not_done(files)),
-                LossReason::Limit,
+                reason(LossReason::Limit),
                 severity,
             );
         }
@@ -898,7 +899,7 @@ pub(crate) fn render_pages(
                 out.loss(
                     format!("p{}", need.page),
                     format!("page {} {}: {why}", need.page, not_done(files)),
-                    LossReason::Damaged,
+                    reason(LossReason::Damaged),
                     severity,
                 );
             }
@@ -931,6 +932,8 @@ pub(crate) fn render_pages(
     // Why each page with small pictures was not rendered.
     let mut failed: HashMap<u32, LossReason> = HashMap::new();
     let mut rendered = 0;
+    // Pages not rendered to be read for codes because they draw too many pictures.
+    let mut heavy: Vec<u32> = Vec::new();
     for need in needs {
         let n = need.page;
         // A page with small pictures only is rendered for those not handled yet.
@@ -942,6 +945,7 @@ pub(crate) fn render_pages(
         // for that, and when it draws few enough pictures to render fast.
         if !files {
             if !need.light {
+                heavy.push(n);
                 continue;
             }
             if !scans.stopped() && scans.past() {
@@ -957,7 +961,7 @@ pub(crate) fn render_pages(
             out.loss(
                 format!("p{n}"),
                 format!("page {n} {}: {what}", not_done(files)),
-                why,
+                reason(why),
                 severity,
             );
             failed.insert(n, why);
@@ -1025,7 +1029,24 @@ pub(crate) fn render_pages(
         rendered += 1;
         match need.whole {
             Some(asset) => {
-                scans.read(n, asset, &page, Some(need), budget);
+                // A picture over most of the page (a scan) is read at its own finer scale
+                // instead of the page render; the page render only when that is not rendered.
+                let (pw, ph) = need.size;
+                let covering = need.regions.iter().position(|r| {
+                    matches!(r.how, How::Picture(..))
+                        && (r.b[2] - r.b[0]) * (r.b[3] - r.b[1]) >= 0.9 * pw * ph
+                });
+                let held = u64::from(page.pixmap.width()) * u64::from(page.pixmap.height()) * 4;
+                let finer = covering
+                    .and_then(|k| pages.region(n, need, &need.regions[k], held, &mut scans));
+                match finer {
+                    Some(r) => {
+                        scans.read(n, asset, &r, Some(need), budget);
+                    }
+                    None => {
+                        scans.read(n, asset, &page, Some(need), budget);
+                    }
+                }
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -1038,9 +1059,12 @@ pub(crate) fn render_pages(
                 } else {
                     drop(page);
                 }
-                for region in &need.regions {
+                for (k, region) in need.regions.iter().enumerate() {
                     if scans.stopped() {
                         break;
+                    }
+                    if Some(k) == covering {
+                        continue;
                     }
                     if let Some(r) = pages.region(n, need, region, 0, &mut scans) {
                         scans.read(n, asset, &r, Some(need), budget);
@@ -1069,8 +1093,25 @@ pub(crate) fn render_pages(
         out.loss(
             format!("p{}", left.first),
             left.words(),
-            LossReason::Limit,
+            reason(LossReason::Limit),
             severity,
+        );
+    }
+    if let Some(&first) = heavy.first() {
+        let what = if heavy.len() == 1 {
+            format!("page {first} is")
+        } else {
+            format!("{} pages are", heavy.len())
+        };
+        out.loss(
+            format!("p{first}"),
+            format!(
+                "{what} not scanned for barcodes, from page {first} on: without an output \
+                 directory a page is rendered only to look for codes, and these draw more than \
+                 {SCAN_PICTURES} pictures"
+            ),
+            LossReason::Unsupported,
+            Severity::Info,
         );
     }
     if files {
