@@ -243,9 +243,15 @@ pub(crate) fn marker(page: &PageInfo) -> String {
     }
 }
 
-/// The height of the page in the frame of its runs, `None` when the frame was turned.
+/// The width and height of the page in the frame of its runs.
+fn frame_size(page: &PageInfo, items: Option<&PageItems>) -> (f32, f32) {
+    let turn = items.map(|i| i.turn).unwrap_or_default();
+    turn.size(page.width, page.height)
+}
+
+/// The height of the page in the frame of its runs.
 fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
-    (!items.is_some_and(|i| i.turned)).then_some(page.height)
+    Some(frame_size(page, items).1)
 }
 
 /// One page section per page, with the laid out text. Pages already read are laid out even
@@ -377,12 +383,25 @@ fn lay_out(
                         .collect()
                 })
                 .unwrap_or_default();
+            // Pictures and form fields go into the frame of the runs, which may be turned.
+            let (width, _) = frame_size(info, Some(&items));
+            let place = |b: &[f32; 4]| items.turn.place_box(*b, info.width, info.height);
+            let images: Vec<[f32; 4]> = if items.turned {
+                items.images.iter().map(place).collect()
+            } else {
+                Vec::new()
+            };
+            let fields: Vec<[f32; 4]> = if items.turned {
+                fields.iter().map(place).collect()
+            } else {
+                fields
+            };
             let drawn = Drawn {
                 rules: &items.rules,
-                images: &items.images,
+                images: if items.turned { &images } else { &items.images },
                 widgets: &fields,
                 lines_unsearched: items.lines_unsearched,
-                width: info.width,
+                width,
                 body_size: style.body_size,
             };
             let runs = std::mem::take(&mut items.runs);

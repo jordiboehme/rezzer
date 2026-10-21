@@ -96,8 +96,9 @@ struct Frag {
 }
 
 /// A frame that turns glyph positions so their text reads along +x.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Turn {
+    #[default]
     None,
     /// Text that reads upward (rotated 90 degrees counterclockwise).
     Up,
@@ -124,7 +125,39 @@ impl Turn {
         }
     }
 
-    /// A point in the turned frame.
+    /// How far the turned frame of a page `w` wide and `h` high moves so the page lies in
+    /// `[0, w']` by `[0, h']` again, `w'` and `h'` its size in that frame.
+    pub(crate) fn shift(self, w: f32, h: f32) -> (f32, f32) {
+        match self {
+            Turn::None => (0.0, 0.0),
+            Turn::Up => (0.0, w),
+            Turn::Half => (w, h),
+            Turn::Down => (h, 0.0),
+        }
+    }
+
+    /// The width and height of a page `w` wide and `h` high in the turned frame.
+    pub(crate) fn size(self, w: f32, h: f32) -> (f32, f32) {
+        match self {
+            Turn::None | Turn::Half => (w, h),
+            Turn::Up | Turn::Down => (h, w),
+        }
+    }
+
+    /// A box (x0, y0, x1, y1) of a page `w` wide and `h` high, in the turned frame moved by
+    /// [`Turn::shift`].
+    pub(crate) fn place_box(self, b: [f32; 4], w: f32, h: f32) -> [f32; 4] {
+        let (sx, sy) = self.shift(w, h);
+        let (a, c) = (self.apply(b[0], b[1]), self.apply(b[2], b[3]));
+        [
+            a.0.min(c.0) + sx,
+            a.1.min(c.1) + sy,
+            a.0.max(c.0) + sx,
+            a.1.max(c.1) + sy,
+        ]
+    }
+
+    /// A point or a direction in the turned frame (directions are never moved).
     fn apply(self, x: f32, y: f32) -> (f32, f32) {
         match self {
             Turn::None => (x, y),

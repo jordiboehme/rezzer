@@ -67,7 +67,8 @@ const LINK_WORK: usize = 16_000_000;
 /// - Coordinates are points in the visible page box, origin at its lower left corner, `y`
 ///   upward, `/Rotate` not applied: `y` lies between 0 and the page height, which running
 ///   header and footer detection relies on. When the frame was turned to make the text read
-///   left to right, `turned` is set and the coordinates are not page coordinates.
+///   left to right, `turned` is set and the coordinates are in that frame, moved so the page
+///   lies between 0 and its turned width and height (`Turn::place_box`).
 /// - Text that puts no glyphs on the page (render mode 3 or 7) is never in `runs`.
 #[derive(Debug, Default)]
 pub(crate) struct PageItems {
@@ -82,8 +83,8 @@ pub(crate) struct PageItems {
     /// For each of `images`, what the picture is: a hash of its dictionary, size and data,
     /// so the same picture on many pages is known as one.
     pub images_id: Vec<u64>,
-    /// Straight lines and rectangles the page draws, in the frame of the page box (not
-    /// turned), for finding ruled tables.
+    /// Straight lines and rectangles the page draws, in the frame of the runs, for finding
+    /// ruled tables.
     pub rules: Vec<Rule>,
     /// The lower left corner of the visible page box in user space: what moves boxes of the
     /// object layer (links, form fields) into the frame of the runs.
@@ -96,10 +97,11 @@ pub(crate) struct PageItems {
     pub hidden_layer: Vec<String>,
     /// The page has more URI links than were matched to its runs.
     pub links_cut: bool,
-    /// The frame was turned a quarter or half so the text reads left to right; the
-    /// coordinates are not page coordinates then, and no running header or footer is looked
-    /// for.
+    /// The frame was turned a quarter or half so the text reads left to right; the runs and
+    /// the rules are then in that frame, moved so the page lies in `[0, w']` by `[0, h']`
+    /// (`turn` says how; `w'` and `h'` are the page's size turned).
     pub turned: bool,
+    pub turn: Turn,
     /// Text in optional content the file switches off, by layer name, in reading order.
     pub hidden_layers: Vec<(String, Vec<Run>)>,
     /// Visible glyphs with a Unicode mapping.
@@ -871,7 +873,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             &dev.glyphs,
             &texts,
             links,
-            (crop.x0, crop.y0),
+            (crop.x0, crop.y0, width, height),
             &layers,
             &boxes,
         );
@@ -893,6 +895,15 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images_code = std::mem::take(&mut dev.images_code);
         items.images_id = std::mem::take(&mut dev.images_id);
         items.rules = std::mem::take(&mut dev.rules);
+        if items.turned {
+            // The rules go into the frame of the runs, in place.
+            for r in &mut items.rules {
+                let b = items
+                    .turn
+                    .place_box([r.x0, r.y0, r.x1, r.y1], width, height);
+                (r.x0, r.y0, r.x1, r.y1) = (b[0], b[1], b[2], b[3]);
+            }
+        }
         items.origin = (crop.x0 as f32, crop.y0 as f32);
         if dev.rules_cut {
             notes.push(Note::Limit(format!(
@@ -3176,13 +3187,13 @@ fn unplaced_links(glyphs: &[Gl], runs: &[Run], links: &[Link]) -> Vec<String> {
 }
 
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
-/// `x0`, `y0` move user space links into it.
+/// `x0`, `y0` move user space links into it; `width` and `height` are its size.
 fn lay_out(
     page: u32,
     glyphs: &[Gl],
     text: &Texts<'_>,
     links: &[Link],
-    (x0, y0): (f64, f64),
+    (x0, y0, width, height): (f64, f64, f32, f32),
     layers: &[String],
     boxes: &[[f32; 4]],
 ) -> PageItems {
@@ -3214,20 +3225,15 @@ fn lay_out(
     let mut items = PageItems {
         page,
         turned: turn != Turn::None,
+        turn,
         ..PageItems::default()
     };
-    if items.turned && !links.is_empty() {
-        let k = links.len();
-        let s = if k == 1 { "" } else { "s" };
-        items.notes.push(Note::Unsupported(format!(
-            "{k} URI link{s} on page {page} not attached to their text: the page is read in a \
-             turned frame"
-        )));
-    }
-    if !items.turned && !links.is_empty() {
+    // Links are matched glyph by glyph in the page's own frame, along each glyph's
+    // direction, so a turned frame does not change which words they cover.
+    if !links.is_empty() {
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
-    let linked = !items.turned && !items.links_cut && !links.is_empty();
+    let linked = !items.links_cut && !links.is_empty();
     (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes);
     if linked {
         for uri in unplaced_links(&visible, &items.runs, links) {
@@ -3243,6 +3249,25 @@ fn lay_out(
             items
                 .hidden_layers
                 .push((name.clone(), runs_of(page, list, text, turn, links)));
+        }
+    }
+    // A turned frame is moved so the page lies between 0 and its turned size, as the page
+    // box does: running headers and footers are found by height there.
+    let (sx, sy) = turn.shift(width, height);
+    if (sx, sy) != (0.0, 0.0) {
+        let runs = items
+            .runs
+            .iter_mut()
+            .chain(items.invisible.iter_mut())
+            .chain(
+                items
+                    .hidden_layers
+                    .iter_mut()
+                    .flat_map(|(_, l)| l.iter_mut()),
+            );
+        for r in runs {
+            r.x += sx;
+            r.y += sy;
         }
     }
     if items.runs.is_empty() && !items.invisible.is_empty() {

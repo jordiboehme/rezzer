@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use common::Builder;
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Loss,
+    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline, Loss,
     LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
@@ -569,8 +569,9 @@ fn an_overprint_with_other_letters_is_kept() {
 }
 
 #[test]
-fn links_on_a_turned_page_are_said() {
-    // All text runs upward, so the page is read in a turned frame.
+fn links_on_a_turned_page_are_attached() {
+    // All text runs upward, so the page is read in a turned frame; the link over its glyphs
+    // still lands on its words.
     let content = b"BT /F1 12 Tf 0 1 -1 0 300 100 Tm (Read the guide on the web site) Tj ET\n";
     let mut b = Builder::default();
     let catalog = b.reserve();
@@ -592,9 +593,17 @@ fn links_on_a_turned_page_are_said() {
     );
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let out = read(&b.finish(catalog));
-    assert!(text(page(&out, 1)).contains("Read the guide"));
+    let blocks = page(&out, 1);
+    assert!(text(blocks).contains("Read the guide"));
+    let linked = blocks.iter().any(|b| match b {
+        Block::Paragraph { inlines, .. } => inlines.iter().any(
+            |i| matches!(i, Inline::Link { target, .. } if target == "https://example.org/guide"),
+        ),
+        _ => false,
+    });
+    assert!(linked, "{blocks:#?}");
     assert!(
-        out.document
+        !out.document
             .losses
             .iter()
             .any(|l| l.location == "p1" && l.what.contains("URI link")),
