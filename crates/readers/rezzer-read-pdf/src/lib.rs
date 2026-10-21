@@ -9,9 +9,10 @@
 //! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
 //! `meta.rs` and `objects.rs` add the metadata, outline, links, attachments, threads and
-//! revisions.
+//! revisions; `annots.rs` puts the annotations at their passage.
 //! Scripts and actions are never run, links are never followed.
 
+mod annots;
 mod layout;
 mod meta;
 mod objects;
@@ -26,7 +27,7 @@ mod fixtures;
 
 use std::collections::{HashMap, HashSet};
 
-use pdfparts::{PageInfo, Pdf};
+use pdfparts::{Annot, PageInfo, Pdf};
 use rezzer_limits::Budget;
 use rezzer_model::{
     Anchor, Blob, Block, CalloutKind, Cell, Completeness, Document, FormatId, Inline, Loss,
@@ -81,11 +82,17 @@ fn read_pdf(
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
     // The revisions are read before any list that draws on pdfparts' budget; the links once,
-    // for the text and for the object layer.
+    // for the text and for the object layer; the annotations before the text, which quotes
+    // what they mark.
     let events = objects::revisions(&pdf, budget, &mut out);
     let links = pdf.links();
-    let extracted = extract(&pdf, &pages, &links, budget, &mut out, text_stop);
-    let room = lay_out(&pdf, &pages, extracted, budget, &mut out);
+    let annots = pdf.annotations();
+    let marked = annots::marked(&annots);
+    let extracted = extract(&pdf, &pages, &links, &marked, budget, &mut out, text_stop);
+    drop(marked);
+    let (room, placed) = lay_out(&pdf, &pages, extracted, &annots, budget, &mut out);
+    annots::read(&annots, placed, budget, &room, &mut out);
+    drop(annots);
     objects::read(&pdf, &pages, &links, events, opts, budget, &room, &mut out);
     out.finish()
 }
@@ -95,10 +102,16 @@ fn extract(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[pdfparts::Link],
+    marked: &annots::Marked<'_>,
     budget: &Budget,
     out: &mut Out,
     stop: &dyn Fn() -> bool,
 ) -> Extracted {
+    let caps = Caps::new(
+        open::limits(budget).max_items,
+        budget.limits().max_memory_bytes,
+        pdf.object_bytes(),
+    );
     if pdf.unsafe_page_tree() {
         out.loss(
             "document",
@@ -107,7 +120,8 @@ fn extract(
             LossReason::Damaged,
             Severity::Error,
         );
-        return Extracted::default();
+        // What the pages may keep stays for the object layer.
+        return text::pages(pdf, &[], links, marked, caps, stop);
     }
     // pdfparts writes refused streams empty, so the other pages are safe to read; the refused
     // ones keep the guard's loss.
@@ -117,12 +131,7 @@ fn extract(
         .map(|p| p.number)
         .filter(|n| !refused.contains(n))
         .collect();
-    let caps = Caps::new(
-        open::limits(budget).max_items,
-        budget.limits().max_memory_bytes,
-        pdf.object_bytes(),
-    );
-    text::pages(pdf, &wanted, links, caps, stop)
+    text::pages(pdf, &wanted, links, marked, caps, stop)
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
@@ -143,20 +152,30 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
 
 /// One page section per page, with the laid out text. Pages already read are laid out even
 /// when a stop cut the reading: layout is bounded by the element and text budgets. Returns
-/// what is left of the bytes the file may keep, for the object layer.
+/// what is left of the bytes the file may keep, for the object layer, and where each of
+/// `annots` stands with what it quotes.
 fn lay_out(
     pdf: &Pdf,
     pages: &[PageInfo],
     extracted: Extracted,
+    annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
-) -> LinkRoom {
+) -> (LinkRoom, Vec<annots::Placed>) {
     let Extracted {
         pages: read,
         failed,
         stopped_at,
         kept_left,
+        quotes_cut,
+        quote_visits,
     } = extracted;
+    let mut on_page: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, a) in annots.iter().enumerate() {
+        on_page.entry(a.page).or_default().push(i);
+    }
+    let mut spots = vec![annots::Placed::default(); annots.len()];
+    let mut unquoted = annots::Unquoted::default();
     let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
         .iter()
@@ -172,6 +191,8 @@ fn lay_out(
     let style = Style::new(&texts);
     drop(texts);
     let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
+    // The pages whose text was laid out.
+    let mut read_pages: HashSet<u32> = HashSet::new();
     let tree = if pdf.tagged() {
         pdf.struct_tree()
     } else {
@@ -232,6 +253,9 @@ fn lay_out(
             notes(n, &items, out);
             links.free(items.kept);
             let height = frame_height(info, Some(&items));
+            read_pages.insert(n);
+            let here = on_page.get(&n).map_or(&[][..], Vec::as_slice);
+            let points = annotation_points(n, &mut items, annots, here, &mut spots, out);
             let (ox, oy) = items.origin;
             let fields: Vec<[f32; 4]> = widgets
                 .get(&n)
@@ -249,7 +273,33 @@ fn lay_out(
                 width: info.width,
                 body_size: style.body_size,
             };
-            let laid = layout::page_blocks(n, height, std::mem::take(&mut items.runs), &drawn, &cx);
+            let runs = std::mem::take(&mut items.runs);
+            let laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            for (&i, anchor) in here.iter().zip(&laid.probed) {
+                spots[i].anchor = anchor.clone();
+            }
+            if laid.probes_cut {
+                out.loss(
+                    format!("p{n}"),
+                    "some annotations stand at the page, not at their block: the page has too \
+                     many annotations near its text to place",
+                    LossReason::Limit,
+                    Severity::Warning,
+                );
+            }
+            // A marked passage whose text was not read in full may be what is missing.
+            let partial = items.in_part
+                || items.notes.iter().any(|n| matches!(n, Note::Damaged(_)))
+                || laid.stop.is_some();
+            for &i in here {
+                if !annots[i].quads.is_empty()
+                    && spots[i].quoted.is_none()
+                    && !spots[i].cut
+                    && partial
+                {
+                    unquoted.add(n);
+                }
+            }
             for (what, why, severity) in laid.notes {
                 out.loss(format!("p{n}"), what, why, severity);
             }
@@ -338,7 +388,17 @@ fn lay_out(
             anchor: Some(Anchor(format!("p{n}"))),
             blocks,
         });
+        // Annotations of a page whose text was not read stand at the page.
+        for &i in on_page.get(&n).map_or(&[][..], Vec::as_slice) {
+            if !read_pages.contains(&n) && !annots[i].quads.is_empty() {
+                unquoted.add(n);
+            }
+            spots[i]
+                .anchor
+                .get_or_insert_with(|| Anchor(format!("p{n}")));
+        }
     }
+    annots::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
         let (s, them) = if count == 1 {
             ("", "its text is")
@@ -384,7 +444,75 @@ fn lay_out(
             Severity::Warning,
         );
     }
-    links
+    (links, spots)
+}
+
+/// The points whose blocks the annotations of page `n` stand at, one for each of `here`: the
+/// middle of the first quoted glyph, else of the run nearest to the top of the rectangle.
+/// Takes the page's quotes into `placed`. On a page read in a turned frame the points are not
+/// in the frame of the runs: the annotations stand at the page, with one Info loss.
+fn annotation_points(
+    n: u32,
+    items: &mut PageItems,
+    annots: &[Annot],
+    here: &[usize],
+    placed: &mut [annots::Placed],
+    out: &mut Out,
+) -> Vec<(f32, f32)> {
+    let mut quotes: HashMap<usize, annots::Quote> = std::mem::take(&mut items.quotes)
+        .into_iter()
+        .map(|q| (q.annot, q))
+        .collect();
+    let mut at: Vec<Option<(f32, f32)>> = Vec::with_capacity(here.len());
+    for &i in here {
+        match quotes.remove(&i) {
+            Some(q) => {
+                placed[i].quoted = q.text;
+                placed[i].cut = q.cut;
+                at.push(q.at);
+            }
+            None => at.push(None),
+        }
+    }
+    if items.turned {
+        if !here.is_empty() {
+            let k = here.len();
+            out.loss(
+                format!("p{n}"),
+                format!(
+                    "{k} {} on page {n} at the page, not at a block: the page is read in a \
+                     turned frame",
+                    if k == 1 {
+                        "annotation stands"
+                    } else {
+                        "annotations stand"
+                    },
+                ),
+                LossReason::Unsupported,
+                Severity::Info,
+            );
+        }
+        return Vec::new();
+    }
+    let (ox, oy) = items.origin;
+    let tops: Vec<(f32, f32)> = here
+        .iter()
+        .map(|&i| {
+            let [x0, y0, x1, y1] = annots[i].rect;
+            ((x0 + x1) / 2.0 - ox, y0.max(y1) - oy)
+        })
+        .collect();
+    let missing: Vec<usize> = (0..here.len()).filter(|&k| at[k].is_none()).collect();
+    let wanted: Vec<(f32, f32)> = missing.iter().map(|&k| tops[k]).collect();
+    for (k, near) in missing
+        .into_iter()
+        .zip(annots::nearest_runs(&items.runs, &wanted))
+    {
+        at[k] = near;
+    }
+    at.into_iter()
+        .map(|p| p.unwrap_or((f32::NAN, f32::NAN)))
+        .collect()
 }
 
 /// Where each tagged table stands: its section and block in the body, and its anchor.

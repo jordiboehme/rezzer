@@ -531,6 +531,10 @@ pub(crate) struct Laid {
     pub added: Vec<(usize, usize, usize, Vec<Inline>)>,
     /// What the table detectors left undecided or found broken: words, reason, severity.
     pub notes: Vec<(String, LossReason, Severity)>,
+    /// For each point asked about, the anchor of the block whose runs hold it.
+    pub probed: Vec<Option<Anchor>>,
+    /// The page has too many points near its runs to place them all; the rest have no block.
+    pub probes_cut: bool,
 }
 
 /// Where a limit cut a page: the first part not kept.
@@ -635,9 +639,8 @@ pub(crate) struct Drawn<'a> {
     pub body_size: f32,
 }
 
-/// Lays out the runs of one page: running headers first, then the text with its tables in
-/// reading order, then running footers. Blocks are anchored `p<N>:b<K>` and tables
-/// `p<N>:t<K>`, K counting each from 1.
+/// [`page_blocks_at`] without points to find.
+#[cfg(test)]
 pub(crate) fn page_blocks(
     page: u32,
     height: Option<f32>,
@@ -645,7 +648,35 @@ pub(crate) fn page_blocks(
     drawn: &Drawn<'_>,
     cx: &Context<'_>,
 ) -> Laid {
-    let mut built = Built::default();
+    page_blocks_at(page, height, runs, drawn, cx, &[])
+}
+
+/// Lays out the runs of one page: running headers first, then the text with its tables in
+/// reading order, then running footers. Blocks are anchored `p<N>:b<K>` and tables
+/// `p<N>:t<K>`, K counting each from 1. For each of `points` (x, y in the frame of the runs)
+/// [`Laid::probed`] names the block whose runs hold it: the first block built with such a
+/// run.
+pub(crate) fn page_blocks_at(
+    page: u32,
+    height: Option<f32>,
+    runs: Vec<Run>,
+    drawn: &Drawn<'_>,
+    cx: &Context<'_>,
+    points: &[(f32, f32)],
+) -> Laid {
+    let mut probes: Vec<(f32, f32, usize)> = points
+        .iter()
+        .enumerate()
+        .filter(|(_, (x, y))| x.is_finite() && y.is_finite())
+        .map(|(i, &(x, y))| (y, x, i))
+        .collect();
+    probes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut built = Built {
+        probes,
+        probe_block: vec![None; points.len()],
+        probe_work: PROBE_WORK,
+        ..Built::default()
+    };
     if let Err(hit) = cx
         .budget
         .add_elements(u64::try_from(runs.len()).unwrap_or(u64::MAX))
@@ -787,7 +818,10 @@ pub(crate) fn page_blocks(
         }
         notes.push((what, LossReason::Limit, Severity::Info));
     }
+    let probe_block = std::mem::take(&mut built.probe_block);
+    let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes);
+    laid.probes_cut = probes_cut;
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -799,7 +833,21 @@ pub(crate) fn page_blocks(
         };
         set_anchor(block, Anchor(anchor));
     }
+    laid.probed = probe_block
+        .into_iter()
+        .map(|k| k.and_then(|k| anchor_of(laid.blocks.get(k)?)))
+        .collect();
     laid
+}
+
+fn anchor_of(block: &Block) -> Option<Anchor> {
+    match block {
+        Block::Heading { anchor, .. }
+        | Block::Paragraph { anchor, .. }
+        | Block::List { anchor, .. }
+        | Block::Table { anchor, .. } => anchor.clone(),
+        _ => None,
+    }
 }
 
 /// A table or an undecided region, placed in reading order among the text.
@@ -827,6 +875,9 @@ fn set_anchor(block: &mut Block, to: Anchor) {
         _ => {}
     }
 }
+
+/// Run and point pairs one page may test to find the blocks of annotations.
+const PROBE_WORK: usize = 16_000_000;
 
 /// How many runs or pieces of one block go by between two looks at the clock.
 const CHECK_EVERY: usize = 1024;
@@ -862,6 +913,15 @@ struct Built {
     /// The link room before the block (or the table row) now being built, to go back to if
     /// it is dropped.
     mark: Option<LinkMark>,
+    /// Points to find the blocks of: y, x and their place in the list asked about, by y.
+    probes: Vec<(f32, f32, usize)>,
+    /// The block each point lies in, by its place in `blocks`.
+    probe_block: Vec<Option<usize>>,
+    /// The points the runs of the block now being built hold.
+    probe_pending: Vec<usize>,
+    /// Run and point pairs the page may still test.
+    probe_work: usize,
+    probes_cut: bool,
 }
 
 /// What a page's layout is building.
@@ -891,6 +951,7 @@ impl Built {
             Ok(()) => {
                 self.mark = None;
                 self.blocks.push(block);
+                self.probes_found();
             }
             Err(hit) => self.stop_at(hit, cx),
         }
@@ -903,6 +964,7 @@ impl Built {
         if let Some(mark) = self.mark.take() {
             cx.links.restore(mark);
         }
+        self.probe_pending.clear();
         let tables = self
             .blocks
             .iter()
@@ -937,6 +999,45 @@ impl Built {
             tagged: self.tagged,
             added: self.added,
             notes,
+            probed: Vec::new(),
+            probes_cut: false,
+        }
+    }
+
+    /// Notes the points the boxes of `runs` hold, for the block now being built. A run's box
+    /// reaches from its left edge over its advance, and from a third of its size below the
+    /// baseline to its size above it.
+    fn probe(&mut self, runs: &[&Run]) {
+        if self.probes.is_empty() {
+            return;
+        }
+        for r in runs {
+            let (y0, y1) = (r.y - r.h / 3.0, r.y + r.h);
+            let (x0, x1) = (r.x.min(r.x + r.w), r.x.max(r.x + r.w));
+            let from = self.probes.partition_point(|p| p.0 < y0);
+            for &(y, x, i) in &self.probes[from..] {
+                if y > y1 {
+                    break;
+                }
+                if self.probe_work == 0 {
+                    // Many points at the height of many runs: the rest stay without a block.
+                    self.probes_cut = true;
+                    self.probes.clear();
+                    return;
+                }
+                self.probe_work -= 1;
+                if x >= x0 && x <= x1 && self.probe_block[i].is_none() {
+                    self.probe_pending.push(i);
+                }
+            }
+        }
+    }
+
+    /// The points the runs of the block just added hold lie in it.
+    fn probes_found(&mut self) {
+        let k = self.blocks.len().saturating_sub(1);
+        for i in self.probe_pending.drain(..) {
+            self.probe_block[i].get_or_insert(k);
         }
     }
 
@@ -1042,10 +1143,15 @@ impl Built {
         }
         self.mark = None;
         if rows.is_empty() {
+            self.probe_pending.clear();
             return;
         }
         match earlier {
-            Some(t) => self.continued.push((t, rows)),
+            Some(t) => {
+                // The rows join a table of an earlier page, which no point here can name.
+                self.probe_pending.clear();
+                self.continued.push((t, rows))
+            }
             None => {
                 self.tagged.push(plan.tagged);
                 self.blocks.push(Block::Table {
@@ -1055,7 +1161,8 @@ impl Built {
                     rows,
                     alignments: Vec::new(),
                     anchor: None,
-                })
+                });
+                self.probes_found();
             }
         }
     }
@@ -1117,6 +1224,7 @@ impl Built {
             self.stop_at(hit, cx);
             return None;
         }
+        self.probe(runs);
         match inlines(runs, cx.links, cx.budget) {
             Ok(mut built) => {
                 // Most blocks hold one or two inlines: the list keeps no spare room.
@@ -1191,6 +1299,7 @@ impl Built {
             items.push(vec![para]);
             // The item joins a list that is kept already.
             self.mark = None;
+            self.probes_found();
             return;
         }
         self.push(

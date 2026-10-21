@@ -2974,3 +2974,167 @@ fn a_layer_name_reached_through_a_chain_of_references_is_read_once() {
     let out = against_twin(&file("/OCProperties"), &file("/Junk"));
     assert_eq!(out.document.properties.facts.layers, Some(30_000));
 }
+
+/// A one-page file that shows `lines` lines of `per_line` letters, with the annotations
+/// `annots` adds and returns by number. The page lists them under `/Annots`.
+fn annotated(
+    lines: usize,
+    per_line: usize,
+    annots: &mut dyn FnMut(&mut Builder) -> Vec<u32>,
+) -> Vec<u8> {
+    let h = 20 + lines * 14;
+    let mut c = b"BT /F1 12 Tf 14 TL ".to_vec();
+    c.extend(format!("1 0 0 1 20 {} Tm ", h - 20).as_bytes());
+    let line = "w".repeat(per_line);
+    for _ in 0..lines {
+        c.extend(format!("({line}) Tj T* ").as_bytes());
+    }
+    c.extend(b"ET");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let refs: Vec<String> = annots(&mut b)
+        .into_iter()
+        .map(|a| format!("{a} 0 R"))
+        .collect();
+    let w = 40 + per_line * 12;
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R /Annots [{}] >>",
+        refs.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_comment_shared_by_many_annotations_is_bounded() {
+    // 30,000 notes name one 8 KB comment: read once by the object layer, but each note in the
+    // model holds its own copy, so the room the file may keep ends the list.
+    let file = |key: &str| {
+        annotated(10, 40, &mut |b| {
+            let s = b.add(format!("({})", "c".repeat(8 << 10)));
+            (0..30_000)
+                .map(|_| {
+                    b.add(format!(
+                        "<< /Type /Annot /Subtype /Text /Rect [20 20 40 40] {key} {s} 0 R \
+                             /T (Ana) >>"
+                    ))
+                })
+                .collect()
+        })
+    };
+    let out = against_twin(&file("/Contents"), &file("/Junk"));
+    let kept = out.document.facets.annotations.len();
+    assert!(kept > 100 && kept < 30_000, "{kept}");
+    limit_at(&out, "document", "are not kept");
+    assert_short_losses(&out);
+}
+
+#[test]
+fn many_quads_per_annotation_are_bounded() {
+    // 9 highlights name one array of 25,000 quads that each cover the whole page of 4,000
+    // glyphs: 900 million glyph visits, far past the bound.
+    let file = |key: &str| {
+        annotated(100, 40, &mut |b| {
+            let quad = "0 2000 2000 2000 0 0 2000 0 ";
+            let quads = b.add(format!("[{}]", quad.repeat(25_000)));
+            (0..9)
+                .map(|_| {
+                    b.add(format!(
+                        "<< /Type /Annot /Subtype /Highlight /Rect [0 0 2000 2000] \
+                             {key} {quads} 0 R >>"
+                    ))
+                })
+                .collect()
+        })
+    };
+    let out = against_twin(&file("/QuadPoints"), &file("/Junk"));
+    assert_eq!(out.document.facets.annotations.len(), 9);
+    let loss = limit_at(&out, "p1", "is not quoted");
+    assert!(loss.what.contains("quoting visits more than"), "{loss:?}");
+    assert_short_losses(&out);
+}
+
+#[test]
+fn many_highlights_over_a_page_of_many_glyphs_are_bounded() {
+    // 20,000 highlights each cover the whole page of 50,000 glyphs.
+    let file = |key: &str| {
+        annotated(500, 100, &mut |b| {
+            (0..20_000)
+                .map(|_| {
+                    b.add(format!(
+                        "<< /Type /Annot /Subtype /Highlight /Rect [0 0 2000 8000] \
+                             {key} [0 8000 2000 8000 0 0 2000 0] >>"
+                    ))
+                })
+                .collect()
+        })
+    };
+    let out = against_twin(&file("/QuadPoints"), &file("/Junk"));
+    let quoted = out
+        .document
+        .facets
+        .annotations
+        .iter()
+        .filter(|a| a.quoted.is_some())
+        .count();
+    assert!(quoted > 0 && quoted < 20_000, "{quoted}");
+    limit_at(&out, "p1", "is not quoted");
+    assert_short_losses(&out);
+}
+
+#[test]
+fn a_long_reply_chain_and_a_loop_of_replies_are_bounded() {
+    // 50,000 notes, each a reply to the one before, and two that reply to each other.
+    let file = |key: &str| {
+        annotated(10, 40, &mut |b| {
+            let (x, y) = (b.reserve(), b.reserve());
+            b.set(
+                x,
+                format!("<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] {key} {y} 0 R >>"),
+            );
+            b.set(
+                y,
+                format!("<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] {key} {x} 0 R >>"),
+            );
+            let mut list = vec![x, y];
+            let mut prev: Option<u32> = None;
+            for _ in 0..50_000 {
+                let irt = prev.map_or(String::new(), |p| format!("{key} {p} 0 R"));
+                let n = b.add(format!(
+                    "<< /Type /Annot /Subtype /Text /Rect [20 20 40 40] /Contents (r) {irt} >>"
+                ));
+                list.push(n);
+                prev = Some(n);
+            }
+            list
+        })
+    };
+    let out = against_twin(&file("/IRT"), &file("/Junk"));
+    let roots = &out.document.facets.annotations;
+    assert!(roots.len() >= 2);
+    let mut depth = 0;
+    let mut at = &roots[1];
+    while let Some(next) = at.replies.first() {
+        depth += 1;
+        at = next;
+    }
+    assert_eq!(depth, 16);
+    limit_at(&out, "document", "what the annotations may keep");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Damaged && l.what.contains("loop of replies")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_short_losses(&out);
+}

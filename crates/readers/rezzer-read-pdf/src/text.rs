@@ -33,6 +33,7 @@ use read_fonts::ps::agl;
 use read_fonts::ps::cff::CffFontRef;
 use skrifa::{FontRef, MetadataProvider};
 
+use crate::annots::{Marked, Quote, Quoting};
 use crate::layout::{Run, UriTarget};
 use crate::order::{Turn, runs_of};
 use crate::tables::{Rule, RuleKind};
@@ -106,6 +107,10 @@ pub(crate) struct PageItems {
     pub in_part: bool,
     /// What the page was charged against the bytes the pages may keep until laid out.
     pub kept: u64,
+    /// The text under each annotation of the page that marks text, quoted from its glyphs.
+    /// The quotes are charged to the bytes the file may keep for good: they go into the
+    /// model as they are.
+    pub quotes: Vec<Quote>,
 }
 
 impl PageItems {
@@ -191,6 +196,10 @@ pub(crate) struct Extracted {
     /// What is left of the bytes the pages may keep ([`Caps::max_kept`]): the room the model's
     /// copies of link targets may take.
     pub kept_left: u64,
+    /// The quotes left out, if any.
+    pub quotes_cut: Option<crate::annots::Cut>,
+    /// The bound on glyph visits for quotes.
+    pub quote_visits: usize,
 }
 
 /// Bounds for reading one page.
@@ -227,16 +236,22 @@ impl Caps {
 }
 
 /// Reads the text of `wanted` pages (1-based, ascending, none refused by the guard) from the
-/// canonical bytes. `stop` is asked before each page and while a page is read; a page the
-/// stop cuts is not kept.
+/// canonical bytes, and quotes the text under the annotations of `marked`. `stop` is asked
+/// before each page and while a page is read; a page the stop cuts is not kept.
 pub(crate) fn pages(
     pdf: &Pdf,
     wanted: &[u32],
     links: &[PdfLink],
+    marked: &Marked<'_>,
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Extracted {
-    let mut out = Extracted::default();
+    // Pages that are not read keep nothing: what they may keep stays for the rest.
+    let mut out = Extracted {
+        kept_left: caps.max_kept,
+        quote_visits: caps.max_items,
+        ..Extracted::default()
+    };
     if wanted.is_empty() {
         return out;
     }
@@ -301,7 +316,8 @@ pub(crate) fn pages(
             continue;
         };
         let on_page = links.get(&n).map_or(&[][..], Vec::as_slice);
-        match reader.page(n, page, on_page) {
+        let marks = marked.get(&n).map_or(&[][..], Vec::as_slice);
+        match reader.page(n, page, on_page, marks) {
             Read::Page(items) => out.pages.push(*items),
             Read::Failed(f) => out.failed.push(f),
             Read::Stopped => {
@@ -311,6 +327,8 @@ pub(crate) fn pages(
         }
     }
     out.kept_left = reader.kept_left;
+    out.quote_visits = reader.quoting.max();
+    out.quotes_cut = reader.quoting.cut;
     out
 }
 
@@ -446,6 +464,8 @@ struct PageReader<'p, 'a> {
     kept_left: u64,
     /// Why the later pages are not read, once the kept pages took all they may.
     kept_spent: Option<String>,
+    /// What quoting the text under annotations may still visit.
+    quoting: Quoting,
 }
 
 impl<'p, 'a> PageReader<'p, 'a> {
@@ -476,10 +496,17 @@ impl<'p, 'a> PageReader<'p, 'a> {
             text_buf: String::new(),
             kept_left: caps.max_kept,
             kept_spent: None,
+            quoting: Quoting::new(caps.max_items),
         }
     }
 
-    fn page(&mut self, n: u32, page: &Page<'a>, links: &[Link]) -> Read {
+    fn page(
+        &mut self,
+        n: u32,
+        page: &Page<'a>,
+        links: &[Link],
+        marked: &[(usize, &[[f32; 8]])],
+    ) -> Read {
         let fail = |why: String, kind: Fail| Read::Failed(Failure { page: n, why, kind });
         if let Some(why) = &self.kept_spent {
             return fail(why.clone(), Fail::Limit);
@@ -688,7 +715,24 @@ impl<'p, 'a> PageReader<'p, 'a> {
             text: &dev.text,
             actuals: &dev.actuals,
         };
+        // The quotes are taken from the glyphs while they are at hand; no glyph box is kept.
+        let kept_before = self.kept_left;
+        let quotes = if marked.is_empty() {
+            Vec::new()
+        } else {
+            crate::annots::quote_page(
+                n,
+                &dev.glyphs,
+                &texts,
+                marked,
+                (crop.x0 as f32, crop.y0 as f32),
+                &mut self.quoting,
+                &mut self.kept_left,
+                self.stop,
+            )
+        };
         let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
+        items.quotes = quotes;
         items.images = std::mem::take(&mut dev.images);
         items.rules = std::mem::take(&mut dev.rules);
         items.origin = (crop.x0 as f32, crop.y0 as f32);
@@ -720,6 +764,8 @@ impl<'p, 'a> PageReader<'p, 'a> {
         // measured before anything is copied.
         let cost = items.kept_bytes();
         if cost > self.kept_left {
+            // The page is not kept, so neither are its quotes.
+            self.kept_left = kept_before;
             let why = format!(
                 "the text of the file takes more than the {} bytes it may keep until it is laid \
                  out",
@@ -2465,7 +2511,7 @@ pub(crate) fn needs_ocr(
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Vec<(u32, Vec<String>)> {
-    let found = self::pages(pdf, pages, &[], caps, stop);
+    let found = self::pages(pdf, pages, &[], &Marked::new(), caps, stop);
     let sizes: HashMap<u32, (f32, f32)> = pdf
         .pages(stop)
         .into_iter()
@@ -2557,7 +2603,7 @@ mod tests {
         );
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         let pdf = open(&b.finish(catalog));
-        let mut found = pages(&pdf, &[1], &pdf.links(), caps, &|| false);
+        let mut found = pages(&pdf, &[1], &pdf.links(), &Marked::new(), caps, &|| false);
         assert!(found.failed.is_empty(), "{:?}", found.failed);
         found.pages.remove(0)
     }
@@ -2738,7 +2784,7 @@ mod tests {
             asked.get() > 4
         };
         let all: Vec<u32> = (1..=10).collect();
-        let found = pages(&pdf, &all, &pdf.links(), CAPS, &stop);
+        let found = pages(&pdf, &all, &pdf.links(), &Marked::new(), CAPS, &stop);
         assert_eq!(found.pages.len(), 4);
         assert_eq!(found.stopped_at, Some(5));
         assert_eq!(asked.get(), 5);
@@ -2760,7 +2806,14 @@ mod tests {
             max_glyphs: 1_000,
             max_kept: 1 << 30,
         };
-        let found = pages(&pdf, &[1, 2, 3], &pdf.links(), caps, &|| false);
+        let found = pages(
+            &pdf,
+            &[1, 2, 3],
+            &pdf.links(),
+            &Marked::new(),
+            caps,
+            &|| false,
+        );
         let read: Vec<u32> = found.pages.iter().map(|p| p.page).collect();
         assert_eq!(read, [1, 2, 3]);
         assert!(found.failed.is_empty(), "{:?}", found.failed);
