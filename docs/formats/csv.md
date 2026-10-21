@@ -77,6 +77,6 @@ Extreme cases that were held, at the default limits:
 
 - One row of 50 MB without a line break, with a time limit of 1 second: the read ends within the limit plus 2 seconds
 - 100 MB of short rows with a time limit of 50 ms: the read stops in time and says so
-- 1 MB of random bytes: reported as a format Rezzer does not know, not as a broken file
+- 3,000 columns by 200 rows: the table shows 1,000 columns and 200,000 cells, the Columns table 500 columns, and the output says what is not shown
 
 Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.05 seconds with a peak memory of 9 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.

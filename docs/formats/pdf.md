@@ -111,14 +111,14 @@ Lorem ipsum dolor sit amet
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
 - A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
-- Under a short time limit, the text of a long file may be read in part only. The output says from which page on
+- Under a short time limit, a long file may keep no page text at all, even for the pages that were read before the limit. The output names the pages that are not read
 - When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
 - Revision diffs count the first save of a linearized file as one save
-- No public test file was found for `AFSimple_Calculate`, `AFPercent_Format` or a field with the required flag. These parts follow the format specification but are not proven on a real file
+- No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the format specification but are not proven on a real file
 
 ## How it is tested
 
-The corpus has 38 public PDF files from the test suites of pdf.js, qpdf, PDFBox, py-pdf and pdfplumber, and from the IRS, the National Archives, NIST and arXiv. Two large files (NIST and arXiv) are fetched by a script and not kept in the repository.
+The corpus has 40 public PDF files from the test suites of pdf.js, qpdf, PDFBox, py-pdf and pdfplumber, and from the IRS, the National Archives, NIST and arXiv. 38 of them are in the repository. The two large ones (NIST and arXiv) are fetched by a script.
 
 Extreme cases that were held, at the default limits:
 
