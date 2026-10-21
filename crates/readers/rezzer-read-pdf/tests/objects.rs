@@ -288,7 +288,8 @@ fn uri_launch_and_remote_links_are_listed_not_followed() {
         [
             ("launch-action", "run.exe", Some("run.exe")),
             ("remote-link", "other.pdf", Some("other.pdf")),
-            ("link-action", "JavaScript", None),
+            // The script link is listed with the scripts, with its text.
+            ("script", "link page 1", None),
         ]
     );
     let remote = &out.document.facets.embedded[1];
@@ -296,6 +297,9 @@ fn uri_launch_and_remote_links_are_listed_not_followed() {
         remote.detail.as_deref(),
         Some("from page 1, to page 3 of that file")
     );
+    let script = &out.document.facets.embedded[2];
+    assert_eq!(script.detail.as_deref(), Some("javascript"));
+    assert_eq!(script.text.as_deref(), Some("app.alert(1)"));
 }
 
 #[test]

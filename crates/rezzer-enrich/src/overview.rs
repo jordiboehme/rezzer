@@ -5,7 +5,8 @@
 //! Pass `overview`: builds `doc.overview` from the body and the facets.
 //!
 //! Parts are the top-level sections. Footnote sections (anchor `fn:...`) are definitions of
-//! the text, not parts, so they are left out. A formula
+//! the text, not parts, so they are left out, and so are page sections: the pages of a PDF
+//! are counted as a fact, as a list of pages says nothing a reader needs. A formula
 //! belongs to the part that holds its anchor; for a spreadsheet reference such as
 //! `Costs!A1:B9` it is the sheet part. A part with formulas is a `result`; a part that other
 //! parts read from and that has no formulas is an `input`.
@@ -31,7 +32,7 @@ impl Pass for Overview {
         let sections: Vec<&Block> = doc
             .body
             .iter()
-            .filter(|b| !is_footnote_section(b))
+            .filter(|b| !is_footnote_section(b) && !is_page(b))
             .collect();
         let mut parts: Vec<OverviewPart> = Vec::new();
         let mut owner: HashMap<&str, usize> = HashMap::new();
@@ -135,6 +136,16 @@ impl Pass for Overview {
             facts: facts(doc),
         });
     }
+}
+
+fn is_page(block: &Block) -> bool {
+    matches!(
+        block,
+        Block::Section {
+            kind: SectionKind::Page,
+            ..
+        }
+    )
 }
 
 fn is_footnote_anchor(block: &Block) -> bool {
@@ -351,6 +362,7 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             out.push((label.to_string(), n.to_string()));
         }
     };
+    count("Pages", doc.body.iter().filter(|b| is_page(b)).count());
     if !workbook {
         count("Formulas", doc.facets.formulas.len());
         count("Graphs", doc.facets.graphs.len());
@@ -368,6 +380,16 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
     if !workbook {
         count("Annotations", doc.facets.annotations.len());
     }
+    count("Form fields", doc.facets.fields.len());
+    count(
+        "Scripts",
+        doc.facets
+            .embedded
+            .iter()
+            .filter(|e| e.kind == "script")
+            .count(),
+    );
+    count("Signatures", doc.facets.signatures.len());
     count("Changes", doc.facets.timeline.len());
     count("Embedded", doc.facets.embedded.len());
     count("Not read", doc.losses.len());

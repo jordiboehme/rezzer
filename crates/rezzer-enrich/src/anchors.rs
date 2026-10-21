@@ -16,7 +16,9 @@
 //! single quotes; every `!` split is tried) equals the anchor of a section, or for a 3D
 //! reference (`Sheet1:Sheet3!A1`) when both end sheets are sections. A defined name
 //! (`name:gg`, `name:Sheet1!gg`) resolves when a formula of kind `name` or `lambda` has it as
-//! its anchor. An external reference (`ext:[1]Sheet1!A1`) points outside the document by
+//! its anchor. A form field (`field:a.b`) resolves when it is a field of the form or the
+//! parent of one (`field:a`), as a script reads a group of fields by its name. An external
+//! reference (`ext:[1]Sheet1!A1`) points outside the document by
 //! definition (the link is listed under Embedded) and is not checked. Everything else that is
 //! missing becomes a Warning loss.
 
@@ -136,6 +138,12 @@ impl<'a> AnchorSet<'a> {
                 .filter(|f| matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda)))
                 .map(|f| f.anchor.0.as_str()),
         );
+        // Form fields have no block either: each field and every parent it names.
+        for f in &doc.facets.fields {
+            let a = f.anchor.0.as_str();
+            set.all.insert(a);
+            set.all.extend(a.match_indices('.').map(|(at, _)| &a[..at]));
+        }
         set
     }
 

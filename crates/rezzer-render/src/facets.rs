@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The sections after the content: Logic, Annotations, Changes, Embedded and Not read.
-//! Each returns `None` when it has nothing to show.
+//! Each returns `None` when it has nothing to show. The form parts are in `form.rs`.
 
 use std::collections::HashMap;
 
@@ -11,7 +11,8 @@ use rezzer_model::{
     Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
 };
 
-use crate::blocks::{self, Ctx, MAX_DEPTH, Mode, cell_text, code_span, pipe_table};
+use crate::blocks::{self, Ctx, MAX_DEPTH, Mode, Notes, cell_text, code_span, pipe_table};
+use crate::form::{self, FORM_GRAPH, PDF_JS};
 use crate::mermaid;
 use crate::workbook;
 
@@ -102,18 +103,33 @@ fn formula_table(list: &[&Formula], math: bool) -> String {
 }
 
 /// `## Logic`. A workbook gets its logic per sheet ([`workbook::logic`]); any other document
-/// gets formulas without a pattern (one table per dialect), then one table per pattern (in
-/// order of first appearance), then the graphs. Without `math` no LaTeX is written.
+/// gets its form first ([`form::section`]: the fields, their graph and calculations, which are
+/// then not repeated), then formulas without a pattern (one table per dialect), then one table
+/// per pattern (in order of first appearance), then the graphs. Without `math` no LaTeX is
+/// written.
 pub(crate) fn logic(doc: &Document, math: bool) -> Option<String> {
     if workbook::is_workbook(doc) {
         return workbook::logic(doc, math);
     }
-    let formulas = &doc.facets.formulas;
-    let graphs = &doc.facets.graphs;
-    if formulas.is_empty() && graphs.is_empty() {
+    let form = form::section(doc);
+    let with_form = form.is_some();
+    let formulas: Vec<&Formula> = doc
+        .facets
+        .formulas
+        .iter()
+        .filter(|f| !(with_form && f.dialect == PDF_JS))
+        .collect();
+    let graphs: Vec<_> = doc
+        .facets
+        .graphs
+        .iter()
+        .filter(|g| !(with_form && g.id == FORM_GRAPH))
+        .collect();
+    if formulas.is_empty() && graphs.is_empty() && form.is_none() {
         return None;
     }
     let mut parts = vec!["## Logic".to_string()];
+    parts.extend(form);
     // One pass: formulas without a pattern by dialect, the others by pattern, each list in
     // order of first appearance.
     let mut singles: Vec<(&str, Vec<&Formula>)> = Vec::new();
@@ -216,7 +232,7 @@ fn paragraph(inlines: Vec<Inline>) -> Block {
 
 /// One annotation as list item blocks: who, when and where, the quoted passage, the body
 /// and the replies.
-fn annotation_item(a: &Annotation, depth: usize) -> Vec<Block> {
+pub(crate) fn annotation_item(a: &Annotation, depth: usize) -> Vec<Block> {
     let mut meta = vec![Inline::Text {
         text: a.kind.clone(),
         emphasis: false,
@@ -282,19 +298,76 @@ fn annotation_item(a: &Annotation, depth: usize) -> Vec<Block> {
     item
 }
 
-/// `## Annotations`: comments, notes and highlights with author, date and passage.
-pub(crate) fn annotations(doc: &Document, ctx: &Ctx) -> Option<String> {
-    if doc.facets.annotations.is_empty() {
+/// An annotation at its passage: a note callout `<Kind> by <author>, <date>` with the quoted
+/// passage as a nested quote, the state, the body and the replies as a list.
+pub(crate) fn passage_note(a: &Annotation) -> Block {
+    let mut title: String = a
+        .kind
+        .chars()
+        .take(1)
+        .flat_map(char::to_uppercase)
+        .chain(a.kind.chars().skip(1))
+        .collect();
+    if let Some(author) = a.author.as_deref().filter(|s| !s.trim().is_empty()) {
+        title.push_str(&format!(" by {author}"));
+    }
+    if let Some(date) = a.date.as_deref().filter(|s| !s.trim().is_empty()) {
+        title.push_str(&format!(", {date}"));
+    }
+    let mut item = Vec::new();
+    if let Some(q) = a.quoted.as_deref().filter(|q| !q.trim().is_empty()) {
+        item.push(Block::Quote {
+            blocks: vec![paragraph(vec![text(q)])],
+            anchor: None,
+        });
+    }
+    match a.resolved {
+        Some(true) => item.push(paragraph(vec![Inline::Status {
+            text: "Resolved".into(),
+            color: StatusColor::Green,
+        }])),
+        Some(false) => item.push(paragraph(vec![Inline::Status {
+            text: "Open".into(),
+            color: StatusColor::Yellow,
+        }])),
+        None => {}
+    }
+    if !a.body.is_empty() {
+        item.push(paragraph(a.body.clone()));
+    }
+    if !a.replies.is_empty() {
+        item.push(Block::List {
+            ordered: false,
+            items: a.replies.iter().map(|r| annotation_item(r, 1)).collect(),
+            anchor: None,
+        });
+    }
+    Block::Callout {
+        kind: rezzer_model::CalloutKind::Note,
+        title: Some(title),
+        folded: None,
+        blocks: item,
+        anchor: None,
+    }
+}
+
+/// `## Annotations`: comments, notes and highlights with author, date and passage; the ones
+/// the content showed at their passage (`notes`) are left out.
+pub(crate) fn annotations(doc: &Document, ctx: &Ctx, notes: &Notes) -> Option<String> {
+    let items: Vec<Vec<Block>> = doc
+        .facets
+        .annotations
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !notes.shown(*i))
+        .map(|(_, a)| annotation_item(a, 0))
+        .collect();
+    if items.is_empty() {
         return None;
     }
     let list = Block::List {
         ordered: false,
-        items: doc
-            .facets
-            .annotations
-            .iter()
-            .map(|a| annotation_item(a, 0))
-            .collect(),
+        items,
         anchor: None,
     };
     Some(format!(
@@ -303,10 +376,12 @@ pub(crate) fn annotations(doc: &Document, ctx: &Ctx) -> Option<String> {
     ))
 }
 
-/// `## Changes`: the timeline as a table.
+/// `## Changes`: the signatures ([`form::signatures`]), then the timeline as a table, under
+/// `### Revisions` when there are signatures.
 pub(crate) fn changes(doc: &Document) -> Option<String> {
+    let signatures = form::signatures(doc);
     if doc.facets.timeline.is_empty() {
-        return None;
+        return signatures.map(|s| format!("## Changes\n\n{s}"));
     }
     let opt = |v: &Option<String>| v.as_deref().map(cell_text).unwrap_or_default();
     let rows: Vec<Vec<String>> = doc
@@ -326,18 +401,20 @@ pub(crate) fn changes(doc: &Document) -> Option<String> {
             ]
         })
         .collect();
-    Some(format!(
-        "## Changes\n\n{}",
-        pipe_table(
-            &header(&["When", "Who", "What", "Where", "Text"]),
-            &[],
-            &rows
-        )
-    ))
+    let table = pipe_table(
+        &header(&["When", "Who", "What", "Where", "Text"]),
+        &[],
+        &rows,
+    );
+    Some(match signatures {
+        Some(s) => format!("## Changes\n\n{s}\n\n### Revisions\n\n{table}"),
+        None => format!("## Changes\n\n{table}"),
+    })
 }
 
-/// `## Embedded`: scripts, macros, objects and references (never run or followed), then the
-/// pictures the calling agent should look at.
+/// `## Embedded`: scripts, macros, objects and references (never run or followed) with the
+/// texts of the scripts ([`form::scripts`]), then the pictures the calling agent should look
+/// at.
 pub(crate) fn embedded(doc: &Document) -> Option<String> {
     let vision: Vec<_> = doc.assets.iter().filter(|a| a.needs_vision).collect();
     if doc.facets.embedded.is_empty() && vision.is_empty() {
@@ -385,6 +462,7 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
             &[],
             &rows,
         ));
+        parts.extend(form::scripts(doc));
     }
     if !vision.is_empty() {
         parts.push("### Pictures that need vision".into());

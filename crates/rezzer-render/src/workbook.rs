@@ -1034,6 +1034,7 @@ fn stale_callout(doc: &Document) -> Option<String> {
     let ctx = Ctx {
         assets: &doc.assets,
         heading_offset: 0,
+        notes: None,
     };
     Some(blocks::blocks(&[callout], &ctx, 0, 3, false))
 }

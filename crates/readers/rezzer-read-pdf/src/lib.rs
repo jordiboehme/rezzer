@@ -9,13 +9,15 @@
 //! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
 //! `meta.rs` and `objects.rs` add the metadata, outline, links, attachments, threads and
-//! revisions; `quote.rs` quotes the text under annotations and `annots.rs` puts them at
-//! their passage. `render.rs` lists the pages that need vision and renders them on request;
-//! `fallback.rs` reads the text of a file pdfparts cannot open with the same text walk.
+//! revisions, and `forms.rs` the form logic, scripts and signatures; `quote.rs` quotes the
+//! text under annotations and `annots.rs` puts them at their passage. `render.rs` lists the
+//! pages that need vision and renders them on request; `fallback.rs` reads the text of a
+//! file pdfparts cannot open with the same text walk.
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
 mod fallback;
+mod forms;
 mod layout;
 mod meta;
 mod objects;
@@ -94,7 +96,7 @@ fn read_pdf(
     // The revisions are read before any list that draws on pdfparts' budget; the links once,
     // for the text and for the object layer; the annotations before the text, which quotes
     // what they mark.
-    let events = objects::revisions(&pdf, budget, &mut out);
+    let history = objects::revisions(&pdf, budget, &mut out);
     let links = pdf.links();
     let annots = pdf.annotations();
     let marked = quote::marked(&annots);
@@ -106,7 +108,7 @@ fn read_pdf(
     drop(needs);
     annots::read(&annots, placed, budget, &room, &mut out);
     drop(annots);
-    objects::read(&pdf, &pages, &links, events, opts, budget, &room, &mut out);
+    objects::read(&pdf, &pages, &links, history, opts, budget, &room, &mut out);
     out.finish()
 }
 

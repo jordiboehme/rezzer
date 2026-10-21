@@ -26,7 +26,7 @@ use rezzer_model::{
 use sha2::{Digest, Sha256};
 
 use crate::layout::LinkRoom;
-use crate::{Out, marker, meta};
+use crate::{Out, forms, marker, meta};
 
 /// What one item in the model costs besides its texts: the struct, its strings' headers and
 /// the slot in its list.
@@ -50,25 +50,28 @@ pub(crate) fn read(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[Link],
-    events: Events,
+    history: History,
     opts: &ReadOptions,
     budget: &Budget,
     room: &LinkRoom,
     out: &mut Out,
 ) {
-    let kept = Kept {
-        room,
-        budget,
-        own: Counter::new(budget.limits().max_memory_bytes / OWN_SHARE),
-        calls: Counter::new(0),
-    };
+    let kept = Kept::new(room, budget, "the metadata, outline and links");
     meta::facts(pdf, out);
     meta::properties(pdf, &kept, out);
     outline(pdf, pages, &kept, out);
     link_graph(links, pages, &kept, out);
     attachments(pdf, opts, &kept, out);
     threads(pdf, &kept, out);
-    timeline(events, &kept, out);
+    timeline(history.events, &kept, out);
+    // The form logic has a share of its own, so a large form never costs the outline or
+    // links, nor they the form. Its pdfparts issues are among those listed next.
+    forms::read(
+        pdf,
+        &history.ends,
+        &Kept::new(room, budget, "the form logic"),
+        out,
+    );
     issues(pdf, out);
 }
 
@@ -90,12 +93,30 @@ fn item_bytes(texts: &[&str]) -> u64 {
 pub(crate) struct Kept<'a> {
     room: &'a LinkRoom,
     budget: &'a Budget,
-    /// What is left of the object layer's own share ([`OWN_SHARE`]).
+    /// What is left of this share ([`OWN_SHARE`]).
     own: Counter<u64>,
     calls: Counter<u32>,
+    /// What the share is for, in the words of its losses.
+    what: &'static str,
 }
 
-impl Kept<'_> {
+impl<'a> Kept<'a> {
+    /// A share of [`OWN_SHARE`] of the memory limit for `what`, beside what the pages leave.
+    pub(crate) fn new(room: &'a LinkRoom, budget: &'a Budget, what: &'static str) -> Kept<'a> {
+        Kept {
+            room,
+            budget,
+            own: Counter::new(budget.limits().max_memory_bytes / OWN_SHARE),
+            calls: Counter::new(0),
+            what,
+        }
+    }
+
+    /// The budget of the read.
+    pub(crate) fn budget(&self) -> &Budget {
+        self.budget
+    }
+
     /// The share of the memory limit the object layer may keep at most.
     pub(crate) fn share(&self) -> u64 {
         self.budget.limits().max_memory_bytes / OWN_SHARE
@@ -126,13 +147,23 @@ impl Kept<'_> {
     /// does not fit: then nothing more of its kind may be kept. The bytes are checked first,
     /// so an item that does not fit costs nothing.
     pub(crate) fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
+        self.take_with(elements, texts, 0)
+    }
+
+    /// As [`Kept::take`], with `extra` bytes the item copies besides its texts.
+    pub(crate) fn take_with(
+        &self,
+        elements: u64,
+        texts: &[&str],
+        extra: u64,
+    ) -> Result<(), String> {
         self.calls.set(self.calls.get().wrapping_add(1));
         if self.calls.get().is_multiple_of(TIME_EVERY)
             && let Err(hit) = self.budget.check_time()
         {
             return Err(hit.to_string());
         }
-        let bytes = item_bytes(texts);
+        let bytes = item_bytes(texts).saturating_add(extra);
         if bytes > self.room.left() {
             return Err(format!(
                 "the copies take more than the {} bytes left of what the file may keep",
@@ -142,8 +173,9 @@ impl Kept<'_> {
         let own = self.own.get();
         if bytes > own {
             return Err(format!(
-                "the copies take more than the {own} bytes left of what the metadata, outline \
-                 and links may keep (a 64th of the memory limit)"
+                "the copies take more than the {own} bytes left of what {} may keep (a 64th of \
+                 the memory limit)",
+                self.what
             ));
         }
         if let Err(hit) = self.budget.add_elements(elements) {
@@ -508,6 +540,8 @@ fn link_graph(links: &[Link], pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out
                 format!("from page {from}"),
                 Some(file),
             ),
+            // A script link is listed with the other scripts, with its text.
+            LinkTarget::Other(action) if &**action == "JavaScript" => Ok(()),
             LinkTarget::Other(action) => {
                 listed("link-action", action, format!("from page {from}"), None)
             }
@@ -761,15 +795,22 @@ fn revision_text(rev: &Revision) -> String {
     text
 }
 
-/// The revisions: their count as a fact, their issues as losses, and the time and words of
-/// one event per revision, when the file has 2 or more (a file saved once has no history to
-/// tell). Older revisions over the cap are counted, not compared: that is one Limit Info loss.
 /// The revisions' events: number, time and words.
 pub(crate) type Events = Vec<(u32, Option<String>, String)>;
 
+/// What the revisions tell the rest of the object layer: the events, and where each save
+/// ends, oldest first, for the saves after a signature.
+pub(crate) struct History {
+    events: Events,
+    ends: Vec<u64>,
+}
+
+/// The revisions: their count as a fact, their issues as losses, and the time and words of
+/// one event per revision, when the file has 2 or more (a file saved once has no history to
+/// tell). Older revisions over the cap are counted, not compared: that is one Limit Info loss.
 /// They are read before the links and every other list, which draw on the same pdfparts
 /// budget: they are few and small.
-pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Events {
+pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> History {
     let stop = || budget.check_time().is_err();
     let r = pdf.revisions(&stop);
     let count = r.list.len() + r.skipped;
@@ -788,16 +829,22 @@ pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Events {
         let (why, severity) = reason(issue.kind);
         out.loss(location(issue), issue.what.clone(), why, severity);
     }
+    let ends = r.list.iter().map(|rev| rev.end).collect();
     if count < 2 {
-        return Vec::new();
+        return History {
+            events: Vec::new(),
+            ends,
+        };
     }
-    r.list
+    let events = r
+        .list
         .iter()
         .map(|rev| {
             let time = iso(rev.modified.as_ref()).map(str::to_string);
             (rev.number, time, revision_text(rev))
         })
-        .collect()
+        .collect();
+    History { events, ends }
 }
 
 /// One timeline event per revision, charged like every other copy.
@@ -824,7 +871,7 @@ fn timeline(events: Events, kept: &Kept<'_>, out: &mut Out) {
 }
 
 /// The loss reason and severity of an issue kind.
-fn reason(kind: IssueKind) -> (LossReason, Severity) {
+pub(crate) fn reason(kind: IssueKind) -> (LossReason, Severity) {
     match kind {
         IssueKind::Damaged => (LossReason::Damaged, Severity::Warning),
         IssueKind::Limit => (LossReason::Limit, Severity::Warning),

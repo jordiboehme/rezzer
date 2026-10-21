@@ -3459,3 +3459,162 @@ fn a_bomb_in_a_fallback_file_is_not_unpacked() {
     );
     assert_rss_under_256_mib();
 }
+
+/// A one-page file whose catalog names `fields` (dictionaries, written straight into one
+/// array object) under `key`: `/AcroForm` for the shape, `/Junk` for its twin, where no reader
+/// looks.
+fn form_file(key: &str, fields: &mut dyn FnMut(&mut Builder) -> Vec<String>) -> Vec<u8> {
+    catalog_file(&mut |b| {
+        let list = format!("[{}]", fields(b).join("\n"));
+        let list = b.add(list);
+        (format!("{key} << /Fields {list} 0 R >>"), String::new())
+    })
+}
+
+/// The Limit loss at `location` whose text contains `words`, with a short text.
+fn form_cut<'a>(out: &'a ReadOutcome, location: &str, words: &str) -> &'a Loss {
+    assert_short_losses(out);
+    assert_eq!(out.completeness, Completeness::Partial);
+    limit_at(out, location, words)
+}
+
+#[test]
+fn many_form_fields_are_bounded() {
+    // 100,000 text fields, each with a value.
+    let file = |key: &str| {
+        form_file(key, &mut |_| {
+            (0..100_000)
+                .map(|k| format!("<< /T (field{k}) /FT /Tx /V (value {k}) >>"))
+                .collect()
+        })
+    };
+    let out = against_twin(&file("/AcroForm"), &file("/Junk"));
+    let kept = out.document.facets.fields.len();
+    assert!(kept > 1_000 && kept < 100_000, "{kept}");
+    assert_eq!(out.document.facets.fields[0].name, "field0");
+    let loss = form_cut(&out, "form", "form fields are not kept");
+    assert!(
+        loss.what.starts_with(&format!(
+            "{} of 100000 form fields are not kept",
+            100_000 - kept
+        )),
+        "{loss:?}"
+    );
+    assert_eq!(out.document.properties.facts.form_fields, Some(100_000));
+}
+
+#[test]
+fn one_field_read_by_many_calculations_is_bounded() {
+    // 50,000 fields calculate from one field through one shared script.
+    let file = |key: &str| {
+        form_file(key, &mut |b| {
+            let js = b.add(
+                r#"<< /S /JavaScript /JS (event.value = this.getField\("Source"\).value;) >>"#,
+            );
+            let mut fields = vec!["<< /T (Source) /FT /Tx >>".to_string()];
+            fields.extend(
+                (0..50_000).map(|k| format!("<< /T (c{k}) /FT /Tx /AA << /C {js} 0 R >> >>")),
+            );
+            fields
+        })
+    };
+    let out = against_twin(&file("/AcroForm"), &file("/Junk"));
+    let facets = &out.document.facets;
+    let kept = facets.fields.len();
+    assert!(kept > 100 && kept < 50_001, "{kept}");
+    // Every kept calculation is a formula that reads Source, and an edge of the graph.
+    let formulas = facets.formulas.len();
+    assert!(formulas > 0 && formulas < kept, "{formulas} of {kept}");
+    let graph = facets.graphs.iter().find(|g| g.id == "form").unwrap();
+    assert!(graph.edges.len() <= formulas, "{}", graph.edges.len());
+    assert!(graph.nodes.len() <= kept);
+    form_cut(&out, "form", "form fields are not kept");
+}
+
+#[test]
+fn a_huge_script_is_not_copied() {
+    // A 50 MB calculate script, beside a small field that reads nothing. Shape and twin are
+    // built and read one after the other, so the test holds one file at a time.
+    const SIZE: usize = 50 << 20;
+    let file = |key: &str| {
+        form_file(key, &mut |b| {
+            let js = b.stream("", "var x = 1;\n".repeat(SIZE / 11).as_bytes());
+            let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R >>"));
+            vec![
+                format!("<< /T (Big) /FT /Tx /AA << /C {action} 0 R >> >>"),
+                "<< /T (Small) /FT /Tx /V (kept) >>".to_string(),
+            ]
+        })
+    };
+    let start = Instant::now();
+    drop(read_through(&file("/Junk")));
+    let twin_rss = common::max_rss_bytes();
+    let out = read_through(&file("/AcroForm"));
+    let rss = common::max_rss_bytes();
+    // pdfparts unpacks the stream and keeps its text once (at most three copies of it while it
+    // does); nothing of it reaches the model.
+    assert!(
+        rss < twin_rss + (64 << 20) + 3 * SIZE as u64,
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin_rss >> 20
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let json = serde_json::to_string(&out.document).unwrap();
+    assert!(json.len() < 1 << 20, "{} bytes", json.len());
+    let facets = &out.document.facets;
+    let names: Vec<&str> = facets.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Big", "Small"]);
+    assert_eq!(facets.fields[0].role, Some(rezzer_model::Role::Result));
+    assert!(facets.fields[0].actions.is_empty());
+    assert!(facets.formulas.is_empty());
+    let script = facets
+        .embedded
+        .iter()
+        .find(|e| e.name == "field Big calculate")
+        .expect("the script is listed");
+    assert_eq!(script.text, None);
+    form_cut(&out, "form", "field script is not kept");
+    form_cut(&out, "scripts", "the text of 1 script is not kept");
+    assert_eq!(out.document.properties.facts.has_javascript, Some(true));
+}
+
+#[test]
+fn megabyte_field_names_are_bounded() {
+    // 40 fields under one parent whose name is 1 MB, named by one string object.
+    let file = |key: &str| {
+        form_file(key, &mut |b| {
+            let name = b.add(format!("({})", "n".repeat(1 << 20)));
+            let kids: Vec<String> = (0..40)
+                .map(|k| format!("{} 0 R", b.add(format!("<< /T (k{k}) /FT /Tx /V (v) >>"))))
+                .collect();
+            vec![format!("<< /T {name} 0 R /Kids [{}] >>", kids.join(" "))]
+        })
+    };
+    let out = against_twin(&file("/AcroForm"), &file("/Junk"));
+    let kept = out.document.facets.fields.len();
+    assert!(kept < 40, "{kept}");
+    form_cut(&out, "form", "form fields are not kept");
+}
+
+#[test]
+fn deep_field_trees_are_bounded() {
+    // A chain of 10,000 nested fields: pdfparts stops at the depth limit and says so.
+    let bytes = form_file("/AcroForm", &mut |b| {
+        let mut inner = b.add("<< /T (leaf) /FT /Tx /V (deep) >>");
+        for k in 0..10_000 {
+            inner = b.add(format!("<< /T (n{k}) /Kids [{inner} 0 R] >>"));
+        }
+        vec![format!("<< /T (root) /Kids [{inner} 0 R] >>")]
+    });
+    let start = Instant::now();
+    let out = read_through(&bytes);
+    assert!(start.elapsed() < Duration::from_secs(60));
+    assert!(out.document.facets.fields.is_empty());
+    form_cut(&out, "form", "deeper than");
+    assert_rss_under_256_mib();
+}

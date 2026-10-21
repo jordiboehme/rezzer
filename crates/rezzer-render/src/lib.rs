@@ -14,11 +14,14 @@
 //!   anchor stays in the model JSON (`--json`). Footnote sections (`fn:<label>`) become
 //!   footnote definitions
 //! - A hard line break is a backslash at the line end
+//! - An annotation stands at its passage: after the first block with its anchor, or at the
+//!   end of its page section. Only the others are listed in `## Annotations`
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 
 mod blocks;
 mod facets;
+mod form;
 mod frontmatter;
 mod mermaid;
 mod overview;
@@ -27,7 +30,7 @@ mod workbook;
 
 use rezzer_model::{Block, Completeness, Document, plain_text};
 
-use crate::blocks::{Ctx, MAX_DEPTH};
+use crate::blocks::{Ctx, MAX_DEPTH, Notes};
 
 /// A part of the output that a caller can ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,8 +152,9 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     if want(OutputSection::Properties) {
         parts.extend(facets::properties(doc));
     }
+    let notes = Notes::new(&doc.facets.annotations);
     if want(OutputSection::Content) {
-        parts.push(content(doc, title));
+        parts.push(content(doc, title, &notes));
     }
     if want(OutputSection::Logic) {
         parts.extend(facets::logic(doc, opts.math));
@@ -158,9 +162,10 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let ctx = Ctx {
         assets: &doc.assets,
         heading_offset: 0,
+        notes: None,
     };
     if want(OutputSection::Annotations) {
-        parts.extend(facets::annotations(doc, &ctx));
+        parts.extend(facets::annotations(doc, &ctx, &notes));
     }
     if want(OutputSection::Changes) {
         parts.extend(facets::changes(doc));
@@ -203,7 +208,7 @@ pub fn paginate(markdown: &str, page_tokens: usize) -> Vec<String> {
     paging::paginate(markdown, page_tokens)
 }
 
-fn content(doc: &Document, title: &str) -> String {
+fn content(doc: &Document, title: &str, notes: &Notes) -> String {
     let mut body: &[Block] = &doc.body;
     if let Some(Block::Heading {
         level: 1, inlines, ..
@@ -216,6 +221,7 @@ fn content(doc: &Document, title: &str) -> String {
     let ctx = Ctx {
         assets: &doc.assets,
         heading_offset: 2u8.saturating_sub(min),
+        notes: Some(notes),
     };
     blocks::blocks(body, &ctx, 0, 2, false)
 }

@@ -9,10 +9,12 @@
 //! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use rezzer_model::{
-    Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState, column_letter,
-    plain_text,
+    Align, Annotation, Asset, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
+    TaskState, column_letter, plain_text,
 };
 
 /// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
@@ -37,6 +39,84 @@ pub(crate) struct Ctx<'a> {
     pub assets: &'a [Asset],
     /// Added to every body heading level, so body headings stay below the title.
     pub heading_offset: u8,
+    /// Annotations to show at their passage; only the content has them.
+    pub notes: Option<&'a Notes<'a>>,
+}
+
+/// The annotations of a document by the anchor they stand at, and which of them the content
+/// showed. Each one is shown once: after the first block with its anchor that is rendered, or
+/// at the end of its page section. The ones not shown stay for `## Annotations`.
+pub(crate) struct Notes<'a> {
+    list: &'a [Annotation],
+    at: HashMap<&'a str, Vec<usize>>,
+    shown: RefCell<Vec<bool>>,
+}
+
+impl<'a> Notes<'a> {
+    pub(crate) fn new(list: &'a [Annotation]) -> Notes<'a> {
+        let mut at: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (i, a) in list.iter().enumerate() {
+            if let Some(anchor) = &a.anchor {
+                at.entry(anchor.0.as_str()).or_default().push(i);
+            }
+        }
+        Notes {
+            list,
+            at,
+            shown: RefCell::new(vec![false; list.len()]),
+        }
+    }
+
+    /// True when annotation `i` was shown at its passage.
+    pub(crate) fn shown(&self, i: usize) -> bool {
+        self.shown.borrow().get(i).copied().unwrap_or(false)
+    }
+
+    /// The annotations at `anchor` not shown yet, now marked as shown.
+    fn take(&self, anchor: &str) -> Vec<&'a Annotation> {
+        let Some(list) = self.at.get(anchor) else {
+            return Vec::new();
+        };
+        let mut shown = self.shown.borrow_mut();
+        list.iter()
+            .filter(|&&i| !std::mem::replace(&mut shown[i], true))
+            .map(|&i| &self.list[i])
+            .collect()
+    }
+}
+
+/// The anchor a block's annotations stand at, for every block but sections.
+fn passage_anchor(b: &Block) -> Option<&str> {
+    match b {
+        Block::Section { .. } => None,
+        Block::Heading { anchor, .. }
+        | Block::Paragraph { anchor, .. }
+        | Block::List { anchor, .. }
+        | Block::Table { anchor, .. }
+        | Block::Code { anchor, .. }
+        | Block::Quote { anchor, .. }
+        | Block::Math { anchor, .. }
+        | Block::Media { anchor, .. }
+        | Block::Callout { anchor, .. }
+        | Block::Rule { anchor, .. }
+        | Block::Task { anchor, .. } => anchor.as_ref().map(|a| a.0.as_str()),
+    }
+}
+
+/// `text` with the note callouts of the annotations at `anchor` after it.
+fn with_notes(text: String, anchor: Option<&str>, ctx: &Ctx, depth: usize, level: u8) -> String {
+    let (Some(notes), Some(anchor)) = (ctx.notes, anchor) else {
+        return text;
+    };
+    let mut out = text;
+    for a in notes.take(anchor) {
+        let note = block(&crate::facets::passage_note(a), ctx, depth + 1, level);
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&note);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -887,7 +967,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                     prev.kind == PrevKind::Bullet && !prev.alt
                 };
                 (
-                    task(*state, inlines, alt),
+                    with_notes(
+                        task(*state, inlines, alt),
+                        passage_anchor(item),
+                        ctx,
+                        depth,
+                        level,
+                    ),
                     Prev {
                         kind: PrevKind::Bullet,
                         alt,
@@ -904,7 +990,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                 };
                 let alt = prev.kind == same && !prev.alt;
                 (
-                    list_block(*ordered, items, alt, ctx, depth, level),
+                    with_notes(
+                        list_block(*ordered, items, alt, ctx, depth, level),
+                        passage_anchor(item),
+                        ctx,
+                        depth,
+                        level,
+                    ),
                     Prev {
                         kind: same,
                         alt,
@@ -914,7 +1006,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                 )
             }
             other => (
-                block(other, ctx, depth, level),
+                with_notes(
+                    block(other, ctx, depth, level),
+                    passage_anchor(other),
+                    ctx,
+                    depth,
+                    level,
+                ),
                 Prev {
                     kind: PrevKind::Other,
                     alt: false,
@@ -944,13 +1042,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
 fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
     match b {
         Block::Section {
+            kind,
             title,
             anchor,
             blocks: inner,
-            ..
         } => {
             let label = anchor.as_ref().and_then(|a| a.0.strip_prefix("fn:"));
-            match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
+            let text = match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
                 (None, Some(label)) => footnote(label, inner, ctx, depth),
                 (Some(title), _) => {
                     let head = heading_line(level.min(6), &line_text(title.trim()));
@@ -958,7 +1056,12 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                     join2(head, body)
                 }
                 (None, None) => blocks(inner, ctx, depth + 1, level, false),
-            }
+            };
+            // The annotations of a page that stand at no block close its section.
+            let page = (*kind == SectionKind::Page)
+                .then(|| anchor.as_ref().map(|a| a.0.as_str()))
+                .flatten();
+            with_notes(text, page, ctx, depth, level)
         }
         Block::Heading {
             level: l,
