@@ -181,8 +181,6 @@ The spreadsheet files were downloaded on 2026-10-20 from the raw form of the pin
 
 - Apache Tika test documents (Apache-2.0): `office/testEXCEL_custom_props.xlsx`, `testEXCEL_various.xlsb`. Source: https://github.com/apache/tika/tree/043762c6327ff36b3081ce297688e93915c85996 . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/tika/blob/043762c6327ff36b3081ce297688e93915c85996/NOTICE.txt . The license text is the Apache License 2.0 below.
 
-- Mustang project test data (Apache-2.0): `pdf/mustang-gnuaccounting-invoice-508.pdf` (renamed from `MustangGnuaccountingBeispielRE-20201121_508blanko.pdf`, bytes unchanged). Source: https://github.com/ZUGFeRD/mustangproject/tree/c83a73af4e57b45a8bb396ce97003f0fca05f5a9 . Copyright 2014 Jochen Staerk. NOTICE: https://github.com/ZUGFeRD/mustangproject/blob/c83a73af4e57b45a8bb396ce97003f0fca05f5a9/NOTICE . The license text is the Apache License 2.0 below.
-
 NOTICE of Apache POI (section 4(d) of the license), source: https://raw.githubusercontent.com/apache/poi/04804ac97487ceded07a8231bc106a258109cbeb/legal/NOTICE
 
     Apache POI
@@ -951,6 +949,7 @@ The license text is the Apache License 2.0 above (section "Spreadsheet corpus").
 - pdf.js test files (Apache-2.0): `pdf/pdfjs-*.pdf`. Source: https://github.com/mozilla/pdf.js/tree/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/test/pdfs . Copyright Mozilla and individual contributors; the annotation files were made for the pdf.js test suite by Tim van der Meij. The repository has no NOTICE file at this commit (https://raw.githubusercontent.com/mozilla/pdf.js/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/NOTICE returns "not found"), so there is no notice text to include. License: https://raw.githubusercontent.com/mozilla/pdf.js/33734f1fdf1b8987c656c0a5f67b4e2cc57e9d13/LICENSE .
 - qpdf test files (Apache-2.0): `pdf/qpdf-*.pdf`. Source: https://github.com/qpdf/qpdf/tree/4eba95899886e851cc41d76886483b347612f2a8/qpdf/qtest/qpdf . Copyright Jay Berkenbilt and Manfred Holger. NOTICE: `NOTICE.md` of the repository, reproduced below.
 - Apache PDFBox test resources (Apache-2.0): `pdf/pdfbox-*.pdf`. Source: https://github.com/apache/pdfbox/tree/ccb7498b942d99d7644f4c1d14906b646f814d84 . Copyright The Apache Software Foundation. NOTICE: `NOTICE.txt` of the repository, reproduced below.
+- Mustang project test data (Apache-2.0): `pdf/mustang-gnuaccounting-invoice-508.pdf` (renamed from `MustangGnuaccountingBeispielRE-20201121_508blanko.pdf`, bytes unchanged). Source: https://github.com/ZUGFeRD/mustangproject/tree/c83a73af4e57b45a8bb396ce97003f0fca05f5a9 . Copyright 2014 Jochen Staerk. NOTICE: `NOTICE` of the repository, reproduced below.
 
 NOTICE of qpdf (section 4(d) of the license), source: https://raw.githubusercontent.com/qpdf/qpdf/4eba95899886e851cc41d76886483b347612f2a8/NOTICE.md
 
@@ -1021,3 +1020,44 @@ NOTICE of Apache PDFBox (section 4(d) of the license), source: https://raw.githu
     
     Includes OSXAdapter
     Copyright (C) 2003-2007 Apple, Inc., All Rights Reserved
+
+NOTICE of the Mustang project (section 4(d) of the license), source: https://raw.githubusercontent.com/ZUGFeRD/mustangproject/c83a73af4e57b45a8bb396ce97003f0fca05f5a9/NOTICE
+
+    Mustangproject
+    Copyright 2014 Jochen Staerk <jstaerk@usegroup.de>
+    
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+    
+        http://www.apache.org/licenses/LICENSE-2.0
+    
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+    
+    
+    Based on Apache PDFBox developed at
+    The Apache Software Foundation (http://www.apache.org/).
+    
+    Apache PDFBox was based on source code originally developed in the PDFBox, JempBox and FontBox projects.
+    Copyright (c) 2002-2007, www.pdfbox.org
+    Copyright (c) 2006-2007, www.jempbox.org
+    
+    Apache PDFBox was based on source code originally developed in the PaDaF project.
+    Copyright (c) 2010 Atos Worldline SAS
+    
+    Based on VeraPDF-library https://github.com/veraPDF/veraPDF-library licensed under the MPL 2.0
+    Based on PH-Schematron https://github.com/phax/ph-schematron licensed under the APL2.0
+    Based on CII2UBL https://github.com/phax/en16931-cii2ubl licensed under the APL2.0
+    Based on https://github.com/itplr-kosit/xrechnung-schematron licensed under the APL2.0
+    Based on https://github.com/itplr-kosit/xrechnung-visualization licensed under the APL2.0
+    Based on https://jcthiele.github.io/xrechnung-visualization-codelist-resolve/ under the APL2.0
+    Based on Saxon-HE https://sourceforge.net/projects/saxon/ licensed under the MPL 2.0
+    Based on DOM4j https://dom4j.github.io/ licensed under the BSD license
+    Based on EN16931 validation artefacts https://github.com/ConnectingEurope/eInvoicing-EN16931 licensed under the EUPL 1.2
+    Based on https://xmlgraphics.apache.org/fop under the APL2.0
+    Based on https://github.com/saucecontrol/Compact-ICC-Profiles/ under the Public Domain
+    http://ftp.gnu.org/gnu/freefont/
