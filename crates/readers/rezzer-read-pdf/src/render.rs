@@ -95,11 +95,13 @@ fn same_spot(a: &[f32; 4], b: &[f32; 4]) -> bool {
     a.iter().zip(b).all(|(p, q)| (p - q).abs() <= near)
 }
 
-/// Picture places, found by their lower left corner on a grid of 4 points.
+/// Pictures at their places, found by their lower left corner on a grid of 4 points. A spot
+/// is one picture (by its identity, see `text::picture_id`) at one place: different pictures
+/// at one place are different spots.
 #[derive(Default)]
 pub(crate) struct Spots {
     buckets: HashMap<(i32, i32), Vec<usize>>,
-    boxes: Vec<[f32; 4]>,
+    boxes: Vec<([f32; 4], u64)>,
 }
 
 impl Spots {
@@ -107,8 +109,8 @@ impl Spots {
         ((b[0] / 4.0).floor() as i32, (b[1] / 4.0).floor() as i32)
     }
 
-    /// The spot `b` stands at, if one is known.
-    fn find(&self, b: &[f32; 4]) -> Option<usize> {
+    /// The spot of picture `id` at `b`, if one is known.
+    fn find(&self, b: &[f32; 4], id: u64) -> Option<usize> {
         let (cx, cy) = Self::cell(b);
         for dx in -1..=1 {
             for dy in -1..=1 {
@@ -118,7 +120,7 @@ impl Spots {
                 if let Some(&k) = list
                     .iter()
                     .take(SPOTS_PER_BUCKET)
-                    .find(|&&k| same_spot(&self.boxes[k], b))
+                    .find(|&&k| self.boxes[k].1 == id && same_spot(&self.boxes[k].0, b))
                 {
                     return Some(k);
                 }
@@ -127,24 +129,24 @@ impl Spots {
         None
     }
 
-    /// The spot of `b`, a new one when none is known.
-    fn add(&mut self, b: &[f32; 4]) -> usize {
-        if let Some(k) = self.find(b) {
+    /// The spot of picture `id` at `b`, a new one when none is known.
+    fn add(&mut self, b: &[f32; 4], id: u64) -> usize {
+        if let Some(k) = self.find(b, id) {
             return k;
         }
         let k = self.boxes.len();
-        self.boxes.push(*b);
+        self.boxes.push((*b, id));
         self.buckets.entry(Self::cell(b)).or_default().push(k);
         k
     }
 
-    pub(crate) fn holds(&self, b: &[f32; 4]) -> bool {
-        self.find(b).is_some()
+    pub(crate) fn holds(&self, b: &[f32; 4], id: u64) -> bool {
+        self.find(b, id).is_some()
     }
 }
 
-/// Pictures drawn at the same place (within [`SAME_SPOT`]) on at least three pages and on at
-/// least half of the pages read. When they are small, they are page furniture (a logo in the
+/// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
+/// and on at least half of the pages read. When they are small, they are page furniture (a logo in the
 /// margin, a strip along the edge), like a running header, and do not make a page need vision.
 pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
     let mut all = Spots::default();
@@ -153,8 +155,8 @@ pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots
     let mut read = 0usize;
     for items in pages {
         read += 1;
-        for b in &items.images {
-            let k = all.add(b);
+        for (i, b) in items.images.iter().enumerate() {
+            let k = all.add(b, items.images_id.get(i).copied().unwrap_or(0));
             if k == seen.len() {
                 seen.push((0, 0));
             }
@@ -166,9 +168,9 @@ pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots
     let mut out = Spots::default();
     for (k, &(n, _)) in seen.iter().enumerate() {
         if n >= 3 && n * 2 >= read {
-            let b = all.boxes[k];
+            let (b, id) = all.boxes[k];
             let i = out.boxes.len();
-            out.boxes.push(b);
+            out.boxes.push((b, id));
             out.buckets.entry(Spots::cell(&b)).or_default().push(i);
         }
     }
@@ -201,7 +203,8 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &Spots) -> Option
         .into_iter()
         .filter(|&k| {
             let b = &items.images[k];
-            !(skip.holds(b) && visible(b) < FURNITURE_SHARE * area)
+            let id = items.images_id.get(k).copied().unwrap_or(0);
+            !(skip.holds(b, id) && visible(b) < FURNITURE_SHARE * area)
         })
         .collect();
     let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();

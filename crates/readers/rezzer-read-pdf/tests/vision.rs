@@ -654,3 +654,82 @@ fn a_repeated_logo_whose_size_changes_a_little_is_furniture() {
     let out = read(&b.finish(catalog));
     assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
 }
+
+/// A picture drawn on a page: x, y, width, height and its index in the pictures.
+type Draw = (f32, f32, f32, f32, usize);
+
+/// Pages of A4, each with a line of text and the pictures `draws` names, by their index in
+/// `pictures` (each given as dictionary and data).
+fn picture_pages(draws: &[Vec<Draw>], pictures: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut xo = String::new();
+    for (k, (dict, data)) in pictures.iter().enumerate() {
+        let n = b.stream(dict, data);
+        xo.push_str(&format!("/P{k} {n} 0 R "));
+    }
+    let mut kids = String::new();
+    for (n, page) in draws.iter().enumerate() {
+        let mut c = format!("BT /F1 11 Tf 72 700 Td (Page {n}.) Tj ET\n");
+        for (x, y, w, h, k) in page {
+            c += &format!("q {w} 0 0 {h} {x} {y} cm /P{k} Do Q\n");
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << {xo}>> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", draws.len()),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn different_pictures_at_one_place_are_not_furniture() {
+    // Four tickets, each with its own code (a 24 by 24 stencil) at the same place: four
+    // assets.
+    let mask = "/Type /XObject /Subtype /Image /Width 24 /Height 24 /ImageMask true \
+                /BitsPerComponent 1";
+    let codes: Vec<(&str, Vec<u8>)> = (0..4u32)
+        .map(|k| (mask, (0..72u32).map(|i| (i * 7 + k * 13) as u8).collect()))
+        .collect();
+    let draws: Vec<_> = (0..4)
+        .map(|k| vec![(400.0, 600.0, 85.0, 85.0, k)])
+        .collect();
+    let out = read(&picture_pages(&draws, &codes));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+    // Two logos taking turns 1.5 points apart on four pages: each is on two pages only.
+    let rgb = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB \
+               /BitsPerComponent 8";
+    let logos = [(rgb, vec![200u8; 36]), (rgb, vec![50u8; 36])];
+    let draws: Vec<_> = (0..4)
+        .map(|n| {
+            if n % 2 == 0 {
+                vec![(480.0, 780.0, 60.0, 45.0, 0)]
+            } else {
+                vec![(481.5, 780.0, 60.0, 45.0, 1)]
+            }
+        })
+        .collect();
+    let out = read(&picture_pages(&draws, &logos));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+    // The same logo on four pages stays furniture.
+    let draws: Vec<_> = (0..4)
+        .map(|_| vec![(480.0, 780.0, 60.0, 45.0, 0)])
+        .collect();
+    let out = read(&picture_pages(&draws, &logos));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    // One stencil object on four pages stays furniture too.
+    let draws: Vec<_> = (0..4)
+        .map(|_| vec![(400.0, 600.0, 85.0, 85.0, 0)])
+        .collect();
+    let out = read(&picture_pages(&draws, &codes[..1]));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}

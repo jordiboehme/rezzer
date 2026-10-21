@@ -78,6 +78,9 @@ pub(crate) struct PageItems {
     /// For each of `images`, whether its pixels could be a barcode or QR code: 1-bit and at
     /// least 21 on a side.
     pub images_code: Vec<bool>,
+    /// For each of `images`, what the picture is: a hash of its dictionary, size and data,
+    /// so the same picture on many pages is known as one.
+    pub images_id: Vec<u64>,
     /// Straight lines and rectangles the page draws, in the frame of the page box (not
     /// turned), for finding ruled tables.
     pub rules: Vec<Rule>,
@@ -168,7 +171,7 @@ impl PageItems {
             .sum::<u64>();
         self.rules.shrink_to_fit();
         total
-            + 17 * self.images.len() as u64
+            + 25 * self.images.len() as u64
             + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
             + 256
     }
@@ -632,6 +635,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             unread_hidden,
             clip_in_forms,
             font_bytes,
+            stencils,
         } = walked;
         self.cache_bytes = self.cache_bytes.saturating_add(font_bytes);
         let (placed, failed) = edit(&mut data, cut.as_ref().map(|(at, _)| *at), &rewrites);
@@ -692,6 +696,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
             actuals: Vec::new(),
             images: Vec::new(),
             images_code: Vec::new(),
+            images_id: Vec::new(),
+            stencils,
+            page: n,
             rules: Vec::new(),
             rules_cut: false,
             open: Vec::new(),
@@ -802,6 +809,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.quotes = quotes;
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
+        items.images_id = std::mem::take(&mut dev.images_id);
         items.rules = std::mem::take(&mut dev.rules);
         items.origin = (crop.x0 as f32, crop.y0 as f32);
         if dev.rules_cut {
@@ -962,6 +970,7 @@ struct Walked {
     unread_hidden: Vec<(String, u64)>,
     clip_in_forms: u64,
     font_bytes: u64,
+    stencils: HashMap<u128, Option<ObjectIdentifier>>,
 }
 
 /// What the walk keeps for the whole file: fonts, the ActualText of named properties and
@@ -1020,6 +1029,8 @@ struct Walk<'w> {
     skipping: usize,
     /// Why the walk stopped.
     over: Option<String>,
+    /// Stencil mask objects by their dictionary's key (see [`picture_id`]).
+    stencils: HashMap<u128, Option<ObjectIdentifier>>,
 }
 
 impl<'w> Walk<'w> {
@@ -1046,6 +1057,7 @@ impl<'w> Walk<'w> {
             layer: Vec::new(),
             skipping: 0,
             over: None,
+            stencils: HashMap::new(),
         }
     }
 
@@ -1059,6 +1071,7 @@ impl<'w> Walk<'w> {
             unread_hidden: self.unread_hidden,
             clip_in_forms: self.clip_in_forms,
             font_bytes: self.font_bytes,
+            stencils: self.stencils,
         }
     }
 
@@ -1331,6 +1344,21 @@ impl<'w> Walk<'w> {
                 match dict.get::<Name<'_>>(b"Subtype").as_deref() {
                     Some(b"Form") => self.run_form(&s, &dict, res),
                     Some(b"Image") => {
+                        let mask = dict
+                            .get::<bool>(b"ImageMask")
+                            .or_else(|| dict.get::<bool>(b"IM"))
+                            .unwrap_or(false);
+                        if mask {
+                            let id = s.obj_id();
+                            self.stencils
+                                .entry(s.cache_key())
+                                .and_modify(|known| {
+                                    if *known != Some(id) {
+                                        *known = None;
+                                    }
+                                })
+                                .or_insert(Some(id));
+                        }
                         let cs = dict.get::<Object<'_>>(b"ColorSpace");
                         let bytes = cs.map_or(0, |o| self.streams_under(&o, 3));
                         self.charge(bytes / BYTES_PER_UNIT)
@@ -1979,6 +2007,38 @@ struct Open {
     used: bool,
 }
 
+/// Bytes of a picture's data its identity hash reads; its length counts too.
+const ID_BYTES: usize = 64 << 10;
+
+/// What a picture is, for finding the same picture on many pages: a hash of its size, its
+/// dictionary and the first [`ID_BYTES`] of its data with the data's length. A stencil mask
+/// shows no data: it is known by its image object, which the walk found by its dictionary
+/// (`stencils`); one whose object is not known for sure (an inline one, or several objects
+/// with one dictionary) is a picture of its own, `own` making it unique.
+fn picture_id(
+    image: &Image<'_, '_>,
+    stencils: &HashMap<u128, Option<ObjectIdentifier>>,
+    own: (u32, usize),
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (image.width(), image.height()).hash(&mut h);
+    match image {
+        Image::Raster(r) => {
+            let s = r.stream();
+            s.dict().data().hash(&mut h);
+            let data = s.raw_data();
+            data.len().hash(&mut h);
+            data[..data.len().min(ID_BYTES)].hash(&mut h);
+        }
+        Image::Stencil(st) => match stencils.get(&st.cache_key()) {
+            Some(Some(id)) => (id.obj_number, id.gen_number).hash(&mut h),
+            _ => ("own", own).hash(&mut h),
+        },
+    }
+    h.finish()
+}
+
 /// The fewest pixels a side of a QR code has.
 const CODE_PIXELS: u32 = 21;
 
@@ -2017,6 +2077,11 @@ struct TextDevice<'d> {
     actuals: Vec<Rc<str>>,
     images: Vec<[f32; 4]>,
     images_code: Vec<bool>,
+    images_id: Vec<u64>,
+    /// The image object of each stencil mask dictionary the walk met, `None` when several
+    /// objects share it.
+    stencils: HashMap<u128, Option<ObjectIdentifier>>,
+    page: u32,
     rules: Vec<Rule>,
     /// Lines were drawn past the cap and are not kept.
     rules_cut: bool,
@@ -2457,6 +2522,8 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
         self.images.push([min(xs), min(ys), max(xs), max(ys)]);
         self.images_code.push(code_pixels(&image));
+        let id = picture_id(&image, &self.stencils, (self.page, self.images.len()));
+        self.images_id.push(id);
     }
 
     fn pop_clip(&mut self) {
