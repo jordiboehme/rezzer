@@ -1,0 +1,32 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/assets/0/id",
+    "equals": "page-1-pic-1"
+  },
+  {
+    "pointer": "/assets/0/needs_vision",
+    "equals": false
+  },
+  {
+    "pointer": "/assets/0/alt",
+    "equals": "logo or small picture, box 451, 724 to 522, 795"
+  },
+  {
+    "contains": "Bei Spiel GmbH"
+  },
+  {
+    "contains": "logo or small picture, box 451, 724 to 522, 795"
+  },
+  {
+    "pointer": "/assets/1",
+    "absent": true
+  }
+]

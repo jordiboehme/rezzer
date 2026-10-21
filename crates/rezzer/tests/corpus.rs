@@ -77,8 +77,8 @@ const GOLDEN_OFFICE: [&str; 8] = [
 
 /// The PDFs with golden files: form logic (a calculation, formats in words, a LibreOffice
 /// form, buttons with scripts), an annotation at its passage, two columns, page labels with
-/// an outline, and a scan that needs vision.
-const GOLDEN_PDF: [&str; 8] = [
+/// an outline, a scan that needs vision, and an invoice with a logo.
+const GOLDEN_PDF: [&str; 9] = [
     "pdfjs-text-field-calc.pdf",
     "pdfbox-sf1199a-direct-deposit.pdf",
     "pdfjs-annotation-highlight.pdf",
@@ -87,6 +87,7 @@ const GOLDEN_PDF: [&str; 8] = [
     "pdfjs-js-buttons.pdf",
     "pypdf-libreoffice-form.pdf",
     "scan-truman-letter-nara.pdf",
+    "mustang-gnuaccounting-invoice-508.pdf",
 ];
 
 /// Corpus files, sorted: the files right in the pipeline folders, except facts files and the
@@ -410,7 +411,7 @@ fn office_corpus_matches_manifest() {
 fn pdf_corpus_matches_manifest() {
     let mut listed = manifest_rows();
     listed.retain(|k, _| k.starts_with("pdf/"));
-    assert_eq!(listed.len(), 38, "expected 38 pdf rows");
+    assert_eq!(listed.len(), 39, "expected 39 pdf rows");
     let mut files: Vec<PathBuf> = std::fs::read_dir(corpus_dir().join("pdf"))
         .unwrap()
         .map(|e| e.unwrap().path())

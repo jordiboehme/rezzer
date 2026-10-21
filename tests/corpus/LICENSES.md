@@ -181,6 +181,8 @@ The spreadsheet files were downloaded on 2026-10-20 from the raw form of the pin
 
 - Apache Tika test documents (Apache-2.0): `office/testEXCEL_custom_props.xlsx`, `testEXCEL_various.xlsb`. Source: https://github.com/apache/tika/tree/043762c6327ff36b3081ce297688e93915c85996 . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/tika/blob/043762c6327ff36b3081ce297688e93915c85996/NOTICE.txt . The license text is the Apache License 2.0 below.
 
+- Mustang project test data (Apache-2.0): `pdf/mustang-gnuaccounting-invoice-508.pdf` (renamed from `MustangGnuaccountingBeispielRE-20201121_508blanko.pdf`, bytes unchanged). Source: https://github.com/ZUGFeRD/mustangproject/tree/c83a73af4e57b45a8bb396ce97003f0fca05f5a9 . Copyright 2014 Jochen Staerk. NOTICE: https://github.com/ZUGFeRD/mustangproject/blob/c83a73af4e57b45a8bb396ce97003f0fca05f5a9/NOTICE . The license text is the Apache License 2.0 below.
+
 NOTICE of Apache POI (section 4(d) of the license), source: https://raw.githubusercontent.com/apache/poi/04804ac97487ceded07a8231bc106a258109cbeb/legal/NOTICE
 
     Apache POI
