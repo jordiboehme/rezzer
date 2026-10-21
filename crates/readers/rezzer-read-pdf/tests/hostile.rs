@@ -3938,3 +3938,92 @@ fn annotated_chain(key: &str) -> Vec<u8> {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     b.finish(catalog)
 }
+
+/// A page of 80 lines of 50 words, a URI link over each word, and with `tall` one more link
+/// over the whole page.
+fn linked_words(tall: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut content = String::from("BT /F1 6 Tf ");
+    let mut annots = Vec::new();
+    let mut link = |b: &mut Builder, rect: String, k: usize| {
+        annots.push(format!(
+            "{} 0 R",
+            b.add(format!(
+                "<< /Type /Annot /Subtype /Link /Rect [{rect}] \
+                 /A << /S /URI /URI (https://example.org/{k}) >> >>"
+            ))
+        ));
+    };
+    if tall {
+        link(&mut b, "0 0 595 842".into(), 0);
+    }
+    for r in 0..80 {
+        let y = 820 - 10 * r;
+        for c in 0..50 {
+            let x = 10 + 11 * c;
+            content += &format!("1 0 0 1 {x} {y} Tm (ab) Tj ");
+            link(&mut b, format!("{x} {} {} {}", y - 1, x + 7, y + 5), r * 50 + c + 1);
+        }
+    }
+    content += "ET\n";
+    let c = b.stream("/Filter /FlateDecode", &deflate(content.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R /Annots [{}] >>",
+        annots.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn links_are_matched_per_glyph_within_bounds() {
+    // 4,000 small links: each glyph tests only the links at its height, and every word
+    // keeps its own link.
+    let start = Instant::now();
+    let out = read(&linked_words(false));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    assert!(md.contains("[ab](https://example.org/1)"), "{}", &md[..2000]);
+    assert!(md.contains("[ab](https://example.org/4000)"), "{}", &md[..2000]);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("too many links")),
+        "{:?}",
+        out.document.losses
+    );
+    // One link over the whole page makes every glyph test the links below it: past the
+    // work bound no glyph keeps a link, and the loss says so.
+    let start = Instant::now();
+    let out = read(&linked_words(true));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        losses(&out, LossReason::Limit)
+            .iter()
+            .any(|l| l.what.contains("too many links")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}

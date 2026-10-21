@@ -48,7 +48,7 @@ const BYTES_PER_UNIT: u64 = 64;
 /// Nesting of forms the interpreter follows (hayro-interpret's own bound).
 const FORM_DEPTH: usize = 50;
 
-/// Run and link pairs one page may test for a URI link over a run.
+/// Glyph and link pairs one page may test for a URI link over a glyph.
 const LINK_WORK: usize = 16_000_000;
 
 /// What the text parser found on one page. Any text layer that fills it must keep this
@@ -427,7 +427,7 @@ fn switched_off(doc: &hayro_syntax::Pdf) -> HashSet<ObjectIdentifier> {
 }
 
 /// A URI link box (x0, y0, x1, y1 in user space) and its target.
-type Link = ([f32; 4], Rc<UriTarget>);
+pub(crate) type Link = ([f32; 4], Rc<UriTarget>);
 
 /// The URI links of every page, from the object layer. They are never followed. Links that
 /// share one address share one target.
@@ -1922,6 +1922,8 @@ pub(crate) struct Gl {
     pub joined: bool,
     /// The ActualText the glyph stands for, an index into the page's list.
     pub actual: Option<u32>,
+    /// The URI link whose box holds the glyph's middle, an index into the page's links.
+    pub link: Option<u32>,
 }
 
 /// How a sequence the interpreter opens matches the marks of the walk.
@@ -2362,6 +2364,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 vertical: info.vertical,
                 joined: false,
                 actual: None,
+                link: None,
             };
             // ActualText of the outermost sequence that has one replaces the glyphs in it.
             if let Some(o) = self.open.iter_mut().find(|o| o.actual.is_some()) {
@@ -2470,6 +2473,48 @@ impl<'a> Device<'a> for TextDevice<'_> {
     }
 }
 
+/// Marks each glyph with the first of `links` whose box holds the glyph's middle (half its
+/// advance along the baseline, a quarter of its size above it), so a run ends where a link
+/// does. `x0`, `y0` move the glyphs into the links' user space. The boxes are looked up by
+/// height; past [`LINK_WORK`] tests no glyph keeps a link and the result is false.
+fn link_glyphs(glyphs: &mut [Gl], links: &[Link], x0: f64, y0: f64) -> bool {
+    let mut order: Vec<usize> = (0..links.len()).collect();
+    order.sort_by(|&a, &b| links[a].0[1].total_cmp(&links[b].0[1]));
+    let bottoms: Vec<f64> = order.iter().map(|&k| f64::from(links[k].0[1])).collect();
+    let tallest = links
+        .iter()
+        .map(|(b, _)| f64::from(b[3] - b[1]))
+        .fold(0.0f64, f64::max);
+    let mut work = 0usize;
+    for g in glyphs.iter_mut() {
+        let size = f64::from(g.size.max(0.1));
+        let half = f64::from(g.adv.unwrap_or(g.size.max(0.1) * 0.5)) / 2.0;
+        let (dx, dy) = (f64::from(g.dx), f64::from(g.dy));
+        let cx = f64::from(g.x) + dx * half - dy * size / 4.0 + x0;
+        let cy = f64::from(g.y) + dy * half + dx * size / 4.0 + y0;
+        let lo = bottoms.partition_point(|b| *b < cy - tallest);
+        let hi = bottoms.partition_point(|b| *b <= cy);
+        work = work.saturating_add(hi.saturating_sub(lo));
+        if work > LINK_WORK {
+            glyphs.iter_mut().for_each(|g| g.link = None);
+            return false;
+        }
+        g.link = order[lo.min(hi)..hi]
+            .iter()
+            .copied()
+            .filter(|&k| {
+                let b = &links[k].0;
+                cx >= f64::from(b[0])
+                    && cx <= f64::from(b[2])
+                    && cy >= f64::from(b[1])
+                    && cy <= f64::from(b[3])
+            })
+            .min()
+            .and_then(|k| u32::try_from(k).ok());
+    }
+    true
+}
+
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it.
 fn lay_out(
@@ -2490,7 +2535,7 @@ fn lay_out(
         }
     }
     let glyphs = &rest[..];
-    let (visible, hidden): (Vec<Gl>, Vec<Gl>) = glyphs.iter().partition(|g| !g.invisible);
+    let (mut visible, hidden): (Vec<Gl>, Vec<Gl>) = glyphs.iter().partition(|g| !g.invisible);
     // When most of the text reads in one other direction, the page is read in that frame.
     let mut by_dir = [0usize; 4];
     for g in &visible {
@@ -2511,15 +2556,6 @@ fn lay_out(
         turned: turn != Turn::None,
         ..PageItems::default()
     };
-    items.runs = runs_of(page, &visible, text, turn);
-    items.invisible = runs_of(page, &hidden, text, turn);
-    for (name, list) in layers.iter().zip(&by_layer) {
-        if !list.is_empty() {
-            items
-                .hidden_layers
-                .push((name.clone(), runs_of(page, list, text, turn)));
-        }
-    }
     if items.turned && !links.is_empty() {
         let k = links.len();
         let s = if k == 1 { "" } else { "s" };
@@ -2529,23 +2565,15 @@ fn lay_out(
         )));
     }
     if !items.turned && !links.is_empty() {
-        let cost = items.runs.len().saturating_mul(links.len());
-        if cost > LINK_WORK {
-            items.links_cut = true;
-        } else {
-            for r in &mut items.runs {
-                let cx = f64::from(r.x + r.w / 2.0) + x0;
-                let cy = f64::from(r.y + r.h / 4.0) + y0;
-                r.uri = links
-                    .iter()
-                    .find(|(b, _)| {
-                        cx >= f64::from(b[0])
-                            && cx <= f64::from(b[2])
-                            && cy >= f64::from(b[1])
-                            && cy <= f64::from(b[3])
-                    })
-                    .map(|(_, u)| u.clone());
-            }
+        items.links_cut = !link_glyphs(&mut visible, links, x0, y0);
+    }
+    items.runs = runs_of(page, &visible, text, turn, links);
+    items.invisible = runs_of(page, &hidden, text, turn, links);
+    for (name, list) in layers.iter().zip(&by_layer) {
+        if !list.is_empty() {
+            items
+                .hidden_layers
+                .push((name.clone(), runs_of(page, list, text, turn, links)));
         }
     }
     if items.runs.is_empty() && !items.invisible.is_empty() {

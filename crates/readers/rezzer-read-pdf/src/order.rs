@@ -9,7 +9,7 @@
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::Run;
-use crate::text::{Gl, Texts};
+use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
 const WORD_GAP: f32 = 0.15;
@@ -56,6 +56,8 @@ struct Frag {
     bold: bool,
     italic: bool,
     mcid: Option<u32>,
+    /// The URI link over the glyphs, an index into the page's links.
+    link: Option<u32>,
     chars: usize,
     /// Where the text of each glyph (and each space put in) starts in `text`: the units
     /// right-to-left reordering moves as a whole.
@@ -118,6 +120,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             let same_style = f.bold == g.bold
                 && f.italic == g.italic
                 && f.mcid == g.mcid
+                && f.link == g.link
                 && (f.size - size).abs() <= 0.05 * f.size.max(size);
             let gap = x - f.end;
             let on_line = (y - f.y).abs() <= 0.25 * f.size.max(size);
@@ -150,6 +153,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             bold: g.bold,
             italic: g.italic,
             mcid: g.mcid,
+            link: g.link,
             chars: t.chars().count(),
             units: vec![0],
         });
@@ -448,8 +452,9 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
 }
 
 /// The runs of one line, numbered `line`. A run that starts a new word gets a leading space;
-/// a line with right-to-left text becomes one run in logical order.
-fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32) -> Vec<Run> {
+/// a line with right-to-left text becomes one run in logical order. A run's link is the one
+/// of `links` its glyphs lie in.
+fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::with_capacity(ids.len());
     let mut prev: Option<&Frag> = None;
     for &i in ids {
@@ -474,7 +479,10 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32) -> Vec<Run> {
             bold: f.bold,
             italic: f.italic,
             mcid: f.mcid,
-            uri: None,
+            uri: f
+                .link
+                .and_then(|k| links.get(k as usize))
+                .map(|(_, u)| u.clone()),
             line,
             off_axis: false,
         });
@@ -598,7 +606,13 @@ fn vertical_runs(
 
 /// Runs in reading order for one set of glyphs (visible or invisible), with the frame turn
 /// used: the main text along +x first, then text in other directions, then vertical writing.
-pub(crate) fn runs_of(page: u32, glyphs: &[Gl], text: &Texts<'_>, turn: Turn) -> Vec<Run> {
+pub(crate) fn runs_of(
+    page: u32,
+    glyphs: &[Gl],
+    text: &Texts<'_>,
+    turn: Turn,
+    links: &[Link],
+) -> Vec<Run> {
     let mut main = Vec::with_capacity(glyphs.len());
     let mut vertical = Vec::new();
     let mut others: Vec<(Turn, Vec<Gl>)> = Vec::new();
@@ -633,7 +647,7 @@ pub(crate) fn runs_of(page: u32, glyphs: &[Gl], text: &Texts<'_>, turn: Turn) ->
     let mut line = 0u32;
     let frags = fragments(&main, text, turn, turn);
     for ids in lines_of(&frags, true) {
-        runs.extend(line_runs(page, &frags, &ids, line));
+        runs.extend(line_runs(page, &frags, &ids, line, links));
         line += 1;
     }
     for (dir, list) in others {
@@ -642,7 +656,7 @@ pub(crate) fn runs_of(page: u32, glyphs: &[Gl], text: &Texts<'_>, turn: Turn) ->
         let frame = compose(turn, dir);
         let frags = fragments(&list, text, frame, turn);
         for ids in lines_of(&frags, false) {
-            let mut r = line_runs(page, &frags, &ids, line);
+            let mut r = line_runs(page, &frags, &ids, line, links);
             for (run, &i) in r.iter_mut().zip(&ids) {
                 (run.x, run.y) = (frags[i].ox, frags[i].oy);
                 run.off_axis = true;
@@ -699,6 +713,7 @@ mod tests {
             bold: false,
             italic: false,
             mcid: None,
+            link: None,
             chars: text.chars().count(),
             units: vec![0],
         }

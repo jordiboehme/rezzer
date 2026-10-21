@@ -821,3 +821,36 @@ fn reader_id_and_formats() {
     assert_eq!(PdfReader.id(), "pdf");
     assert_eq!(PdfReader.formats(), &[FormatId::Pdf]);
 }
+
+#[test]
+fn link_covers_only_its_box() {
+    // One line drawn as one text object; the link box covers only the address in it.
+    let page = Page {
+        content: "BT /F1 12 Tf 72 700 Td [(see ) -300 (www.example.org) -300 ( now)] TJ ET\n"
+            .into(),
+        annots: vec![
+            "<< /Type /Annot /Subtype /Link /Rect [96 690 196 715] \
+             /A << /S /URI /URI (http://www.example.org) >> >>"
+                .into(),
+        ],
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    assert_eq!(
+        all_links(&out.document.body),
+        [(
+            "http://www.example.org".to_string(),
+            false,
+            "www.example.org".to_string()
+        )]
+    );
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    assert!(
+        md.contains("see [www.example.org](http://www.example.org) now"),
+        "{md}"
+    );
+}
