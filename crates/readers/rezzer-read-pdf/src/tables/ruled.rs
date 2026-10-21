@@ -16,26 +16,39 @@ struct Seg {
     to: f32,
 }
 
-/// Collinear segments that touch become one.
+/// Collinear segments that touch become one. Segments are grouped by where they lie first
+/// (positions closer than [`SNAP`] are one line); within a group, pieces that overlap or
+/// touch within [`SNAP`] join, and the joined piece lies at the mean of its pieces. Two lines
+/// a point apart that never meet along their length stay apart.
 fn merged(mut segs: Vec<Seg>) -> Vec<Seg> {
-    segs.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+    segs.sort_by(|a, b| a.at.total_cmp(&b.at));
     let mut out: Vec<Seg> = Vec::with_capacity(segs.len());
-    let mut group_start = 0;
-    for s in segs {
-        let joined = out[group_start..]
-            .iter_mut()
-            .rev()
-            .find(|o| (o.at - s.at).abs() <= SNAP && s.from <= o.to + SNAP);
-        match joined {
-            Some(o) => o.to = o.to.max(s.to),
-            None => {
-                if out.last().is_none_or(|o| (o.at - s.at).abs() > SNAP) {
-                    group_start = out.len();
-                }
-                out.push(s);
-            }
+    let mut start = 0;
+    while start < segs.len() {
+        let mut end = start + 1;
+        while end < segs.len() && segs[end].at - segs[end - 1].at <= SNAP {
+            end += 1;
         }
+        let group = &mut segs[start..end];
+        group.sort_by(|a, b| a.from.total_cmp(&b.from));
+        let mut k = 0;
+        while k < group.len() {
+            let mut joined = group[k];
+            let (mut sum, mut n) = (f64::from(joined.at), 1u32);
+            k += 1;
+            while k < group.len() && group[k].from <= joined.to + SNAP {
+                joined.to = joined.to.max(group[k].to);
+                sum += f64::from(group[k].at);
+                n += 1;
+                k += 1;
+            }
+            joined.at = (sum / f64::from(n)) as f32;
+            out.push(joined);
+        }
+        start = end;
     }
+    // The grid search looks segments up by where they lie.
+    out.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
     out
 }
 
@@ -415,5 +428,47 @@ pub(super) fn ruled(
     for mut t in tables {
         t.header_rows = header_of(&t.rows);
         found.tables.push(t);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seg(at: f32, from: f32, to: f32) -> Seg {
+        Seg { at, from, to }
+    }
+
+    #[test]
+    fn merged_keeps_near_collinear_segments() {
+        // Two sides of a box drawn twice a little apart, and a column rule 1.5 points to
+        // the right of them in three pieces lower down: the rule's pieces stay apart from
+        // the box sides and from each other.
+        let out = merged(vec![
+            seg(411.5, 689.5, 739.8),
+            seg(412.2, 689.5, 739.8),
+            seg(413.3, 106.2, 261.5),
+            seg(413.3, 481.0, 557.5),
+            seg(413.3, 621.2, 672.2),
+        ]);
+        let mut got: Vec<(f32, f32, f32)> = out.iter().map(|s| (s.at, s.from, s.to)).collect();
+        got.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.total_cmp(&b.0)));
+        assert_eq!(got.len(), 4, "{got:?}");
+        for (k, (from, to)) in [(106.2, 261.5), (481.0, 557.5), (621.2, 672.2)]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(got[k], (413.3, from, to), "{got:?}");
+        }
+        assert!((got[3].0 - 411.85).abs() < 0.01, "{got:?}");
+        assert_eq!((got[3].1, got[3].2), (689.5, 739.8), "{got:?}");
+        // Pieces that touch within the snap distance join; pieces of one line far apart
+        // stay apart.
+        let out = merged(vec![
+            seg(100.0, 0.0, 10.0),
+            seg(100.5, 11.5, 20.0),
+            seg(100.0, 30.0, 40.0),
+        ]);
+        assert_eq!(out.len(), 2, "{out:?}");
     }
 }
