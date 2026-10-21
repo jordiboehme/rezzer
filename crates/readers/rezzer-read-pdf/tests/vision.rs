@@ -1342,8 +1342,7 @@ fn black_picture_page(x: f32, y: f32, page: &str) -> Vec<u8> {
 /// The crop `png` is `w` by `h` pixels; its dark pixels are exactly the rectangle inside the
 /// margin of 8 pixels, and the margin is white.
 fn assert_cut_at_the_box(png: &[u8], w: u16, h: u16) {
-    let pixmap =
-        hayro::vello_cpu::Pixmap::from_png(std::io::Cursor::new(png)).expect("a PNG file");
+    let pixmap = hayro::vello_cpu::Pixmap::from_png(std::io::Cursor::new(png)).expect("a PNG file");
     assert_eq!((pixmap.width(), pixmap.height()), (w, h));
     for y in 0..h {
         for x in 0..w {
@@ -1376,4 +1375,61 @@ fn a_crop_is_cut_at_the_box_on_a_rotated_page() {
     let file = black_picture_page(250.0, 400.0, "/Rotate 90");
     let out = read_opts(&file, true, Limits::default());
     assert_cut_at_the_box(blob(&out, "page-1-pic-1"), 96, 136);
+}
+
+#[test]
+fn two_pictures_at_one_block_are_numbered_from_the_top() {
+    // Both below the one line of text; the lower one is drawn first.
+    let draws = vec![vec![
+        (250.0, 300.0, 60.0, 40.0, 0),
+        (250.0, 400.0, 60.0, 40.0, 1),
+    ]];
+    let out = read(&picture_pages(&draws, &[gray(10), gray(100)]));
+    assert_eq!(
+        lines(page(&out, 1)),
+        [
+            "Page 1",
+            "Page 0.",
+            "[media page-1-pic-1]",
+            "[media page-1-pic-2]"
+        ]
+    );
+    assert_eq!(
+        asset(&out, "page-1-pic-1").alt.as_deref(),
+        Some("small picture, box 250, 400 to 310, 440")
+    );
+}
+
+#[test]
+fn side_strips_and_the_band_edge_are_not_logo_places() {
+    // At the left edge but in the middle of the height; and in the middle of the width, between
+    // the bottom band (15 %) and the corner height (20 %).
+    for (x, y, w, h) in [(10.0, 400.0, 30.0, 40.0), (250.0, 130.0, 60.0, 30.0)] {
+        let out = read(&picture_pages(&[vec![(x, y, w, h, 0)]], &[gray(10)]));
+        assert_eq!(needing(&out), ["page-1-pic-1"], "{x}, {y}");
+    }
+}
+
+#[test]
+fn a_note_on_a_turned_page_stays_at_the_page_beside_a_picture() {
+    // A turned page puts its annotations at the page. The picture's point must not give the
+    // note the picture's block.
+    let content = "q 0 1 -1 0 595 0 cm\n\
+                   BT /F1 12 Tf 72 500 Td (First line of the turned page.) Tj ET\n\
+                   BT /F1 12 Tf 72 480 Td (Second line of the turned page.) Tj ET\n\
+                   BT /F1 12 Tf 72 200 Td (Third line of the turned page.) Tj ET\nQ\n\
+                   q 60 0 0 40 250 400 cm BI /W 1 /H 1 /CS /G /BPC 8 /F /AHx ID 80> EI Q\n";
+    let note = "<< /Type /Annot /Subtype /Text /Rect [500 290 520 310] /Contents (Look.) >>";
+    let file = common::pdf(
+        &[common::Page {
+            annots: vec![note.into()],
+            ..common::Page::text(content)
+        }],
+        "",
+    );
+    let out = read(&file);
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    let notes = &out.document.facets.annotations;
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(notes[0].anchor, Some(Anchor("p1".into())));
 }

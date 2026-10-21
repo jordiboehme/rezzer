@@ -1143,6 +1143,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_read_cut_short_never_finds_a_picture_on_every_page() {
+        let page = |n: u32| PageItems {
+            page: n,
+            images: vec![[0.0, 0.0, 30.0, 30.0]],
+            images_id: vec![7],
+            ..PageItems::default()
+        };
+        let read = [page(1), page(2)];
+        assert_eq!(on_every_page(read.iter(), 2), HashSet::from([7]));
+        // Two pages read of three: the third may not have it.
+        assert!(on_every_page(read.iter(), 3).is_empty());
+        // One page is not every page.
+        assert!(on_every_page(read[..1].iter(), 1).is_empty());
+    }
+
+    #[test]
     fn pages_stay_under_the_pixel_cap() {
         assert_eq!(pixel_size(595.0, 842.0, MAX_PIXELS), (1190, 1684));
         let (w, h) = pixel_size(200_000.0, 200_000.0, MAX_PIXELS);
