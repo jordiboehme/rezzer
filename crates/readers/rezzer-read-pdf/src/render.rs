@@ -25,6 +25,7 @@
 //! One render can still run past the time limit: it cannot stop in the middle of a page.
 
 mod cost;
+mod headers;
 mod stencils;
 
 use std::collections::{HashMap, HashSet};

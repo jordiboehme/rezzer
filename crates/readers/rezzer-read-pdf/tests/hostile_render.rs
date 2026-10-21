@@ -725,3 +725,159 @@ fn a_thousand_page_fills_render() {
     );
     assert_rss_under_256_mib();
 }
+
+/// A page that needs vision, then `content` drawn on it, with Helvetica as `/F1` and the tiling
+/// patterns `/P1` (a cell of 20 points) and `/P2` (a cell of 20 points filled with `/P1`).
+fn draw_twin(content: &str) -> Vec<u8> {
+    let packed = deflate(content.as_bytes());
+    render_twin(595, 842, "/Body Do\n", |b| {
+        let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let p1 = b.stream(
+            "/PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20] /XStep 20 \
+             /YStep 20 /Resources << >>",
+            b"0 0 10 10 re f",
+        );
+        let p2 = b.stream(
+            &format!(
+                "/PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20] /XStep 20 \
+                 /YStep 20 /Resources << /Pattern << /P1 {p1} 0 R >> >>"
+            ),
+            b"/Pattern cs /P1 scn 0 0 20 20 re f",
+        );
+        let body = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode \
+                 /Resources << /Font << /F1 {font} 0 R >> \
+                 /Pattern << /P1 {p1} 0 R /P2 {p2} 0 R >> >>"
+            ),
+            &packed,
+        );
+        Extra {
+            xobjects: format!("/Body {body} 0 R"),
+            ..Extra::default()
+        }
+    })
+}
+
+#[test]
+fn finely_dashed_lines_stay_small() {
+    // 800 full-height lines with dashes of 0.01 points: about 67 million dashes.
+    let line = "0 0 m 0 842 l S\n";
+    let content = format!("[0.01] 0 d\n{}", line.repeat(800));
+    assert_fills_bounded(&draw_twin(&content));
+}
+
+#[test]
+fn a_long_finely_dashed_curve_stays_small() {
+    let mut c = String::from("[0.05] 0 d 10 10 m\n");
+    for i in 0..300 {
+        let y = if i % 2 == 0 { 832 } else { 10 };
+        c.push_str(&format!(
+            "{} {y} {} {y} {} {} c\n",
+            10 + i % 500,
+            20 + i % 500,
+            30 + i % 500,
+            842 - y
+        ));
+    }
+    c.push_str("S\n");
+    assert_fills_bounded(&draw_twin(&c));
+}
+
+#[test]
+fn a_dash_array_with_many_entries_stays_small() {
+    let dashes = vec!["0.01"; 1000].join(" ");
+    let content = format!("[{dashes}] 0 d\n{}", "0 0 m 0 842 l S\n".repeat(800));
+    assert_fills_bounded(&draw_twin(&content));
+}
+
+#[test]
+fn a_dense_hatch_in_one_path_stays_small() {
+    let mut c = String::new();
+    for i in 0..1_000 {
+        let x = (i % 595) as f32 + 0.5;
+        c.push_str(&format!("{x} 0 m {x} 842 l {} 842 l h\n", x + 0.1));
+    }
+    c.push_str("f\n");
+    assert_fills_bounded(&draw_twin(&c));
+}
+
+#[test]
+fn nested_clips_stay_small() {
+    let clip = "q 0 0 m 595 0 l 297 842 l h W n\n";
+    let content = format!(
+        "{}0 0 595 842 re f\n{}",
+        clip.repeat(800),
+        "Q\n".repeat(800)
+    );
+    assert_fills_bounded(&draw_twin(&content));
+}
+
+#[test]
+fn huge_stroke_widths_stay_small() {
+    assert_fills_bounded(&draw_twin(&"1000000 w 0 0 m 595 842 l S\n".repeat(800)));
+}
+
+#[test]
+fn text_that_fills_strokes_and_clips_stays_small() {
+    let mut c = String::from("BT /F1 400 Tf 2 Tr\n");
+    for _ in 0..200 {
+        c.push_str("0 100 Td (WM) Tj 0 -100 Td\n");
+    }
+    c.push_str("6 Tr (WMWM) Tj ET\n");
+    assert_fills_bounded(&draw_twin(&c));
+}
+
+#[test]
+fn patterns_inside_patterns_stay_small() {
+    let content = "/Pattern cs /P2 scn 0 0 595 842 re f\n".repeat(600);
+    assert_fills_bounded(&draw_twin(&content));
+}
+
+#[test]
+fn coarsely_dashed_lines_stay_small() {
+    // 100 full-height lines with dashes of 2 points: about 21,000 dashes, under the room.
+    let content = format!("[2] 0 d\n{}", "0 0 m 0 842 l S\n".repeat(100));
+    assert_fills_bounded(&draw_twin(&content));
+}
+
+#[test]
+fn a_large_form_is_scanned_for_inline_pictures_with_a_small_buffer() {
+    // A form of 200 MB of comment lines (rows of noise, each repeated 40 times), named in the
+    // page's resources, with a small inline stencil at its end. The scan for inline pictures
+    // reads it piece by piece; the page renders.
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut state = 5u32;
+    let mut line = vec![b'%'; 1000];
+    line[999] = b'\n';
+    for i in 0..200_000 {
+        if i % 40 == 0 {
+            for b in &mut line[1..999] {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                *b = b'a' + ((state >> 16) % 26) as u8;
+            }
+        }
+        z.write_all(&line).expect("deflate");
+    }
+    z.write_all(b"BI /W 8 /H 8 /IM true /BPC 1 ID \x00\x00\x00\x00\x00\x00\x00\x00 EI\n")
+        .expect("deflate");
+    let packed = z.finish().expect("deflate");
+    let file = render_twin(595, 842, "", |b| {
+        let form = b.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode",
+            &packed,
+        );
+        Extra {
+            xobjects: format!("/Big {form} 0 R"),
+            ..Extra::default()
+        }
+    });
+    drop(packed);
+    let out = read_with(&file, true);
+    assert!(
+        out.blobs.iter().any(|b| b.asset == "page-1"),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}

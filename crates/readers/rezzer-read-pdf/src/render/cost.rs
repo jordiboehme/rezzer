@@ -48,12 +48,13 @@ use hayro_interpret::shading::ShadingType;
 use hayro_interpret::util::x_y_advances;
 use hayro_interpret::{
     BlendMode, CacheKey, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, Paint, SoftMask, interpret_page,
+    InterpreterCache, InterpreterSettings, Paint, SoftMask, StrokeProps, interpret_page,
 };
 use hayro_syntax::object::{Array, Dict, Name, Object, Stream};
 use hayro_syntax::page::Page;
 use kurbo::{Affine, BezPath, Rect, Shape};
 
+use super::headers::{jbig2_page, jpeg_frame, jpx_frame};
 use crate::fallback::filters_of;
 
 /// Device calls one page's estimate may take.
@@ -98,6 +99,18 @@ const FILL_ROW: u64 = 64;
 
 /// Pixel rows in one row of vello's tiles.
 const TILE_ROWS: f64 = 4.0;
+
+// A dashed stroke: kurbo expands the dash pattern into one outline per dash before vello
+// makes strips of each, so every dash is a draw of its own. Measured as above, 300 full-height
+// curves stroked with dashes of 0.05 points (about 2.5 million dashes) took 931 MiB; the model
+// charges each dash as a draw of the rows it spans, plus its expanded path.
+
+/// Bytes of the expanded path of one dash (about five elements).
+const DASH_PATH: u64 = 160;
+
+/// Dashes one stroke may draw; past that, working out the render is refused (the room
+/// refuses far fewer dashes, at about 1 KB each, on the way).
+const MAX_DASHES: f64 = 1_000_000.0;
 
 /// What a render's memory goes to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -233,6 +246,52 @@ impl Dry<'_> {
             .saturating_add(edges.saturating_mul(EDGE_ROW))
             .saturating_add(self.rows(b.y0 - pad, b.y1 + pad).saturating_mul(FILL_ROW));
         self.charge(Kind::Drawing, 0, bytes);
+    }
+
+    /// What the dashes of a stroke of `device` (device space) keep, when `stroke` has a dash
+    /// pattern: one draw for each dash, of the rows a dash spans, `width` pixels wide.
+    fn dashes(&mut self, device: &BezPath, stroke: &StrokeProps, transform: &Affine, width: f64) {
+        let period: f64 = stroke.dash_array.iter().map(|d| f64::from(d.abs())).sum();
+        if !(period.is_finite() && period > 0.0) {
+            return;
+        }
+        // The pattern is in user space; its shortest scale gives the most dashes.
+        let (a, b) = x_y_advances(transform);
+        let scale = a.length().min(b.length());
+        let period_px = period * scale;
+        // The control polygon is never shorter than the curve.
+        let length: f64 = device
+            .segments()
+            .map(|s| match s {
+                kurbo::PathSeg::Line(l) => l.p0.distance(l.p1),
+                kurbo::PathSeg::Quad(q) => q.p0.distance(q.p1) + q.p1.distance(q.p2),
+                kurbo::PathSeg::Cubic(c) => {
+                    c.p0.distance(c.p1) + c.p1.distance(c.p2) + c.p2.distance(c.p3)
+                }
+            })
+            .sum();
+        let per_period = (stroke.dash_array.len() as f64 / 2.0).ceil().max(1.0);
+        let count = if period_px > 0.0 {
+            (length / period_px).ceil() * per_period
+        } else {
+            0.0
+        };
+        if !count.is_finite() || count > MAX_DASHES {
+            Self::unbounded(format!(
+                "it strokes with a dash pattern of more than {MAX_DASHES} dashes, too many to \
+                 work out its render first"
+            ));
+        }
+        let longest = stroke
+            .dash_array
+            .iter()
+            .map(|d| f64::from(d.abs()) * a.length().max(b.length()))
+            .fold(0.0, f64::max);
+        let rows = self.rows(0.0, longest + width.max(0.0));
+        let each = DRAW_BASE
+            .saturating_add(rows.saturating_mul(EDGE_ROW * 4 + FILL_ROW))
+            .saturating_add(DASH_PATH);
+        self.charge(Kind::Drawing, 0, (count as u64).saturating_mul(each));
     }
 
     /// The box `(0, 0, w, h)` under `transform`, drawn as a path.
@@ -715,105 +774,6 @@ fn pixels_under(points: &[kurbo::Point]) -> u64 {
     side(x0, x1).saturating_mul(side(y0, y1))
 }
 
-/// Width, height and components of a JPEG frame (its SOF marker), and whether it is not a
-/// baseline or extended sequential frame.
-pub(crate) fn jpeg_frame(data: &[u8]) -> Option<(u64, u64, u64, bool)> {
-    let mut i = 2;
-    if data.get(..2)? != [0xFF, 0xD8] {
-        return None;
-    }
-    while i + 4 <= data.len() {
-        if data[i] != 0xFF {
-            i += 1;
-            continue;
-        }
-        let marker = data[i + 1];
-        match marker {
-            0xFF => i += 1,
-            0x01 | 0xD0..=0xD8 => i += 2,
-            0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
-                let h = u16::from_be_bytes([*data.get(i + 5)?, *data.get(i + 6)?]);
-                let w = u16::from_be_bytes([*data.get(i + 7)?, *data.get(i + 8)?]);
-                let c = *data.get(i + 9)?;
-                let sequential = matches!(marker, 0xC0 | 0xC1);
-                return Some((u64::from(w), u64::from(h), u64::from(c), !sequential));
-            }
-            _ => {
-                let len = u16::from_be_bytes([*data.get(i + 2)?, *data.get(i + 3)?]);
-                i += 2 + usize::from(len);
-            }
-        }
-    }
-    None
-}
-
-/// Width, height and components of a JPEG 2000 picture: the `ihdr` box of a JP2 file, or the
-/// SIZ marker of a bare codestream.
-pub(crate) fn jpx_frame(data: &[u8]) -> Option<(u64, u64, u64)> {
-    let u32_at = |i: usize| -> Option<u64> {
-        Some(u64::from(u32::from_be_bytes(
-            data.get(i..i + 4)?.try_into().ok()?,
-        )))
-    };
-    let head = &data[..data.len().min(1 << 16)];
-    if let Some(at) = head.windows(4).position(|w| w == b"ihdr") {
-        let h = u32_at(at + 4)?;
-        let w = u32_at(at + 8)?;
-        let c = u64::from(u16::from_be_bytes(
-            data.get(at + 12..at + 14)?.try_into().ok()?,
-        ));
-        return Some((w, h, c));
-    }
-    let at = head.windows(2).position(|w| w == [0xFF, 0x51])?;
-    // Lsiz, Rsiz, Xsiz, Ysiz, XOsiz, YOsiz, then tiles, then Csiz.
-    let x = u32_at(at + 6)?;
-    let y = u32_at(at + 10)?;
-    let xo = u32_at(at + 14)?;
-    let yo = u32_at(at + 18)?;
-    let c = u64::from(u16::from_be_bytes(
-        data.get(at + 38..at + 40)?.try_into().ok()?,
-    ));
-    Some((x.saturating_sub(xo), y.saturating_sub(yo), c))
-}
-
-/// Width and height of the page of an embedded JBIG2 stream (its page information segment).
-pub(crate) fn jbig2_page(data: &[u8]) -> Option<(u64, u64)> {
-    let mut i = 0usize;
-    for _ in 0..64 {
-        let number = u32::from_be_bytes(data.get(i..i + 4)?.try_into().ok()?);
-        let flags = *data.get(i + 4)?;
-        let kind = flags & 0x3F;
-        let refs = *data.get(i + 5)? >> 5;
-        if refs > 4 {
-            return None;
-        }
-        let ref_size = if number <= 256 {
-            1
-        } else if number <= 65_536 {
-            2
-        } else {
-            4
-        };
-        let page_size = if flags & 0x40 != 0 { 4 } else { 1 };
-        let mut at = i + 6 + usize::from(refs) * ref_size + page_size;
-        let len = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?);
-        at += 4;
-        if kind == 48 {
-            let w = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?);
-            let h = u32::from_be_bytes(data.get(at + 4..at + 8)?.try_into().ok()?);
-            if h == u32::MAX {
-                return None;
-            }
-            return Some((u64::from(w), u64::from(h)));
-        }
-        if len == u32::MAX {
-            return None;
-        }
-        i = at.checked_add(usize::try_from(len).ok()?)?;
-    }
-    None
-}
-
 impl<'a> Device<'a> for Dry<'_> {
     fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
         self.tick();
@@ -833,6 +793,9 @@ impl<'a> Device<'a> for Dry<'_> {
         }
         if width.is_some() {
             self.draw(&device, width);
+        }
+        if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) = (mode, width) {
+            self.dashes(&device, s, &props.transform, w);
         }
         self.paint(&props.paint, area, stroke);
     }
@@ -883,6 +846,11 @@ impl<'a> Device<'a> for Dry<'_> {
                 }
                 if width.is_some() {
                     self.draw(&device, width);
+                }
+                if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) =
+                    (mode, width)
+                {
+                    self.dashes(&device, s, &props.transform, w);
                 }
             }
             if let Glyph::Type3(t) = &**g {
