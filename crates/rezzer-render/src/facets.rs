@@ -345,6 +345,10 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
     }
     let mut parts = vec!["## Embedded".to_string()];
     if !doc.facets.embedded.is_empty() {
+        // The k-th attachment is extracted as asset `attachment-<k>`, under its own name.
+        let files: HashMap<&str, &rezzer_model::Asset> =
+            doc.assets.iter().map(|a| (a.id.as_str(), a)).collect();
+        let mut attachments = 0;
         let rows: Vec<Vec<String>> = doc
             .facets
             .embedded
@@ -353,6 +357,20 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
                 let mut target = String::new();
                 if let Some(t) = &e.target {
                     code_span(t, Mode::Cell, &mut target);
+                }
+                if e.kind == "attachment" {
+                    attachments += 1;
+                    let id = format!("attachment-{attachments}");
+                    let file = files
+                        .get(id.as_str())
+                        .filter(|a| a.caption.as_deref() == Some(e.name.as_str()))
+                        .and_then(|a| a.path.as_deref());
+                    if let Some(path) = file {
+                        if !target.is_empty() {
+                            target.push(' ');
+                        }
+                        target.push_str(&blocks::asset_link(path, Mode::Cell));
+                    }
                 }
                 vec![
                     cell_text(&e.kind),
@@ -373,11 +391,10 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
         let rows: Vec<Vec<String>> = vision
             .iter()
             .map(|a| {
-                let mut file = String::new();
-                match &a.path {
-                    Some(p) => code_span(p, Mode::Cell, &mut file),
-                    None => file.push_str("not extracted"),
-                }
+                let file = match &a.path {
+                    Some(p) => blocks::asset_link(p, Mode::Cell),
+                    None => "not extracted".to_string(),
+                };
                 vec![
                     cell_text(&a.id),
                     file,

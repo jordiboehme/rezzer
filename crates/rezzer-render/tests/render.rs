@@ -2723,3 +2723,93 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
         "{md}"
     );
 }
+
+/// Every link and image destination in `md`, in order, as a Markdown reader sees them.
+fn destinations(md: &str) -> Vec<String> {
+    Parser::new_ext(md, Options::ENABLE_TABLES)
+        .filter_map(|e| match e {
+            Event::Start(Tag::Link { dest_url, .. })
+            | Event::Start(Tag::Image { dest_url, .. }) => Some(dest_url.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn asset(id: &str, path: Option<&str>, mime: &str, needs_vision: bool) -> Asset {
+    Asset {
+        id: id.into(),
+        path: path.map(str::to_string),
+        sha256: String::new(),
+        mime: mime.into(),
+        caption: None,
+        alt: None,
+        needs_vision,
+    }
+}
+
+#[test]
+fn pictures_and_attachments_link_to_their_files() {
+    let mut d = doc();
+    d.body = vec![Block::Media {
+        asset: "page-1".into(),
+        anchor: None,
+    }];
+    let mut file = asset(
+        "attachment-1",
+        Some("50% #2.assets/attachment-1.bin"),
+        "text/plain",
+        false,
+    );
+    file.caption = Some("notes.txt".into());
+    d.assets = vec![
+        asset(
+            "page-1",
+            Some("50% #2.assets/page-1.png"),
+            "image/png",
+            true,
+        ),
+        file,
+    ];
+    d.facets.embedded = vec![Embedded {
+        kind: "attachment".into(),
+        name: "notes.txt".into(),
+        detail: Some("text/plain, 5 bytes".into()),
+        target: None,
+        text: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    // The picture in the body, the File column of the vision table and the attachment's row:
+    // `%` and `#` of the path are encoded, so a reader that splits at `#` or decodes `%` finds
+    // the file.
+    assert_eq!(
+        destinations(&md),
+        [
+            "50%25%20%232.assets/page-1.png",
+            "50%25%20%232.assets/attachment-1.bin",
+            "50%25%20%232.assets/page-1.png",
+        ],
+        "{md}"
+    );
+    assert!(!md.contains('`'), "{md}");
+}
+
+#[test]
+fn links_keep_their_fragments_and_percent_codes() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: target.starts_with('#'),
+        wiki: false,
+        inlines: vec![txt("here")],
+    };
+    let md = body_of(vec![Block::paragraph(vec![
+        link("#numbers"),
+        txt(" and "),
+        link("https://example.org/a%20b?q=1#part"),
+    ])]);
+    assert_eq!(
+        destinations(&md),
+        ["#numbers", "https://example.org/a%20b?q=1#part"],
+        "{md}"
+    );
+}

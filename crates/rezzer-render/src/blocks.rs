@@ -697,6 +697,36 @@ fn destination_char(c: char, out: &mut String) {
     }
 }
 
+/// The path of an extracted file as a link destination: `%` and `#` are encoded first, so a
+/// reader that decodes percent codes or cuts the target at `#` still finds the file. The
+/// rest is encoded as in any destination. Only asset paths take this: a web address keeps
+/// its percent codes and an anchor its `#`.
+pub(crate) fn asset_target(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for c in path.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '#' => out.push_str("%23"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A link to an extracted file, its path as the text.
+pub(crate) fn asset_link(path: &str, mode: Mode) -> String {
+    inlines(
+        &[Inline::Link {
+            target: asset_target(path),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(path)],
+        }],
+        mode,
+    )
+}
+
 /// A link or image destination plus optional title, without the parentheses.
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
@@ -1216,7 +1246,7 @@ fn media(id: &str, ctx: &Ctx) -> String {
         Some(asset) => {
             match &asset.path {
                 Some(path) => parts.push(Inline::Image {
-                    target: path.clone(),
+                    target: asset_target(path),
                     alt: asset
                         .alt
                         .clone()
