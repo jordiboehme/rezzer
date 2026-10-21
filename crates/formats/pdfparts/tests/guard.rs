@@ -578,17 +578,34 @@ fn the_canonical_copy_of_a_damaged_stream_holds_what_was_measured() {
         issues.iter().any(|i| i.what.contains("is damaged")),
         "{issues:?}"
     );
-    // Another parser reads the measured text as it is, without a filter that could unpack
-    // more.
+    // Another parser reads the measured text, packed again, and nothing more.
     let doc = Document::load_mem(pdf.canonical()).unwrap();
     let content = doc
         .objects
         .values()
         .find_map(|o| match o {
-            Object::Stream(s) if s.content.windows(5).any(|w| w == b"Kept.") => Some(s),
+            Object::Stream(s) if s.dict.get(b"Length").is_ok() && s.dict.get(b"Filter").is_ok() => {
+                Some(s)
+            }
             _ => None,
         })
         .expect("the content stream holds its text");
-    assert!(content.dict.get(b"Filter").is_err(), "{:?}", content.dict);
-    assert_eq!(content.content, text);
+    // Packed again, it unpacks to exactly the measured text.
+    assert_eq!(
+        content
+            .dict
+            .get(b"Filter")
+            .ok()
+            .and_then(|f| f.as_name().ok()),
+        Some(&b"FlateDecode"[..]),
+        "{:?}",
+        content.dict
+    );
+    let mut unpacked = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::ZlibDecoder::new(&content.content[..]),
+        &mut unpacked,
+    )
+    .unwrap();
+    assert_eq!(unpacked, text);
 }

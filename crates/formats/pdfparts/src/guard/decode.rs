@@ -98,7 +98,7 @@ struct Shared<'a> {
     next_check: Cell<u64>,
     stop: &'a dyn Fn() -> bool,
     /// The final output, when the caller wants the data and not only its size.
-    kept: RefCell<Option<Vec<u8>>>,
+    kept: RefCell<Keep>,
     /// A Flate or LZW layer stopped with a decoding error: what follows it is lost.
     broke: Cell<bool>,
     /// A zlib layer unpacked all its data, but its Adler-32 checksum does not match it.
@@ -149,14 +149,34 @@ impl Write for Sink<'_> {
         let n = s.count.get().saturating_add(buf.len() as u64);
         s.count.set(n);
         s.charge(n, true, buf.len())?;
-        if let Some(kept) = s.kept.borrow_mut().as_mut() {
-            kept.extend_from_slice(buf);
+        match &mut *s.kept.borrow_mut() {
+            Keep::Nothing => {}
+            Keep::Plain(kept) => kept.extend_from_slice(buf),
+            Keep::Packed(z) => z.write_all(buf)?,
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// What a decode keeps of its final output.
+enum Keep {
+    Nothing,
+    Plain(Vec<u8>),
+    /// Packed again with Flate as it comes, so it takes about what the stream took.
+    Packed(flate2::write::ZlibEncoder<Vec<u8>>),
+}
+
+impl Keep {
+    fn into_data(self) -> Option<Vec<u8>> {
+        match self {
+            Keep::Nothing => None,
+            Keep::Plain(v) => Some(v),
+            Keep::Packed(z) => z.finish().ok(),
+        }
     }
 }
 
@@ -591,7 +611,7 @@ pub(crate) fn measure_checked(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> (Measure, bool) {
-    let (m, _, health) = decode(raw, filters, limits, budget, stop, false);
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, KeepAs::Nothing);
     (m, health.broke)
 }
 
@@ -612,7 +632,7 @@ pub(crate) fn measure_health(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> (Measure, Health) {
-    let (m, _, health) = decode(raw, filters, limits, budget, stop, false);
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, KeepAs::Nothing);
     (m, health)
 }
 
@@ -628,8 +648,33 @@ pub(crate) fn unpack(
     if filters.contains(&Filter::Opaque) {
         return (Measure::Fits(0), None);
     }
-    let (m, data, _) = decode(raw, filters, limits, budget, stop, true);
+    let (m, data, _) = decode(raw, filters, limits, budget, stop, KeepAs::Plain);
     (m, data)
+}
+
+/// Decodes `raw` through `filters` under the same caps and keeps the output packed again
+/// with Flate as a zlib stream, so it never sits in memory unpacked. `None` as for
+/// [`unpack`].
+pub(crate) fn repack(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> (Measure, Option<Vec<u8>>) {
+    if filters.contains(&Filter::Opaque) {
+        return (Measure::Fits(0), None);
+    }
+    let (m, data, _) = decode(raw, filters, limits, budget, stop, KeepAs::Packed);
+    (m, data)
+}
+
+/// What a decode keeps.
+#[derive(Clone, Copy)]
+enum KeepAs {
+    Nothing,
+    Plain,
+    Packed,
 }
 
 fn decode(
@@ -638,7 +683,7 @@ fn decode(
     limits: &Limits,
     budget: u64,
     stop: &dyn Fn() -> bool,
-    keep: bool,
+    keep: KeepAs,
 ) -> (Measure, Option<Vec<u8>>, Health) {
     // The chain ends at the first filter whose output stays encoded.
     let end = filters
@@ -659,7 +704,14 @@ fn decode(
         moved: Cell::new(0),
         next_check: Cell::new(STOP_EVERY),
         stop,
-        kept: RefCell::new(keep.then(Vec::new)),
+        kept: RefCell::new(match keep {
+            KeepAs::Nothing => Keep::Nothing,
+            KeepAs::Plain => Keep::Plain(Vec::new()),
+            KeepAs::Packed => Keep::Packed(flate2::write::ZlibEncoder::new(
+                Vec::new(),
+                flate2::Compression::fast(),
+            )),
+        }),
         broke: Cell::new(false),
         bad_sum: Cell::new(false),
     };
@@ -674,11 +726,8 @@ fn decode(
         broke: shared.broke.get(),
         bad_sum: shared.bad_sum.get(),
     };
-    (
-        Measure::Fits(shared.count.get()),
-        shared.kept.take(),
-        health,
-    )
+    let kept = shared.kept.replace(Keep::Nothing).into_data();
+    (Measure::Fits(shared.count.get()), kept, health)
 }
 
 pub(crate) fn cap_words(cap: Cap, limits: &Limits) -> String {

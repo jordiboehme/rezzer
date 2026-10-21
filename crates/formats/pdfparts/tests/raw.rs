@@ -184,3 +184,34 @@ fn a_stream_is_measured_with_its_decode_parameters() {
         Ok(1)
     );
 }
+
+#[test]
+fn indirect_lengths_are_looked_up_once() {
+    // 80,000 streams, each with its length in an object of its own.
+    let mut out = b"%PDF-1.4\n".to_vec();
+    for i in 0..80_000u32 {
+        let (s, l) = (2 * i + 1, 2 * i + 2);
+        out.extend(format!("{s} 0 obj\n<< /Length {l} 0 R >>\nstream\nab\nendstream\nendobj\n{l} 0 obj 2 endobj\n").as_bytes());
+    }
+    let start = std::time::Instant::now();
+    let raw = RawStreams::measure(&out, &limits(), &never).unwrap();
+    assert_eq!(raw.size(1, 0), Some(2));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn a_length_in_an_object_stream_keeps_the_fallback_out() {
+    // Object 9 lives in an object stream: the scan finds no header for it.
+    let file = objects(&[
+        stream(5, "/Type /ObjStm /N 1 /First 4", b"9 0 2"),
+        b"4 0 obj\n<< /Length 9 0 R >>\nstream\nab\nendstream\nendobj".to_vec(),
+    ]);
+    match RawStreams::measure(&file, &limits(), &never) {
+        Err(OpenError::Limit(why)) => assert!(why.contains("object 9"), "{why}"),
+        other => panic!("{:?}", other.map(|r| r.unpacked())),
+    }
+}

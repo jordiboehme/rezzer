@@ -34,7 +34,7 @@ use store::Store;
 use xref::{Entry, read_chain, rebuild};
 
 pub(crate) use crypt::Crypt;
-pub(crate) use predict::{last_parms, unpredict};
+pub(crate) use predict::last_parms;
 
 /// What every parsed value costs, on top of its bytes. Measured on a file of 1,000,117 small
 /// values (structure elements of five entries each): parsing them took 178 MiB, about 187
@@ -561,6 +561,11 @@ pub(crate) fn measure_raw(
         unpacked: 0,
         broken: HashSet::new(),
     };
+    // Where each object is defined, in file order, found once.
+    let mut defined: HashMap<(u32, u16), Vec<usize>> = HashMap::new();
+    for &(pos, n, g) in &found.headers {
+        defined.entry((n, g)).or_default().push(pos);
+    }
     for (k, &(pos, n, g)) in found.headers.iter().enumerate() {
         if k % POLL_EVERY == 0 {
             budget.poll().map_err(Fail::into_open)?;
@@ -576,7 +581,20 @@ pub(crate) fn measure_raw(
         // Every length a parser may take: the direct one, or each definition of an indirect
         // one, since a parser that follows an old offset takes an earlier definition.
         let lengths: Vec<i64> = match length_ref(&head) {
-            Some(r) => raw_lengths(bytes, &found, r, &mut budget)?,
+            Some(r) => {
+                let lengths = raw_lengths(bytes, &defined, r, &mut budget)?;
+                // A length defined only inside an object stream gives no extent to measure,
+                // and the parser would take it.
+                if lengths.is_empty() {
+                    return Err(OpenError::Limit(format!(
+                        "stream {n} {g} takes its length from object {} {}, which is not a \
+                         plain object of the file (it may sit in an object stream), so the \
+                         extent a parser takes cannot be measured",
+                        r.0, r.1
+                    )));
+                }
+                lengths
+            }
             None => match &head.value {
                 Object::Dictionary(d) => d
                     .get(b"Length")
@@ -653,15 +671,12 @@ pub(crate) fn measure_raw(
 /// order, the last definition last.
 fn raw_lengths(
     bytes: &[u8],
-    found: &xref::Rebuilt,
+    defined: &HashMap<(u32, u16), Vec<usize>>,
     r: lopdf::ObjectId,
     budget: &mut Budget,
 ) -> Result<Vec<i64>, OpenError> {
     let mut out = Vec::new();
-    for &(pos, n, g) in &found.headers {
-        if (n, g) != r {
-            continue;
-        }
+    for &pos in defined.get(&r).map_or(&[][..], Vec::as_slice) {
         match head_at(bytes, pos, budget) {
             Ok(head) => out.extend(head.value.as_i64().ok()),
             Err(Fail::Bad(_)) => {}

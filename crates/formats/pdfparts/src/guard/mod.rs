@@ -18,8 +18,8 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use decode::Cap;
 pub(crate) use decode::{
-    Filter, Measure, cap_words, filters_with, measure_checked, measure_health, stream_filters,
-    unpack,
+    Filter, Measure, cap_words, filters_with, measure_checked, measure_health, repack,
+    stream_filters, unpack,
 };
 
 use crate::pagetree::{self, PageNode, ResourcesKey};
@@ -355,9 +355,10 @@ fn reach(
 }
 
 /// The canonical form of a stream a decoding error stops in: the data the guard measured,
-/// unpacked and without filters, so no parser can unpack more than was measured. A chain
-/// with a filter whose output stays encoded (an image codec) cannot be cut so, and the stream
-/// is emptied instead, as a refused one.
+/// packed again with Flate as it is decoded, so no parser can unpack more than was measured
+/// and the copy takes about what the stream took. A chain with a filter whose output stays
+/// encoded (an image codec), or with a predictor, cannot be cut so, and the stream is emptied
+/// instead, as a refused one.
 pub(crate) fn cut_to_measured(
     doc: &Document,
     stream: &mut lopdf::Stream,
@@ -365,19 +366,35 @@ pub(crate) fn cut_to_measured(
     stop: &dyn Fn() -> bool,
 ) {
     let filters = stream_filters(doc, &stream.dict);
-    let data = match unpack(
-        &stream.content,
-        &filters,
-        limits,
-        limits.max_total_bytes,
-        stop,
-    ) {
-        (Measure::Fits(_), Some(data)) => {
-            crate::parse::unpredict(data, crate::parse::last_parms(&stream.dict))
+    let predictor = crate::parse::last_parms(&stream.dict)
+        .and_then(|p| p.get(b"Predictor").ok())
+        .and_then(|o| o.as_i64().ok())
+        .is_some_and(|p| p > 1);
+    let packed = if predictor {
+        None
+    } else {
+        match repack(
+            &stream.content,
+            &filters,
+            limits,
+            limits.max_total_bytes,
+            stop,
+        ) {
+            (Measure::Fits(_), Some(data)) => Some(data),
+            _ => None,
         }
-        _ => Vec::new(),
     };
-    stream.dict.remove(b"Filter");
     stream.dict.remove(b"DecodeParms");
-    stream.set_content(data);
+    match packed {
+        Some(data) => {
+            stream
+                .dict
+                .set("Filter", Object::Name(b"FlateDecode".to_vec()));
+            stream.set_content(data);
+        }
+        None => {
+            stream.dict.remove(b"Filter");
+            stream.set_content(Vec::new());
+        }
+    }
 }
