@@ -1742,12 +1742,24 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
 const ADDRESS_WORDS: usize = 4;
 
 /// Whether lines have the shape of an address or a list: each starts with a list marker, or
-/// none holds more than [`ADDRESS_WORDS`] words.
+/// none holds more than [`ADDRESS_WORDS`] words and words in small letters are rare (at most
+/// one a line, and at most one for every two lines). Prose, also German prose whose nouns
+/// start with capitals, holds many words in small letters.
 fn listed(lines: &[Line<'_>]) -> bool {
-    lines.iter().all(|l| list_marker(&l.text).is_some())
-        || lines
-            .iter()
-            .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS)
+    if lines.iter().all(|l| list_marker(&l.text).is_some()) {
+        return true;
+    }
+    let small = |l: &Line<'_>| {
+        l.text
+            .split_whitespace()
+            .filter(|w| w.chars().next().is_some_and(char::is_lowercase))
+            .count()
+    };
+    let total: usize = lines.iter().map(small).sum();
+    lines
+        .iter()
+        .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS && small(l) <= 1)
+        && 2 * total <= lines.len()
 }
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or

@@ -1411,3 +1411,44 @@ fn two_centred_lines_keep_their_break() {
         "{md}"
     );
 }
+
+#[test]
+fn very_narrow_german_prose_keeps_joining() {
+    // German prose in a column of three or four words a line, every line starting with a
+    // capital: its lines hold words in small letters, an address does not, so each paragraph
+    // is one text.
+    let paras: [&[&str]; 3] = [
+        &[
+            "Der Vorstand hat am",
+            "Montag die Satzung",
+            "Beschlossen, gueltig ab",
+            "Januar 2027.",
+        ],
+        &[
+            "Die Kasse pruefen",
+            "Mitglieder der Sparkasse",
+            "Musterstadt AG.",
+        ],
+        &[
+            "Die neue Halle",
+            "Wird im Fruehjahr",
+            "Gebaut und kostet",
+            "Rund 40.000 Euro",
+        ],
+    ];
+    let mut c = String::new();
+    let mut y = 700.0;
+    for para in &paras {
+        for line in *para {
+            c += &show("F1", 10.0, 72.0, y, line);
+            y -= 12.0;
+        }
+        y -= 10.0;
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let md = markdown_of(&out);
+    for para in &paras {
+        let joined = format!("\n{}\n", para.join(" "));
+        assert!(md.contains(&joined), "{joined} in {md}");
+    }
+}
