@@ -2029,6 +2029,12 @@ fn a_tagged_table_kept_as_paragraphs_keeps_its_later_pages_as_text() {
     assert!(loss.what.contains("kept as paragraphs"), "{loss:?}");
     let one = text(page(&out, 1));
     assert!(one.contains("first"), "{one:?}");
+    // The loss names the table by its first paragraph.
+    let named = page(&out, 1).iter().any(|b| {
+        matches!(b, Block::Paragraph { inlines, anchor: Some(a), .. }
+            if a.0 == "p1:b1" && plain_text(inlines) == "first")
+    });
+    assert!(named && loss.what.contains("p1:b1"), "{:?}", page(&out, 1));
     let two = text(page(&out, 2));
     let (second, plain) = (two.find("second"), two.find("plain two"));
     assert!(
