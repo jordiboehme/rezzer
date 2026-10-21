@@ -36,6 +36,12 @@ const HOLD: usize = 16 << 20;
 /// Bytes the check of one inline picture's earlier ends may look at.
 const WORK: usize = 16 * WINDOW;
 
+/// Bytes the checks of a picture's end look at between two questions to the stop callback.
+const POLL: usize = 4096;
+
+/// What the scan says when the stop callback stops it.
+const STOPPED: &str = "the time limit was reached";
+
 /// A regular token longer than this is no `BI`, even with `#` escapes.
 const TOKEN: usize = 16;
 
@@ -84,6 +90,8 @@ pub(super) struct InlineScan<'c> {
     /// The `BI` whose end is decided at the end of the stream.
     hold: Option<usize>,
     check: &'c dyn Fn(&Stream<'_>) -> Result<(), String>,
+    /// Asked for each `BI` and every [`POLL`] bytes the checks look at: true stops the scan.
+    stop: &'c dyn Fn() -> bool,
 }
 
 /// What came of a `BI`.
@@ -232,7 +240,10 @@ fn no_picture(data: &[u8]) -> bool {
 }
 
 impl<'c> InlineScan<'c> {
-    pub(super) fn new(check: &'c dyn Fn(&Stream<'_>) -> Result<(), String>) -> Self {
+    pub(super) fn new(
+        check: &'c dyn Fn(&Stream<'_>) -> Result<(), String>,
+        stop: &'c dyn Fn() -> bool,
+    ) -> Self {
         InlineScan {
             buf: Vec::new(),
             pos: 0,
@@ -241,6 +252,7 @@ impl<'c> InlineScan<'c> {
             pending: None,
             hold: None,
             check,
+            stop,
         }
     }
 
@@ -379,6 +391,9 @@ impl<'c> InlineScan<'c> {
         if !last && self.buf.len() - bi < WINDOW {
             return Ok(Bi::Wait);
         }
+        if (self.stop)() {
+            return Err(STOPPED.into());
+        }
         // What came before this `BI` is followed first: the `BI` may end it.
         self.follow(bi + 2, last)?;
         if self.pending.as_ref().is_some_and(|p| p.at <= bi) {
@@ -464,6 +479,9 @@ impl<'c> InlineScan<'c> {
                 if work > WORK {
                     return Err(unclear());
                 }
+                if work.is_multiple_of(POLL) && (self.stop)() {
+                    return Err(STOPPED.into());
+                }
                 let c = buf[i];
                 if c == b'E' && buf[i + 1] == b'I' {
                     if high
@@ -500,7 +518,12 @@ impl<'c> InlineScan<'c> {
         };
         let buf = &self.buf;
         let limit = limit.min(buf.len());
+        let mut steps = 0usize;
         while p.at + 1 < limit {
+            steps += 1;
+            if steps.is_multiple_of(POLL) && (self.stop)() {
+                return Err(STOPPED.into());
+            }
             let c = buf[p.at];
             if c == b'E' && buf[p.at + 1] == b'I' {
                 if p.high || !p.confirmed {
@@ -565,7 +588,7 @@ mod tests {
             found.borrow_mut().push(s.raw_data().len());
             Ok(())
         };
-        let mut scan = InlineScan::new(&check);
+        let mut scan = InlineScan::new(&check, &|| false);
         for p in content.chunks(piece) {
             scan.feed(p)?;
         }
@@ -579,6 +602,42 @@ mod tests {
         assert_eq!(whole, pictures(content, 7));
         assert_eq!(whole, pictures(content, 1));
         whole
+    }
+
+    #[test]
+    fn the_stop_callback_stops_the_scan_at_a_picture() {
+        // Many pictures in one piece: the scan asks the stop callback for each.
+        let asked = std::cell::Cell::new(0);
+        let stop = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 3
+        };
+        let check = |_: &Stream<'_>| -> Result<(), String> { Ok(()) };
+        let c = b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x07 EI\n".repeat(1_000);
+        let mut scan = InlineScan::new(&check, &stop);
+        let got = scan.feed(&c).and_then(|()| scan.finish());
+        assert_eq!(got, Err(STOPPED.to_string()));
+        assert_eq!(asked.get(), 4);
+    }
+
+    #[test]
+    fn the_stop_callback_stops_the_scan_while_it_follows_content() {
+        // One picture, then more than a window of content followed byte by byte.
+        let asked = std::cell::Cell::new(0);
+        let stop = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 1
+        };
+        let check = |_: &Stream<'_>| -> Result<(), String> { Ok(()) };
+        let mut scan = InlineScan::new(&check, &stop);
+        let mut got = Ok(());
+        for p in far(b"").chunks(65_536) {
+            got = scan.feed(p);
+            if got.is_err() {
+                break;
+            }
+        }
+        assert_eq!(got, Err(STOPPED.to_string()));
     }
 
     #[test]

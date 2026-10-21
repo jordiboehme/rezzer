@@ -1189,3 +1189,46 @@ fn ascii85_bands_holding_ei_render() {
     assert!(inner > 0, "no band holds EI at a line end");
     assert_rendered(&read_with(&draw_twin_bytes(&c), true));
 }
+
+#[test]
+fn a_page_at_the_pixel_cap_renders_small_enough_for_its_png() {
+    // 200,000 points square, with a picture of noise over it: the pixmap and a PNG that
+    // hardly packs, in a buffer that doubles, take 12 bytes a pixel, which must fit the render
+    // room of 128 MiB.
+    let mut b = Builder::default();
+    let mut state = 3u32;
+    let noise: Vec<u8> = (0..512 * 512 * 3)
+        .map(|_| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (state >> 16) as u8
+        })
+        .collect();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 512 /Height 512 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&noise),
+    );
+    let c = b.stream("", b"q 200000 0 0 200000 0 0 cm /Im0 Do Q");
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 200000 200000] \
+         /Resources << /XObject << /Im0 {image} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_with(&b.finish(catalog), true);
+    let blob = out
+        .blobs
+        .iter()
+        .find(|b| b.asset == "page-1")
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    let w = u64::from(u32::from_be_bytes(blob.bytes[16..20].try_into().unwrap()));
+    let h = u64::from(u32::from_be_bytes(blob.bytes[20..24].try_into().unwrap()));
+    assert!(w * h * 12 <= 128 << 20, "{w} x {h}");
+    assert!(w > 3000 && h > 3000, "{w} x {h}");
+    assert_rss_under_256_mib();
+}

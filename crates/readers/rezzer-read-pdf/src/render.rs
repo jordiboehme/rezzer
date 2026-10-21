@@ -12,7 +12,8 @@
 //! - the guard refused the pages whose streams break a limit, and a stream that stops with a
 //!   decoding error holds only what the guard measured;
 //! - a page whose text was cut by a limit is not rendered;
-//! - the page pixmap has at most [`MAX_PIXELS`];
+//! - the page pixmap has at most [`MAX_PIXELS`], and fewer when its PNG would not fit the
+//!   render room;
 //! - `cost.rs` works out every buffer the renderer would build from the file's values
 //!   (pictures, tiling pattern cells, shading textures, soft masks, Type3 glyphs, annotation
 //!   appearances) by running the page through the interpreter into a device that draws
@@ -396,7 +397,8 @@ fn render_png(
     if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
         return Err(Failed::Damaged("the page has no size".into()));
     }
-    let (px, py) = pixel_size(w, h);
+    // A page whose PNG would not fit the room is rendered smaller.
+    let (px, py) = pixel_size(w, h, MAX_PIXELS.min(room / cost::PNG_BYTES));
     let transform = Affine::scale_non_uniform(f64::from(px) / w, f64::from(py) / h)
         * p.initial_transform(true).to_kurbo();
     let settings = InterpreterSettings::default();
@@ -453,12 +455,12 @@ fn render_png(
 }
 
 /// The pixel size of a page of `w` by `h` points: twice its size, scaled down to at most
-/// [`MAX_PIXELS`], each side at least 1 and at most 65,535 pixels.
-fn pixel_size(w: f64, h: f64) -> (u16, u16) {
+/// `max` pixels, each side at least 1 and at most 65,535 pixels.
+fn pixel_size(w: f64, h: f64, max: u64) -> (u16, u16) {
     let mut scale = SCALE;
     let pixels = w * scale * h * scale;
-    if pixels > MAX_PIXELS as f64 {
-        scale *= (MAX_PIXELS as f64 / pixels).sqrt();
+    if pixels > max as f64 {
+        scale *= (max as f64 / pixels).sqrt();
     }
     let side = |v: f64| (v * scale).floor().clamp(1.0, f64::from(u16::MAX)) as u16;
     (side(w), side(h))
@@ -485,12 +487,12 @@ mod tests {
 
     #[test]
     fn pages_stay_under_the_pixel_cap() {
-        assert_eq!(pixel_size(595.0, 842.0), (1190, 1684));
-        let (w, h) = pixel_size(200_000.0, 200_000.0);
+        assert_eq!(pixel_size(595.0, 842.0, MAX_PIXELS), (1190, 1684));
+        let (w, h) = pixel_size(200_000.0, 200_000.0, MAX_PIXELS);
         assert!(u64::from(w) * u64::from(h) <= MAX_PIXELS);
         assert_eq!((w, h), (4000, 4000));
         // A long thin page keeps each side inside a pixmap's bounds.
-        let (w, h) = pixel_size(1e9, 0.001);
+        let (w, h) = pixel_size(1e9, 0.001, MAX_PIXELS);
         assert_eq!((w, h), (u16::MAX, 1));
     }
 }

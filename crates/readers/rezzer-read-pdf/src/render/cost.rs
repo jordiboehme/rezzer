@@ -57,6 +57,9 @@ use kurbo::{Affine, BezPath, Rect, Shape};
 use super::headers::{jbig2_page, jpeg_frame, jpx_frame};
 use crate::fallback::filters_of;
 
+/// Bytes a page pixel takes while its PNG is written: the pixmap, and twice it for the PNG.
+pub(crate) const PNG_BYTES: u64 = 12;
+
 /// Device calls one page's estimate may take.
 const MAX_CALLS: u64 = 16_000_000;
 
@@ -968,12 +971,9 @@ pub(crate) fn estimate(
         depth: 0,
     };
     let run = panic::catch_unwind(AssertUnwindSafe(|| {
-        // The page's pixmap and render context, and at the end its PNG.
-        dry.charge(
-            Kind::Page,
-            w.saturating_mul(h).saturating_mul(4),
-            w.saturating_mul(h).saturating_mul(4),
-        );
+        // The page's pixmap and render context, and its PNG (charged again at the end).
+        let px = w.saturating_mul(h);
+        dry.charge(Kind::Page, px * 4, px * 4);
         let cache = InterpreterCache::new();
         let mut ctx = Context::new(
             transform,
@@ -983,6 +983,9 @@ pub(crate) fn estimate(
             settings.clone(),
         );
         interpret_page(page, &mut ctx, &mut dry);
+        // The render context goes before the PNG, which can grow to twice the pixmap.
+        dry.alive = px * 4;
+        dry.charge(Kind::Page, px * (PNG_BYTES - 4), 0);
         dry.peak
     }));
     match run {

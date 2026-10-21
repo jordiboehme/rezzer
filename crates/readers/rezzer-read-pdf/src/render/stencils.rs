@@ -22,7 +22,7 @@ fn inline_stencils(
     facts: &Facts<'_>,
     check: &dyn Fn(&Stream<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
-    let mut scan = InlineScan::new(check);
+    let mut scan = InlineScan::new(check, facts.stop);
     for (i, s) in streams.iter().enumerate() {
         if i > 0 {
             scan.feed(b" ")?;
