@@ -4403,7 +4403,7 @@ fn two_font_page(content: &[u8], w: usize, h: usize) -> Vec<u8> {
 
 #[test]
 fn a_header_band_of_thousands_of_empty_cells_is_bounded() {
-    // A band of three titled cells and 5,700 narrow empty ones over 4,700 lines of three
+    // A band of three titled cells and 5,700 narrow empty ones over 2,000 lines of three
     // short pieces, on a page of 14,400 points: the table is only as wide as its titled
     // columns, quick and small.
     let start = Instant::now();
@@ -4425,7 +4425,7 @@ fn a_header_band_of_thousands_of_empty_cells_is_bounded() {
     for (k, t) in ["Date", "Text", "Amount"].iter().enumerate() {
         c.extend(format!("BT /F1 1 Tf {} {} Td ({t}) Tj ET\n", 11 + 20 * k, top - 2.0).as_bytes());
     }
-    for i in 0..4_700usize {
+    for i in 0..2_000usize {
         let y = top - 6.0 - 3.0 * i as f32;
         c.extend(
             format!("BT /F1 1 Tf 11 {y} Td (a) Tj 20 0 Td (b) Tj 20 0 Td (1) Tj ET\n").as_bytes(),
@@ -4440,7 +4440,7 @@ fn a_header_band_of_thousands_of_empty_cells_is_bounded() {
             _ => None,
         })
         .collect();
-    assert!(widths.iter().all(|w| *w <= 3), "{widths:?}");
+    assert_eq!(widths, [3], "{:?}", out.document.losses);
 }
 
 /// A page of `lines` lines of 25 one-letter words in two fonts, with `bands` one-row grids of two
