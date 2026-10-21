@@ -720,6 +720,12 @@ fn different_pictures_at_one_place_are_not_furniture() {
         .collect();
     let out = read(&picture_pages(&draws, &logos));
     assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+    // The same two logos taking turns at exactly one place: four pictures too.
+    let draws: Vec<_> = (0..4)
+        .map(|n| vec![(480.0, 780.0, 60.0, 45.0, n % 2)])
+        .collect();
+    let out = read(&picture_pages(&draws, &logos));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
     // The same logo on four pages stays furniture.
     let draws: Vec<_> = (0..4)
         .map(|_| vec![(480.0, 780.0, 60.0, 45.0, 0)])
@@ -732,4 +738,154 @@ fn different_pictures_at_one_place_are_not_furniture() {
         .collect();
     let out = read(&picture_pages(&draws, &codes[..1]));
     assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
+
+/// Pages of A4, each with a line of text and one picture drawn `draws` times at 400, 600 (85
+/// points square); `make` adds the picture object for a page (and anything it refers to) and
+/// gives its number.
+fn copied_pages(pages: usize, draws: usize, make: &dyn Fn(&mut Builder, usize) -> u32) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = String::new();
+    for n in 0..pages {
+        let image = make(&mut b, n);
+        let mut c = format!("BT /F1 11 Tf 72 700 Td (Page {n}.) Tj ET\n");
+        for _ in 0..draws {
+            c += "q 85 0 0 85 400 600 cm /Im Do Q\n";
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im {image} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_logo_copied_per_page_with_its_own_objects_is_furniture() {
+    // Single-page files merged into one: each page has its own copy of the logo, and each
+    // copy its own soft mask object with the same bytes. One picture: furniture.
+    let rgb = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /BitsPerComponent 8";
+    let mask = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let out = read(&copied_pages(4, 1, &|b, _| {
+        let m = b.stream(mask, &[255u8; 12]);
+        b.stream(
+            &format!("{rgb} /ColorSpace /DeviceRGB /SMask {m} 0 R"),
+            &[200u8; 36],
+        )
+    }));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    // The same with its own ICC profile object per copy.
+    let out = read(&copied_pages(4, 1, &|b, _| {
+        let icc = b.stream("/N 3 /Alternate /DeviceRGB", &[9u8; 128]);
+        b.stream(
+            &format!("{rgb} /ColorSpace [/ICCBased {icc} 0 R]"),
+            &[200u8; 36],
+        )
+    }));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    // The same with its own palette object per copy.
+    let out = read(&copied_pages(4, 1, &|b, _| {
+        let table = b.stream("", &[10, 20, 30, 40, 50, 60]);
+        b.stream(
+            &format!("{rgb} /ColorSpace [/Indexed /DeviceRGB 1 {table} 0 R]"),
+            &[1u8; 12],
+        )
+    }));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
+
+#[test]
+fn pictures_that_differ_in_mask_or_palette_are_not_furniture() {
+    // The same pixels at one place on four pages, each with another soft mask: four pictures.
+    let rgb = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /BitsPerComponent 8";
+    let mask = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let out = read(&copied_pages(4, 1, &|b, n| {
+        let m = b.stream(mask, &[(n * 60) as u8; 12]);
+        b.stream(
+            &format!("{rgb} /ColorSpace /DeviceRGB /SMask {m} 0 R"),
+            &[200u8; 36],
+        )
+    }));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+    // The same indices with another palette on each page: four pictures.
+    let out = read(&copied_pages(4, 1, &|b, n| {
+        let table = b.stream("", &[10, 20, 30, 40, 50, (60 + n) as u8]);
+        b.stream(
+            &format!("{rgb} /ColorSpace [/Indexed /DeviceRGB 1 {table} 0 R]"),
+            &[1u8; 12],
+        )
+    }));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+}
+
+#[test]
+fn pictures_that_differ_only_after_64_kib_are_not_furniture() {
+    // Four 300 by 300 gray pictures, unpacked, the same in their first 70,000 bytes, one per
+    // page at one place: four pictures.
+    let gray = "/Type /XObject /Subtype /Image /Width 300 /Height 300 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let out = read(&copied_pages(4, 1, &|b, n| {
+        let mut v = vec![128u8; 90_000];
+        for (i, p) in v.iter_mut().enumerate().skip(70_000) {
+            *p = (i * (n + 1)) as u8;
+        }
+        b.stream(gray, &v)
+    }));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+}
+
+#[test]
+fn a_big_picture_drawn_many_times_is_known_once() {
+    // One page draws a 1 MB unpacked picture 100,000 times, another a 4 by 3 one as often.
+    // Knowing the picture is done once per object, so the big one takes not much longer.
+    let big = copied_pages(1, 100_000, &|b, _| {
+        b.stream(
+            "/Type /XObject /Subtype /Image /Width 1000 /Height 1000 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &vec![7u8; 1_000_000],
+        )
+    });
+    let small = copied_pages(1, 100_000, &|b, _| {
+        b.stream(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &[7u8; 12],
+        )
+    });
+    let start = std::time::Instant::now();
+    let out = read(&small);
+    let small_time = start.elapsed();
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    let start = std::time::Instant::now();
+    let out = read(&big);
+    let big_time = start.elapsed();
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    eprintln!("small {small_time:?}, big {big_time:?}");
+    assert!(
+        big_time < small_time * 2 + std::time::Duration::from_millis(300),
+        "small {small_time:?}, big {big_time:?}"
+    );
 }

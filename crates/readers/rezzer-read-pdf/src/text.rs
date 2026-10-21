@@ -521,6 +521,8 @@ struct PageReader<'p, 'a> {
     cache_bytes: u64,
     known: Known,
     programs: Programs,
+    /// Raster image objects by their identity, computed once (see [`picture_id`]).
+    pictures: HashMap<ObjectIdentifier, u64>,
     /// The device's glyph and text buffers, reused from page to page.
     glyph_buf: Vec<Gl>,
     text_buf: String,
@@ -556,6 +558,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 ..Known::default()
             },
             programs: Programs::default(),
+            pictures: HashMap::new(),
             glyph_buf: Vec::new(),
             text_buf: String::new(),
             kept_left: caps.max_kept,
@@ -698,6 +701,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             images_code: Vec::new(),
             images_id: Vec::new(),
             stencils,
+            pictures: &mut self.pictures,
             page: n,
             rules: Vec::new(),
             rules_cut: false,
@@ -2007,29 +2011,68 @@ struct Open {
     used: bool,
 }
 
-/// Bytes of a picture's data its identity hash reads; its length counts too.
+/// Bytes at the start of a picture's data its identity hash reads; its length counts too.
 const ID_BYTES: usize = 64 << 10;
+/// Bytes at the end of a picture's data its identity hash reads.
+const ID_TAIL: usize = 4 << 10;
+/// Values an identity hash follows in a picture's dictionary, and how deep.
+const ID_VALUES: usize = 256;
+const ID_DEPTH: usize = 4;
+/// Streams an identity hash reads besides the picture's own data (a soft mask, an ICC
+/// profile, a palette).
+const ID_STREAMS: usize = 8;
 
-/// What a picture is, for finding the same picture on many pages: a hash of its size, its
-/// dictionary and the first [`ID_BYTES`] of its data with the data's length. A stencil mask
-/// shows no data: it is known by its image object, which the walk found by its dictionary
-/// (`stencils`); one whose object is not known for sure (an inline one, or several objects
-/// with one dictionary) is a picture of its own, `own` making it unique.
+/// The dictionary keys that describe a picture's pixels, with their short forms in inline
+/// images.
+const PIXEL_KEYS: [(&[u8], &[u8]); 9] = [
+    (b"Width", b"W"),
+    (b"Height", b"H"),
+    (b"BitsPerComponent", b"BPC"),
+    (b"ColorSpace", b"CS"),
+    (b"Filter", b"F"),
+    (b"DecodeParms", b"DP"),
+    (b"Decode", b"D"),
+    (b"ImageMask", b"IM"),
+    (b"SMaskInData", b"SMaskInData"),
+];
+
+/// What a picture is, for finding the same picture on many pages. A raster picture is known
+/// by the values that describe its pixels and by its data (see [`pixels_id`]), computed once
+/// per image object (`known`); one whose values are past the bounds is known by its image
+/// object, an inline one then being a picture of its own, `own` making it unique. A stencil
+/// mask shows no data: it is known by its image object, which the walk found by its
+/// dictionary (`stencils`); one whose object is not known for sure (an inline one, or several
+/// objects with one dictionary) is a picture of its own.
 fn picture_id(
     image: &Image<'_, '_>,
     stencils: &HashMap<u128, Option<ObjectIdentifier>>,
+    known: &mut HashMap<ObjectIdentifier, u64>,
     own: (u32, usize),
 ) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut h = DefaultHasher::new();
     (image.width(), image.height()).hash(&mut h);
     match image {
         Image::Raster(r) => {
             let s = r.stream();
-            s.dict().data().hash(&mut h);
-            let data = s.raw_data();
-            data.len().hash(&mut h);
-            data[..data.len().min(ID_BYTES)].hash(&mut h);
+            let object = s.dict().obj_id();
+            if let Some(id) = object.and_then(|o| known.get(&o)) {
+                return *id;
+            }
+            let mut left = (ID_VALUES, ID_STREAMS);
+            if pixels_id(s, true, &mut left, &mut h) {
+                "pixels".hash(&mut h);
+            } else {
+                h = DefaultHasher::new();
+                match object {
+                    Some(o) => ("object", o.obj_number, o.gen_number).hash(&mut h),
+                    None => ("own", own).hash(&mut h),
+                }
+            }
+            let id = h.finish();
+            if let Some(o) = object {
+                known.insert(o, id);
+            }
+            return id;
         }
         Image::Stencil(st) => match stencils.get(&st.cache_key()) {
             Some(Some(id)) => (id.obj_number, id.gen_number).hash(&mut h),
@@ -2037,6 +2080,150 @@ fn picture_id(
         },
     }
     h.finish()
+}
+
+/// Adds to `h` what a picture stream's pixels are: the values of [`PIXEL_KEYS`], resolved so
+/// that no object number counts, the first [`ID_BYTES`] and last [`ID_TAIL`] of its data
+/// with its length, and with `masks` its soft mask and mask the same way. False when the
+/// values are past the bounds (`left`: values and streams) or a color space is named by a
+/// resource, which says nothing of the colors here.
+fn pixels_id(
+    s: &Stream<'_>,
+    masks: bool,
+    left: &mut (usize, usize),
+    h: &mut DefaultHasher,
+) -> bool {
+    let dict = s.dict();
+    for (long, short) in PIXEL_KEYS {
+        long.hash(h);
+        match dict
+            .get::<Object<'_>>(long)
+            .or_else(|| dict.get::<Object<'_>>(short))
+        {
+            Some(Object::Name(n)) if long == b"ColorSpace" && !device_space(n.as_ref()) => {
+                return false;
+            }
+            Some(v) => {
+                if !value_id(&v, 0, left, h) {
+                    return false;
+                }
+            }
+            None => 0u8.hash(h),
+        }
+    }
+    data_id(&s.raw_data(), h);
+    if masks {
+        for key in [b"SMask".as_slice(), b"Mask"] {
+            key.hash(h);
+            match dict.get::<Object<'_>>(key) {
+                Some(Object::Stream(m)) => {
+                    if left.1 == 0 {
+                        return false;
+                    }
+                    left.1 -= 1;
+                    if !pixels_id(&m, false, left, h) {
+                        return false;
+                    }
+                }
+                Some(v) => {
+                    if !value_id(&v, 0, left, h) {
+                        return false;
+                    }
+                }
+                None => 0u8.hash(h),
+            }
+        }
+    }
+    true
+}
+
+/// Whether a color space name is a device space, which needs no resources.
+fn device_space(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK" | b"G" | b"RGB" | b"CMYK" | b"Pattern"
+    )
+}
+
+/// Adds the first [`ID_BYTES`] and last [`ID_TAIL`] of `data` with its length to `h`.
+fn data_id(data: &[u8], h: &mut DefaultHasher) {
+    data.len().hash(h);
+    data[..data.len().min(ID_BYTES)].hash(h);
+    data[data.len().saturating_sub(ID_TAIL)..].hash(h);
+}
+
+/// Adds a value to `h`, following references to what they hold, so that only content
+/// counts: a stream by its dictionary and its data (see [`data_id`]). False past the bounds
+/// (`left`: values and streams, [`ID_DEPTH`]) or when a value does not resolve.
+fn value_id(
+    v: &Object<'_>,
+    depth: usize,
+    left: &mut (usize, usize),
+    h: &mut DefaultHasher,
+) -> bool {
+    if left.0 == 0 || depth > ID_DEPTH {
+        return false;
+    }
+    left.0 -= 1;
+    match v {
+        Object::Null(_) => 0u8.hash(h),
+        Object::Boolean(b) => (1u8, b).hash(h),
+        Object::Number(n) => (2u8, n.as_f64().to_bits()).hash(h),
+        Object::String(s) => (3u8, s.as_bytes()).hash(h),
+        Object::Name(n) => (4u8, n.as_ref()).hash(h),
+        Object::Array(a) => {
+            5u8.hash(h);
+            let mut count = 0usize;
+            for x in a.iter::<Object<'_>>() {
+                if !value_id(&x, depth + 1, left, h) {
+                    return false;
+                }
+                count += 1;
+            }
+            // An element that does not resolve ends the resolved iteration early.
+            if count != a.raw_iter().count() {
+                return false;
+            }
+            count.hash(h);
+        }
+        Object::Dict(d) => {
+            6u8.hash(h);
+            if !dict_id(d, depth, left, h) {
+                return false;
+            }
+        }
+        Object::Stream(s) => {
+            if left.1 == 0 {
+                return false;
+            }
+            left.1 -= 1;
+            7u8.hash(h);
+            if !dict_id(s.dict(), depth, left, h) {
+                return false;
+            }
+            data_id(&s.raw_data(), h);
+        }
+    }
+    true
+}
+
+/// Adds a dictionary's entries in key order to `h` (see [`value_id`]).
+fn dict_id(d: &Dict<'_>, depth: usize, left: &mut (usize, usize), h: &mut DefaultHasher) -> bool {
+    let mut keys: Vec<Name<'_>> = d.keys().collect();
+    keys.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+    keys.len().hash(h);
+    for k in keys {
+        k.as_ref().hash(h);
+        match d.get::<Object<'_>>(k.as_ref()) {
+            Some(v) => {
+                if !value_id(&v, depth + 1, left, h) {
+                    return false;
+                }
+            }
+            None => return false,
+        }
+    }
+    true
 }
 
 /// The fewest pixels a side of a QR code has.
@@ -2081,6 +2268,8 @@ struct TextDevice<'d> {
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
     stencils: HashMap<u128, Option<ObjectIdentifier>>,
+    /// Raster image objects by their identity (see [`picture_id`]).
+    pictures: &'d mut HashMap<ObjectIdentifier, u64>,
     page: u32,
     rules: Vec<Rule>,
     /// Lines were drawn past the cap and are not kept.
@@ -2522,7 +2711,12 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
         self.images.push([min(xs), min(ys), max(xs), max(ys)]);
         self.images_code.push(code_pixels(&image));
-        let id = picture_id(&image, &self.stencils, (self.page, self.images.len()));
+        let id = picture_id(
+            &image,
+            &self.stencils,
+            self.pictures,
+            (self.page, self.images.len()),
+        );
         self.images_id.push(id);
     }
 
