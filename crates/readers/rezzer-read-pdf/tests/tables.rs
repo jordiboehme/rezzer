@@ -731,3 +731,44 @@ fn rules_close_together_do_not_chain() {
         assert_eq!(found[0].1[0], ["c00", "c01", "c02", "c03"], "{found:?}");
     }
 }
+
+#[test]
+fn form_boxes_give_one_note_per_page() {
+    // Twelve ruled boxes of three columns and two rows with a label in each row of the first
+    // column: one note for the page that counts them.
+    let mut c = String::from("0.5 w ");
+    for i in 0..12 {
+        let top = 780.0 - 60.0 * i as f32;
+        for k in 0..3 {
+            let y = top - 20.0 * k as f32;
+            c += &format!("50 {y} m 500 {y} l S ");
+        }
+        for k in 0..4 {
+            let x = 50.0 + 150.0 * k as f32;
+            c += &format!("{x} {} m {x} {top} l S ", top - 40.0);
+        }
+        c += &show("F1", 8.0, 54.0, top - 14.0, &format!("Name {i}"));
+        c += &show("F1", 8.0, 54.0, top - 34.0, &format!("Address {i}"));
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let note = "Possible tables on page 1 not rebuilt: 12 (most of their cells are empty)";
+    let paras = paragraphs(page(&out, 1));
+    assert_eq!(
+        paras
+            .iter()
+            .filter(|p| p.contains("Possible table"))
+            .count(),
+        1,
+        "{paras:?}"
+    );
+    assert!(paras.iter().any(|p| p == note), "{paras:?}");
+    assert!(paras.iter().any(|p| p.contains("Address 11")), "{paras:?}");
+    let losses: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("Possible table"))
+        .collect();
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+}

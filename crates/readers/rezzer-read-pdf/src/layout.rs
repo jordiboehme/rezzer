@@ -786,10 +786,12 @@ pub(crate) fn page_blocks_at(
         match p {
             Placed::Table(t) => built.table(t, cx),
             Placed::Unsure(u) => {
-                let what = format!(
-                    "Possible table on page {page} not rebuilt (reason: {})",
-                    u.reason
-                );
+                let what = u.text.unwrap_or_else(|| {
+                    format!(
+                        "Possible table on page {page} not rebuilt (reason: {})",
+                        u.reason
+                    )
+                });
                 built.note(&what, cx);
                 notes.push((what, LossReason::Uncertain, Severity::Info));
             }

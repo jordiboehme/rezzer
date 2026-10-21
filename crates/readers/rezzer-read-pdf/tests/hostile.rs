@@ -1540,8 +1540,8 @@ fn many_small_ruled_tables_on_one_page_are_bounded() {
 #[test]
 fn many_refused_ruled_grids_with_notes_are_bounded() {
     // 2,000 ruled grids of three by two cells with a word in two cells of the first column:
-    // each is refused (most of its cells are empty) with a note, and its text stays
-    // paragraphs.
+    // each is refused (most of its cells are empty), the page gets one note for all of them,
+    // and their text stays paragraphs.
     let start = Instant::now();
     let n = 2_000usize;
     let h = (n + 2) * 30;
@@ -1579,7 +1579,7 @@ fn many_refused_ruled_grids_with_notes_are_bounded() {
         .iter()
         .filter(|l| l.what.contains("Possible table"))
         .count();
-    assert!(notes > 0 && notes <= n, "{notes}");
+    assert_eq!(notes, 1, "{notes}");
     assert_rss_under_256_mib();
 }
 

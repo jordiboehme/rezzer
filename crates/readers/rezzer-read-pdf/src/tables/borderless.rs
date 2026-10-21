@@ -211,6 +211,7 @@ pub(super) fn borderless(
                         at: flow.at[lines[a].start],
                         top: b[3],
                         reason: why.to_string(),
+                        text: None,
                     });
                 }
             }

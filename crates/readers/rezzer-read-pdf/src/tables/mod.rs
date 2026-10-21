@@ -78,6 +78,8 @@ pub(crate) struct Unsure {
     pub at: usize,
     pub top: f32,
     pub reason: String,
+    /// The whole note, when it speaks of several regions at once.
+    pub text: Option<String>,
 }
 
 /// What the detectors for untagged pages found: tables, undecided regions, and what they

@@ -85,6 +85,59 @@ fn merged(mut segs: Vec<Seg>) -> Vec<Seg> {
     out
 }
 
+/// Why a grid with a figure caption next to it is not a table.
+const FIGURE_NEAR: &str = "a figure caption stands next to it";
+
+/// The one note of a page for its grids refused with a note: a grid alone says why; several
+/// say how many and why, by reason, the reasons in the order they first came. The note stands
+/// where the first of them does.
+fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsure> {
+    let first = refusals.iter().min_by_key(|r| r.0)?;
+    let mut text = None;
+    if refusals.len() > 1 {
+        let mut counts: Vec<(&str, usize)> = Vec::new();
+        for (_, _, why) in refusals {
+            match counts.iter_mut().find(|(w, _)| w == why) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((why, 1)),
+            }
+        }
+        let parts: Vec<String> = counts
+            .iter()
+            .map(|&(why, n)| {
+                let why = if n == 1 { why } else { plural(why) };
+                format!("{n} ({why})")
+            })
+            .collect();
+        text = Some(format!(
+            "Possible tables on page {page} not rebuilt: {}",
+            parts.join(", ")
+        ));
+    }
+    Some(Unsure {
+        at: first.0,
+        top: first.1,
+        reason: first.2.to_string(),
+        text,
+    })
+}
+
+/// A reason a ruled grid is refused, said of several grids.
+fn plural(why: &str) -> &str {
+    match why {
+        "it has more than 15 columns" => "they have more than 15 columns",
+        "most of its cells are empty" => "most of their cells are empty",
+        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
+        "its text crosses its lines" => "their text crosses their lines",
+        "it covers most of the page" => "they cover most of the page",
+        "it lies on a picture" => "they lie on a picture",
+        "its text is much smaller than the body text, as in a picture of a page" => {
+            "their text is much smaller than the body text, as in pictures of pages"
+        }
+        other => other,
+    }
+}
+
 /// Values closer than [`SNAP`] are one, sorted.
 fn clustered(mut values: Vec<f32>) -> Vec<f32> {
     values.sort_by(f32::total_cmp);
@@ -213,8 +266,9 @@ pub(super) fn ruled(
     let by_y = ByY::new(flow, &lines);
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
-    // Runs of grids refused with a note.
+    // Runs of grids refused with a note, and those grids: where each stands and why.
     let mut held: Vec<bool> = vec![false; flow.runs.len()];
+    let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
     let mut tables: Vec<Planned> = Vec::new();
     'grids: for (g, (gh, gv)) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
@@ -299,22 +353,19 @@ pub(super) fn ruled(
             || (cols >= 3
                 && (text_rows.len() >= 2 || text_squares.len() >= 6)
                 && area.refuses(b, &sizes).is_none());
-        let mut refuse = |why: &str, found: &mut Found| {
-            if !noted {
+        // A figure caption speaks against a table: no note for it.
+        let mut refuse = |why: &'static str| {
+            if !noted || why == FIGURE_NEAR {
                 return;
             }
-            found.unsure.push(Unsure {
-                at,
-                top: b[3],
-                reason: why.to_string(),
-            });
+            refusals.push((at, b[3], why));
             for &i in &mine {
                 held[i] = true;
             }
         };
         // A grid of many columns is refused before its cells are worked out.
         if cols > MAX_COLUMNS {
-            refuse("it has more than 15 columns", found);
+            refuse("it has more than 15 columns");
             continue;
         }
         // The segments on each boundary of the grid, found once.
@@ -425,7 +476,7 @@ pub(super) fn ruled(
         let spanning = extent.values().filter(|(rs, cs)| rs * cs > 1).count();
         let empty = extent.len() - with_text.len();
         let refused = if figure_caption || caption_inside {
-            Some("a figure caption stands next to it")
+            Some(FIGURE_NEAR)
         } else if empty as f32 > EMPTY_SHARE * extent.len() as f32 {
             Some("most of its cells are empty")
         } else if 10 * spanning > 3 * extent.len() {
@@ -436,7 +487,7 @@ pub(super) fn ruled(
             area.refuses(b, &sizes)
         };
         if let Some(why) = refused {
-            refuse(why, found);
+            refuse(why);
             continue;
         }
         // The place of each cell in the planned rows.
@@ -474,6 +525,9 @@ pub(super) fn ruled(
             tagged: None,
             continues: false,
         });
+    }
+    if let Some(u) = page_note(page, &refusals) {
+        found.unsure.push(u);
     }
     if tables.is_empty() {
         if held.contains(&true) {
