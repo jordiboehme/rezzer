@@ -66,7 +66,7 @@ pub(crate) fn read(
     meta::properties(pdf, &kept, out);
     outline(pdf, pages, &kept, out);
     link_graph(links, pages, &kept, out);
-    attachments(pdf, opts, budget, &kept, out);
+    attachments(pdf, opts, &kept, out);
     threads(pdf, &kept, out);
     timeline(events, &kept, out);
     issues(pdf, out);
@@ -555,11 +555,11 @@ fn link_graph(links: &[Link], pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out
 }
 
 /// The attachments, listed with type, size and description. With `extract_assets` each one's
-/// bytes come back as a blob, within an eighth of the memory limit for all of them; the ones
-/// left out get one Limit loss together.
-fn attachments(pdf: &Pdf, opts: &ReadOptions, budget: &Budget, kept: &Kept<'_>, out: &mut Out) {
+/// bytes come back as a blob, within what is left of the eighth of the memory limit that
+/// rendered pages and attachments share; the ones left out get one Limit loss together.
+fn attachments(pdf: &Pdf, opts: &ReadOptions, kept: &Kept<'_>, out: &mut Out) {
     let files = pdf.embedded_files();
-    let mut room = budget.limits().max_memory_bytes / 8;
+    let mut room = out.blob_room;
     // The attachments not extracted for a limit: the first one, why, and how many.
     let mut left_out: Option<(usize, String, usize)> = None;
     for (i, f) in files.iter().enumerate() {
@@ -620,6 +620,7 @@ fn attachments(pdf: &Pdf, opts: &ReadOptions, budget: &Budget, kept: &Kept<'_>, 
             }
         }
     }
+    out.blob_room = room;
     if let Some((i, why, n)) = left_out {
         let name = &files[i].name;
         let what = if n == 1 {
@@ -654,8 +655,8 @@ fn extract(
 ) -> Result<(), String> {
     let over = |n: u64, room: u64| {
         format!(
-            "it unpacks to {n} bytes, more than the {room} bytes left for attachments (an \
-             eighth of the memory limit)"
+            "it unpacks to {n} bytes, more than the {room} bytes left for extracted pictures \
+             and attachments (an eighth of the memory limit)"
         )
     };
     if let Some(n) = pdf.embedded_file_measured(i)

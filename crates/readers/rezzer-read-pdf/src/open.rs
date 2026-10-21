@@ -28,20 +28,31 @@ pub(crate) fn limits(budget: &Budget) -> pdfparts::Limits {
     }
 }
 
-/// Opens the file. On failure the outcome to return is ready.
+/// Why the file did not open.
+pub(crate) enum Refused {
+    /// The outcome to return is ready.
+    Done(Box<ReadOutcome>),
+    /// pdfparts cannot read the file as a PDF (NotPdf or Damaged): the fallback parser may.
+    Unreadable(OpenError, Box<Out>),
+}
+
+/// Opens the file.
 pub(crate) fn open(
     bytes: &[u8],
     password: Option<&str>,
     budget: &Budget,
     mut out: Out,
-) -> Result<(Pdf, Out), Box<ReadOutcome>> {
+) -> Result<(Pdf, Out), Refused> {
     let stop = || budget.check_time().is_err();
     let opened = contain(AssertUnwindSafe(|| {
         Pdf::open(bytes, password, &limits(budget), &stop)
     }));
     let pdf = match opened {
         Ok(Ok(pdf)) => pdf,
-        Ok(Err(e)) => return Err(Box::new(refused(e, out))),
+        Ok(Err(e @ (OpenError::NotPdf | OpenError::Damaged(_)))) => {
+            return Err(Refused::Unreadable(e, Box::new(out)));
+        }
+        Ok(Err(e)) => return Err(Refused::Done(Box::new(refused(e, out)))),
         Err(panic) => {
             out.loss(
                 "document",
@@ -49,7 +60,7 @@ pub(crate) fn open(
                 LossReason::Internal,
                 Severity::Error,
             );
-            return Err(Box::new(out.failed()));
+            return Err(Refused::Done(Box::new(out.failed())));
         }
     };
     if let Err(hit) = budget.add_unpacked(pdf.unpacked()) {
@@ -59,7 +70,7 @@ pub(crate) fn open(
             LossReason::Limit,
             Severity::Error,
         );
-        return Err(Box::new(out.failed()));
+        return Err(Refused::Done(Box::new(out.failed())));
     }
     Ok((pdf, out))
 }
@@ -92,8 +103,8 @@ fn refused(e: OpenError, mut out: Out) -> ReadOutcome {
     out.failed()
 }
 
-/// A file pdfparts cannot read as a PDF: not read at all.
-fn unreadable(e: &OpenError, mut out: Out) -> ReadOutcome {
+/// A file neither pdfparts nor the fallback parser can read: not read at all.
+pub(crate) fn unreadable(e: &OpenError, mut out: Out) -> ReadOutcome {
     out.loss(
         "document",
         format!("the whole file: {e}"),

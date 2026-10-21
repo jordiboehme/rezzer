@@ -10,6 +10,7 @@ publish = false
 rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
 pdfparts = { path = "../../formats/pdfparts" }
+hayro.workspace = true
 hayro-interpret.workspace = true
 hayro-syntax.workspace = true
 kurbo.workspace = true

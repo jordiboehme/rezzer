@@ -33,6 +33,7 @@ use read_fonts::ps::agl;
 use read_fonts::ps::cff::CffFontRef;
 use skrifa::{FontRef, MetadataProvider};
 
+use crate::fallback::Raw;
 use crate::layout::{Run, UriTarget};
 use crate::order::{Turn, runs_of};
 use crate::quote::{Marked, Quote, Quoting};
@@ -114,6 +115,16 @@ pub(crate) struct PageItems {
 }
 
 impl PageItems {
+    /// Whether the page gave any text, visible or not.
+    pub(crate) fn has_text(&self) -> bool {
+        !self.runs.is_empty()
+            || !self.invisible.is_empty()
+            || !self.hidden_layer.is_empty()
+            || !self.hidden_layers.is_empty()
+            || self.mapped > 0
+            || self.unmapped > 0
+    }
+
     /// Copies the runs into fresh allocations.
     fn compact(&mut self) {
         let copy = |list: &mut Vec<Run>| *list = list.to_vec();
@@ -235,11 +246,57 @@ impl Caps {
     }
 }
 
+/// What the text parser reads: pdfparts' canonical bytes, whose streams the guard measured,
+/// or, for the fallback parser, the file itself, whose streams [`Raw`] measured.
+#[derive(Clone, Copy)]
+pub(crate) enum Origin<'p> {
+    Canonical(&'p Pdf),
+    Fallback(&'p Raw<'p>),
+}
+
+impl Origin<'_> {
+    /// Takes `bytes` from the pool for what the readers copy out of the document; false when
+    /// they do not fit.
+    fn charge_copy(self, bytes: u64) -> bool {
+        match self {
+            Origin::Canonical(pdf) => pdf.charge_copy(bytes),
+            Origin::Fallback(raw) => raw.charge_copy(bytes),
+        }
+    }
+
+    /// The number of pages the parser's page walk must find, if it is known.
+    fn page_count(self) -> Option<u32> {
+        match self {
+            Origin::Canonical(pdf) => Some(pdf.page_count()),
+            Origin::Fallback(raw) => raw.page_count(),
+        }
+    }
+
+    fn open(self) -> Result<hayro_syntax::Pdf, hayro_syntax::LoadPdfError> {
+        match self {
+            Origin::Canonical(pdf) => hayro_syntax::Pdf::new(pdf.canonical_shared()),
+            Origin::Fallback(raw) => raw.open(),
+        }
+    }
+}
+
 /// Reads the text of `wanted` pages (1-based, ascending, none refused by the guard) from the
 /// canonical bytes, and quotes the text under the annotations of `marked`. `stop` is asked
 /// before each page and while a page is read; a page the stop cuts is not kept.
 pub(crate) fn pages(
     pdf: &Pdf,
+    wanted: &[u32],
+    links: &[PdfLink],
+    marked: &Marked<'_>,
+    caps: Caps,
+    stop: &dyn Fn() -> bool,
+) -> Extracted {
+    pages_of(Origin::Canonical(pdf), wanted, links, marked, caps, stop)
+}
+
+/// [`pages`] from either origin.
+pub(crate) fn pages_of(
+    origin: Origin<'_>,
     wanted: &[u32],
     links: &[PdfLink],
     marked: &Marked<'_>,
@@ -262,9 +319,7 @@ pub(crate) fn pages(
             kind,
         }));
     };
-    let opened = panic::catch_unwind(AssertUnwindSafe(|| {
-        hayro_syntax::Pdf::new(pdf.canonical_shared())
-    }));
+    let opened = panic::catch_unwind(AssertUnwindSafe(|| origin.open()));
     let doc = match opened {
         Ok(Ok(doc)) => doc,
         Ok(Err(e)) => {
@@ -287,14 +342,15 @@ pub(crate) fn pages(
             return out;
         }
     };
-    if found.len() != pdf.page_count() as usize {
+    if let Some(count) = origin.page_count()
+        && found.len() != count as usize
+    {
         all_fail(
             &mut out,
             format!(
-                "it finds {} pages where the object layer finds {}, so it could number them \
-                 differently",
+                "it finds {} pages where the object layer finds {count}, so it could number \
+                 them differently",
                 found.len(),
-                pdf.page_count()
             ),
             Fail::Damaged,
         );
@@ -302,7 +358,7 @@ pub(crate) fn pages(
     }
     let links = uri_links(links);
     let off = switched_off(&doc);
-    let mut reader = PageReader::new(pdf, caps, stop, off);
+    let mut reader = PageReader::new(origin, caps, stop, off);
     for &n in wanted {
         if stop() {
             out.stopped_at = Some(n);
@@ -448,7 +504,7 @@ struct Programs {
 
 /// Reads pages one after the other, sharing hayro's caches and what is known of the fonts.
 struct PageReader<'p, 'a> {
-    pdf: &'p Pdf,
+    origin: Origin<'p>,
     caps: Caps,
     stop: &'p dyn Fn() -> bool,
     settings: InterpreterSettings,
@@ -470,13 +526,13 @@ struct PageReader<'p, 'a> {
 
 impl<'p, 'a> PageReader<'p, 'a> {
     fn new(
-        pdf: &'p Pdf,
+        origin: Origin<'p>,
         caps: Caps,
         stop: &'p dyn Fn() -> bool,
         off: HashSet<ObjectIdentifier>,
     ) -> Self {
         PageReader {
-            pdf,
+            origin,
             caps,
             stop,
             settings: InterpreterSettings {
@@ -513,7 +569,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         }
         let max_bytes = (self.caps.max_items as u64).saturating_mul(BYTES_PER_UNIT);
         let streams = content_streams(page.raw());
-        let size: u64 = streams.iter().map(|s| stream_size(self.pdf, s)).sum();
+        let size: u64 = streams.iter().map(|s| stream_size(self.origin, s)).sum();
         if size > max_bytes {
             return fail(
                 format!(
@@ -546,10 +602,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             self.cache = InterpreterCache::new();
             self.cache_bytes = 0;
         }
-        let (pdf, caps) = (self.pdf, self.caps);
+        let (origin, caps) = (self.origin, self.caps);
         let known = &mut self.known;
         let walked = panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut walk = Walk::new(pdf, caps, n, known);
+            let mut walk = Walk::new(origin, caps, n, known);
             walk.charge(size / BYTES_PER_UNIT);
             let cut = walk.top(&data, page.resources());
             walk.finish(cut)
@@ -638,7 +694,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 .map(|m| m.tag)
                 .collect(),
             fonts: &self.known.fonts,
-            pdf: self.pdf,
+            origin: self.origin,
             programs: &mut self.programs,
             stand_ins: HashSet::new(),
             tables_cut: false,
@@ -920,7 +976,7 @@ const HEAVY_GLYPH: u64 = 8;
 /// them, with the same optional content visibility, and stops once the page's work or glyphs
 /// pass their bounds.
 struct Walk<'w> {
-    pdf: &'w Pdf,
+    origin: Origin<'w>,
     caps: Caps,
     page: u32,
     known: &'w mut Known,
@@ -955,9 +1011,9 @@ struct Walk<'w> {
 }
 
 impl<'w> Walk<'w> {
-    fn new(pdf: &'w Pdf, caps: Caps, page: u32, known: &'w mut Known) -> Self {
+    fn new(origin: Origin<'w>, caps: Caps, page: u32, known: &'w mut Known) -> Self {
         Walk {
-            pdf,
+            origin,
             caps,
             page,
             known,
@@ -1054,7 +1110,7 @@ impl<'w> Walk<'w> {
     }
 
     fn size(&self, s: &Stream<'_>) -> u64 {
-        stream_size(self.pdf, s)
+        stream_size(self.origin, s)
     }
 
     fn is_visible(&self) -> bool {
@@ -1353,7 +1409,7 @@ impl<'w> Walk<'w> {
             if !self.charge(a.len() as u64) {
                 return false;
             }
-            if !self.pdf.charge_copy(a.len() as u64) {
+            if !self.origin.charge_copy(a.len() as u64) {
                 self.over = Some(
                     "its ActualText copies take more than the object limit allows".to_string(),
                 );
@@ -1574,8 +1630,13 @@ fn stops_early(data: &[u8], typed: usize) -> bool {
     ops.next().is_some()
 }
 
-/// The unpacked size of a stream, as the guard measured it.
-fn stream_size(pdf: &Pdf, s: &Stream<'_>) -> u64 {
+/// The unpacked size of a stream, as the guard measured it: pdfparts' guard for the
+/// canonical bytes, the fallback's for the file itself.
+fn stream_size(origin: Origin<'_>, s: &Stream<'_>) -> u64 {
+    let pdf = match origin {
+        Origin::Canonical(pdf) => pdf,
+        Origin::Fallback(raw) => return raw.stream_size(s),
+    };
     let id = s.obj_id();
     match (u32::try_from(id.obj_number), u16::try_from(id.gen_number)) {
         (Ok(n), Ok(g)) => pdf.unpacked_size(n, g),
@@ -1925,7 +1986,7 @@ struct TextDevice<'d> {
     /// The tags the walk gave rewritten switched-off sequences.
     layer_tags: HashSet<u64>,
     fonts: &'d HashMap<u128, FontInfo>,
-    pdf: &'d Pdf,
+    origin: Origin<'d>,
     programs: &'d mut Programs,
     /// Fonts whose embedded program did not load and a stand-in is in use.
     stand_ins: HashSet<u128>,
@@ -1993,7 +2054,7 @@ impl TextDevice<'_> {
                             .font_data()
                             .map(|d| GlyphNames::read(d.data.as_ref().as_ref(), cmap.as_deref()))
                             .unwrap_or_default();
-                        if self.pdf.charge_copy(built.bytes()) {
+                        if self.origin.charge_copy(built.bytes()) {
                             built
                         } else {
                             self.programs.spent = true;

@@ -3223,3 +3223,239 @@ fn a_probe_bound_with_every_note_placed_says_nothing() {
         out.document.losses
     );
 }
+
+fn read_assets(bytes: &[u8]) -> ReadOutcome {
+    let src = Source {
+        path: None,
+        name: "file.pdf".into(),
+        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format: FormatId::Pdf,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "%PDF-".into(),
+        },
+        modified: None,
+    };
+    let opts = ReadOptions {
+        extract_assets: true,
+        ..ReadOptions::default()
+    };
+    PdfReader.read(&src, &opts, &Budget::new(hostile()))
+}
+
+/// `pages` pages of `w` by `h` points, each drawing one shared gray picture of 8 by 8 pixels
+/// over the whole page and no text.
+fn picture_pages(pages: usize, w: u32, h: u32) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&[90u8; 64]),
+    );
+    let c = b.stream("", format!("q {w} 0 0 {h} 0 0 cm /Im1 Do Q\n").as_bytes());
+    let mut kids = String::new();
+    for _ in 0..pages {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+             /Resources << /XObject << /Im1 {image} 0 R >> >> /Contents {c} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_huge_media_box_renders_at_most_16_million_pixels() {
+    // 200,000 points square: at 144 dpi that would be 160 billion pixels.
+    let out = read_assets(&picture_pages(1, 200_000, 200_000));
+    let blob = out
+        .blobs
+        .iter()
+        .find(|b| b.asset == "page-1")
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    let w = u32::from_be_bytes(blob.bytes[16..20].try_into().unwrap());
+    let h = u32::from_be_bytes(blob.bytes[20..24].try_into().unwrap());
+    assert!(u64::from(w) * u64::from(h) <= 16_000_000, "{w} x {h}");
+    assert!(w > 3000 && h > 3000, "{w} x {h}");
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_pages_that_need_vision_render_at_most_1000() {
+    let start = Instant::now();
+    let out = read_assets(&picture_pages(1010, 20, 20));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(out.blobs.len(), 1000);
+    assert_eq!(out.document.assets.len(), 1010);
+    let cut: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit && l.what.contains("not rendered"))
+        .collect();
+    assert_eq!(cut.len(), 1, "{:?}", out.document.losses);
+    assert_eq!(cut[0].location, "p1001");
+    assert!(cut[0].what.contains("10 pages"), "{:?}", cut[0]);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_rss_under_256_mib();
+}
+
+/// `pages` pages of `glyphs` glyphs each, behind 2,000 bytes before the header, so only the
+/// fallback parser reads the file. With `looped`, the page tree also lists itself as a kid.
+fn prefixed_pages(pages: usize, glyphs: usize, looped: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut c = b"BT /F1 12 Tf 72 700 Td (Before.) Tj 72 600 Td (".to_vec();
+    c.extend(std::iter::repeat_n(b'a', glyphs));
+    c.extend(b") Tj ET\n");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let mut kids = String::new();
+    for _ in 0..pages {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    if looped {
+        kids.push_str(&format!("{tree} 0 R"));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let mut file = vec![b' '; 2000];
+    file.extend(b.finish(catalog));
+    file
+}
+
+fn fallback_loss(out: &ReadOutcome) -> &Loss {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("fallback parser"))
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses))
+}
+
+#[test]
+fn huge_fallback_text_is_bounded() {
+    // The glyphs of the spread twins, behind 2,000 bytes before the header: only the fallback
+    // parser reads them, under the same kept budget.
+    let start = Instant::now();
+    let mut file = vec![b' '; 2000];
+    file.extend(many_pages(20, 220_000, 0));
+    let out = read(&file);
+    assert_eq!(fallback_loss(&out).location, "document");
+    assert_file_cut(&out, 20, start);
+}
+
+/// `many_pages` where the content stream's dictionary holds a bare keyword: the object layer
+/// drops it, so every page has fonts and no text, and the fallback parser reads them all.
+fn fallback_pages(pages: usize, glyphs: usize) -> Vec<u8> {
+    let file = many_pages(pages, glyphs, 0);
+    let from = b"<< /Filter /FlateDecode /Length ";
+    let at = file
+        .windows(from.len())
+        .position(|w| w == from)
+        .expect("the content stream");
+    let mut out = file[..at].to_vec();
+    // `<< /Filter /FlateDecode /Length N >>` becomes `<</Filter /FlateDecode /Length N x>>`:
+    // the same length, so the table holds.
+    let close = at + file[at..].windows(2).position(|w| w == b">>").unwrap();
+    let length = std::str::from_utf8(&file[at + from.len()..close])
+        .unwrap()
+        .trim();
+    let swapped = format!("<</Filter /FlateDecode /Length {length} x>>");
+    assert_eq!(swapped.len(), close + 2 - at);
+    out.extend(swapped.as_bytes());
+    out.extend(&file[close + 2..]);
+    out
+}
+
+#[test]
+fn huge_text_of_the_per_page_fallback_is_bounded() {
+    let start = Instant::now();
+    let out = read(&fallback_pages(20, 220_000));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let losses = &out.document.losses;
+    assert!(
+        losses
+            .iter()
+            .any(|l| l.location == "p1" && l.what == "page 1: text read with the fallback parser"),
+        "{losses:?}"
+    );
+    assert!(text(page(&out, 1)).contains("Before."));
+    // The kept bytes end the fallback's reading before page 20, and that is said.
+    assert!(
+        losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("to 20")),
+        "{losses:?}"
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_page_tree_loop_in_a_fallback_file_ends() {
+    let start = Instant::now();
+    let out = read(&prefixed_pages(3, 10, true));
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(fallback_loss(&out).location, "document");
+    assert!(text(page(&out, 3)).contains("Before."));
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_bomb_in_a_fallback_file_is_not_unpacked() {
+    // The stream guard of the fallback refuses the file before the parser unpacks anything.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let bomb = b.stream("/Filter /FlateDecode", &common::zeros_packed(1 << 30));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Contents {bomb} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let mut file = vec![b' '; 2000];
+    file.extend(b.finish(catalog));
+    let out = read(&file);
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("fallback parser") && l.what.contains("not used")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}

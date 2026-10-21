@@ -10,16 +10,19 @@
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
 //! `meta.rs` and `objects.rs` add the metadata, outline, links, attachments, threads and
 //! revisions; `quote.rs` quotes the text under annotations and `annots.rs` puts them at
-//! their passage.
+//! their passage. `render.rs` lists the pages that need vision and renders them on request;
+//! `fallback.rs` reads the text of a file pdfparts cannot open with the same text walk.
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
+mod fallback;
 mod layout;
 mod meta;
 mod objects;
 mod open;
 mod order;
 mod quote;
+mod render;
 mod tables;
 mod text;
 
@@ -76,10 +79,15 @@ fn read_pdf(
         id: reader.id().to_string(),
         version: reader.version().to_string(),
     });
-    let out = Out::new(Document::new(info));
+    let mut out = Out::new(Document::new(info));
+    // Rendered pages and extracted attachments share one room.
+    out.blob_room = budget.limits().max_memory_bytes / 8;
     let (pdf, mut out) = match open::open(src.bytes(), opts.password.as_deref(), budget, out) {
         Ok(opened) => opened,
-        Err(outcome) => return *outcome,
+        Err(open::Refused::Done(outcome)) => return *outcome,
+        Err(open::Refused::Unreadable(e, out)) => {
+            return fallback::read_file(src, opts, budget, &e, *out, text_stop);
+        }
     };
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
@@ -90,25 +98,37 @@ fn read_pdf(
     let links = pdf.links();
     let annots = pdf.annotations();
     let marked = quote::marked(&annots);
-    let extracted = extract(&pdf, &pages, &links, &marked, budget, &mut out, text_stop);
+    let read = Read { src, opts, budget };
+    let extracted = extract(&pdf, &pages, &links, &marked, &read, &mut out, text_stop);
     drop(marked);
-    let (room, placed) = lay_out(&pdf, &pages, extracted, &annots, budget, &mut out);
+    let (room, placed, needs) = lay_out(Some(&pdf), &pages, extracted, &annots, budget, &mut out);
+    render::render_pages(&pdf, &pages, &needs, opts, budget, &mut out);
+    drop(needs);
     annots::read(&annots, placed, budget, &room, &mut out);
     drop(annots);
     objects::read(&pdf, &pages, &links, events, opts, budget, &room, &mut out);
     out.finish()
 }
 
-/// Reads the text of the pages the guard let through.
+/// What one read is of: the file, its options and its budget.
+struct Read<'r> {
+    src: &'r Source,
+    opts: &'r ReadOptions,
+    budget: &'r Budget,
+}
+
+/// Reads the text of the pages the guard let through. A page with fonts that gave no text is
+/// read again with the fallback parser; its text replaces the empty page, with a loss.
 fn extract(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[pdfparts::Link],
     marked: &quote::Marked<'_>,
-    budget: &Budget,
+    read: &Read<'_>,
     out: &mut Out,
     stop: &dyn Fn() -> bool,
 ) -> Extracted {
+    let budget = read.budget;
     let caps = Caps::new(
         open::limits(budget).max_items,
         budget.limits().max_memory_bytes,
@@ -133,7 +153,77 @@ fn extract(
         .map(|p| p.number)
         .filter(|n| !refused.contains(n))
         .collect();
-    text::pages(pdf, &wanted, links, marked, caps, stop)
+    let mut extracted = text::pages(pdf, &wanted, links, marked, caps, stop);
+    let fonts: HashSet<u32> = pages
+        .iter()
+        .filter(|p| p.has_fonts)
+        .map(|p| p.number)
+        .collect();
+    let empty: Vec<u32> = extracted
+        .pages
+        .iter()
+        .filter(|p| fonts.contains(&p.page) && !p.has_text())
+        .map(|p| p.page)
+        .collect();
+    if empty.is_empty() {
+        return extracted;
+    }
+    let again = Caps {
+        max_kept: extracted.kept_left,
+        ..caps
+    };
+    let Some(found) = fallback::pages(pdf, read.src, read.opts, budget, &empty, again, stop) else {
+        return extracted;
+    };
+    // What the fallback kept counts against the same bytes; a page it read without text
+    // gives its share back, and so does an empty page its text replaces.
+    let mut left = found.kept_left;
+    for items in found.pages {
+        let Some(old) = extracted
+            .pages
+            .iter_mut()
+            .find(|p| p.page == items.page)
+            .filter(|_| items.has_text())
+        else {
+            left += items.kept;
+            continue;
+        };
+        left += old.kept;
+        let n = items.page;
+        *old = items;
+        out.loss(
+            format!("p{n}"),
+            format!("page {n}: text read with the fallback parser"),
+            LossReason::Uncertain,
+            Severity::Warning,
+        );
+    }
+    extracted.kept_left = left;
+    // Pages a limit kept the fallback from reading say so. Where the fallback parser failed
+    // otherwise, the first read stands: it read the page and found no text.
+    let mut failed: Vec<text::Failure> = found
+        .failed
+        .into_iter()
+        .filter(|f| f.kind == text::Fail::Limit)
+        .collect();
+    if let Some(first) = found.stopped_at {
+        let read: HashSet<u32> = extracted.pages.iter().map(|p| p.page).collect();
+        failed.extend(
+            empty
+                .iter()
+                .filter(|&&n| n >= first && read.contains(&n))
+                .map(|&page| text::Failure {
+                    page,
+                    why: "the time limit was reached".into(),
+                    kind: text::Fail::Limit,
+                }),
+        );
+    }
+    if !failed.is_empty() {
+        extracted.failed.append(&mut failed);
+        extracted.failed.sort_by_key(|f| f.page);
+    }
+    extracted
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
@@ -157,13 +247,13 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
 /// what is left of the bytes the file may keep, for the object layer, and where each of
 /// `annots` stands with what it quotes.
 fn lay_out(
-    pdf: &Pdf,
+    pdf: Option<&Pdf>,
     pages: &[PageInfo],
     extracted: Extracted,
     annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
-) -> (LinkRoom, Vec<annots::Placed>) {
+) -> (LinkRoom, Vec<annots::Placed>, Vec<render::Need>) {
     let Extracted {
         pages: read,
         failed,
@@ -195,11 +285,12 @@ fn lay_out(
     let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
     // The pages whose text was laid out.
     let mut read_pages: HashSet<u32> = HashSet::new();
-    let tree = if pdf.tagged() {
-        pdf.struct_tree()
-    } else {
-        None
+    let tree = match pdf {
+        Some(pdf) if pdf.tagged() => pdf.struct_tree(),
+        _ => None,
     };
+    let captions = pdf.map(render::figure_captions).unwrap_or_default();
+    let mut needs: Vec<render::Need> = Vec::new();
     let tables = Tables::default();
     // The model's link targets share what is left of the bytes the pages could keep.
     let links = LinkRoom::new(kept_left);
@@ -208,7 +299,7 @@ fn lay_out(
     // Where each tagged table stands: the index of its page section in the body, of the
     // table among the section's blocks, and its anchor.
     let mut placed: Placed = HashMap::new();
-    let widgets = widget_boxes(pdf);
+    let widgets = pdf.map(widget_boxes).unwrap_or_default();
     for info in pages {
         let n = info.number;
         // The section and its marker.
@@ -233,7 +324,7 @@ fn lay_out(
             anchor: None,
         }];
         if let (false, Some(mut items)) = (halted, read.remove(&n)) {
-            let roles = |mcid: u32| pdf.role_of(n, mcid);
+            let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
             let cx = Context {
                 style: &style,
                 tree,
@@ -257,7 +348,18 @@ fn lay_out(
             let height = frame_height(info, Some(&items));
             read_pages.insert(n);
             let here = on_page.get(&n).map_or(&[][..], Vec::as_slice);
-            let points = annotation_points(n, &mut items, annots, here, &mut spots, out);
+            let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
+            // The picture's block is looked for at the run nearest to its top, after the
+            // annotations' points; a turned frame has no points.
+            let vision = render::vision(info, &items);
+            let picture = vision
+                .as_ref()
+                .and_then(render::picture_top)
+                .filter(|_| !items.turned)
+                .and_then(|top| quote::nearest_runs(&items.runs, &[top])[0].map(|at| (at, top)));
+            if let Some((at, _)) = picture {
+                points.push(at);
+            }
             let (ox, oy) = items.origin;
             let fields: Vec<[f32; 4]> = widgets
                 .get(&n)
@@ -337,8 +439,44 @@ fn lay_out(
                     placed.insert(table, (section, first_table + k, anchor));
                 }
             }
+            let picture_block = picture.and_then(|_| laid.probed.last().cloned().flatten());
             blocks.extend(laid.blocks);
             blocks.extend(orphans);
+            if let Some(v) = vision {
+                let caption = captions.get(&n).cloned();
+                let charged = budget.add_elements(1).and_then(|()| {
+                    budget.charge_text(v.alt.len() + caption.as_ref().map_or(0, String::len))
+                });
+                match charged {
+                    Ok(()) => {
+                        let media = Block::Media {
+                            asset: format!("page-{n}"),
+                            anchor: None,
+                        };
+                        // After the block when its run stands above the picture's top.
+                        let after = picture.is_some_and(|(at, top)| at.1 > top.1);
+                        let at = render::place(&mut blocks, picture_block.as_ref(), after, media);
+                        // The tables of this page after it move one block on.
+                        for (s, b, _) in placed.values_mut() {
+                            if *s == section && *b >= at {
+                                *b += 1;
+                            }
+                        }
+                        needs.push(render::Need {
+                            page: n,
+                            asset: out.doc.assets.len(),
+                            cut: items.in_part,
+                        });
+                        out.doc.assets.push(render::asset(n, v.alt, caption));
+                    }
+                    Err(hit) => out.loss(
+                        format!("p{n}"),
+                        format!("page {n} needs vision but is not listed: {hit}"),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    ),
+                }
+            }
             // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {
                 let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
@@ -434,19 +572,19 @@ fn lay_out(
             Severity::Warning,
         );
     }
-    if pages.len() < pdf.page_count() as usize {
+    let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
+    if pages.len() < count {
         out.loss(
             "document",
             format!(
-                "pages {} to {} not read: the time limit was reached",
+                "pages {} to {count} not read: the time limit was reached",
                 pages.len() + 1,
-                pdf.page_count()
             ),
             LossReason::Limit,
             Severity::Warning,
         );
     }
-    (links, spots)
+    (links, spots, needs)
 }
 
 /// The points whose blocks the annotations of page `n` stand at, two for each of `here`: the
@@ -788,6 +926,8 @@ pub(crate) struct Out {
     pub doc: Document,
     pub partial: bool,
     pub blobs: Vec<Blob>,
+    /// The bytes rendered pages and extracted attachments may still take.
+    pub blob_room: u64,
 }
 
 impl Out {
@@ -796,6 +936,7 @@ impl Out {
             doc,
             partial: false,
             blobs: Vec::new(),
+            blob_room: 0,
         }
     }
 
