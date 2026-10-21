@@ -522,7 +522,7 @@ impl Pdf {
             .map(|i| i.list.clone())
             .unwrap_or_default();
         if let Ok(room) = self.script_room.lock() {
-            list.extend(room.issue(self.limits.max_script_total_bytes));
+            list.extend(room.issues(self.limits.max_script_total_bytes));
         }
         list
     }

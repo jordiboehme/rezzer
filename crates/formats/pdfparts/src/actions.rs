@@ -115,7 +115,16 @@ pub(crate) struct ScriptRoom {
     texts: HashMap<ObjectId, Option<Arc<str>>>,
     refused: usize,
     first: Option<String>,
+    /// What is left of the same total for the actions that follow the first of a chain
+    /// through `/Next`, each counted at [`ACTION_COST`] plus its kind and target, and how many
+    /// chains were cut short.
+    actions_left: u64,
+    chains_cut: usize,
 }
+
+/// What one listed action holds besides its texts, as measured: the entry in the reader's
+/// list, its strings' headers and the copy in the list of scripts.
+const ACTION_COST: u64 = 256;
 
 impl ScriptRoom {
     pub(crate) fn new(total: u64) -> ScriptRoom {
@@ -124,7 +133,21 @@ impl ScriptRoom {
             texts: HashMap::new(),
             refused: 0,
             first: None,
+            actions_left: total,
+            chains_cut: 0,
         }
+    }
+
+    /// Takes room for one more action of `bytes`; `false` when it does not fit, and then the
+    /// chain it stands in, which ends there, is counted as cut short.
+    fn take_action(&mut self, bytes: u64) -> bool {
+        let n = ACTION_COST.saturating_add(bytes);
+        if n <= self.actions_left {
+            self.actions_left -= n;
+            return true;
+        }
+        self.chains_cut += 1;
+        false
     }
 
     /// Takes `n` bytes; when they do not fit, counts the script `what` as left without text.
@@ -138,8 +161,31 @@ impl ScriptRoom {
         false
     }
 
-    /// The one issue for the scripts left without their text, if any.
-    pub(crate) fn issue(&self, total: u64) -> Option<Issue> {
+    /// The issues for the scripts left without their text and the actions left out, if any.
+    pub(crate) fn issues(&self, total: u64) -> Vec<Issue> {
+        let mut out: Vec<Issue> = self.text_issue(total).into_iter().collect();
+        if self.chains_cut > 0 {
+            let n = self.chains_cut;
+            out.push(Issue::new(
+                SCRIPTS,
+                IssueKind::Limit,
+                format!(
+                    "{n} {} cut short: the actions that follow others through /Next take more \
+                     than the {total} bytes they may hold together, so the rest of {} is not \
+                     listed",
+                    if n == 1 {
+                        "action chain is"
+                    } else {
+                        "action chains are"
+                    },
+                    if n == 1 { "it" } else { "them" },
+                ),
+            ));
+        }
+        out
+    }
+
+    fn text_issue(&self, total: u64) -> Option<Issue> {
         let first = self.first.as_ref()?;
         let n = self.refused;
         Some(Issue::new(
@@ -430,12 +476,17 @@ impl Pdf {
         let start = final_id(doc, action);
         if let Some(found) = start.and_then(|id| chains.cache.get(&id)) {
             // The actions are copied, so each copy is charged.
-            for a in found {
+            let mut copied = Vec::with_capacity(found.len());
+            for (k, a) in found.iter().enumerate() {
                 if !budget.charge(a.weight()) {
                     return Err(Spent);
                 }
+                if k > 0 && !self.take_action(a) {
+                    break;
+                }
+                copied.push(a.clone());
             }
-            return Ok(found.clone());
+            return Ok(copied);
         }
         let location = chains.location;
         let mut out = Vec::new();
@@ -468,7 +519,13 @@ impl Pdf {
             if let Some(s) = get_name(doc, d, b"S")
                 && s != b"GoTo"
             {
-                out.push(self.action(d, s, budget, &mut chains.shared, location, issues)?);
+                let a = self.action(d, s, budget, &mut chains.shared, location, issues)?;
+                // The actions that follow the first through /Next share one room; past it the
+                // chain ends, and one issue counts the chains cut short.
+                if depth > 1 && !self.take_action(&a) {
+                    break;
+                }
+                out.push(a);
             }
             // /Next is one action or an array of them, read in order. Each entry counts as
             // it is stacked, so a list that many actions share costs each time.
@@ -756,6 +813,15 @@ impl Pdf {
     fn reserve_script(&self, n: u64, named: &dyn Fn() -> String) -> bool {
         match self.script_room.lock() {
             Ok(mut room) => room.reserve(n, named),
+            Err(_) => false,
+        }
+    }
+
+    /// Takes room for one listed action of the document.
+    fn take_action(&self, a: &Action) -> bool {
+        let bytes = a.kind.len() as u64 + a.target.as_ref().map_or(0, |t| t.len() as u64);
+        match self.script_room.lock() {
+            Ok(mut room) => room.take_action(bytes),
             Err(_) => false,
         }
     }

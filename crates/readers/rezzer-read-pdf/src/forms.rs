@@ -695,13 +695,15 @@ fn list_scripts(scripts: &[Script], links: &[Link], kept: &Kept<'_>, out: &mut O
         out.loss(
             "scripts",
             format!(
-                "the text of {dropped} {} not kept, the first that of {}: {why}",
+                "{}: {why}",
                 if dropped == 1 {
-                    "script is"
+                    format!("1 script is kept without its text ({})", quote(&trigger))
                 } else {
-                    "scripts are"
-                },
-                quote(&trigger)
+                    format!(
+                        "{dropped} scripts are kept without their text, the first {}",
+                        quote(&trigger)
+                    )
+                }
             ),
             LossReason::Limit,
             Severity::Warning,

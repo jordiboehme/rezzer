@@ -3814,4 +3814,81 @@ fn a_shared_script_counts_once() {
     let fields = &out.document.facets.fields;
     assert_eq!(fields.len(), 80);
     assert!(fields.iter().all(|f| f.format.is_some()), "{fields:?}");
+    // The reader's own share keeps only a few copies of the text in its list of scripts.
+    let loss = limit_at(
+        &out,
+        "scripts",
+        "scripts are kept without their text, the first",
+    );
+    assert!(
+        loss.what.starts_with(|c: char| c.is_ascii_digit()),
+        "{loss:?}"
+    );
+}
+
+#[test]
+fn a_link_chain_of_many_addresses_is_bounded() {
+    // One link to an address whose /Next names 200,000 more: the first is in the links
+    // graph, the others are listed as link actions as far as the share of the form logic
+    // goes. The twin names the same array under a key nobody reads.
+    // Shape and twin are built and read one after the other.
+    let start = Instant::now();
+    drop(read_through(&annotated_chain("JunkNext")));
+    let twin = common::max_rss_bytes();
+    let out = read_through(&annotated_chain("Next"));
+    let rss = common::max_rss_bytes();
+    // Measured at the 512 MiB limits: the twin takes 210 MiB in this process (building the
+    // file and parsing 200,000 dictionaries), the shape 55 MiB more. Of that, 39 MiB come
+    // before the form logic and the scripts are read at all, 10 MiB are pdfparts' list of
+    // actions, which the room for actions now bounds (it took 85 MiB before), and 6 MiB the
+    // reader's copies. The twin alone is near 256 MiB here, so the bound over it is the
+    // twin rule, and the whole read stays far under the memory limit.
+    assert!(
+        rss < twin + (64 << 20) && rss < 320 << 20,
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin >> 20
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let listed = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.detail.as_deref() == Some("uri"))
+        .count();
+    assert!(listed > 1_000 && listed < 200_000, "{listed}");
+    limit_at(&out, "scripts", "action chain is cut short");
+}
+
+/// A one-page file with one link to an address whose `key` (`Next` for the shape) names an
+/// array of 200,000 more address actions.
+fn annotated_chain(key: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let content = b.stream("", b"BT ET");
+    let list: Vec<String> = (0..200_000)
+        .map(|k| format!("<< /S /URI /URI (http://h{k}.example/) >>"))
+        .collect();
+    let next = b.add(format!("[{}]", list.join("\n")));
+    drop(list);
+    let link = b.add(format!(
+        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI \
+         /URI (http://first.example/) /{key} {next} 0 R >> >>"
+    ));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Contents {content} 0 R \
+         /Annots [{link} 0 R] >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
 }
