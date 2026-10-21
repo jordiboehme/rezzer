@@ -249,6 +249,7 @@ fn overview_lists_sections_and_counts() {
         },
         Block::Media {
             asset: "img1".into(),
+            alt: None,
             anchor: None,
         },
     ];

@@ -1096,7 +1096,7 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             prefix_lines(&body, ">")
         }
         Block::Math { latex, .. } => math_block(latex),
-        Block::Media { asset, .. } => media(asset, ctx),
+        Block::Media { asset, alt, .. } => media(asset, alt.as_deref(), ctx),
         Block::Callout {
             kind,
             title,
@@ -1349,24 +1349,26 @@ fn math_is_plain(body: &str) -> bool {
     })
 }
 
-fn media(id: &str, ctx: &Ctx) -> String {
+/// A picture by its asset `id`; `place` is what this place of it says, when it says more than
+/// the asset's alt text (one picture drawn at several places, each with its own box).
+fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
     let mut parts: Vec<Inline> = Vec::new();
     let text = Inline::plain;
     match ctx.assets.iter().find(|a| a.id == id) {
         None => parts.push(text(format!("Picture {id} is missing from the assets."))),
         Some(asset) => {
+            let alt = place.or(asset.alt.as_deref());
             match &asset.path {
                 Some(path) => parts.push(Inline::Image {
                     target: asset_target(path),
-                    alt: asset
-                        .alt
-                        .clone()
+                    alt: alt
+                        .map(str::to_string)
                         .or_else(|| asset.caption.clone())
                         .unwrap_or_else(|| asset.id.clone()),
                     title: None,
                 }),
                 // The alt text says what the picture is or why it needs a look.
-                None => parts.push(text(match asset.alt.as_deref().map(str::trim) {
+                None => parts.push(text(match alt.map(str::trim) {
                     Some(alt) if !alt.is_empty() => format!(
                         "Picture {} ({}, {alt}) is not extracted.",
                         asset.id, asset.mime

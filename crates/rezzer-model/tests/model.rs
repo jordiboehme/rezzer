@@ -156,6 +156,7 @@ fn full_document() -> Document {
         },
         Block::Media {
             asset: "img1".into(),
+            alt: None,
             anchor: Some(Anchor("fig:1".into())),
         },
         Block::Callout {
@@ -366,6 +367,7 @@ fn serde_shapes_are_tagged_snake_case() {
     assert_eq!(v["type"], "date_time");
     let b = serde_json::to_value(Block::Media {
         asset: "a".into(),
+        alt: None,
         anchor: None,
     })
     .unwrap();

@@ -766,10 +766,12 @@ fn rich_document() -> Document {
         },
         Block::Media {
             asset: "img1".into(),
+            alt: None,
             anchor: None,
         },
         Block::Media {
             asset: "img2".into(),
+            alt: None,
             anchor: None,
         },
         Block::Section {
@@ -2735,6 +2737,7 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
     let mut d = doc();
     d.body = vec![Block::Media {
         asset: "page-3".into(),
+        alt: None,
         anchor: None,
     }];
     d.assets = vec![
@@ -2773,11 +2776,54 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
     );
     d.body = vec![Block::Media {
         asset: "img2".into(),
+        alt: None,
         anchor: None,
     }];
     let md = render(&d, Completeness::Complete, &opts());
     assert!(
         md.contains("Picture img2 (image/jpeg) is not extracted."),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_picture_at_several_places_says_each_place() {
+    // One asset drawn at two places: each place says its own words, the list of pictures that
+    // need vision has the asset once with its own words.
+    let mut d = doc();
+    let place = |alt: &str| Block::Media {
+        asset: "page-1-pic-1".into(),
+        alt: Some(alt.into()),
+        anchor: None,
+    };
+    d.body = vec![
+        place("small picture, box 1, 2 to 3, 4"),
+        place("small picture, box 5, 6 to 7, 8"),
+    ];
+    let mut a = asset("page-1-pic-1", None, "image/png", true);
+    a.alt = Some("small picture, pages 1, 2".into());
+    d.assets = vec![a.clone()];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "Picture page-1-pic-1 (image/png, small picture, box 1, 2 to 3, 4) is not extracted."
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "Picture page-1-pic-1 (image/png, small picture, box 5, 6 to 7, 8) is not extracted."
+        ),
+        "{md}"
+    );
+    assert_eq!(md.matches("| page-1-pic-1 |").count(), 1, "{md}");
+    assert!(md.contains("| small picture, pages 1, 2 |"), "{md}");
+    // With a file, the place's words are the alt text of the picture link.
+    a.path = Some("f.pdf.assets/page-1-pic-1.png".into());
+    d.assets = vec![a];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("![small picture, box 5, 6 to 7, 8](f.pdf.assets/page-1-pic-1.png)"),
         "{md}"
     );
 }
@@ -2810,6 +2856,7 @@ fn pictures_and_attachments_link_to_their_files() {
     let mut d = doc();
     d.body = vec![Block::Media {
         asset: "page-1".into(),
+        alt: None,
         anchor: None,
     }];
     let mut file = asset(
