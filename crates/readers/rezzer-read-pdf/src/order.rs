@@ -6,6 +6,8 @@
 //! columns by white space gutters, right-to-left lines in logical order and vertical writing
 //! column by column. Nothing here reads the file; the glyphs come from the text device.
 
+use std::rc::Rc;
+
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::Run;
@@ -545,100 +547,142 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
 /// a line with right-to-left text becomes one run in logical order. A run's link is the one
 /// of `links` its glyphs lie in.
 fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]) -> Vec<Run> {
-    let mut runs: Vec<Run> = Vec::with_capacity(ids.len());
-    let mut prev: Option<&Frag> = None;
-    // Whether each run got a space put in before it.
-    let mut spaced: Vec<bool> = Vec::with_capacity(ids.len());
-    for &i in ids {
-        let f = &frags[i];
-        let mut text = f.text.clone();
-        spaced.push(false);
+    let n = ids.len();
+    // For each fragment: the part of its text that is kept, whether its padding is written as
+    // one space after it, and whether a space is put in before it.
+    let mut keep: Vec<(usize, usize)> = ids.iter().map(|&i| (0, frags[i].text.len())).collect();
+    let mut pad_after = vec![false; n];
+    let mut spaced = vec![false; n];
+    for pos in 1..n {
+        let (p, f) = (&frags[ids[pos - 1]], &frags[ids[pos]]);
         // White space that opens a piece gap is padding: it is written as one space.
-        if let Some(p) = prev
-            && gap(p.free, p.padded, f) > PIECE_GAP * f.size.max(p.size)
-            && let Some(last) = runs.last_mut()
-        {
-            let lead = text.len() - text.trim_start_matches(is_pad).len();
-            let trail = last.text.trim_end_matches(is_pad).len();
-            if lead > 0 || trail < last.text.len() {
-                last.text.truncate(trail);
-                last.text.push(' ');
-                text.drain(..lead);
+        if gap(p.free, p.padded, f) > PIECE_GAP * f.size.max(p.size) {
+            let lead = f.text.len() - f.text.trim_start_matches(is_pad).len();
+            let trail = p.text.trim_end_matches(is_pad).len().max(keep[pos - 1].0);
+            if lead > 0 || trail < keep[pos - 1].1 {
+                keep[pos - 1].1 = trail.min(keep[pos - 1].1);
+                pad_after[pos - 1] = true;
+                keep[pos].0 = lead;
             }
         }
-        if let Some(p) = prev {
-            let gap = f.x - p.end;
-            let glued =
-                p.text.ends_with(char::is_whitespace) || text.starts_with(char::is_whitespace);
-            if !glued && gap > WORD_GAP * f.size.max(p.size) {
-                text.insert(0, ' ');
-                if let Some(s) = spaced.last_mut() {
-                    *s = true;
-                }
-            }
+        let glued = pad_after[pos - 1]
+            || p.text.ends_with(char::is_whitespace)
+            || f.text[keep[pos].0..].starts_with(char::is_whitespace);
+        if !glued && f.x - p.end > WORD_GAP * f.size.max(p.size) {
+            spaced[pos] = true;
         }
-        runs.push(Run {
-            page,
-            text,
-            x: f.x,
-            y: f.y,
-            w: (f.end - f.x).max(0.0),
-            h: f.size,
-            size: f.size,
-            bold: f.bold,
-            italic: f.italic,
-            mcid: f.mcid,
-            uri: f
-                .link
-                .and_then(|k| links.get(k as usize))
-                .map(|(_, u)| u.clone()),
-            line,
-            off_axis: false,
-        });
-        prev = Some(f);
     }
     // Padding at the end of a line (a label whose value is empty) opens a gap to nothing: it
     // is dropped. One space there stays as drawn.
-    if let Some(last) = runs.last_mut() {
-        let kept = last.text.trim_end_matches(is_pad).len();
-        if last.text[kept..].chars().count() > 1 {
-            last.text.truncate(kept);
+    if let Some(&last) = ids.last() {
+        let t = &frags[last].text;
+        let (a, b) = keep[n - 1];
+        let kept = t[..b].trim_end_matches(is_pad).len().max(a);
+        if t[kept..b].chars().count() > 1 {
+            keep[n - 1].1 = kept;
         }
     }
-    if runs.iter().any(|r| r.text.chars().any(is_rtl)) {
-        // The glyphs stand in visual order. Reordering a visual line by the bidi rules gives
-        // the logical order back; the text of one glyph (a ligature mapped to several
-        // characters) moves as a whole.
-        let mut units: Vec<&str> = Vec::new();
-        for (&spaced, &i) in spaced.iter().zip(ids) {
-            let f = &frags[i];
-            if spaced {
-                units.push(" ");
-            }
-            let mut starts: Vec<usize> = f.units.iter().map(|&u| u as usize).collect();
-            starts.push(f.text.len());
-            for w in starts.windows(2) {
-                if w[1] > w[0] {
-                    units.push(&f.text[w[0]..w[1]]);
+    let uri = |f: &Frag| {
+        f.link
+            .and_then(|k| links.get(k as usize))
+            .map(|(_, u)| u.clone())
+    };
+    let run_of = |f: &Frag, text: String| Run {
+        page,
+        text,
+        x: f.x,
+        y: f.y,
+        w: (f.end - f.x).max(0.0),
+        h: f.size,
+        size: f.size,
+        bold: f.bold,
+        italic: f.italic,
+        mcid: f.mcid,
+        uri: uri(f),
+        line,
+        off_axis: false,
+    };
+    let rtl = ids.iter().any(|&i| frags[i].text.chars().any(is_rtl));
+    if !rtl {
+        return (0..n)
+            .map(|pos| {
+                let f = &frags[ids[pos]];
+                let (a, b) = keep[pos];
+                let mut text = String::with_capacity(b.saturating_sub(a) + 2);
+                if spaced[pos] {
+                    text.push(' ');
                 }
+                text.push_str(&f.text[a..b.max(a)]);
+                if pad_after[pos] {
+                    text.push(' ');
+                }
+                run_of(f, text)
+            })
+            .collect();
+    }
+    // The glyphs stand in visual order. Reordering a visual line by the bidi rules gives the
+    // logical order back; the text of one glyph (a ligature mapped to several characters)
+    // moves as a whole. Each unit keeps the fragment it comes from, so the runs of the line
+    // are cut where its link changes, in logical order.
+    let mut units: Vec<(&str, usize)> = Vec::new();
+    for pos in 0..n {
+        let f = &frags[ids[pos]];
+        let (a, b) = keep[pos];
+        if spaced[pos] {
+            units.push((" ", pos));
+        }
+        let mut starts: Vec<usize> = f.units.iter().map(|&u| u as usize).collect();
+        starts.push(f.text.len());
+        for w in starts.windows(2) {
+            let (u0, u1) = (w[0].max(a), w[1].min(b));
+            if u1 > u0 {
+                units.push((&f.text[u0..u1], pos));
             }
         }
-        let logical = logical_order(&units);
-        let mut one = runs.swap_remove(0);
-        let x0 = runs.iter().map(|r| r.x).fold(one.x, f32::min);
-        let x1 = runs.iter().map(|r| r.x + r.w).fold(one.x + one.w, f32::max);
-        one.text = logical;
-        one.x = x0;
-        one.w = x1 - x0;
-        runs = vec![one];
+        if pad_after[pos] {
+            units.push((" ", pos));
+        }
     }
-    runs
+    let texts: Vec<&str> = units.iter().map(|u| u.0).collect();
+    let mut out: Vec<Run> = Vec::new();
+    // The fragments of the run being built, for its extent.
+    let mut span: (f32, f32) = (f32::MAX, f32::MIN);
+    for k in logical_indices(&texts) {
+        let (t, pos) = units[k];
+        let f = &frags[ids[pos]];
+        match out.last_mut() {
+            Some(r) if r.uri.as_ref().map(Rc::as_ptr) == uri(f).as_ref().map(Rc::as_ptr) => {
+                r.text.push_str(t);
+            }
+            _ => {
+                if let Some(r) = out.last_mut() {
+                    (r.x, r.w) = (span.0, span.1 - span.0);
+                }
+                span = (f32::MAX, f32::MIN);
+                out.push(run_of(f, t.to_string()));
+            }
+        }
+        span = (span.0.min(f.x), span.1.max(f.end));
+    }
+    if let Some(r) = out.last_mut() {
+        (r.x, r.w) = (span.0, span.1 - span.0);
+    }
+    out
 }
 
 /// The units of a visual line in logical order. In the bidi algorithm each unit stands for
 /// its first strongly directed character; a unit with text of both directions is already in
 /// logical order inside and stands for a space, taking the direction around it.
+#[cfg(test)]
 fn logical_order(units: &[&str]) -> String {
+    logical_indices(units)
+        .into_iter()
+        .filter_map(|i| units.get(i).copied())
+        .collect()
+}
+
+/// The indices of `units`, a visual line, in logical order (see [`logical_order`]).
+fn logical_indices(units: &[&str]) -> Vec<usize> {
     let stand_in: String = units
         .iter()
         .map(|u| {
@@ -667,7 +711,7 @@ fn logical_order(units: &[&str]) -> String {
     let levels = info.reordered_levels_per_char(0..stand_in.len());
     ParagraphBidiInfo::reorder_visual(&levels)
         .into_iter()
-        .filter_map(|i| units.get(i).copied())
+        .filter(|&i| i < units.len())
         .collect()
 }
 

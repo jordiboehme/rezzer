@@ -2554,7 +2554,8 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
         let t = text.of(g);
         !t.is_empty() && !t.chars().all(char::is_whitespace)
     };
-    let joins = |a: &Gl, b: &Gl| {
+    // `b` stands right after `a` along the baseline.
+    let follows = |a: &Gl, b: &Gl| {
         let size = a.size.max(b.size).max(0.1);
         let adv = a.adv.unwrap_or(a.size.max(0.1) * 0.5);
         let (ex, ey) = (a.x + a.dx * adv, a.y + a.dy * adv);
@@ -2565,6 +2566,9 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
             && along.abs() <= 0.15 * size
             && across.abs() <= 0.25 * size
     };
+    // Glyphs of one word follow each other in content order, also when a line is drawn from
+    // right to left.
+    let joins = |a: &Gl, b: &Gl| follows(a, b) || follows(b, a);
     let mut k = 0;
     while k < glyphs.len() {
         if !ink(&glyphs[k]) {
@@ -2575,21 +2579,31 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
         while e < glyphs.len() && ink(&glyphs[e]) && joins(&glyphs[e - 1], &glyphs[e]) {
             e += 1;
         }
-        // The linked part of the word grows to the word's edges, but not over punctuation at
-        // an edge (a full stop after an address, a bracket before it).
+        // A box edge that cuts inside the word: the link grows to the word's edges, but not
+        // over punctuation at an edge (a full stop after an address, a bracket before it). A
+        // box that ends where letters meet punctuation (an apostrophe, a hyphen) stays.
         let linked: Vec<usize> = (k..e).filter(|&i| glyphs[i].link.is_some()).collect();
         if let (Some(&a), Some(&z)) = (linked.first(), linked.last())
             && linked.iter().all(|&i| glyphs[i].link == glyphs[a].link)
         {
             let link = glyphs[a].link;
             let letter = |g: &Gl| text.of(g).chars().all(char::is_alphanumeric);
-            let mut from = k;
-            while from < a && !letter(&glyphs[from]) {
-                from += 1;
+            let exact = |inside: usize, outside: usize| {
+                letter(&glyphs[inside]) && !letter(&glyphs[outside])
+            };
+            let mut from = a;
+            if a > k && !exact(a, a - 1) {
+                from = k;
+                while from < a && !letter(&glyphs[from]) {
+                    from += 1;
+                }
             }
-            let mut to = e;
-            while to > z + 1 && !letter(&glyphs[to - 1]) {
-                to -= 1;
+            let mut to = z + 1;
+            if z + 1 < e && !exact(z, z + 1) {
+                to = e;
+                while to > z + 1 && !letter(&glyphs[to - 1]) {
+                    to -= 1;
+                }
             }
             glyphs[from..to].iter_mut().for_each(|g| g.link = link);
         }

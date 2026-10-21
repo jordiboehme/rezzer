@@ -996,3 +996,114 @@ fn a_link_box_that_cuts_a_word_takes_the_whole_word() {
         )]
     );
 }
+
+/// A ToUnicode CMap, deflated, that maps the bytes A to Z to the Hebrew letters from U+05D0 on
+/// and every other printable byte and the space to itself.
+fn hebrew_cmap() -> Vec<u8> {
+    use std::io::Write;
+    let mut chars: Vec<String> = Vec::new();
+    for c in 0x20u8..=0x7e {
+        let u = if c.is_ascii_uppercase() {
+            0x05d0 + u32::from(c - b'A')
+        } else {
+            u32::from(c)
+        };
+        chars.push(format!("<{c:02X}> <{u:04X}>"));
+    }
+    let mut body = String::new();
+    for chunk in chars.chunks(90) {
+        body += &format!(
+            "{} beginbfchar\n{}\nendbfchar\n",
+            chunk.len(),
+            chunk.join("\n")
+        );
+    }
+    let cmap = format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /X def \
+         1 begincodespacerange <00> <FF> endcodespacerange\n{body}endcmap CMapName \
+         currentdict /CMap defineresource pop end end\n"
+    );
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    z.write_all(cmap.as_bytes()).expect("deflate");
+    z.finish().expect("deflate")
+}
+
+#[test]
+fn a_link_in_a_right_to_left_line_stays_on_its_word() {
+    // A Hebrew line in visual order, a link box over two letters of its leftmost word; then
+    // the same line drawn glyph by glyph from right to left. The link covers that word (the
+    // last one in reading order), not the line.
+    let word = "ABCDEFGH IJK LMN";
+    let mut reverse = String::from("BT /F1 12 Tf ");
+    let mut x = 72.0f32;
+    let mut xs = Vec::new();
+    for ch in word.chars() {
+        xs.push((x, ch));
+        x += if ch == ' ' { 3.34 } else { 8.0 };
+    }
+    for (x, ch) in xs.iter().rev() {
+        reverse += &format!("1 0 0 1 {x} 700 Tm ({ch}) Tj ");
+    }
+    reverse += "ET\n";
+    for content in [show("F1", 12.0, 72.0, 700.0, word), reverse] {
+        let page = Page {
+            content,
+            annots: vec![
+                "<< /Type /Annot /Subtype /Link /Rect [90 696 110 712] \
+                 /A << /S /URI /URI (http://example.org) >> >>"
+                    .into(),
+            ],
+            packed_cmap: Some(hebrew_cmap()),
+        };
+        let out = read(&pdf(&[page], ""));
+        let links = all_links(&out.document.body);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].0, "http://example.org");
+        assert_eq!(
+            links[0].2, "\u{5d7}\u{5d6}\u{5d5}\u{5d4}\u{5d3}\u{5d2}\u{5d1}\u{5d0}",
+            "{links:?}"
+        );
+    }
+}
+
+#[test]
+fn padding_in_a_right_to_left_line_is_one_space() {
+    // A Hebrew label, twelve spaces of padding, a Hebrew value, in one string.
+    let page = Page {
+        content: show("F1", 12.0, 72.0, 700.0, "ABC:            DEF"),
+        packed_cmap: Some(hebrew_cmap()),
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    let all = all_text(&out);
+    // The glyphs stand in visual order: the value, read first, then the label.
+    assert!(
+        all.contains("\u{5d5}\u{5d4}\u{5d3} :\u{5d2}\u{5d1}\u{5d0}"),
+        "{all:?}"
+    );
+    assert!(!all.contains("  "), "{all:?}");
+}
+
+#[test]
+fn an_exact_link_box_stays_exact() {
+    // A box exactly over "example.org", before an apostrophe and before a hyphen.
+    for (text, rest) in [
+        ("see example.org's page", "\u{2019}s page"),
+        ("see example.org-based tool", "-based tool"),
+    ] {
+        let page = Page {
+            content: show("F1", 12.0, 72.0, 700.0, text),
+            annots: vec![
+                "<< /Type /Annot /Subtype /Link /Rect [94 696 161.3 712] \
+                 /A << /S /URI /URI (http://example.org) >> >>"
+                    .into(),
+            ],
+            ..Page::default()
+        };
+        let out = read(&pdf(&[page], ""));
+        let links = all_links(&out.document.body);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].2, "example.org", "{links:?}");
+        assert!(all_text(&out).contains(rest), "{}", all_text(&out));
+    }
+}
