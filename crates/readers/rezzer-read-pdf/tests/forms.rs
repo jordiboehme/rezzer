@@ -440,3 +440,38 @@ fn saves_after_a_signature_past_the_revision_cap_are_a_lower_bound() {
     assert!(loss.what.contains("at least"), "{loss:?}");
     assert_eq!(loss.why, LossReason::Limit);
 }
+
+#[test]
+fn later_addresses_in_a_link_chain_are_listed() {
+    // A Launch that goes on to an address, and an address that goes on to another: the
+    // address a link starts with is in the links graph, every later one is listed here.
+    let link = |rect: &str, action: &str| {
+        format!("<< /Type /Annot /Subtype /Link /Rect [{rect}] /A << {action} >> >>")
+    };
+    let page = Page {
+        content: show("F1", 12.0, 72.0, 700.0, "Hello"),
+        annots: vec![
+            link(
+                "0 0 50 50",
+                "/S /Launch /F (first.exe) /Next << /S /URI /URI (http://second.example/) >>",
+            ),
+            link(
+                "60 0 110 50",
+                "/S /URI /URI (http://one.example/) /Next << /S /URI /URI (http://two.example/) >>",
+            ),
+        ],
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    let uris: Vec<&str> = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.kind == "script" && e.detail.as_deref() == Some("uri"))
+        .filter_map(|e| e.target.as_deref())
+        .collect();
+    assert_eq!(uris, ["http://second.example/", "http://two.example/"]);
+    let graph = &out.document.facets.graphs[0];
+    assert!(graph.nodes.iter().any(|n| n.label == "http://one.example/"));
+}

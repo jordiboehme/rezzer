@@ -3595,7 +3595,7 @@ fn one_field_read_by_many_calculations_is_bounded() {
     form_cut(&out, "form", "form fields are not kept");
 }
 
-/// `n` bytes of script text, packed with FlateDecode about 10 to 1, so the guard's ratio check
+/// Exactly `n` bytes of script text, packed with FlateDecode about 10 to 1, so the guard's ratio check
 /// lets it pass. The text is packed piece by piece and never held whole.
 fn packed_script(n: usize) -> Vec<u8> {
     let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
@@ -3613,6 +3613,7 @@ fn packed_script(n: usize) -> Vec<u8> {
             piece.extend_from_slice(&[b'x'; 47]);
             piece.push(b'\n');
         }
+        piece.truncate(n - written);
         z.write_all(&piece).expect("deflate");
         written += piece.len();
     }
@@ -3727,4 +3728,90 @@ fn deep_field_trees_are_bounded() {
     assert!(out.document.facets.fields.is_empty());
     form_cut(&out, "form", "deeper than");
     assert_rss_under_256_mib();
+}
+
+/// Bytes just under the size one script may have at the hostile limits (4 MiB).
+const NEAR_CAP: usize = 4_194_000;
+
+#[test]
+fn many_scripts_just_under_the_cap_are_bounded() {
+    // 80 fields, each with its own packed calculate script just under the size a script may
+    // have: together they are over the script text the document may hold.
+    let packed = packed_script(NEAR_CAP);
+    let file = |key: &str| {
+        form_file(key, &mut |b| {
+            (0..80)
+                .map(|k| {
+                    let js = b.stream("/Filter /FlateDecode", &packed);
+                    let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R >>"));
+                    format!("<< /T (f{k}) /FT /Tx /AA << /C {action} 0 R >> >>")
+                })
+                .collect()
+        })
+    };
+    let out = against_twin(&file("/AcroForm"), &file("/Junk"));
+    let fields = &out.document.facets.fields;
+    assert_eq!(fields.len(), 80);
+    assert!(
+        fields
+            .iter()
+            .all(|f| f.role == Some(rezzer_model::Role::Result))
+    );
+    form_cut(&out, "scripts", "listed without their text");
+}
+
+#[test]
+fn many_scripts_in_one_chain_are_bounded() {
+    // The open action starts a /Next chain of 80 packed scripts just under the size a script
+    // may have; the twin names the chain under a key nobody reads.
+    let packed = packed_script(NEAR_CAP);
+    let file = |key: &str| {
+        catalog_file(&mut |b| {
+            let mut next = String::new();
+            for _ in 0..80 {
+                let js = b.stream("/Filter /FlateDecode", &packed);
+                let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R {next} >>"));
+                next = format!("/Next {action} 0 R");
+            }
+            let first = next.trim_start_matches("/Next ").to_string();
+            (format!("{key} {first}"), String::new())
+        })
+    };
+    let out = against_twin(&file("/OpenAction"), &file("/JunkAction"));
+    let opens = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.name == "open")
+        .count();
+    assert_eq!(opens, 80);
+    form_cut(&out, "scripts", "listed without their text");
+}
+
+#[test]
+fn a_shared_script_counts_once() {
+    // 80 fields share one format script just under the size a script may have: pdfparts reads
+    // and holds it once, within the script text the document may hold.
+    let packed = packed_script(NEAR_CAP);
+    let bytes = form_file("/AcroForm", &mut |b| {
+        let js = b.stream("/Filter /FlateDecode", &packed);
+        let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R >>"));
+        (0..80)
+            .map(|k| format!("<< /T (f{k}) /FT /Tx /AA << /F {action} 0 R >> >>"))
+            .collect()
+    });
+    let out = read(&bytes);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("listed without their text")),
+        "{:?}",
+        out.document.losses
+    );
+    // pdfparts holds the text for every field: each field's format is its start in words.
+    let fields = &out.document.facets.fields;
+    assert_eq!(fields.len(), 80);
+    assert!(fields.iter().all(|f| f.format.is_some()), "{fields:?}");
 }
