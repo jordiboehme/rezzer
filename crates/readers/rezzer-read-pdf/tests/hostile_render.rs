@@ -547,3 +547,181 @@ fn the_scanned_letter_renders() {
         .join("../../../tests/corpus/pdf/scan-truman-letter-nara.pdf");
     assert_rendered(&read_with(&std::fs::read(path).expect("corpus file"), true));
 }
+
+/// A page that needs vision and then fills the whole page `fills` times: in the page's own
+/// content, or (`form`) through one form of 100 fills drawn `fills / 100` times.
+fn fill_twin(fills: usize, form: bool) -> Vec<u8> {
+    let fill = "0 0 595 842 re f\n";
+    let content = if form {
+        "/Fm1 Do\n".repeat(fills / 100)
+    } else {
+        fill.repeat(fills)
+    };
+    let packed = deflate(content.as_bytes());
+    render_twin(595, 842, "/Fill Do\n", |b| {
+        let body = b.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode",
+            &packed,
+        );
+        let mut xobjects = format!("/Fill {body} 0 R");
+        if form {
+            let fm = b.stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode",
+                &deflate(fill.repeat(100).as_bytes()),
+            );
+            // The inner form is named in the page's resources, which the outer form inherits
+            // through its own resources.
+            xobjects.push_str(&format!(" /Fm1 {fm} 0 R"));
+        }
+        Extra {
+            xobjects,
+            ..Extra::default()
+        }
+    })
+}
+
+/// The twin read with `extract_assets`: the read ends in time, stays small, and either
+/// renders or says why not.
+fn assert_fills_bounded(file: &[u8]) {
+    let start = Instant::now();
+    let out = read_with(file, true);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let rendered = out.blobs.iter().any(|b| b.asset == "page-1");
+    let said = out.document.losses.iter().any(|l| {
+        l.location == "p1" && l.why == LossReason::Limit && l.what.contains("not rendered")
+    });
+    assert!(rendered || said, "{:#?}", out.document.losses);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn five_thousand_page_fills_stay_small() {
+    assert_fills_bounded(&fill_twin(5_000, false));
+}
+
+#[test]
+fn fifty_thousand_page_fills_stay_small() {
+    assert_fills_bounded(&fill_twin(50_000, false));
+}
+
+#[test]
+fn two_hundred_thousand_page_fills_stay_small() {
+    assert_fills_bounded(&fill_twin(200_000, false));
+}
+
+#[test]
+fn fifty_thousand_page_fills_through_a_form_stay_small() {
+    assert_fills_bounded(&fill_twin(50_000, true));
+}
+
+#[test]
+fn a_large_stream_the_render_does_not_use_is_not_unpacked() {
+    // 300 MB of rows of noise, each repeated 30 times, in a stream the page names but no
+    // render draws.
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut state = 3u32;
+    let mut row = vec![0u8; 1000];
+    for i in 0..300_000 {
+        if i % 30 == 0 {
+            for b in &mut row {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                *b = (state >> 16) as u8;
+            }
+        }
+        z.write_all(&row).expect("deflate");
+    }
+    let packed = z.finish().expect("deflate");
+    let file = render_twin(595, 842, "", |b| {
+        let big = b.stream("/Type /EmbeddedFile /Filter /FlateDecode", &packed);
+        Extra {
+            page: format!("/PieceInfo << /Data {big} 0 R >>"),
+            ..Extra::default()
+        }
+    });
+    drop(packed);
+    let out = read_with(&file, true);
+    assert!(
+        out.blobs.iter().any(|b| b.asset == "page-1"),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_damaged_streams_stay_small() {
+    // Twelve streams of 16 MB each from about 100 KB of data, each ending in a code that
+    // does not exist: the canonical copy holds what was measured, packed again.
+    let mut d = common::Deflate::zlib();
+    d.fixed_block(true);
+    d.symbol(u32::from(b' '));
+    for _ in 0..65_000 {
+        d.run();
+    }
+    d.bad_symbol();
+    d.symbol(256);
+    let broken = d.finish();
+    let file = render_twin(595, 842, "", |b| {
+        let refs: Vec<String> = (0..12)
+            .map(|_| format!("{} 0 R", b.stream("/Filter /FlateDecode", &broken)))
+            .collect();
+        Extra {
+            page: format!("/PieceInfo << /Data [{}] >>", refs.join(" ")),
+            ..Extra::default()
+        }
+    });
+    let out = read_with(&file, false);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("is damaged")),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_picture_with_a_large_mask_counts_the_mask() {
+    // A small picture whose /Mask is a stencil of 8,000 by 8,000 pixels: alone just under the
+    // render room, with the page over it.
+    let start = Instant::now();
+    let file = render_twin(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", |b| {
+        let mask = b.stream(
+            "/Type /XObject /Subtype /Image /Width 8000 /Height 8000 /ImageMask true \
+             /BitsPerComponent 1 /Filter /FlateDecode",
+            &deflate(&[0u8; 800]),
+        );
+        let image = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8 /Mask {mask} 0 R /Filter /FlateDecode"
+            ),
+            &deflate(&[90u8; 64]),
+        );
+        Extra {
+            xobjects: format!("/Im1 {image} 0 R"),
+            ..Extra::default()
+        }
+    });
+    let out = read_with(&file, true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("pictures"), "{loss:?}");
+}
+
+#[test]
+fn a_thousand_page_fills_render() {
+    // Under the render room by the per-draw estimate, and well under the memory bound.
+    let out = read_with(&fill_twin(1_000, false), true);
+    assert!(
+        out.blobs.iter().any(|b| b.asset == "page-1"),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}

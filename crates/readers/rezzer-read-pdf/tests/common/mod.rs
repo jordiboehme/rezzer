@@ -523,6 +523,11 @@ impl Deflate {
         self.bits(8191, 13);
     }
 
+    /// A length code that does not exist (286): every inflater stops at it.
+    pub fn bad_symbol(&mut self) {
+        self.symbol(286);
+    }
+
     /// A stored block with `data` (at most 65,535 bytes).
     pub fn stored(&mut self, last: bool, data: &[u8]) {
         self.bits(u32::from(last), 1);

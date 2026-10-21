@@ -24,12 +24,19 @@
 //! - a shading pattern that is not drawn as a gradient: a texture of the filled area; a mesh
 //!   shading also a map entry for each pixel its triangles cover, and its patches' triangles;
 //! - a soft mask: a render of the page's size and the mask, once for each mask in a render;
-//! - a Type3 glyph: its content, as drawn.
+//! - a Type3 glyph: its content, as drawn;
+//! - every draw call (fill, stroke, clip, glyph, picture, group): what vello keeps for it
+//!   until its target is rendered, from the rows of tiles its path covers (measured, see
+//!   [`DRAW_BASE`]).
 //!
-//! Stencil masks and inline stencils do not show their data to a device, so [`stencils`]
-//! checks every stencil in the file once: one whose decoded size cannot be known, or alone
-//! passes the room, keeps all renders of the file out. What the interpreter and the outline
+//! Stencil masks and inline stencils do not show their data to a device, so
+//! `stencils.rs` checks every stencil a page's render can reach first, unpacking only
+//! the streams the renderer reads as content: one whose decoded size cannot be known, or
+//! alone passes the room, keeps the page from rendering. What the interpreter and the outline
 //! cache keep is bounded by the guard's stream sizes, like the text walk.
+//!
+//! The JPEG 2000 (x5) and JBIG2 (x2) factors are read from the decoders, not measured: no
+//! encoder for either is at hand in the tree or the corpus.
 
 use std::collections::HashSet;
 use std::panic::{self, AssertUnwindSafe};
@@ -43,8 +50,6 @@ use hayro_interpret::{
     BlendMode, CacheKey, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
     InterpreterCache, InterpreterSettings, Paint, SoftMask, interpret_page,
 };
-use hayro_syntax::content::TypedIter;
-use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::object::{Array, Dict, Name, Object, Stream};
 use hayro_syntax::page::Page;
 use kurbo::{Affine, BezPath, Rect, Shape};
@@ -66,6 +71,34 @@ const MESH_ENTRY: u64 = 64;
 /// Triangles the renderer makes of each patch of a patch mesh.
 const PATCH_TRIANGLES: u64 = 2 * 19 * 19;
 
+// What vello_cpu 0.3.0 keeps for each draw until its target is rendered: commands per wide
+// tile and strips per row of tiles a path's edges cross. Measured with hayro 0.8.0 on a
+// 1,190 by 1,684 pixmap (an A4 page at 144 dpi), peak RSS of 4,000 to 8,000 equal draws less
+// the same file read without a render:
+// - a full-page rectangle fill: 53.5 KB (231 MiB at 4,000 fills, 445 MiB at 8,000);
+// - a fill of a quarter of the page (half its height): 29 KB, so the cost follows the rows of
+//   4 pixels the path covers, not its area;
+// - a 1 by 1 point fill: 0.3 KB;
+// - a full-page rectangle outline stroke: 60 KB; a full-height diagonal line stroke: 29 KB;
+// - one 800 point "W" glyph (1,600 pixels high): 108 KB; one line of 23 glyphs at 10 points:
+//   8.4 KB;
+// - a full-page picture drawn: 71 KB; a rectangle clip with nothing drawn: about 0.1 KB.
+// The model below is above each of these: a base, a strip term for every row of tiles each
+// edge of the path crosses (twice for a stroke, whose outline has two sides), and a command
+// term for every row of tiles the path's box covers.
+
+/// Bytes each draw keeps, whatever its size.
+const DRAW_BASE: u64 = 512;
+
+/// Bytes for each row of tiles an edge of a path crosses.
+const EDGE_ROW: u64 = 64;
+
+/// Bytes for each row of tiles the box of a path covers.
+const FILL_ROW: u64 = 64;
+
+/// Pixel rows in one row of vello's tiles.
+const TILE_ROWS: f64 = 4.0;
+
 /// What a render's memory goes to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -75,6 +108,7 @@ pub(crate) enum Kind {
     Patterns,
     Shadings,
     SoftMasks,
+    Drawing,
 }
 
 impl Kind {
@@ -85,6 +119,7 @@ impl Kind {
             Kind::Patterns => "its tiling patterns",
             Kind::Shadings => "its shadings",
             Kind::SoftMasks => "its soft masks",
+            Kind::Drawing => "its drawing operations",
         }
     }
 }
@@ -129,7 +164,7 @@ struct Dry<'f> {
     /// Bytes kept by all open targets.
     alive: u64,
     peak: u64,
-    by_kind: [u64; 5],
+    by_kind: [u64; 6],
     calls: u64,
     depth: usize,
 }
@@ -150,6 +185,7 @@ impl Dry<'_> {
             Kind::Patterns,
             Kind::Shadings,
             Kind::SoftMasks,
+            Kind::Drawing,
         ]
         .into_iter()
         .max_by_key(|k| self.by_kind[Self::kind_index(*k)])
@@ -170,6 +206,39 @@ impl Dry<'_> {
             let most = self.most();
             panic::resume_unwind(Box::new(Abort(Unknown::Over(most, self.peak))));
         }
+    }
+
+    /// The tile rows between `y0` and `y1` (device pixels) inside the current target.
+    fn rows(&self, y0: f64, y1: f64) -> u64 {
+        let h = self.level().h as f64;
+        let (a, b) = (y0.max(0.0), y1.min(h));
+        if !(a.is_finite() && b.is_finite()) || b < a {
+            return 0;
+        }
+        ((b - a) / TILE_ROWS).ceil() as u64 + 1
+    }
+
+    /// What the render keeps for drawing `path` (device space), stroked `stroke` pixels wide
+    /// when given, as the comment at [`DRAW_BASE`] says.
+    fn draw(&mut self, path: &BezPath, stroke: Option<f64>) {
+        let pad = stroke.unwrap_or(0.0).max(0.0);
+        let mut edges = 0u64;
+        for seg in path.segments() {
+            let b = seg.bounding_box();
+            edges = edges.saturating_add(self.rows(b.y0 - pad, b.y1 + pad));
+        }
+        let b = path.bounding_box();
+        let edges = if stroke.is_some() { edges * 2 } else { edges };
+        let bytes = DRAW_BASE
+            .saturating_add(edges.saturating_mul(EDGE_ROW))
+            .saturating_add(self.rows(b.y0 - pad, b.y1 + pad).saturating_mul(FILL_ROW));
+        self.charge(Kind::Drawing, 0, bytes);
+    }
+
+    /// The box `(0, 0, w, h)` under `transform`, drawn as a path.
+    fn draw_box(&mut self, w: f64, h: f64, transform: Affine) {
+        let path = transform * Rect::new(0.0, 0.0, w, h).to_path(0.1);
+        self.draw(&path, None);
     }
 
     fn tick(&mut self) {
@@ -332,7 +401,26 @@ impl Dry<'_> {
                     .unwrap_or_else(|why| Self::unbounded(why))
             })
             .unwrap_or(0);
-        let (passing, kept) = image_bytes(&spec, &decoded, transform, alpha);
+        // An explicit mask is a stencil the decoder unpacks with the picture.
+        let mask = dict
+            .get::<Stream<'_>>(b"Mask")
+            .map(|m| {
+                let s = Spec {
+                    comps: 1,
+                    out: 1,
+                    direct: false,
+                    native: true,
+                    ..Spec::of(m.dict())
+                };
+                decoded_size(&s, &m, self.facts)
+                    .map(|d| {
+                        d.bytes
+                            .saturating_add(d.w.saturating_mul(d.h).saturating_mul(2))
+                    })
+                    .unwrap_or_else(|why| Self::unbounded(why))
+            })
+            .unwrap_or(0);
+        let (passing, kept) = image_bytes(&spec, &decoded, transform, alpha.saturating_add(mask));
         self.charge(Kind::Pictures, passing, kept);
     }
 
@@ -357,21 +445,21 @@ impl Dry<'_> {
 }
 
 /// How an image is stated in its dictionary.
-struct Spec {
-    w: u64,
-    h: u64,
+pub(super) struct Spec {
+    pub w: u64,
+    pub h: u64,
     /// Components a sample has.
-    comps: u64,
+    pub comps: u64,
     /// Components after conversion: 1 for gray, 3 for color.
-    out: u64,
+    pub out: u64,
     /// 8-bit samples without a `/Decode` array, used as unpacked without a copy.
-    direct: bool,
+    pub direct: bool,
     /// Gray or device RGB samples, which need no conversion buffer.
-    native: bool,
+    pub native: bool,
 }
 
 impl Spec {
-    fn of(dict: &Dict<'_>) -> Spec {
+    pub(super) fn of(dict: &Dict<'_>) -> Spec {
         let int = |a: &[u8], b: &[u8]| {
             dict.get::<u32>(a)
                 .or_else(|| dict.get::<u32>(b))
@@ -437,14 +525,18 @@ fn color_components(cs: Option<Object<'_>>) -> (u64, u64, bool) {
 }
 
 /// What a decoder builds: the size of the picture it gives and the bytes it unpacks to.
-struct Decoded {
-    w: u64,
-    h: u64,
-    bytes: u64,
+pub(super) struct Decoded {
+    pub w: u64,
+    pub h: u64,
+    pub bytes: u64,
 }
 
 /// What the filter chain of an image unpacks to. `Err` when it cannot be known.
-fn decoded_size(spec: &Spec, stream: &Stream<'_>, facts: &Facts<'_>) -> Result<Decoded, String> {
+pub(super) fn decoded_size(
+    spec: &Spec,
+    stream: &Stream<'_>,
+    facts: &Facts<'_>,
+) -> Result<Decoded, String> {
     let (names, _) = filters_of(stream.dict());
     let stated = Decoded {
         w: spec.w,
@@ -726,22 +818,39 @@ impl<'a> Device<'a> for Dry<'_> {
     fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
         self.tick();
         self.soft_mask(props.soft_mask.as_ref());
-        let mut area = (props.transform * path.bounding_box().to_path(0.0)).bounding_box();
+        let device = props.transform * path.clone();
+        let mut area = device.bounding_box();
         let stroke = matches!(mode, DrawMode::Stroke(_) | DrawMode::FillAndStroke(..));
+        let mut width = None;
         if let DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s) = mode {
             let (a, b) = x_y_advances(&props.transform);
             let f = a.length().max(b.length()) * f64::from(s.line_width);
             area = area.inflate(f, f);
+            width = Some(f);
+        }
+        if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
+            self.draw(&device, None);
+        }
+        if width.is_some() {
+            self.draw(&device, width);
         }
         self.paint(&props.paint, area, stroke);
     }
 
-    fn push_clip_path(&mut self, _: &ClipPath) {
+    fn push_clip_path(&mut self, clip: &ClipPath) {
         self.tick();
+        // Clip paths come in device space.
+        self.draw(&clip.path, None);
+    }
+
+    fn push_clip_rect(&mut self, _: &Rect) {
+        self.tick();
+        self.charge(Kind::Drawing, 0, DRAW_BASE);
     }
 
     fn push_transparency_group(&mut self, _: f32, mask: Option<SoftMask<'a>>, _: BlendMode) {
         self.tick();
+        self.charge(Kind::Drawing, 0, DRAW_BASE);
         self.soft_mask(mask.as_ref());
     }
 
@@ -758,7 +867,24 @@ impl<'a> Device<'a> for Dry<'_> {
         // whole target.
         let stroke = matches!(mode, DrawMode::Stroke(_));
         self.paint(&props.paint, Rect::new(0.0, 0.0, w, h), stroke);
+        let width = match mode {
+            DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s) => {
+                let (a, b) = x_y_advances(&props.transform);
+                Some(a.length().max(b.length()) * f64::from(s.line_width))
+            }
+            _ => None,
+        };
         for g in run.glyphs() {
+            if let Glyph::Outline(o) = &**g {
+                self.tick();
+                let device = props.transform * g.transform() * o.outline();
+                if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
+                    self.draw(&device, None);
+                }
+                if width.is_some() {
+                    self.draw(&device, width);
+                }
+            }
             if let Glyph::Type3(t) = &**g {
                 self.tick();
                 self.depth += 1;
@@ -774,6 +900,11 @@ impl<'a> Device<'a> for Dry<'_> {
     fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
         self.tick();
         self.soft_mask(props.soft_mask.as_ref());
+        self.draw_box(
+            f64::from(image.width()),
+            f64::from(image.height()),
+            props.transform,
+        );
         match image {
             Image::Raster(r) => self.raster(r.stream(), props.transform),
             Image::Stencil(s) => {
@@ -832,7 +963,7 @@ pub(crate) fn estimate(
         }],
         alive: 0,
         peak: 0,
-        by_kind: [0; 5],
+        by_kind: [0; 6],
         calls: 0,
         depth: 0,
     };
@@ -863,68 +994,4 @@ pub(crate) fn estimate(
             )),
         },
     }
-}
-
-/// Checks every stencil mask of the file, in image streams and inline in content: their
-/// data is unpacked before any device sees them, so one whose decoded size cannot be known,
-/// or alone takes more than `room`, keeps the renders out. `Err` says which.
-pub(crate) fn stencils(
-    doc: &hayro_syntax::Pdf,
-    room: u64,
-    facts: &Facts<'_>,
-) -> Result<(), String> {
-    let check = |stream: &Stream<'_>| -> Result<(), String> {
-        let dict = stream.dict();
-        let is_stencil = dict
-            .get::<bool>(b"ImageMask")
-            .or_else(|| dict.get::<bool>(b"IM"))
-            .unwrap_or(false);
-        if !is_stencil {
-            return Ok(());
-        }
-        let spec = Spec {
-            comps: 1,
-            out: 1,
-            direct: false,
-            native: true,
-            ..Spec::of(dict)
-        };
-        let d = decoded_size(&spec, stream, facts)
-            .map_err(|why| format!("the file has a stencil mask whose size is unknown: {why}"))?;
-        let bytes = d
-            .bytes
-            .saturating_add(spec.w.saturating_mul(spec.h).saturating_mul(2));
-        if bytes > room {
-            return Err(format!(
-                "the file has a stencil mask that unpacks to about {bytes} bytes, more than the \
-                 {room} bytes a render may take"
-            ));
-        }
-        Ok(())
-    };
-    for (k, obj) in doc.objects().into_iter().enumerate() {
-        if k % 1024 == 0 && (facts.stop)() {
-            return Err("the time limit was reached".into());
-        }
-        let Some(stream) = obj.into_stream() else {
-            continue;
-        };
-        let dict = stream.dict();
-        if dict.get::<Name<'_>>(b"Subtype").as_deref() == Some(b"Image") {
-            check(&stream)?;
-            continue;
-        }
-        // Inline images live in content: of a page, a form, a pattern, a Type3 glyph or an
-        // appearance. Other streams give no inline images when read as content.
-        let Ok(data) = stream.decoded() else {
-            continue;
-        };
-        let mut ops = TypedIter::new(&data);
-        while let Some(op) = ops.next() {
-            if let TypedInstruction::InlineImage(i) = op {
-                check(i.0)?;
-            }
-        }
-    }
-    Ok(())
 }

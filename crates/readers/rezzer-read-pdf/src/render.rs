@@ -16,14 +16,16 @@
 //! - `cost.rs` works out every buffer the renderer would build from the file's values
 //!   (pictures, tiling pattern cells, shading textures, soft masks, Type3 glyphs, annotation
 //!   appearances) by running the page through the interpreter into a device that draws
-//!   nothing; a page over the render room (a quarter of the memory limit) is not rendered,
-//!   and a file with a stencil mask whose size cannot be known renders nothing;
+//!   nothing, with what vello keeps for each draw call; a page over the render room (a
+//!   quarter of the memory limit) is not rendered, and neither is one that reaches a stencil
+//!   mask whose size cannot be known;
 //! - the time is checked before each render, and a file renders at most [`MAX_RENDERS`]
 //!   pages.
 //!
 //! One render can still run past the time limit: it cannot stop in the middle of a page.
 
 mod cost;
+mod stencils;
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
@@ -255,9 +257,8 @@ pub(crate) fn render_pages(
     // The pages left out for the render count, the blob room or the time: the first, why,
     // how many.
     let mut left_out: Option<(u32, String, usize)> = None;
-    if let Err(why) = cost::stencils(&doc, room, &facts) {
-        left_out = Some((needs[0].page, why, 0));
-    }
+    // The content streams and stencils checked for earlier pages.
+    let mut seen = HashSet::new();
     let mut rendered = 0;
     for need in needs {
         let n = need.page;
@@ -297,7 +298,7 @@ pub(crate) fn render_pages(
             );
             continue;
         }
-        let png = match render_png(&doc, n, budget, room, &facts) {
+        let png = match render_png(&doc, n, budget, room, &facts, &mut seen) {
             Ok(png) => png,
             Err(Failed::Limit(why)) => {
                 left_out = Some((n, why, 1));
@@ -376,6 +377,7 @@ fn render_png(
     budget: &Budget,
     room: u64,
     facts: &cost::Facts<'_>,
+    seen: &mut HashSet<hayro_syntax::object::ObjectIdentifier>,
 ) -> Result<Vec<u8>, Failed> {
     budget
         .check_time()
@@ -396,6 +398,7 @@ fn render_png(
     let transform = Affine::scale_non_uniform(f64::from(px) / w, f64::from(py) / h)
         * p.initial_transform(true).to_kurbo();
     let settings = InterpreterSettings::default();
+    stencils::page_stencils(p, room, facts, seen).map_err(Failed::Room)?;
     match cost::estimate(p, transform, (px, py), &settings, room, facts) {
         Ok(_) => {}
         Err(cost::Unknown::Over(kind, bytes)) => {
