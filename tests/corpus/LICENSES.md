@@ -922,7 +922,7 @@ Source of the text: https://raw.githubusercontent.com/alokpalai/underground-tunn
 
 ## PDF corpus (`pdf/`)
 
-The PDF files were downloaded on 2026-10-19 (and checked again on 2026-10-20) from the raw form of the pinned commit URLs in `MANIFEST.md` and left byte for byte unchanged. Each SHA-256 was checked against `docs/spike-2026-10-19/MANIFEST-pdf.md`. The two large files that are only in `remote.tsv` are not in the repo.
+The PDF files were downloaded on 2026-10-19 (and checked again on 2026-10-20; the two pdfplumber files on 2026-10-21) from the raw form of the pinned commit URLs in `MANIFEST.md` and left byte for byte unchanged. Each SHA-256 was checked against `docs/spike-2026-10-19/MANIFEST-pdf.md`. The two large files that are only in `remote.tsv` are not in the repo.
 
 ### Attribution and share-alike license (CC BY-SA 4.0)
 
@@ -938,6 +938,8 @@ License text: https://creativecommons.org/licenses/by/4.0/legalcode . `pdf/arxiv
 - `pdf/nist-sp800-53r5.pdf` (remote only): NIST Special Publication 800-53 Revision 5, https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf . Work of the US government (NIST), public domain.
 - `pdf/pdfbox-sf1199a-direct-deposit.pdf`: Standard Form 1199A, US Department of the Treasury. Work of the US government, public domain. It was found in the Apache PDFBox test resources.
 - `pdf/scan-truman-letter-nara.pdf`: letter from Harry S. Truman to Eleanor Roosevelt, National Archives and Records Administration via the Digital Public Library of America, public domain on Wikimedia Commons (page named in `MANIFEST.md`).
+- `pdf/senate-expenditures.pdf`: report of the expenditures of a US Senate office, https://github.com/jsvine/pdfplumber/blob/4c64b92d5caccd71c645e98e0fabb0c4dba7ff45/tests/pdfs/senate-expenditures.pdf . Work of the US government, public domain. It was found in the pdfplumber test files; the MIT license of that repository does not cover them, so the file is used for its public domain status.
+- `pdf/nics-background-checks-2015-11.pdf`: NICS firearm background checks, November 2015, Federal Bureau of Investigation, https://github.com/jsvine/pdfplumber/blob/4c64b92d5caccd71c645e98e0fabb0c4dba7ff45/tests/pdfs/nics-background-checks-2015-11.pdf . Work of the US government, public domain. It was found in the pdfplumber test files, as above.
 - `pdf/pdfbox-poems-article-threads.pdf` has public domain poems (Goethe and others) as text. The file itself is an Apache PDFBox test resource (Apache-2.0).
 
 ### Apache-2.0 sources

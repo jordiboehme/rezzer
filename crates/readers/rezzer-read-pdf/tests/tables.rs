@@ -1375,3 +1375,63 @@ fn a_page_wide_grid_full_of_text_says_so() {
         out.document.losses
     );
 }
+
+#[test]
+fn senate_expenditures_table_is_rebuilt() {
+    // A page turned for display whose table has column rules in its header only and no rules
+    // between the records: one table with two header rows; each record is a row, the second
+    // line of a record in its description.
+    let out = read_corpus("senate-expenditures.pdf");
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (head, rows) = &found[0];
+    assert_eq!(*head, 2);
+    assert_eq!(rows.len(), 34);
+    let md = markdown(&out);
+    for expected in [
+        "| **DOCUMENT NO.** | **DATE POSTED** | **PAYEE NAME** | \
+         **OBLIGATION/SERVICE DATES** **START** | **OBLIGATION/SERVICE DATES** **END** | \
+         **DESCRIPTION** | **AMOUNT ($)** |\n| --- | --- | --- | --- | --- | --- | --- |\n\
+         |  |  | BAIN, J MATTHEW |  |  | DISTRICT DIRECTOR | 37,499.96 |\n",
+        "| DHAW20190001 | 05/03/2019 | CITIBANK - TRAVEL CBA CARD | 03/04/2019 | 03/06/2019 | \
+         STAFF TRANSPORTATION AIRFARE FOR E JOHNSON KANSAS CITY TO WASHINGTON DC AND RETURN | \
+         920.68 |\n",
+        "| DHAW20190070 | 09/09/2019 | CITIBANK - TRAVEL CBA CARD | 08/12/2019 | 08/14/2019 | \
+         STAFF TRANSPORTATION AIRFARE FOR C WEIHS WASHINGTON DC TO SPRINGFIELD AND RETURN | \
+         411.49 |\n",
+    ] {
+        assert!(md.contains(expected), "{expected} in {md}");
+    }
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("Possible table")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn nics_checks_grid_is_noted() {
+    // A ruled grid of about 25 columns over most of a landscape page, full of numbers: no
+    // table, its text stays, and one note says a table may stand there.
+    let out = read_corpus("nics-background-checks-2015-11.pdf");
+    let blocks = page(&out, 1);
+    assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
+    let note = "Possible table on page 1 not rebuilt (reason: it has more than 15 columns)";
+    let paras = paragraphs(blocks);
+    assert_eq!(paras.iter().filter(|p| *p == note).count(), 1, "{paras:?}");
+    assert!(
+        paras.iter().any(|p| p.contains("Alabama 18,870")),
+        "{paras:?}"
+    );
+    let losses: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("Possible table"))
+        .collect();
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+}
