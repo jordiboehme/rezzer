@@ -182,8 +182,9 @@ pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots
 pub(crate) enum Seen {
     /// The whole page needs vision.
     Page(Vision),
-    /// Only small pictures, each of at least 1 cm2, in the order the page draws them.
-    Small(Vec<Small>),
+    /// Only small pictures, each of at least 1 cm2, in the order the page draws them, and how
+    /// many more there are past the cap the caller can take.
+    Small(Vec<Small>, usize),
 }
 
 /// A small picture on a page that does not need vision as a whole.
@@ -262,11 +263,13 @@ pub(crate) fn on_every_page<'a>(
 /// pictures, without the page furniture `skip`, cover at least 2 % of it. Otherwise each of
 /// its pictures of at least 1 cm2 is a small picture of its own; one that does not look like
 /// a code and lies in the top or bottom band or a corner, or is in `everywhere`, is a logo.
+/// At most `cap` small pictures are kept, the first the page draws.
 pub(crate) fn vision(
     info: &PageInfo,
     items: &PageItems,
     skip: &Spots,
     everywhere: &HashSet<u64>,
+    cap: usize,
 ) -> Option<Seen> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
@@ -342,6 +345,10 @@ pub(crate) fn vision(
     if small.is_empty() {
         return None;
     }
+    // Past `cap` the work for each picture is more than the caller may take.
+    let more = small.len().saturating_sub(cap);
+    let mut small = small;
+    small.truncate(cap);
     let (fw, fh) = items.turn.size(width, height);
     let list = small
         .into_iter()
@@ -361,7 +368,7 @@ pub(crate) fn vision(
             }
         })
         .collect();
-    Some(Seen::Small(list))
+    Some(Seen::Small(list, more))
 }
 
 /// The alt text for small pictures `small` of a page that needs vision as a whole: how many,

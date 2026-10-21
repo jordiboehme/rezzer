@@ -444,6 +444,11 @@ impl LinkRoom {
         false
     }
 
+    /// The bytes [`LinkRoom::take_bytes`] can still take.
+    pub(crate) fn available(&self) -> u64 {
+        self.freed.get().saturating_add(self.left.get())
+    }
+
     /// Gives back what a page's runs were charged while the file was read, once the page is
     /// laid out: its text now sits in the model, charged once.
     pub(crate) fn free(&self, bytes: u64) {

@@ -50,6 +50,27 @@ fn read_with(bytes: &[u8], extract: bool) -> ReadOutcome {
     PdfReader.read(&src, &opts, &Budget::new(hostile()))
 }
 
+fn read_with_limits(bytes: &[u8], extract: bool, limits: Limits) -> ReadOutcome {
+    let src = Source {
+        path: None,
+        name: "file.pdf".into(),
+        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format: FormatId::Pdf,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "%PDF-".into(),
+        },
+        modified: None,
+    };
+    let opts = ReadOptions {
+        extract_assets: extract,
+        ..ReadOptions::default()
+    };
+    PdfReader.read(&src, &opts, &Budget::new(limits))
+}
+
 fn deflate(data: &[u8]) -> Vec<u8> {
     let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
     z.write_all(data).expect("deflate");
@@ -1268,13 +1289,19 @@ fn many_places_of_one_picture_stay_linear() {
     // a read that grows with the places, not with their square. Nothing is rendered: the page
     // with 100,000 draws is over the render room, which other tests cover.
     let start = Instant::now();
-    let one = read_with(&common::many_places_twin(1), false);
+    // At 1 GiB, so the kept bytes (a sixteenth) take the 100,000 places and their work.
+    let limits = Limits {
+        max_memory_bytes: 1 << 30,
+        ..hostile()
+    };
+    let read = |bytes: &[u8]| read_with_limits(bytes, false, limits.clone());
+    let one = read(&common::many_places_twin(1));
     let one_took = start.elapsed();
     assert_eq!(one.document.assets.len(), 1, "{:#?}", one.document.losses);
     let n = 100_000;
     let file = common::many_places_twin(n);
     let start = Instant::now();
-    let out = read_with(&file, false);
+    let out = read(&file);
     let took = start.elapsed();
     eprintln!(
         "1 place: {one_took:?}; {n} places: {took:?}, max RSS {} MiB",
@@ -1380,4 +1407,27 @@ fn a_shared_picture_is_cut_at_the_next_page_that_renders() {
         .collect();
     assert_eq!(named.len(), 1, "{:#?}", out.document.losses);
     assert!(named[0].what.contains("pages 1, 2"), "{}", named[0].what);
+}
+
+#[test]
+fn many_places_at_a_low_limit_stay_under_it() {
+    // 160,000 places of one picture at a memory limit of 64 MiB: the work for each drawn
+    // picture is charged, so the read stays under the limit and says what it did not list.
+    let limit = 64u64 << 20;
+    let limits = Limits {
+        max_memory_bytes: limit,
+        ..hostile()
+    };
+    let out = read_with_limits(&common::many_places_twin(160_000), false, limits);
+    let rss = common::max_rss_bytes();
+    eprintln!("160,000 places at 64 MiB: max RSS {} MiB", rss >> 20);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("small pictures on page 1 not listed")),
+        "{:#?}",
+        out.document.losses
+    );
+    assert!(rss < limit, "max RSS {} MiB", rss >> 20);
 }

@@ -387,12 +387,34 @@ fn lay_out(
             let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
             // Each picture's block is looked for at the run nearest to its top, after the
             // annotations' points, in the frame of the runs.
-            let seen = render::vision(info, &items, &furniture, &everywhere);
+            // The work for each small picture while the page is laid out is charged against
+            // the kept bytes, and given back after the page.
+            // The cap leaves room for the places themselves (their block and words).
+            let cap =
+                usize::try_from(links.available() / (PICTURE_WORK + PLACE_COST + PLACE_WORDS))
+                    .unwrap_or(usize::MAX);
+            let seen = render::vision(info, &items, &furniture, &everywhere, cap);
+            let mut work = 0;
+            if let Some(render::Seen::Small(list, more)) = &seen {
+                work = list.len() as u64 * PICTURE_WORK;
+                if links.take_bytes(work).is_err() {
+                    work = 0;
+                }
+                if *more > 0 {
+                    let hit = rezzer_limits::LimitHit {
+                        limit: "kept text",
+                        value: (list.len() + more) as u64 * PICTURE_WORK,
+                        max: work,
+                        unit: "bytes",
+                    };
+                    pictures.unlist(*more, n, hit.to_string());
+                }
+            }
             let tops: Vec<Option<(f32, f32)>> = match &seen {
                 Some(render::Seen::Page(v)) => {
                     vec![render::picture_top(v, items.turn, info.width, info.height)]
                 }
-                Some(render::Seen::Small(list)) => list
+                Some(render::Seen::Small(list, _)) => list
                     .iter()
                     .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
                     .collect(),
@@ -568,7 +590,7 @@ fn lay_out(
                         ),
                     }
                 }
-                Some(render::Seen::Small(list)) => {
+                Some(render::Seen::Small(list, _)) => {
                     let crops = pictures.list(
                         n,
                         (&list, &spots, here),
@@ -605,6 +627,7 @@ fn lay_out(
                 }
                 blocks = render::merge(blocks, media);
             }
+            links.free(work);
             // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {
                 let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
@@ -760,6 +783,30 @@ fn figure_texts(
     blocks
 }
 
+/// What each small picture of a page takes while the page is laid out, besides what its
+/// place keeps: the picture, its top and the run found for it, its point and what the layout
+/// keeps for it, its place among the blocks and in reading order, its block, its crop and its
+/// entry in the page's set of assets.
+const PICTURE_WORK: u64 = (std::mem::size_of::<render::Small>()
+    + 2 * std::mem::size_of::<Option<(f32, f32)>>()
+    + 2 * std::mem::size_of::<(f32, f32)>()
+    + std::mem::size_of::<Option<Near>>()
+    + std::mem::size_of::<(f32, f32, usize)>()
+    + std::mem::size_of::<Option<usize>>()
+    + std::mem::size_of::<u32>()
+    + std::mem::size_of::<Option<Anchor>>()
+    + 16
+    + 2 * std::mem::size_of::<usize>()
+    + std::mem::size_of::<(usize, Block)>()
+    + std::mem::size_of::<render::Crop>()
+    + 16) as u64;
+
+/// Things to put among a page's blocks, each with the index of the block it goes before.
+type AtPlace<T> = Vec<(usize, T)>;
+
+/// About what the words of one place take: `small picture, box 1234, 1234 to 1234, 1234`.
+const PLACE_WORDS: u64 = 64;
+
 /// What one more small picture asset keeps in the model besides its alt text: the asset,
 /// its id and its entry in the identity map.
 const PICTURE_COST: u64 = 256;
@@ -801,7 +848,7 @@ impl Pictures {
         n: u32,
         (list, spots, figures): (&[render::Small], &[usize], &[render::Figure]),
         (budget, room): (&Budget, &LinkRoom),
-        (media, unmatched): (&mut Vec<(usize, Block)>, &mut Vec<(usize, String)>),
+        (media, unmatched): (&mut AtPlace<Block>, &mut AtPlace<String>),
         out: &mut Out,
     ) -> Vec<render::Crop> {
         let mut order: Vec<usize> = (0..list.len()).collect();
