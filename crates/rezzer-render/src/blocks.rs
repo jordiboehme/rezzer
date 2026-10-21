@@ -1439,6 +1439,29 @@ const MAX_COLUMNS: usize = 1_000;
 /// A table's rendered grid (rows times width) holds at most this many cells.
 const MAX_CELLS: usize = 200_000;
 
+/// The mark for a grid position a cell merged from above covers (U+3003, ditto mark).
+const SAME_AS_ABOVE: &str = "\u{3003}";
+
+/// The mark for a grid position a cell merged from the left covers.
+const SAME_AS_LEFT: &str = "\u{2190}";
+
+/// What a grid position of a rendered table shows: the cell that starts there, or a mark for
+/// a position a merged cell covers. Each names the cell by its place in the table's texts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Spot {
+    Own(usize),
+    Above(usize),
+    Left(usize),
+}
+
+impl Spot {
+    fn cell(self) -> usize {
+        match self {
+            Spot::Own(k) | Spot::Above(k) | Spot::Left(k) => k,
+        }
+    }
+}
+
 fn model_table(
     caption: Option<&str>,
     header_rows: usize,
@@ -1465,10 +1488,12 @@ fn model_table(
         .max()
         .unwrap_or(1)
         .clamp(1, MAX_COLUMNS);
-    // Place every cell on a grid; a merged cell's text stands once, in its first position,
-    // and the positions it spans stay empty. Rows stop once the grid would pass MAX_CELLS;
-    // the header row is always shown.
-    let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
+    // Place every cell on a grid; a merged cell's text stands once, in its first position.
+    // The other positions of its first row say "same as left", every position below its
+    // first row "same as above". Rows stop once the grid would pass MAX_CELLS; the header
+    // row is always shown.
+    let mut grid: Vec<Vec<Option<Spot>>> = vec![Vec::new(); rows.len()];
+    let mut texts: Vec<String> = Vec::new();
     // (row, column, column span, row span) of every merged cell.
     let mut merged: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut filled = 0usize;
@@ -1486,7 +1511,6 @@ fn model_table(
                 c += 1;
                 continue;
             }
-            let text = inlines(&cell.inlines, Mode::Cell).trim().to_string();
             let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
             let cs = (cell.col_span.max(1) as usize)
                 .min(real.saturating_sub(c).max(1))
@@ -1498,15 +1522,20 @@ fn model_table(
                 (rs, cs)
             };
             filled += fill_rows * fill_cols;
-            for grid_row in &mut grid[r..r + fill_rows] {
+            let k = texts.len();
+            texts.push(inlines(&cell.inlines, Mode::Cell).trim().to_string());
+            for (dr, grid_row) in grid[r..r + fill_rows].iter_mut().enumerate() {
                 if grid_row.len() < c + fill_cols {
                     grid_row.resize(c + fill_cols, None);
                 }
-                for slot in &mut grid_row[c..c + fill_cols] {
-                    *slot = Some(String::new());
+                for (dc, slot) in grid_row[c..c + fill_cols].iter_mut().enumerate() {
+                    *slot = Some(match (dr, dc) {
+                        (0, 0) => Spot::Own(k),
+                        (0, _) => Spot::Left(k),
+                        _ => Spot::Above(k),
+                    });
                 }
             }
-            grid[r][c] = Some(text);
             if rs > 1 || cs > 1 {
                 merged.push((r, c, cs, rs));
             }
@@ -1520,59 +1549,101 @@ fn model_table(
         }
     }
     grid.truncate(shown);
-    let grid: Vec<Vec<String>> = grid
-        .into_iter()
-        .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
-        .collect();
-    let (header, body) = if header_rows == 0 {
-        (Vec::new(), &grid[..])
-    } else {
-        (grid[0].clone(), &grid[1..])
+    // A real cell whose whole text is a mark is escaped, so it is never read as one.
+    let own = |k: usize| -> String {
+        let t = &texts[k];
+        if t == SAME_AS_ABOVE || t == SAME_AS_LEFT {
+            format!("\\{t}")
+        } else {
+            t.clone()
+        }
     };
+    let mut marked = false;
+    let mut line = |row: &[Option<Spot>]| -> Vec<String> {
+        row.iter()
+            .map(|spot| match spot {
+                None => String::new(),
+                Some(Spot::Own(k)) => own(*k),
+                Some(Spot::Above(_)) => {
+                    marked = true;
+                    SAME_AS_ABOVE.to_string()
+                }
+                Some(Spot::Left(_)) => {
+                    marked = true;
+                    SAME_AS_LEFT.to_string()
+                }
+            })
+            .collect()
+    };
+    // Several header rows are one header line: per column the texts of the cells over it,
+    // top down, a cell over several rows once.
+    let head = header_rows.min(grid.len());
+    let header: Vec<String> = match head {
+        0 => Vec::new(),
+        1 => line(&grid[0]),
+        _ => (0..width)
+            .map(|c| {
+                let mut parts: Vec<String> = Vec::new();
+                let mut last = None;
+                for row in &grid[..head] {
+                    let Some(spot) = row.get(c).copied().flatten() else {
+                        continue;
+                    };
+                    if last == Some(spot.cell()) {
+                        continue;
+                    }
+                    last = Some(spot.cell());
+                    let t = own(spot.cell());
+                    if !t.is_empty() {
+                        parts.push(t);
+                    }
+                }
+                parts.join(" ")
+            })
+            .collect(),
+    };
+    let body: Vec<Vec<String>> = grid[head..]
+        .iter()
+        .map(|row| line(row))
+        .collect();
     let mut out = String::new();
     if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
     }
-    out.push_str(&pipe_table(&header, aligns, body));
+    out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    // Only rows that are shown are named; a span into hidden rows ends at the last one.
-    // A sheet's table (its cells carry sheet anchors) names ranges as the sheet does; any
-    // other table names rows and columns, counted from 1.
+    // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
+    // sheet does; only rows that are shown are named, and a range into hidden rows ends at
+    // the last one.
     let sheet = rows
         .iter()
         .flatten()
         .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
-    let merged: Vec<String> = merged
-        .into_iter()
-        .filter(|(r, ..)| *r < shown)
-        .map(|(r, c, cs, rs)| {
-            let last = (r + rs).min(shown);
-            if sheet {
-                return format!(
+    let ranges: Vec<String> = if sheet {
+        merged
+            .into_iter()
+            .filter(|(r, ..)| *r < shown)
+            .map(|(r, c, cs, rs)| {
+                format!(
                     "{}{}:{}{}",
                     column_letter(c),
                     r + 1,
                     column_letter(c + cs - 1),
-                    last
-                );
-            }
-            let span = |word: &str, from: usize, to: usize| {
-                if from == to {
-                    format!("{word} {from}")
-                } else {
-                    format!("{word}s {from} to {to}")
-                }
-            };
-            format!(
-                "{}, {}",
-                span("row", r + 1, last),
-                span("column", c + 1, c + cs)
-            )
-        })
-        .collect();
-    if !merged.is_empty() {
-        let joint = if sheet { ", " } else { "; " };
-        notes.push(format!("Merged cells: {}", merged.join(joint)));
+                    (r + rs).min(shown)
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if marked || !ranges.is_empty() {
+        let mut note = format!(
+            "Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left."
+        );
+        if !ranges.is_empty() {
+            note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
+        }
+        notes.push(note);
     }
     if shown < rows.len() {
         notes.push(format!(

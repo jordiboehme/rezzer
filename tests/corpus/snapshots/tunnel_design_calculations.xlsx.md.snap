@@ -55,37 +55,37 @@ modified: "2026-08-24T17:24:13Z"
 | UNDERGROUND TUNNEL STRUCTURAL ANALYSIS |  |
 | Conceptual design calculations - structural stability, drainage, ventilation \& safety |  |
 |  |  |
-| PROJECT DESCRIPTION |  |
+| PROJECT DESCRIPTION | ← |
 | Project type | Two-lane single-tube underground road tunnel (conceptual design) |
 | Prepared by | Alok |
 | Tools used | AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets) |
 | Scope | Structural lining stability, ventilation, drainage, and life-safety checks at concept stage |
 | Disclaimer | Preliminary / conceptual calculations for a portfolio project. NOT for construction use. |
 |  |  |
-| KEY GEOMETRIC PARAMETERS (shared across sheets) |  |
+| KEY GEOMETRIC PARAMETERS (shared across sheets) | ← |
 | Excavated (bored) diameter | 10.0 m |
 | Tunnel length | 800 m |
 | Overburden depth to crown | 25 m |
 | Ground type | Weathered rock / dense soil (assumed) |
 | Traffic | Two-lane, design-hour volume 1200 veh/hr |
 |  |  |
-| DESIGN CODES / REFERENCES USED (conceptual guidance) |  |
-| - IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance |  |
-| - IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) |  |
-| - IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) |  |
-| - PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) |  |
-| - Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) |  |
-| - Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) |  |
-| - Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires |  |
+| DESIGN CODES / REFERENCES USED (conceptual guidance) | ← |
+| - IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance | ← |
+| - IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) | ← |
+| - IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) | ← |
+| - PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) | ← |
+| - Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) | ← |
+| - Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) | ← |
+| - Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires | ← |
 |  |  |
-| HOW TO USE THIS WORKBOOK |  |
-| - Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. |  |
-| - Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. |  |
-| - Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. |  |
-| - Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. |  |
-| - These mirror the Python scripts in /python (same method \& formulas) for cross-verification. |  |
+| HOW TO USE THIS WORKBOOK | ← |
+| - Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. | ← |
+| - Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. | ← |
+| - Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. | ← |
+| - Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. | ← |
+| - These mirror the Python scripts in /python (same method \& formulas) for cross-verification. | ← |
 
-Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B23, A24:B24, A25:B25, A27:B27, A28:B28, A29:B29, A30:B30, A31:B31, A32:B32
+Merged cells: 〃 same as above, ← same as left. Ranges: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B23, A24:B24, A25:B25, A27:B27, A28:B28, A29:B29, A30:B30, A31:B31, A32:B32
 
 ## Structural\_Lining
 
@@ -94,7 +94,7 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 | STRUCTURAL STABILITY - TUNNEL LINING CHECK |  |  |  |  |  |
 | Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check |  |  |  |  |  |
 |  |  |  |  |  |  |
-| INPUTS |  |  |  |  |  |
+| INPUTS | ← | ← |  |  |  |
 | Excavated diameter, D | 10 | m |  |  |  |
 | Trial lining thickness, t | 0.35 | m |  |  |  |
 | Overburden depth, H | 25 | m |  |  |  |
@@ -105,7 +105,7 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 | Steel grade, fy | 500 | MPa |  |  |  |
 | Target Factor of Safety | 2 | - |  |  |  |
 |  |  |  |  |  |  |
-| TERZAGHI LOOSENING PRESSURE |  |  |  |  |  |
+| TERZAGHI LOOSENING PRESSURE | ← | ← |  |  |  |
 | Tunnel radius, R | 5.00 | m |  |  |  |
 | Loosening zone width, B1 | 7.89 | m |  |  |  |
 | At-rest coeff., K0 = 1-sin(phi) | 0.50 | - |  |  |  |
@@ -115,7 +115,7 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 | Design vertical pressure, Pv | 194.15 | kPa |  |  |  |
 | Lateral pressure at springline, Ph = K0\*Pv | 97.08 | kPa |  |  |  |
 |  |  |  |  |  |  |
-| RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) |  |  |  |  |  |
+| RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) | ← | ← |  |  |  |
 | Mean pressure, p\_mean | 145.62 | kPa |  |  |  |
 | Deviatoric pressure, p\_dev | 48.54 | kPa |  |  |  |
 | Thrust at crown, N(0) | 485.38 | kN/m |  |  |  |
@@ -125,7 +125,7 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 | Moment at springline, M(90) | 606.73 | kNm/m |  |  |  |
 | Max ring moment, M\_max | 606.73 | kNm/m |  |  |  |
 |  |  |  |  |  |  |
-| RCC LINING SECTION CHECK (1 m wide strip) |  |  |  |  |  |
+| RCC LINING SECTION CHECK (1 m wide strip) | ← | ← |  |  |  |
 | Section area, A = 1 x t | 0.350 | m2 |  |  |  |
 | Section modulus, Z = 1 x t^2/6 | 0.020 | m3 |  |  |  |
 | Axial stress = N\_max/A /1000 | 2.77 | MPa |  |  |  |
@@ -135,9 +135,9 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 | Permissible stress = 0.33 fck | 9.90 | MPa |  |  |  |
 | Factor of Safety (actual) | 0.30 | - |  |  |  |
 | Status | NOT SAFE - increase thickness |  |  |  |  |
-| Note: net tension on inner fibre - provide crack-control reinforcement |  |  |  |  |  |
+| Note: net tension on inner fibre - provide crack-control reinforcement | ← | ← |  |  |  |
 |  |  |  |  |  |  |
-| LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) |  |  |  |  |  |
+| LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) | ← | ← |  |  |  |
 |  |  |  |  | t (m) | FOS |
 |  |  |  |  | 0.15 | 0.06 |
 |  |  |  |  | 0.2 | 0.10 |
@@ -166,7 +166,7 @@ Merged cells: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B
 |  |  |  |  |  |  |
 | Min. lining thickness for target FOS | 1 | m |  |  |  |
 
-Merged cells: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
+Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
 
 ## Ventilation
 
@@ -175,7 +175,7 @@ Merged cells: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
 | LONGITUDINAL VENTILATION DESIGN CHECK |  |  |
 | Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control |  |  |
 |  |  |  |
-| INPUTS |  |  |
+| INPUTS | ← | ← |
 | Tunnel length, L | 800 | m |
 | Tunnel diameter, D | 10 | m |
 | Design-hour traffic volume | 1200 | veh/hr |
@@ -190,11 +190,11 @@ Merged cells: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
 | Darcy friction factor | 0.02 | - |
 | Jet fan thrust (each) | 1500 | N |
 |  |  |  |
-| GEOMETRY |  |  |
+| GEOMETRY | ← | ← |
 | Cross-sectional area, A = pi.D^2/4 | 78.54 | m2 |
 | Hydraulic diameter (circular = D) | 10.00 | m |
 |  |  |  |
-| CO DILUTION - FRESH AIR DEMAND |  |  |
+| CO DILUTION - FRESH AIR DEMAND | ← | ← |
 | Heavy diesel vehicles | 120 | veh/hr |
 | Light vehicles | 1080 | veh/hr |
 | Total CO emission rate | 2.2400 | g/s |
@@ -202,17 +202,17 @@ Merged cells: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
 | Fresh air required, Q | 19.56 | m3/s |
 | Required velocity (CO dilution) | 0.25 | m/s |
 |  |  |  |
-| CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) |  |  |
+| CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) | ← | ← |
 | Critical velocity, Vc | 2.18 | m/s |
 | Governing design velocity | 2.18 | m/s |
 | Comfort/safety check (1-10 m/s) | OK |  |
 |  |  |  |
-| JET FAN COUNT |  |  |
+| JET FAN COUNT | ← | ← |
 | Friction pressure loss, dP | 4.58 | Pa |
 | Total thrust required | 359.85 | N |
 | No. of jet fans required | 1 | nos |
 
-Merged cells: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
+Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
 
 ## Drainage
 
@@ -221,7 +221,7 @@ Merged cells: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
 | DRAINAGE SYSTEM SIZING |  |  |  |  |  |
 | Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check |  |  |  |  |  |
 |  |  |  |  |  |  |
-| INPUTS |  |  |  |  |  |
+| INPUTS | ← | ← |  |  |  |
 | Tunnel length, L | 800 | m |  |  |  |
 | Longitudinal gradient | 0.005 | fraction |  |  |  |
 | Seepage rate assumed | 0.02 | l/s per m |  |  |  |
@@ -233,18 +233,18 @@ Merged cells: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
 | Sump retention time | 10 | min |  |  |  |
 | Pump duty factor | 1.25 | - |  |  |  |
 |  |  |  |  |  |  |
-| INFLOW ESTIMATES |  |  |  |  |  |
+| INFLOW ESTIMATES | ← | ← |  |  |  |
 | Groundwater seepage inflow | 16.00 | l/s |  |  |  |
 | Portal rainfall runoff (Rational Method) | 106.25 | l/s |  |  |  |
 | Total design drain flow | 122.25 | l/s |  |  |  |
 |  |  |  |  |  |  |
-| INVERT DRAIN PIPE SIZING (Manning's, full-bore) |  |  |  |  |  |
+| INVERT DRAIN PIPE SIZING (Manning's, full-bore) | ← | ← |  |  |  |
 | Pipe area | 0.0707 | m2 |  |  |  |
 | Hydraulic radius, R = D/4 | 0.0750 | m |  |  |  |
 | Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2) | 68.38 | l/s |  |  |  |
 | Trial pipe status | UNDERSIZED - increase diameter |  |  |  |  |
 |  |  |  |  |  |  |
-| STANDARD PIPE SIZE CHECK |  |  |  |  |  |
+| STANDARD PIPE SIZE CHECK | ← | ← |  |  |  |
 |  |  |  |  | D (m) | Capacity (l/s) |
 |  |  |  |  | 0.15 | 10.77 |
 |  |  |  |  | 0.2 | 23.19 |
@@ -259,12 +259,12 @@ Merged cells: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
 |  |  |  |  |  |  |
 | Minimum standard pipe size required | 0.4 | m |  |  |  |
 |  |  |  |  |  |  |
-| SUMP \& PUMP SIZING |  |  |  |  |  |
+| SUMP \& PUMP SIZING | ← | ← |  |  |  |
 | Peak design inflow to sump | 152.81 | l/s |  |  |  |
 | Required sump volume | 91.69 | m3 |  |  |  |
 | Required pump capacity | 152.81 | l/s |  |  |  |
 
-Merged cells: A4:C4, A16:C16, A21:C21, A27:C27, A42:C42
+Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A16:C16, A21:C21, A27:C27, A42:C42
 
 ## Logic
 

@@ -447,10 +447,10 @@ fn table_alignment_merged_cells_and_pipes() {
     let expected = "**Costs**\n\n\
 | A | B | C |\n\
 | :--- | :---: | ---: |\n\
-| x \\| y | wide |  |\n\
+| x \\| y | wide | \u{2190} |\n\
 | `a\\|b` | -5 |  |\n\
 \n\
-Merged cells: row 2, columns 2 to 3\n";
+Merged cells: \u{3003} same as above, \u{2190} same as left.\n";
     assert!(md.contains(expected), "{md}");
 }
 
@@ -479,7 +479,10 @@ fn sheet_tables_keep_a1_merge_notes() {
         anchor: None,
     }]);
     assert!(
-        md.contains("| x | wide |  |\n| y |  |  |\n\nMerged cells: B2:C3\n"),
+        md.contains(
+            "| x | wide | \u{2190} |\n| y | \u{3003} | \u{3003} |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B2:C3\n"
+        ),
         "{md}"
     );
 }
@@ -1080,7 +1083,12 @@ fn hostile_spans_stay_bounded() {
         anchor: None,
     }]);
     assert!(
-        md.contains("Merged cells: rows 2 to 3, columns 1 to 2"),
+        md.contains("| h | \u{2190} |") && md.contains("| \u{3003} | \u{3003} |"),
+        "{}",
+        &md[..300]
+    );
+    assert!(
+        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left."),
         "{}",
         &md[..300]
     );
@@ -1658,8 +1666,10 @@ fn merge_note_names_only_shown_rows() {
         alignments: Vec::new(),
         anchor: None,
     }]);
+    // The cell merged down stands in the header; each shown row below says "same as above".
+    assert_eq!(md.matches("\n| \u{3003} | 0 |").count(), 199, "{}", &md[..300]);
     assert!(
-        md.contains("Merged cells: rows 1 to 200, column 1\n"),
+        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left.\n"),
         "{}",
         &md[md.len() - 200..]
     );
@@ -3314,4 +3324,86 @@ fn a_note_too_deep_for_its_passage_stays_in_the_list() {
     let md = render(&d, Completeness::Complete, &opts());
     let listed = md.split("## Annotations").nth(1).expect("the list");
     assert!(listed.contains("Deep body."), "{md}");
+}
+
+#[test]
+fn merged_cells_are_marked_once_and_real_marks_are_escaped() {
+    // A block of two by two cells: its text once, the first row's other cell "same as left",
+    // the cells below "same as above". A real cell that holds only a mark is escaped.
+    let mut block = Cell::new(vec![txt("both")]);
+    block.col_span = 2;
+    block.row_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![
+                Cell::new(vec![txt("A")]),
+                Cell::new(vec![txt("B")]),
+                Cell::new(vec![txt("C")]),
+            ],
+            vec![block, Cell::new(vec![txt("\u{3003}")])],
+            vec![Cell::new(vec![txt("\u{2190}")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "| A | B | C |\n| --- | --- | --- |\n\
+             | both | \u{2190} | \\\u{3003} |\n\
+             | \u{3003} | \u{3003} | \\\u{2190} |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left.\n"
+        ),
+        "{md}"
+    );
+    // Without a merged cell, no note; a lone mark is still escaped.
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![Cell::new(vec![txt("A")])],
+            vec![Cell::new(vec![txt("\u{3003}")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(md.contains("| \\\u{3003} |\n"), "{md}");
+    assert!(!md.contains("Merged cells"), "{md}");
+}
+
+#[test]
+fn header_rows_join_into_one_header_line() {
+    // Two header rows: a title over two rows stands once, a title over two columns heads
+    // each of them; no merge note, as no mark is left.
+    let mut date = Cell::new(vec![txt("ISSUING DATE")]);
+    date.row_span = 2;
+    let mut vat = Cell::new(vec![txt("VAT")]);
+    vat.col_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 2,
+        role: None,
+        rows: vec![
+            vec![date, vat],
+            vec![Cell::new(vec![txt("RATE")]), Cell::new(vec![txt("AMOUNT")])],
+            vec![
+                Cell::new(vec![txt("2030-01-02")]),
+                Cell::new(vec![txt("0.00")]),
+                Cell::new(vec![txt("1.00")]),
+            ],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "| ISSUING DATE | VAT RATE | VAT AMOUNT |\n| --- | --- | --- |\n\
+             | 2030-01-02 | 0.00 | 1.00 |\n"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Merged cells"), "{md}");
 }

@@ -623,14 +623,15 @@ fn ticket_box_next_to_table() {
     assert_eq!(rows[3], ["Ticket 1000001", "Price 10.00"], "{rows:?}");
     let md = markdown(&out);
     assert!(
-        md.contains("| Reserved seats only |  |  |  |  |  |\n"),
+        md.contains(
+            "| Reserved seats only | \u{2190} | \u{2190} | \u{2190} | \u{2190} | \u{2190} |\n\
+             | Ticket 1000001 | \u{2190} | \u{2190} | Price 10.00 | \u{2190} | \u{2190} |\n"
+        ),
         "{md}"
     );
     assert_eq!(md.matches("Reserved seats only").count(), 1, "{md}");
     assert!(
-        md.contains(
-            "Merged cells: row 3, columns 1 to 6; row 4, columns 1 to 3; row 4, columns 4 to 6"
-        ),
+        md.contains("\n\nMerged cells: \u{3003} same as above, \u{2190} same as left.\n"),
         "{md}"
     );
 }
