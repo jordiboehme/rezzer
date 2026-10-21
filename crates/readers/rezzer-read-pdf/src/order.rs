@@ -246,14 +246,9 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
     }
     let mut out = Vec::new();
     for (r, mut row) in rows.into_iter().enumerate() {
-        row.sort_by(|&a, &b| {
-            frags[head[a]]
-                .x
-                .total_cmp(&frags[head[b]].x)
-                .then(head[a].cmp(&head[b]))
-                .then(a.cmp(&b))
-        });
-        // The same text drawn again on top of itself (a fake bold) is read once.
+        row.sort_by(|&a, &b| frags[a].x.total_cmp(&frags[b].x));
+        // The same text drawn again on top of itself (a fake bold) is read once: in x order
+        // its copies stand next to each other.
         let mut kept: Vec<usize> = Vec::with_capacity(row.len());
         for i in row {
             let dup = kept.iter().rev().take(4).any(|&k| {
@@ -266,6 +261,13 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
                 kept.push(i);
             }
         }
+        kept.sort_by(|&a, &b| {
+            frags[head[a]]
+                .x
+                .total_cmp(&frags[head[b]].x)
+                .then(head[a].cmp(&head[b]))
+                .then(a.cmp(&b))
+        });
         let mut piece: Option<Piece> = None;
         for i in kept {
             let f = &frags[i];
@@ -858,6 +860,26 @@ mod tests {
         ];
         let lines = lines_of(&frags, true);
         assert_eq!(lines, [vec![2, 3, 4, 0, 1]]);
+    }
+
+    #[test]
+    fn a_line_drawn_twice_in_cut_runs_is_read_once() {
+        // Five runs of one line (alternating bold), drawn again 0.2 points to the right as a
+        // fake bold: each copy is a chain of its own, and the copy is still dropped.
+        let mut frags = Vec::new();
+        for shift in [0.0, 0.2] {
+            for k in 0..5 {
+                let x = 100.0 + 30.0 * k as f32 + shift;
+                frags.push(Frag {
+                    bold: k % 2 == 0,
+                    end: x + 30.0,
+                    pen: x + 30.0,
+                    ..frag(&format!("part{k}"), x, 700.0)
+                });
+            }
+        }
+        let lines = lines_of(&frags, true);
+        assert_eq!(lines, [vec![0, 1, 2, 3, 4]]);
     }
 
     #[test]
