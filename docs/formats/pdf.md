@@ -19,7 +19,7 @@ Built on (versions as tested on 2026-10-19):
 
 - Text in reading order, also on two-column pages
 - Headings, lists, tables and footnotes from the tag tree when the PDF is tagged. Untagged PDFs get headings from font size
-- Tables as cells
+- Tables as cells. A tagged PDF gives its tables from the tag tree, with header rows and cells that span. A table that goes on over several pages stays one table, and the column titles it repeats on each page are left out
 - Outline (bookmarks) with level, title and target page
 - Page labels (i, ii, iii, then 1, 2, 3 and so on)
 - Links: internal targets, named destinations and web links
@@ -74,7 +74,8 @@ flowchart LR
 
 - XFA forms are not read. The output says "XFA form data present, not read"
 - Scripts are listed, never run. When a script builds field names at run time, the dependency is marked "unknown, see script"
-- Tables on untagged PDFs are found by layout rules. Expect gaps on complex tables
+- Tables on untagged PDFs are found from drawn lines and from the white space between columns. Rezzer only rebuilds such a table when the evidence is strong. When it is not sure, the text stays as paragraphs and a note says "Possible table on page N not rebuilt" with the reason. Complex tables, for example with two header rows or values between rows, often get this note
+- Tables on pages with form fields and tables inside pictures are not rebuilt
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer
 - lopdf 0.45.0 decodes some outline titles wrongly ("Isís" as "Is?s"). Rezzer decodes titles itself
 - pdf-inspector 1.25.2 does not decode UTF-16 form values and reports a file with a broken cross-reference table as "scanned". Rezzer reads form values through lopdf and checks pages with fonts before it trusts a "scanned" result

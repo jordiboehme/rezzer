@@ -578,12 +578,8 @@ pub(crate) fn page_blocks(
         Some(tree) => {
             let (found, fallbacks) = tables::tagged(page, &mut flow, tree, cx.tables);
             placed.extend(found.into_iter().map(Placed::Table));
-            for (p, what) in cx.tables.take_issues() {
-                notes.push((
-                    format!("{what} (page {p})"),
-                    LossReason::Damaged,
-                    Severity::Warning,
-                ));
+            for what in cx.tables.take_issues() {
+                notes.push((what, LossReason::Damaged, Severity::Warning));
             }
             let fell_back = !fallbacks.is_empty();
             notes.extend(
@@ -636,7 +632,8 @@ pub(crate) fn page_blocks(
         built.paragraph(l.runs.iter().collect(), Some("page-header"), cx);
     }
     if geometry && let Some(height) = height {
-        let found = tables::untagged(page, &mut flow, drawn, height);
+        let stop = || time_over(cx.budget).is_err();
+        let found = tables::untagged(page, &mut flow, drawn, height, &stop);
         placed.extend(found.tables.into_iter().map(Placed::Table));
         placed.extend(found.unsure.into_iter().map(Placed::Unsure));
         notes.extend(
@@ -1957,7 +1954,8 @@ mod tests {
             laid.notes
                 .iter()
                 .any(|(w, why, _)| *why == LossReason::Damaged
-                    && w.contains("1 cell of a tagged table on page 1 stand")),
+                    && w == "1 cell of a tagged table on page 1 stands in more than one row of the tag \
+                     tree; it is kept in its first row"),
             "{:?}",
             laid.notes
         );

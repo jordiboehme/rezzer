@@ -1461,3 +1461,114 @@ fn a_borderless_table_of_40000_rows_is_bounded() {
     }
     assert_rss_under_256_mib();
 }
+
+/// One tall page with Helvetica as `/F1` and `content`, `h` points high.
+fn tall_page(content: &[u8], h: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(content));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn many_small_ruled_tables_on_one_page_are_bounded() {
+    // 3,000 ruled boxes of two by two cells, each with a word in every cell.
+    let start = Instant::now();
+    let n = 3_000usize;
+    let h = (n + 2) * 30;
+    let mut c = b"0.5 w ".to_vec();
+    for i in 0..n {
+        let top = h - 10 - i * 30;
+        for k in 0..3 {
+            let y = top - k * 10;
+            c.extend(format!("72 {y} m 272 {y} l S ").as_bytes());
+            let x = 72 + k * 100;
+            c.extend(format!("{x} {top} m {x} {} l S ", top - 20).as_bytes());
+        }
+        c.extend(b"BT /F1 6 Tf ");
+        for (k, (x, y)) in [
+            (76, top - 8),
+            (176, top - 8),
+            (76, top - 18),
+            (176, top - 18),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            c.extend(format!("1 0 0 1 {x} {y} Tm (c{i}x{k}) Tj ").as_bytes());
+        }
+        c.extend(b"ET\n");
+    }
+    let out = read(&tall_page(&c, h));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    let tables = page(&out, 1)
+        .iter()
+        .filter(|b| matches!(b, Block::Table { .. }))
+        .count();
+    assert!(tables > 0, "{:?}", out.document.losses);
+    if tables < n {
+        assert!(
+            !losses(&out, LossReason::Limit).is_empty(),
+            "{tables} tables, {:?}",
+            out.document.losses
+        );
+    }
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_small_tables_without_rules_on_one_page_are_bounded() {
+    // 6,000 blocks of three rows in two columns, 60 points apart.
+    let start = Instant::now();
+    let n = 6_000usize;
+    let h = (n + 2) * 60;
+    let mut c = b"BT /F1 8 Tf ".to_vec();
+    for i in 0..n {
+        let top = h - 20 - i * 60;
+        for r in 0..3 {
+            let y = top - r * 10;
+            c.extend(
+                format!(
+                    "1 0 0 1 72 {y} Tm (k{i}r{r}) Tj 1 0 0 1 300 {y} Tm ({}) Tj ",
+                    (i * 31 + r * 7) % 97
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    c.extend(b"ET\n");
+    let out = read(&tall_page(&c, h));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    let tables = page(&out, 1)
+        .iter()
+        .filter(|b| matches!(b, Block::Table { .. }))
+        .count();
+    assert!(tables > 0, "{:?}", out.document.losses);
+    if tables < n {
+        assert!(
+            !losses(&out, LossReason::Limit).is_empty(),
+            "{tables} tables, {:?}",
+            out.document.losses
+        );
+    }
+    assert_rss_under_256_mib();
+}

@@ -72,8 +72,8 @@ pub(crate) struct Tables {
     rows: RefCell<HashMap<usize, Rc<TableRows>>>,
     /// Tagged table to the page it started on and the text of its header rows.
     started: RefCell<HashMap<usize, (u32, Vec<String>)>>,
-    /// What was found broken in the tag tree, once per table: page and words.
-    issues: RefCell<Vec<(u32, String)>>,
+    /// What was found broken in the tag tree, once per table, in words.
+    issues: RefCell<Vec<String>>,
 }
 
 /// The rows of one tagged table: the `TD` and `TH` cells of each row, the row of each cell
@@ -131,13 +131,14 @@ impl Tables {
             rows.push(cells);
         }
         if twice > 0 {
-            let s = if twice == 1 { "" } else { "s" };
-            self.issues.borrow_mut().push((
-                page,
-                format!(
-                    "{twice} cell{s} of a tagged table on page {page} stand in more than one row \
-                     of the tag tree; each is kept in its first row"
-                ),
+            let (cells, stand, kept) = if twice == 1 {
+                ("1 cell", "stands", "it is")
+            } else {
+                (&*format!("{twice} cells"), "stand", "each is")
+            };
+            self.issues.borrow_mut().push(format!(
+                "{cells} of a tagged table on page {page} {stand} in more than one row of the \
+                 tag tree; {kept} kept in its first row"
             ));
         }
         let mut content_cells: HashMap<u32, usize> = HashMap::new();
@@ -155,8 +156,8 @@ impl Tables {
         Some(found)
     }
 
-    /// What was found broken in the tag tree since the last call: page and words.
-    pub(crate) fn take_issues(&self) -> Vec<(u32, String)> {
+    /// What was found broken in the tag tree since the last call, in words.
+    pub(crate) fn take_issues(&self) -> Vec<String> {
         std::mem::take(&mut self.issues.borrow_mut())
     }
 }
@@ -398,7 +399,13 @@ const CLEAN_ROWS: f32 = 0.8;
 /// The tables of an untagged page (or a tagged page whose tag tree did not hold): first
 /// grids of drawn rules, then white space gutters in the text left. Their runs are taken out
 /// of `flow`. `height` is the page height; text in other directions is never in a table.
-pub(crate) fn untagged(page: u32, flow: &mut Flow, drawn: &Drawn<'_>, height: f32) -> Found {
+pub(crate) fn untagged(
+    page: u32,
+    flow: &mut Flow,
+    drawn: &Drawn<'_>,
+    height: f32,
+    stop: &dyn Fn() -> bool,
+) -> Found {
     let mut found = Found::default();
     // On a page with form fields, boxes and aligned labels are the form.
     if !drawn.widgets.is_empty() {
@@ -410,8 +417,8 @@ pub(crate) fn untagged(page: u32, flow: &mut Flow, drawn: &Drawn<'_>, height: f3
         images: drawn.images,
         body_size: drawn.body_size,
     };
-    ruled(page, flow, drawn.rules, &area, &mut found);
-    borderless(flow, &area, &mut found);
+    ruled(page, flow, drawn.rules, &area, stop, &mut found);
+    borderless(page, flow, &area, stop, &mut found);
     found
 }
 
@@ -506,6 +513,7 @@ fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
 fn captions_near(
     flow: &Flow,
     lines: &[FlowLine],
+    by_y: &ByY,
     b: [f32; 4],
     skip: &dyn Fn(usize) -> bool,
 ) -> (bool, bool) {
@@ -527,7 +535,12 @@ fn captions_near(
         Some(false) => figure = true,
         None => {}
     };
-    for (k, l) in lines.iter().enumerate() {
+    // Only lines in a band around the box can be near it.
+    let band = 4.0 * by_y.size;
+    let lo = by_y.line_y.partition_point(|y| *y < b[1] - band);
+    let hi = by_y.line_y.partition_point(|y| *y <= b[3] + band);
+    for &k in &by_y.lines[lo..hi] {
+        let l = &lines[k];
         if skip(l.start) || !across(l) {
             continue;
         }
@@ -553,6 +566,56 @@ fn captions_near(
     }
     (table, figure)
 }
+
+/// The runs and lines of a page sorted by height, so a box finds what lies in it by search.
+struct ByY {
+    /// Run indices by the height of their middle, and those heights.
+    runs: Vec<usize>,
+    run_y: Vec<f32>,
+    /// Line indices by baseline, and the baselines.
+    lines: Vec<usize>,
+    line_y: Vec<f32>,
+    /// The largest font size of the page.
+    size: f32,
+}
+
+impl ByY {
+    fn new(flow: &Flow, lines: &[FlowLine]) -> ByY {
+        let mut runs: Vec<(f32, usize)> = flow
+            .runs
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (middle(r).1, i))
+            .collect();
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut ls: Vec<(f32, usize)> = lines.iter().enumerate().map(|(k, l)| (l.y, k)).collect();
+        ls.sort_by(|a, b| a.0.total_cmp(&b.0));
+        ByY {
+            run_y: runs.iter().map(|r| r.0).collect(),
+            runs: runs.into_iter().map(|r| r.1).collect(),
+            line_y: ls.iter().map(|l| l.0).collect(),
+            lines: ls.into_iter().map(|l| l.1).collect(),
+            size: lines.iter().map(|l| l.size).fold(1.0, f32::max),
+        }
+    }
+
+    /// The runs whose middle lies between the heights `lo` and `hi`, in page order.
+    fn runs_between(&self, lo: f32, hi: f32) -> Vec<usize> {
+        let a = self.run_y.partition_point(|y| *y <= lo);
+        let z = self.run_y.partition_point(|y| *y < hi);
+        let mut out = self.runs[a..z].to_vec();
+        out.sort_unstable();
+        out
+    }
+}
+
+/// The point of a run that decides which cell it is in.
+fn middle(r: &Run) -> (f32, f32) {
+    (r.x + r.w / 2.0, r.y + r.h * 0.3)
+}
+
+/// Grids and regions one page may have looked at between two looks at the clock.
+const CHECK_EVERY: usize = 64;
 
 /// A straight horizontal (`at` is y, `from`..`to` along x) or vertical segment.
 #[derive(Debug, Clone, Copy)]
@@ -607,7 +670,14 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 }
 
 /// Grids of drawn rules: horizontal and vertical lines that meet, with text in their cells.
-fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mut Found) {
+fn ruled(
+    page: u32,
+    flow: &mut Flow,
+    rules: &[Rule],
+    area: &Area<'_>,
+    stop: &dyn Fn() -> bool,
+    found: &mut Found,
+) {
     let mut hs = Vec::new();
     let mut vs = Vec::new();
     for r in rules {
@@ -703,7 +773,18 @@ fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mu
         top(b).total_cmp(&top(a))
     });
     let lines = flow_lines(flow);
-    for (gh, gv) in grids {
+    let by_y = ByY::new(flow, &lines);
+    // Runs a grid took, and for each the table and the row and cell it goes to.
+    let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
+    let mut tables: Vec<Planned> = Vec::new();
+    for (g, (gh, gv)) in grids.into_iter().enumerate() {
+        if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
+            found.skipped.push(format!(
+                "ruled tables on page {page} are looked for only in part: the time limit was \
+                 reached"
+            ));
+            break;
+        }
         let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
         let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
         let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
@@ -728,19 +809,29 @@ fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mu
             continue;
         }
         let b = [xs[0], ys[rows], xs[cols], ys[0]];
-        let inside = |r: &Run| {
-            let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h * 0.3);
-            !r.off_axis && cx > b[0] && cx < b[2] && cy > b[1] && cy < b[3]
+        let inside = |i: usize| {
+            let r = &flow.runs[i];
+            let (cx, _) = middle(r);
+            !r.off_axis && claimed[i].is_none() && cx > b[0] && cx < b[2]
         };
-        let within: Vec<usize> = (0..flow.runs.len())
-            .filter(|&i| inside(&flow.runs[i]) && !flow.runs[i].text.trim().is_empty())
+        let mine: Vec<usize> = by_y
+            .runs_between(b[1], b[3])
+            .into_iter()
+            .filter(|&i| inside(i))
+            .collect();
+        let within: Vec<usize> = mine
+            .iter()
+            .copied()
+            .filter(|&i| !flow.runs[i].text.trim().is_empty())
             .collect();
         if within.is_empty() {
             continue;
         }
         let at = flow.at[within[0]];
-        let (table_caption, figure_caption) =
-            captions_near(flow, &lines, b, &|i| inside(&flow.runs[i]));
+        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &|i| {
+            let (_, cy) = middle(&flow.runs[i]);
+            inside(i) && cy > b[1] && cy < b[3]
+        });
         let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
         // Whether a boundary is drawn over at least half of a cell's side.
         let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32| {
@@ -806,7 +897,8 @@ fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mu
         let mut caption_inside = false;
         for &i in &within {
             let r = &flow.runs[i];
-            let o = cell_at(r.x + r.w / 2.0, r.y + r.h * 0.3);
+            let (cx, cy) = middle(r);
+            let o = cell_at(cx, cy);
             with_text.insert(o);
             // A run that reaches over its cell's side crosses a drawn line.
             let (x0, x1) = (xs[o.1], xs[(o.1 + extent[&o].1 as usize).min(cols)]);
@@ -842,12 +934,8 @@ fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mu
             }
             continue;
         }
-        let taken = flow.take(|r, _| inside(r));
-        let mut runs_of: HashMap<(usize, usize), Vec<Run>> = HashMap::new();
-        for (r, _, _) in taken {
-            let o = cell_at(r.x + r.w / 2.0, r.y + r.h * 0.3);
-            runs_of.entry(o).or_default().push(r);
-        }
+        // The place of each cell in the planned rows.
+        let mut place: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
         let mut planned_rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(rows);
         for (r, row) in owner.iter().enumerate() {
             let mut cells = Vec::new();
@@ -856,23 +944,45 @@ fn ruled(page: u32, flow: &mut Flow, rules: &[Rule], area: &Area<'_>, found: &mu
                     continue;
                 }
                 let (row_span, col_span) = extent[o];
+                place.insert(*o, (r, cells.len()));
                 cells.push(PlannedCell {
-                    runs: runs_of.remove(o).unwrap_or_default(),
+                    runs: Vec::new(),
                     row_span,
                     col_span,
                 });
             }
             planned_rows.push(cells);
         }
-        let header_rows = header_of(&planned_rows);
-        found.tables.push(Planned {
+        let t = tables.len();
+        for &i in &mine {
+            let (cx, cy) = middle(&flow.runs[i]);
+            let (r, c) = place[&cell_at(cx, cy)];
+            claimed[i] = Some((t, r, c));
+        }
+        tables.push(Planned {
             at,
             top: b[3],
             rows: planned_rows,
-            header_rows,
+            header_rows: 0,
             tagged: None,
             continues: false,
         });
+    }
+    if tables.is_empty() {
+        return;
+    }
+    // The runs of all grids leave the flow at once.
+    let mut k = 0;
+    let taken = flow.take(|_, _| {
+        k += 1;
+        claimed[k - 1].is_some()
+    });
+    for ((r, _, _), (t, row, cell)) in taken.into_iter().zip(claimed.into_iter().flatten()) {
+        tables[t].rows[row][cell].runs.push(r);
+    }
+    for mut t in tables {
+        t.header_rows = header_of(&t.rows);
+        found.tables.push(t);
     }
 }
 
@@ -962,8 +1072,15 @@ fn numeric(text: &str) -> bool {
 
 /// Tables without rules: regions of lines whose pieces stand in columns with white space
 /// between them, accepted only on strong evidence.
-fn borderless(flow: &mut Flow, area: &Area<'_>, found: &mut Found) {
+fn borderless(
+    page: u32,
+    flow: &mut Flow,
+    area: &Area<'_>,
+    stop: &dyn Fn() -> bool,
+    found: &mut Found,
+) {
     let lines = flow_lines(flow);
+    let by_y = ByY::new(flow, &lines);
     let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(flow, l)).collect();
     let off: Vec<bool> = lines
         .iter()
@@ -997,7 +1114,14 @@ fn borderless(flow: &mut Flow, area: &Area<'_>, found: &mut Found) {
         i = last_multi + 1;
     }
     let mut claim: Vec<(usize, usize, Planned, Grid)> = Vec::new();
-    for (a, z) in regions {
+    for (g, (a, z)) in regions.into_iter().enumerate() {
+        if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
+            found.skipped.push(format!(
+                "tables without rules on page {page} are looked for only in part: the time \
+                 limit was reached"
+            ));
+            break;
+        }
         let multi = (a..z).filter(|&k| pieces[k].len() >= 2).count();
         if multi < 2 {
             continue;
@@ -1015,7 +1139,7 @@ fn borderless(flow: &mut Flow, area: &Area<'_>, found: &mut Found) {
             lines[a].y + lines[a].size,
         ];
         let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
-        let (table_caption, figure_caption) = captions_near(flow, &lines, b, &in_region);
+        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &in_region);
         let rows_needed = if table_caption { 2 } else { 3 };
         let verdict = grid_of(
             flow,
@@ -1063,7 +1187,10 @@ fn borderless(flow: &mut Flow, area: &Area<'_>, found: &mut Found) {
                 claim.push((a, z, planned, grid));
             }
             Err(why) => {
-                if table_caption && multi >= 2 {
+                // A grid of rules over the same text may have said so already.
+                let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
+                let said = found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
+                if table_caption && !said {
                     found.unsure.push(Unsure {
                         at: flow.at[lines[a].start],
                         top: b[3],
@@ -1073,30 +1200,34 @@ fn borderless(flow: &mut Flow, area: &Area<'_>, found: &mut Found) {
             }
         }
     }
-    // Take the runs of the accepted regions out, cell by cell.
-    for (a, z, mut planned, grid) in claim.into_iter().rev() {
-        let (first, last) = (lines[a].start, lines[z - 1].end);
-        let tail: Vec<(Run, Slot, usize)> = {
-            let mut k = 0usize;
-            flow.take(|_, _| {
-                k += 1;
-                (first..last).contains(&(k - 1))
-            })
-        };
-        let mut tail: Vec<Option<Run>> = tail.into_iter().map(|t| Some(t.0)).collect();
-        for (row, cells) in planned.rows.iter_mut().zip(&grid.rows) {
-            for (cell, g) in row.iter_mut().zip(cells) {
+    if claim.is_empty() {
+        return;
+    }
+    // The runs of all accepted regions leave the flow at once; each goes to its cell.
+    let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
+    for (t, (_, _, _, grid)) in claim.iter().enumerate() {
+        for (r, cells) in grid.rows.iter().enumerate() {
+            for (c, g) in cells.iter().enumerate() {
                 for &(s, e) in &g.ranges {
-                    for i in s..e {
-                        if let Some(r) = tail.get_mut(i - first).and_then(Option::take) {
-                            cell.runs.push(r);
-                        }
+                    for slot in &mut target[s..e] {
+                        *slot = Some((t, r, c));
                     }
                 }
             }
         }
-        planned.header_rows = header_of(&planned.rows);
-        found.tables.push(planned);
+    }
+    let mut k = 0;
+    let taken = flow.take(|_, _| {
+        k += 1;
+        target[k - 1].is_some()
+    });
+    let mut planned: Vec<Planned> = claim.into_iter().map(|c| c.2).collect();
+    for ((r, _, _), (t, row, cell)) in taken.into_iter().zip(target.into_iter().flatten()) {
+        planned[t].rows[row][cell].runs.push(r);
+    }
+    for mut p in planned {
+        p.header_rows = header_of(&p.rows);
+        found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
 }
@@ -1284,12 +1415,23 @@ fn grid_of(
             }
         }
     }
-    // Entries with page numbers in the last column, going up, are a table of contents.
+    // Numbered entries with page numbers in the last column, going up, are a table of
+    // contents.
     let pages: Vec<Option<u32>> = texts
         .iter()
         .map(|r| r.last().and_then(|t| t.parse::<u32>().ok()))
         .collect();
+    let numbered = texts.iter().all(|r| {
+        r.first()
+            .and_then(|t| t.split_whitespace().next())
+            .is_some_and(|w| {
+                w.trim_end_matches('.')
+                    .split('.')
+                    .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            })
+    });
     if texts.len() >= 3
+        && numbered
         && pages.iter().all(Option::is_some)
         && pages.windows(2).all(|w| w[0] <= w[1])
     {
