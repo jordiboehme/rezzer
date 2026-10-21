@@ -10,6 +10,7 @@ Built on (versions as used in the development version):
 
 - Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.45.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
 - [hayro](https://crates.io/crates/hayro) 0.8.0 (with hayro-interpret and hayro-syntax) for the text with its position on the page, the exact glyph boxes under an annotation, page renders and as a fallback parser for broken files
+- Rezzer's own crate barcodes for barcodes and QR codes. It uses [rxing](https://crates.io/crates/rxing) 0.9.3 (Apache-2.0) with bounds of its own
 - Rezzer's own reader for the interpretation: reading order, headings, tables, the form logic, field formats in words and revision diffs
 
 ## What Rezzer reads
@@ -49,12 +50,25 @@ Built on (versions as used in the development version):
 ### Pictures and embedded files
 
 - A page without a text layer, with glyphs that have no Unicode mapping or with large pictures needs vision. It is listed with the reason. With an output directory (`-o` on the command line), Rezzer renders it to a PNG file at 144 dpi, at most 16 million pixels
-- Small pictures (1 square centimeter or more, together under 2 % of the page) do not make the whole page need vision. Each one is written at its place in the text with its box in points. With an output directory, Rezzer cuts it out of the page render with a margin of 8 pixels and writes it as `page-<N>-pic-<K>.png` (picture K on page N, in reading order)
-- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 15 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures, and likely codes, are marked "Needs vision"
+- Small pictures (1 square centimeter or more, together under 2 % of the page) do not make the whole page need vision. Each one is written at its place in the text with its box in points. With an output directory, Rezzer cuts it out of the page render with a margin of 8 pixels and writes it as `page-<N>-pic-<K>.png` (picture K on page N, in reading order). On a very large page, where the page render is coarser than 144 dpi, the crop is rendered again at 144 dpi
+- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 15 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures are marked "Needs vision", unless a code is read from them
 - Equal pictures share one file. The same picture on three pages is one PNG, and each place links to it with its own box. The list of pictures that need vision has it once, with its pages and boxes. When the page of its first place is not rendered, the file is cut from the next page that shows it. The overview counts the places and the distinct pictures
 - In a tagged file, the alt text of a Figure goes to the picture drawn inside it. A Figure that marks no picture gives its alt text to the one new small picture of its page. Every other Figure alt text stays in the text as "Figure (not matched to a picture): " and the alt text. It stands at the picture the Figure marks, else at the first picture of the page, else at the end of the page
 - A picture at the same place on at least 3 pages and half the pages is page furniture, like a running header. It is not listed
 - Attachments are listed with name and size. They are never opened
+
+### Barcodes and QR codes
+
+- Rezzer reads QR Code, Micro QR Code, Data Matrix, Aztec, PDF417, Code 128, Code 39, EAN-13, UPC-A and ITF. It reads them with and without an output directory
+- It looks in small pictures (logos too), in pages that need vision, in large pictures at their own resolution (at most 300 dpi) and in codes drawn as paths (many small filled squares or bars). A code drawn as paths is rendered again with each module on 3 whole pixels. Its crop is written as `page-<N>-code-<K>.png`
+- A small picture with a code is named after the code, for example "QR Code, box 480, 40 to 570, 130". It does not need vision and is not in the list of pictures that need vision. Below the picture, each code has a line with its kind and its content: `QR Code: https://example.org/t/dNuKThV1`
+- The content is data from the file. It is escaped for Markdown and never run or followed. Only `http` and `https` addresses become links. Content of several lines is a code block. Bytes that are not text are shown as their size and in base64
+- A code read from a page that needs vision is listed below the page picture with its box in points. The page still needs vision for the rest of it
+- A picture that looks like a code but gives none keeps "Needs vision" and says "barcode or QR code found, not decoded". Paths that look like a code but give none are not listed
+- Equal pictures are read once. The code shows at every place of the picture
+- The overview counts the codes by kind, and the pictures that look like a code but gave none
+- In the JSON, the codes are in `codes` of their asset: kind, text or base64, size in bytes and the box on the page for a page picture
+- Bounds: 10 seconds a picture, a quarter of the time limit for the file, 50 codes a picture, 500 a file, 64 KiB a code, pictures up to 100 million pixels, read in tiles of up to 4 million pixels. What is not read because of a bound is named in the output
 - A PDF with a user password is read with `--password-stdin` (command line) or the `password` option (MCP). The password never shows up in the output, in the logs or in the cache
 
 ## Example
@@ -104,6 +118,32 @@ Lorem ipsum dolor sit amet
 > Highlight content
 ```
 
+No file of the test corpus has a barcode or QR code. This part comes from a generated invoice: a QR code picture in the bottom right corner and a Code 128 drawn as bars. It is the real output of `rezzer read invoice.pdf -o out`, cut to the overview and the page:
+
+```markdown
+## Overview
+
+- Pages: 1
+- Images: 2
+- Codes: 2 (Code 128 1, QR Code 1)
+
+:status[Page 1]{grey}
+
+## Invoice 2026-114
+
+Two chairs, 240.00 EUR
+
+Pay within 14 days.
+
+![Code 128, box 72, 600 to 197, 640](invoice.pdf.assets/page-1-code-1.png)
+
+Code 128: RZ-2026-114
+
+![QR Code, box 480, 40 to 570, 130](invoice.pdf.assets/page-1-pic-1.png)
+
+QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
+```
+
 ## Known limitations
 
 - XFA forms are not read. The output says "XFA form data present, not read"
@@ -116,6 +156,12 @@ Lorem ipsum dolor sit amet
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
 - A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
 - A small picture in a corner or in the top or bottom band is taken as a logo, even when it shows content. It is listed with its box, but not marked as needing vision
+- A QR code with a logo over more than about 15 % of its area cannot be read. The error correction does not reach that far
+- Aztec codes in scans and turned codes are read less well than codes that are drawn straight
+- EAN-8, UPC-E and MaxiCode are not read. The first two give too many false hits, the last one can take minutes on a small picture
+- Codes are read as text or bytes. What a ticket, a payment or a boarding pass code means (EPC QR, Swiss QR bill, UIC 918, IATA BCBP) is read in a later plan
+- A code drawn as one outline path, not as squares or bars, is only found when its page is rendered for vision
+- Without an output directory, a page that draws more than 1,000 pictures is not rendered to look for codes
 - Equal pictures are found by all of their data. Two copies of one picture with different compression get a file each, and so do two copies in their own objects after the first 65,536 picture objects of a file. A stencil mask drawn in two colors is one picture
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
 - The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so

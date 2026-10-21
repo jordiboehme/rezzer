@@ -80,6 +80,11 @@ pub(crate) struct PageItems {
     /// For each of `images`, whether its pixels could be a barcode or QR code: 1-bit and at
     /// least 21 on a side.
     pub images_code: Vec<bool>,
+    /// For each of `images`, its size in pixels as its dictionary states it.
+    pub images_px: Vec<(u32, u32)>,
+    /// Regions that may be barcodes or QR codes drawn as vector paths, in the frame of
+    /// `images`.
+    pub codes: Vec<crate::codes::VectorCode>,
     /// For each of `images`, what the picture is: a hash of its dictionary, size and data,
     /// so the same picture on many pages is known as one.
     pub images_id: Vec<u64>,
@@ -793,8 +798,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             actuals: Vec::new(),
             images: Vec::new(),
             images_code: Vec::new(),
+            images_px: Vec::new(),
             images_id: Vec::new(),
             images_mcid: Vec::new(),
+            cells: Vec::new(),
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -965,6 +972,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.quotes = quotes;
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
+        items.images_px = std::mem::take(&mut dev.images_px);
+        items.codes = crate::codes::vector_codes(&dev.cells);
+        dev.cells = Vec::new();
         items.images_id = std::mem::take(&mut dev.images_id);
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
@@ -2480,7 +2490,11 @@ struct TextDevice<'d> {
     actuals: Vec<Rc<str>>,
     images: Vec<[f32; 4]>,
     images_code: Vec<bool>,
+    images_px: Vec<(u32, u32)>,
     images_id: Vec<u64>,
+    /// Filled rectangles that may be modules or bars of a code drawn as paths (at most
+    /// [`crate::codes::MAX_CELLS`]).
+    cells: Vec<[f32; 4]>,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -2800,6 +2814,70 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
     }
 }
 
+/// The filled subpaths of `path` that are rectangles with horizontal and vertical sides, as
+/// boxes: the modules or bars of a code drawn as paths.
+fn cells_of(path: &BezPath, transform: Affine, keep: &mut dyn FnMut([f32; 4])) {
+    use kurbo::PathEl;
+    let mut points: Vec<Point> = Vec::with_capacity(6);
+    let mut plain = true;
+    let mut flush = |points: &mut Vec<Point>, plain: bool| {
+        if plain
+            && (4..=5).contains(&points.len())
+            && let Some(b) = axis_box(points)
+        {
+            keep(b);
+        }
+        points.clear();
+    };
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                flush(&mut points, plain);
+                plain = true;
+                points.push(transform * p);
+            }
+            PathEl::LineTo(p) => {
+                if points.len() < 6 {
+                    points.push(transform * p);
+                } else {
+                    plain = false;
+                }
+            }
+            PathEl::QuadTo(..) | PathEl::CurveTo(..) => plain = false,
+            PathEl::ClosePath => {
+                flush(&mut points, plain);
+                plain = false;
+            }
+        }
+    }
+    flush(&mut points, plain);
+}
+
+/// The box of four (or five, the last back at the first) corners whose sides are horizontal
+/// and vertical.
+fn axis_box(points: &[Point]) -> Option<[f32; 4]> {
+    let mut points = points.to_vec();
+    if points.len() == 5 {
+        let (a, b) = (points[0], points[4]);
+        if (a.x - b.x).abs() > 0.01 || (a.y - b.y).abs() > 0.01 {
+            return None;
+        }
+        points.pop();
+    }
+    for k in 0..4 {
+        let (a, b) = (points[k], points[(k + 1) % 4]);
+        if (a.x - b.x).abs() > 0.01 && (a.y - b.y).abs() > 0.01 {
+            return None;
+        }
+    }
+    let x0 = points.iter().map(|p| p.x).fold(f64::MAX, f64::min);
+    let x1 = points.iter().map(|p| p.x).fold(f64::MIN, f64::max);
+    let y0 = points.iter().map(|p| p.y).fold(f64::MAX, f64::min);
+    let y1 = points.iter().map(|p| p.y).fold(f64::MIN, f64::max);
+    (x1 > x0 && y1 > y0 && [x0, y0, x1, y1].iter().all(|v| v.is_finite()))
+        .then_some([x0 as f32, y0 as f32, x1 as f32, y1 as f32])
+}
+
 /// The rule a filled four-cornered path is when its sides are horizontal and vertical.
 fn rectangle(points: &[Point]) -> Option<Rule> {
     let mut points = points.to_vec();
@@ -2901,6 +2979,14 @@ impl<'a> Device<'a> for TextDevice<'_> {
             return;
         }
         let stroke = !matches!(mode, DrawMode::Fill(_));
+        if !stroke && self.cells.len() < crate::codes::MAX_CELLS {
+            let cells = &mut self.cells;
+            cells_of(path, props.transform, &mut |c| {
+                if cells.len() < crate::codes::MAX_CELLS {
+                    cells.push(c);
+                }
+            });
+        }
         let (rules, cap) = (&mut self.rules, self.cap);
         let mut cut = false;
         rules_of(path, props.transform, stroke, &mut |r| {
@@ -3055,6 +3141,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
         self.images.push([min(xs), min(ys), max(xs), max(ys)]);
         self.images_code.push(code_pixels(&image));
+        self.images_px.push((image.width(), image.height()));
         let id = picture_id(
             &image,
             &self.stencils,

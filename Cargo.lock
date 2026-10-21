@@ -161,6 +161,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "barcodes"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rxing",
 ]
 
@@ -1704,6 +1705,7 @@ name = "rezzer"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "barcodes",
  "flate2",
  "hex",
  "insta",
@@ -1857,6 +1859,8 @@ dependencies = [
 name = "rezzer-read-pdf"
 version = "0.1.0"
 dependencies = [
+ "barcodes",
+ "base64",
  "flate2",
  "hayro",
  "hayro-interpret",

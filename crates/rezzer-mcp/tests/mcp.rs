@@ -731,6 +731,8 @@ impl Reader for Pictures {
                 caption: None,
                 alt: None,
                 needs_vision,
+                codes: Vec::new(),
+                code_unread: false,
             });
         }
         ReadOutcome {

@@ -139,6 +139,35 @@ pub struct Asset {
     /// True when Rezzer cannot interpret the picture and the calling agent should look at it.
     #[serde(default)]
     pub needs_vision: bool,
+    /// The barcodes and QR codes read from the picture, in the order they were found.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codes: Vec<Barcode>,
+    /// The picture looks like a barcode or QR code, but none was read from it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub code_unread: bool,
+}
+
+/// A barcode or QR code read from a picture. Its payload is data from the file: it is never
+/// followed or run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Barcode {
+    /// The kind of code: `QR Code`, `Data Matrix`, `Code 128`.
+    pub symbology: String,
+    /// The payload, when it is text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The payload in base64, when it is bytes that are not text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base64: Option<String>,
+    /// The size of the payload in bytes. A payload over the reader's limit has neither text
+    /// nor base64, only its size.
+    pub bytes: u64,
+    /// About where the code lies on its page, in points (left, bottom, right, top in the
+    /// frame of the page's text), when the picture is the page. A small picture shared by
+    /// several places has no box here: each place says where the picture is.
+    #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<[f32; 4]>,
 }
 
 /// A short map of the document: its parts and the main facts. Built by the enrich passes.

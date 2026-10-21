@@ -732,6 +732,8 @@ fn extract(
         caption: Some(name.to_string()),
         alt: None,
         needs_vision: false,
+        codes: Vec::new(),
+        code_unread: false,
     });
     out.blobs.push(Blob { asset: id, bytes });
     Ok(())

@@ -378,6 +378,15 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
     );
     let (places, distinct) = images(doc);
     count("Images", places);
+    // Barcodes and QR codes read, by kind; a picture that looks like one but gave none.
+    let mut kinds: Vec<(&str, usize)> = Vec::new();
+    for c in doc.assets.iter().flat_map(|a| &a.codes) {
+        match kinds.iter_mut().find(|(k, _)| *k == c.symbology) {
+            Some((_, n)) => *n += 1,
+            None => kinds.push((&c.symbology, 1)),
+        }
+    }
+    let unread = doc.assets.iter().filter(|a| a.code_unread).count();
     if !workbook {
         count("Annotations", doc.facets.annotations.len());
     }
@@ -402,6 +411,21 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .count(),
     );
     count("Not read", doc.losses.len());
+    // The codes stand right after the pictures they were read from.
+    let mut codes: Vec<(String, String)> = Vec::new();
+    if !kinds.is_empty() {
+        let total: usize = kinds.iter().map(|(_, n)| n).sum();
+        let each: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
+        codes.push(("Codes".into(), format!("{total} ({})", each.join(", "))));
+    }
+    if unread > 0 {
+        codes.push(("Codes not decoded".into(), unread.to_string()));
+    }
+    let at = ["Images", "Links", "Graphs", "Formulas", "Pages"]
+        .iter()
+        .find_map(|k| out.iter().position(|(l, _)| l == k))
+        .map_or(0, |i| i + 1);
+    out.splice(at..at, codes);
     // One picture drawn at several places (a logo on every page) is one file.
     if distinct < places
         && let Some((_, v)) = out.iter_mut().find(|(k, _)| k == "Images")

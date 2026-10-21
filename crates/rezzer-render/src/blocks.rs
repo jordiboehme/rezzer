@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use rezzer_model::{
-    Align, Annotation, Asset, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
+    Align, Annotation, Asset, Barcode, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
     TaskState, column_letter, plain_text,
 };
 
@@ -1354,7 +1354,8 @@ fn math_is_plain(body: &str) -> bool {
 fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
     let mut parts: Vec<Inline> = Vec::new();
     let text = Inline::plain;
-    match ctx.assets.iter().find(|a| a.id == id) {
+    let found = ctx.assets.iter().find(|a| a.id == id);
+    match found {
         None => parts.push(text(format!("Picture {id} is missing from the assets."))),
         Some(asset) => {
             let alt = place.or(asset.alt.as_deref());
@@ -1394,7 +1395,81 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
             }
         }
     }
+    let mut out = paragraph(&parts);
+    for c in found.map_or(&[][..], |a| a.codes.as_slice()) {
+        out.push_str("\n\n");
+        out.push_str(&code_lines(c));
+    }
+    out
+}
+
+/// One code read from a picture: `QR Code: <payload>`. Its payload is data: a web address
+/// becomes a link, other text stays escaped text (a payload of several lines a fenced block,
+/// control characters as their symbols), bytes are written in base64.
+fn code_lines(c: &Barcode) -> String {
+    let mut head = c.symbology.clone();
+    if let Some(b) = c.bounds {
+        let r = |v: f32| v.round() as i64;
+        head.push_str(&format!(
+            ", box {}, {} to {}, {}",
+            r(b[0]),
+            r(b[1]),
+            r(b[2]),
+            r(b[3])
+        ));
+    }
+    head.push_str(": ");
+    let mut parts = vec![Inline::plain(head.clone())];
+    match (&c.text, &c.base64) {
+        (Some(t), _) if t.contains(['\n', '\r']) => {
+            return format!(
+                "{}\n\n{}",
+                paragraph(&[Inline::plain(head.trim_end().to_string())]),
+                fence(None, &visible_controls(t))
+            );
+        }
+        (Some(t), _) if web_address(t) => parts.push(Inline::Link {
+            target: t.clone(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(t.clone())],
+        }),
+        (Some(t), _) => parts.push(Inline::plain(visible_controls(t))),
+        (None, Some(b64)) => {
+            parts.push(Inline::plain(format!("{} bytes, base64 ", c.bytes)));
+            parts.push(Inline::Code { text: b64.clone() });
+        }
+        (None, None) => parts.push(Inline::plain(format!(
+            "{} bytes, not kept: more than the reader keeps",
+            c.bytes
+        ))),
+    }
     paragraph(&parts)
+}
+
+/// Whether `t` is an `http` or `https` address without spaces or control characters: only
+/// those become links.
+fn web_address(t: &str) -> bool {
+    let lower = t.to_ascii_lowercase();
+    (lower.starts_with("https://") || lower.starts_with("http://"))
+        && t.len() > 8
+        && !t
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>'))
+}
+
+/// `t` with its control characters other than tab and line breaks as their Unicode symbols
+/// (U+2400 on), so a separator such as GS shows.
+fn visible_controls(t: &str) -> String {
+    t.chars()
+        .map(|c| match c {
+            '\t' | '\n' | '\r' => c,
+            '\u{0}'..='\u{1f}' => char::from_u32(0x2400 + c as u32).unwrap_or(c),
+            '\u{7f}' => '\u{2421}',
+            _ => c,
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------

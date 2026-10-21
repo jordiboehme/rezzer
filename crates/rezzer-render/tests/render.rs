@@ -800,6 +800,8 @@ fn rich_document() -> Document {
         caption: Some("Figure 1".into()),
         alt: Some("A chart".into()),
         needs_vision: true,
+        codes: Vec::new(),
+        code_unread: false,
     }];
     d.facets.formulas = vec![formula("Sheet 1!B2", "=A2*2", &["Sheet 1!A2"], None)];
     d.facets.annotations = vec![Annotation {
@@ -2749,6 +2751,8 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
             caption: None,
             alt: Some("no text layer".into()),
             needs_vision: true,
+            codes: Vec::new(),
+            code_unread: false,
         },
         Asset {
             id: "img2".into(),
@@ -2758,6 +2762,8 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
             caption: None,
             alt: None,
             needs_vision: false,
+            codes: Vec::new(),
+            code_unread: false,
         },
     ];
     let md = render(&d, Completeness::Complete, &opts());
@@ -2848,6 +2854,8 @@ fn asset(id: &str, path: Option<&str>, mime: &str, needs_vision: bool) -> Asset 
         caption: None,
         alt: None,
         needs_vision,
+        codes: Vec::new(),
+        code_unread: false,
     }
 }
 

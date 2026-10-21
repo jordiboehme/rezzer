@@ -1431,3 +1431,321 @@ fn many_places_at_a_low_limit_stay_under_it() {
     );
     assert!(rss < limit, "max RSS {} MiB", rss >> 20);
 }
+
+// ---------------------------------------------------------------------------------------
+// Barcodes and QR codes
+
+use barcodes::Symbology;
+use barcodes::encode::{self as code, Options};
+
+/// A picture drawn on a page: x, y, width, height and its index in the pictures.
+type Draw = (f32, f32, f32, f32, usize);
+
+/// Pages of `w` by `h` points, each drawing its pictures: (x, y, width, height, picture).
+/// The pictures are gray, given as width, height and pixels.
+fn picture_file(w: u32, h: u32, pages: &[Vec<Draw>], pictures: &[(u32, u32, Vec<u8>)]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let mut xo = String::new();
+    for (k, (pw, ph, px)) in pictures.iter().enumerate() {
+        let n = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {pw} /Height {ph} /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8 /Filter /FlateDecode"
+            ),
+            &deflate(px),
+        );
+        xo.push_str(&format!("/P{k} {n} 0 R "));
+    }
+    let mut kids = String::new();
+    for draws in pages {
+        let mut c = String::new();
+        for (x, y, dw, dh, k) in draws {
+            c += &format!("q {dw} 0 0 {dh} {x} {y} cm /P{k} Do Q\n");
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+             /Resources << /XObject << {xo}>> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The hostile memory limit with a shorter time limit: 3 seconds a picture, 9 for the file.
+fn scan_limits() -> Limits {
+    Limits {
+        max_time: Duration::from_secs(36),
+        ..hostile()
+    }
+}
+
+fn timed(file: &[u8], extract: bool, limits: Limits) -> (ReadOutcome, Duration) {
+    let start = Instant::now();
+    let out = read_with_limits(file, extract, limits);
+    (out, start.elapsed())
+}
+
+/// Square blocks of noise, `block` pixels a side, `w` by `h` pixels: they look like modules.
+fn block_noise(w: u32, h: u32, block: u32) -> Vec<u8> {
+    let mut state = 0x9e37_79b9u32;
+    let cols = w.div_ceil(block);
+    let mut row_blocks = vec![0u8; cols as usize];
+    let mut out = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        if y % block == 0 {
+            for v in &mut row_blocks {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                *v = if state & 1 == 0 { 0 } else { 255 };
+            }
+        }
+        for x in 0..w {
+            out.push(row_blocks[(x / block) as usize]);
+        }
+    }
+    out
+}
+
+#[test]
+fn a_noise_page_at_the_render_cap_is_scanned_in_tiles_within_its_time() {
+    // A page of 4,000 by 4,000 points covered by noise of 4 pixel blocks: its render has the
+    // most pixels a render may have (16 MP), read in tiles. The twin is an A4 page.
+    let noise = block_noise(4000, 4000, 4);
+    let big = picture_file(
+        4000,
+        4000,
+        &[vec![(0.0, 0.0, 4000.0, 4000.0, 0)]],
+        &[(4000, 4000, noise)],
+    );
+    let small = picture_file(
+        595,
+        842,
+        &[vec![(0.0, 0.0, 595.0, 842.0, 0)]],
+        &[(64, 64, block_noise(64, 64, 4))],
+    );
+    let (twin, twin_time) = timed(&small, false, scan_limits());
+    assert!(twin.document.assets.iter().all(|a| a.codes.is_empty()));
+    let (out, took) = timed(&big, false, scan_limits());
+    eprintln!(
+        "twin {twin_time:?}, noise {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    let found: Vec<_> = out.document.assets.iter().flat_map(|a| &a.codes).collect();
+    assert!(found.is_empty(), "{found:#?}");
+    // One picture's time and the render, at most.
+    assert!(took < Duration::from_secs(15), "{took:?}");
+    assert_rss_under_256_mib();
+}
+
+/// Finder-like squares (a QR code's corner pattern) on a grid, `n` of them, 4 pixels a module.
+fn finders(n: u32) -> (u32, u32, Vec<u8>) {
+    let per = f64::from(n).sqrt().ceil() as u32;
+    let side = per * 36;
+    let mut out = vec![255u8; (side * side) as usize];
+    for k in 0..n {
+        let (cx, cy) = ((k % per) * 36 + 4, (k / per) * 36 + 4);
+        for y in 0..28 {
+            for x in 0..28 {
+                let ring = x.min(y).min(27 - x).min(27 - y);
+                if !(4..8).contains(&ring) {
+                    out[((cy + y) * side + cx + x) as usize] = 0;
+                }
+            }
+        }
+    }
+    (side, side, out)
+}
+
+#[test]
+fn five_thousand_finder_patterns_stop_at_the_time_limit() {
+    let file = |n: u32| {
+        let pic = finders(n);
+        picture_file(595, 842, &[vec![(0.0, 0.0, 595.0, 842.0, 0)]], &[pic])
+    };
+    let (twin, twin_time) = timed(&file(50), false, scan_limits());
+    assert!(
+        twin.document.losses.is_empty(),
+        "{:#?}",
+        twin.document.losses
+    );
+    let (out, took) = timed(&file(5_000), false, scan_limits());
+    eprintln!(
+        "twin {twin_time:?}, 5,000 finders {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.starts_with("barcode scan stopped: time limit"))
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(out.completeness, Completeness::Partial);
+    // The scan stops waiting at 3 seconds a picture; the page still needs vision.
+    assert!(took < twin_time + Duration::from_secs(8), "{took:?}");
+    assert!(
+        out.document
+            .assets
+            .iter()
+            .any(|a| a.id == "page-1" && a.needs_vision)
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
+    // The dictionary says 20,000 by 20,000 pixels; the data is short. The twin says 2,000.
+    let file = |side: u32| {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let image = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {side} /Height {side} \
+                 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode"
+            ),
+            &deflate(&[200u8; 4096]),
+        );
+        let c = b.stream("", b"q 595 0 0 842 0 0 cm /Im1 Do Q\n");
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /XObject << /Im1 {image} 0 R >> >> /Contents {c} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        b.finish(catalog)
+    };
+    let (_, twin_time) = timed(&file(2_000), false, scan_limits());
+    let (out, took) = timed(&file(20_000), false, scan_limits());
+    eprintln!(
+        "twin {twin_time:?}, 400 MP {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    assert!(took < Duration::from_secs(5), "{took:?}");
+    // The picture is not scanned on its own: its size alone says it is too large.
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("too large to scan for codes"))
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn the_code_cap_of_a_file_holds() {
+    // 21 pages of 30 different small QR codes each, 630 codes: 500 are kept.
+    let pictures: Vec<(u32, u32, Vec<u8>)> = (0..630)
+        .map(|k| {
+            let m = code::text(
+                Symbology::QrCode,
+                &format!("CODE-{k:04}"),
+                &Options::default(),
+            )
+            .expect("encode");
+            m.gray(3, 4, 0)
+        })
+        .map(|(g, w, h)| (w, h, g))
+        .collect();
+    let pages = |count: usize| -> Vec<Vec<Draw>> {
+        (0..count)
+            .map(|p| {
+                (0..30)
+                    .map(|i| {
+                        let (col, row) = ((i % 6) as f32, (i / 6) as f32);
+                        (
+                            40.0 + col * 90.0,
+                            100.0 + row * 140.0,
+                            60.0,
+                            60.0,
+                            p * 30 + i,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    };
+    let (twin, twin_time) = timed(
+        &picture_file(595, 842, &pages(1), &pictures[..30]),
+        false,
+        hostile(),
+    );
+    let twin_codes: usize = twin.document.assets.iter().map(|a| a.codes.len()).sum();
+    assert_eq!(twin_codes, 30, "{:#?}", twin.document.losses);
+    let (out, took) = timed(
+        &picture_file(595, 842, &pages(21), &pictures),
+        false,
+        hostile(),
+    );
+    eprintln!(
+        "twin {twin_time:?}, 630 codes {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    let codes: usize = out.document.assets.iter().map(|a| a.codes.len()).sum();
+    assert_eq!(codes, 500);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("more than 500 codes"))
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Limit);
+    assert!(took < twin_time * 30 + Duration::from_secs(10), "{took:?}");
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_payload_of_the_largest_code_is_kept_whole() {
+    // A QR code of version 40 with 2,940 bytes, about the most a QR code holds, against a
+    // short one.
+    let file = |raw: &[u8]| {
+        let m = code::bytes(
+            Symbology::QrCode,
+            raw,
+            &Options {
+                error_correction: Some("L".into()),
+            },
+        )
+        .expect("encode");
+        let (g, w, h) = m.gray(2, 4, 0);
+        picture_file(
+            595,
+            842,
+            &[vec![(150.0, 300.0, 300.0, 300.0, 0)]],
+            &[(w, h, g)],
+        )
+    };
+    let short: Vec<u8> = (0u8..=255).cycle().take(32).collect();
+    let long: Vec<u8> = (0u8..=255).rev().cycle().take(2_940).collect();
+    let (twin, twin_time) = timed(&file(&short), false, scan_limits());
+    let (out, took) = timed(&file(&long), false, scan_limits());
+    eprintln!(
+        "twin {twin_time:?}, 2,940 bytes {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    let got = |o: &ReadOutcome| {
+        o.document
+            .assets
+            .iter()
+            .flat_map(|a| &a.codes)
+            .map(|c| c.bytes)
+            .collect::<Vec<u64>>()
+    };
+    assert_eq!(got(&twin), [32]);
+    assert_eq!(got(&out), [2_940]);
+    assert!(took < twin_time * 4 + Duration::from_secs(2), "{took:?}");
+    assert_rss_under_256_mib();
+}

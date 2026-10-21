@@ -825,6 +825,8 @@ impl Reader for Pictures {
                 caption: None,
                 alt: None,
                 needs_vision: true,
+                codes: Vec::new(),
+                code_unread: false,
             });
             blobs.push(Blob {
                 asset: id.to_string(),

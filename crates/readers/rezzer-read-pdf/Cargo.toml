@@ -10,6 +10,8 @@ publish = false
 rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
 pdfparts = { path = "../../formats/pdfparts" }
+barcodes = { path = "../../formats/barcodes" }
+base64.workspace = true
 hayro.workspace = true
 hayro-interpret.workspace = true
 hayro-syntax.workspace = true
@@ -20,6 +22,7 @@ skrifa.workspace = true
 unicode-bidi.workspace = true
 
 [dev-dependencies]
+barcodes = { path = "../../formats/barcodes", features = ["encode"] }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 libc.workspace = true
 rezzer-render = { path = "../../rezzer-render" }

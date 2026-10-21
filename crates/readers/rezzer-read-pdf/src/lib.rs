@@ -16,6 +16,7 @@
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
+mod codes;
 mod fallback;
 mod forms;
 mod layout;
@@ -122,8 +123,10 @@ fn read_pdf_in(
     let read = Read { src, opts, budget };
     let extracted = extract(&pdf, &pages, &links, &marked, &read, &mut out, text_stop);
     drop(marked);
-    let (room, placed, needs) = lay_out(Some(&pdf), &pages, extracted, &annots, budget, &mut out);
-    render::render_pages(&pdf, &needs, opts, budget, &mut out);
+    let (room, placed, needs, places) =
+        lay_out(Some(&pdf), &pages, extracted, &annots, budget, &mut out);
+    let scans = render::render_pages(&pdf, &needs, opts, budget, &mut out);
+    render::apply_codes(Some(scans), places, &mut out);
     drop(needs);
     annots::read(&annots, placed, budget, &room, &mut out);
     drop(annots);
@@ -283,7 +286,7 @@ fn lay_out(
     annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
-) -> (LinkRoom, Vec<annots::Placed>, Vec<render::Need>) {
+) -> LaidOut {
     let Extracted {
         pages: read,
         failed,
@@ -553,10 +556,11 @@ fn lay_out(
             // The Figure alt texts no picture took as its caption, with where they go.
             let mut unmatched: Vec<(usize, String)> = Vec::new();
             match seen {
-                Some(render::Seen::Page(v)) => {
+                Some(render::Seen::Page(mut v)) => {
                     // The page's first Figure is the page picture's caption; the others stay
                     // as page text at the picture.
                     let caption = here.first().map(|f| f.alt.clone());
+                    let regions = std::mem::take(&mut v.regions);
                     let spot = spots.first().copied().unwrap_or(blocks.len());
                     unmatched.extend(here.iter().skip(1).map(|f| (spot, f.alt.clone())));
                     let charged = budget.add_elements(1).and_then(|()| {
@@ -579,6 +583,10 @@ fn lay_out(
                                 origin: items.origin,
                                 cut: items.in_part,
                                 fallback: items.fallback,
+                                regions,
+                                turn: items.turn,
+                                size: (info.width, info.height),
+                                light: items.images.len() <= render::SCAN_PICTURES,
                             });
                             out.doc.assets.push(render::asset(n, v.alt, caption));
                         }
@@ -606,6 +614,10 @@ fn lay_out(
                             origin: items.origin,
                             cut: items.in_part,
                             fallback: items.fallback,
+                            regions: Vec::new(),
+                            turn: items.turn,
+                            size: (info.width, info.height),
+                            light: items.images.len() <= render::SCAN_PICTURES,
                         });
                     }
                 }
@@ -689,7 +701,7 @@ fn lay_out(
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
     }
-    pictures.finish(out);
+    let places = pictures.finish(out);
     quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
         let (s, them) = if count == 1 {
@@ -740,8 +752,17 @@ fn lay_out(
             Severity::Warning,
         );
     }
-    (links, spots, needs)
+    (links, spots, needs, places)
 }
+
+/// What the layout gives the steps after it: the link room, the annotations' places, the
+/// pages to render and the small picture assets with their places.
+type LaidOut = (
+    LinkRoom,
+    Vec<annots::Placed>,
+    Vec<render::Need>,
+    Vec<(usize, render::Places)>,
+);
 
 /// Where a picture is placed: the middle of the run found nearest to its top, its top, and
 /// the index of the point the layout probes for the run's block.
@@ -872,6 +893,8 @@ impl Pictures {
         let mut crops: Vec<render::Crop> = Vec::new();
         let mut on_page: HashSet<usize> = HashSet::new();
         let mut new: Vec<usize> = Vec::new();
+        // Pictures and regions of paths that may be codes are counted apart.
+        let (mut pics, mut codes) = (0, 0);
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
@@ -896,6 +919,13 @@ impl Pictures {
                 break;
             }
             let figure = p.mcid.and_then(|m| by_mcid.get(&m)).copied();
+            let name = if p.vector {
+                codes += 1;
+                format!("page-{n}-code-{codes}")
+            } else {
+                pics += 1;
+                format!("page-{n}-pic-{pics}")
+            };
             let asset = match known {
                 Some(at) => {
                     self.assets[at].1.add(n, p);
@@ -917,19 +947,25 @@ impl Pictures {
                         figures[f].alt.clone()
                     });
                     out.doc.assets.push(render::picture_asset(
-                        format!("page-{n}-pic-{}", k + 1),
+                        name,
                         words.clone(),
                         caption,
                         !p.logo,
                     ));
                     self.known.insert(p.id, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
-                    new.push(asset);
+                    if !p.vector {
+                        new.push(asset);
+                    }
                     asset
                 }
             };
             if on_page.insert(asset) {
-                crops.push(render::Crop { asset, b: p.b });
+                crops.push(render::Crop {
+                    asset,
+                    b: p.b,
+                    how: p.how,
+                });
             }
             media.push((
                 spots[i],
@@ -963,14 +999,10 @@ impl Pictures {
         });
     }
 
-    /// Writes each asset's alt text with all its places; one place that is not a logo makes
-    /// the asset need vision. Says in one loss how many small pictures were not listed.
-    fn finish(self, out: &mut Out) {
-        for (asset, places) in self.assets {
-            let a = &mut out.doc.assets[asset];
-            a.alt = Some(places.alt());
-            a.needs_vision = !places.logo;
-        }
+    /// Says in one loss how many small pictures were not listed, and gives the assets with
+    /// their places: their alt texts are written once they are read for codes
+    /// (`render::apply_codes`).
+    fn finish(self, out: &mut Out) -> Vec<(usize, render::Places)> {
         if let Some((count, first, last, why)) = self.unlisted {
             let what = if count == 1 {
                 "1 small picture".to_string()
@@ -989,6 +1021,7 @@ impl Pictures {
                 Severity::Warning,
             );
         }
+        self.assets
     }
 }
 
@@ -1504,7 +1537,8 @@ mod tests {
                     b,
                     framed: b,
                     id: k,
-                    code: false,
+                    how: None,
+                    vector: false,
                     logo: false,
                     mcid: None,
                 }
@@ -1521,7 +1555,7 @@ mod tests {
             (&mut media, &mut unmatched),
             &mut out,
         );
-        pictures.finish(&mut out);
+        let _ = pictures.finish(&mut out);
         assert_eq!(media.len(), PICTURES_PER_CHECK - 1);
         let said: Vec<&str> = out.doc.losses.iter().map(|l| l.what.as_str()).collect();
         assert_eq!(said.len(), 1, "{said:?}");
@@ -1602,6 +1636,70 @@ mod tests {
             ),
             "row 13 of table p3:t1 on"
         );
+    }
+
+    #[test]
+    fn shared_code_decoded_once() {
+        // One QR code picture drawn on three pages at three places: one asset, read once.
+        let m = barcodes::encode::text(
+            barcodes::Symbology::QrCode,
+            "https://example.org/once",
+            &barcodes::encode::Options::default(),
+        )
+        .expect("encode");
+        let (gray, w, h) = m.gray(4, 4, 0);
+        let mut b = crate::fixtures::Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let image = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8"
+            ),
+            &gray,
+        );
+        let mut kids = Vec::new();
+        for y in [500, 400, 300] {
+            let cs = b.stream("", format!("q 60 0 0 60 260 {y} cm /Q Do Q").as_bytes());
+            kids.push(b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+                 /Resources << /XObject << /Q {image} 0 R >> >> /Contents {cs} 0 R >>"
+            )));
+        }
+        let list: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{}] /Count 3 >>", list.join(" ")),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let bytes = b.finish(catalog);
+        let src = Source {
+            path: None,
+            name: "file.pdf".into(),
+            bytes: Bytes::Owned(Arc::new(bytes.clone())),
+            sha256: "00".repeat(32),
+            size: bytes.len() as u64,
+            format: FormatId::Pdf,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "%PDF-".into(),
+            },
+            modified: None,
+        };
+        let budget = Budget::new(Limits::default());
+        let before = render::SCAN_RUNS.with(std::cell::Cell::get);
+        let out = read_pdf_in(
+            &PdfReader,
+            &src,
+            &ReadOptions::default(),
+            &budget,
+            &|| false,
+            1 << 30,
+        );
+        let runs = render::SCAN_RUNS.with(std::cell::Cell::get) - before;
+        assert_eq!(runs, 1);
+        assert_eq!(out.document.assets.len(), 1);
+        assert_eq!(out.document.assets[0].codes.len(), 1);
     }
 
     #[test]

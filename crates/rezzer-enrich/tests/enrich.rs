@@ -261,6 +261,8 @@ fn overview_lists_sections_and_counts() {
         caption: None,
         alt: None,
         needs_vision: false,
+        codes: Vec::new(),
+        code_unread: false,
     });
     d.facets.formulas = vec![formula("Calc!A1", &["Input!A1", "Input!B2"])];
     d.facets.graphs.push(Graph {
@@ -340,6 +342,8 @@ fn overview_counts_one_picture_at_several_places_once_more() {
             caption: None,
             alt: None,
             needs_vision: false,
+            codes: Vec::new(),
+            code_unread: false,
         });
     }
     enrich(&mut d, &only(&[]));

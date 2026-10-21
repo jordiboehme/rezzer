@@ -532,7 +532,7 @@ fn small_square_picture_is_listed() {
     assert!(a.needs_vision);
     assert_eq!(
         a.alt.as_deref(),
-        Some("small picture, box 400, 600 to 485, 685, likely a barcode or QR code, not decoded")
+        Some("small picture, box 400, 600 to 485, 685, barcode or QR code found, not decoded")
     );
     assert_eq!(
         lines(page(&out, 1)),
@@ -1121,7 +1121,7 @@ fn small_code_keeps_needs_vision_with_crop() {
     let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
     assert_eq!(
         alt,
-        "small picture, box 480, 20 to 565, 105, likely a barcode or QR code, not decoded"
+        "small picture, box 480, 20 to 565, 105, barcode or QR code found, not decoded"
     );
     // The crop, not the page.
     assert_eq!(png_size(blob(&out, "page-1-pic-1")), (186, 186));
@@ -1491,7 +1491,10 @@ fn code_words_come_from_any_place_of_a_picture() {
     ];
     let out = read(&picture_pages(&draws, &code));
     let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
-    assert!(alt.contains("likely a barcode or QR code"), "{alt}");
+    assert!(
+        alt.contains("barcode or QR code found, not decoded"),
+        "{alt}"
+    );
 }
 
 /// A tagged A4 page with one Figure (alt "A chart of sales.") on marked content 0. With
@@ -1769,4 +1772,410 @@ fn a_figure_on_a_page_without_pictures_stays_at_the_page_end() {
     let out = read(&tagged_pages(&[(content, &["A drawn diagram"])]));
     assert!(out.document.assets.is_empty());
     assert_eq!(unmatched(&out, 1), [("A drawn diagram".to_string(), None)]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Barcodes and QR codes
+
+use barcodes::Symbology;
+use barcodes::encode::{self as code, Options};
+
+const TICKET_URL: &str = "https://example.org/t/dNuKThV1";
+
+/// The modules of a code with `text`.
+fn modules(s: Symbology, text: &str) -> code::Modules {
+    code::text(s, text, &Options::default()).expect("encode")
+}
+
+/// A gray picture of a code, `px` pixels a module and a quiet zone of `quiet` modules, as
+/// dictionary and deflated data.
+fn code_picture(m: &code::Modules, px: u32, quiet: u32) -> (String, Vec<u8>) {
+    let (gray, w, h) = m.gray(px, quiet, 30);
+    (
+        format!(
+            "/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray \
+             /BitsPerComponent 8 /Filter /FlateDecode"
+        ),
+        deflate(&gray),
+    )
+}
+
+/// One A4 page with `content`, Helvetica as `/F1` and the pictures `pictures` as `/P0`, `/P1`.
+fn code_page(content: &str, pictures: &[(String, Vec<u8>)]) -> Vec<u8> {
+    code_pages(&[content], pictures)
+}
+
+/// A4 pages, each with its content, sharing the pictures `pictures` as `/P0`, `/P1`.
+fn code_pages(contents: &[&str], pictures: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut xo = String::new();
+    for (k, (dict, data)) in pictures.iter().enumerate() {
+        let n = b.stream(dict, data);
+        xo.push_str(&format!("/P{k} {n} 0 R "));
+    }
+    let mut kids = String::new();
+    for content in contents {
+        let cs = b.stream("", content.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << {xo}>> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {} >>",
+            contents.len()
+        ),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// A code drawn as filled squares, one `re` for each dark module of `module` points, its
+/// lower left corner at (`x`, `y`).
+fn vector_code(m: &code::Modules, x: f32, y: f32, module: f32) -> String {
+    let mut out = String::from("q 0 g\n");
+    for row in 0..m.height {
+        for col in 0..m.width {
+            if m.dark[(row * m.width + col) as usize] {
+                // Row 0 is the top row.
+                let mx = x + col as f32 * module;
+                let my = y + (m.height - 1 - row) as f32 * module;
+                out += &format!("{mx:.3} {my:.3} {module:.3} {module:.3} re\n");
+            }
+        }
+    }
+    out + "f Q\n"
+}
+
+/// The payloads read from asset `id`, as symbology and text.
+fn codes_of(out: &ReadOutcome, id: &str) -> Vec<(String, String)> {
+    asset(out, id)
+        .codes
+        .iter()
+        .map(|c| {
+            (
+                c.symbology.clone(),
+                c.text.clone().or(c.base64.clone()).unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+const INVOICE: &str = "BT /F1 16 Tf 72 780 Td (Invoice 2026-114) Tj ET\n\
+                       BT /F1 11 Tf 72 740 Td (Two chairs, 240.00 EUR) Tj ET\n\
+                       BT /F1 11 Tf 72 720 Td (Pay within 14 days.) Tj ET\n";
+
+#[test]
+fn qr_in_invoice_corner_is_decoded_not_logo() {
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    // A QR code picture in the bottom right corner, where a logo would be.
+    let content = format!("{INVOICE}q 90 0 0 90 480 40 cm /P0 Do Q\n");
+    let out = read_opts(
+        &code_page(&content, &[code_picture(&m, 4, 4)]),
+        true,
+        Limits::default(),
+    );
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1"),
+        [("QR Code".to_string(), TICKET_URL.to_string())]
+    );
+    let a = asset(&out, "page-1-pic-1");
+    assert!(!a.needs_vision, "{a:#?}");
+    assert_eq!(a.alt.as_deref(), Some("QR Code, box 480, 40 to 570, 130"));
+    let md = markdown(&out);
+    assert!(md.contains("QR Code, box 480, 40 to 570, 130"), "{md}");
+    assert!(
+        md.contains(&format!("QR Code: [{TICKET_URL}]({TICKET_URL})")),
+        "{md}"
+    );
+    assert!(!md.contains("logo or small picture"), "{md}");
+    assert!(!md.contains("Needs vision"), "{md}");
+    assert!(!md.contains("Pictures that need vision"), "{md}");
+}
+
+#[test]
+fn grey_qr_logo_place_becomes_code() {
+    // An 8-bit gray QR code of one pixel a module, no quiet zone, in the bottom right corner:
+    // Task 14d took it for a logo.
+    let m = modules(Symbology::QrCode, "EPC QR test 4711");
+    let (dict, data) = code_picture(&m, 1, 0);
+    let side = m.width as f32 * 2.0;
+    let content = format!("{INVOICE}q {side} 0 0 {side} 500 40 cm /P0 Do Q\n");
+    let out = read(&code_page(&content, &[(dict, data)]));
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1"),
+        [("QR Code".to_string(), "EPC QR test 4711".to_string())]
+    );
+    let a = asset(&out, "page-1-pic-1");
+    assert!(!a.needs_vision);
+    assert!(
+        a.alt
+            .as_deref()
+            .is_some_and(|t| t.starts_with("QR Code, box ")),
+        "{a:#?}"
+    );
+    let md = markdown(&out);
+    assert!(!md.contains("logo or small picture"), "{md}");
+}
+
+#[test]
+fn vector_drawn_qr_is_decoded() {
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    let content = format!("{INVOICE}{}", vector_code(&m, 380.0, 500.0, 2.5));
+    let out = read_opts(&code_page(&content, &[]), true, Limits::default());
+    assert_eq!(
+        codes_of(&out, "page-1-code-1"),
+        [("QR Code".to_string(), TICKET_URL.to_string())]
+    );
+    assert!(!asset(&out, "page-1-code-1").needs_vision);
+    let shown = lines(page(&out, 1));
+    assert!(
+        shown.contains(&"[media page-1-code-1]".to_string()),
+        "{shown:?}"
+    );
+    // Its crop is written.
+    assert!(blob(&out, "page-1-code-1").starts_with(PNG_SIGNATURE));
+}
+
+#[test]
+fn aztec_vector_ticket_pixel_aligned() {
+    // A rail ticket's Aztec code drawn as paths at 1.2 points a module: 2.4 pixels at the
+    // page's 144 dpi, which rxing cannot read; whole pixels a module can be.
+    let m = modules(Symbology::Aztec, "TICKET 0042 FRA-MUC 2026-10-21 2nd class");
+    let content = format!(
+        "BT /F1 12 Tf 72 780 Td (Rail ticket) Tj ET\n{}",
+        vector_code(&m, 330.3, 610.7, 1.2)
+    );
+    let out = read(&code_page(&content, &[]));
+    assert_eq!(
+        codes_of(&out, "page-1-code-1"),
+        [(
+            "Aztec".to_string(),
+            "TICKET 0042 FRA-MUC 2026-10-21 2nd class".to_string()
+        )]
+    );
+}
+
+#[test]
+fn undecodable_code_keeps_needs_vision() {
+    // A 1-bit square picture that looks like a code but holds none.
+    let content = "BT /F1 12 Tf 72 780 Td (Ticket.) Tj ET\nq 85 0 0 85 480 20 cm /Im1 Do Q\n";
+    let file = image_page_bits(595, 842, content, 21, 21, 1, &[0x5au8; 63]);
+    let out = read_opts(&file, true, Limits::default());
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    let a = asset(&out, "page-1-pic-1");
+    assert!(a.codes.is_empty());
+    assert!(a.code_unread);
+    assert_eq!(
+        a.alt.as_deref(),
+        Some("small picture, box 480, 20 to 565, 105, barcode or QR code found, not decoded")
+    );
+    let md = markdown(&out);
+    assert!(md.contains("Needs vision"), "{md}");
+    assert!(!md.contains("likely a barcode"), "{md}");
+}
+
+#[test]
+fn shared_code_decoded_once_at_every_place() {
+    // The same code picture on three pages, at three places (at one place it would be page
+    // furniture): one asset, decoded, named a code at every place.
+    let m = modules(Symbology::DataMatrix, "PARCEL 00340434161094042016");
+    let at = |y: u32| format!("{INVOICE}q 60 0 0 60 260 {y} cm /P0 Do Q\n");
+    let (a, b, c) = (at(400), at(300), at(200));
+    let out = read(&code_pages(&[&a, &b, &c], &[code_picture(&m, 4, 2)]));
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1"]);
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1"),
+        [(
+            "Data Matrix".to_string(),
+            "PARCEL 00340434161094042016".to_string()
+        )]
+    );
+    for (n, y) in [(1, 400), (2, 300), (3, 200)] {
+        let alts: Vec<String> = page(&out, n)
+            .iter()
+            .filter_map(|b| match b {
+                Block::Media { alt, .. } => alt.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            alts,
+            [format!("Data Matrix, box 260, {y} to 320, {}", y + 60)],
+            "page {n}"
+        );
+    }
+}
+
+#[test]
+fn decode_without_output_dir() {
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    let content = format!("{INVOICE}q 90 0 0 90 250 400 cm /P0 Do Q\n");
+    let out = read(&code_page(&content, &[code_picture(&m, 4, 4)]));
+    assert!(out.blobs.is_empty());
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1"),
+        [("QR Code".to_string(), TICKET_URL.to_string())]
+    );
+    assert!(needing(&out).is_empty());
+    let md = markdown(&out);
+    assert!(md.contains(&format!("QR Code: [{TICKET_URL}]")), "{md}");
+}
+
+#[test]
+fn url_payload_is_link_and_escaped() {
+    let tricky = "# not a heading *x* [y](z) <b>";
+    let js = "javascript:alert(1)";
+    let url = "https://example.org/a_b?c=*d*";
+    let pictures: Vec<(String, Vec<u8>)> = [url, tricky, js]
+        .iter()
+        .map(|t| code_picture(&modules(Symbology::QrCode, t), 4, 4))
+        .collect();
+    let content = format!(
+        "{INVOICE}q 50 0 0 50 72 400 cm /P0 Do Q\nq 50 0 0 50 252 400 cm /P1 Do Q\n\
+         q 50 0 0 50 432 400 cm /P2 Do Q\n"
+    );
+    let out = read(&code_page(&content, &pictures));
+    let md = markdown(&out);
+    assert!(
+        md.contains(r"QR Code: [https://example.org/a\_b?c=\*d\*](https://example.org/a_b?c=*d*)"),
+        "{md}"
+    );
+    assert!(
+        md.contains(r"QR Code: # not a heading \*x\* \[y\](z) &lt;b>"),
+        "{md}"
+    );
+    // Only http and https become links.
+    assert!(md.contains("QR Code: javascript:alert(1)"), "{md}");
+    assert!(!md.contains("](javascript:"), "{md}");
+    // The JSON keeps the payload as it is.
+    assert_eq!(codes_of(&out, "page-1-pic-2")[0].1, tricky);
+}
+
+#[test]
+fn binary_payload_is_base64() {
+    let raw: Vec<u8> = (0u8..=255).rev().step_by(5).collect();
+    let m = code::bytes(Symbology::QrCode, &raw, &Options::default()).expect("encode");
+    let content = format!("{INVOICE}q 90 0 0 90 250 400 cm /P0 Do Q\n");
+    let out = read(&code_page(&content, &[code_picture(&m, 4, 4)]));
+    let c = &asset(&out, "page-1-pic-1").codes[0];
+    assert_eq!(c.text, None);
+    assert_eq!(c.bytes, raw.len() as u64);
+    use base64::Engine;
+    let back = base64::engine::general_purpose::STANDARD
+        .decode(c.base64.as_deref().unwrap_or_default())
+        .expect("base64");
+    assert_eq!(back, raw);
+    let md = markdown(&out);
+    assert!(
+        md.contains(&format!("QR Code: {} bytes, base64 `", raw.len())),
+        "{md}"
+    );
+}
+
+#[test]
+fn code_on_a_scan_page_is_listed_with_the_page() {
+    // A scanned page (one picture over all of it, no text) with a code in it: the page still
+    // needs vision, and the code is read from it with its box on the page.
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    let (qr, qw, qh) = m.gray(4, 4, 0);
+    let (w, h) = (595u32, 842u32);
+    let mut scan = vec![235u8; (w * h) as usize];
+    for y in 0..qh {
+        for x in 0..qw {
+            scan[((y + 600) * w + x + 300) as usize] = qr[(y * qw + x) as usize];
+        }
+    }
+    let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, content, w, h, &scan));
+    assert_eq!(needing(&out), ["page-1"]);
+    let a = asset(&out, "page-1");
+    assert_eq!(
+        codes_of(&out, "page-1"),
+        [("QR Code".to_string(), TICKET_URL.to_string())]
+    );
+    // The code lies at x 300 to 432, y 842 - 732 = 110 to 242 points, about.
+    let b = a.codes[0].bounds.expect("box");
+    assert!(
+        (b[0] - 300.0).abs() < 25.0 && (b[3] - 242.0).abs() < 25.0,
+        "{b:?}"
+    );
+}
+
+#[test]
+fn figure_texts_stay_on_a_page_that_needs_vision_as_a_whole() {
+    // The chart covers most of the page, so the page needs vision as a whole: the first
+    // Figure is its caption, the second is written as page text.
+    let content = "BT /F1 12 Tf 72 780 Td (Sales.) Tj ET\n\
+                   /Figure << /MCID 0 >> BDC q 450 0 0 600 72 100 cm /C Do Q EMC\n";
+    let out = read(&tagged_pages(&[(
+        content,
+        &["A chart of sales.", "A logo."],
+    )]));
+    assert_eq!(needing(&out), ["page-1"]);
+    assert_eq!(
+        asset(&out, "page-1").caption.as_deref(),
+        Some("A chart of sales.")
+    );
+    let found = unmatched(&out, 1);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "A logo.");
+}
+
+#[test]
+fn a_payload_of_several_lines_is_a_fenced_block() {
+    let card = "BEGIN:VCARD\n# Name\n```\nN:Doe;Jane\nEND:VCARD";
+    let content = format!("{INVOICE}q 60 0 0 60 250 400 cm /P0 Do Q\n");
+    let out = read(&code_page(
+        &content,
+        &[code_picture(&modules(Symbology::QrCode, card), 3, 4)],
+    ));
+    assert_eq!(codes_of(&out, "page-1-pic-1")[0].1, card);
+    let md = markdown(&out);
+    assert!(
+        md.contains("QR Code:\n\n````\nBEGIN:VCARD\n# Name\n```\nN:Doe;Jane\nEND:VCARD\n````"),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_small_code_on_a_very_large_page_is_read_at_a_fine_scale() {
+    // A page of 14,400 by 14,400 points renders at 0.28 pixels a point: a code of 60 points
+    // would be 17 pixels. Its crop is rendered again at 144 dpi.
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let (dict, data) = code_picture(&m, 4, 4);
+    let image = b.stream(&dict, &data);
+    let c = b.stream(
+        "",
+        b"BT /F1 200 Tf 300 14000 Td (A large plan.) Tj ET\nq 60 0 0 60 7000 7000 cm /P0 Do Q\n",
+    );
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 14400 14400] \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /P0 {image} 0 R >> >> \
+         /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_opts(&b.finish(catalog), true, Limits::default());
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1"),
+        [("QR Code".to_string(), TICKET_URL.to_string())]
+    );
+    // The file is the crop at 144 dpi: 60 points and the margin.
+    let (w, h) = png_size(blob(&out, "page-1-pic-1"));
+    assert!(w >= 120 && h >= 120, "{w} by {h}");
 }

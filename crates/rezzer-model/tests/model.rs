@@ -306,6 +306,8 @@ fn full_document() -> Document {
         caption: Some("Chart".into()),
         alt: None,
         needs_vision: true,
+        codes: Vec::new(),
+        code_unread: false,
     });
     doc.losses.push(Loss {
         location: "Costs!D1".into(),

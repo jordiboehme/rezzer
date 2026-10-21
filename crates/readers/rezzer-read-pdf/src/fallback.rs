@@ -391,7 +391,9 @@ pub(crate) fn read_file(
         caps,
         text_stop,
     );
-    let (_, _, needs) = lay_out(None, &pages, extracted, &[], budget, &mut out);
+    let (_, _, needs, places) = lay_out(None, &pages, extracted, &[], budget, &mut out);
+    // Nothing is rendered, so nothing is read for codes.
+    crate::render::apply_codes(None, places, &mut out);
     // The renderer reads only pdfparts' canonical copy, and there is none.
     if opts.extract_assets
         && let Some(first) = needs.first()
