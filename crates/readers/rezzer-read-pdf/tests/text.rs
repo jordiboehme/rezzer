@@ -902,3 +902,54 @@ fn nbsp_padding_splits_pieces() {
         "{all:?}"
     );
 }
+
+/// Lines of five words at 10 points from `top` down, the word spacing of line `l` is `tw(l)`.
+fn justified(x: f32, top: f32, lines: usize, seed: usize, tw: impl Fn(usize) -> f32) -> String {
+    let vocab = [
+        "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+        "juliet", "kilo", "lima", "mike", "november",
+    ];
+    let mut c = String::new();
+    for l in 0..lines {
+        let words: Vec<&str> = (0..5)
+            .map(|k| vocab[(seed + l * 5 + k) % vocab.len()])
+            .collect();
+        c += &format!(
+            "BT /F1 10 Tf {} Tw {x} {} Td ({}) Tj ET\n",
+            tw(l),
+            top - 12.0 * l as f32,
+            words.join(" ")
+        );
+    }
+    c
+}
+
+#[test]
+fn loose_justified_columns_read_column_by_column() {
+    // Two columns of justified prose with wide word spacing (5.5 points at 10 points, wider
+    // than the piece gap from the ink, narrower from the end of the space), then the same
+    // with only every third line loose.
+    let left = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike \
+                november alpha";
+    for tw in [
+        |_: usize| 5.5f32,
+        |l: usize| if l % 3 == 0 { 6.0 } else { 1.0 },
+    ] {
+        let c = justified(50.0, 760.0, 20, 0, tw) + &justified(320.0, 760.0, 20, 3, tw);
+        let out = read(&pdf(&[Page::text(c)], ""));
+        let all = all_text(&out);
+        assert!(all.contains(left), "{all}");
+    }
+}
+
+#[test]
+fn double_spaces_inside_a_line_stay() {
+    // Two spaces between words open no piece gap: they stay as drawn.
+    let c = "BT /F1 10 Tf 50 760 Td (let  x  =  1;) Tj ET\n";
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert!(
+        all_text(&out).contains("let  x  =  1;"),
+        "{}",
+        all_text(&out)
+    );
+}

@@ -40,9 +40,13 @@ fn is_rtl(c: char) -> bool {
     matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
 }
 
-/// White space that pads text: a space, a no-break space and the typographic spaces.
+/// White space that pads text: a space, a tab, the no-break spaces, the typographic spaces
+/// and the ideographic space.
 fn is_pad(c: char) -> bool {
-    matches!(c, ' ' | '\u{a0}' | '\u{2000}'..='\u{200a}')
+    matches!(
+        c,
+        ' ' | '\t' | '\u{a0}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{3000}'
+    )
 }
 
 /// A run being built: glyphs of one style next to each other on one baseline.
@@ -63,6 +67,16 @@ struct Frag {
     /// Whether a glyph with ink is in the run yet: white space before the first one joins
     /// it whatever the gap.
     inked: bool,
+    /// Where a gap after the ink starts to count: the end of the first white space glyph
+    /// after the last ink, or the ink end when none follows it yet. One space between words
+    /// is never a gap, however wide the word spacing.
+    free: f32,
+    /// White space follows the last ink.
+    padded: bool,
+    /// Where the first ink starts, and the advance of the white space glyph the run starts
+    /// with (0 when it starts with ink).
+    ink_x: f32,
+    lead: f32,
     size: f32,
     bold: bool,
     italic: bool,
@@ -136,7 +150,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             // White space joins the white space or ink before it; ink joins the ink before
             // it, so a wide stretch of white space between two words splits them.
             let pad = !t.is_empty() && t.chars().all(is_pad);
-            let gap = x - if pad || !f.inked { f.pen } else { f.end };
+            let gap = x - if pad || !f.inked { f.pen } else { f.free };
             let on_line = (y - f.y).abs() <= 0.25 * f.size.max(size);
             if same_style && on_line && gap >= -0.5 * size && gap <= PIECE_GAP * size {
                 let glued = g.joined
@@ -152,9 +166,19 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                 f.text.push_str(t);
                 f.chars += t.chars().count();
                 f.pen = f.pen.max(x + adv);
-                if !pad {
+                if pad {
+                    if !f.padded {
+                        f.free = f.free.max(x + adv);
+                        f.padded = true;
+                    }
+                } else {
+                    if !f.inked {
+                        f.ink_x = x;
+                    }
                     f.end = if f.inked { f.end.max(x + adv) } else { x + adv };
                     f.inked = true;
+                    f.free = f.end;
+                    f.padded = false;
                 }
                 continue;
             }
@@ -170,6 +194,10 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             end: if pad { x } else { x + adv },
             pen: x + adv,
             inked: !pad,
+            free: x + adv,
+            padded: pad,
+            ink_x: x,
+            lead: if pad { adv } else { 0.0 },
             size,
             bold: g.bold,
             italic: g.italic,
@@ -190,13 +218,22 @@ struct Piece {
     x0: f32,
     /// The end of the piece's last glyph, white space too.
     x1: f32,
-    /// The end of its last glyph with ink, where the gap to the next fragment is measured.
-    ink: f32,
+    /// Where a gap to the next fragment starts to count (see [`Frag::free`]), and whether
+    /// white space ends the piece.
+    free: f32,
+    padded: bool,
     y0: f32,
     y1: f32,
     size: f32,
     chars: usize,
     frags: Vec<usize>,
+}
+
+/// The white space between a run or piece whose gap counts from `free` (`padded` when white
+/// space ends it) and the first ink of `f`, less one space: a gap of padding, not of a word
+/// space.
+fn gap(free: f32, padded: bool, f: &Frag) -> f32 {
+    f.ink_x - free - if padded { 0.0 } else { f.lead }
 }
 
 /// The vertical extent of a fragment: a quarter of its size below the baseline, three
@@ -273,9 +310,13 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
             let f = &frags[i];
             let (lo, hi) = extent(f);
             if let Some(p) = piece.as_mut() {
-                if f.x - p.ink <= PIECE_GAP * f.size.max(p.size) {
+                if gap(p.free, p.padded, f) <= PIECE_GAP * f.size.max(p.size) {
                     p.x1 = p.x1.max(f.pen);
-                    p.ink = p.ink.max(f.end);
+                    if f.inked {
+                        (p.free, p.padded) = (f.free, f.padded);
+                    } else if !p.padded {
+                        (p.free, p.padded) = (f.free, true);
+                    }
                     p.y0 = p.y0.min(lo);
                     p.y1 = p.y1.max(hi);
                     p.size = p.size.max(f.size);
@@ -289,7 +330,8 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
                 row: r,
                 x0: f.x,
                 x1: f.pen.max(f.x),
-                ink: f.end.max(f.x),
+                free: f.free,
+                padded: f.padded,
                 y0: lo,
                 y1: hi,
                 size: f.size,
@@ -509,8 +551,21 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
     let mut spaced: Vec<bool> = Vec::with_capacity(ids.len());
     for &i in ids {
         let f = &frags[i];
-        let mut text = collapsed(&f.text);
+        let mut text = f.text.clone();
         spaced.push(false);
+        // White space that opens a piece gap is padding: it is written as one space.
+        if let Some(p) = prev
+            && gap(p.free, p.padded, f) > PIECE_GAP * f.size.max(p.size)
+            && let Some(last) = runs.last_mut()
+        {
+            let lead = text.len() - text.trim_start_matches(is_pad).len();
+            let trail = last.text.trim_end_matches(is_pad).len();
+            if lead > 0 || trail < last.text.len() {
+                last.text.truncate(trail);
+                last.text.push(' ');
+                text.drain(..lead);
+            }
+        }
         if let Some(p) = prev {
             let gap = f.x - p.end;
             let glued =
@@ -570,46 +625,6 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         runs = vec![one];
     }
     runs
-}
-
-/// `text` with each stretch of two or more padding spaces made one space.
-fn collapsed(text: &str) -> String {
-    let mut chars = text.chars().peekable();
-    let mut doubled = false;
-    while let Some(c) = chars.next() {
-        if is_pad(c) && chars.peek().is_some_and(|&n| is_pad(n)) {
-            doubled = true;
-            break;
-        }
-    }
-    if !doubled {
-        return text.to_string();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut stretch = 0usize;
-    let mut first = ' ';
-    for c in text.chars() {
-        if is_pad(c) {
-            if stretch == 0 {
-                first = c;
-            }
-            stretch += 1;
-            continue;
-        }
-        match stretch {
-            0 => {}
-            1 => out.push(first),
-            _ => out.push(' '),
-        }
-        stretch = 0;
-        out.push(c);
-    }
-    match stretch {
-        0 => {}
-        1 => out.push(first),
-        _ => out.push(' '),
-    }
-    out
 }
 
 /// The units of a visual line in logical order. In the bidi algorithm each unit stands for
@@ -805,6 +820,10 @@ mod tests {
             end: x + 6.0 * text.chars().count() as f32,
             pen: x + 6.0 * text.chars().count() as f32,
             inked: true,
+            free: x + 6.0 * text.chars().count() as f32,
+            padded: false,
+            ink_x: x,
+            lead: 0.0,
             size: 10.0,
             bold: false,
             italic: false,
@@ -847,6 +866,7 @@ mod tests {
         let part = |text: &str, x: f32, end: f32, y: f32, size: f32, link: Option<u32>| Frag {
             end,
             pen: end,
+            free: end,
             size,
             link,
             ..frag(text, x, y)
@@ -874,6 +894,7 @@ mod tests {
                     bold: k % 2 == 0,
                     end: x + 30.0,
                     pen: x + 30.0,
+                    free: x + 30.0,
                     ..frag(&format!("part{k}"), x, 700.0)
                 });
             }
@@ -884,24 +905,28 @@ mod tests {
 
     #[test]
     fn padding_splits_pieces_but_not_words() {
-        // A label, white space padding past the piece gap, a value: two pieces. A word gap
-        // of one space keeps one piece.
-        let pad = |text: &str, x: f32| Frag {
-            end: x,
-            inked: false,
-            ..frag(text, x, 700.0)
-        };
+        // A label, five no-break spaces of 6 points, a value: the gap counts from the end of
+        // the first space, so two pieces, and the padding is written as one space.
         let mut label = frag("Points:", 50.0, 700.0);
-        label.pen = 50.0 + 6.0 * 7.0 + 30.0;
         label.text.push_str("\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}");
-        let value = frag("1200", 50.0 + 6.0 * 7.0 + 30.0, 700.0);
-        let ps = pieces(&[label, value]);
+        (label.pen, label.free, label.padded) = (122.0, 98.0, true);
+        let value = frag("1200", 122.0, 700.0);
+        let ps = pieces(&[label.clone(), value.clone()]);
         assert_eq!(ps.len(), 2, "{ps:?}");
         // The piece of the label reaches over its padding.
         assert_eq!(ps[0].x1, 122.0);
-        let ps = pieces(&[pad(" ", 40.0), frag("word", 43.0, 700.0)]);
+        let runs = line_runs(1, &[label, value], &[0, 1], 0, &[]);
+        let text: Vec<&str> = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(text, ["Points: ", "1200"]);
+        // One space and wide word spacing (5 points at 10) is no gap: one piece, and two
+        // spaces inside a run stay.
+        let mut see = frag("see  ", 50.0, 700.0);
+        (see.end, see.free, see.padded) = (68.0, 71.0, true);
+        let ps = pieces(&[see.clone(), frag("www", 76.0, 700.0)]);
         assert_eq!(ps.len(), 1, "{ps:?}");
-        assert_eq!(collapsed("a\u{a0}\u{a0}\u{a0}b c\u{a0}d"), "a b c\u{a0}d");
+        let runs = line_runs(1, &[see, frag("www", 76.0, 700.0)], &[0, 1], 0, &[]);
+        assert_eq!(runs[0].text, "see  ");
+        assert!(is_pad('\u{3000}') && is_pad('\u{202f}') && is_pad('\t'));
     }
 
     #[test]
