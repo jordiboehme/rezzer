@@ -650,3 +650,24 @@ fn texts_many_fields_name_are_read_once() {
     assert_eq!(scripts.len(), 2, "{scripts:?}");
     assert!(same(&scripts[0].text, &scripts[1].text));
 }
+
+#[test]
+fn a_field_reached_through_hops_is_listed_once() {
+    let pdf = with_form(|doc, _| {
+        let f = doc.add_object(dictionary! { "T" => text("Once"), "FT" => "Tx" });
+        let a = doc.add_object(Object::Reference(f));
+        let b = doc.add_object(Object::Reference(a));
+        dictionary! { "Fields" => vec![a.into(), b.into()], "CO" => vec![b.into()] }
+    });
+    let form = pdf.form().unwrap();
+    assert_eq!(form.fields.len(), 1, "{:?}", form.fields);
+    // The calculation order names the field through another chain.
+    assert_eq!(form.calc_order, ["Once"]);
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.starts_with("1 node is reached twice")),
+        "{:?}",
+        pdf.issues()
+    );
+}

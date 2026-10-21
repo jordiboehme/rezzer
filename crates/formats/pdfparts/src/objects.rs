@@ -631,6 +631,16 @@ pub(crate) fn date_of(bytes: &[u8]) -> crate::PdfDate {
     crate::PdfDate { raw, iso }
 }
 
+/// Bytes of a name that are kept where it names a type (a subtype, an action or a field
+/// type): a real type name is far shorter, and a longer one would be copied for every item
+/// that names it.
+pub(crate) const NAME_BYTES: usize = 64;
+
+/// A name that names a type, as text, cut to [`NAME_BYTES`].
+pub(crate) fn type_name(name: &[u8]) -> String {
+    String::from_utf8_lossy(&name[..name.len().min(NAME_BYTES)]).into_owned()
+}
+
 /// Fixed cost of one item a reader copies out of the document, as for one parsed value.
 pub(crate) const ITEM_BYTES: u64 = 128;
 

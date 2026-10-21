@@ -13,7 +13,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
     BrokenTexts, Decode, Shared, TextBudget, Tree, TreeKey, Work, dict, final_id, get_dict,
-    get_name, reference, resolve, text_string, walk_tree,
+    get_name, resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Limits, Pdf};
 
@@ -113,6 +113,7 @@ const CHAIN_LIMIT: &str =
 
 /// The words for an action type: lower case, words joined by hyphens.
 fn kind_word(s: &[u8]) -> String {
+    let s = &s[..s.len().min(crate::objects::NAME_BYTES)];
     match s {
         b"JavaScript" => "javascript".into(),
         b"URI" => "uri".into(),
@@ -264,7 +265,7 @@ impl Pdf {
         let mut seen = HashSet::new();
         let mut found_issues = Vec::new();
         self.each_annot(SCRIPTS, issues, |page, _, a| {
-            if let Some(r) = reference(a)
+            if let Some(r) = final_id(doc, a)
                 && data.widgets.contains(&r)
             {
                 return Ok(());
@@ -370,7 +371,7 @@ impl Pdf {
         issues: &mut Vec<Issue>,
     ) -> Result<Vec<Action>, Spent> {
         let doc = &self.doc;
-        let start = reference(action);
+        let start = final_id(doc, action);
         if let Some(found) = start.and_then(|id| chains.cache.get(&id)) {
             // The actions are copied, so each copy is charged.
             for a in found {
@@ -390,7 +391,7 @@ impl Pdf {
             issues.extend(chains.work.limit_issue(location, "action chains"));
         }
         while let Some((obj, depth)) = stack.pop() {
-            if let Some(id) = reference(obj)
+            if let Some(id) = final_id(doc, obj)
                 && !seen.insert(id)
             {
                 chains.repeats += 1;

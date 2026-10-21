@@ -512,3 +512,18 @@ fn a_comment_behind_a_reference_loop_is_damaged() {
         pdf.issues()
     );
 }
+
+#[test]
+fn a_long_subtype_name_is_cut() {
+    let pdf = with_annots(|doc, _| {
+        let long = "S".repeat(10_000);
+        let a = doc.add_object(dictionary! {
+            "Type" => "Annot",
+            "Subtype" => Object::Name(long.into_bytes()),
+            "Rect" => vec![0.into(), 0.into(), 1.into(), 1.into()],
+        });
+        Object::Array(vec![a.into()])
+    });
+    let annots = pdf.annotations();
+    assert_eq!(annots[0].subtype, "S".repeat(64));
+}

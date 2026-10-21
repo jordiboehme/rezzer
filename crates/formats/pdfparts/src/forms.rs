@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::actions::{Chains, event_word};
 use crate::objects::{
-    Decode, TextBudget, Work, dict, get, get_dict, get_text, quote, reference, resolve,
+    Decode, TextBudget, Work, dict, final_id, get, get_dict, get_text, quote, resolve, type_name,
 };
 use crate::{Issue, IssueKind, Pdf};
 
@@ -105,7 +105,7 @@ fn kind_of(ft: Option<&[u8]>, flags: u32) -> FieldKind {
         Some(b"Ch") if bit(flags, 18) => FieldKind::Combo,
         Some(b"Ch") => FieldKind::List,
         Some(b"Sig") => FieldKind::Signature,
-        Some(other) => FieldKind::Unknown(String::from_utf8_lossy(other).into_owned()),
+        Some(other) => FieldKind::Unknown(type_name(other)),
         None => FieldKind::Unknown(String::new()),
     }
 }
@@ -240,7 +240,7 @@ impl Pdf {
         };
         let mut read = b.count(co.len());
         if read.is_ok() {
-            b.co = co.iter().filter_map(reference).collect();
+            b.co = co.iter().filter_map(|o| final_id(doc, o)).collect();
         }
         if let (Ok(()), Some(Object::Array(fields))) = (&read, get(doc, acro, b"Fields")) {
             read = b.count(fields.len());
@@ -254,7 +254,7 @@ impl Pdf {
             }
         }
         let mut calc_order = Vec::new();
-        for id in co.iter().filter_map(reference) {
+        for id in co.iter().filter_map(|o| final_id(doc, o)) {
             if let Some(name) = b.co_names.get(&id) {
                 calc_order.push(name.clone());
             }
@@ -284,7 +284,7 @@ impl Pdf {
         let mut pages = HashMap::new();
         let mut issues = Vec::new();
         self.each_annot("form fields", &mut issues, |page, _, a| {
-            if let Some(id) = reference(a) {
+            if let Some(id) = final_id(&self.doc, a) {
                 pages.entry(id).or_insert(page);
             }
             Ok(())
@@ -390,7 +390,8 @@ impl<'a> Build<'a> {
             ));
             return Ok(());
         }
-        let id = reference(obj);
+        // Nodes are known by the object their chain of references ends at.
+        let id = final_id(doc, obj);
         if let Some(id) = id
             && !self.seen.insert(id)
         {
@@ -433,7 +434,7 @@ impl<'a> Build<'a> {
         let mut shared = false;
         match d.get(b"Kids").ok().map(|k| (k, resolve(doc, k))) {
             Some((k, Some(Object::Array(kids)))) => {
-                if let Some(kid_id) = reference(k)
+                if let Some(kid_id) = final_id(doc, k)
                     && !self.kids_arrays.insert(kid_id)
                 {
                     shared = true;
@@ -449,14 +450,14 @@ impl<'a> Build<'a> {
                             fields.push(kid);
                             continue;
                         }
-                        if let Some(w) = reference(kid)
+                        if let Some(w) = final_id(doc, kid)
                             && !self.seen.insert(w)
                         {
                             self.repeats += 1;
                             self.first_repeat.get_or_insert(w);
                             continue;
                         }
-                        widgets.push((reference(kid), kd));
+                        widgets.push((final_id(doc, kid), kd));
                     }
                 }
             }
@@ -547,7 +548,7 @@ impl<'a> Build<'a> {
             let page = id.and_then(|id| self.pages.get(&id).copied()).or_else(|| {
                 w.get(b"P")
                     .ok()
-                    .and_then(reference)
+                    .and_then(|p| final_id(doc, p))
                     .and_then(|p| pdf.page_number(p))
             });
             if let Some(p) = page
@@ -559,7 +560,9 @@ impl<'a> Build<'a> {
         self.charge(on.len() * 4)?;
         if here.ft == Some(b"Sig") {
             let value = match here.v {
-                Some(Object::Reference(id)) => Some(SigValue::Object(*id)),
+                Some(v @ Object::Reference(id)) => {
+                    Some(SigValue::Object(final_id(doc, v).unwrap_or(*id)))
+                }
                 Some(_) => here.v_holder.map(SigValue::In),
                 None => None,
             };
@@ -614,7 +617,7 @@ impl<'a> Build<'a> {
             );
             for (key, action) in entries {
                 self.count(1)?;
-                if let Some(id) = reference(action)
+                if let Some(id) = final_id(doc, action)
                     && !seen.insert(id)
                 {
                     continue;

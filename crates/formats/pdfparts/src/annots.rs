@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 use crate::nav::{page_list, rect};
 use crate::objects::{
     BrokenTexts, Shared, Spent, TextBudget, Work, dict, final_id, get_date, get_name, number,
-    reference, resolve,
+    reference, resolve, type_name,
 };
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
@@ -26,7 +26,7 @@ pub struct Annot {
     pub id: String,
     /// The 1-based page number.
     pub page: u32,
-    /// `Highlight`, `Text`, `Ink`, `FreeText` and so on, as written.
+    /// `Highlight`, `Text`, `Ink`, `FreeText` and so on, as written (at most 64 bytes).
     pub subtype: String,
     /// `/T`, by convention the author.
     pub author: Option<Arc<str>>,
@@ -196,7 +196,10 @@ impl Pdf {
                 }
                 let on = shared
                     .and_then(|pages| {
-                        let p = dict(doc, a)?.get(b"P").ok().and_then(reference)?;
+                        let p = dict(doc, a)?
+                            .get(b"P")
+                            .ok()
+                            .and_then(|p| final_id(doc, p))?;
                         // The list is in page order.
                         self.page_number(p)
                             .filter(|n| pages.binary_search(n).is_ok())
@@ -347,7 +350,7 @@ impl Pdf {
         Ok(Some(Annot {
             id,
             page,
-            subtype: String::from_utf8_lossy(subtype).into_owned(),
+            subtype: type_name(subtype),
             author: text(b"T")?,
             contents: text(b"Contents")?,
             subject: text(b"Subj")?,

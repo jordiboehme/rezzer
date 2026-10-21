@@ -12,7 +12,7 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::forms::SigValue;
 use crate::objects::{
-    BrokenTexts, Shared, Spent, TextBudget, Work, dict, get, get_date, get_dict, quote, reference,
+    BrokenTexts, Shared, Spent, TextBudget, Work, dict, final_id, get, get_date, get_dict, quote,
     resolve,
 };
 use crate::{Issue, IssueKind, Pdf, PdfDate};
@@ -85,7 +85,7 @@ impl Pdf {
         let mut perm_ids: Vec<(ObjectId, SigKind)> = Vec::new();
         if let Some(p) = perms {
             for (k, v) in p.iter() {
-                if let (Some(kind), Some(id)) = (perm_kind(k), reference(v)) {
+                if let (Some(kind), Some(id)) = (perm_kind(k), final_id(doc, v)) {
                     perm_ids.push((id, kind));
                 }
             }
@@ -129,7 +129,7 @@ impl Pdf {
                 let Some(kind) = perm_kind(k) else {
                     continue;
                 };
-                if reference(v).is_some_and(|id| !listed.insert(id)) {
+                if final_id(doc, v).is_some_and(|id| !listed.insert(id)) {
                     continue;
                 }
                 if let Some(sd) = dict(doc, v) {
