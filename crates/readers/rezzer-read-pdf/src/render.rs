@@ -176,7 +176,8 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -
 }
 
 /// The alt text for small pictures `small` of a page: how many, and the box of each of the
-/// first [`SMALL_LISTED`] in points, with a near-square 1-bit or gray one named a likely code.
+/// first [`SMALL_LISTED`] in points. A near-square one of 1-bit pixels, at least 21 a side, is
+/// named a likely code.
 fn small_pictures(items: &PageItems, small: &[usize]) -> String {
     let n = small.len();
     let mut boxes: Vec<String> = small
@@ -188,7 +189,7 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
             let mut s = format!("box {}, {} to {}, {}", r(b[0]), r(b[1]), r(b[2]), r(b[3]));
             let (w, h) = (b[2] - b[0], b[3] - b[1]);
             let square = (w - h).abs() <= 0.1 * w.max(h);
-            if square && items.images_gray.get(k).copied().unwrap_or(false) {
+            if square && items.images_code.get(k).copied().unwrap_or(false) {
                 s.push_str(", likely a barcode or QR code, not decoded");
             }
             s

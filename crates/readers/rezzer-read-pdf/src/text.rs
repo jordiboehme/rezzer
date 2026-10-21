@@ -75,8 +75,9 @@ pub(crate) struct PageItems {
     pub runs: Vec<Run>,
     /// Boxes of the pictures the page draws: x0, y0, x1, y1.
     pub images: Vec<[f32; 4]>,
-    /// For each of `images`, whether its pixels are 1-bit or gray (a barcode may be one).
-    pub images_gray: Vec<bool>,
+    /// For each of `images`, whether its pixels could be a barcode or QR code: 1-bit and at
+    /// least 21 on a side.
+    pub images_code: Vec<bool>,
     /// Straight lines and rectangles the page draws, in the frame of the page box (not
     /// turned), for finding ruled tables.
     pub rules: Vec<Rule>,
@@ -690,7 +691,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             text: std::mem::take(&mut self.text_buf),
             actuals: Vec::new(),
             images: Vec::new(),
-            images_gray: Vec::new(),
+            images_code: Vec::new(),
             rules: Vec::new(),
             rules_cut: false,
             open: Vec::new(),
@@ -800,7 +801,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
         items.quotes = quotes;
         items.images = std::mem::take(&mut dev.images);
-        items.images_gray = std::mem::take(&mut dev.images_gray);
+        items.images_code = std::mem::take(&mut dev.images_code);
         items.rules = std::mem::take(&mut dev.rules);
         items.origin = (crop.x0 as f32, crop.y0 as f32);
         if dev.rules_cut {
@@ -1978,9 +1979,16 @@ struct Open {
     used: bool,
 }
 
-/// Whether a picture's pixels are 1-bit or gray, from its dictionary alone: a stencil mask,
-/// one bit per component, or a gray color space.
-fn gray_pixels(image: &Image<'_, '_>) -> bool {
+/// The fewest pixels a side of a QR code has.
+const CODE_PIXELS: u32 = 21;
+
+/// Whether a picture's pixels could be a barcode or QR code, from its dictionary alone:
+/// 1-bit pixels (a stencil mask, one bit per component, or a JBIG2 or CCITT fax filter) and
+/// at least [`CODE_PIXELS`] on each side.
+fn code_pixels(image: &Image<'_, '_>) -> bool {
+    if image.width() < CODE_PIXELS || image.height() < CODE_PIXELS {
+        return false;
+    }
     let Image::Raster(r) = image else {
         return true;
     };
@@ -1988,27 +1996,16 @@ fn gray_pixels(image: &Image<'_, '_>) -> bool {
     let bits = dict
         .get::<u32>(b"BitsPerComponent")
         .or_else(|| dict.get::<u32>(b"BPC"));
-    if bits == Some(1) {
-        return true;
-    }
-    let gray = |n: &[u8]| matches!(n, b"DeviceGray" | b"G" | b"CalGray");
-    match dict
-        .get::<Object<'_>>(b"ColorSpace")
-        .or_else(|| dict.get::<Object<'_>>(b"CS"))
+    let one_bit = |n: &[u8]| matches!(n, b"JBIG2Decode" | b"CCITTFaxDecode" | b"CCF");
+    let filter = match dict
+        .get::<Object<'_>>(b"Filter")
+        .or_else(|| dict.get::<Object<'_>>(b"F"))
     {
-        Some(Object::Name(n)) => gray(n.as_ref()),
-        Some(Object::Array(a)) => match a.iter::<Name<'_>>().next().as_deref() {
-            Some(b"CalGray") => true,
-            Some(b"ICCBased") => {
-                a.iter::<Stream<'_>>()
-                    .next()
-                    .and_then(|s| s.dict().get::<u32>(b"N"))
-                    == Some(1)
-            }
-            _ => false,
-        },
+        Some(Object::Name(n)) => one_bit(n.as_ref()),
+        Some(Object::Array(a)) => a.iter::<Name<'_>>().any(|n| one_bit(n.as_ref())),
         _ => false,
-    }
+    };
+    bits == Some(1) || filter
 }
 
 /// The device that keeps glyphs and picture boxes. It aborts the page with a panic payload of
@@ -2019,7 +2016,7 @@ struct TextDevice<'d> {
     /// ActualText strings the glyphs refer to.
     actuals: Vec<Rc<str>>,
     images: Vec<[f32; 4]>,
-    images_gray: Vec<bool>,
+    images_code: Vec<bool>,
     rules: Vec<Rule>,
     /// Lines were drawn past the cap and are not kept.
     rules_cut: bool,
@@ -2459,7 +2456,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
         let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
         self.images.push([min(xs), min(ys), max(xs), max(ys)]);
-        self.images_gray.push(gray_pixels(&image));
+        self.images_code.push(code_pixels(&image));
     }
 
     fn pop_clip(&mut self) {

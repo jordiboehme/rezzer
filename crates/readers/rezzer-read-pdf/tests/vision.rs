@@ -104,6 +104,19 @@ fn deflate(data: &[u8]) -> Vec<u8> {
 /// A one-page file (`w` by `h` points) whose content is `content`, with Helvetica as `/F1`
 /// and a gray image of `iw` by `ih` pixels as `/Im1` (its data, deflated, is `pixels`).
 fn image_page(w: u32, h: u32, content: &str, iw: u32, ih: u32, pixels: &[u8]) -> Vec<u8> {
+    image_page_bits(w, h, content, iw, ih, 8, pixels)
+}
+
+/// [`image_page`] with `bits` per pixel.
+fn image_page_bits(
+    w: u32,
+    h: u32,
+    content: &str,
+    iw: u32,
+    ih: u32,
+    bits: u32,
+    pixels: &[u8],
+) -> Vec<u8> {
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
@@ -111,7 +124,7 @@ fn image_page(w: u32, h: u32, content: &str, iw: u32, ih: u32, pixels: &[u8]) ->
     let image = b.stream(
         &format!(
             "/Type /XObject /Subtype /Image /Width {iw} /Height {ih} /ColorSpace /DeviceGray \
-             /BitsPerComponent 8 /Filter /FlateDecode"
+             /BitsPerComponent {bits} /Filter /FlateDecode"
         ),
         &deflate(pixels),
     );
@@ -505,7 +518,16 @@ fn small_square_picture_is_listed() {
     let content = "BT /F1 12 Tf 72 780 Td (Above the code.) Tj ET\n\
                    q 85 0 0 85 400 600 cm /Im1 Do Q\n\
                    BT /F1 12 Tf 72 500 Td (Below the code.) Tj ET\n";
-    let out = read(&image_page(595, 842, content, 21, 21, &[0u8; 441]));
+    // 21 by 21 pixels of 1 bit: 3 bytes a row.
+    let out = read(&image_page_bits(
+        595,
+        842,
+        content,
+        21,
+        21,
+        1,
+        &[0x5au8; 63],
+    ));
     let a = asset(&out, "page-1");
     assert!(a.needs_vision);
     let alt = a.alt.as_deref().unwrap_or_default();
@@ -543,8 +565,60 @@ fn small_square_picture_is_listed() {
     );
     assert_eq!(alt.matches("box ").count(), 10, "{alt}");
     assert!(alt.ends_with("; 1 more)"), "{alt}");
+    // Not named a code: a gray photo of 8 by 8 pixels drawn square, a stencil icon of 8 by 8
+    // pixels, and a picture of 21 by 21 gray pixels of 8 bits.
+    let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 60 0 0 60 72 600 cm /Im1 Do Q\n";
+    for out in [
+        read(&image_page(595, 842, content, 8, 8, &[90u8; 64])),
+        read(&image_page_bits(595, 842, content, 8, 8, 1, &[0x5au8; 8])),
+        read(&image_page(595, 842, content, 21, 21, &[0u8; 441])),
+    ] {
+        let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
+        assert!(alt.contains("1 small picture"), "{alt}");
+        assert!(!alt.contains("barcode"), "{alt}");
+    }
     // A picture under 1 square centimeter is not listed.
     let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 20 0 0 20 400 600 cm /Im1 Do Q\n";
     let out = read(&image_page(595, 842, content, 21, 21, &[0u8; 441]));
     assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
+
+#[test]
+fn a_small_logo_on_every_page_is_not_listed() {
+    // 30 pages with the same small picture at the same place: furniture, no asset. A page with
+    // a small picture of its own is one asset.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&[200u8; 36]),
+    );
+    let mut kids = String::new();
+    for n in 1..=30 {
+        let mut c = format!("BT /F1 11 Tf 72 700 Td (Body text of page {n}.) Tj ET\n");
+        c += "q 32 0 0 32 480 780 cm /Im1 Do Q\n";
+        if n == 7 {
+            c += "q 40 0 0 40 200 300 cm /Im1 Do Q\n";
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 30 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-7"], "{:#?}", out.document.assets);
+    let alt = asset(&out, "page-7").alt.clone().unwrap_or_default();
+    assert!(
+        alt.starts_with("1 small picture (box 200, 300 to 240, 340"),
+        "{alt}"
+    );
 }
