@@ -1611,3 +1611,162 @@ fn a_figure_matched_to_no_picture_stays_as_page_text() {
         out.document.assets
     );
 }
+
+/// Tagged A4 pages: each with its content (which may use the pictures `/L`, a dark logo, and
+/// `/C`, a gray chart) and its Figures, each an alt text on marked content id `k` (the k-th
+/// Figure of the page, counted from 0).
+fn tagged_pages(pages: &[(&str, &[&str])]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let root = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let picture = |b: &mut Builder, v: u8| {
+        b.stream(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &[v; 16],
+        )
+    };
+    let l = picture(&mut b, 30);
+    let ch = picture(&mut b, 120);
+    let mut kids = Vec::new();
+    let mut elems = Vec::new();
+    let mut nums = String::new();
+    for (i, (content, figures)) in pages.iter().enumerate() {
+        let page = b.reserve();
+        let cs = b.stream("", content.as_bytes());
+        b.set(
+            page,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {i} \
+                 /Resources << /Font << /F1 {font} 0 R >> /XObject << /L {l} 0 R /C {ch} 0 R >> \
+                 >> /Contents {cs} 0 R >>"
+            ),
+        );
+        let mut here = Vec::new();
+        for (k, alt) in figures.iter().enumerate() {
+            let e = b.add(format!(
+                "<< /Type /StructElem /S /Figure /P {root} 0 R /Pg {page} 0 R /K {k} /Alt ({alt}) >>"
+            ));
+            here.push(format!("{e} 0 R"));
+            elems.push(format!("{e} 0 R"));
+        }
+        nums.push_str(&format!("{i} [{}] ", here.join(" ")));
+        kids.push(format!("{page} 0 R"));
+    }
+    let parents = b.add(format!("<< /Nums [{nums}] >>"));
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K [{}] /ParentTree {parents} 0 R >>",
+            elems.join(" ")
+        ),
+    );
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            kids.len()
+        ),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// The "Figure (not matched to a picture)" paragraphs of a page, and what follows each.
+fn unmatched(out: &ReadOutcome, n: u32) -> Vec<(String, Option<String>)> {
+    let shown = lines(page(out, n));
+    shown
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| {
+            l.strip_prefix("Figure (not matched to a picture): ")
+                .map(|alt| (alt.to_string(), shown.get(i + 1).cloned()))
+        })
+        .collect()
+}
+
+#[test]
+fn a_figure_on_vector_art_stays_when_another_figure_has_the_picture() {
+    // Figure 0 marks a drawn chart (paths, no picture), Figure 1 the logo's draw.
+    let content = "BT /F1 12 Tf 72 700 Td (Revenue.) Tj ET\n\
+                   /Figure <</MCID 0>> BDC 200 300 100 80 re f EMC\n\
+                   /Figure <</MCID 1>> BDC q 60 0 0 40 40 760 cm /L Do Q EMC\n";
+    let out = read(&tagged_pages(&[(
+        content,
+        &["Revenue chart 2020", "Company logo"],
+    )]));
+    assert_eq!(
+        asset(&out, "page-1-pic-1").caption.as_deref(),
+        Some("Company logo")
+    );
+    assert_eq!(
+        unmatched(&out, 1),
+        [(
+            "Revenue chart 2020".to_string(),
+            Some("[media page-1-pic-1]".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_figure_on_a_picture_seen_before_stays_at_its_place() {
+    // The chart is new on page 1; on page 2 a Figure marks its draw, but the asset has no
+    // caption to share: the alt text stays as page text at that place.
+    let page1 = "BT /F1 12 Tf 72 700 Td (One.) Tj ET\nq 60 0 0 40 250 400 cm /C Do Q\n";
+    let page2 = "BT /F1 12 Tf 72 700 Td (Two.) Tj ET\n\
+                 /Figure <</MCID 0>> BDC q 60 0 0 40 250 300 cm /C Do Q EMC\n";
+    let out = read(&tagged_pages(&[
+        (page1, &[]),
+        (page2, &["The chart again"]),
+    ]));
+    assert_eq!(asset(&out, "page-1-pic-1").caption, None);
+    assert_eq!(
+        unmatched(&out, 2),
+        [(
+            "The chart again".to_string(),
+            Some("[media page-1-pic-1]".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_second_unmatched_figure_stays_as_page_text() {
+    // Two Figures mark text, the page has one new picture: the first alt text is its caption,
+    // the second stays as page text at the picture.
+    let content = "/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (First.) Tj ET EMC\n\
+                   /P <</MCID 1>> BDC BT /F1 12 Tf 72 600 Td (Second.) Tj ET EMC\n\
+                   q 60 0 0 40 250 400 cm /C Do Q\n";
+    let out = read(&tagged_pages(&[(
+        content,
+        &["First figure", "Second figure"],
+    )]));
+    assert_eq!(
+        asset(&out, "page-1-pic-1").caption.as_deref(),
+        Some("First figure")
+    );
+    assert_eq!(
+        unmatched(&out, 1),
+        [(
+            "Second figure".to_string(),
+            Some("[media page-1-pic-1]".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_figure_on_a_page_without_pictures_stays_at_the_page_end() {
+    let content = "BT /F1 12 Tf 72 700 Td (Only text.) Tj ET\n\
+                   /Figure <</MCID 0>> BDC 200 300 100 80 re f EMC\n";
+    let out = read(&tagged_pages(&[(content, &["A drawn diagram"])]));
+    assert!(out.document.assets.is_empty());
+    assert_eq!(unmatched(&out, 1), [("A drawn diagram".to_string(), None)]);
+}

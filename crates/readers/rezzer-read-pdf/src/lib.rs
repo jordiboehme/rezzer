@@ -319,8 +319,7 @@ fn lay_out(
         Some(pdf) if pdf.tagged() => pdf.struct_tree(),
         _ => None,
     };
-    let captions = pdf.map(render::figure_captions).unwrap_or_default();
-    let figures = pdf.map(render::figure_alts).unwrap_or_default();
+    let figures = pdf.map(render::page_figures).unwrap_or_default();
     let furniture = render::furniture(read.values());
     let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
     let everywhere = render::on_every_page(read.values(), count);
@@ -528,9 +527,16 @@ fn lay_out(
                 .collect();
             drop(anchored);
             let mut media: Vec<(usize, Block)> = Vec::new();
+            let here = figures.get(&n).map_or(&[][..], Vec::as_slice);
+            // The Figure alt texts no picture took as its caption, with where they go.
+            let mut unmatched: Vec<(usize, String)> = Vec::new();
             match seen {
                 Some(render::Seen::Page(v)) => {
-                    let caption = captions.get(&n).cloned();
+                    // The page's first Figure is the page picture's caption; the others stay
+                    // as page text at the picture.
+                    let caption = here.first().map(|f| f.alt.clone());
+                    let spot = spots.first().copied().unwrap_or(blocks.len());
+                    unmatched.extend(here.iter().skip(1).map(|f| (spot, f.alt.clone())));
                     let charged = budget.add_elements(1).and_then(|()| {
                         budget.charge_text(v.alt.len() + caption.as_ref().map_or(0, String::len))
                     });
@@ -565,11 +571,9 @@ fn lay_out(
                 Some(render::Seen::Small(list)) => {
                     let crops = pictures.list(
                         n,
-                        &list,
-                        &spots,
-                        (&figures, captions.get(&n)),
+                        (&list, &spots, here),
                         (budget, &links),
-                        &mut media,
+                        (&mut media, &mut unmatched),
                         out,
                     );
                     if !crops.is_empty() {
@@ -583,11 +587,17 @@ fn lay_out(
                         });
                     }
                 }
-                None => {}
+                None => unmatched.extend(here.iter().map(|f| (blocks.len(), f.alt.clone()))),
+            }
+            if !unmatched.is_empty() {
+                // Before the pictures at their place, in their order.
+                let texts = figure_texts(n, unmatched, (budget, &links), out);
+                media = texts.into_iter().chain(media).collect();
             }
             if !media.is_empty() {
                 // One pass: the pictures go between the blocks, and each table of this page
                 // moves on by the pictures before it.
+                // A stable sort: the Figure texts stay before the pictures at their place.
                 media.sort_by_key(|(at, _)| *at);
                 let at: Vec<usize> = media.iter().map(|(at, _)| *at).collect();
                 for (_, b, _) in placed.values_mut().filter(|t| t.0 == section) {
@@ -714,6 +724,42 @@ fn lay_out(
 /// the index of the point the layout probes for the run's block.
 type Near = ((f32, f32), (f32, f32), usize);
 
+/// The page text for Figure alt texts no picture took as its caption, at their places:
+/// "Figure (not matched to a picture): <alt>", so no alt text is lost. What the element budget
+/// or the kept bytes no longer allow is said in one loss for the page.
+fn figure_texts(
+    n: u32,
+    texts: Vec<(usize, String)>,
+    (budget, room): (&Budget, &LinkRoom),
+    out: &mut Out,
+) -> Vec<(usize, Block)> {
+    let total = texts.len();
+    let mut blocks = Vec::with_capacity(total);
+    for (k, (at, alt)) in texts.into_iter().enumerate() {
+        let words = format!("Figure (not matched to a picture): {alt}");
+        let charged = budget
+            .add_elements(2)
+            .and_then(|()| room.take_bytes(words.len() as u64 + PLACE_COST));
+        if let Err(hit) = charged {
+            let left = total - k;
+            let what = if left == 1 {
+                "the alt text of 1 Figure".to_string()
+            } else {
+                format!("the alt texts of {left} Figures")
+            };
+            out.loss(
+                format!("p{n}"),
+                format!("{what} on page {n} that match no picture are not written: {hit}"),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+            break;
+        }
+        blocks.push((at, Block::paragraph(vec![Inline::plain(words)])));
+    }
+    blocks
+}
+
 /// What one more small picture asset keeps in the model besides its alt text: the asset,
 /// its id and its entry in the identity map.
 const PICTURE_COST: u64 = 256;
@@ -742,21 +788,20 @@ impl Pictures {
     /// Lists the small pictures `list` of page `n`, whose places among the blocks are
     /// `spots`: one block each, into `media` in reading order, and an asset for each picture
     /// not seen before, named `page-<n>-pic-<k>` with `k` its place in reading order on the
-    /// page. A picture drawn in a Figure's marked content gets the Figure's alt text
-    /// (`figures`, by page and marked content id) as its caption; the page's first Figure
-    /// caption (`caption`) goes to its new picture only when there is just one. Returns the
-    /// pictures to cut out of the page's render: the first place on the page of each asset
-    /// it shows, so a picture whose first page is not rendered is cut from a later one. What
-    /// the element budget, the kept bytes or the time no longer allow is counted for one loss.
-    #[allow(clippy::too_many_arguments)]
+    /// page. A new picture drawn in the marked content of one of the page's `figures` gets
+    /// that Figure's alt text as its caption; a Figure that marks no picture gives its alt
+    /// text to the page's new picture when there is just one. Every other Figure alt text goes
+    /// to `unmatched`, with its place: the place of a picture it marks, else the page's first
+    /// picture. Returns the pictures to cut out of the page's render: the first place on the
+    /// page of each asset it shows, so a picture whose first page is not rendered is cut from
+    /// a later one. What the element budget, the kept bytes or the time no longer allow is
+    /// counted for one loss.
     fn list(
         &mut self,
         n: u32,
-        list: &[render::Small],
-        spots: &[usize],
-        (figures, caption): (&HashMap<(u32, u32), String>, Option<&String>),
+        (list, spots, figures): (&[render::Small], &[usize], &[render::Figure]),
         (budget, room): (&Budget, &LinkRoom),
-        media: &mut Vec<(usize, Block)>,
+        (media, unmatched): (&mut Vec<(usize, Block)>, &mut Vec<(usize, String)>),
         out: &mut Out,
     ) -> Vec<render::Crop> {
         let mut order: Vec<usize> = (0..list.len()).collect();
@@ -768,12 +813,18 @@ impl Pictures {
                 .then(pb[3].total_cmp(&pa[3]))
                 .then(pa[0].total_cmp(&pb[0]))
         });
+        let mut by_mcid: HashMap<u32, usize> = HashMap::new();
+        for (f, figure) in figures.iter().enumerate() {
+            for &m in &figure.mcids {
+                by_mcid.entry(m).or_insert(f);
+            }
+        }
+        // For each Figure: taken as a caption, and the place of a picture it marks.
+        let mut taken = vec![false; figures.len()];
+        let mut marks: Vec<Option<usize>> = vec![None; figures.len()];
         let mut crops: Vec<render::Crop> = Vec::new();
         let mut on_page: HashSet<usize> = HashSet::new();
         let mut new: Vec<usize> = Vec::new();
-        // Where the block of the first new picture is in `media`, and its place.
-        let mut first_new: Option<(usize, usize)> = None;
-        let mut figured = false;
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
@@ -794,32 +845,39 @@ impl Pictures {
                     room.take_bytes(words.len() as u64 + PLACE_COST + fresh)
                 });
             if let Err(hit) = charged {
-                let left = order.len() - k;
-                self.unlisted = Some(match self.unlisted.take() {
-                    None => (left, n, n, hit.to_string()),
-                    Some((count, first, _, why)) => (count + left, first, n, why),
-                });
+                self.unlist(order.len() - k, n, hit.to_string());
                 break;
             }
+            let figure = p.mcid.and_then(|m| by_mcid.get(&m)).copied();
             let asset = match known {
                 Some(at) => {
                     self.assets[at].1.add(n, p);
-                    self.assets[at].0
+                    let asset = self.assets[at].0;
+                    if let Some(f) = figure {
+                        // The same alt text as the asset's caption is said already.
+                        if out.doc.assets[asset].caption.as_deref() == Some(&figures[f].alt) {
+                            taken[f] = true;
+                        } else {
+                            marks[f].get_or_insert(spots[i]);
+                        }
+                    }
+                    asset
                 }
                 None => {
                     let asset = out.doc.assets.len();
-                    let figure = p.mcid.and_then(|m| figures.get(&(n, m))).cloned();
-                    figured |= figure.is_some();
+                    let caption = figure.map(|f| {
+                        taken[f] = true;
+                        figures[f].alt.clone()
+                    });
                     out.doc.assets.push(render::picture_asset(
                         format!("page-{n}-pic-{}", k + 1),
                         words.clone(),
-                        figure,
+                        caption,
                         !p.logo,
                     ));
                     self.known.insert(p.id, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
                     new.push(asset);
-                    first_new.get_or_insert((media.len(), spots[i]));
                     asset
                 }
             };
@@ -835,33 +893,27 @@ impl Pictures {
                 },
             ));
         }
-        // The page's Figure caption, matched to no picture: only a page with one new picture
-        // gives it to that picture. With more, it is page text before the first new one, so it
-        // is not lost.
-        match (new.as_slice(), figured, caption) {
-            ([only], false, Some(text)) => out.doc.assets[*only].caption = Some(text.clone()),
-            ([_, _, ..], false, Some(text)) => {
-                let words = format!("Figure (not matched to a picture): {text}");
-                let charged = budget
-                    .add_elements(2)
-                    .and_then(|()| room.take_bytes(words.len() as u64 + PLACE_COST));
-                if let (Ok(()), Some((at, spot))) = (charged, first_new) {
-                    media.insert(at, (spot, Block::paragraph(vec![Inline::plain(words)])));
-                } else {
-                    out.loss(
-                        format!("p{n}"),
-                        format!(
-                            "the alt text of a Figure on page {n} matches no picture and is not \
-                             written: a limit was reached"
-                        ),
-                        LossReason::Limit,
-                        Severity::Warning,
-                    );
-                }
-            }
-            _ => {}
+        // A Figure that marks no picture: the page's only new picture takes the first one.
+        if let [only] = new.as_slice()
+            && out.doc.assets[*only].caption.is_none()
+            && let Some(f) = (0..figures.len()).find(|&f| !taken[f] && marks[f].is_none())
+        {
+            out.doc.assets[*only].caption = Some(figures[f].alt.clone());
+            taken[f] = true;
+        }
+        let first = order.first().map(|&i| spots[i]).unwrap_or_default();
+        for (f, figure) in figures.iter().enumerate().filter(|(f, _)| !taken[*f]) {
+            unmatched.push((marks[f].unwrap_or(first), figure.alt.clone()));
         }
         crops
+    }
+
+    /// Counts `count` small pictures of page `n` as not listed, for `why`.
+    fn unlist(&mut self, count: usize, n: u32, why: String) {
+        self.unlisted = Some(match self.unlisted.take() {
+            None => (count, n, n, why),
+            Some((c, first, _, w)) => (c + count, first, n, w),
+        });
     }
 
     /// Writes each asset's alt text with all its places; one place that is not a logo makes

@@ -1233,33 +1233,25 @@ fn pixel_size(w: f64, h: f64, max: u64) -> (u16, u16) {
     (side(w), side(h))
 }
 
-/// The alt text of each Figure of the tag tree by the page and marked content id of its own
-/// content, so a picture drawn in that marked content gets it.
-pub(crate) fn figure_alts(pdf: &Pdf) -> HashMap<(u32, u32), String> {
-    let mut out = HashMap::new();
-    if let Some(tree) = pdf.struct_tree() {
-        for e in &tree.elems {
-            if let (true, Some(page), Some(alt)) = (e.role == "Figure", e.page, e.alt.as_ref())
-                && !alt.trim().is_empty()
-            {
-                for &mcid in &e.mcids {
-                    out.entry((page, mcid)).or_insert_with(|| alt.clone());
-                }
-            }
-        }
-    }
-    out
+/// A Figure of the tag tree with an alt text: the text, and the marked content ids of its
+/// own content on its page.
+pub(crate) struct Figure {
+    pub alt: String,
+    pub mcids: Vec<u32>,
 }
 
-/// The alt text of each page's first figure in the tag tree.
-pub(crate) fn figure_captions(pdf: &Pdf) -> HashMap<u32, String> {
-    let mut out = HashMap::new();
+/// The Figures with an alt text of each page, in the order of the tag tree.
+pub(crate) fn page_figures(pdf: &Pdf) -> HashMap<u32, Vec<Figure>> {
+    let mut out: HashMap<u32, Vec<Figure>> = HashMap::new();
     if let Some(tree) = pdf.struct_tree() {
         for e in &tree.elems {
             if let (true, Some(page), Some(alt)) = (e.role == "Figure", e.page, e.alt.as_ref())
                 && !alt.trim().is_empty()
             {
-                out.entry(page).or_insert_with(|| alt.clone());
+                out.entry(page).or_default().push(Figure {
+                    alt: alt.clone(),
+                    mcids: e.mcids.clone(),
+                });
             }
         }
     }
