@@ -3332,7 +3332,7 @@ fn a_note_too_deep_for_its_passage_stays_in_the_list() {
 }
 
 #[test]
-fn merged_cells_are_marked_once_and_real_marks_are_escaped() {
+fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
     // A block of two by two cells: its text once, the first row's other cell "same as left",
     // the cells below "same as above". A real cell that holds only a mark is escaped.
     let mut block = Cell::new(vec![txt("both")]);
@@ -3363,7 +3363,7 @@ fn merged_cells_are_marked_once_and_real_marks_are_escaped() {
         ),
         "{md}"
     );
-    // Without a merged cell, no note; a lone mark is still escaped.
+    // Without a merged cell, no note, and a lone mark is written as it is.
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
@@ -3375,7 +3375,7 @@ fn merged_cells_are_marked_once_and_real_marks_are_escaped() {
         alignments: Vec::new(),
         anchor: None,
     }]);
-    assert!(md.contains("| \\\u{3003} |\n"), "{md}");
+    assert!(md.contains("\n| \u{3003} |\n"), "{md}");
     assert!(!md.contains("Merged cells"), "{md}");
 }
 

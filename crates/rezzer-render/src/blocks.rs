@@ -1549,35 +1549,62 @@ fn model_table(
         }
     }
     grid.truncate(shown);
-    // A real cell whose whole text is a mark is escaped, so it is never read as one.
+    // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
+    // sheet does; only rows that are shown are named, and a range into hidden rows ends at
+    // the last one.
+    let sheet = rows
+        .iter()
+        .flatten()
+        .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
+    let ranges: Vec<String> = if sheet {
+        merged
+            .into_iter()
+            .filter(|(r, ..)| *r < shown)
+            .map(|(r, c, cs, rs)| {
+                format!(
+                    "{}{}:{}{}",
+                    column_letter(c),
+                    r + 1,
+                    column_letter(c + cs - 1),
+                    (r + rs).min(shown)
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // Several header rows are one header line, so their marks are never shown; the marks of
+    // the other rows are, and then the legend explains them.
+    let head = header_rows.min(grid.len());
+    let marked = grid.iter().enumerate().any(|(r, row)| {
+        (head < 2 || r >= head)
+            && row
+                .iter()
+                .any(|s| matches!(s, Some(Spot::Above(_) | Spot::Left(_))))
+    });
+    let legend = marked || !ranges.is_empty();
+    // A real cell whose whole text is a mark is escaped where the table carries marks, so it
+    // is never read as one; elsewhere it is written as it is.
     let own = |k: usize| -> String {
         let t = &texts[k];
-        if t == SAME_AS_ABOVE || t == SAME_AS_LEFT {
+        if legend && (t == SAME_AS_ABOVE || t == SAME_AS_LEFT) {
             format!("\\{t}")
         } else {
             t.clone()
         }
     };
-    let mut marked = false;
-    let mut line = |row: &[Option<Spot>]| -> Vec<String> {
+    let line = |row: &[Option<Spot>]| -> Vec<String> {
         row.iter()
             .map(|spot| match spot {
                 None => String::new(),
                 Some(Spot::Own(k)) => own(*k),
-                Some(Spot::Above(_)) => {
-                    marked = true;
-                    SAME_AS_ABOVE.to_string()
-                }
-                Some(Spot::Left(_)) => {
-                    marked = true;
-                    SAME_AS_LEFT.to_string()
-                }
+                Some(Spot::Above(_)) => SAME_AS_ABOVE.to_string(),
+                Some(Spot::Left(_)) => SAME_AS_LEFT.to_string(),
             })
             .collect()
     };
     // Several header rows are one header line: per column the texts of the cells over it,
     // top down, a cell over several rows once.
-    let head = header_rows.min(grid.len());
     let header: Vec<String> = match head {
         0 => Vec::new(),
         1 => line(&grid[0]),
@@ -1609,31 +1636,7 @@ fn model_table(
     }
     out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
-    // sheet does; only rows that are shown are named, and a range into hidden rows ends at
-    // the last one.
-    let sheet = rows
-        .iter()
-        .flatten()
-        .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
-    let ranges: Vec<String> = if sheet {
-        merged
-            .into_iter()
-            .filter(|(r, ..)| *r < shown)
-            .map(|(r, c, cs, rs)| {
-                format!(
-                    "{}{}:{}{}",
-                    column_letter(c),
-                    r + 1,
-                    column_letter(c + cs - 1),
-                    (r + rs).min(shown)
-                )
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if marked || !ranges.is_empty() {
+    if legend {
         let mut note =
             format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
         if !ranges.is_empty() {
