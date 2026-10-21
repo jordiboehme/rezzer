@@ -198,6 +198,8 @@ pub(crate) struct Small {
     pub code: bool,
     /// A logo: it needs no vision.
     pub logo: bool,
+    /// The marked content id it was drawn in (`PageItems::images_mcid`).
+    pub mcid: Option<u32>,
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
@@ -355,6 +357,7 @@ pub(crate) fn vision(
                 id,
                 code,
                 logo,
+                mcid: items.images_mcid.get(k).copied().flatten(),
             }
         })
         .collect();
@@ -458,6 +461,7 @@ impl Places {
         }
         self.count += 1;
         self.logo &= s.logo;
+        self.code |= s.code;
     }
 
     /// The asset's alt text: the place's words for one place; for more, the pages and the
@@ -641,22 +645,14 @@ impl LeftOut {
         }
     }
 
-    fn picture(n: u32, id: &str, why: String) -> LeftOut {
+    /// `pictures` small pictures, the first being `id` on page `n`.
+    fn pictures(n: u32, id: &str, pictures: usize, why: String) -> LeftOut {
         LeftOut {
             first: n,
             what: format!("picture {id} is not written"),
             why,
             pages: 0,
-            pictures: 1,
-        }
-    }
-
-    /// Counts the next need left out.
-    fn add(&mut self, need: &Need) {
-        if need.whole.is_some() {
-            self.pages += 1;
-        } else {
-            self.pictures += need.crops.len();
+            pictures,
         }
     }
 
@@ -677,6 +673,15 @@ impl LeftOut {
             ),
         }
     }
+}
+
+/// The small pictures of `need` that have no file yet and are not counted in a loss: an
+/// asset shared with earlier pages is cut from the first page that renders.
+fn pending<'n>(need: &'n Need, counted: &HashSet<usize>, out: &Out) -> Vec<&'n Crop> {
+    need.crops
+        .iter()
+        .filter(|c| out.doc.assets[c.asset].sha256.is_empty() && !counted.contains(&c.asset))
+        .collect()
 }
 
 /// Renders the pages of `needs` with `extract_assets`: a page that needs vision into a blob
@@ -747,55 +752,71 @@ pub(crate) fn render_pages(
         stop: &stop,
     };
     let room = budget.limits().max_memory_bytes / 4;
-    // What is left out for the render count, the blob room or the time.
+    // What is left out for the render count, the blob room or the time, and the small
+    // pictures it counts.
     let mut left_out: Option<LeftOut> = None;
+    let mut counted: HashSet<usize> = HashSet::new();
+    // Why each page with small pictures was not rendered.
+    let mut failed: HashMap<u32, LossReason> = HashMap::new();
     // The content streams and stencils checked for earlier pages.
     let mut seen = HashSet::new();
     let mut rendered = 0;
     for need in needs {
         let n = need.page;
-        let skip = |why: String, out: &mut Out| {
-            out.loss(
-                format!("p{n}"),
-                format!("page {n} is not rendered: {why}"),
-                LossReason::Limit,
-                Severity::Warning,
-            );
-        };
-        if let Some(left) = &mut left_out {
-            left.add(need);
+        // A page with small pictures only is rendered for those without a file yet.
+        let todo = pending(need, &counted, out);
+        if need.whole.is_none() && todo.is_empty() {
             continue;
         }
-        let first_out = |why: String| match need.whole {
+        let mut fail = |why: LossReason, what: String, out: &mut Out| {
+            out.loss(
+                format!("p{n}"),
+                format!("page {n} is not rendered: {what}"),
+                why,
+                Severity::Warning,
+            );
+            failed.insert(n, why);
+        };
+        if let Some(left) = &mut left_out {
+            match need.whole {
+                Some(_) => left.pages += 1,
+                None => {
+                    left.pictures += todo.len();
+                    counted.extend(todo.iter().map(|c| c.asset));
+                }
+            }
+            continue;
+        }
+        let first_out = |why: String, counted: &mut HashSet<usize>| match need.whole {
             Some(_) => LeftOut::page(n, why),
             None => {
+                counted.extend(todo.iter().map(|c| c.asset));
                 let mut left = LeftOut::page(n, why);
                 left.pages = 0;
-                left.add(need);
+                left.pictures = todo.len();
                 left
             }
         };
         if rendered == MAX_RENDERS {
-            left_out = Some(first_out(format!(
-                "a file renders at most {MAX_RENDERS} pages"
-            )));
+            left_out = Some(first_out(
+                format!("a file renders at most {MAX_RENDERS} pages"),
+                &mut counted,
+            ));
             continue;
         }
         if need.fallback {
-            out.loss(
-                format!("p{n}"),
-                format!(
-                    "page {n} is not rendered: its text was read with the fallback parser, and \
-                     the renderer reads only the object layer's copy, where its content is \
-                     missing"
-                ),
+            fail(
                 LossReason::Unsupported,
-                Severity::Warning,
+                "its text was read with the fallback parser, and the renderer reads only the \
+                 object layer's copy, where its content is missing"
+                    .into(),
+                out,
             );
             continue;
         }
         if need.cut {
-            skip(
+            fail(
+                LossReason::Limit,
                 "a limit cut its text, so its content is more than a render may take".into(),
                 out,
             );
@@ -804,20 +825,15 @@ pub(crate) fn render_pages(
         let page = match render_page(&doc, n, budget, room, &facts, &mut seen) {
             Ok(page) => page,
             Err(Failed::Limit(why)) => {
-                left_out = Some(first_out(why));
+                left_out = Some(first_out(why, &mut counted));
                 continue;
             }
             Err(Failed::Room(why)) => {
-                skip(why, out);
+                fail(LossReason::Limit, why, out);
                 continue;
             }
             Err(Failed::Damaged(why)) => {
-                out.loss(
-                    format!("p{n}"),
-                    format!("page {n} is not rendered: {why}"),
-                    LossReason::Damaged,
-                    Severity::Warning,
-                );
+                fail(LossReason::Damaged, why, out);
                 continue;
             }
         };
@@ -827,12 +843,7 @@ pub(crate) fn render_pages(
                 let png = match encode(page.pixmap) {
                     Ok(png) => png,
                     Err(why) => {
-                        out.loss(
-                            format!("p{n}"),
-                            format!("page {n} is not rendered: {why}"),
-                            LossReason::Damaged,
-                            Severity::Warning,
-                        );
+                        fail(LossReason::Damaged, why, out);
                         continue;
                     }
                 };
@@ -840,7 +851,16 @@ pub(crate) fn render_pages(
                     left_out = Some(LeftOut::page(n, why));
                 }
             }
-            None => left_out = cut_out(need, page, budget, room, out),
+            None => {
+                left_out = cut_out(need, &todo, page, budget, room, out);
+                if left_out.is_some() {
+                    counted.extend(
+                        todo.iter()
+                            .filter(|c| out.doc.assets[c.asset].sha256.is_empty())
+                            .map(|c| c.asset),
+                    );
+                }
+            }
         }
     }
     if let Some(left) = left_out {
@@ -848,6 +868,88 @@ pub(crate) fn render_pages(
             format!("p{}", left.first),
             left.words(),
             LossReason::Limit,
+            Severity::Warning,
+        );
+    }
+    unwritten(needs, &counted, &failed, out);
+}
+
+/// Small pictures most named in the loss for those that have no file.
+const UNWRITTEN_NAMED: usize = 10;
+
+/// Says which small pictures have no file because no page they stand on was rendered (each
+/// page already says why): one loss for each reason, naming the first pictures with their
+/// pages. Those a limit loss already counts are left out.
+fn unwritten(
+    needs: &[Need],
+    counted: &HashSet<usize>,
+    failed: &HashMap<u32, LossReason>,
+    out: &mut Out,
+) {
+    // For each asset without a file: its pages, and why its first page was not rendered.
+    let mut lost: Vec<(usize, Vec<u32>, LossReason)> = Vec::new();
+    let mut at: HashMap<usize, usize> = HashMap::new();
+    for need in needs.iter().filter(|n| n.whole.is_none()) {
+        for c in &need.crops {
+            if !out.doc.assets[c.asset].sha256.is_empty() || counted.contains(&c.asset) {
+                continue;
+            }
+            let why = failed
+                .get(&need.page)
+                .copied()
+                .unwrap_or(LossReason::Damaged);
+            let k = *at.entry(c.asset).or_insert_with(|| {
+                lost.push((c.asset, Vec::new(), why));
+                lost.len() - 1
+            });
+            lost[k].1.push(need.page);
+        }
+    }
+    for why in [
+        LossReason::Limit,
+        LossReason::Damaged,
+        LossReason::Unsupported,
+    ] {
+        let these: Vec<&(usize, Vec<u32>, LossReason)> =
+            lost.iter().filter(|(_, _, w)| *w == why).collect();
+        let Some(first) = these.first().and_then(|(_, pages, _)| pages.first()) else {
+            continue;
+        };
+        let mut named: Vec<String> = these
+            .iter()
+            .take(UNWRITTEN_NAMED)
+            .map(|(asset, pages, _)| {
+                let id = &out.doc.assets[*asset].id;
+                let shown: Vec<String> = pages
+                    .iter()
+                    .take(UNWRITTEN_NAMED)
+                    .map(u32::to_string)
+                    .collect();
+                let more = pages.len().saturating_sub(UNWRITTEN_NAMED);
+                let more = if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                };
+                let word = if pages.len() == 1 { "page" } else { "pages" };
+                format!("{id} on {word} {}{more}", shown.join(", "))
+            })
+            .collect();
+        if these.len() > UNWRITTEN_NAMED {
+            named.push(format!("{} more", these.len() - UNWRITTEN_NAMED));
+        }
+        let what = if these.len() == 1 {
+            "1 small picture has no file".to_string()
+        } else {
+            format!("{} small pictures have no file", these.len())
+        };
+        out.loss(
+            format!("p{first}"),
+            format!(
+                "{what}: {}; no page it stands on was rendered",
+                named.join("; ")
+            ),
+            why,
             Severity::Warning,
         );
     }
@@ -877,12 +979,14 @@ fn keep(png: Vec<u8>, asset: usize, out: &mut Out) -> Result<(), String> {
     Ok(())
 }
 
-/// Cuts the small pictures of `need` out of its render, one at a time, each into a blob of
-/// its asset. The render is dropped before the last one is written. A crop takes its pixels
-/// and its PNG next to the render, which must fit the render room the page was checked
-/// against. Returns what is left out when the time or the blob room runs out.
+/// Cuts the small pictures `todo` of `need` out of its render, one at a time, each into a
+/// blob of its asset. The render is dropped before the last one is written. A crop takes its
+/// pixels and its PNG next to the render, which must fit the render room the page was checked
+/// against. A picture not cut here stays without a file, for a later page. Returns what is
+/// left out when the time or the blob room runs out.
 fn cut_out(
     need: &Need,
+    todo: &[&Crop],
     page: Rendered,
     budget: &Budget,
     room: u64,
@@ -891,13 +995,9 @@ fn cut_out(
     let n = need.page;
     let mut page = Some(page);
     let pixels = |p: &Rendered| u64::from(p.pixmap.width()) * u64::from(p.pixmap.height());
-    for (i, c) in need.crops.iter().enumerate() {
+    for (i, c) in todo.iter().enumerate() {
         let id = out.doc.assets[c.asset].id.clone();
-        let left = |why: String| {
-            let mut left = LeftOut::picture(n, &id, why);
-            left.pictures = need.crops.len() - i;
-            Some(left)
-        };
+        let left = |why: String| Some(LeftOut::pictures(n, &id, todo.len() - i, why));
         if let Err(hit) = budget.check_time() {
             return left(hit.to_string());
         }
@@ -909,6 +1009,15 @@ fn cut_out(
             c.b[3] + need.origin.1,
         ];
         let Some(rect) = crop_rect(p, user, CROP_MARGIN) else {
+            out.loss(
+                format!("p{n}"),
+                format!(
+                    "picture {id} is not cut out of page {n}: its box lies outside the \
+                     rendered page"
+                ),
+                LossReason::Damaged,
+                Severity::Warning,
+            );
             continue;
         };
         // The render's pixels, the crop's and its PNG (twice its pixels).
@@ -917,8 +1026,9 @@ fn cut_out(
             out.loss(
                 format!("p{n}"),
                 format!(
-                    "picture {id} is not written: cutting it out would take {takes} bytes, more \
-                     than the {room} bytes a render may take (a quarter of the memory limit)"
+                    "picture {id} is not cut out of page {n}: that would take {takes} bytes, \
+                     more than the {room} bytes a render may take (a quarter of the memory \
+                     limit)"
                 ),
                 LossReason::Limit,
                 Severity::Warning,
@@ -926,7 +1036,7 @@ fn cut_out(
             continue;
         }
         let pixmap = crop(p, rect);
-        if i + 1 == need.crops.len() {
+        if i + 1 == todo.len() {
             page = None;
         }
         match encode(pixmap) {
@@ -937,7 +1047,7 @@ fn cut_out(
             }
             Err(why) => out.loss(
                 format!("p{n}"),
-                format!("picture {id} is not written: {why}"),
+                format!("picture {id} is not cut out of page {n}: {why}"),
                 LossReason::Damaged,
                 Severity::Warning,
             ),
@@ -1121,6 +1231,24 @@ fn pixel_size(w: f64, h: f64, max: u64) -> (u16, u16) {
     }
     let side = |v: f64| (v * scale).floor().clamp(1.0, f64::from(u16::MAX)) as u16;
     (side(w), side(h))
+}
+
+/// The alt text of each Figure of the tag tree by the page and marked content id of its own
+/// content, so a picture drawn in that marked content gets it.
+pub(crate) fn figure_alts(pdf: &Pdf) -> HashMap<(u32, u32), String> {
+    let mut out = HashMap::new();
+    if let Some(tree) = pdf.struct_tree() {
+        for e in &tree.elems {
+            if let (true, Some(page), Some(alt)) = (e.role == "Figure", e.page, e.alt.as_ref())
+                && !alt.trim().is_empty()
+            {
+                for &mcid in &e.mcids {
+                    out.entry((page, mcid)).or_insert_with(|| alt.clone());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The alt text of each page's first figure in the tag tree.

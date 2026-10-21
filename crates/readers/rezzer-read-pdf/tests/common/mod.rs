@@ -690,3 +690,38 @@ pub fn many_places_twin(n: usize) -> Vec<u8> {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     b.finish(catalog)
 }
+
+/// `pages` A4 pages, each with a line of text and `per_page` different inline pictures of 30
+/// by 30 points in a row in the middle of the page: small pictures that need vision, each an
+/// asset of its own.
+pub fn small_picture_pages(pages: usize, per_page: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = String::new();
+    let mut state = 11u32;
+    for n in 0..pages {
+        let mut c = format!("BT /F1 12 Tf 72 700 Td (Page {n}.) Tj ET\n");
+        for k in 0..per_page {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            let color = (state >> 8) & 0xff_ffff;
+            let x = 140 + 40 * k;
+            c.push_str(&format!(
+                "q 30 0 0 30 {x} 400 cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID {color:06x}> EI Q\n"
+            ));
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}

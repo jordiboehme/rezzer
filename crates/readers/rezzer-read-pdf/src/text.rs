@@ -83,6 +83,9 @@ pub(crate) struct PageItems {
     /// For each of `images`, what the picture is: a hash of its dictionary, size and data,
     /// so the same picture on many pages is known as one.
     pub images_id: Vec<u64>,
+    /// For each of `images`, the marked content id it was drawn in, if any: what ties it to a
+    /// Figure of the tag tree.
+    pub images_mcid: Vec<Option<u32>>,
     /// Straight lines and rectangles the page draws, in the frame of the runs, for finding
     /// ruled tables.
     pub rules: Vec<Rule>,
@@ -791,6 +794,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             images: Vec::new(),
             images_code: Vec::new(),
             images_id: Vec::new(),
+            images_mcid: Vec::new(),
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -962,6 +966,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
         items.images_id = std::mem::take(&mut dev.images_id);
+        items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
         if items.turned {
             // The rules go into the frame of the runs, in place.
@@ -2476,6 +2481,7 @@ struct TextDevice<'d> {
     images: Vec<[f32; 4]>,
     images_code: Vec<bool>,
     images_id: Vec<u64>,
+    images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
     stencils: HashMap<u128, Option<ObjectIdentifier>>,
@@ -3056,6 +3062,8 @@ impl<'a> Device<'a> for TextDevice<'_> {
             (self.page, self.images.len()),
         );
         self.images_id.push(id);
+        let mcid = self.open.iter().rev().find_map(|o| o.mcid);
+        self.images_mcid.push(mcid);
     }
 
     fn pop_clip(&mut self) {

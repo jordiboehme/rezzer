@@ -1300,3 +1300,84 @@ fn many_places_of_one_picture_stay_linear() {
     assert_eq!(media, n);
     assert_rss_under_256_mib();
 }
+
+/// Pages with a line of text and one shared gray picture (60 by 40 points, 50 points lower on
+/// each page). A page
+/// marked in `bomb` also draws, at 10 by 10 points (too small to be listed), a JPEG that says
+/// it is 15,000 by 15,000 pixels, so that page is not rendered.
+fn shared_picture_pages(bomb: &[bool]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let logo = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        &[30u8; 16],
+    );
+    let jpeg = b.stream(
+        "/Type /XObject /Subtype /Image /Width 15000 /Height 15000 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /DCTDecode",
+        &jpeg_head(15_000, 15_000),
+    );
+    let mut kids = String::new();
+    for (n, &bad) in bomb.iter().enumerate() {
+        // Each page at another place, so the picture is no page furniture.
+        let y = 400 - 50 * n;
+        let mut c =
+            format!("BT /F1 12 Tf 72 700 Td (Page {n}.) Tj ET\nq 60 0 0 40 250 {y} cm /L Do Q\n");
+        if bad {
+            c.push_str("q 10 0 0 10 300 200 cm /B Do Q\n");
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /L {logo} 0 R /B {jpeg} 0 R >> \
+             >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", bomb.len()),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_shared_picture_is_cut_at_the_next_page_that_renders() {
+    // Page 1 is not rendered; page 2, with the same picture, is: the crop comes from page 2.
+    let out = read_with(&shared_picture_pages(&[true, false, false]), true);
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1"]);
+    let blobs: Vec<&str> = out.blobs.iter().map(|b| b.asset.as_str()).collect();
+    assert_eq!(
+        blobs,
+        ["page-1-pic-1"],
+        "{:#?} {:#?}",
+        out.document.losses,
+        out.document.assets
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "p1" && l.what.starts_with("page 1 is not rendered")),
+        "{:#?}",
+        out.document.losses
+    );
+    // No page with it renders: the loss names the picture and its pages.
+    let out = read_with(&shared_picture_pages(&[true, true, false]), true);
+    assert_eq!(out.blobs.len(), 1, "{:#?}", out.document.losses);
+    let out = read_with(&shared_picture_pages(&[true, true]), true);
+    assert!(out.blobs.is_empty());
+    let named: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("page-1-pic-1"))
+        .collect();
+    assert_eq!(named.len(), 1, "{:#?}", out.document.losses);
+    assert!(named[0].what.contains("pages 1, 2"), "{}", named[0].what);
+}

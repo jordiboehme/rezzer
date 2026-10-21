@@ -320,6 +320,7 @@ fn lay_out(
         _ => None,
     };
     let captions = pdf.map(render::figure_captions).unwrap_or_default();
+    let figures = pdf.map(render::figure_alts).unwrap_or_default();
     let furniture = render::furniture(read.values());
     let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
     let everywhere = render::on_every_page(read.values(), count);
@@ -566,7 +567,7 @@ fn lay_out(
                         n,
                         &list,
                         &spots,
-                        captions.get(&n),
+                        (&figures, captions.get(&n)),
                         (budget, &links),
                         &mut media,
                         out,
@@ -721,31 +722,39 @@ const PICTURE_COST: u64 = 256;
 /// boxes of the places it lists (`render::Places::alt`).
 const PICTURE_ALT: u64 = 1_200;
 
-/// What one more place of a small picture keeps besides its words: its block.
-const PLACE_COST: u64 = 64;
+/// What one more place of a small picture keeps besides its words: its block in the page.
+const PLACE_COST: u64 = std::mem::size_of::<Block>() as u64;
+
+/// Small pictures listed between two questions to the clock.
+const PICTURES_PER_CHECK: usize = 4_096;
 
 /// The small pictures of the document by what they are (`PageItems::images_id`), so equal
-/// pictures share one asset: the index of the asset and its places.
+/// pictures share one asset: the index of the asset and its places. Also the small pictures
+/// not listed: how many, on which pages, and why the first were not.
 #[derive(Default)]
 struct Pictures {
     known: HashMap<u64, usize>,
     assets: Vec<(usize, render::Places)>,
+    unlisted: Option<(usize, u32, u32, String)>,
 }
 
 impl Pictures {
     /// Lists the small pictures `list` of page `n`, whose places among the blocks are
     /// `spots`: one block each, into `media` in reading order, and an asset for each picture
     /// not seen before, named `page-<n>-pic-<k>` with `k` its place in reading order on the
-    /// page. The page's figure caption goes to the first new asset. Returns the pictures to
-    /// cut out of the page's render. What the element budget or the kept bytes no longer
-    /// take is left out with one loss.
+    /// page. A picture drawn in a Figure's marked content gets the Figure's alt text
+    /// (`figures`, by page and marked content id) as its caption; the page's first Figure
+    /// caption (`caption`) goes to its new picture only when there is just one. Returns the
+    /// pictures to cut out of the page's render: the first place on the page of each asset
+    /// it shows, so a picture whose first page is not rendered is cut from a later one. What
+    /// the element budget, the kept bytes or the time no longer allow is counted for one loss.
     #[allow(clippy::too_many_arguments)]
     fn list(
         &mut self,
         n: u32,
         list: &[render::Small],
         spots: &[usize],
-        caption: Option<&String>,
+        (figures, caption): (&HashMap<(u32, u32), String>, Option<&String>),
         (budget, room): (&Budget, &LinkRoom),
         media: &mut Vec<(usize, Block)>,
         out: &mut Out,
@@ -759,33 +768,35 @@ impl Pictures {
                 .then(pb[3].total_cmp(&pa[3]))
                 .then(pa[0].total_cmp(&pb[0]))
         });
-        let mut crops = Vec::new();
-        let mut caption = caption.cloned();
+        let mut crops: Vec<render::Crop> = Vec::new();
+        let mut on_page: HashSet<usize> = HashSet::new();
+        let mut new: Vec<usize> = Vec::new();
+        let mut figured = false;
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
             let known = self.known.get(&p.id).copied();
-            let charged = budget.add_elements(1).and_then(|()| {
-                let new = if known.is_none() {
-                    PICTURE_COST + PICTURE_ALT
-                } else {
-                    0
-                };
-                room.take_bytes(words.len() as u64 + PLACE_COST + new)
-            });
+            let checked = if k % PICTURES_PER_CHECK == PICTURES_PER_CHECK - 1 {
+                budget.check_time()
+            } else {
+                Ok(())
+            };
+            let charged = checked
+                .and_then(|()| budget.add_elements(1))
+                .and_then(|()| {
+                    let fresh = if known.is_none() {
+                        PICTURE_COST + PICTURE_ALT
+                    } else {
+                        0
+                    };
+                    room.take_bytes(words.len() as u64 + PLACE_COST + fresh)
+                });
             if let Err(hit) = charged {
                 let left = order.len() - k;
-                let what = if left == 1 {
-                    "1 small picture".to_string()
-                } else {
-                    format!("{left} small pictures")
-                };
-                out.loss(
-                    format!("p{n}"),
-                    format!("{what} on page {n} not listed: {hit}"),
-                    LossReason::Limit,
-                    Severity::Warning,
-                );
+                self.unlisted = Some(match self.unlisted.take() {
+                    None => (left, n, n, hit.to_string()),
+                    Some((count, first, _, why)) => (count + left, first, n, why),
+                });
                 break;
             }
             let asset = match known {
@@ -795,18 +806,23 @@ impl Pictures {
                 }
                 None => {
                     let asset = out.doc.assets.len();
+                    let figure = p.mcid.and_then(|m| figures.get(&(n, m))).cloned();
+                    figured |= figure.is_some();
                     out.doc.assets.push(render::picture_asset(
                         format!("page-{n}-pic-{}", k + 1),
                         words.clone(),
-                        caption.take(),
+                        figure,
                         !p.logo,
                     ));
                     self.known.insert(p.id, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
-                    crops.push(render::Crop { asset, b: p.b });
+                    new.push(asset);
                     asset
                 }
             };
+            if on_page.insert(asset) {
+                crops.push(render::Crop { asset, b: p.b });
+            }
             media.push((
                 spots[i],
                 Block::Media {
@@ -816,16 +832,39 @@ impl Pictures {
                 },
             ));
         }
+        // The page's Figure caption, matched to no picture: only a page with one new picture
+        // gives it to that picture.
+        if let ([only], false, Some(text)) = (new.as_slice(), figured, caption) {
+            out.doc.assets[*only].caption = Some(text.clone());
+        }
         crops
     }
 
     /// Writes each asset's alt text with all its places; one place that is not a logo makes
-    /// the asset need vision.
+    /// the asset need vision. Says in one loss how many small pictures were not listed.
     fn finish(self, out: &mut Out) {
         for (asset, places) in self.assets {
             let a = &mut out.doc.assets[asset];
             a.alt = Some(places.alt());
             a.needs_vision = !places.logo;
+        }
+        if let Some((count, first, last, why)) = self.unlisted {
+            let what = if count == 1 {
+                "1 small picture".to_string()
+            } else {
+                format!("{count} small pictures")
+            };
+            let pages = if first == last {
+                format!("page {first}")
+            } else {
+                format!("pages {first} to {last}")
+            };
+            out.loss(
+                format!("p{first}"),
+                format!("{what} on {pages} not listed: {why}"),
+                LossReason::Limit,
+                Severity::Warning,
+            );
         }
     }
 }

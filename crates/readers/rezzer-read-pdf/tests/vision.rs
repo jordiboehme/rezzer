@@ -1433,3 +1433,164 @@ fn a_note_on_a_turned_page_stays_at_the_page_beside_a_picture() {
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(notes[0].anchor, Some(Anchor("p1".into())));
 }
+
+#[test]
+fn small_pictures_not_listed_are_one_loss() {
+    // 300 pages with 8 pictures each at a small memory limit: the kept bytes run out (and come
+    // back in part as pages are laid out). One loss says how many pictures and on which pages; every picture listed before stays, with
+    // its block.
+    let limits = Limits {
+        max_memory_bytes: 32 << 20,
+        ..Limits::default()
+    };
+    let out = read_opts(&common::small_picture_pages(300, 8), false, limits);
+    let cut: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("not listed"))
+        .collect();
+    assert_eq!(cut.len(), 1, "{:#?}", out.document.losses);
+    assert_eq!(cut[0].why, LossReason::Limit);
+    let what = &cut[0].what;
+    let count: usize = what
+        .split(' ')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{what}"));
+    assert!(what.contains(" small pictures on pages "), "{what}");
+    assert!(
+        what.contains(" not listed: kept text limit reached"),
+        "{what}"
+    );
+    let media: usize = (1..=300)
+        .map(|n| {
+            lines(page(&out, n))
+                .iter()
+                .filter(|l| l.starts_with("[media "))
+                .count()
+        })
+        .sum();
+    assert!(media > 0, "{what}");
+    assert_eq!(media + count, 2_400, "{what}");
+    assert_eq!(out.document.assets.len(), media);
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn code_words_come_from_any_place_of_a_picture() {
+    // A 1-bit picture of 21 by 21 pixels, drawn stretched on page 1 and square on page 2: the
+    // square place looks like a code, so the asset says so.
+    let dict = "/Type /XObject /Subtype /Image /Width 21 /Height 21 /ColorSpace /DeviceGray \
+                /BitsPerComponent 1";
+    let code = vec![(dict, vec![0x5au8; 63])];
+    let draws = vec![
+        vec![(250.0, 400.0, 85.0, 40.0, 0)],
+        vec![(250.0, 300.0, 85.0, 85.0, 0)],
+        vec![],
+    ];
+    let out = read(&picture_pages(&draws, &code));
+    let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
+    assert!(alt.contains("likely a barcode or QR code"), "{alt}");
+}
+
+/// A tagged A4 page with one Figure (alt "A chart of sales.") on marked content 0. With
+/// `on_chart` the marked content is the chart's draw, else a line of text. With `logo` a
+/// second picture stands top left, outside the Figure.
+fn tagged_figure_page(on_chart: bool, logo: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let root = b.reserve();
+    let figure = b.reserve();
+    let page = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let picture = |b: &mut Builder, v: u8| {
+        b.stream(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &[v; 16],
+        )
+    };
+    let l = picture(&mut b, 30);
+    let ch = picture(&mut b, 120);
+    let chart = "q 60 0 0 40 250 400 cm /C Do Q\n";
+    let mut c = String::new();
+    if on_chart {
+        c.push_str("BT /F1 12 Tf 72 700 Td (Sales.) Tj ET\n");
+        c.push_str(&format!("/Figure <</MCID 0>> BDC {chart}EMC\n"));
+    } else {
+        c.push_str("/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (Sales.) Tj ET EMC\n");
+        c.push_str(chart);
+    }
+    if logo {
+        c.push_str("q 60 0 0 40 40 760 cm /L Do Q\n");
+    }
+    let cs = b.stream("", c.as_bytes());
+    let parents = b.add(format!("<< /Nums [0 [{figure} 0 R]] >>"));
+    b.set(
+        figure,
+        format!(
+            "<< /Type /StructElem /S /Figure /P {root} 0 R /Pg {page} 0 R /K 0 \
+             /Alt (A chart of sales.) >>"
+        ),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K [{figure} 0 R] /ParentTree {parents} 0 R >>"),
+    );
+    b.set(
+        page,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /L {l} 0 R /C {ch} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{page} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// The caption of the asset whose place box is `b`.
+fn caption_at(out: &ReadOutcome, b: &str) -> Option<String> {
+    out.document
+        .assets
+        .iter()
+        .find(|a| a.alt.as_deref().is_some_and(|t| t.contains(b)))
+        .unwrap_or_else(|| panic!("no asset at {b}: {:#?}", out.document.assets))
+        .caption
+        .clone()
+}
+
+#[test]
+fn a_figure_caption_goes_to_its_own_picture() {
+    let chart = "box 250, 400 to 310, 440";
+    let logo = "box 40, 760 to 100, 800";
+    // The Figure marks the chart's draw: the chart has the caption, the logo does not.
+    let out = read(&tagged_figure_page(true, true));
+    assert_eq!(
+        caption_at(&out, chart).as_deref(),
+        Some("A chart of sales.")
+    );
+    assert_eq!(caption_at(&out, logo), None);
+    // The Figure marks no picture, and the page has two: neither gets it.
+    let out = read(&tagged_figure_page(false, true));
+    assert_eq!(caption_at(&out, chart), None);
+    assert_eq!(caption_at(&out, logo), None);
+    // The page has only one new small picture: it gets the page's Figure caption.
+    let out = read(&tagged_figure_page(false, false));
+    assert_eq!(
+        caption_at(&out, chart).as_deref(),
+        Some("A chart of sales.")
+    );
+}
