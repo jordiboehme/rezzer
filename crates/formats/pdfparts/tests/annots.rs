@@ -290,6 +290,33 @@ fn links_popups_and_widgets_are_left_out() {
 }
 
 #[test]
+fn widget_boxes_are_listed_by_page() {
+    let pdf = with_annots(|_, _| {
+        let annot = |kind: &str, r: [i64; 4]| {
+            Object::Dictionary(dictionary! {
+                "Type" => "Annot",
+                "Subtype" => kind,
+                "Rect" => r.iter().map(|&v| Object::Integer(v)).collect::<Vec<_>>(),
+            })
+        };
+        Object::Array(vec![
+            annot("Widget", [300, 700, 100, 680]),
+            annot("Link", [0, 0, 10, 10]),
+            annot("Widget", [10, 20, 30, 40]),
+        ])
+    });
+    assert_eq!(
+        pdf.widget_boxes(),
+        [
+            (1, [100.0, 680.0, 300.0, 700.0]),
+            (1, [10.0, 20.0, 30.0, 40.0])
+        ]
+    );
+    let none = with_annots(|_, _| Object::Array(Vec::new()));
+    assert!(none.widget_boxes().is_empty());
+}
+
+#[test]
 fn colours_from_gray_and_cmyk() {
     let pdf = with_annots(|_, _| {
         let c = |c: Vec<Object>| Object::Dictionary(note("x", dictionary! { "C" => c }));

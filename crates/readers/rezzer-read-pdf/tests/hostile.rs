@@ -1292,3 +1292,172 @@ fn an_element_stop_keeps_the_blocks_before_it() {
         cut[0]
     );
 }
+
+#[test]
+fn a_tagged_table_of_40000_rows_is_bounded_through_render() {
+    // 40,000 rows of one cell each under one link: 120,000 structure elements, an 8 MB file.
+    // The table and its render add nothing to the peak of the read. The read itself peaks
+    // while the object layer parses the file; that bound belongs to the object layer.
+    let start = Instant::now();
+    let bytes = common::tagged_lines(40_000, "table", Some("http://x/u"));
+    let out = read(&bytes);
+    let read_peak = common::max_rss_bytes();
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    assert!(!pages.is_empty());
+    drop(pages);
+    drop(md);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let tables: Vec<usize> = page(&out, 1)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows.len()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tables.len(), 1, "{:?}", out.document.losses);
+    // Every row is kept, or a Limit loss on page 1 says the page was cut.
+    if tables[0] < 40_000 {
+        assert!(
+            losses(&out, LossReason::Limit)
+                .iter()
+                .any(|l| l.what.contains("page 1")),
+            "{} rows, {:?}",
+            tables[0],
+            out.document.losses
+        );
+    }
+    let render_peak = common::max_rss_bytes();
+    assert!(
+        render_peak <= read_peak + (16 << 20),
+        "read {} MiB, render {} MiB",
+        read_peak >> 20,
+        render_peak >> 20
+    );
+}
+
+#[test]
+fn a_page_of_many_drawn_lines_is_not_searched_for_tables() {
+    // 30,000 short lines in a lattice, with text in it.
+    let start = Instant::now();
+    let mut c = b"BT /F1 12 Tf 72 700 Td (Before.) Tj ET 0.1 w ".to_vec();
+    for k in 0..15_000 {
+        let (x, y) = (20 + (k % 150) * 3, 20 + (k / 150) * 6);
+        c.extend(format!("{x} {y} m {} {y} l S {x} {y} m {x} {} l S ", x + 3, y + 6).as_bytes());
+    }
+    let out = read(&one_page(&c, nothing));
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("ruled tables on page 1")),
+        "{:?}",
+        out.document.losses
+    );
+    assert!(text(page(&out, 1)).contains("Before."));
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_dense_ruled_grid_is_bounded() {
+    // 400 by 400 lines 3 points apart: 159,201 squares, more than a table may have.
+    let start = Instant::now();
+    let mut c = b"BT /F1 6 Tf 30 30 Td (x) Tj ET 0.1 w ".to_vec();
+    for k in 0..400 {
+        let p = 10 + 3 * k;
+        c.extend(format!("10 {p} m 1207 {p} l S {p} 10 m {p} 1207 l S ").as_bytes());
+    }
+    let out = read(&one_page(&c, nothing));
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.contains("drawn cells on page 1")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_borderless_table_of_40000_rows_is_bounded() {
+    // One tall page of 40,000 rows in two columns of short distinct cells.
+    let start = Instant::now();
+    let n = 40_000usize;
+    let h = (n + 2) * 14;
+    let mut c = b"BT /F1 10 Tf ".to_vec();
+    for i in 0..n {
+        let y = h - (i + 1) * 14;
+        c.extend(
+            format!(
+                "1 0 0 1 72 {y} Tm (row {i}) Tj 1 0 0 1 300 {y} Tm ({}) Tj ",
+                (i * 7919) % 10007
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    assert!(!pages.is_empty());
+    drop(pages);
+    drop(md);
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    let rows: usize = page(&out, 1)
+        .iter()
+        .map(|b| match b {
+            Block::Table { rows, .. } => rows.len(),
+            _ => 0,
+        })
+        .sum();
+    assert!(rows > 1_000, "{rows} rows, {:?}", out.document.losses);
+    if rows < n {
+        assert!(
+            !losses(&out, LossReason::Limit).is_empty(),
+            "{rows} rows, {:?}",
+            out.document.losses
+        );
+    }
+    assert_rss_under_256_mib();
+}

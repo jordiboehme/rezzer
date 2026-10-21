@@ -476,6 +476,7 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32) -> Vec<Run> {
             mcid: f.mcid,
             uri: None,
             line,
+            off_axis: false,
         });
         prev = Some(f);
     }
@@ -582,6 +583,7 @@ fn vertical_runs(
                 mcid: g.mcid,
                 uri: None,
                 line: 0,
+                off_axis: true,
             },
             y,
         ));
@@ -643,6 +645,7 @@ pub(crate) fn runs_of(page: u32, glyphs: &[Gl], text: &Texts<'_>, turn: Turn) ->
             let mut r = line_runs(page, &frags, &ids, line);
             for (run, &i) in r.iter_mut().zip(&ids) {
                 (run.x, run.y) = (frags[i].ox, frags[i].oy);
+                run.off_axis = true;
             }
             runs.extend(r);
             line += 1;

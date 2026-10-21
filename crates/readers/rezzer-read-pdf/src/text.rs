@@ -76,6 +76,9 @@ pub(crate) struct PageItems {
     /// Straight lines and rectangles the page draws, in the frame of the page box (not
     /// turned), for finding ruled tables.
     pub rules: Vec<Rule>,
+    /// The lower left corner of the visible page box in user space: what moves boxes of the
+    /// object layer (links, form fields) into the frame of the runs.
+    pub origin: (f32, f32),
     /// Text that puts no glyphs on the page (render mode 3 or 7), in reading order, on a page
     /// that also shows visible text.
     pub invisible: Vec<Run>,
@@ -664,6 +667,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
         items.images = std::mem::take(&mut dev.images);
         items.rules = std::mem::take(&mut dev.rules);
+        items.origin = (crop.x0 as f32, crop.y0 as f32);
         if dev.rules_cut {
             notes.push(Note::Limit(format!(
                 "drawn lines of page {n} past the first {} are not used to find tables: the \

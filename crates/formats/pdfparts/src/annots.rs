@@ -208,6 +208,40 @@ impl Pdf {
         }
     }
 
+    /// The rectangle of every form widget annotation, with its 1-based page, in page order:
+    /// lower left x and y, upper right x and y, in default user space. A widget that several
+    /// pages share is listed once, on the first.
+    pub fn widget_boxes(&self) -> Vec<(u32, [f32; 4])> {
+        let doc = &self.doc;
+        let mut issues = Vec::new();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut budget = self.text_budget();
+        self.each_annot("form widgets", &mut issues, |page, _, a| {
+            if let Some(r) = reference(a)
+                && !seen.insert(r)
+            {
+                return Ok(());
+            }
+            let Some(ad) = dict(doc, a) else {
+                return Ok(());
+            };
+            if get_name(doc, ad, b"Subtype") != Some(b"Widget") {
+                return Ok(());
+            }
+            let Some([a, b, c, d]) = rect(doc, ad.get(b"Rect").ok()) else {
+                return Ok(());
+            };
+            if !budget.charge(16) {
+                return Err(budget.limit_issue("document", "form widgets"));
+            }
+            out.push((page, [a.min(c), b.min(d), a.max(c), b.max(d)]));
+            Ok(())
+        });
+        self.note(issues);
+        out
+    }
+
     /// Every annotation on every page in page order, except links, popups and form widgets.
     /// An annotation that several pages share is listed once, on the first, and so is an
     /// `/Annots` array that pages share.

@@ -3,20 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! From positioned text runs to blocks: running headers and footers, headings, paragraphs,
-//! lists and tagged tables.
+//! lists, and the tables `tables.rs` finds, placed in reading order.
 //!
 //! A tagged file (`/MarkInfo /Marked true`) gets its roles from the structure tree. An
 //! untagged file gets headings from the font size and lists from their markers. Lines come in
 //! reading order; a paragraph ends at a vertical gap over 1.5 times the line height, at a
 //! change of font size and where the text moves up (the next column).
 
-use std::cell::{Cell as Counter, RefCell};
+use std::cell::Cell as Counter;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
-use rezzer_model::{Anchor, Block, Cell, Inline};
+use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, Severity};
+
+use crate::tables::{self, Planned, Rule, Tables, Unsure};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -42,6 +44,9 @@ pub(crate) struct Run {
     /// The number of the run's line on its page, in reading order. The runs of one line are
     /// next to each other.
     pub line: u32,
+    /// The run reads in another direction than the page's text (margin notes, stamps,
+    /// vertical writing); its `x` and `y` are where it starts.
+    pub off_axis: bool,
 }
 
 /// The target of a URI link, with the most bytes its copy can be written as. The size is
@@ -270,7 +275,7 @@ impl Style {
         let mut chars: HashMap<i32, usize> = HashMap::new();
         for p in pages {
             let all = lines(p.runs);
-            let bands = style.furniture(&all, p.height);
+            let bands = style.furniture(&all, p.height, &[]);
             for (l, b) in all.iter().zip(&bands) {
                 if b.is_some() {
                     continue;
@@ -289,7 +294,7 @@ impl Style {
         let mut sizes: Vec<i32> = Vec::new();
         for p in pages {
             let all = lines(p.runs);
-            let bands = style.furniture(&all, p.height);
+            let bands = style.furniture(&all, p.height, &[]);
             for (l, b) in all.iter().zip(&bands) {
                 if b.is_none() && style.is_heading_size(l) {
                     sizes.push(size_key(l.size));
@@ -305,10 +310,20 @@ impl Style {
     /// The band of each line that is a running header or footer on its page. A header stands
     /// above all text of the page and a footer below it: a repeated line inside the text
     /// stays text.
-    fn furniture(&self, lines: &[Line<'_>], height: Option<f32>) -> Vec<Option<Band>> {
+    /// A line marked in `content` is never a header or footer; an empty `content` marks none.
+    fn furniture(
+        &self,
+        lines: &[Line<'_>],
+        height: Option<f32>,
+        content: &[bool],
+    ) -> Vec<Option<Band>> {
         let found: Vec<Option<Band>> = lines
             .iter()
-            .map(|l| {
+            .enumerate()
+            .map(|(k, l)| {
+                if content.get(k).copied().unwrap_or(false) {
+                    return None;
+                }
                 let key = furniture_key_of(l, height)?;
                 let m = l.middle();
                 self.furniture
@@ -447,69 +462,250 @@ impl LinkRoom {
 pub(crate) struct Laid {
     pub blocks: Vec<Block>,
     pub stop: Option<LimitHit>,
+    /// What the stop cut first.
+    pub cut: Option<Cut>,
+    /// Rows for tagged tables begun on an earlier page: the table and its rows, in order.
+    pub continued: Vec<(usize, Vec<Vec<Cell>>)>,
+    /// For each table in `blocks`, in order: the tagged table it begins, if any.
+    pub tagged: Vec<Option<usize>>,
+    /// What the table detectors left undecided or found broken: words, reason, severity.
+    pub notes: Vec<(String, LossReason, Severity)>,
 }
 
-/// Lays out the runs of one page: running headers first, then the text, then running
-/// footers. Blocks are anchored `p<N>:b<K>`, K counting from 1.
+/// Where a limit cut a page: the first part not kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cut {
+    /// The page's block anchored `p<N>:b<K>` and all after it.
+    Block(usize),
+    /// The page's table anchored `p<N>:t<K>` and all after it.
+    Table(usize),
+    /// Item `item` (from 1) of the list anchored `p<N>:b<block>` and all after it.
+    Item { block: usize, item: usize },
+    /// Row `row` (from 1) of the rows this page adds to a table, and all after it.
+    Row { table: TableRef, row: usize },
+}
+
+/// A table a cut names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableRef {
+    /// The page's table anchored `p<N>:t<K>`.
+    Here(usize),
+    /// The tagged table (an element of the tag tree) begun on an earlier page.
+    Earlier(usize),
+}
+
+/// The runs of a page in reading order, with their slots and their places in the page's
+/// order, which stay as runs are taken out.
+#[derive(Default)]
+pub(crate) struct Flow {
+    pub runs: Vec<Run>,
+    pub slots: Vec<Slot>,
+    pub at: Vec<usize>,
+}
+
+impl Flow {
+    fn new(runs: Vec<Run>, slots: Vec<Slot>) -> Flow {
+        let at = (0..runs.len()).collect();
+        Flow { runs, slots, at }
+    }
+
+    /// Takes out the runs `pick` chooses, in order, with their slots and places.
+    pub(crate) fn take(
+        &mut self,
+        mut pick: impl FnMut(&Run, Slot) -> bool,
+    ) -> Vec<(Run, Slot, usize)> {
+        let mut taken = Vec::new();
+        let mut kept = Flow::default();
+        let all = std::mem::take(self);
+        for ((r, s), a) in all.runs.into_iter().zip(all.slots).zip(all.at) {
+            if pick(&r, s) {
+                taken.push((r, s, a));
+            } else {
+                kept.runs.push(r);
+                kept.slots.push(s);
+                kept.at.push(a);
+            }
+        }
+        *self = kept;
+        taken
+    }
+}
+
+/// What a page draws besides text, for tables without tags, and its size.
+pub(crate) struct Drawn<'a> {
+    pub rules: &'a [Rule],
+    pub images: &'a [[f32; 4]],
+    /// Boxes of the form fields on the page.
+    pub widgets: &'a [[f32; 4]],
+    pub width: f32,
+    /// The most common font size of the file's text.
+    pub body_size: f32,
+}
+
+/// Lays out the runs of one page: running headers first, then the text with its tables in
+/// reading order, then running footers. Blocks are anchored `p<N>:b<K>` and tables
+/// `p<N>:t<K>`, K counting each from 1.
 pub(crate) fn page_blocks(
     page: u32,
     height: Option<f32>,
     runs: Vec<Run>,
+    drawn: &Drawn<'_>,
     cx: &Context<'_>,
 ) -> Laid {
+    let mut built = Built::default();
     if let Err(hit) = cx
         .budget
         .add_elements(u64::try_from(runs.len()).unwrap_or(u64::MAX))
     {
-        return Laid {
-            blocks: Vec::new(),
-            stop: Some(hit),
-        };
+        built.stop_at(hit, cx);
+        return built.laid(Vec::new());
     }
-    let mut built = Built::default();
-    let mut flow: Vec<Run> = Vec::with_capacity(runs.len());
-    let mut headers = Vec::new();
-    let mut footers = Vec::new();
-    let all = lines(&runs);
-    let bands = cx.style.furniture(&all, height);
-    for (l, b) in all.iter().zip(bands) {
+    let mut flow = match cx.tree {
+        Some(tree) => {
+            let (runs, slots) = classified(runs, tree, cx);
+            Flow::new(runs, slots)
+        }
+        None => {
+            let n = runs.len();
+            Flow::new(runs, vec![Slot::Free; n])
+        }
+    };
+    let mut notes = Vec::new();
+    let mut placed: Vec<Placed> = Vec::new();
+    // Tagged tables are taken out before running headers and footers are looked for: the
+    // column titles a long table repeats at the top of each page are table text.
+    let geometry = match cx.tree {
+        Some(tree) => {
+            let (found, fallbacks) = tables::tagged(page, &mut flow, tree, cx.tables);
+            placed.extend(found.into_iter().map(Placed::Table));
+            for (p, what) in cx.tables.take_issues() {
+                notes.push((
+                    format!("{what} (page {p})"),
+                    LossReason::Damaged,
+                    Severity::Warning,
+                ));
+            }
+            let fell_back = !fallbacks.is_empty();
+            notes.extend(
+                fallbacks
+                    .into_iter()
+                    .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+            );
+            fell_back
+        }
+        None => true,
+    };
+    let bands = {
+        let all = lines(&flow.runs);
+        // Text the tag tree places is content, wherever it stands.
+        let content: Vec<bool> = if cx.tree.is_some() {
+            let mut at = 0;
+            all.iter()
+                .map(|l| {
+                    let s = &flow.slots[at..at + l.runs.len()];
+                    at += l.runs.len();
+                    s.iter().any(|s| *s != Slot::Free)
+                })
+                .collect()
+        } else {
+            vec![false; all.len()]
+        };
+        let by_line = cx.style.furniture(&all, height, &content);
+        let mut bands = Vec::with_capacity(flow.runs.len());
+        for (l, b) in all.iter().zip(by_line) {
+            bands.extend(std::iter::repeat_n(b, l.runs.len()));
+        }
+        bands
+    };
+    let mut k = 0;
+    let edges = flow.take(|_, _| {
+        k += 1;
+        bands[k - 1].is_some()
+    });
+    let mut headers: Vec<Run> = Vec::new();
+    let mut footers: Vec<Run> = Vec::new();
+    for ((r, _, _), b) in edges.into_iter().zip(bands.iter().flatten()) {
         match b {
-            Some(Band::Top) => headers.push(l.runs),
-            Some(Band::Bottom) => footers.push(l.runs),
-            None => flow.extend_from_slice(l.runs),
+            Band::Top => headers.push(r),
+            Band::Bottom => footers.push(r),
         }
     }
     // One list of blocks for the whole page, each charged as it is built: a stop keeps the
     // blocks before it.
-    for runs in headers {
-        built.paragraph(runs.iter().collect(), Some("page-header"), cx);
+    for l in lines(&headers) {
+        built.paragraph(l.runs.iter().collect(), Some("page-header"), cx);
     }
-    let tables = claimed_tables(page, &mut flow);
-    match cx.tree {
-        Some(tree) => tagged(&flow, tree, cx, &mut built),
-        None => untagged(&flow, cx, &mut built),
+    if geometry && let Some(height) = height {
+        let found = tables::untagged(page, &mut flow, drawn, height);
+        placed.extend(found.tables.into_iter().map(Placed::Table));
+        placed.extend(found.unsure.into_iter().map(Placed::Unsure));
+        notes.extend(
+            found
+                .skipped
+                .into_iter()
+                .map(|w| (w, LossReason::Limit, Severity::Info)),
+        );
     }
-    for (_, table) in tables {
-        built.push(table, cx);
+    placed.sort_by(|a, b| {
+        let (la, ta) = a.at();
+        let (lb, tb) = b.at();
+        la.cmp(&lb).then(tb.total_cmp(&ta))
+    });
+    let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
+        Some(_) => tagged(runs, slots, cx, built),
+        None => untagged(runs, cx, built),
+    };
+    let mut start = 0;
+    for p in placed {
+        let (at, _) = p.at();
+        let end = start + flow.at[start..].partition_point(|a| *a < at);
+        lay(&flow.runs[start..end], &flow.slots[start..end], &mut built);
+        start = end;
+        match p {
+            Placed::Table(t) => built.table(t, cx),
+            Placed::Unsure(u) => {
+                let what = format!(
+                    "Possible table on page {page} not rebuilt (reason: {})",
+                    u.reason
+                );
+                built.note(&what, cx);
+                notes.push((what, LossReason::Uncertain, Severity::Info));
+            }
+        }
     }
-    for runs in footers {
-        built.paragraph(runs.iter().collect(), Some("page-footer"), cx);
+    lay(&flow.runs[start..], &flow.slots[start..], &mut built);
+    for l in lines(&footers) {
+        built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
     }
-    let mut blocks = built.blocks;
-    for (k, block) in blocks.iter_mut().enumerate() {
-        set_anchor(block, Anchor(format!("p{page}:b{}", k + 1)));
+    let mut laid = built.laid(notes);
+    let (mut b, mut t) = (0, 0);
+    for block in &mut laid.blocks {
+        let anchor = if matches!(block, Block::Table { .. }) {
+            t += 1;
+            format!("p{page}:t{t}")
+        } else {
+            b += 1;
+            format!("p{page}:b{b}")
+        };
+        set_anchor(block, Anchor(anchor));
     }
-    Laid {
-        blocks,
-        stop: built.stop,
-    }
+    laid
 }
 
-/// Tables found without tags, each with the y of its top. The runs a table holds are taken
-/// out of `flow` before paragraphs are built, so no paragraph repeats them. Untagged tables
-/// are not rebuilt yet: this finds none.
-fn claimed_tables(_page: u32, _flow: &mut Vec<Run>) -> Vec<(f32, Block)> {
-    Vec::new()
+/// A table or an undecided region, placed in reading order among the text.
+enum Placed {
+    Table(Planned),
+    Unsure(Unsure),
+}
+
+impl Placed {
+    /// The place in reading order it stands at, and its top.
+    fn at(&self) -> (usize, f32) {
+        match self {
+            Placed::Table(t) => (t.at, t.top),
+            Placed::Unsure(u) => (u.at, u.top),
+        }
+    }
 }
 
 fn set_anchor(block: &mut Block, to: Anchor) {
@@ -539,8 +735,30 @@ fn time_over(budget: &Budget) -> Result<(), LimitHit> {
 struct Built {
     blocks: Vec<Block>,
     stop: Option<LimitHit>,
-    /// The link room before the block now being built, to go back to if it is dropped.
+    /// What is being built now, which a stop cuts.
+    pending: Pending,
+    cut: Option<Cut>,
+    /// Rows for tagged tables begun on earlier pages.
+    continued: Vec<(usize, Vec<Vec<Cell>>)>,
+    /// The tagged table each table block begins, if any.
+    tagged: Vec<Option<usize>>,
+    /// The link room before the block (or the table row) now being built, to go back to if
+    /// it is dropped.
     mark: Option<LinkMark>,
+}
+
+/// What a page's layout is building.
+#[derive(Debug, Clone, Copy, Default)]
+enum Pending {
+    /// A new block.
+    #[default]
+    Block,
+    /// A new table.
+    Table,
+    /// An item that joins the list built last.
+    Item,
+    /// A row of a table.
+    Row(TableRef, usize),
 }
 
 impl Built {
@@ -566,7 +784,121 @@ impl Built {
         if let Some(mark) = self.mark.take() {
             cx.links.restore(mark);
         }
+        let tables = self
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Table { .. }))
+            .count();
+        let others = self.blocks.len() - tables;
+        self.cut = Some(match self.pending {
+            Pending::Block => Cut::Block(others + 1),
+            Pending::Table => Cut::Table(tables + 1),
+            Pending::Item => match self.blocks.last() {
+                Some(Block::List { items, .. }) => Cut::Item {
+                    block: others,
+                    item: items.len() + 1,
+                },
+                _ => Cut::Block(others + 1),
+            },
+            // Nothing of a table of this page is kept before its first row.
+            Pending::Row(TableRef::Here(k), 1) => Cut::Table(k),
+            Pending::Row(table, row) => Cut::Row { table, row },
+        });
         self.stop = Some(hit);
+    }
+
+    /// What was built, with the table detectors' `notes`.
+    fn laid(self, notes: Vec<(String, LossReason, Severity)>) -> Laid {
+        Laid {
+            blocks: self.blocks,
+            stop: self.stop,
+            cut: self.cut,
+            continued: self.continued,
+            tagged: self.tagged,
+            notes,
+        }
+    }
+
+    /// A paragraph that says something about the page, not its text.
+    fn note(&mut self, text: &str, cx: &Context<'_>) {
+        if self.stop.is_some() {
+            return;
+        }
+        self.pending = Pending::Block;
+        if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.charge_text(text.len())) {
+            self.stop_at(hit, cx);
+            return;
+        }
+        self.push(Block::paragraph(vec![Inline::plain(text)]), cx);
+    }
+
+    /// Builds a planned table: a new table on this page, or rows for a tagged table begun on an
+    /// earlier page. The table is one element, charged first; a stop inside it keeps the rows
+    /// built before.
+    fn table(&mut self, plan: Planned, cx: &Context<'_>) {
+        if self.stop.is_some() {
+            return;
+        }
+        let earlier = plan.tagged.filter(|_| plan.continues);
+        let table = match earlier {
+            Some(t) => TableRef::Earlier(t),
+            None => {
+                self.pending = Pending::Table;
+                if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.add_elements(1)) {
+                    self.stop_at(hit, cx);
+                    return;
+                }
+                let here = self
+                    .blocks
+                    .iter()
+                    .filter(|b| matches!(b, Block::Table { .. }))
+                    .count();
+                TableRef::Here(here + 1)
+            }
+        };
+        let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(plan.rows.len());
+        'rows: for (r, row) in plan.rows.into_iter().enumerate() {
+            self.pending = Pending::Row(table, r + 1);
+            self.mark = Some(cx.links.mark());
+            let mut cells = Vec::with_capacity(row.len());
+            for c in row {
+                let inlines = if c.runs.is_empty() {
+                    Vec::new()
+                } else {
+                    let refs: Vec<&Run> = c.runs.iter().collect();
+                    match self.inlines(&refs, cx) {
+                        Some(i) => i,
+                        None => break 'rows,
+                    }
+                };
+                cells.push(Cell {
+                    inlines,
+                    row_span: c.row_span,
+                    col_span: c.col_span,
+                    anchor: None,
+                });
+            }
+            self.mark = None;
+            rows.push(cells);
+        }
+        self.mark = None;
+        if rows.is_empty() {
+            return;
+        }
+        match earlier {
+            Some(t) => self.continued.push((t, rows)),
+            None => {
+                self.tagged.push(plan.tagged);
+                self.blocks.push(Block::Table {
+                    caption: None,
+                    header_rows: plan.header_rows.min(rows.len()),
+                    role: None,
+                    rows,
+                    alignments: Vec::new(),
+                    anchor: None,
+                })
+            }
+        }
     }
 
     /// The inlines of `runs`, or `None` once a limit stopped the page. Each stretch of runs
@@ -594,6 +926,7 @@ impl Built {
     }
 
     fn paragraph(&mut self, runs: Vec<&Run>, role: Option<&str>, cx: &Context<'_>) {
+        self.pending = Pending::Block;
         if let Some(inlines) = self.inlines(&runs, cx) {
             self.push(
                 Block::Paragraph {
@@ -607,6 +940,7 @@ impl Built {
     }
 
     fn heading(&mut self, level: u8, runs: Vec<&Run>, cx: &Context<'_>) {
+        self.pending = Pending::Block;
         if let Some(mut inlines) = self.inlines(&runs, cx) {
             // Heading fonts are mostly bold; the heading says that already.
             for i in &mut inlines {
@@ -640,6 +974,8 @@ impl Built {
         cx: &Context<'_>,
         open: &mut Option<Option<usize>>,
     ) {
+        let joins = *open == Some(list) && matches!(self.blocks.last(), Some(Block::List { .. }));
+        self.pending = if joins { Pending::Item } else { Pending::Block };
         let Some(inlines) = self.inlines(&runs, cx) else {
             return;
         };
@@ -913,7 +1249,7 @@ fn list_gap_ok(prev: &Line<'_>, cur: &Line<'_>) -> bool {
 
 /// Where a run belongs in a tagged file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Slot {
+pub(crate) enum Slot {
     /// Not tagged, or no block role above it.
     Free,
     Heading(u8, usize),
@@ -1034,40 +1370,38 @@ fn classify(tree: &StructTree, start: usize) -> (Slot, Option<usize>) {
     (slot, actual)
 }
 
-/// Lays out a tagged page: runs of one element form one block, in reading order.
-fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
-    let mut slots = Vec::with_capacity(flow.len());
+/// The slot of every run of a tagged page, with the ActualText of an element written into the
+/// first of its runs (the others are dropped). The runs are moved, not copied.
+fn classified(runs: Vec<Run>, tree: &StructTree, cx: &Context<'_>) -> (Vec<Run>, Vec<Slot>) {
+    let mut slots = Vec::with_capacity(runs.len());
+    let mut kept = Vec::with_capacity(runs.len());
     // ActualText of an element replaces the text of all its runs: the first run carries it.
     let mut replaced: HashSet<usize> = HashSet::new();
-    let mut runs: Vec<Option<Run>> = Vec::with_capacity(flow.len());
-    for r in flow {
+    for mut r in runs {
         let (slot, actual) = match r.mcid.and_then(|m| (cx.roles)(m)) {
             Some(e) if e < tree.elems.len() => classify(tree, e),
             _ => (Slot::Free, None),
         };
-        slots.push(slot);
         match actual {
-            Some(a) if !replaced.insert(a) => runs.push(None),
+            Some(a) if !replaced.insert(a) => continue,
             Some(a) => {
-                let mut r = r.clone();
                 let space = if r.text.starts_with(' ') { " " } else { "" };
                 r.text = format!(
                     "{space}{}",
                     tree.elems[a].actual_text.as_deref().unwrap_or("")
                 );
-                runs.push(Some(r));
             }
-            None => runs.push(Some(r.clone())),
+            None => {}
         }
+        slots.push(slot);
+        kept.push(r);
     }
-    // The runs of each table cell on this page.
-    let mut cells: HashMap<usize, Vec<&Run>> = HashMap::new();
-    for (slot, r) in slots.iter().zip(&runs) {
-        if let (Slot::Cell { cell, .. }, Some(r)) = (slot, r) {
-            cells.entry(*cell).or_default().push(r);
-        }
-    }
-    let mut tables_done: HashSet<usize> = HashSet::new();
+    (kept, slots)
+}
+
+/// Lays out runs of a tagged page with their slots: runs of one element form one block, in
+/// reading order. Table cells are laid out as tables before; a cell run left here is text.
+fn tagged(flow: &[Run], slots: &[Slot], cx: &Context<'_>, out: &mut Built) {
     let mut open_list: Option<Option<usize>> = None;
     let mut current: Vec<&Run> = Vec::new();
     let mut current_slot = Slot::Free;
@@ -1106,30 +1440,22 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
                     *open = None;
                     out.paragraph(taken, role, cx);
                 }
-                Slot::Free => {
+                Slot::Free | Slot::Cell { .. } => {
                     *open = None;
                     out.paragraph(taken, None, cx);
                 }
-                Slot::Cell { .. } => {}
             }
         };
-    for (i, slot) in slots.iter().enumerate() {
+    for (i, (r, slot)) in flow.iter().zip(slots).enumerate() {
         if out.stop.is_some() {
             return;
         }
-        let Some(r) = runs[i].as_ref() else { continue };
-        if let Slot::Cell { table, .. } = slot {
-            flush(out, &mut current, current_slot, &mut open_list);
-            current_slot = Slot::Free;
-            if tables_done.insert(*table) {
-                open_list = None;
-                if let Some(t) = tagged_table(tree, *table, &cells, cx, out) {
-                    out.push(t, cx);
-                }
-            }
-            continue;
-        }
-        let same = *slot == current_slot
+        // A cell run left to the text reads like a free run.
+        let slot = match slot {
+            Slot::Cell { .. } => Slot::Free,
+            s => *s,
+        };
+        let same = slot == current_slot
             && match slot {
                 Slot::Free => {
                     let (a, b) = (line_of[current_last], line_of[i]);
@@ -1139,125 +1465,12 @@ fn tagged(flow: &[Run], tree: &StructTree, cx: &Context<'_>, out: &mut Built) {
             };
         if !same {
             flush(out, &mut current, current_slot, &mut open_list);
-            current_slot = *slot;
+            current_slot = slot;
         }
         current.push(r);
         current_last = i;
     }
     flush(out, &mut current, current_slot, &mut open_list);
-}
-
-/// The rows of the tagged tables met so far, each table read once for all its pages.
-#[derive(Default)]
-pub(crate) struct Tables(RefCell<HashMap<usize, Rc<TableRows>>>);
-
-/// The rows of one tagged table: the `TD` and `TH` cells of each row, and the row of each
-/// cell.
-struct TableRows {
-    rows: Vec<Vec<usize>>,
-    row_of: HashMap<usize, usize>,
-}
-
-impl Tables {
-    fn rows(&self, tree: &StructTree, table: usize) -> Option<Rc<TableRows>> {
-        if let Some(found) = self.0.borrow().get(&table) {
-            return Some(found.clone());
-        }
-        let elems = &tree.elems;
-        let mut trs: Vec<usize> = Vec::new();
-        for &c in &elems.get(table)?.children {
-            match elems.get(c).map(|e| e.role.as_str()) {
-                Some("TR") => trs.push(c),
-                Some("THead" | "TBody" | "TFoot") => trs.extend(
-                    elems[c]
-                        .children
-                        .iter()
-                        .copied()
-                        .filter(|&r| elems.get(r).is_some_and(|e| e.role == "TR")),
-                ),
-                _ => {}
-            }
-        }
-        let mut rows = Vec::with_capacity(trs.len());
-        let mut row_of = HashMap::new();
-        for (i, tr) in trs.into_iter().enumerate() {
-            let cells: Vec<usize> = elems[tr]
-                .children
-                .iter()
-                .copied()
-                .filter(|&c| {
-                    elems
-                        .get(c)
-                        .is_some_and(|e| matches!(e.role.as_str(), "TD" | "TH"))
-                })
-                .collect();
-            for &c in &cells {
-                row_of.entry(c).or_insert(i);
-            }
-            rows.push(cells);
-        }
-        let found = Rc::new(TableRows { rows, row_of });
-        self.0.borrow_mut().insert(table, found.clone());
-        Some(found)
-    }
-}
-
-/// A table from the tag tree, with the rows that have text on this page. Header rows are the
-/// leading rows made only of `TH` cells. The work is bounded by the cells on the page.
-fn tagged_table(
-    tree: &StructTree,
-    table: usize,
-    cells: &HashMap<usize, Vec<&Run>>,
-    cx: &Context<'_>,
-    out: &mut Built,
-) -> Option<Block> {
-    let elems = &tree.elems;
-    let index = cx.tables.rows(tree, table)?;
-    let mut touched: Vec<usize> = cells
-        .keys()
-        .filter_map(|c| index.row_of.get(c).copied())
-        .collect();
-    touched.sort_unstable();
-    touched.dedup();
-    let mut built: Vec<Vec<Cell>> = Vec::new();
-    let mut header_rows = 0;
-    let mut in_header = true;
-    for row in touched {
-        let row_cells = &index.rows[row];
-        let mut cells_out = Vec::with_capacity(row_cells.len());
-        for c in row_cells {
-            let e = &elems[*c];
-            let runs = cells.get(c).cloned().unwrap_or_default();
-            let inlines = if runs.is_empty() {
-                Vec::new()
-            } else {
-                out.inlines(&runs, cx)?
-            };
-            cells_out.push(Cell {
-                inlines,
-                row_span: e.row_span.max(1),
-                col_span: e.col_span.max(1),
-                anchor: None,
-            });
-        }
-        if in_header && row_cells.iter().all(|c| elems[*c].role == "TH") {
-            header_rows += 1;
-        } else {
-            in_header = false;
-        }
-        built.push(cells_out);
-    }
-    if built.is_empty() {
-        return None;
-    }
-    Some(Block::Table {
-        caption: None,
-        header_rows,
-        role: None,
-        rows: built,
-        alignments: Vec::new(),
-        anchor: None,
-    })
 }
 
 #[cfg(test)]
@@ -1271,6 +1484,14 @@ mod tests {
     use pdfparts::StructElem;
 
     use super::*;
+
+    const NOTHING_DRAWN: Drawn<'static> = Drawn {
+        rules: &[],
+        images: &[],
+        widgets: &[],
+        width: 595.0,
+        body_size: 10.0,
+    };
 
     fn run(text: &str, line: u32, y: f32, size: f32) -> Run {
         Run {
@@ -1286,6 +1507,7 @@ mod tests {
             mcid: None,
             uri: None,
             line,
+            off_axis: false,
         }
     }
 
@@ -1503,7 +1725,7 @@ mod tests {
             tables: &Tables::default(),
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks(1, Some(842.0), runs, &cx);
+        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
         let texts: Vec<String> = laid
             .blocks
             .iter()
@@ -1536,6 +1758,322 @@ mod tests {
             row_span: 1,
             ..StructElem::default()
         }
+    }
+
+    /// A table of `rows` rows of cells, each `(role, text)`, below a Document element, and
+    /// the cell elements of each row.
+    fn table_tree(rows: &[&[&str]]) -> (StructTree, Vec<Vec<usize>>) {
+        let mut elems = vec![elem("Document", None, &[1]), elem("Table", Some(0), &[])];
+        let mut cells = Vec::new();
+        for row in rows {
+            let tr = elems.len();
+            elems[1].children.push(tr);
+            elems.push(elem("TR", Some(1), &[]));
+            let mut ids = Vec::new();
+            for role in row.iter() {
+                let c = elems.len();
+                elems[tr].children.push(c);
+                elems.push(elem(role, Some(tr), &[]));
+                ids.push(c);
+            }
+            cells.push(ids);
+        }
+        (
+            StructTree {
+                elems,
+                roots: vec![0],
+            },
+            cells,
+        )
+    }
+
+    /// Runs one line each from the top of a page, MCID k on line k.
+    fn tagged_runs(texts: &[&str], top: f32) -> Vec<Run> {
+        texts
+            .iter()
+            .enumerate()
+            .map(|(k, t)| {
+                let mut r = run(t, k as u32, top - 14.0 * k as f32, 10.0);
+                r.mcid = Some(k as u32);
+                r
+            })
+            .collect()
+    }
+
+    fn cell_texts(rows: &[Vec<Cell>]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|r| {
+                r.iter()
+                    .map(|c| rezzer_model::plain_text(&c.inlines))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tagged_table_goes_on_over_pages_without_its_repeated_header() {
+        let (tree, cells) =
+            table_tree(&[&["TH", "TH"], &["TD", "TD"], &["TH", "TH"], &["TD", "TD"]]);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let links = LinkRoom::new(u64::MAX);
+        // Page 1 holds rows 1 and 2, page 2 the header again and row 4.
+        let on = |rows: [usize; 2]| -> Vec<usize> {
+            rows.iter().flat_map(|&r| cells[r].clone()).collect()
+        };
+        let pages = [
+            (on([0, 1]), ["Name", "Age", "Ann", "31"]),
+            (on([2, 3]), ["Name", "Age", "Bob", "42"]),
+        ];
+        let mut laid = Vec::new();
+        for (k, (owners, texts)) in pages.iter().enumerate() {
+            let roles = |m: u32| owners.get(m as usize).copied();
+            let cx = Context {
+                style: &style,
+                tree: Some(&tree),
+                roles: &roles,
+                budget: &budget,
+                tables: &tables,
+                links: &links,
+            };
+            laid.push(page_blocks(
+                k as u32 + 1,
+                Some(842.0),
+                tagged_runs(texts, 700.0),
+                &NOTHING_DRAWN,
+                &cx,
+            ));
+        }
+        match laid[0].blocks.as_slice() {
+            [
+                Block::Table {
+                    header_rows: 1,
+                    rows,
+                    anchor: Some(a),
+                    ..
+                },
+            ] => {
+                assert_eq!(cell_texts(rows), [["Name", "Age"], ["Ann", "31"]]);
+                assert_eq!(a.0, "p1:t1");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(laid[0].tagged, [Some(1)]);
+        assert!(laid[1].blocks.is_empty(), "{:?}", laid[1].blocks);
+        match laid[1].continued.as_slice() {
+            [(1, rows)] => assert_eq!(cell_texts(rows), [["Bob", "42"]]),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn tagged_column_titles_are_not_running_headers() {
+        // Each page has an untagged running header and a tagged table whose column titles
+        // stand at the same height below it.
+        let (tree, cells) = table_tree(&[&["TD"], &["TD"], &["TD"], &["TD"], &["TD"], &["TD"]]);
+        let page_runs = |n: usize| -> Vec<Run> {
+            let mut runs = vec![run("ACME Catalog", 0, 815.0, 9.0)];
+            let mut table = tagged_runs(&["CONTROL NAME", &format!("Row {n}")], 790.0);
+            for r in &mut table {
+                r.line += 1;
+            }
+            runs.extend(table);
+            runs
+        };
+        let all: Vec<Vec<Run>> = (0..3).map(page_runs).collect();
+        let texts: Vec<PageText<'_>> = all
+            .iter()
+            .enumerate()
+            .map(|(k, runs)| PageText {
+                page: k as u32 + 1,
+                height: Some(842.0),
+                runs,
+            })
+            .collect();
+        let style = Style::new(&texts);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let links = LinkRoom::new(u64::MAX);
+        for (k, runs) in all.iter().enumerate() {
+            let owners = [cells[2 * k][0], cells[2 * k + 1][0]];
+            let roles = |m: u32| {
+                m.checked_sub(0)
+                    .and_then(|m| owners.get(m as usize).copied())
+            };
+            let cx = Context {
+                style: &style,
+                tree: Some(&tree),
+                roles: &roles,
+                budget: &budget,
+                tables: &tables,
+                links: &links,
+            };
+            let laid = page_blocks(k as u32 + 1, Some(842.0), runs.clone(), &NOTHING_DRAWN, &cx);
+            let header = laid.blocks.iter().any(|b| {
+                matches!(b, Block::Paragraph { role: Some(r), inlines, .. }
+                    if r == "page-header" && rezzer_model::plain_text(inlines) == "ACME Catalog")
+            });
+            assert!(header, "page {}: {:?}", k + 1, laid.blocks);
+            let titles_as_header = laid.blocks.iter().any(|b| {
+                matches!(b, Block::Paragraph { inlines, .. }
+                    if rezzer_model::plain_text(inlines) == "CONTROL NAME")
+            });
+            assert!(!titles_as_header, "page {}: {:?}", k + 1, laid.blocks);
+        }
+    }
+
+    #[test]
+    fn a_cell_in_two_rows_is_kept_once_and_said() {
+        let (mut tree, cells) = table_tree(&[&["TD"], &["TD"]]);
+        // The second row also names the cell of the first.
+        let (first, second) = (cells[0][0], cells[1][0]);
+        let tr = tree.elems[second].parent.expect("a row");
+        tree.elems[tr].children.insert(0, first);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let owners = [first, second];
+        let roles = |m: u32| owners.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["one", "two"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        match laid.blocks.as_slice() {
+            [Block::Table { rows, .. }] => assert_eq!(cell_texts(rows), [["one"], ["two"]]),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            laid.notes
+                .iter()
+                .any(|(w, why, _)| *why == LossReason::Damaged
+                    && w.contains("1 cell of a tagged table on page 1 stand")),
+            "{:?}",
+            laid.notes
+        );
+    }
+
+    #[test]
+    fn a_tagged_table_mostly_without_text_is_left_as_text() {
+        let (mut tree, cells) = table_tree(&[&["TD", "TD"], &["TD", "TD"]]);
+        // All four cells have marked content on page 1, but only one has text there.
+        for row in &cells {
+            for &c in row {
+                tree.elems[c].mcids = vec![0];
+                tree.elems[c].page = Some(1);
+            }
+        }
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let owners = [cells[0][0]];
+        let roles = |m: u32| owners.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["lonely"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        match laid.blocks.as_slice() {
+            [Block::Paragraph { inlines, .. }] => {
+                assert_eq!(rezzer_model::plain_text(inlines), "lonely")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            laid.notes
+                .iter()
+                .any(|(w, why, _)| *why == LossReason::Uncertain
+                    && w.contains("only 1 of its 4 cells")),
+            "{:?}",
+            laid.notes
+        );
+    }
+
+    #[test]
+    fn a_stop_inside_a_kept_list_names_the_item() {
+        let runs = vec![
+            run("- apples", 0, 700.0, 10.0),
+            run("- pears", 1, 688.0, 10.0),
+            run("- a much longer third item", 2, 676.0, 10.0),
+            run("After the list.", 3, 640.0, 10.0),
+        ];
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_text_bytes: 10,
+            ..rezzer_limits::Limits::default()
+        });
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
+        match laid.blocks.as_slice() {
+            [Block::List { items, .. }] => assert_eq!(items.len(), 2),
+            other => panic!("{other:?}"),
+        }
+        assert!(laid.stop.is_some());
+        assert_eq!(laid.cut, Some(Cut::Item { block: 1, item: 3 }));
+    }
+
+    #[test]
+    fn a_stop_inside_a_table_keeps_its_rows_before() {
+        let (tree, cells) = table_tree(&[&["TD"], &["TD"], &["TD"]]);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_text_bytes: 10,
+            ..rezzer_limits::Limits::default()
+        });
+        let owners: Vec<usize> = cells.iter().map(|r| r[0]).collect();
+        let roles = |m: u32| owners.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &Tables::default(),
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["one", "two", "a much longer third"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        match laid.blocks.as_slice() {
+            [Block::Table { rows, .. }] => assert_eq!(cell_texts(rows), [["one"], ["two"]]),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            laid.cut,
+            Some(Cut::Row {
+                table: TableRef::Here(1),
+                row: 3
+            })
+        );
     }
 
     #[test]
@@ -1600,7 +2138,7 @@ mod tests {
             tables: &tables,
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks(1, Some(842.0), runs, &cx);
+        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
         let text = |inlines: &[Inline]| rezzer_model::plain_text(inlines);
         match laid.blocks.as_slice() {
             [
@@ -1692,9 +2230,11 @@ mod tests {
                 tables: &tables,
                 links: &LinkRoom::new(u64::MAX),
             };
-            let laid = page_blocks(page as u32 + 1, None, runs, &cx);
-            match laid.blocks.as_slice() {
-                [Block::Table { rows: r, .. }] => rows += r.len(),
+            let laid = page_blocks(page as u32 + 1, None, runs, &NOTHING_DRAWN, &cx);
+            // The table starts on page 1; later pages add rows to it.
+            match (laid.blocks.as_slice(), laid.continued.as_slice()) {
+                ([Block::Table { rows: r, .. }], []) if page == 0 => rows += r.len(),
+                ([], [(1, r)]) if page > 0 => rows += r.len(),
                 other => panic!("{other:?}"),
             }
         }

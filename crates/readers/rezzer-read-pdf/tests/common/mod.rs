@@ -167,3 +167,117 @@ pub fn max_rss_bytes() -> u64 {
 pub fn max_rss_bytes() -> u64 {
     0
 }
+
+/// One tall tagged page of `n` lines 40 points apart, `w0.` to `w<n-1>.`, each in its own
+/// structure element: `kind` is `table` (one row of one cell per line), `list` (one item per
+/// line) or `p`. With `uri`, one link with that URI lies over the page.
+pub fn tagged_lines(n: usize, kind: &str, uri: Option<&str>) -> Vec<u8> {
+    let gap = 40usize;
+    let h = (n + 2) * gap;
+    let mut c = b"BT /F1 12 Tf ".to_vec();
+    for i in 0..n {
+        c.extend(
+            format!(
+                "/P <</MCID {i}>> BDC 1 0 0 1 72 {} Tm (w{i}.) Tj EMC ",
+                h - (i + 1) * gap
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let annots = match uri {
+        Some(u) => {
+            let a = b.add(format!(
+                "<< /Type /Annot /Subtype /Link /Rect [0 0 595 {h}] /A << /S /URI /URI ({u}) >> >>"
+            ));
+            format!("/Annots [{a} 0 R]")
+        }
+        None => String::new(),
+    };
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    z.write_all(&c).expect("deflate");
+    let cs = b.stream("/Filter /FlateDecode", &z.finish().expect("deflate"));
+    let root = b.reserve();
+    let doc = b.reserve();
+    let mut leaves = Vec::with_capacity(n);
+    let mut top = Vec::new();
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    match kind {
+        "table" | "list" => {
+            let (group, row, leaf) = if kind == "table" {
+                ("Table", "TR", "TD")
+            } else {
+                ("L", "LI", "LBody")
+            };
+            let parent = b.reserve();
+            let mut rows = Vec::with_capacity(n);
+            for i in 0..n {
+                let r = b.reserve();
+                let l = b.add(format!(
+                    "<< /Type /StructElem /S /{leaf} /P {r} 0 R /Pg {kid} 0 R /K {i} >>"
+                ));
+                b.set(
+                    r,
+                    format!("<< /Type /StructElem /S /{row} /P {parent} 0 R /K [{l} 0 R] >>"),
+                );
+                rows.push(r);
+                leaves.push(l);
+            }
+            b.set(
+                parent,
+                format!(
+                    "<< /Type /StructElem /S /{group} /P {doc} 0 R /K [{}] >>",
+                    refs(&rows)
+                ),
+            );
+            top.push(parent);
+        }
+        _ => {
+            for i in 0..n {
+                let e = b.add(format!(
+                    "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K {i} >>"
+                ));
+                leaves.push(e);
+                top.push(e);
+            }
+        }
+    }
+    b.set(
+        doc,
+        format!(
+            "<< /Type /StructElem /S /Document /P {root} 0 R /K [{}] >>",
+            refs(&top)
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            refs(&leaves)
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> {annots} /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}

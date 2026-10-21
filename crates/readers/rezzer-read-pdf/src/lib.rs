@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! PDF reader: the text of every page in reading order, with headings, lists, tagged tables,
+//! PDF reader: the text of every page in reading order, with headings, lists, tables,
 //! running headers and footers, and the text nobody sees on the page kept apart.
 //!
 //! pdfparts opens the file with its stream guard and gives the object layer: pages, labels
@@ -30,7 +30,8 @@ use rezzer_model::{
     source_info,
 };
 
-use layout::{Context, LinkRoom, PageText, Run, Style, Tables};
+use layout::{Context, Cut, Drawn, LinkRoom, PageText, Run, Style, TableRef};
+use tables::Tables;
 use text::{Caps, Extracted, Fail, Failure, Note, PageItems};
 
 /// Reads PDF files.
@@ -166,6 +167,10 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
     let links = LinkRoom::new(kept_left);
     let last = pages.last().map_or(0, |p| p.number);
     let mut halted = false;
+    // Where each tagged table stands: the index of its page section in the body, of the
+    // table among the section's blocks, and its anchor.
+    let mut placed: HashMap<usize, (usize, usize, String)> = HashMap::new();
+    let widgets = widget_boxes(pdf);
     for info in pages {
         let n = info.number;
         // The section and its marker.
@@ -210,16 +215,76 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             }
             notes(n, &items, out);
             let height = frame_height(info, Some(&items));
-            let laid = layout::page_blocks(n, height, std::mem::take(&mut items.runs), &cx);
-            let kept = laid.blocks.len();
+            let (ox, oy) = items.origin;
+            let fields: Vec<[f32; 4]> = widgets
+                .get(&n)
+                .map(|boxes| {
+                    boxes
+                        .iter()
+                        .map(|b| [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy])
+                        .collect()
+                })
+                .unwrap_or_default();
+            let drawn = Drawn {
+                rules: &items.rules,
+                images: &items.images,
+                widgets: &fields,
+                width: info.width,
+                body_size: style.body_size,
+            };
+            let laid = layout::page_blocks(n, height, std::mem::take(&mut items.runs), &drawn, &cx);
+            for (what, why, severity) in laid.notes {
+                out.loss(format!("p{n}"), what, why, severity);
+            }
+            let section = out.doc.body.len();
+            let first_table = blocks.len();
+            let nothing = laid.blocks.is_empty() && laid.continued.is_empty();
+            for (table, rows) in laid.continued {
+                if let Some((s, b, _)) = placed.get(&table)
+                    && let Some(Block::Section { blocks, .. }) = out.doc.body.get_mut(*s)
+                    && let Some(Block::Table { rows: kept, .. }) = blocks.get_mut(*b)
+                {
+                    kept.extend(rows);
+                }
+            }
+            let mut tagged = laid.tagged.into_iter();
+            for (k, block) in laid.blocks.iter().enumerate() {
+                if let Block::Table { anchor, .. } = block
+                    && let Some(table) = tagged.next().flatten()
+                {
+                    let anchor = anchor.as_ref().map_or_else(String::new, |a| a.0.clone());
+                    placed.insert(table, (section, first_table + k, anchor));
+                }
+            }
             blocks.extend(laid.blocks);
-            // What a stop cuts: the page from the first block not built on, or its hidden text.
+            // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {
-                let what = match (kept, pages_after(n, last)) {
-                    (0, _) => format!("{} not read", pages_from(n, last)),
-                    (k, None) => format!("page {n} from block {} on is not read", k + 1),
-                    (k, Some(later)) => {
-                        format!("page {n} from block {} on and {later} not read", k + 1)
+                let from = (!nothing).then(|| match laid.cut.unwrap_or(Cut::Block(1)) {
+                    Cut::Block(k) => format!("block {k} on"),
+                    Cut::Table(k) => format!("table {k} on"),
+                    Cut::Item { block, item } => format!("item {item} of list p{n}:b{block} on"),
+                    Cut::Row { table, row } => match table {
+                        TableRef::Here(k) => format!("row {row} of table p{n}:t{k} on"),
+                        TableRef::Earlier(t) => match placed.get(&t) {
+                            Some((s, b, anchor)) => {
+                                let before = match out.doc.body.get(*s) {
+                                    Some(Block::Section { blocks, .. }) => match blocks.get(*b) {
+                                        Some(Block::Table { rows, .. }) => rows.len(),
+                                        _ => 0,
+                                    },
+                                    _ => 0,
+                                };
+                                format!("row {} of table {anchor} on", before + 1)
+                            }
+                            None => format!("row {row} of a table begun on an earlier page on"),
+                        },
+                    },
+                });
+                let what = match (from, pages_after(n, last)) {
+                    (None, _) => format!("{} not read", pages_from(n, last)),
+                    (Some(from), None) => format!("page {n} from {from} is not read"),
+                    (Some(from), Some(later)) => {
+                        format!("page {n} from {from} and {later} not read")
                     }
                 };
                 (hit, what)
@@ -463,6 +528,15 @@ fn invisible(
         blocks,
         anchor: None,
     }))
+}
+
+/// The boxes of the form fields of each page, in user space.
+fn widget_boxes(pdf: &Pdf) -> HashMap<u32, Vec<[f32; 4]>> {
+    let mut out: HashMap<u32, Vec<[f32; 4]>> = HashMap::new();
+    for (page, b) in pdf.widget_boxes() {
+        out.entry(page).or_default().push(b);
+    }
+    out
 }
 
 /// The issues pdfparts found, as losses. `page 3` becomes the page anchor `p3`.
