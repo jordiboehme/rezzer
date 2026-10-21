@@ -3965,7 +3965,11 @@ fn linked_words(tall: bool) -> Vec<u8> {
         for c in 0..50 {
             let x = 10 + 11 * c;
             content += &format!("1 0 0 1 {x} {y} Tm (ab) Tj ");
-            link(&mut b, format!("{x} {} {} {}", y - 1, x + 7, y + 5), r * 50 + c + 1);
+            link(
+                &mut b,
+                format!("{x} {} {} {}", y - 1, x + 7, y + 5),
+                r * 50 + c + 1,
+            );
         }
     }
     content += "ET\n";
@@ -3999,8 +4003,16 @@ fn links_are_matched_per_glyph_within_bounds() {
         out.completeness,
         &rezzer_render::RenderOptions::default(),
     );
-    assert!(md.contains("[ab](https://example.org/1)"), "{}", &md[..2000]);
-    assert!(md.contains("[ab](https://example.org/4000)"), "{}", &md[..2000]);
+    assert!(
+        md.contains("[ab](https://example.org/1)"),
+        "{}",
+        &md[..2000]
+    );
+    assert!(
+        md.contains("[ab](https://example.org/4000)"),
+        "{}",
+        &md[..2000]
+    );
     assert!(
         !out.document
             .losses
