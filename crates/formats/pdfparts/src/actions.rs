@@ -108,6 +108,53 @@ impl Chains {
 
 const SCRIPTS: &str = "scripts";
 
+/// The script text the document holds: what is left of [`Limits::max_script_total_bytes`],
+/// each script object's text once, and the scripts left without their text.
+pub(crate) struct ScriptRoom {
+    left: u64,
+    texts: HashMap<ObjectId, Option<Arc<str>>>,
+    refused: usize,
+    first: Option<String>,
+}
+
+impl ScriptRoom {
+    pub(crate) fn new(total: u64) -> ScriptRoom {
+        ScriptRoom {
+            left: total,
+            texts: HashMap::new(),
+            refused: 0,
+            first: None,
+        }
+    }
+
+    /// Takes `n` bytes; when they do not fit, counts the script `what` as left without text.
+    fn reserve(&mut self, n: u64, what: impl FnOnce() -> String) -> bool {
+        if n <= self.left {
+            self.left -= n;
+            return true;
+        }
+        self.refused += 1;
+        self.first.get_or_insert_with(what);
+        false
+    }
+
+    /// The one issue for the scripts left without their text, if any.
+    pub(crate) fn issue(&self, total: u64) -> Option<Issue> {
+        let first = self.first.as_ref()?;
+        let n = self.refused;
+        Some(Issue::new(
+            SCRIPTS,
+            IssueKind::Limit,
+            format!(
+                "{n} {} listed without {} text: the scripts of the document together take more \
+                 than the {total} bytes of script text it may hold (the first is {first})",
+                if n == 1 { "script is" } else { "scripts are" },
+                if n == 1 { "its" } else { "their" },
+            ),
+        ))
+    }
+}
+
 const CHAIN_LIMIT: &str =
     "an action chain is longer or deeper than the limits allow; the rest is not read";
 
@@ -160,8 +207,8 @@ impl Pdf {
     /// Every script and action of the document, in this order: document-level scripts, the
     /// open action, document actions, page actions in page order, field actions in field
     /// order, then the actions of every other annotation (links, widgets outside the form,
-    /// screens) in page order. Plain jumps inside the document are left out, and so are link
-    /// addresses, which [`Pdf::links`] lists. Read on the first call and kept.
+    /// screens) in page order. Plain jumps inside the document are left out, and so is the
+    /// address a link starts with, which [`Pdf::links`] lists. Read on the first call and kept.
     pub fn scripts(&self) -> &[Script] {
         self.scripts.get_or_init(|| self.read_scripts())
     }
@@ -293,7 +340,13 @@ impl Pdf {
                     entries.push((format!("annotation page {page} {}", event_word(key)), v));
                 }
             }
-            for (trigger, action) in entries {
+            for (k, (trigger, action)) in entries.into_iter().enumerate() {
+                // The address a link starts with is listed by `links()`; later ones in its
+                // chain are listed here.
+                let mut skip_uri = link
+                    && k == 0
+                    && ad.has(b"A")
+                    && dict(doc, action).and_then(|d| get_name(doc, d, b"S")) == Some(b"URI");
                 let found = self.action_chain(action, budget, chains, &mut found_issues);
                 chains
                     .broken
@@ -301,8 +354,11 @@ impl Pdf {
                 let Ok(found) = found else {
                     return Err(budget.limit_issue(SCRIPTS, "scripts"));
                 };
-                // Link addresses are listed by `links()`.
-                for a in found.into_iter().filter(|a| !(link && a.kind == "uri")) {
+                for a in found {
+                    if skip_uri && a.kind == "uri" {
+                        skip_uri = false;
+                        continue;
+                    }
                     let s = Script {
                         trigger: trigger.clone(),
                         name: None,
@@ -537,6 +593,17 @@ impl Pdf {
         {
             return Ok(t.clone());
         }
+        // Read once for every reader of the document, and its text held once.
+        let known = id.and_then(|id| {
+            self.script_room
+                .lock()
+                .ok()
+                .and_then(|room| room.texts.get(&id).cloned())
+        });
+        if let (Some(id), Some(text)) = (id, known) {
+            shared.scripts.insert(id, text.clone());
+            return Ok(text);
+        }
         let text: Option<Arc<str>> = self
             .read_script(id, obj, budget, location, issues)?
             .map(Into::into);
@@ -545,6 +612,9 @@ impl Pdf {
         }
         if let Some(id) = id {
             shared.scripts.insert(id, text.clone());
+            if let Ok(mut room) = self.script_room.lock() {
+                room.texts.insert(id, text.clone());
+            }
         }
         Ok(text)
     }
@@ -582,7 +652,15 @@ impl Pdf {
                     return Ok(None);
                 }
                 // The string itself is an object already charged; the text is the copy.
+                if !self.reserve_script(s.len() as u64, &named) {
+                    return Ok(None);
+                }
                 let text = text_string(s);
+                let grown = (text.len() as u64).saturating_sub(s.len() as u64);
+                if grown > 0 && !self.reserve_script(grown, &named) {
+                    self.refund_script(s.len() as u64);
+                    return Ok(None);
+                }
                 if !budget.take(text.len() as u64) {
                     return Err(Spent);
                 }
@@ -613,6 +691,11 @@ impl Pdf {
                     issues.push(too_long(format!("{} unpacks to {n} bytes", named())));
                     return Ok(None);
                 }
+                // Room for the text it may give: the measured size, else the cap.
+                let room = size.unwrap_or(cap);
+                if !self.reserve_script(room, &named) {
+                    return Ok(None);
+                }
                 if !budget.take(size.unwrap_or(stream.content.len() as u64)) {
                     return Err(Spent);
                 }
@@ -631,26 +714,56 @@ impl Pdf {
                         // The unpacked bytes were charged; the text is a second copy only when
                         // the script is not plain ASCII.
                         let (text, copied) = text_string_owned(bytes);
-                        if copied && !budget.take(text.len() as u64) {
+                        let len = text.len() as u64;
+                        if len > room {
+                            if !self.reserve_script(len - room, &named) {
+                                self.refund_script(room);
+                                return Ok(None);
+                            }
+                        } else {
+                            self.refund_script(room - len);
+                        }
+                        if copied && !budget.take(len) {
                             return Err(Spent);
                         }
                         Ok(Some(text))
                     }
                     (Measure::Over(Cap::Stream), _) => {
+                        self.refund_script(room);
                         issues.push(too_long(format!("{} unpacks to more bytes", named())));
                         Ok(None)
                     }
                     (Measure::Over(over), _) => {
+                        self.refund_script(room);
                         issues.push(fail(
                             IssueKind::Limit,
                             format!("a script stream {}", cap_words(over, &self.limits)),
                         ));
                         Ok(None)
                     }
-                    _ => Ok(None),
+                    _ => {
+                        self.refund_script(room);
+                        Ok(None)
+                    }
                 }
             }
             _ => Ok(None),
+        }
+    }
+
+    /// Takes `n` bytes of the document's script text room; `false`, and the script `named`
+    /// counted as left without its text, when they do not fit.
+    fn reserve_script(&self, n: u64, named: &dyn Fn() -> String) -> bool {
+        match self.script_room.lock() {
+            Ok(mut room) => room.reserve(n, named),
+            Err(_) => false,
+        }
+    }
+
+    /// Gives back `n` bytes taken for a text that turned out shorter or was not read.
+    fn refund_script(&self, n: u64) {
+        if let Ok(mut room) = self.script_room.lock() {
+            room.left = room.left.saturating_add(n);
         }
     }
 }

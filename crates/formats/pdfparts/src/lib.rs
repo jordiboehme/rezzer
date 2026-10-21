@@ -77,6 +77,9 @@ pub struct Limits {
     pub max_object_bytes: u64,
     /// Most bytes one script (`/JS`) may have, packed or unpacked: a longer one is not read.
     pub max_script_bytes: u64,
+    /// Most bytes of script text all scripts of the document may hold together, each script
+    /// object counted once: a script past it is listed without its text.
+    pub max_script_total_bytes: u64,
 }
 
 impl Default for Limits {
@@ -90,6 +93,7 @@ impl Default for Limits {
             max_revisions: 64,
             max_object_bytes: 1 << 30,
             max_script_bytes: 4 << 20,
+            max_script_total_bytes: 16 << 20,
         }
     }
 }
@@ -331,6 +335,8 @@ pub struct Pdf {
     /// What all readers together may still copy out of the document: the object budget left
     /// after open.
     text_left: AtomicU64,
+    /// The script text all readers hold, each script object read once.
+    script_room: Mutex<actions::ScriptRoom>,
 }
 
 /// Issues in the order found, each once.
@@ -442,6 +448,7 @@ impl Pdf {
             signatures: OnceLock::new(),
             revisions: OnceLock::new(),
             text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(charged)),
+            script_room: Mutex::new(actions::ScriptRoom::new(limits.max_script_total_bytes)),
         })
     }
 
@@ -509,10 +516,15 @@ impl Pdf {
 
     /// Every issue found so far: while opening, and by the readers called since.
     pub fn issues(&self) -> Vec<Issue> {
-        self.issues
+        let mut list = self
+            .issues
             .lock()
             .map(|i| i.list.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Ok(room) = self.script_room.lock() {
+            list.extend(room.issue(self.limits.max_script_total_bytes));
+        }
+        list
     }
 
     /// Number of pages found in the page tree.

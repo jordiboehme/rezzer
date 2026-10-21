@@ -27,6 +27,8 @@ pub(crate) fn limits(budget: &Budget) -> pdfparts::Limits {
         // A script is held unpacked and as text while it is read: a 64th of the memory limit,
         // at most 4 MiB, keeps that small beside the object budget.
         max_script_bytes: (lim.max_memory_bytes / 64).min(4 << 20),
+        // All script text together: a 64th of the memory limit, as the form logic's share.
+        max_script_total_bytes: lim.max_memory_bytes / 64,
         ..pdfparts::Limits::default()
     }
 }
