@@ -269,6 +269,34 @@ pub fn measure_stream(
     }
 }
 
+/// Unpacks one stream's data `raw` through the filters named `filters` (with `parms`, as for
+/// [`measure_stream`]) under the guard's caps, and hands the output to `each` piece by piece,
+/// keeping none of it, so a reader can scan a large stream with a small buffer. `each`
+/// returns false to stop. `Err` says which cap the stream passes, or that it was stopped.
+pub fn read_stream(
+    raw: &[u8],
+    filters: &[&[u8]],
+    parms: &[FilterParms],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+    each: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u64, String> {
+    let chain: Vec<guard::Filter> = filters
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let early = parms.get(i).copied().unwrap_or_default().early_change;
+            guard::Filter::from_name(name, early)
+        })
+        .collect();
+    match guard::each_piece(raw, &chain, limits, budget, stop, each) {
+        guard::Measure::Fits(n) => Ok(n),
+        guard::Measure::Over(cap) => Err(format!("it {}", guard::cap_words(cap, limits))),
+        guard::Measure::Stopped => Err("stopped".into()),
+    }
+}
+
 /// An open PDF file.
 pub struct Pdf {
     doc: Document,
@@ -373,11 +401,11 @@ impl Pdf {
             }
         }
         // A stream that stops with a decoding error keeps only what the guard measured.
-        for id in &verdict.broken {
+        for (id, &measured) in &verdict.broken {
             let Some(lopdf::Object::Stream(mut stream)) = doc.objects.remove(id) else {
                 continue;
             };
-            guard::cut_to_measured(&doc, &mut stream, limits, stop);
+            guard::cut_to_measured(&doc, &mut stream, measured, limits, stop);
             doc.objects.insert(*id, lopdf::Object::Stream(stream));
         }
         let (canonical, charged) = parse::write_canonical(&mut doc, limits, built.charged)?;

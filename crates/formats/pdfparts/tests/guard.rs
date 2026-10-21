@@ -609,3 +609,45 @@ fn the_canonical_copy_of_a_damaged_stream_holds_what_was_measured() {
     .unwrap();
     assert_eq!(unpacked, text);
 }
+
+#[test]
+fn a_damaged_stream_with_a_predictor_keeps_its_whole_rows() {
+    // Two whole PNG rows (filter byte 0, then four bytes), part of a third, then damage.
+    let rows = b"\x00ABCD\x00EFGH\x00IJ";
+    let packed = text_then_far_copy(rows);
+    let bytes = save(|doc, pages| {
+        let content = doc.add_object(
+            Stream::new(
+                dictionary! {
+                    "Filter" => "FlateDecode",
+                    "DecodeParms" => dictionary! { "Predictor" => 12, "Columns" => 4 },
+                },
+                packed,
+            )
+            .with_compression(false),
+        );
+        vec![page(doc, pages, dictionary! { "Contents" => content }).into()]
+    });
+    let pdf = open(&bytes).unwrap();
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    let content = doc
+        .objects
+        .values()
+        .find_map(|o| match o {
+            Object::Stream(s) if s.dict.get(b"Filter").is_ok() => Some(s),
+            _ => None,
+        })
+        .expect("the content stream keeps its rows");
+    assert!(
+        content.dict.get(b"DecodeParms").is_err(),
+        "{:?}",
+        content.dict
+    );
+    let mut unpacked = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::ZlibDecoder::new(&content.content[..]),
+        &mut unpacked,
+    )
+    .unwrap();
+    assert_eq!(unpacked, b"ABCDEFGH");
+}

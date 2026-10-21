@@ -23,6 +23,27 @@ fn int(d: &Dictionary, key: &[u8], default: i64) -> i64 {
         .unwrap_or(default)
 }
 
+/// `data` cut to whole rows of the predictor named in `parms`: a row cut off by damage
+/// cannot be undone.
+pub(crate) fn whole_rows(mut data: Vec<u8>, parms: Option<&Dictionary>) -> Vec<u8> {
+    let Some(p) = parms else {
+        return data;
+    };
+    let predictor = int(p, b"Predictor", 1);
+    let colors = int(p, b"Colors", 1).clamp(1, 32) as usize;
+    let bpc = int(p, b"BitsPerComponent", 8).clamp(1, 16) as usize;
+    let columns = int(p, b"Columns", 1).clamp(1, 1 << 24) as usize;
+    let row = (colors * bpc * columns).div_ceil(8);
+    // PNG rows start with a byte that names their filter.
+    let stride = match predictor {
+        10..=15 => row + 1,
+        2 => row,
+        _ => return data,
+    };
+    data.truncate(data.len() - data.len() % stride.max(1));
+    data
+}
+
 /// Undoes the predictor named in `parms`, if any.
 pub(crate) fn unpredict(data: Vec<u8>, parms: Option<&Dictionary>) -> Vec<u8> {
     let Some(p) = parms else {

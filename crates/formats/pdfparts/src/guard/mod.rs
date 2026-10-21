@@ -18,7 +18,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use decode::Cap;
 pub(crate) use decode::{
-    Filter, Measure, cap_words, filters_with, measure_checked, measure_health, repack,
+    Filter, Measure, cap_words, each_piece, filters_with, measure_checked, measure_health, repack,
     stream_filters, unpack,
 };
 
@@ -49,7 +49,7 @@ pub(crate) struct Verdict {
     pub sizes: HashMap<ObjectId, u64>,
     /// Streams a Flate or LZW layer stops in with a decoding error. Another decoder may go on
     /// past the error, so the canonical copy holds only what was measured.
-    pub broken: HashSet<ObjectId>,
+    pub broken: HashMap<ObjectId, u64>,
 }
 
 /// Measures every stream of the document once, then refuses each page that reaches a stream
@@ -118,7 +118,7 @@ pub(crate) fn measure(
     }
     if !broken.is_empty() {
         damaged(doc, pages, &broken, limits, stop, issues)?;
-        verdict.broken = broken.keys().copied().collect();
+        verdict.broken = broken.clone();
     }
     if !bad_sums.is_empty() {
         wrong_sums(doc, pages, &bad_sums, limits, stop, issues)?;
@@ -354,24 +354,53 @@ fn reach(
     Ok(found)
 }
 
-/// The canonical form of a stream a decoding error stops in: the data the guard measured,
-/// packed again with Flate as it is decoded, so no parser can unpack more than was measured
-/// and the copy takes about what the stream took. A chain with a filter whose output stays
-/// encoded (an image codec), or with a predictor, cannot be cut so, and the stream is emptied
-/// instead, as a refused one.
+/// The most a stream with a predictor may unpack to for its measured part to be kept: the
+/// predictor is undone on the whole data at once.
+const PREDICTED_MAX: u64 = 16 << 20;
+
+/// The canonical form of a stream a decoding error stops in: the data the guard measured
+/// (`measured` bytes), packed again with Flate, so no parser can unpack more than was measured
+/// and the copy takes about what the stream took. A stream with a predictor keeps its whole
+/// rows, the predictor undone, when it unpacks to at most [`PREDICTED_MAX`]. A chain with a
+/// filter whose output stays encoded (an image codec), or a larger predicted stream, is
+/// emptied instead, as a refused one; its Damaged issue says it.
 pub(crate) fn cut_to_measured(
     doc: &Document,
     stream: &mut lopdf::Stream,
+    measured: u64,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) {
     let filters = stream_filters(doc, &stream.dict);
-    let predictor = crate::parse::last_parms(&stream.dict)
+    let parms = crate::parse::last_parms(&stream.dict).cloned();
+    let predictor = parms
+        .as_ref()
         .and_then(|p| p.get(b"Predictor").ok())
         .and_then(|o| o.as_i64().ok())
-        .is_some_and(|p| p > 1);
-    let packed = if predictor {
-        None
+        .unwrap_or(1);
+    let packed = if predictor > 1 {
+        if measured > PREDICTED_MAX {
+            None
+        } else {
+            match unpack(
+                &stream.content,
+                &filters,
+                limits,
+                limits.max_total_bytes,
+                stop,
+            ) {
+                (Measure::Fits(_), Some(data)) => {
+                    let data = crate::parse::whole_rows(data, parms.as_ref());
+                    let data = crate::parse::unpredict(data, parms.as_ref());
+                    let mut z =
+                        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+                    std::io::Write::write_all(&mut z, &data)
+                        .ok()
+                        .and_then(|()| z.finish().ok())
+                }
+                _ => None,
+            }
+        }
     } else {
         match repack(
             &stream.content,

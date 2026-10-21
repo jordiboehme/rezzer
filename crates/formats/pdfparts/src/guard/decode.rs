@@ -98,7 +98,7 @@ struct Shared<'a> {
     next_check: Cell<u64>,
     stop: &'a dyn Fn() -> bool,
     /// The final output, when the caller wants the data and not only its size.
-    kept: RefCell<Keep>,
+    kept: RefCell<Keep<'a>>,
     /// A Flate or LZW layer stopped with a decoding error: what follows it is lost.
     broke: Cell<bool>,
     /// A zlib layer unpacked all its data, but its Adler-32 checksum does not match it.
@@ -139,11 +139,11 @@ impl Shared<'_> {
 }
 
 /// The end of every chain: counts the final output and keeps none.
-struct Sink<'s> {
-    shared: &'s Shared<'s>,
+struct Sink<'s, 'a> {
+    shared: &'s Shared<'a>,
 }
 
-impl Write for Sink<'_> {
+impl Write for Sink<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s = self.shared;
         let n = s.count.get().saturating_add(buf.len() as u64);
@@ -153,6 +153,12 @@ impl Write for Sink<'_> {
             Keep::Nothing => {}
             Keep::Plain(kept) => kept.extend_from_slice(buf),
             Keep::Packed(z) => z.write_all(buf)?,
+            Keep::Each(each) => {
+                if !each(buf) {
+                    s.stopped.set(true);
+                    return Err(io::Error::other("stopped by the reader of the data"));
+                }
+            }
         }
         Ok(buf.len())
     }
@@ -163,17 +169,19 @@ impl Write for Sink<'_> {
 }
 
 /// What a decode keeps of its final output.
-enum Keep {
+enum Keep<'a> {
     Nothing,
     Plain(Vec<u8>),
     /// Packed again with Flate as it comes, so it takes about what the stream took.
     Packed(flate2::write::ZlibEncoder<Vec<u8>>),
+    /// Handed to a reader piece by piece and not kept; it returns false to stop.
+    Each(&'a mut dyn FnMut(&[u8]) -> bool),
 }
 
-impl Keep {
+impl Keep<'_> {
     fn into_data(self) -> Option<Vec<u8>> {
         match self {
-            Keep::Nothing => None,
+            Keep::Nothing | Keep::Each(_) => None,
             Keep::Plain(v) => Some(v),
             Keep::Packed(z) => z.finish().ok(),
         }
@@ -181,13 +189,13 @@ impl Keep {
 }
 
 /// Counts the output of one layer before it goes to the next.
-struct Meter<'s, W: Write> {
+struct Meter<'s, 'a, W: Write> {
     next: W,
     count: u64,
-    shared: &'s Shared<'s>,
+    shared: &'s Shared<'a>,
 }
 
-impl<W: Write> Write for Meter<'_, W> {
+impl<W: Write> Write for Meter<'_, '_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.count = self.count.saturating_add(buf.len() as u64);
         self.shared.charge(self.count, false, buf.len())?;
@@ -201,16 +209,16 @@ impl<W: Write> Write for Meter<'_, W> {
 }
 
 /// LZW (ISO 32000-1 7.4.4) as a writer stage.
-struct LzwStage<'s, W: Write> {
+struct LzwStage<'s, 'a, W: Write> {
     decoder: weezl::decode::Decoder,
     next: W,
     buf: Box<[u8]>,
     done: bool,
-    shared: &'s Shared<'s>,
+    shared: &'s Shared<'a>,
 }
 
-impl<'s, W: Write> LzwStage<'s, W> {
-    fn new(next: W, early_change: bool, shared: &'s Shared<'s>) -> Self {
+impl<'s, 'a, W: Write> LzwStage<'s, 'a, W> {
+    fn new(next: W, early_change: bool, shared: &'s Shared<'a>) -> Self {
         use weezl::BitOrder;
         let decoder = if early_change {
             weezl::decode::Decoder::with_tiff_size_switch(BitOrder::Msb, 8)
@@ -246,7 +254,7 @@ impl<'s, W: Write> LzwStage<'s, W> {
     }
 }
 
-impl<W: Write> Write for LzwStage<'_, W> {
+impl<W: Write> Write for LzwStage<'_, '_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.pump(buf)?;
         Ok(buf.len())
@@ -396,7 +404,7 @@ const PROBE_MAX: usize = 64 * 1024;
 /// inflated as raw deflate, as lopdf does when the header is broken: the data then ends at the
 /// end of the last block, and the Adler-32 checksum after it is not checked. A checksum that
 /// does not match the data is no damage: every byte was unpacked.
-struct FlateStage<'s, W: Write> {
+struct FlateStage<'s, 'a, W: Write> {
     inflater: flate2::Decompress,
     /// Header bytes still to skip.
     header: usize,
@@ -412,11 +420,11 @@ struct FlateStage<'s, W: Write> {
     sum: Vec<u8>,
     /// The Adler-32 of the output so far.
     adler: adler2::Adler32,
-    shared: &'s Shared<'s>,
+    shared: &'s Shared<'a>,
 }
 
-impl<'s, W: Write> FlateStage<'s, W> {
-    fn new(next: W, shared: &'s Shared<'s>) -> Self {
+impl<'s, 'a, W: Write> FlateStage<'s, 'a, W> {
+    fn new(next: W, shared: &'s Shared<'a>) -> Self {
         FlateStage {
             inflater: flate2::Decompress::new(false),
             header: 2,
@@ -488,7 +496,7 @@ impl<'s, W: Write> FlateStage<'s, W> {
     }
 }
 
-impl<W: Write> Write for FlateStage<'_, W> {
+impl<W: Write> Write for FlateStage<'_, '_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if let Some(taken) = self.probe.as_mut().filter(|_| !self.done) {
             *taken += buf.len();
@@ -539,7 +547,7 @@ impl<W: Write> Write for Pass<W> {
     }
 }
 
-fn chain<'s>(filters: &[Filter], shared: &'s Shared<'s>) -> Box<dyn Write + 's> {
+fn chain<'s, 'a>(filters: &[Filter], shared: &'s Shared<'a>) -> Box<dyn Write + 's> {
     let mut w: Box<dyn Write + 's> = Box::new(Sink { shared });
     for (i, f) in filters.iter().enumerate().rev() {
         // Every layer but the last writes through a meter.
@@ -579,7 +587,7 @@ fn chain<'s>(filters: &[Filter], shared: &'s Shared<'s>) -> Box<dyn Write + 's> 
 
 /// Feeds `raw` through the chain. Decoding errors end a stage quietly, as in lopdf; only the
 /// sink (over a cap, or stopped) ends the run early.
-fn run<'s>(raw: &[u8], filters: &[Filter], shared: &'s Shared<'s>) {
+fn run<'s, 'a>(raw: &[u8], filters: &[Filter], shared: &'s Shared<'a>) {
     let mut w = chain(filters, shared);
     for piece in raw.chunks(CHUNK) {
         if shared.poll(piece.len()).is_err() || w.write_all(piece).is_err() {
@@ -611,7 +619,7 @@ pub(crate) fn measure_checked(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> (Measure, bool) {
-    let (m, _, health) = decode(raw, filters, limits, budget, stop, KeepAs::Nothing);
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, Keep::Nothing);
     (m, health.broke)
 }
 
@@ -632,7 +640,7 @@ pub(crate) fn measure_health(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> (Measure, Health) {
-    let (m, _, health) = decode(raw, filters, limits, budget, stop, KeepAs::Nothing);
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, Keep::Nothing);
     (m, health)
 }
 
@@ -648,7 +656,7 @@ pub(crate) fn unpack(
     if filters.contains(&Filter::Opaque) {
         return (Measure::Fits(0), None);
     }
-    let (m, data, _) = decode(raw, filters, limits, budget, stop, KeepAs::Plain);
+    let (m, data, _) = decode(raw, filters, limits, budget, stop, Keep::Plain(Vec::new()));
     (m, data)
 }
 
@@ -665,25 +673,32 @@ pub(crate) fn repack(
     if filters.contains(&Filter::Opaque) {
         return (Measure::Fits(0), None);
     }
-    let (m, data, _) = decode(raw, filters, limits, budget, stop, KeepAs::Packed);
+    let packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let (m, data, _) = decode(raw, filters, limits, budget, stop, Keep::Packed(packer));
     (m, data)
 }
 
-/// What a decode keeps.
-#[derive(Clone, Copy)]
-enum KeepAs {
-    Nothing,
-    Plain,
-    Packed,
-}
-
-fn decode(
+/// Decodes `raw` through `filters` under the same caps and hands the output to `each` piece
+/// by piece, keeping none of it. `each` returns false to stop; the measure is then
+/// [`Measure::Stopped`].
+pub(crate) fn each_piece<'a>(
     raw: &[u8],
     filters: &[Filter],
     limits: &Limits,
     budget: u64,
-    stop: &dyn Fn() -> bool,
-    keep: KeepAs,
+    stop: &'a dyn Fn() -> bool,
+    each: &'a mut dyn FnMut(&[u8]) -> bool,
+) -> Measure {
+    decode(raw, filters, limits, budget, stop, Keep::Each(each)).0
+}
+
+fn decode<'a>(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &'a dyn Fn() -> bool,
+    keep: Keep<'a>,
 ) -> (Measure, Option<Vec<u8>>, Health) {
     // The chain ends at the first filter whose output stays encoded.
     let end = filters
@@ -704,14 +719,7 @@ fn decode(
         moved: Cell::new(0),
         next_check: Cell::new(STOP_EVERY),
         stop,
-        kept: RefCell::new(match keep {
-            KeepAs::Nothing => Keep::Nothing,
-            KeepAs::Plain => Keep::Plain(Vec::new()),
-            KeepAs::Packed => Keep::Packed(flate2::write::ZlibEncoder::new(
-                Vec::new(),
-                flate2::Compression::fast(),
-            )),
-        }),
+        kept: RefCell::new(keep),
         broke: Cell::new(false),
         bad_sum: Cell::new(false),
     };

@@ -34,7 +34,7 @@ use store::Store;
 use xref::{Entry, read_chain, rebuild};
 
 pub(crate) use crypt::Crypt;
-pub(crate) use predict::last_parms;
+pub(crate) use predict::{last_parms, unpredict, whole_rows};
 
 /// What every parsed value costs, on top of its bytes. Measured on a file of 1,000,117 small
 /// values (structure elements of five entries each): parsing them took 178 MiB, about 187
