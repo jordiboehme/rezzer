@@ -522,7 +522,7 @@ struct PageReader<'p, 'a> {
     known: Known,
     programs: Programs,
     /// Raster image objects by their identity, computed once (see [`picture_id`]).
-    pictures: HashMap<ObjectIdentifier, u64>,
+    pictures: Pictures,
     /// The device's glyph and text buffers, reused from page to page.
     glyph_buf: Vec<Gl>,
     text_buf: String,
@@ -558,7 +558,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 ..Known::default()
             },
             programs: Programs::default(),
-            pictures: HashMap::new(),
+            pictures: Pictures::default(),
             glyph_buf: Vec::new(),
             text_buf: String::new(),
             kept_left: caps.max_kept,
@@ -2022,6 +2022,21 @@ const ID_DEPTH: usize = 4;
 /// profile, a palette).
 const ID_STREAMS: usize = 8;
 
+/// Identities [`Pictures`] keeps in each of its maps; past them an identity is computed again
+/// at each use.
+const ID_KEPT: usize = 1 << 16;
+
+/// Identities computed once per object for the whole document (see [`picture_id`]): of
+/// raster image objects, and of the streams they refer to (a soft mask, an ICC profile, a
+/// palette), so a stream many pictures share is read once. Each map holds at most
+/// [`ID_KEPT`] entries.
+#[derive(Default)]
+struct Pictures {
+    images: HashMap<ObjectIdentifier, u64>,
+    /// By object and whether the stream was read as a mask.
+    streams: HashMap<(ObjectIdentifier, bool), u64>,
+}
+
 /// The dictionary keys that describe a picture's pixels, with their short forms in inline
 /// images.
 const PIXEL_KEYS: [(&[u8], &[u8]); 9] = [
@@ -2038,7 +2053,7 @@ const PIXEL_KEYS: [(&[u8], &[u8]); 9] = [
 
 /// What a picture is, for finding the same picture on many pages. A raster picture is known
 /// by the values that describe its pixels and by its data (see [`pixels_id`]), computed once
-/// per image object (`known`); one whose values are past the bounds is known by its image
+/// per image object (`ids`); one whose values are past the bounds is known by its image
 /// object, an inline one then being a picture of its own, `own` making it unique. A stencil
 /// mask shows no data: it is known by its image object, which the walk found by its
 /// dictionary (`stencils`); one whose object is not known for sure (an inline one, or several
@@ -2046,7 +2061,7 @@ const PIXEL_KEYS: [(&[u8], &[u8]); 9] = [
 fn picture_id(
     image: &Image<'_, '_>,
     stencils: &HashMap<u128, Option<ObjectIdentifier>>,
-    known: &mut HashMap<ObjectIdentifier, u64>,
+    ids: &mut Pictures,
     own: (u32, usize),
 ) -> u64 {
     let mut h = DefaultHasher::new();
@@ -2055,11 +2070,11 @@ fn picture_id(
         Image::Raster(r) => {
             let s = r.stream();
             let object = s.dict().obj_id();
-            if let Some(id) = object.and_then(|o| known.get(&o)) {
+            if let Some(id) = object.and_then(|o| ids.images.get(&o)) {
                 return *id;
             }
             let mut left = (ID_VALUES, ID_STREAMS);
-            if pixels_id(s, true, &mut left, &mut h) {
+            if pixels_id(s, true, &mut left, ids, &mut h) {
                 "pixels".hash(&mut h);
             } else {
                 h = DefaultHasher::new();
@@ -2069,8 +2084,10 @@ fn picture_id(
                 }
             }
             let id = h.finish();
-            if let Some(o) = object {
-                known.insert(o, id);
+            if let Some(o) = object
+                && ids.images.len() < ID_KEPT
+            {
+                ids.images.insert(o, id);
             }
             return id;
         }
@@ -2091,6 +2108,7 @@ fn pixels_id(
     s: &Stream<'_>,
     masks: bool,
     left: &mut (usize, usize),
+    ids: &mut Pictures,
     h: &mut DefaultHasher,
 ) -> bool {
     let dict = s.dict();
@@ -2104,7 +2122,7 @@ fn pixels_id(
                 return false;
             }
             Some(v) => {
-                if !value_id(&v, 0, left, h) {
+                if !value_id(&v, 0, left, ids, h) {
                     return false;
                 }
             }
@@ -2116,17 +2134,12 @@ fn pixels_id(
         for key in [b"SMask".as_slice(), b"Mask"] {
             key.hash(h);
             match dict.get::<Object<'_>>(key) {
-                Some(Object::Stream(m)) => {
-                    if left.1 == 0 {
-                        return false;
-                    }
-                    left.1 -= 1;
-                    if !pixels_id(&m, false, left, h) {
-                        return false;
-                    }
-                }
+                Some(Object::Stream(m)) => match stream_id(&m, true, 0, left, ids) {
+                    Some(id) => id.hash(h),
+                    None => return false,
+                },
                 Some(v) => {
-                    if !value_id(&v, 0, left, h) {
+                    if !value_id(&v, 0, left, ids, h) {
                         return false;
                     }
                 }
@@ -2135,6 +2148,45 @@ fn pixels_id(
         }
     }
     true
+}
+
+/// The identity of a stream a picture refers to: with `mask` as a picture without masks (see
+/// [`pixels_id`]), otherwise by its dictionary and its data. Kept in `ids` by its object, so
+/// each stream is read once; `None` past the bounds.
+fn stream_id(
+    s: &Stream<'_>,
+    mask: bool,
+    depth: usize,
+    left: &mut (usize, usize),
+    ids: &mut Pictures,
+) -> Option<u64> {
+    let key = s.dict().obj_id().map(|o| (o, mask));
+    if let Some(id) = key.and_then(|k| ids.streams.get(&k)) {
+        return Some(*id);
+    }
+    if left.1 == 0 {
+        return None;
+    }
+    left.1 -= 1;
+    let mut h = DefaultHasher::new();
+    let read = if mask {
+        pixels_id(s, false, left, ids, &mut h)
+    } else {
+        dict_id(s.dict(), depth, left, ids, &mut h) && {
+            data_id(&s.raw_data(), &mut h);
+            true
+        }
+    };
+    if !read {
+        return None;
+    }
+    let id = h.finish();
+    if let Some(k) = key
+        && ids.streams.len() < ID_KEPT
+    {
+        ids.streams.insert(k, id);
+    }
+    Some(id)
 }
 
 /// Whether a color space name is a device space, which needs no resources.
@@ -2159,6 +2211,7 @@ fn value_id(
     v: &Object<'_>,
     depth: usize,
     left: &mut (usize, usize),
+    ids: &mut Pictures,
     h: &mut DefaultHasher,
 ) -> bool {
     if left.0 == 0 || depth > ID_DEPTH {
@@ -2175,7 +2228,7 @@ fn value_id(
             5u8.hash(h);
             let mut count = 0usize;
             for x in a.iter::<Object<'_>>() {
-                if !value_id(&x, depth + 1, left, h) {
+                if !value_id(&x, depth + 1, left, ids, h) {
                     return false;
                 }
                 count += 1;
@@ -2188,27 +2241,26 @@ fn value_id(
         }
         Object::Dict(d) => {
             6u8.hash(h);
-            if !dict_id(d, depth, left, h) {
+            if !dict_id(d, depth, left, ids, h) {
                 return false;
             }
         }
-        Object::Stream(s) => {
-            if left.1 == 0 {
-                return false;
-            }
-            left.1 -= 1;
-            7u8.hash(h);
-            if !dict_id(s.dict(), depth, left, h) {
-                return false;
-            }
-            data_id(&s.raw_data(), h);
-        }
+        Object::Stream(s) => match stream_id(s, false, depth, left, ids) {
+            Some(id) => (7u8, id).hash(h),
+            None => return false,
+        },
     }
     true
 }
 
 /// Adds a dictionary's entries in key order to `h` (see [`value_id`]).
-fn dict_id(d: &Dict<'_>, depth: usize, left: &mut (usize, usize), h: &mut DefaultHasher) -> bool {
+fn dict_id(
+    d: &Dict<'_>,
+    depth: usize,
+    left: &mut (usize, usize),
+    ids: &mut Pictures,
+    h: &mut DefaultHasher,
+) -> bool {
     let mut keys: Vec<Name<'_>> = d.keys().collect();
     keys.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
     keys.len().hash(h);
@@ -2216,7 +2268,7 @@ fn dict_id(d: &Dict<'_>, depth: usize, left: &mut (usize, usize), h: &mut Defaul
         k.as_ref().hash(h);
         match d.get::<Object<'_>>(k.as_ref()) {
             Some(v) => {
-                if !value_id(&v, depth + 1, left, h) {
+                if !value_id(&v, depth + 1, left, ids, h) {
                     return false;
                 }
             }
@@ -2269,7 +2321,7 @@ struct TextDevice<'d> {
     /// objects share it.
     stencils: HashMap<u128, Option<ObjectIdentifier>>,
     /// Raster image objects by their identity (see [`picture_id`]).
-    pictures: &'d mut HashMap<ObjectIdentifier, u64>,
+    pictures: &'d mut Pictures,
     page: u32,
     rules: Vec<Rule>,
     /// Lines were drawn past the cap and are not kept.

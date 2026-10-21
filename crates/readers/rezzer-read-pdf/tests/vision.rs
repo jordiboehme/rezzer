@@ -889,3 +889,106 @@ fn a_big_picture_drawn_many_times_is_known_once() {
         "small {small_time:?}, big {big_time:?}"
     );
 }
+
+/// One page that draws `n` picture objects of 4 by 3 pixels, each with its own data, at one
+/// place; with `mask` they all share one soft mask of 1000 by 1000 pixels (1 MB unpacked).
+fn many_pictures_page(n: usize, mask: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let extra = if mask {
+        let m = b.stream(
+            "/Type /XObject /Subtype /Image /Width 1000 /Height 1000 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &vec![255u8; 1_000_000],
+        );
+        format!(" /SMask {m} 0 R")
+    } else {
+        String::new()
+    };
+    let mut xo = String::new();
+    let mut c = String::from("BT /F1 11 Tf 72 700 Td (Page.) Tj ET\n");
+    for k in 0..n {
+        let data: Vec<u8> = (0..36).map(|i| (k * 7 + i * 13 + k / 256) as u8).collect();
+        let im = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB \
+                 /BitsPerComponent 8{extra}"
+            ),
+            &data,
+        );
+        xo.push_str(&format!("/I{k} {im} 0 R "));
+        c += &format!("q 85 0 0 85 400 600 cm /I{k} Do Q\n");
+    }
+    let cs = b.stream("", c.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << {xo}>> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_soft_mask_many_pictures_share_is_read_once() {
+    // 50,000 pictures share one soft mask of 1 MB: knowing them takes not much longer than
+    // knowing 50,000 pictures without a mask.
+    let plain = many_pictures_page(50_000, false);
+    let masked = many_pictures_page(50_000, true);
+    let start = std::time::Instant::now();
+    let out = read(&plain);
+    let plain_time = start.elapsed();
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    let start = std::time::Instant::now();
+    let out = read(&masked);
+    let masked_time = start.elapsed();
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    eprintln!("plain {plain_time:?}, masked {masked_time:?}");
+    assert!(
+        masked_time < plain_time * 3 / 2 + std::time::Duration::from_millis(300),
+        "plain {plain_time:?}, masked {masked_time:?}"
+    );
+}
+
+#[test]
+fn an_inline_picture_with_a_named_color_space_is_its_own() {
+    // An inline logo whose color space is a page resource (/CS0): its colors are not known
+    // where the picture is drawn, so it is never furniture and is listed on each page.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = String::new();
+    for n in 0..4 {
+        let mut c = format!("BT /F1 11 Tf 72 700 Td (Page {n}.) Tj ET\n").into_bytes();
+        c.extend_from_slice(b"q 85 0 0 85 400 600 cm BI /W 4 /H 3 /CS /CS0 /BPC 8 ID ");
+        c.extend_from_slice(&[200u8; 36]);
+        c.extend_from_slice(b"\nEI Q\n");
+        let cs = b.stream("", &c);
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /ColorSpace << /CS0 /DeviceRGB >> >> \
+             /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 4 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+}
