@@ -33,9 +33,9 @@ use read_fonts::ps::agl;
 use read_fonts::ps::cff::CffFontRef;
 use skrifa::{FontRef, MetadataProvider};
 
-use crate::annots::{Marked, Quote, Quoting};
 use crate::layout::{Run, UriTarget};
 use crate::order::{Turn, runs_of};
+use crate::quote::{Marked, Quote, Quoting};
 use crate::tables::{Rule, RuleKind};
 
 /// Glyphs and device calls between two questions to the stop callback.
@@ -197,7 +197,7 @@ pub(crate) struct Extracted {
     /// copies of link targets may take.
     pub kept_left: u64,
     /// The quotes left out, if any.
-    pub quotes_cut: Option<crate::annots::Cut>,
+    pub quotes_cut: Option<crate::quote::Cut>,
     /// The bound on glyph visits for quotes.
     pub quote_visits: usize,
 }
@@ -720,7 +720,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         let quotes = if marked.is_empty() {
             Vec::new()
         } else {
-            crate::annots::quote_page(
+            crate::quote::quote_page(
                 n,
                 &dev.glyphs,
                 &texts,

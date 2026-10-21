@@ -9,7 +9,8 @@
 //! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
 //! `meta.rs` and `objects.rs` add the metadata, outline, links, attachments, threads and
-//! revisions; `annots.rs` puts the annotations at their passage.
+//! revisions; `quote.rs` quotes the text under annotations and `annots.rs` puts them at
+//! their passage.
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
@@ -18,6 +19,7 @@ mod meta;
 mod objects;
 mod open;
 mod order;
+mod quote;
 mod tables;
 mod text;
 
@@ -87,7 +89,7 @@ fn read_pdf(
     let events = objects::revisions(&pdf, budget, &mut out);
     let links = pdf.links();
     let annots = pdf.annotations();
-    let marked = annots::marked(&annots);
+    let marked = quote::marked(&annots);
     let extracted = extract(&pdf, &pages, &links, &marked, budget, &mut out, text_stop);
     drop(marked);
     let (room, placed) = lay_out(&pdf, &pages, extracted, &annots, budget, &mut out);
@@ -102,7 +104,7 @@ fn extract(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[pdfparts::Link],
-    marked: &annots::Marked<'_>,
+    marked: &quote::Marked<'_>,
     budget: &Budget,
     out: &mut Out,
     stop: &dyn Fn() -> bool,
@@ -175,7 +177,7 @@ fn lay_out(
         on_page.entry(a.page).or_default().push(i);
     }
     let mut spots = vec![annots::Placed::default(); annots.len()];
-    let mut unquoted = annots::Unquoted::default();
+    let mut unquoted = quote::Unquoted::default();
     let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
         .iter()
@@ -398,7 +400,7 @@ fn lay_out(
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
     }
-    annots::losses(&unquoted, quotes_cut, quote_visits, out);
+    quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
         let (s, them) = if count == 1 {
             ("", "its text is")
@@ -460,7 +462,7 @@ fn annotation_points(
     placed: &mut [annots::Placed],
     out: &mut Out,
 ) -> Vec<(f32, f32)> {
-    let mut quotes: HashMap<usize, annots::Quote> = std::mem::take(&mut items.quotes)
+    let mut quotes: HashMap<usize, quote::Quote> = std::mem::take(&mut items.quotes)
         .into_iter()
         .map(|q| (q.annot, q))
         .collect();
@@ -505,7 +507,7 @@ fn annotation_points(
         .collect();
     let none = (f32::NAN, f32::NAN);
     at.into_iter()
-        .zip(annots::nearest_runs(&items.runs, &tops))
+        .zip(quote::nearest_runs(&items.runs, &tops))
         .flat_map(|(quoted, near)| [quoted.unwrap_or(none), near.unwrap_or(none)])
         .collect()
 }
