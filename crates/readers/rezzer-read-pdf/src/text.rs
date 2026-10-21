@@ -2575,12 +2575,23 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
         while e < glyphs.len() && ink(&glyphs[e]) && joins(&glyphs[e - 1], &glyphs[e]) {
             e += 1;
         }
-        let word = &mut glyphs[k..e];
-        let mut found = word.iter().filter_map(|g| g.link);
-        if let Some(first) = found.next()
-            && found.all(|l| l == first)
+        // The linked part of the word grows to the word's edges, but not over punctuation at
+        // an edge (a full stop after an address, a bracket before it).
+        let linked: Vec<usize> = (k..e).filter(|&i| glyphs[i].link.is_some()).collect();
+        if let (Some(&a), Some(&z)) = (linked.first(), linked.last())
+            && linked.iter().all(|&i| glyphs[i].link == glyphs[a].link)
         {
-            word.iter_mut().for_each(|g| g.link = Some(first));
+            let link = glyphs[a].link;
+            let letter = |g: &Gl| text.of(g).chars().all(char::is_alphanumeric);
+            let mut from = k;
+            while from < a && !letter(&glyphs[from]) {
+                from += 1;
+            }
+            let mut to = e;
+            while to > z + 1 && !letter(&glyphs[to - 1]) {
+                to -= 1;
+            }
+            glyphs[from..to].iter_mut().for_each(|g| g.link = link);
         }
         k = e;
     }
