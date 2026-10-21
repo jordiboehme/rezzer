@@ -290,6 +290,7 @@ fn lay_out(
         _ => None,
     };
     let captions = pdf.map(render::figure_captions).unwrap_or_default();
+    let furniture = render::furniture(read.values());
     let mut needs: Vec<render::Need> = Vec::new();
     let tables = Tables::default();
     // The model's link targets share what is left of the bytes the pages could keep.
@@ -351,7 +352,7 @@ fn lay_out(
             let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
             // The picture's block is looked for at the run nearest to its top, after the
             // annotations' points; a turned frame has no points.
-            let vision = render::vision(info, &items);
+            let vision = render::vision(info, &items, &furniture);
             let picture = vision
                 .as_ref()
                 .and_then(render::picture_top)

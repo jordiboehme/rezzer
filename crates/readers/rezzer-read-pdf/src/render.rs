@@ -13,7 +13,7 @@
 //! [`MAX_PIXELS`], the time is checked before each render and a file renders at most
 //! [`MAX_RENDERS`] pages.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 
 use hayro::vello_cpu::color::palette::css::WHITE;
@@ -45,6 +45,10 @@ pub(crate) const MAX_RENDERS: usize = 1_000;
 /// Pictures that cover at least this part of the page make it need vision.
 const PICTURE_SHARE: f32 = 0.02;
 
+/// A picture that repeats on many pages and covers less than this part of the page is page
+/// furniture.
+const FURNITURE_SHARE: f32 = 0.25;
+
 /// Pictures that cover more than this part of a page without text make it a scan.
 const SCAN_SHARE: f32 = 0.5;
 
@@ -55,10 +59,37 @@ pub(crate) struct Vision {
     pub first: Option<[f32; 4]>,
 }
 
+/// A picture box rounded to whole points, to find the same picture on many pages.
+type Spot = [i32; 4];
+
+fn spot(b: &[f32; 4]) -> Spot {
+    b.map(|v| v.round() as i32)
+}
+
+/// Pictures drawn at the same place on at least three pages and on at least half of the pages
+/// read. When they are small, they are page furniture (a logo in the margin, a strip along
+/// the edge), like a running header, and do not make a page need vision.
+pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> HashSet<Spot> {
+    let mut seen: HashMap<Spot, usize> = HashMap::new();
+    let mut read = 0usize;
+    for items in pages {
+        read += 1;
+        let on_page: HashSet<Spot> = items.images.iter().map(spot).collect();
+        for s in on_page {
+            *seen.entry(s).or_insert(0) += 1;
+        }
+    }
+    seen.into_iter()
+        .filter(|&(_, k)| k >= 3 && k * 2 >= read)
+        .map(|(s, _)| s)
+        .collect()
+}
+
 /// Whether page `info` with the items read from it needs vision: it has no text layer over
 /// a picture (a scan), its glyphs have no Unicode mapping, or it is only an invisible text
-/// layer over a picture (an OCR layer); or its pictures cover at least 2 % of it.
-pub(crate) fn vision(info: &PageInfo, items: &PageItems) -> Option<Vision> {
+/// layer over a picture (an OCR layer); or its pictures, without the page furniture
+/// `skip`, cover at least 2 % of it.
+pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -> Option<Vision> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
     let visible = |b: &[f32; 4]| {
@@ -66,8 +97,14 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems) -> Option<Vision> {
         let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
         w * h
     };
-    let shown: Vec<&[f32; 4]> = items.images.iter().filter(|b| visible(b) > 0.0).collect();
-    let covered = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
+    let drawn: Vec<&[f32; 4]> = items.images.iter().filter(|b| visible(b) > 0.0).collect();
+    let covered = (drawn.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
+    // Furniture is small: a picture over a quarter of the page is content wherever it is.
+    let shown: Vec<&[f32; 4]> = drawn
+        .into_iter()
+        .filter(|b| !(skip.contains(&spot(b)) && visible(b) < FURNITURE_SHARE * area))
+        .collect();
+    let pictured = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
     let visible_text = items.mapped > 0;
     let invisible_text = !items.hidden_layer.is_empty() || !items.invisible.is_empty();
     let mut words: Vec<String> = Vec::new();
@@ -80,7 +117,7 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems) -> Option<Vision> {
     if !visible_text && invisible_text && covered > SCAN_SHARE {
         words.push("only an invisible text layer".into());
     }
-    if !shown.is_empty() && covered >= PICTURE_SHARE {
+    if !shown.is_empty() && pictured >= PICTURE_SHARE {
         let k = shown.len();
         words.push(format!(
             "{k} {}",

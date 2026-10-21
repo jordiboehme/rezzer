@@ -425,6 +425,48 @@ fn a_broken_content_stream_names_its_page() {
     );
 }
 
+/// Three A4 pages of text, each with a small picture (a logo of 120 by 100 points, 2.4 % of
+/// the page) at `spots[i]`.
+fn logo_pages(spots: [(u32, u32); 3]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&[30u8; 16]),
+    );
+    let mut kids = String::new();
+    for (x, y) in spots {
+        let c = b.stream(
+            "",
+            format!(
+                "BT /F1 12 Tf 72 700 Td (Some text.) Tj ET\nq 120 0 0 100 {x} {y} cm /Im1 Do Q\n"
+            )
+            .as_bytes(),
+        );
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+             /Contents {c} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 3 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_small_picture_on_every_page_is_furniture() {
+    let out = read(&logo_pages([(10, 10); 3]));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    // The same pictures at other places are content.
+    let out = read(&logo_pages([(10, 10), (200, 300), (400, 100)]));
+    assert_eq!(out.document.assets.len(), 3, "{:#?}", out.document.assets);
+}
+
 #[test]
 fn a_fallback_page_that_needs_vision_says_it_is_not_rendered() {
     let mut file = vec![b' '; 2000];
