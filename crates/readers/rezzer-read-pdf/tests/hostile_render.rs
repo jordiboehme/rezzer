@@ -963,6 +963,18 @@ fn dashes_in_a_form_drawn_many_times_stay_small() {
     assert!(loss.what.contains("drawing operations"), "{loss:?}");
 }
 
+#[test]
+fn a_dash_pattern_of_negative_length_is_not_rendered() {
+    // The renderer's dasher never finishes such a pattern.
+    for pattern in ["[1 -2]", "[-1 -1]"] {
+        let start = Instant::now();
+        let content = format!("{pattern} 0 d 0 0 m 0 842 l S\n");
+        let out = read_with(&draw_twin(&content), true);
+        let loss = assert_render_skipped(&out, start);
+        assert!(loss.what.contains("dash pattern"), "{loss:?}");
+    }
+}
+
 /// `n` bytes of zeros, deflated as small as they go.
 fn zeros_tight(n: usize) -> Vec<u8> {
     let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());

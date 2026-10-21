@@ -100,21 +100,17 @@ const FILL_ROW: u64 = 64;
 /// Pixel rows in one row of vello's tiles.
 const TILE_ROWS: f64 = 4.0;
 
-// A dashed stroke: kurbo expands the dashes of the whole path into one outline, which vello
-// fills as one draw (vello_common 0.3.0 flatten.rs). It keeps the draw's base and box rows once,
-// and for each dash the strips of the tiles its outline crosses; while it is drawn it holds
-// each dash's outline, in buffers vello reuses, so the largest stroke's stay. Measured as above
-// (less the page rendered empty, 12 MiB; lines 0.5 points wide, butt caps), bytes a dash:
-// - each line stroked on its own: 1,000 vertical lines of 800 points with `[6 3]` (dashes of 12
-//   pixels) 306, `[12 6]` 590, `[24 12]` 1,133, `[1 1]` 79, round caps `[6 3]` 353; 300 lines
-//   `[0.5 0.5]` 57, `[0.1 0.1]` 12; 2,000 horizontal lines `[6 3]` 160; 1,000 diagonal 228;
-//   lines 5 points wide 566, 40 points wide 943;
-// - all lines in one path, stroked once: `[1 1]` 385, `[0.1 0.1]` (1.2 and 2.4 million dashes)
-//   388 and 385, diagonal 370, round caps `[1 1]` 553; 300 full-height curves with dashes of
-//   0.05 points (about 2.5 million) took 931 MiB.
-// The model is above each: a base and a part for each pixel of the longest dash plus the line
-// width, kept, and the outlines of all dashes of the largest stroke.
-
+// A dashed stroke: kurbo expands the dashes of the whole path into one outline that vello
+// fills as one draw (vello_common 0.3.0 flatten.rs): the draw's base and box rows once, the
+// strips of each dash's tiles, and while drawn each dash's outline, in buffers vello keeps.
+// Measured as above less the page rendered empty (12 MiB), bytes a dash, lines 0.5 points wide:
+// - lines stroked one by one, 1,000 vertical of 800 points: `[6 3]` 306, `[12 6]` 590,
+//   `[24 12]` 1,133, `[1 1]` 79, round caps `[6 3]` 353; `[0.5 0.5]` 57, `[0.1 0.1]` 12;
+//   horizontal `[6 3]` 160, diagonal 228; 5 points wide 566, 40 points wide 943;
+// - all in one path: `[1 1]` 385, `[0.1 0.1]` 385 to 388, diagonal 370, round caps 553; 600
+//   tight curves, round caps: `[24 12]` 1,050, `[6 3]` 655, `[1 1]` 557.
+// The model is above each: a base and a part a pixel of the longest dash plus the line width,
+// kept, and the outlines of the largest stroke's dashes.
 /// Bytes each dash keeps, whatever its size.
 const DASH_BASE: u64 = 96;
 
@@ -277,9 +273,14 @@ impl Dry<'_> {
         transform: &Affine,
         width: f64,
     ) -> bool {
-        let period: f64 = stroke.dash_array.iter().map(|d| f64::from(d.abs())).sum();
-        if !(period.is_finite() && period > 0.0) {
+        if stroke.dash_array.is_empty() {
             return false;
+        }
+        // kurbo never finishes a pattern of negative length (measured: `[1 -2]`, `[-1 -1]`);
+        // hayro makes each 0 in a pattern 0.01, so a valid one has a length.
+        let period: f64 = stroke.dash_array.iter().map(|d| f64::from(*d)).sum();
+        if stroke.dash_array.iter().any(|d| !d.is_finite() || *d < 0.0) || !(period > 0.0) {
+            Self::unbounded("it strokes with a dash pattern the renderer cannot finish".into());
         }
         // The renderer dashes the path in user space, where the pattern is; the control
         // polygon is never shorter than the curve.
@@ -306,7 +307,7 @@ impl Dry<'_> {
         let longest = stroke
             .dash_array
             .iter()
-            .map(|d| f64::from(d.abs()) * a.length().max(b.length()))
+            .map(|d| f64::from(*d) * a.length().max(b.length()))
             .fold(0.0, f64::max);
         // The renderer draws a line at least a pixel wide.
         let pixels = (longest + width.max(1.0)).min(f64::from(u32::MAX));
