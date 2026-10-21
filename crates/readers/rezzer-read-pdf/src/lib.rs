@@ -13,6 +13,7 @@
 mod layout;
 mod open;
 mod order;
+mod tables;
 mod text;
 
 #[cfg(test)]

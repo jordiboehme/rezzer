@@ -35,6 +35,7 @@ use skrifa::{FontRef, MetadataProvider};
 
 use crate::layout::{Run, UriTarget};
 use crate::order::{Turn, runs_of};
+use crate::tables::{Rule, RuleKind};
 
 /// Glyphs and device calls between two questions to the stop callback.
 const POLL: u64 = 4096;
@@ -72,6 +73,9 @@ pub(crate) struct PageItems {
     pub runs: Vec<Run>,
     /// Boxes of the pictures the page draws: x0, y0, x1, y1.
     pub images: Vec<[f32; 4]>,
+    /// Straight lines and rectangles the page draws, in the frame of the page box (not
+    /// turned), for finding ruled tables.
+    pub rules: Vec<Rule>,
     /// Text that puts no glyphs on the page (render mode 3 or 7), in reading order, on a page
     /// that also shows visible text.
     pub invisible: Vec<Run>,
@@ -102,6 +106,7 @@ impl PageItems {
         let copy = |list: &mut Vec<Run>| *list = list.to_vec();
         copy(&mut self.runs);
         copy(&mut self.invisible);
+        self.rules = self.rules.to_vec();
         for (_, list) in &mut self.hidden_layers {
             copy(list);
         }
@@ -132,7 +137,11 @@ impl PageItems {
             .iter()
             .map(|l| l.len() as u64 + 32)
             .sum::<u64>();
-        total + 16 * self.images.len() as u64 + 256
+        self.rules.shrink_to_fit();
+        total
+            + 16 * self.images.len() as u64
+            + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
+            + 256
     }
 }
 
@@ -565,6 +574,8 @@ impl<'p, 'a> PageReader<'p, 'a> {
             text: std::mem::take(&mut self.text_buf),
             actuals: Vec::new(),
             images: Vec::new(),
+            rules: Vec::new(),
+            rules_cut: false,
             open: Vec::new(),
             marks: if use_marks { &marks } else { &[] },
             next_mark: 0,
@@ -652,6 +663,14 @@ impl<'p, 'a> PageReader<'p, 'a> {
         };
         let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
         items.images = std::mem::take(&mut dev.images);
+        items.rules = std::mem::take(&mut dev.rules);
+        if dev.rules_cut {
+            notes.push(Note::Limit(format!(
+                "drawn lines of page {n} past the first {} are not used to find tables: the \
+                 page draws more lines than it may keep",
+                dev.cap
+            )));
+        }
         items.mapped = dev.mapped;
         items.unmapped = dev.unmapped;
         items.unmapped_visible = dev.unmapped_visible;
@@ -1817,6 +1836,9 @@ struct TextDevice<'d> {
     /// ActualText strings the glyphs refer to.
     actuals: Vec<Rc<str>>,
     images: Vec<[f32; 4]>,
+    rules: Vec<Rule>,
+    /// Lines were drawn past the cap and are not kept.
+    rules_cut: bool,
     open: Vec<Open>,
     marks: &'d [Mark],
     next_mark: usize,
@@ -1920,6 +1942,143 @@ impl TextDevice<'_> {
     }
 }
 
+/// A filled rectangle at most this many points thick is a rule, not a shaded area.
+const THIN: f32 = 2.0;
+
+/// Straight segments shorter than this many points are not rules.
+const SHORTEST: f32 = 1.0;
+
+/// The rules a path draws once `transform` maps it into the page box: each straight
+/// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
+/// rectangle is a line when thin and a rectangle otherwise. Curves and slanted segments are
+/// not rules.
+fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+    use kurbo::PathEl;
+    // The first points of the subpath being drawn (a rectangle has at most five) and how
+    // many it has, and whether it holds a curve.
+    let mut corners: [Point; 5] = [Point::ZERO; 5];
+    let mut count = 0usize;
+    let mut curved = false;
+    let mut start = Point::ZERO;
+    let mut last = Point::ZERO;
+    // A filled subpath that ends is a rule when it is a rectangle.
+    let filled = |corners: &[Point; 5], count: usize, curved: bool| -> Option<Rule> {
+        if stroke || curved || !(4..=5).contains(&count) {
+            return None;
+        }
+        rectangle(&corners[..count])
+    };
+    let segment = |a: Point, b: Point| -> Option<Rule> {
+        let (dx, dy) = ((b.x - a.x).abs() as f32, (b.y - a.y).abs() as f32);
+        let line = |x0: f64, y0: f64, x1: f64, y1: f64| Rule {
+            x0: x0 as f32,
+            y0: y0 as f32,
+            x1: x1 as f32,
+            y1: y1 as f32,
+            kind: RuleKind::Line,
+        };
+        if dy <= 0.5 && dx >= SHORTEST {
+            let y = (a.y + b.y) / 2.0;
+            Some(line(a.x.min(b.x), y, a.x.max(b.x), y))
+        } else if dx <= 0.5 && dy >= SHORTEST {
+            let x = (a.x + b.x) / 2.0;
+            Some(line(x, a.y.min(b.y), x, a.y.max(b.y)))
+        } else {
+            None
+        }
+    };
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                if let Some(r) = filled(&corners, count, curved) {
+                    keep(r);
+                }
+                let p = transform * p;
+                (start, last, count, curved) = (p, p, 1, false);
+                corners[0] = p;
+            }
+            PathEl::LineTo(p) => {
+                let p = transform * p;
+                if stroke && let Some(r) = segment(last, p) {
+                    keep(r);
+                }
+                if count < corners.len() {
+                    corners[count] = p;
+                }
+                count += 1;
+                last = p;
+            }
+            PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => {
+                curved = true;
+                last = transform * p;
+                count += 1;
+            }
+            PathEl::ClosePath => {
+                if stroke && let Some(r) = segment(last, start) {
+                    keep(r);
+                }
+                last = start;
+            }
+        }
+    }
+    if let Some(r) = filled(&corners, count, curved) {
+        keep(r);
+    }
+}
+
+/// The rule a filled four-cornered path is when its sides are horizontal and vertical.
+fn rectangle(points: &[Point]) -> Option<Rule> {
+    let mut points = points.to_vec();
+    if points.len() == 5 {
+        let (a, b) = (points[0], points[4]);
+        if (a.x - b.x).abs() > 0.5 || (a.y - b.y).abs() > 0.5 {
+            return None;
+        }
+        points.pop();
+    }
+    for k in 0..4 {
+        let (a, b) = (points[k], points[(k + 1) % 4]);
+        if (a.x - b.x).abs() > 0.5 && (a.y - b.y).abs() > 0.5 {
+            return None;
+        }
+    }
+    let x0 = points.iter().map(|p| p.x).fold(f64::MAX, f64::min) as f32;
+    let x1 = points.iter().map(|p| p.x).fold(f64::MIN, f64::max) as f32;
+    let y0 = points.iter().map(|p| p.y).fold(f64::MAX, f64::min) as f32;
+    let y1 = points.iter().map(|p| p.y).fold(f64::MIN, f64::max) as f32;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if w.max(h) < SHORTEST {
+        return None;
+    }
+    Some(if h <= THIN {
+        let y = (y0 + y1) / 2.0;
+        Rule {
+            x0,
+            y0: y,
+            x1,
+            y1: y,
+            kind: RuleKind::Line,
+        }
+    } else if w <= THIN {
+        let x = (x0 + x1) / 2.0;
+        Rule {
+            x0: x,
+            y0,
+            x1: x,
+            y1,
+            kind: RuleKind::Line,
+        }
+    } else {
+        Rule {
+            x0,
+            y0,
+            x1,
+            y1,
+            kind: RuleKind::Rect,
+        }
+    })
+}
+
 /// Glyphs of one text show whose font tells no advance (Type3) get the distance to the next
 /// glyph along the baseline; the last one gets the advance of the one before it.
 fn advances_from_positions(run: &mut [Gl]) {
@@ -1956,8 +2115,23 @@ fn collection_cmap(
 }
 
 impl<'a> Device<'a> for TextDevice<'_> {
-    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {
+    fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
         self.tick();
+        // Lines in a switched-off layer are not on the page.
+        if matches!(mode, DrawMode::Invisible) || self.open.iter().any(|o| o.layer.is_some()) {
+            return;
+        }
+        let stroke = !matches!(mode, DrawMode::Fill(_));
+        let (rules, cap) = (&mut self.rules, self.cap);
+        let mut cut = false;
+        rules_of(path, props.transform, stroke, &mut |r| {
+            if rules.len() < cap {
+                rules.push(r);
+            } else {
+                cut = true;
+            }
+        });
+        self.rules_cut |= cut;
     }
 
     fn push_clip_path(&mut self, _: &ClipPath) {
@@ -2329,6 +2503,122 @@ mod tests {
         max_glyphs: 1_000_000,
         max_kept: 1 << 30,
     };
+
+    /// The rules of page 1 of a file whose page draws `content`, with `/Fm1` a form that
+    /// draws `form`.
+    fn rules_of_page(content: &str, form: &str, caps: Caps) -> PageItems {
+        let mut b = crate::fixtures::Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let fm = b.stream(
+            "/Type /XObject /Subtype /Form /BBox [0 0 595 842]",
+            form.as_bytes(),
+        );
+        let cs = b.stream("", content.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /Fm1 {fm} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let pdf = open(&b.finish(catalog));
+        let mut found = pages(&pdf, &[1], caps, &|| false);
+        assert!(found.failed.is_empty(), "{:?}", found.failed);
+        found.pages.remove(0)
+    }
+
+    #[test]
+    fn rules_from_content_stream() {
+        let items = rules_of_page(
+            "q 2 0 0 2 0 0 cm 10 10 100 50 re S 100 350 m 250 350 l S Q \
+             q 1 0 0 1 20 0 cm /Fm1 Do Q BT /F1 12 Tf 72 780 Td (Text) Tj ET",
+            "50 100 200 0.5 re f 60 300 m 60 400 l S 80 500 m 150 560 l S",
+            CAPS,
+        );
+        let line = |x0: f32, y0: f32, x1: f32, y1: f32| (x0, y0, x1, y1, RuleKind::Line);
+        let mut got: Vec<(f32, f32, f32, f32, RuleKind)> = items
+            .rules
+            .iter()
+            .map(|r| {
+                let k = |v: f32| (v * 4.0).round() / 4.0;
+                (k(r.x0), k(r.y0), k(r.x1), k(r.y1), r.kind)
+            })
+            .collect();
+        got.sort_by(|a, b| a.partial_cmp(b).expect("numbers"));
+        let mut want = vec![
+            // The rectangle stroked under a scale of two: its four sides.
+            line(20.0, 20.0, 220.0, 20.0),
+            line(220.0, 20.0, 220.0, 120.0),
+            line(20.0, 120.0, 220.0, 120.0),
+            line(20.0, 20.0, 20.0, 120.0),
+            line(200.0, 700.0, 500.0, 700.0),
+            // In the form, moved 20 points: a thin filled bar and a stroked line. The slanted
+            // line is no rule.
+            line(70.0, 100.25, 270.0, 100.25),
+            line(80.0, 300.0, 80.0, 400.0),
+        ];
+        want.sort_by(|a, b| a.partial_cmp(b).expect("numbers"));
+        assert_eq!(got, want);
+        assert_eq!(
+            items
+                .runs
+                .iter()
+                .map(|r| r.text.as_str())
+                .collect::<String>(),
+            "Text"
+        );
+    }
+
+    #[test]
+    fn a_filled_box_is_a_rectangle_rule() {
+        let items = rules_of_page("1 0 0 rg 100 100 50 30 re f", "", CAPS);
+        assert_eq!(
+            items.rules,
+            [Rule {
+                x0: 100.0,
+                y0: 100.0,
+                x1: 150.0,
+                y1: 130.0,
+                kind: RuleKind::Rect
+            }]
+        );
+    }
+
+    #[test]
+    fn rules_bounded() {
+        // More lines than a page may keep: the first ones are kept and a loss says the rest
+        // are not used.
+        let caps = Caps {
+            max_glyphs: 1_000,
+            ..CAPS
+        };
+        let items = rules_of_page(&"10 10 m 100 10 l S\n".repeat(5_000), "", caps);
+        assert_eq!(items.rules.len(), 1_000);
+        assert!(
+            items
+                .notes
+                .iter()
+                .any(|n| matches!(n, Note::Limit(w) if w.contains("drawn lines of page 1"))),
+            "{:?}",
+            items.notes
+        );
+        // An operator bomb inside the object limit: the walk cuts it with a loss, and the
+        // rules kept stay under the cap.
+        let start = std::time::Instant::now();
+        let items = rules_of_page(&"10 10 m 100 10 l S\n".repeat(1_000_000), "", CAPS);
+        assert!(start.elapsed().as_secs() < 30, "{:?}", start.elapsed());
+        assert!(items.rules.len() <= CAPS.max_glyphs);
+        assert!(
+            items.notes.iter().any(|n| matches!(n, Note::Limit(_))),
+            "{:?}",
+            items.notes
+        );
+    }
 
     #[test]
     fn marks_passed_over_count_their_actual_text() {
