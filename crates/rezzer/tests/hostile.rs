@@ -914,8 +914,23 @@ fn max_rss_bytes() -> u64 {
 #[cfg(unix)]
 const RSS_BOUND: u64 = 512 * MB as u64;
 
+/// Whether the test runs under nextest, which runs every test in its own process. Only then
+/// is the process's maximum RSS the figure of one test; under `cargo test` the RSS checks are
+/// skipped (and say so) rather than fail on the tests that ran before.
+#[cfg(unix)]
+fn own_process(test: &str) -> bool {
+    let own = std::env::var_os("NEXTEST").is_some();
+    if !own {
+        eprintln!("{test}: RSS not checked, the test needs nextest (one process per test)");
+    }
+    own
+}
+
 #[cfg(unix)]
 fn assert_rss_bounded(test: &str) {
+    if !own_process(test) {
+        return;
+    }
     let rss = max_rss_bytes();
     eprintln!("{test}: max RSS {} MiB", rss >> 20);
     assert!(rss < RSS_BOUND, "{test}: max RSS {} MiB", rss >> 20);
@@ -1222,32 +1237,195 @@ fn page_tree_cycle_is_partial() {
     assert_rss_bounded("page_tree_cycle_is_partial");
 }
 
+/// Writes a file of `pages` pages to `path`, built in memory and dropped before the read so
+/// that its bytes are not part of the measure. With `own`, every page has its own resources,
+/// media box and content stream of one line (`Page N`); else the pages inherit their
+/// resources and media box and share one content stream of 40 lines (`Line K of a page`).
+#[cfg(unix)]
+fn many_pages(path: &std::path::Path, pages: usize, own: bool) {
+    use std::io::Write;
+    let mut b = PdfFile::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut text = String::from("BT /F1 10 Tf 72 780 Td 14 TL ");
+    for line in 0..40 {
+        text.push_str(&format!(
+            "(Line {line} of a page that is shown again and again.) ' "
+        ));
+    }
+    text.push_str("ET");
+    let shared = b.stream("", text.as_bytes());
+    let mut kids = String::with_capacity(pages * 10);
+    for i in 0..pages {
+        let page = if own {
+            let c = b.stream(
+                "",
+                format!("BT /F1 12 Tf 72 720 Td (Page {i}) Tj ET").as_bytes(),
+            );
+            b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+            ))
+        } else {
+            b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /Contents {shared} 0 R >>"
+            ))
+        };
+        kids.push_str(&format!("{page} 0 R "));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font} 0 R >> >> \
+             /Kids [{kids}] /Count {pages} >>"
+        ),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let mut out = std::fs::File::create(path).unwrap();
+    out.write_all(&b.finish(catalog)).unwrap();
+}
+
+/// A pipeline with the PDF reader only, under `memory` bytes of memory and `time`.
+#[cfg(unix)]
+fn pdf_pipeline(memory: u64, time: Duration) -> Pipeline {
+    let mut config = Config {
+        cache: false,
+        ..Config::default()
+    };
+    config.limits.max_memory_bytes = memory;
+    config.limits.max_time = time;
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    Pipeline::new(config, registry)
+}
+
+/// The peak RSS of the test stays under the memory limit the read was given.
+#[cfg(unix)]
+fn assert_rss_under(test: &str, limit: u64) {
+    if !own_process(test) {
+        return;
+    }
+    let rss = max_rss_bytes();
+    eprintln!(
+        "{test}: max RSS {} MiB, limit {} MiB",
+        rss >> 20,
+        limit >> 20
+    );
+    assert!(rss < limit, "{test}: max RSS {} MiB", rss >> 20);
+}
+
+/// The pages of a page section with text besides its marker.
+#[cfg(unix)]
+fn pages_with_text(result: &RunResult) -> usize {
+    result.document.as_ref().map_or(0, |d| {
+        d.body
+            .iter()
+            .filter(
+                |b| matches!(b, rezzer_model::Block::Section { blocks, .. } if blocks.len() > 1),
+            )
+            .count()
+    })
+}
+
 #[cfg(unix)]
 #[test]
 fn hundred_thousand_pages_stop_in_time() {
-    // 100,000 pages in a flat page tree; the pages inherit their resources and media box and
-    // all show one content stream of 40 lines, far more than 2 s of work. The file is
-    // written to a temp dir before the clock starts and read from there, so its bytes are
-    // not part of the measure.
-    use std::io::Write;
+    // 100,000 pages that share one content stream of 40 lines, far more than 2 s of work, at
+    // the default memory limit. The pages read before the stop keep their text, and one loss
+    // names the first page without it.
     const PAGES: usize = 100_000;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, false);
+    let limit = Duration::from_secs(2);
+    let p = pipeline_with(Some(limit));
+    let start = Instant::now();
+    let result = p.run_path(&path, &markdown_request());
+    let took = start.elapsed();
+    eprintln!(
+        "hundred_thousand_pages: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert!(took < limit + SLACK, "took {took:?}");
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    let read = pages_with_text(&result);
+    assert!(read > 0 && read < PAGES, "{read} pages with text");
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Line 39 of a page"));
+    let timed: Vec<String> = losses(&result)
+        .into_iter()
+        .filter(|l| l.contains("time limit"))
+        .collect();
+    assert_eq!(
+        timed,
+        [format!(
+            "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and the \
+             pages read before are laid out in the time left",
+            read + 1,
+            read + 1
+        )]
+    );
+    assert_rss_bounded("hundred_thousand_pages_stop_in_time");
+}
+
+#[cfg(unix)]
+#[test]
+fn pages_with_their_own_resources_are_read_under_the_memory_limit() {
+    // 15,000 pages, each with its own resources, media box and content stream, at a memory
+    // limit of 256 MiB: the objects and the text parser's page list fit in the object budget,
+    // every page is read, and the process stays under the limit.
+    const PAGES: usize = 15_000;
+    let limit: u64 = 256 << 20;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, true);
+    let p = pdf_pipeline(limit, Duration::from_secs(120));
+    let result = p.run_path(&path, &markdown_request());
+    eprintln!(
+        "own resources: {:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(pages_with_text(&result), PAGES, "{:?}", losses(&result));
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Page 14999"));
+    assert_rss_under(
+        "pages_with_their_own_resources_are_read_under_the_memory_limit",
+        limit,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn hundred_thousand_pages_stay_under_the_memory_limit() {
+    // 100,000 pages with their own content streams at a memory limit of 512 MiB. The objects
+    // take almost all of the object budget; the text parser's list of the pages (about 2 KB a
+    // page) does not fit beside them, so the text is not read and the output says why,
+    // instead of going over the limit.
+    const PAGES: usize = 100_000;
+    let limit: u64 = 512 << 20;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
     {
+        // The pages inherit their resources and media box, so the objects fit the budget.
+        use std::io::Write;
         let mut b = PdfFile::default();
         let catalog = b.reserve();
         let tree = b.reserve();
         let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-        let mut text = String::from("BT /F1 10 Tf 72 780 Td 14 TL ");
-        for line in 0..40 {
-            text.push_str(&format!(
-                "(Line {line} of a page that is shown again and again.) ' "
-            ));
-        }
-        text.push_str("ET");
-        let c = b.stream("", text.as_bytes());
         let mut kids = String::with_capacity(PAGES * 10);
-        for _ in 0..PAGES {
+        for i in 0..PAGES {
+            let c = b.stream(
+                "",
+                format!("BT /F1 12 Tf 72 720 Td (Page {i}) Tj ET").as_bytes(),
+            );
             let page = b.add(format!(
                 "<< /Type /Page /Parent {tree} 0 R /Contents {c} 0 R >>"
             ));
@@ -1264,17 +1442,13 @@ fn hundred_thousand_pages_stop_in_time() {
         let mut out = std::fs::File::create(&path).unwrap();
         out.write_all(&b.finish(catalog)).unwrap();
     }
-    let limit = Duration::from_secs(2);
-    let p = pipeline_with(Some(limit));
-    let start = Instant::now();
+    let p = pdf_pipeline(limit, Duration::from_secs(120));
     let result = p.run_path(&path, &markdown_request());
-    let took = start.elapsed();
     eprintln!(
-        "hundred_thousand_pages: {:?} in {took:?}: {:?}",
+        "page list: {:?}: {:?}",
         result.completeness,
-        losses(&result).iter().take(3).collect::<Vec<_>>()
+        losses(&result)
     );
-    assert!(took < limit + SLACK, "took {took:?}");
     assert_eq!(
         result.completeness,
         Completeness::Partial,
@@ -1282,13 +1456,13 @@ fn hundred_thousand_pages_stop_in_time() {
         losses(&result)
     );
     assert!(
-        losses(&result)
-            .iter()
-            .any(|l| l.starts_with("Limit") && l.contains("time limit reached")),
+        losses(&result).iter().any(|l| l
+            .starts_with("Limit p1 text of pages 1 to 100000 not read")
+            && l.contains("the text parser's list of the 100000 pages")),
         "{:?}",
         losses(&result)
     );
-    assert_rss_bounded("hundred_thousand_pages_stop_in_time");
+    assert_rss_under("hundred_thousand_pages_stay_under_the_memory_limit", limit);
 }
 
 #[cfg(unix)]

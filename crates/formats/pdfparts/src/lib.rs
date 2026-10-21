@@ -41,7 +41,7 @@ mod structure;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lopdf::{Document, ObjectId};
@@ -475,6 +475,27 @@ impl Pdf {
     /// then spent and the caller must stop copying.
     pub fn charge_copy(&self, bytes: u64) -> bool {
         self.text_budget().take(bytes)
+    }
+
+    /// Takes `bytes` from the same pool as [`Pdf::charge_copy`] for memory a reader holds for
+    /// a while, only when they fit: unlike `charge_copy`, a reservation that does not fit
+    /// leaves the pool as it is. Give the bytes back with [`Pdf::release_copy`] once the
+    /// memory is gone.
+    pub fn reserve_copy(&self, bytes: u64) -> bool {
+        self.text_left
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(bytes)
+            })
+            .is_ok()
+    }
+
+    /// Gives back the bytes of a [`Pdf::reserve_copy`].
+    pub fn release_copy(&self, bytes: u64) {
+        let _ = self
+            .text_left
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                Some(left.saturating_add(bytes))
+            });
     }
 
     /// The bytes charged for the objects parsed at open, against `max_object_bytes`.

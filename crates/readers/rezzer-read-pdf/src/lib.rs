@@ -65,7 +65,12 @@ impl Reader for PdfReader {
     }
 
     fn read(&self, src: &Source, opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
-        read_pdf(self, src, opts, budget, &|| budget.check_time().is_err())
+        // The text is read for three quarters of the time limit at most: the pages read must
+        // still be laid out, or their text would be lost with the rest.
+        let text_time = budget.limits().max_time * 3 / 4;
+        read_pdf(self, src, opts, budget, &|| {
+            budget.check_time().is_err() || budget.elapsed() > text_time
+        })
     }
 }
 
@@ -326,6 +331,7 @@ fn lay_out(
                     Severity::Warning,
                 );
             }
+            halted = true;
             break;
         }
         let mut blocks = vec![Block::Paragraph {
@@ -590,11 +596,16 @@ fn lay_out(
         );
     }
     failures(&failed, out);
-    if let Some(first) = stopped_at {
+    // A stop in the layout already named the pages from where it stopped.
+    if let Some(first) = stopped_at.filter(|_| !halted) {
         let last = pages.last().map_or(first, |p| p.number);
+        let why = match budget.check_time() {
+            Err(hit) if hit.limit == "cancelled" => "the read was cancelled",
+            _ => "the time limit was near, and the pages read before are laid out in the time left",
+        };
         out.loss(
             format!("p{first}"),
-            format!("text of pages {first} to {last} not read: the time limit was reached"),
+            format!("text of pages {first} to {last} not read: {why}"),
             LossReason::Limit,
             Severity::Warning,
         );

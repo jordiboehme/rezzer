@@ -93,6 +93,23 @@ impl<'b> Raw<'b> {
         }
     }
 
+    /// Takes `bytes` for memory held for a while, only when they fit; a reservation that
+    /// does not fit leaves the pool as it is. [`Raw::release_copy`] gives them back.
+    pub(crate) fn reserve_copy(&self, bytes: u64) -> bool {
+        match self.copy_left.get().checked_sub(bytes) {
+            Some(left) => {
+                self.copy_left.set(left);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub(crate) fn release_copy(&self, bytes: u64) {
+        self.copy_left
+            .set(self.copy_left.get().saturating_add(bytes));
+    }
+
     pub(crate) fn page_count(&self) -> Option<u32> {
         self.pages
     }

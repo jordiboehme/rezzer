@@ -357,6 +357,24 @@ pub(crate) fn render_pages(
     if !opts.extract_assets || needs.is_empty() {
         return;
     }
+    // The renderer opens the file again and holds its own page list while it renders.
+    let Some(_list) = crate::text::PageList::of(pdf) else {
+        let why = format!(
+            "the renderer's list of the {} pages would take about {} bytes, more than the \
+             object limit leaves after the objects of the file",
+            pdf.page_count(),
+            crate::text::page_list_bytes(pdf.page_count())
+        );
+        for need in needs {
+            out.loss(
+                format!("p{}", need.page),
+                format!("page {} is not rendered: {why}", need.page),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+        }
+        return;
+    };
     let opened = panic::catch_unwind(AssertUnwindSafe(|| {
         hayro_syntax::Pdf::new(pdf.canonical_shared())
     }));

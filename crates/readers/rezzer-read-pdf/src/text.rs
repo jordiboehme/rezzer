@@ -283,6 +283,21 @@ impl Origin<'_> {
         }
     }
 
+    /// Reserves `bytes` for memory held for a while; see [`Pdf::reserve_copy`].
+    fn reserve_copy(self, bytes: u64) -> bool {
+        match self {
+            Origin::Canonical(pdf) => pdf.reserve_copy(bytes),
+            Origin::Fallback(raw) => raw.reserve_copy(bytes),
+        }
+    }
+
+    fn release_copy(self, bytes: u64) {
+        match self {
+            Origin::Canonical(pdf) => pdf.release_copy(bytes),
+            Origin::Fallback(raw) => raw.release_copy(bytes),
+        }
+    }
+
     /// The number of pages the parser's page walk must find, if it is known.
     fn page_count(self) -> Option<u32> {
         match self {
@@ -347,6 +362,21 @@ pub(crate) fn pages_of(
             why: why.clone(),
             kind,
         }));
+    };
+    // The text parser builds its own list of every page when it opens the file. That list
+    // is held while the pages are read and comes from the object pool.
+    let count = origin.page_count().unwrap_or(0).max(wanted.len() as u32);
+    let Some(_list) = PageList::reserve(origin, count) else {
+        all_fail(
+            &mut out,
+            format!(
+                "the text parser's list of the {count} pages would take about {} bytes, more \
+                 than the object limit leaves after the objects of the file",
+                page_list_bytes(count)
+            ),
+            Fail::Limit,
+        );
+        return out;
     };
     let opened = panic::catch_unwind(AssertUnwindSafe(|| origin.open()));
     let doc = match opened {
@@ -416,6 +446,44 @@ pub(crate) fn pages_of(
     out.quote_visits = reader.quoting.max();
     out.quotes_cut = reader.quoting.cut;
     out
+}
+
+/// What hayro-syntax 0.8.0 holds for one page of an open file (its page list with the
+/// resources and boxes of each page), measured at about 1,950 bytes a page on files of 50,000
+/// and 100,000 pages, whatever their objects.
+pub(crate) const PAGE_LIST_BYTES: u64 = 2048;
+
+/// The memory the page list of a file of `pages` pages takes once hayro-syntax opened it.
+pub(crate) fn page_list_bytes(pages: u32) -> u64 {
+    u64::from(pages).saturating_mul(PAGE_LIST_BYTES)
+}
+
+/// The object pool's share for one open hayro-syntax file, given back when it is dropped.
+/// Keep it alive for as long as the open file.
+pub(crate) struct PageList<'p> {
+    origin: Origin<'p>,
+    bytes: u64,
+}
+
+impl<'p> PageList<'p> {
+    /// Reserves the page list of a file of `pages` pages; `None` when it does not fit.
+    pub(crate) fn reserve(origin: Origin<'p>, pages: u32) -> Option<PageList<'p>> {
+        let bytes = page_list_bytes(pages);
+        origin
+            .reserve_copy(bytes)
+            .then_some(PageList { origin, bytes })
+    }
+
+    /// Reserves the page list of the canonical copy of `pdf`.
+    pub(crate) fn of(pdf: &'p Pdf) -> Option<PageList<'p>> {
+        PageList::reserve(Origin::Canonical(pdf), pdf.page_count())
+    }
+}
+
+impl Drop for PageList<'_> {
+    fn drop(&mut self) {
+        self.origin.release_copy(self.bytes);
+    }
 }
 
 /// The optional content groups the default configuration switches off, read the way the

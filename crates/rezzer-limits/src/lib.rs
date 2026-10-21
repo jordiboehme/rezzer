@@ -144,6 +144,11 @@ impl Budget {
         &self.limits
     }
 
+    /// The time since the budget was made.
+    pub fn elapsed(&self) -> Duration {
+        self.start.elapsed()
+    }
+
     /// Fails when the time limit is over or the budget was cancelled.
     /// Values in the error are milliseconds.
     pub fn check_time(&self) -> Result<(), LimitHit> {
