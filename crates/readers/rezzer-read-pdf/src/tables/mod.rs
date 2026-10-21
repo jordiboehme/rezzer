@@ -156,7 +156,9 @@ pub(crate) fn untagged(
         images: drawn.images,
         body_size: drawn.body_size,
     };
-    ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
+    if !drawn.lines_unsearched {
+        ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
+    }
     borderless::borderless(page, flow, &area, stop, &mut found);
     found
 }
@@ -246,8 +248,10 @@ fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
     out
 }
 
-/// The caption kinds next to a box: a caption whose paragraph ends within three line heights
-/// above the box, or starts within three line heights below it, and overlaps it across.
+/// The caption kinds next to a box: the line of a table caption (the first found), and
+/// whether a figure caption is near. A caption counts when its paragraph ends within three
+/// line heights above the box, or starts within three line heights below it, and overlaps
+/// it across.
 /// Lines `skip` names (the box's own) are not looked at. `sizes` are the font sizes of the
 /// box's text: their median sets how far from the box a caption may stand.
 fn captions_near(
@@ -257,8 +261,8 @@ fn captions_near(
     b: [f32; 4],
     sizes: &[f32],
     skip: &dyn Fn(usize) -> bool,
-) -> (bool, bool) {
-    let (mut table, mut figure) = (false, false);
+) -> (Option<usize>, bool) {
+    let (mut table, mut figure) = (None, false);
     let text = |l: &FlowLine| -> String {
         flow.runs[l.start..l.end]
             .iter()
@@ -271,8 +275,10 @@ fn captions_near(
         let x1 = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
         !runs.iter().any(|r| r.off_axis) && x1 >= b[0] && x0 <= b[2]
     };
-    let mut note = |l: &FlowLine| match caption(&text(l)) {
-        Some(true) => table = true,
+    let mut note = |k: usize| match caption(&text(&lines[k])) {
+        Some(true) => {
+            table.get_or_insert(k);
+        }
         Some(false) => figure = true,
         None => {}
     };
@@ -295,10 +301,10 @@ fn captions_near(
         }
         let near = 3.0 * l.size.min(2.0 * size);
         if l.y < b[1] && b[1] - (l.y + l.size) <= near {
-            note(l);
+            note(k);
         } else if l.y > b[3] && l.y - b[3] <= near {
             // The last line of a paragraph above: its first lines may hold the caption.
-            note(l);
+            note(k);
             let mut at = k;
             for _ in 0..CAPTION_LINES {
                 let Some(prev) = at.checked_sub(1).map(|p| &lines[p]) else {
@@ -308,7 +314,7 @@ fn captions_near(
                 if gap <= 0.0 || gap > 1.6 * prev.size.max(lines[at].size) || !across(prev) {
                     break;
                 }
-                note(prev);
+                note(at - 1);
                 at -= 1;
             }
         }

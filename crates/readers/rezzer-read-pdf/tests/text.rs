@@ -1205,3 +1205,23 @@ fn rounded_boxes_side_by_side() {
         }
     }
 }
+
+#[test]
+fn known_limit_a_side_heading_lands_inside_the_question_above_it() {
+    // A known limit, pinned so a later change notices: on the tax form's first page the
+    // sidebar heading "Dependents" stands at other baselines than the form text beside it, so
+    // the sidebar is read as a column of its own. The sidebar label "Digital Assets" and the
+    // first line of the question beside it are one piece that crosses the gutter, so the
+    // heading is read between the two lines of that question. A cut at the top of each side
+    // heading fixes this here but mixes the instructions with the sample check of the direct
+    // deposit form again, so it is not made.
+    let out = read(&corpus("irs-f1040-2025.pdf"));
+    let body = text(page(&out, 1));
+    let at = |t: &str| body.find(t).unwrap_or_else(|| panic!("{t} in {body}"));
+    let (first, heading, second) = (
+        at("(b) sell,"),
+        at("Dependents"),
+        at("exchange, or otherwise"),
+    );
+    assert!(first < heading && heading < second, "{body}");
+}

@@ -4062,8 +4062,9 @@ fn sized_page(content: &[u8], w: usize, h: usize) -> Vec<u8> {
 /// The loss that says the drawn boxes of page 1 are not used as reading regions.
 fn box_loss(out: &ReadOutcome) -> Option<&Loss> {
     out.document.losses.iter().find(|l| {
-        l.what
-            .contains("drawn boxes on page 1 are not used as reading regions")
+        l.what.contains("page 1")
+            && l.what.contains("drawn boxes")
+            && l.what.contains("are not used as reading regions")
     })
 }
 

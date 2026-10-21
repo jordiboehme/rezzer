@@ -634,6 +634,8 @@ pub(crate) struct Drawn<'a> {
     pub images: &'a [[f32; 4]],
     /// Boxes of the form fields on the page.
     pub widgets: &'a [[f32; 4]],
+    /// The text pass found the page's lines too many to search for grids, and said so.
+    pub lines_unsearched: bool,
     pub width: f32,
     /// The most common font size of the file's text.
     pub body_size: f32,
@@ -1842,6 +1844,7 @@ mod tests {
         rules: &[],
         images: &[],
         widgets: &[],
+        lines_unsearched: false,
         width: 595.0,
         body_size: 10.0,
     };

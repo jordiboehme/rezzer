@@ -381,6 +381,7 @@ fn lay_out(
                 rules: &items.rules,
                 images: &items.images,
                 widgets: &fields,
+                lines_unsearched: items.lines_unsearched,
                 width: info.width,
                 body_size: style.body_size,
             };

@@ -123,6 +123,9 @@ pub(crate) struct PageItems {
     pub fallback: bool,
     /// Why the page's drawn boxes were not used as reading regions, while it is laid out.
     pub boxes_unused: Option<String>,
+    /// The page's lines were too many to search for grids; a loss says so already, and the
+    /// ruled detector does not search them again.
+    pub lines_unsearched: bool,
 }
 
 /// The boxes of the form fields of each page, in user space.
@@ -836,10 +839,32 @@ impl<'p, 'a> PageReader<'p, 'a> {
             .collect();
         let width = (crop.x1 - crop.x0) as f32;
         let height = (crop.y1 - crop.y0) as f32;
-        let (boxes, unused) = match regions::boxes(&dev.rules, width, height, &fields) {
+        // The grid search runs once for the page; when it gives up, one loss says so for
+        // both the ruled tables and the boxes.
+        let found = regions::grids(&dev.rules);
+        let inked = regions::Inked::new(
+            width,
+            height,
+            dev.glyphs.iter().filter(|g| !g.invisible).map(|g| {
+                let size = g.size.max(0.1);
+                (
+                    g.x + g.dx * 0.25 * size,
+                    g.y + g.dy * 0.25 * size + 0.25 * size,
+                )
+            }),
+        );
+        let (boxes, unused) = match regions::boxes(
+            found.as_ref().map_err(|e| *e),
+            width,
+            height,
+            &fields,
+            &inked,
+        ) {
             Ok(b) => (b, None),
             Err(why) => (Vec::new(), Some(why)),
         };
+        let unsearched = found.as_ref().err().map(|e| e.why());
+        drop(found);
         drop(fields);
         let mut items = lay_out(
             n,
@@ -851,7 +876,13 @@ impl<'p, 'a> PageReader<'p, 'a> {
             &boxes,
         );
         drop(boxes);
-        if let Some(why) = unused.or(items.boxes_unused.take()) {
+        if let Some(why) = &unsearched {
+            notes.push(Note::Limit(format!(
+                "ruled tables on page {n} are not looked for and its drawn boxes are not used \
+                 as reading regions: {why}; the text there is read in the page's order"
+            )));
+            items.lines_unsearched = true;
+        } else if let Some(why) = unused.or(items.boxes_unused.take()) {
             notes.push(Note::Limit(format!(
                 "drawn boxes on page {n} are not used as reading regions: {why}; the text there \
                  is read in the page's order"
@@ -2505,7 +2536,7 @@ struct Subpath {
     held: Option<Vec<Rule>>,
     /// Every straight segment lies along an axis, so far.
     square: bool,
-    /// The largest move of a curve along either axis.
+    /// The largest move of a curve, its control points too, along either axis.
     bend: f32,
     lo: Point,
     hi: Point,
@@ -2648,16 +2679,24 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
                 straight(s, p, keep);
                 s.reach(p);
             }
-            PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => {
-                let p = transform * p;
+            PathEl::QuadTo(..) | PathEl::CurveTo(..) => {
+                // The end point and the control points: a corner curve stays near its corner.
+                let (points, n): ([Point; 3], usize) = match *el {
+                    PathEl::QuadTo(c, p) => ([c, p, p], 2),
+                    PathEl::CurveTo(c1, c2, p) => ([c1, c2, p], 3),
+                    _ => unreachable!("a curve"),
+                };
                 let s = sub.get_or_insert_with(|| Subpath::new(Point::ZERO));
                 s.curved = true;
                 let a = s.last;
-                s.bend = s
-                    .bend
-                    .max((p.x - a.x).abs() as f32)
-                    .max((p.y - a.y).abs() as f32);
-                s.reach(p);
+                for q in &points[..n] {
+                    let q = transform * *q;
+                    s.bend = s
+                        .bend
+                        .max((q.x - a.x).abs() as f32)
+                        .max((q.y - a.y).abs() as f32);
+                }
+                s.reach(transform * points[n - 1]);
             }
             PathEl::ClosePath => {
                 if let Some(s) = sub.as_mut() {
@@ -3472,6 +3511,10 @@ mod tests {
             + &rounded(300.0, 600.0, 520.0, 720.0, 10.0, "f")
             + &rounded(100.0, 100.0, 120.0, 120.0, 10.0, "S")
             + &rounded(200.0, 100.0, 240.0, 130.0, 9.0, "S");
+        // Corners whose curves bulge 30 points out through their control points.
+        let bulge = "405 100 m 495 100 l 530 70 500 105 500 105 c 500 195 l 530 230 495 200 495 200 c \
+                     405 200 l 370 230 400 195 400 195 c 400 105 l 370 70 405 100 405 100 c h S ";
+        let content = content + bulge;
         let items = rules_of_page(&content, "", CAPS);
         let rects: Vec<(f32, f32, f32, f32)> = items
             .rules

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::regions::offset_baselines;
+use crate::regions::{Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
 #[derive(Debug, Clone)]
@@ -118,8 +118,8 @@ pub(super) fn borderless(
     // Accepted regions, and for each run the table, row and cell it goes to.
     let mut claim: Vec<Planned> = Vec::new();
     let mut target: Vec<Target> = vec![None; flow.runs.len()];
-    // A region without rules was noted on this page already.
-    let mut noted = false;
+    // The caption lines that gated a note already: one note for each caption.
+    let mut noted: Vec<usize> = Vec::new();
     for (g, (a, z)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -152,7 +152,7 @@ pub(super) fn borderless(
             None => vec![pieces],
         };
         let split = sets.len() > 1;
-        let mut refused: Option<(&'static str, f32)> = None;
+        let mut refused: Option<(&'static str, f32, usize)> = None;
         let mut taken = false;
         for pieces in &sets {
             let runs: Vec<usize> = pieces
@@ -183,8 +183,9 @@ pub(super) fn borderless(
             let b = [x0, lb.y - 0.25 * lb.size, x1, lt.y + lt.size];
             let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
             let line_sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
-            let (table_caption, figure_caption) =
+            let (caption_line, figure_caption) =
                 captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
+            let table_caption = caption_line.is_some();
             let rows_needed = if table_caption { 2 } else { 3 };
             let verdict =
                 grid_of(flow, &lines[a..z], pieces, rows_needed, table_caption).and_then(|grid| {
@@ -236,20 +237,21 @@ pub(super) fn borderless(
                     claim.push(planned);
                 }
                 Err(why) => {
-                    if table_caption && refused.is_none() {
+                    if let (Some(line), None) = (caption_line, refused) {
                         let why = if split { SIDE_BY_SIDE } else { why };
-                        refused = Some((why, b[3]));
+                        refused = Some((why, b[3], line));
                     }
                 }
             }
         }
-        if let (false, Some((why, top))) = (taken, refused) {
-            // A grid of rules over the same text may have said so already, and a page gets
-            // one note for its regions without rules.
+        if let (false, Some((why, top, line))) = (taken, refused) {
+            // A grid of rules over the same text may have said so already, and a caption
+            // gates one note: a region it gated before said so.
             let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
-            let said = noted || found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
+            let said =
+                noted.contains(&line) || found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
             if !said {
-                noted = true;
+                noted.push(line);
                 found.unsure.push(Unsure {
                     at: flow.at[lines[a].start],
                     top,
@@ -355,15 +357,19 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
     if g1 - g0 < BLOCK_GUTTER * size || g1 - g0 < BLOCK_GUTTER_RATIO * median {
         return None;
     }
-    // The baselines of a side, line by line: those of its runs.
-    let side = |left: bool| -> Vec<Vec<f32>> {
+    // The baselines and sizes of a side, line by line: those of its runs.
+    let side = |left: bool| -> Vec<Vec<Part>> {
         pieces
             .iter()
             .map(|l| {
                 l.iter()
                     .filter(|p| if left { p.x1 <= mid } else { p.x0 >= mid })
-                    .flat_map(|p| flow.runs[p.start..p.end].iter().map(|r| r.y))
-                    .collect::<Vec<f32>>()
+                    .flat_map(|p| {
+                        flow.runs[p.start..p.end]
+                            .iter()
+                            .map(|r| (r.y, r.size, !r.text.trim().is_empty()))
+                    })
+                    .collect::<Vec<Part>>()
             })
             .filter(|l| !l.is_empty())
             .collect()

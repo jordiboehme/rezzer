@@ -134,6 +134,18 @@ pub(crate) enum Unsearched {
     MeetTooOften,
 }
 
+impl Unsearched {
+    /// Why, in words.
+    pub(crate) fn why(self) -> String {
+        match self {
+            Unsearched::TooMany => {
+                format!("the page draws more than {MAX_SEGMENTS} straight lines")
+            }
+            Unsearched::MeetTooOften => "its lines meet too often".into(),
+        }
+    }
+}
+
 /// The joined segments of a page and the groups of them that meet: indices into `hs` and
 /// `vs`, each group with at least two of each.
 #[derive(Debug, Default)]
@@ -245,12 +257,13 @@ pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
 /// column; a cell of a grid of two rows and two columns or more is a table's. A box that
 /// covers most of the page (its frame) or holds a form field is no region.
 pub(crate) fn boxes(
-    rules: &[Rule],
+    grids: Result<&Grids, Unsearched>,
     width: f32,
     height: f32,
     widgets: &[[f32; 4]],
+    inked: &Inked,
 ) -> Result<Vec<[f32; 4]>, String> {
-    let grids = match grids(rules) {
+    let grids = match grids {
         Ok(g) => g,
         Err(Unsearched::TooMany) => {
             return Err(format!(
@@ -300,14 +313,16 @@ pub(crate) fn boxes(
         let on_x = on(&xs, &v);
         let on_y = on(&ys, &h);
         // Whether lines cover most of the stretch lo..hi of a boundary.
+        // Strokes that overlap count once: the end covered so far moves along.
         let drawn = |segs: &[Seg], lo: f32, hi: f32, work: &mut usize| -> bool {
-            let mut len = 0.0f32;
+            let (mut len, mut end) = (0.0f32, lo);
             for s in segs {
                 *work += 1;
                 if s.from >= hi {
                     break;
                 }
-                len += (s.to.min(hi) - s.from.max(lo)).max(0.0);
+                len += (s.to.min(hi) - s.from.max(end)).max(0.0);
+                end = end.max(s.to);
             }
             len >= DRAWN_SIDE * (hi - lo)
         };
@@ -321,13 +336,15 @@ pub(crate) fn boxes(
                 if work > BOX_WORK {
                     return Err(too_much());
                 }
-                if !closed || (x1 - x0) * (y1 - y0) > PAGE_SHARE * page {
+                // A box without text in it is no region and counts toward no bound.
+                let b = [x0, y0, x1, y1];
+                if !closed || (x1 - x0) * (y1 - y0) > PAGE_SHARE * page || !inked.may_hold(b) {
                     continue;
                 }
                 if out.len() == MAX_BOXES {
                     return Err(format!("the page draws more than {MAX_BOXES} boxes"));
                 }
-                out.push([x0, y0, x1, y1]);
+                out.push(b);
             }
         }
     }
@@ -369,6 +386,64 @@ pub(crate) fn boxes(
         }
     }
     Ok(kept)
+}
+
+/// Cells of the map of where a page has text, along each side.
+const INKED_SIDE: usize = 64;
+
+/// Where a page has text, coarsely: the number of glyphs in each cell of a grid over the
+/// page, summed so that any box asks in four steps whether a glyph may lie in it.
+pub(crate) struct Inked {
+    step: (f32, f32),
+    /// Summed counts: entry (r, c) holds the glyphs in cells below row r and left of column
+    /// c, with one row and one column of zeros first.
+    sums: Vec<u64>,
+}
+
+impl Inked {
+    /// The map of `points` (glyph places) on a page of `width` by `height`.
+    pub(crate) fn new(width: f32, height: f32, points: impl Iterator<Item = (f32, f32)>) -> Inked {
+        let n = INKED_SIDE;
+        let step = (
+            (width / n as f32).max(f32::MIN_POSITIVE),
+            (height / n as f32).max(f32::MIN_POSITIVE),
+        );
+        let mut counts = vec![0u32; n * n];
+        for (x, y) in points {
+            if let (Some(c), Some(r)) = (cell_of(x, step.0, n), cell_of(y, step.1, n)) {
+                counts[r * n + c] = counts[r * n + c].saturating_add(1);
+            }
+        }
+        let mut sums = vec![0u64; (n + 1) * (n + 1)];
+        for r in 0..n {
+            for c in 0..n {
+                sums[(r + 1) * (n + 1) + c + 1] = u64::from(counts[r * n + c])
+                    + sums[r * (n + 1) + c + 1]
+                    + sums[(r + 1) * (n + 1) + c]
+                    - sums[r * (n + 1) + c];
+            }
+        }
+        Inked { step, sums }
+    }
+
+    /// Whether a glyph may lie in `b`: one lies in a cell the box reaches into.
+    pub(crate) fn may_hold(&self, b: [f32; 4]) -> bool {
+        let n = INKED_SIDE;
+        let clamp = |v: f32, step: f32| ((v / step).floor().max(0.0) as usize).min(n - 1);
+        if !(b[0] <= b[2] && b[1] <= b[3]) {
+            return false;
+        }
+        let (c0, c1) = (clamp(b[0], self.step.0), clamp(b[2], self.step.0) + 1);
+        let (r0, r1) = (clamp(b[1], self.step.1), clamp(b[3], self.step.1) + 1);
+        let at = |r: usize, c: usize| self.sums[r * (n + 1) + c];
+        at(r1, c1) + at(r0, c0) > at(r0, c1) + at(r1, c0)
+    }
+}
+
+/// The cell of a value on a side of `n` cells of `step`, `None` off the page.
+fn cell_of(v: f32, step: f32, n: usize) -> Option<usize> {
+    let k = (v / step).floor();
+    (k >= 0.0 && k < n as f32).then_some(k as usize)
 }
 
 /// Boxes found by the points they hold: a grid over their extent, each cell listing the boxes
@@ -473,26 +548,40 @@ const BASELINE_NEAR: f32 = 0.15;
 /// Lines of one block follow each other at most this many font sizes apart, on median.
 const BLOCK_PITCH: f32 = 4.0;
 
+/// A baseline shift between two cells of a row that their size difference explains (top,
+/// centre or baseline alignment of the two sizes) is at most this share of the difference,
+/// plus [`BASELINE_NEAR`] of the smaller size.
+const ALIGN_SHIFT: f32 = 0.8;
+
+/// One part of a line: its baseline, its font size and whether it has ink (white space
+/// only has no size to align with the cell beside it).
+pub(crate) type Part = (f32, f32, bool);
+
 /// Whether two blocks of lines stand apart by their baselines (text of font size `size`).
-/// Each line is given by the baselines of its parts. Each block is at least two lines that
-/// follow each other (see [`BLOCK_PITCH`]), fewer than half of the lines of `right` meet a
-/// line of `left` (a baseline of the one within [`BASELINE_NEAR`] of a baseline of the
-/// other), and at most half of the lines of `left` meet one of `right`. A column of labels
-/// next to text, each label on a line of the text, is not apart.
-pub(crate) fn offset_baselines(left: &[Vec<f32>], right: &[Vec<f32>], size: f32) -> bool {
+/// Each line is given by the baselines and sizes of its parts. Each block is at least two
+/// lines that follow each other (see [`BLOCK_PITCH`]), fewer than half of the lines of
+/// `right` meet a line of `left`, and at most half of the lines of `left` meet one of
+/// `right`. Two lines meet when a baseline of the one lies within [`BASELINE_NEAR`] of a
+/// baseline of the other, or when they pair as the cells of one row (both with ink): each
+/// pairs with the
+/// nearest line of the other side, one to one, by a shift their size difference explains
+/// (see [`ALIGN_SHIFT`]), and all pairs share one shift, so both sides keep one pitch. A
+/// column of labels next to text, each label on a line of the text, is not apart; label and
+/// value cells of two sizes, top-aligned or centred, are rows.
+pub(crate) fn offset_baselines(left: &[Vec<Part>], right: &[Vec<Part>], size: f32) -> bool {
     if left.len() < 2 || right.len() < 2 {
         return false;
     }
-    let tops = |side: &[Vec<f32>]| -> Vec<f32> {
-        let mut t: Vec<f32> = side
-            .iter()
-            .map(|l| l.iter().copied().fold(f32::MIN, f32::max))
-            .collect();
-        t.sort_by(f32::total_cmp);
-        t
+    // The first part of a line: its highest baseline, with its size.
+    let head = |l: &Vec<Part>| -> Part {
+        l.iter().copied().fold(
+            (f32::MIN, size, false),
+            |a, p| if p.0 > a.0 { p } else { a },
+        )
     };
-    let block = |side: &[Vec<f32>]| {
-        let t = tops(side);
+    let block = |side: &[Vec<Part>]| {
+        let mut t: Vec<f32> = side.iter().map(|l| head(l).0).collect();
+        t.sort_by(f32::total_cmp);
         let mut gaps: Vec<f32> = t.windows(2).map(|w| w[1] - w[0]).collect();
         gaps.sort_by(f32::total_cmp);
         gaps[gaps.len() / 2] <= BLOCK_PITCH * size
@@ -501,23 +590,67 @@ pub(crate) fn offset_baselines(left: &[Vec<f32>], right: &[Vec<f32>], size: f32)
         return false;
     }
     let near = BASELINE_NEAR * size;
-    let all = |side: &[Vec<f32>]| -> Vec<f32> {
-        let mut v: Vec<f32> = side.iter().flatten().copied().collect();
+    let all = |side: &[Vec<Part>]| -> Vec<f32> {
+        let mut v: Vec<f32> = side.iter().flatten().map(|p| p.0).collect();
         v.sort_by(f32::total_cmp);
         v
     };
     let (on_left, on_right) = (all(left), all(right));
-    let met = |of: &[Vec<f32>], on: &[f32]| {
-        of.iter()
-            .filter(|line| {
-                line.iter().any(|&y| {
-                    let k = on.partition_point(|l| *l < y - near);
-                    on.get(k).is_some_and(|l| *l <= y + near)
-                })
-            })
-            .count()
+    let meets = |line: &Vec<Part>, on: &[f32]| {
+        line.iter().any(|&(y, _, _)| {
+            let k = on.partition_point(|l| *l < y - near);
+            on.get(k).is_some_and(|l| *l <= y + near)
+        })
     };
-    2 * met(right, &on_left) < right.len() && 2 * met(left, &on_right) <= left.len()
+    let mut met_left: Vec<bool> = left.iter().map(|l| meets(l, &on_right)).collect();
+    let mut met_right: Vec<bool> = right.iter().map(|l| meets(l, &on_left)).collect();
+    // Rows of cells of two sizes: each right line with the nearest left line, when the size
+    // difference explains the shift.
+    let mut heads: Vec<(Part, usize)> = left
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (head(l), i))
+        .filter(|(h, _)| h.2)
+        .collect();
+    heads.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+    // For each left line, the right line it pairs with and the shift.
+    let mut best: Vec<Option<(usize, f32)>> = vec![None; left.len()];
+    for (r, line) in right.iter().enumerate() {
+        let (yr, sr, inked) = head(line);
+        if !inked {
+            continue;
+        }
+        let k = heads.partition_point(|h| h.0.0 < yr);
+        let Some(&((yl, sl, _), i)) = [k.checked_sub(1), Some(k)]
+            .into_iter()
+            .flatten()
+            .filter_map(|j| heads.get(j))
+            .min_by(|a, b| (a.0.0 - yr).abs().total_cmp(&(b.0.0 - yr).abs()))
+        else {
+            continue;
+        };
+        let d = yr - yl;
+        let explained = d.abs() <= BASELINE_NEAR * sl.min(sr) + ALIGN_SHIFT * (sl - sr).abs();
+        if explained && best[i].is_none_or(|(_, e)| d.abs() < e.abs()) {
+            best[i] = Some((r, d));
+        }
+    }
+    let mut shifts: Vec<f32> = best.iter().flatten().map(|b| b.1).collect();
+    if !shifts.is_empty() {
+        shifts.sort_by(f32::total_cmp);
+        let shift = shifts[shifts.len() / 2];
+        for (i, b) in best.iter().enumerate() {
+            if let Some((r, d)) = *b {
+                let small = head(&left[i]).1.min(head(&right[r]).1);
+                if (d - shift).abs() <= BASELINE_NEAR * small {
+                    met_left[i] = true;
+                    met_right[r] = true;
+                }
+            }
+        }
+    }
+    let count = |v: &[bool]| v.iter().filter(|&&m| m).count();
+    2 * count(&met_right) < right.len() && 2 * count(&met_left) <= left.len()
 }
 
 #[cfg(test)]
@@ -574,7 +707,20 @@ mod tests {
             line(300.0, 300.0, 400.0, 300.0),
             line(300.0, 300.0, 300.0, 400.0),
         ];
-        let mut got = boxes(&rules, 595.0, 842.0, &[]).expect("boxes");
+        let inked = Inked::new(
+            595.0,
+            842.0,
+            [
+                (100.0, 650.0),
+                (100.0, 120.0),
+                (300.0, 120.0),
+                (350.0, 650.0),
+            ]
+            .into_iter(),
+        );
+        let found = grids(&rules);
+        let mut got =
+            boxes(found.as_ref().map_err(|e| *e), 595.0, 842.0, &[], &inked).expect("boxes");
         got.iter_mut()
             .for_each(|b| b.iter_mut().for_each(|v| *v = v.round()));
         assert_eq!(
@@ -587,8 +733,21 @@ mod tests {
             ]
         );
         // A box that holds a form field is not a region.
-        let got = boxes(&rules, 595.0, 842.0, &[[310.0, 610.0, 400.0, 630.0]]).expect("boxes");
-        assert_eq!(got.len(), 3, "{got:?}");
+        let fields = [[310.0, 610.0, 400.0, 630.0]];
+        let got = boxes(
+            found.as_ref().map_err(|e| *e),
+            595.0,
+            842.0,
+            &fields,
+            &inked,
+        );
+        assert_eq!(got.expect("boxes").len(), 3);
+        // A box with no text in it is no region.
+        let bare = Inked::new(595.0, 842.0, [(100.0, 650.0)].into_iter());
+        let got = boxes(found.as_ref().map_err(|e| *e), 595.0, 842.0, &[], &bare);
+        let got = got.expect("boxes");
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0][0].round(), 40.0);
     }
 
     #[test]
@@ -607,9 +766,16 @@ mod tests {
 
     #[test]
     fn baselines_that_do_not_line_up() {
-        let lines = |ys: &[f32]| -> Vec<Vec<f32>> { ys.iter().map(|&y| vec![y]).collect() };
-        let left = lines(&[650.6, 639.0, 627.4, 615.8, 604.2]);
-        assert!(offset_baselines(&left, &lines(&[646.3, 630.4, 614.5]), 8.0));
+        let at = |ys: &[f32], size: f32| -> Vec<Vec<Part>> {
+            ys.iter().map(|&y| vec![(y, size, true)]).collect()
+        };
+        let lines = |ys: &[f32]| at(ys, 10.0);
+        let left = at(&[650.6, 639.0, 627.4, 615.8, 604.2], 8.0);
+        assert!(offset_baselines(
+            &left,
+            &at(&[646.3, 630.4, 614.5], 8.0),
+            8.0
+        ));
         // All baselines meet: one block of rows.
         let left = lines(&[700.0, 686.0, 672.0]);
         assert!(!offset_baselines(
@@ -618,8 +784,11 @@ mod tests {
             10.0
         ));
         // A line whose parts sit at two heights meets by either.
-        let right = vec![vec![604.4, 606.5], vec![598.7]];
-        assert!(!offset_baselines(&lines(&[606.5, 598.7]), &right, 7.0));
+        let right = vec![
+            vec![(604.4, 7.0, true), (606.5, 7.0, true)],
+            vec![(598.7, 7.0, true)],
+        ];
+        assert!(!offset_baselines(&at(&[606.5, 598.7], 7.0), &right, 7.0));
         // Labels in a margin, each on a line of the text beside them: not apart.
         let text: Vec<f32> = (0..12).map(|k| 700.0 - 12.0 * k as f32).collect();
         assert!(!offset_baselines(
@@ -637,6 +806,21 @@ mod tests {
         assert!(!offset_baselines(
             &lines(&[700.0]),
             &lines(&[703.0, 690.0]),
+            10.0
+        ));
+        // Labels of 8 points and values of 12, top-aligned: the shift (2.9 points) is what the
+        // sizes explain, the same on every row: rows.
+        let labels: Vec<f32> = (0..6).map(|k| 694.3 - 20.0 * k as f32).collect();
+        let values: Vec<f32> = (0..6).map(|k| 691.4 - 20.0 * k as f32).collect();
+        assert!(!offset_baselines(
+            &at(&labels, 8.0),
+            &at(&values, 12.0),
+            8.0
+        ));
+        // The same shift between lines of one size is not explained: two blocks.
+        assert!(offset_baselines(
+            &at(&labels, 10.0),
+            &at(&values, 10.0),
             10.0
         ));
     }

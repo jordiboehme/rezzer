@@ -11,7 +11,7 @@ use std::rc::Rc;
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::Run;
-use crate::regions::{BOX_WORK, Index, offset_baselines};
+use crate::regions::{BOX_WORK, Index, Part, offset_baselines};
 use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
@@ -240,6 +240,9 @@ struct Piece {
     /// whole where the piece is read; its rows are counted in `rows`.
     stand: Option<usize>,
     rows: usize,
+    /// A glyph with ink is in the piece: a piece of white space only has no size to align
+    /// with the cell beside it.
+    inked: bool,
 }
 
 /// The white space between a run or piece whose gap counts from `free` (`padded` when white
@@ -348,6 +351,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                     p.y1 = p.y1.max(hi);
                     p.size = p.size.max(f.size);
                     p.chars += f.chars;
+                    p.inked |= f.inked;
                     p.frags.push(i);
                     continue;
                 }
@@ -367,6 +371,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 frags: vec![i],
                 stand: None,
                 rows: 1,
+                inked: f.inked,
             });
         }
         out.extend(piece);
@@ -387,7 +392,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) 
     let found = if deep { gutter(p, &ids) } else { None };
     // A gutter that only a drawn box makes is taken after the bands of white space across:
     // text above or below the boxes is not part of their columns.
-    if let Some((_, _, true)) = found {
+    if let Some((_, _, Split::Boxed)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         if let Some(at) = widest_gap(p, &ids) {
             let rest = ids.split_off(at);
@@ -460,10 +465,21 @@ fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
     best.map(|(_, k)| k)
 }
 
+/// What makes a column gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Split {
+    /// Prose on both sides.
+    Prose,
+    /// Blocks of lines whose baselines do not line up.
+    Offset,
+    /// Only a drawn box on one side.
+    Boxed,
+}
+
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
-/// baselines do not line up, or a drawn box. The flag says that only a box makes it.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, bool)> {
+/// baselines do not line up, or a drawn box; and which of them makes it.
+fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
     let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
     if !(hi - lo).is_finite() || hi - lo < 2.0 {
@@ -536,17 +552,19 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, bool)> {
     };
     // A side that holds a drawn box of two lines or more is a block of its own.
     let boxed = |side: &[usize]| side.iter().any(|&i| p[i].stand.is_some() && p[i].rows >= 2);
-    // The baselines of a side, one for each of its rows.
-    // The baselines of a side, line by line: those of the pieces of each row.
+    // The baselines and sizes of a side, line by line: those of the pieces of each row.
     let baselines = |side: &[usize]| {
-        let mut rows: Vec<(usize, f32)> = side.iter().map(|&i| (p[i].row, p[i].y)).collect();
+        let mut rows: Vec<(usize, f32, f32, bool)> = side
+            .iter()
+            .map(|&i| (p[i].row, p[i].y, p[i].size, p[i].inked))
+            .collect();
         rows.sort_by_key(|r| r.0);
-        let mut out: Vec<Vec<f32>> = Vec::new();
+        let mut out: Vec<Vec<Part>> = Vec::new();
         let mut last = None;
-        for (row, y) in rows {
+        for (row, y, size, inked) in rows {
             match out.last_mut() {
-                Some(l) if last == Some(row) => l.push(y),
-                _ => out.push(vec![y]),
+                Some(l) if last == Some(row) => l.push((y, size, inked)),
+                _ => out.push(vec![(y, size, inked)]),
             }
             last = Some(row);
         }
@@ -554,11 +572,15 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, bool)> {
     };
     let size = sizes[sizes.len() / 2];
     let apart = || offset_baselines(&baselines(&left), &baselines(&right), size);
-    let text = (prose(&left) && prose(&right)) || apart();
-    let by_box = !text && !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right));
-    if !text && !by_box {
+    let split = if prose(&left) && prose(&right) {
+        Split::Prose
+    } else if apart() {
+        Split::Offset
+    } else if !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right)) {
+        Split::Boxed
+    } else {
         return None;
-    }
+    };
     // The columns stand side by side: their heights overlap.
     let span = |side: &[usize]| {
         (
@@ -569,7 +591,7 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, bool)> {
     let (a, b) = (span(&left), span(&right));
     let overlap = a.1.min(b.1) - a.0.max(b.0);
     let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
-    (overlap / smaller >= 0.3).then_some((g0, g1, by_box))
+    (overlap / smaller >= 0.3).then_some((g0, g1, split))
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices.
@@ -684,6 +706,7 @@ fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece
             frags: Vec::new(),
             stand: Some(g),
             rows,
+            inked: true,
         });
         ps.extend(list);
         inner.push(at..ps.len());
@@ -1397,5 +1420,26 @@ mod tests {
         frags[1].region = Some(0);
         let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]]);
         assert_eq!(lines, [vec![0, 1]]);
+    }
+
+    #[test]
+    fn rows_of_two_sizes_are_read_row_by_row() {
+        // Labels of 8 points and values of 12, top-aligned: every value sits 2.9 points
+        // below its label's baseline, the shift the sizes explain.
+        let mut frags = Vec::new();
+        for k in 0..6 {
+            let top = 700.0 - 20.0 * k as f32;
+            frags.push(Frag {
+                size: 8.0,
+                ..frag(&format!("Label {k}"), 50.0, top - 8.0 * 0.718)
+            });
+            frags.push(Frag {
+                size: 12.0,
+                ..frag(&format!("Value {k}"), 200.0, top - 12.0 * 0.718)
+            });
+        }
+        let lines = lines_of(&frags, true);
+        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert_eq!(lines[0], [0, 1]);
     }
 }

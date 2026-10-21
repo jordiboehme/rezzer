@@ -158,10 +158,11 @@ pub(super) fn ruled(
         }
         let at = flow.at[within[0]];
         let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
-        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &sizes, &|i| {
+        let (caption_line, figure_caption) = captions_near(flow, &lines, &by_y, b, &sizes, &|i| {
             let (_, cy) = middle(&flow.runs[i]);
             inside(i) && cy > b[1] && cy < b[3]
         });
+        let table_caption = caption_line.is_some();
         // A refused grid gets a note when a caption names a table, or when it looks like one:
         // three columns or more with text in two rows or in six squares, and nothing about
         // the area (the page's frame, a picture, tiny text) that rules out a table. Its text

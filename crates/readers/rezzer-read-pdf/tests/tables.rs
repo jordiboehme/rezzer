@@ -856,3 +856,143 @@ fn side_by_side_lists_are_no_table() {
         assert!(p > r1 || p < r0, "{w} inside the right side: {flat}");
     }
 }
+
+/// The page of rows whose two cells have different font sizes: `shape` 0 is label 8 pt and
+/// value 12 pt top-aligned, 1 is label 8 pt and value 14 pt centred, 2 is code with smaller
+/// line numbers a little above its baseline, 3 a glossary of bold 9 pt terms 2 points below
+/// the first line of 11 pt definitions that wrap.
+fn two_size_rows(shape: usize) -> Vec<u8> {
+    let mut c = String::new();
+    match shape {
+        0 | 1 => {
+            let (value, k) = if shape == 0 {
+                (12.0, 0.718)
+            } else {
+                (14.0, 0.36)
+            };
+            for r in 0..6 {
+                let top = 700.0 - 20.0 * r as f32;
+                c += &show("F1", 8.0, 50.0, top - 8.0 * k, &format!("Label {r}"));
+                c += &show("F1", value, 200.0, top - value * k, &format!("Value {r}"));
+            }
+        }
+        2 => {
+            for r in 0..15 {
+                let y = 700.0 - 12.0 * r as f32;
+                c += &show("F1", 7.0, 50.0, y + 1.5, &format!("{}", r + 1));
+                c += &show(
+                    "F1",
+                    9.5,
+                    75.0,
+                    y,
+                    &format!("let value_{r} = compute(x, {r});"),
+                );
+            }
+        }
+        _ => {
+            let mut y = 720.0f32;
+            for r in 0..8 {
+                c += &show("F2", 9.0, 50.0, y - 2.0, &format!("Term{r}"));
+                let lines = 1 + r % 3;
+                for j in 0..lines {
+                    let t = format!("Definition {r} part {j}");
+                    c += &show("F1", 11.0, 160.0, y - 13.5 * j as f32, &t);
+                }
+                y -= 13.5 * lines as f32 + 6.0;
+            }
+        }
+    }
+    pdf(&[Page::text(c)], "")
+}
+
+#[test]
+fn rows_of_two_sizes_stay_rows() {
+    // The baselines of the two cells differ by what the size difference explains, the same
+    // on every row: the cells are rows, not two columns.
+    let first = [
+        ["Label 0", "Value 0"],
+        ["Label 0", "Value 0"],
+        ["1", "let value_0 = compute(x, 0);"],
+        ["Term0", "Definition 0 part 0"],
+    ];
+    let mut wrong = Vec::new();
+    for (shape, want) in first.iter().enumerate() {
+        let out = read(&two_size_rows(shape));
+        let found = tables(page(&out, 1));
+        if found.len() != 1 || found[0].1[0] != *want {
+            wrong.push((shape, paragraphs(page(&out, 1))));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+}
+
+#[test]
+fn two_refused_captioned_tables_keep_two_notes() {
+    // Two captioned regions on one page, each with text between its columns: each caption
+    // gets its own note.
+    let table = |top: f32, n: u32| {
+        let mut c = show("F2", 10.0, 50.0, top, &format!("Table {n}: Sample figures"));
+        for r in 0..5 {
+            let y = top - 16.0 - 14.0 * r as f32;
+            if r == 2 {
+                c += &show("F1", 9.0, 50.0, y, "Row 2");
+                c += &show("F1", 9.0, 215.0, y, "between");
+                c += &show("F1", 9.0, 400.0, y, "302");
+                continue;
+            }
+            c += &show("F1", 9.0, 50.0, y, &format!("Row {r}"));
+            c += &show("F1", 9.0, 160.0, y, &format!("{}", 100 + r));
+            c += &show("F1", 9.0, 280.0, y, &format!("{}", 200 + r));
+            c += &show("F1", 9.0, 400.0, y, &format!("{}", 300 + r));
+        }
+        c
+    };
+    let mut c = table(760.0, 1);
+    for k in 0..10 {
+        let line =
+            format!("Body line {k} goes on with plain words about nothing in particular here");
+        c += &show("F1", 10.0, 50.0, 660.0 - 13.0 * k as f32, &line);
+    }
+    c += &table(480.0, 2);
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let notes = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.starts_with("Possible table on page 1"))
+        .count();
+    assert_eq!(notes, 2, "{:?}", out.document.losses);
+}
+
+#[test]
+fn a_dot_plot_of_many_squares_stays_complete() {
+    // 4,160 small squares without text and a caption under them: no box holds text, so the
+    // page has no limit to name and stays complete.
+    let mut c = String::new();
+    for i in 0..64 {
+        for j in 0..65 {
+            c += &format!(
+                "{} {} 3 3 re f\n",
+                60.0 + 7.0 * i as f32,
+                300.0 + 7.0 * j as f32
+            );
+        }
+    }
+    c += &show(
+        "F1",
+        10.0,
+        60.0,
+        280.0,
+        "Figure 1: Sample dot plot of invented values.",
+    );
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("drawn boxes")),
+        "{:?}",
+        out.document.losses
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
