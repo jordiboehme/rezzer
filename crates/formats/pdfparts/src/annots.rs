@@ -49,6 +49,11 @@ pub struct Annot {
     pub state: Option<Arc<str>>,
 }
 
+/// What one listed annotation takes besides its copied bytes, as measured: 100,000 highlights
+/// with a comment, an author, two dates and one quad each took 552 bytes apiece of resident
+/// memory once listed (struct, small allocations and the list's slot), rounded up.
+const ANNOT_BYTES: u64 = 576;
+
 impl Annot {
     /// What the annotation copies beyond the fixed part and its texts, which were charged as
     /// they were read: its id, subtype, dates and quads.
@@ -299,7 +304,7 @@ impl Pdf {
                     _ => broken.push((page, 1)),
                 }
             }
-            if !budget.charge(annot.weight()) {
+            if !budget.take(ANNOT_BYTES + annot.weight() as u64) {
                 return Err(budget.limit_issue("document", "annotations"));
             }
             out.push(annot);
