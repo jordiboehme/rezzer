@@ -16,6 +16,7 @@ lopdf.workspace = true
 flate2 = { workspace = true, features = ["zlib-rs"] }
 quick-xml.workspace = true
 weezl.workspace = true
+adler2.workspace = true
 brotli-decompressor.workspace = true
 
 [dev-dependencies]

@@ -391,7 +391,7 @@ struct FlateStage<'s, W: Write> {
     head: Vec<u8>,
     sum: Vec<u8>,
     /// The Adler-32 of the output so far.
-    adler: (u32, u32),
+    adler: adler2::Adler32,
     shared: &'s Shared<'s>,
 }
 
@@ -407,7 +407,7 @@ impl<'s, W: Write> FlateStage<'s, W> {
             tail: 0,
             head: Vec::new(),
             sum: Vec::new(),
-            adler: (1, 0),
+            adler: adler2::Adler32::new(),
             shared,
         }
     }
@@ -427,16 +427,7 @@ impl<'s, W: Write> FlateStage<'s, W> {
             input = &input[used.min(input.len())..];
             if made > 0 {
                 self.probe = None;
-                let (mut a, mut b) = self.adler;
-                for chunk in self.buf[..made].chunks(5552) {
-                    for &x in chunk {
-                        a += u32::from(x);
-                        b += a;
-                    }
-                    a %= 65_521;
-                    b %= 65_521;
-                }
-                self.adler = (a, b);
+                self.adler.write_slice(&self.buf[..made]);
                 self.next.write_all(&self.buf[..made])?;
             }
             match res {
@@ -473,8 +464,7 @@ impl<'s, W: Write> FlateStage<'s, W> {
     fn wrong_sum(&self) -> bool {
         let zlib = matches!(self.head[..], [cmf, flg]
             if cmf & 0x0F == 8 && flg & 0x20 == 0 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0);
-        let (a, b) = self.adler;
-        zlib && self.sum.len() == 4 && self.sum[..] != ((b << 16) | a).to_be_bytes()
+        zlib && self.sum.len() == 4 && self.sum[..] != self.adler.checksum().to_be_bytes()
     }
 }
 

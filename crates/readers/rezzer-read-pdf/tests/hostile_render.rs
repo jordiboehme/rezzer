@@ -547,4 +547,3 @@ fn the_scanned_letter_renders() {
         .join("../../../tests/corpus/pdf/scan-truman-letter-nara.pdf");
     assert_rendered(&read_with(&std::fs::read(path).expect("corpus file"), true));
 }
-

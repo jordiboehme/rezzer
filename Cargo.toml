@@ -66,6 +66,8 @@ quick-xml = "=0.42.0"
 calamine = { version = "=0.37.0", default-features = false }
 lopdf = { version = "=0.45.0", default-features = false }
 weezl = "=0.2.1"
+# The Adler-32 of zlib streams; already in the tree through miniz_oxide.
+adler2 = { version = "=2.0.1", default-features = false }
 brotli-decompressor = "=5.0.3"
 # One version for the three hayro crates. hayro-interpret's default features embed the
 # standard 14 font substitutes and the predefined CMaps that text extraction needs.

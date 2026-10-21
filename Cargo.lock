@@ -1327,6 +1327,7 @@ checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 name = "pdfparts"
 version = "0.1.0"
 dependencies = [
+ "adler2",
  "brotli-decompressor",
  "flate2",
  "libc",
