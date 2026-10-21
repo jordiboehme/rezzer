@@ -104,6 +104,8 @@ pub(crate) struct PageItems {
     /// A limit cut the page's text: what is missing was not read, it is not missing in the
     /// file.
     pub in_part: bool,
+    /// What the page was charged against the bytes the pages may keep until laid out.
+    pub kept: u64,
 }
 
 impl PageItems {
@@ -717,6 +719,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             return fail(why, Fail::Limit);
         }
         self.kept_left -= cost;
+        items.kept = cost;
         // The page's runs were built among many short-lived allocations; copied now (within
         // the bound just charged), the kept text sits together and the memory of the build
         // can be used again.

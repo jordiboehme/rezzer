@@ -394,6 +394,9 @@ pub(crate) struct Context<'a> {
 pub(crate) struct LinkRoom {
     room: u64,
     left: Counter<u64>,
+    /// What laid-out pages gave back of what their runs were charged: only the cells of
+    /// tables draw on it, so a table costs its text once, like a paragraph.
+    freed: Counter<u64>,
     /// Links written without their target, and the first and last page with one.
     cut: Counter<u64>,
     pages: Counter<Option<(u32, u32)>>,
@@ -402,6 +405,7 @@ pub(crate) struct LinkRoom {
 /// The room counts at one point.
 struct LinkMark {
     left: u64,
+    freed: u64,
     cut: u64,
     pages: Option<(u32, u32)>,
 }
@@ -409,15 +413,19 @@ struct LinkMark {
 /// What a copy of a link target costs besides its bytes.
 const LINK_COST: u64 = 64;
 
-/// What one table cell costs in the model besides its text, measured: the cell (56 bytes),
-/// one inline (80) and the allocation of its text and of the row (about 50).
-const CELL_COST: u64 = 192;
+/// What a table costs in the model beyond the same text as paragraphs: per cell the cell
+/// itself (56 bytes, rounded up), per row its list of cells, per table its block. The text
+/// was charged once while the page was read.
+const CELL_COST: u64 = 64;
+const ROW_COST: u64 = 32;
+const TABLE_COST: u64 = 128;
 
 impl LinkRoom {
     pub(crate) fn new(bytes: u64) -> LinkRoom {
         LinkRoom {
             room: bytes,
             left: Counter::new(bytes),
+            freed: Counter::new(0),
             cut: Counter::new(0),
             pages: Counter::new(None),
         }
@@ -436,19 +444,27 @@ impl LinkRoom {
         false
     }
 
-    /// Takes `bytes` for what the model keeps besides link targets (the cells of tables), from
-    /// the same room.
+    /// Gives back what a page's runs were charged while the file was read, once the page is
+    /// laid out: its text now sits in the model, charged once.
+    pub(crate) fn free(&self, bytes: u64) {
+        self.freed.set(self.freed.get().saturating_add(bytes));
+    }
+
+    /// Takes `bytes` of overhead for the cells of a table: first from what laid-out pages
+    /// gave back, then from the room the link targets share.
     fn take_bytes(&self, bytes: u64) -> Result<(), LimitHit> {
-        let left = self.left.get();
-        if bytes > left {
+        let (freed, left) = (self.freed.get(), self.left.get());
+        if bytes > freed.saturating_add(left) {
             return Err(LimitHit {
                 limit: "kept text",
                 value: bytes,
-                max: left,
+                max: freed.saturating_add(left),
                 unit: "bytes",
             });
         }
-        self.left.set(left - bytes);
+        let from_freed = bytes.min(freed);
+        self.freed.set(freed - from_freed);
+        self.left.set(left - (bytes - from_freed));
         Ok(())
     }
 
@@ -456,6 +472,7 @@ impl LinkRoom {
     fn mark(&self) -> LinkMark {
         LinkMark {
             left: self.left.get(),
+            freed: self.freed.get(),
             cut: self.cut.get(),
             pages: self.pages.get(),
         }
@@ -463,6 +480,7 @@ impl LinkRoom {
 
     fn restore(&self, mark: LinkMark) {
         self.left.set(mark.left);
+        self.freed.set(mark.freed);
         self.cut.set(mark.cut);
         self.pages.set(mark.pages);
     }
@@ -633,7 +651,10 @@ pub(crate) fn page_blocks(
     // column titles a long table repeats at the top of each page are table text.
     let geometry = match cx.tree {
         Some(tree) => {
-            let (found, fallbacks) = tables::tagged(page, &mut flow, tree, cx.tables, cx.in_part);
+            let (found, fallbacks) =
+                tables::tagged(page, &mut flow, tree, cx.tables, cx.in_part, &|| {
+                    time_over(cx.budget).is_err()
+                });
             placed.extend(found.into_iter().map(Placed::Table));
             for what in cx.tables.take_issues() {
                 notes.push((what, LossReason::Damaged, Severity::Warning));
@@ -901,7 +922,12 @@ impl Built {
             Some(t) => TableRef::Earlier(t),
             None => {
                 self.pending = Pending::Table;
-                if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.add_elements(1)) {
+                // The table's own cost goes back with its first row if that is dropped.
+                self.mark = Some(cx.links.mark());
+                if let Err(hit) = time_over(cx.budget)
+                    .and_then(|()| cx.budget.add_elements(1))
+                    .and_then(|()| cx.links.take_bytes(TABLE_COST))
+                {
                     self.stop_at(hit, cx);
                     return;
                 }
@@ -927,8 +953,14 @@ impl Built {
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(plan.rows.len());
         'rows: for (r, row) in plan.rows.into_iter().enumerate() {
             self.pending = Pending::Row(table, r + 1);
-            self.mark = Some(cx.links.mark());
-            if let Err(hit) = cx.budget.add_elements(1) {
+            if self.mark.is_none() {
+                self.mark = Some(cx.links.mark());
+            }
+            if let Err(hit) = cx
+                .budget
+                .add_elements(1)
+                .and_then(|()| cx.links.take_bytes(ROW_COST))
+            {
                 self.stop_at(hit, cx);
                 break;
             }
@@ -970,14 +1002,13 @@ impl Built {
         }
     }
 
-    /// The inlines of one table cell, charged as an element and by its fixed cost and its
-    /// text against the room the model may keep; `None` once a limit stopped the page.
+    /// The inlines of one table cell, charged as an element and by its fixed cost against the
+    /// room the model may keep (its text was charged when the page was read); `None` once a
+    /// limit stopped the page.
     fn cell_inlines(&mut self, runs: &[Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
-        let bytes: usize = runs.iter().map(|r| r.text.len()).sum();
-        let cost = CELL_COST + u64::try_from(bytes).unwrap_or(u64::MAX);
         let charged = time_over(cx.budget)
             .and_then(|()| cx.budget.add_elements(1))
-            .and_then(|()| cx.links.take_bytes(cost));
+            .and_then(|()| cx.links.take_bytes(CELL_COST));
         if let Err(hit) = charged {
             self.stop_at(hit, cx);
             return None;
@@ -2018,6 +2049,53 @@ mod tests {
             });
             assert!(!titles_as_header, "page {}: {:?}", k + 1, laid.blocks);
         }
+    }
+
+    #[test]
+    fn a_stop_in_the_text_added_to_an_earlier_row_is_named() {
+        // Two rows, each with a cell on page 1 and one on page 2. Page 2 adds to both rows; the
+        // room runs out at the second addition.
+        let (tree, cells) = table_tree(&[&["TD", "TD"], &["TD", "TD"]]);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let links = LinkRoom::new(u64::MAX);
+        let one = [cells[0][0], cells[1][0]];
+        let roles = |m: u32| one.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let first = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["a", "b"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        assert_eq!(first.blocks.len(), 1);
+        let small = LinkRoom::new(CELL_COST + CELL_COST / 2);
+        let two = [cells[0][1], cells[1][1]];
+        let roles = |m: u32| two.get(m as usize).copied();
+        let cx = Context {
+            roles: &roles,
+            links: &small,
+            ..cx
+        };
+        let second = page_blocks(
+            2,
+            Some(842.0),
+            tagged_runs(&["c", "d"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        assert_eq!(second.added.len(), 1, "{:?}", second.added);
+        assert_eq!(second.cut, Some(Cut::Added { table: 1, row: 1 }));
     }
 
     #[test]

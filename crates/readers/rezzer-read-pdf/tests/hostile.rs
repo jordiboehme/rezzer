@@ -1707,3 +1707,100 @@ fn a_grid_of_20000_columns_is_refused_quickly() {
             .any(|b| matches!(b, Block::Table { .. }))
     );
 }
+
+#[test]
+fn a_built_row_over_5000_pages_costs_about_what_its_text_costs() {
+    // One tagged row of 150,000 cells, one word on each of 5,000 pages. Each page once walked
+    // every cell of the row to find its own.
+    let time = |table: bool| {
+        let bytes = common::row_pages(5_000, 150_000, table);
+        let start = Instant::now();
+        let out = read(&bytes);
+        (start.elapsed(), out)
+    };
+    let (plain, _) = time(false);
+    let (tabled, out) = time(true);
+    assert!(
+        tabled < plain * 3 + Duration::from_millis(500),
+        "table {tabled:?}, without {plain:?}"
+    );
+    assert!(
+        page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Table { .. }))
+    );
+}
+
+/// `n` pages, each with the same `k` small tables of three rows in two columns (or, with
+/// `same`, rows that all read the same, which stay paragraphs).
+fn table_pages(n: usize, k: usize, same: bool) -> Vec<u8> {
+    let h = (k + 2) * 60;
+    let mut c = b"BT /F1 8 Tf ".to_vec();
+    for i in 0..k {
+        let top = h - 20 - i * 60;
+        for r in 0..3 {
+            let y = top - r * 10;
+            let v = if same { 0 } else { (i + r) % 10 };
+            c.extend(format!("1 0 0 1 72 {y} Tm (a) Tj 1 0 0 1 300 {y} Tm ({v}) Tj ").as_bytes());
+        }
+    }
+    c.extend(b"ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let mut kids = String::new();
+    for _ in 0..n {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {n} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The pages of a read with blocks besides their marker.
+fn pages_with_text(out: &ReadOutcome) -> usize {
+    out.document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { blocks, .. } if blocks.len() > 1))
+        .count()
+}
+
+#[test]
+fn tables_cost_about_what_their_text_costs_as_paragraphs() {
+    // 20 pages of 3,000 small tables: the file keeps the text of only some pages. As tables
+    // they must read about as many pages as the same text as paragraphs.
+    let start = Instant::now();
+    let paragraphs = read(&table_pages(20, 3_000, true));
+    let tables = read(&table_pages(20, 3_000, false));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let (p, t) = (pages_with_text(&paragraphs), pages_with_text(&tables));
+    assert!(p < 20, "the shape must cut the file: {p}");
+    assert!(
+        t + 1 >= p,
+        "tables read {t} pages, paragraphs {p}: {:?}",
+        tables.document.losses
+    );
+    let cut: Vec<&Loss> = tables
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(cut.len(), 1, "{cut:?}");
+    assert!(cut[0].what.contains("not read"), "{cut:?}");
+    assert_rss_under_256_mib();
+}

@@ -170,7 +170,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
     let mut halted = false;
     // Where each tagged table stands: the index of its page section in the body, of the
     // table among the section's blocks, and its anchor.
-    let mut placed: HashMap<usize, (usize, usize, String)> = HashMap::new();
+    let mut placed: Placed = HashMap::new();
     let widgets = widget_boxes(pdf);
     for info in pages {
         let n = info.number;
@@ -216,6 +216,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 );
             }
             notes(n, &items, out);
+            links.free(items.kept);
             let height = frame_height(info, Some(&items));
             let (ox, oy) = items.origin;
             let fields: Vec<[f32; 4]> = widgets
@@ -274,35 +275,15 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             blocks.extend(laid.blocks);
             // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {
-                let from = (!nothing).then(|| match laid.cut.unwrap_or(Cut::Block(1)) {
-                    Cut::Block(k) => format!("block {k} on"),
-                    Cut::Table(k) => format!("table {k} on"),
-                    Cut::Item { block, item } => format!("item {item} of list p{n}:b{block} on"),
-                    Cut::Added { table, row } => match placed.get(&table) {
-                        Some((_, _, anchor)) => {
-                            format!("the text it adds to row {} of table {anchor} on", row + 1)
-                        }
-                        None => {
-                            "the text it adds to a table begun on an earlier page on".to_string()
-                        }
+                let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
+                    Some(Block::Section { blocks, .. }) => match blocks.get(b) {
+                        Some(Block::Table { rows, .. }) => rows.len(),
+                        _ => 0,
                     },
-                    Cut::Row { table, row } => match table {
-                        TableRef::Here(k) => format!("row {row} of table p{n}:t{k} on"),
-                        TableRef::Earlier(t) => match placed.get(&t) {
-                            Some((s, b, anchor)) => {
-                                let before = match out.doc.body.get(*s) {
-                                    Some(Block::Section { blocks, .. }) => match blocks.get(*b) {
-                                        Some(Block::Table { rows, .. }) => rows.len(),
-                                        _ => 0,
-                                    },
-                                    _ => 0,
-                                };
-                                format!("row {} of table {anchor} on", before + 1)
-                            }
-                            None => format!("row {row} of a table begun on an earlier page on"),
-                        },
-                    },
-                });
+                    _ => 0,
+                };
+                let from = (!nothing)
+                    .then(|| cut_from(n, laid.cut.unwrap_or(Cut::Block(1)), &placed, &rows_of));
                 let what = match (from, pages_after(n, last)) {
                     (None, _) => format!("{} not read", pages_from(n, last)),
                     (Some(from), None) => format!("page {n} from {from} is not read"),
@@ -388,6 +369,32 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             LossReason::Limit,
             Severity::Warning,
         );
+    }
+}
+
+/// Where each tagged table stands: its section and block in the body, and its anchor.
+type Placed = HashMap<usize, (usize, usize, String)>;
+
+/// What a stop on page `n` cut first, in words that end in "on": "block 4 on", "row 3 of table
+/// p2:t1 on". `rows_of` tells how many rows the table at a section and block holds now.
+fn cut_from(n: u32, cut: Cut, placed: &Placed, rows_of: &dyn Fn(usize, usize) -> usize) -> String {
+    match cut {
+        Cut::Block(k) => format!("block {k} on"),
+        Cut::Table(k) => format!("table {k} on"),
+        Cut::Item { block, item } => format!("item {item} of list p{n}:b{block} on"),
+        Cut::Added { table, row } => match placed.get(&table) {
+            Some((_, _, anchor)) => {
+                format!("the text it adds to row {} of table {anchor} on", row + 1)
+            }
+            None => "the text it adds to a table begun on an earlier page on".to_string(),
+        },
+        Cut::Row { table, row } => match table {
+            TableRef::Here(k) => format!("row {row} of table p{n}:t{k} on"),
+            TableRef::Earlier(t) => match placed.get(&t) {
+                Some((s, b, anchor)) => format!("row {} of table {anchor} on", rows_of(*s, *b) + 1),
+                None => format!("row {row} of a table begun on an earlier page on"),
+            },
+        },
     }
 }
 
@@ -698,6 +705,28 @@ mod tests {
             ]
         );
         assert!(out.partial);
+    }
+
+    #[test]
+    fn a_cut_in_the_text_added_to_an_earlier_row_names_that_row() {
+        let placed: Placed = HashMap::from([(7, (2, 1, "p3:t1".to_string()))]);
+        let rows = |_: usize, _: usize| 12;
+        assert_eq!(
+            cut_from(5, Cut::Added { table: 7, row: 4 }, &placed, &rows),
+            "the text it adds to row 5 of table p3:t1 on"
+        );
+        assert_eq!(
+            cut_from(
+                5,
+                Cut::Row {
+                    table: TableRef::Earlier(7),
+                    row: 1
+                },
+                &placed,
+                &rows
+            ),
+            "row 13 of table p3:t1 on"
+        );
     }
 
     #[test]

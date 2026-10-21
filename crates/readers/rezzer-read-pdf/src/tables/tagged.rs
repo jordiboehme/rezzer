@@ -28,20 +28,31 @@ pub(crate) struct Tables {
     counts: RefCell<HashMap<usize, usize>>,
 }
 
-/// The rows of one tagged table: the `TD` and `TH` cells of each row, the row of each cell
-/// and, per page, how many cells hold marked content there.
+/// The rows of one tagged table: the `TD` and `TH` cells of each row, the row and column of
+/// each cell and, per page, how many cells hold marked content there.
 struct TableRows {
     rows: Vec<Vec<usize>>,
-    row_of: HashMap<usize, usize>,
+    cell_at: HashMap<usize, (usize, usize)>,
     content_cells: HashMap<u32, usize>,
 }
+
+/// Cells looked at between two looks at the clock.
+const STOP_EVERY: usize = 4_096;
 
 /// Elements below one cell looked at to find the pages it has content on; a deeper cell
 /// counts only what was seen.
 const CELL_WALK: usize = 4_096;
 
 impl Tables {
-    fn rows(&self, tree: &StructTree, table: usize, page: u32) -> Option<Rc<TableRows>> {
+    /// The rows of `table`, read once. `None` when `stop` says so before they are read; they
+    /// are read again on a later page then.
+    fn rows(
+        &self,
+        tree: &StructTree,
+        table: usize,
+        page: u32,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<Rc<TableRows>> {
         if let Some(found) = self.rows.borrow().get(&table) {
             return Some(found.clone());
         }
@@ -61,7 +72,7 @@ impl Tables {
             }
         }
         let mut rows = Vec::with_capacity(trs.len());
-        let mut row_of = HashMap::new();
+        let mut cell_at: HashMap<usize, (usize, usize)> = HashMap::new();
         let mut twice = 0usize;
         let mut repeated = 0usize;
         for (i, tr) in trs.into_iter().enumerate() {
@@ -75,8 +86,8 @@ impl Tables {
                 }
                 // A cell that a broken tree puts in two rows stays in the first; one that a
                 // row lists twice is kept once.
-                match row_of.get(&c) {
-                    Some(&r) if r == i => {
+                match cell_at.get(&c) {
+                    Some(&(r, _)) if r == i => {
                         repeated += 1;
                         continue;
                     }
@@ -86,18 +97,19 @@ impl Tables {
                     }
                     None => {}
                 }
-                row_of.insert(c, i);
+                cell_at.insert(c, (i, cells.len()));
                 cells.push(c);
             }
             rows.push(cells);
         }
+        let mut issues = Vec::new();
         if twice > 0 {
             let (cells, stand, kept) = if twice == 1 {
                 ("1 cell", "stands", "it is")
             } else {
                 (&*format!("{twice} cells"), "stand", "each is")
             };
-            self.issues.borrow_mut().push(format!(
+            issues.push(format!(
                 "{cells} of a tagged table on page {page} {stand} in more than one row of the \
                  tag tree; {kept} kept in its first row"
             ));
@@ -108,20 +120,24 @@ impl Tables {
             } else {
                 (&*format!("{repeated} cells"), "each is")
             };
-            self.issues.borrow_mut().push(format!(
+            issues.push(format!(
                 "{cells} of a tagged table on page {page} listed twice in the same row of the \
                  tag tree; {is} kept once"
             ));
         }
         let mut content_cells: HashMap<u32, usize> = HashMap::new();
-        for &c in row_of.keys() {
+        for (k, &c) in cell_at.keys().enumerate() {
+            if k % STOP_EVERY == STOP_EVERY - 1 && stop() {
+                return None;
+            }
             for p in content_pages(tree, c) {
                 *content_cells.entry(p).or_default() += 1;
             }
         }
+        self.issues.borrow_mut().extend(issues);
         let found = Rc::new(TableRows {
             rows,
-            row_of,
+            cell_at,
             content_cells,
         });
         self.rows.borrow_mut().insert(table, found.clone());
@@ -191,6 +207,7 @@ pub(crate) fn tagged(
     tree: &StructTree,
     tables: &Tables,
     in_part: bool,
+    stop: &dyn Fn() -> bool,
 ) -> (Vec<Planned>, Vec<String>) {
     let elems = &tree.elems;
     // The cells with text on this page, by table, in order of the tables' first run.
@@ -211,7 +228,7 @@ pub(crate) fn tagged(
     let mut fallbacks = Vec::new();
     let mut used: HashMap<usize, Rc<TableRows>> = HashMap::new();
     for &t in &order {
-        let Some(index) = tables.rows(tree, t, page) else {
+        let Some(index) = tables.rows(tree, t, page, stop) else {
             continue;
         };
         let resolved = with_text[&t].len();
@@ -249,23 +266,19 @@ pub(crate) fn tagged(
     let mut out = Vec::new();
     for t in order {
         let Some(index) = used.get(&t) else { continue };
-        let mut touched: Vec<usize> = with_text[&t]
+        // The cells with text on this page, by row and column: only those are looked at.
+        let mut here: Vec<(usize, usize, usize)> = with_text[&t]
             .iter()
-            .filter_map(|c| index.row_of.get(c).copied())
+            .filter_map(|c| index.cell_at.get(c).map(|&(r, k)| (r, k, *c)))
             .collect();
-        touched.sort_unstable();
-        touched.dedup();
-        let mut rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(touched.len());
-        let mut trs: Vec<usize> = Vec::with_capacity(touched.len());
+        here.sort_unstable();
+        let mut touched: Vec<usize> = Vec::new();
         let mut additions: Vec<Addition> = Vec::new();
-        let mut header_rows = 0;
-        let mut in_header = true;
-        for row in touched {
-            let row_cells = &index.rows[row];
+        for (row, k, c) in here {
             // A row an earlier page began gets this page's runs in its own cells.
-            if let Some(at) = tables.row_at(t, row) {
-                for (k, c) in row_cells.iter().enumerate() {
-                    if let Some(runs) = cells.remove(c) {
+            match tables.row_at(t, row) {
+                Some(at) => {
+                    if let Some(runs) = cells.remove(&c) {
                         additions.push(Addition {
                             row: at,
                             cell: k,
@@ -273,8 +286,16 @@ pub(crate) fn tagged(
                         });
                     }
                 }
-                continue;
+                None if touched.last() != Some(&row) => touched.push(row),
+                None => {}
             }
+        }
+        let mut rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(touched.len());
+        let mut trs: Vec<usize> = Vec::with_capacity(touched.len());
+        let mut header_rows = 0;
+        let mut in_header = true;
+        for row in touched {
+            let row_cells = &index.rows[row];
             let built: Vec<PlannedCell> = row_cells
                 .iter()
                 .map(|c| PlannedCell {

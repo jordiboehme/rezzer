@@ -348,3 +348,71 @@ pub fn wide_row(n: usize) -> Vec<u8> {
     );
     b.finish(catalog)
 }
+
+/// One tagged row of `c` cells over `p` pages: cell `i < p` has the word `w` on page `i + 1`,
+/// the other cells have no content. Without `table` the same objects are a `Div` of `Div`s.
+pub fn row_pages(p: usize, c: usize, table: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let group = b.reserve();
+    let row = b.reserve();
+    let mut kids = Vec::new();
+    let mut cells = Vec::new();
+    let mut nums = String::new();
+    let cs = b.stream(
+        "",
+        b"/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (w) Tj ET EMC",
+    );
+    for i in 0..p {
+        let kid = b.reserve();
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {i} \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        let td = b.add(format!("<< /S /TD /P {row} 0 R /Pg {kid} 0 R /K 0 >>"));
+        nums.push_str(&format!("{i} [{td} 0 R] "));
+        kids.push(kid);
+        cells.push(td);
+    }
+    for _ in p..c {
+        cells.push(b.add(format!("<< /S /TD /P {row} 0 R >>")));
+    }
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    let (g, r) = if table {
+        ("Table", "TR")
+    } else {
+        ("Div", "Div")
+    };
+    b.set(
+        row,
+        format!("<< /S /{r} /P {group} 0 R /K [{}] >>", refs(&cells)),
+    );
+    b.set(group, format!("<< /S /{g} /P {doc} 0 R /K [{row} 0 R] >>"));
+    b.set(
+        doc,
+        format!("<< /S /Document /P {root} 0 R /K [{group} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count {p} >>", refs(&kids)),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
