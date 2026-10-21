@@ -232,11 +232,13 @@ fn many_revisions_stop_at_cap() {
     for v in &r.list {
         assert_eq!(v.changes, ["changed document information"], "{}", v.number);
     }
-    assert!(
-        r.issues.iter().any(|i| i.kind == IssueKind::Limit),
-        "{:?}",
-        r.issues
-    );
+    let skipped = r
+        .skipped_issue
+        .as_ref()
+        .expect("the issue for the saves not compared");
+    assert_eq!(skipped.kind, IssueKind::Limit);
+    assert!(skipped.what.contains("only the newest 64"), "{skipped:?}");
+    assert!(r.issues.is_empty(), "{:?}", r.issues);
     common::assert_rss_bounded();
 }
 

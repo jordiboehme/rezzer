@@ -4,7 +4,8 @@
 
 //! Decoding of PDF values: text strings, dates, and bounded walks over number and name trees.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
@@ -93,7 +94,7 @@ pub fn pdf_date(raw: &str) -> Option<String> {
     let year: u32 = s[..4].parse().ok()?;
     let (month, day) = (num(4, 1), num(6, 1));
     let (hour, minute, second) = (num(8, 0), num(10, 0), num(12, 0));
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if !(1..=12).contains(&month) || day < 1 || day > days_in(year, month) {
         return None;
     }
     if hour > 23 || minute > 59 || second > 60 {
@@ -136,6 +137,176 @@ pub fn pdf_date(raw: &str) -> Option<String> {
         _ => return None,
     }
     Some(out)
+}
+
+/// Characters of a file value an issue or loss quotes.
+const QUOTED_CHARS: usize = 80;
+
+/// A value from the file as an issue or a loss quotes it: escaped, cut to its first 80
+/// characters with `...` and its length in bytes when it is longer.
+pub fn quote(value: &str) -> String {
+    match value.char_indices().nth(QUOTED_CHARS) {
+        Some((at, _)) => format!("{:?}... ({} bytes)", &value[..at], value.len()),
+        None => format!("{value:?}"),
+    }
+}
+
+/// The days of `month` (1 to 12) in `year` of the Gregorian calendar.
+fn days_in(year: u32, month: u32) -> u32 {
+    match month {
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        _ => 31,
+    }
+}
+
+/// Checks an XMP date (ISO 8601 as XMP allows it: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, then
+/// `Thh:mm`, `Thh:mm:ss` or `Thh:mm:ss.s` with `Z`, `+hh:mm`, `-hh:mm` or no offset) and returns
+/// it as written when it is one and names a real day. Anything else gives `None`.
+pub fn xmp_date(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    let b = s.as_bytes();
+    let digits = |from: usize, n: usize| -> Option<u32> {
+        let part = b.get(from..from + n)?;
+        if !part.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(part).ok()?.parse().ok()
+    };
+    let year = digits(0, 4)?;
+    let mut at = 4;
+    let (mut month, mut day) = (1, 1);
+    if b.get(at) == Some(&b'-') {
+        month = digits(at + 1, 2)?;
+        at += 3;
+        if b.get(at) == Some(&b'-') {
+            day = digits(at + 1, 2)?;
+            at += 3;
+        }
+    }
+    if !(1..=12).contains(&month) || day < 1 || day > days_in(year, month) {
+        return None;
+    }
+    if b.get(at) == Some(&b'T') {
+        if at != 10 {
+            return None;
+        }
+        let hour = digits(at + 1, 2)?;
+        if b.get(at + 3) != Some(&b':') {
+            return None;
+        }
+        let minute = digits(at + 4, 2)?;
+        at += 6;
+        let mut second = 0;
+        if b.get(at) == Some(&b':') {
+            second = digits(at + 1, 2)?;
+            at += 3;
+            if b.get(at) == Some(&b'.') {
+                let n = b[at + 1..]
+                    .iter()
+                    .take_while(|c| c.is_ascii_digit())
+                    .count();
+                if n == 0 {
+                    return None;
+                }
+                at += 1 + n;
+            }
+        }
+        if hour > 23 || minute > 59 || second > 60 {
+            return None;
+        }
+        match b.get(at) {
+            None => {}
+            Some(b'Z') => at += 1,
+            Some(b'+' | b'-') => {
+                let oh = digits(at + 1, 2)?;
+                if b.get(at + 3) != Some(&b':') {
+                    return None;
+                }
+                let om = digits(at + 4, 2)?;
+                if oh > 23 || om > 59 {
+                    return None;
+                }
+                at += 6;
+            }
+            Some(_) => return None,
+        }
+    }
+    (at == b.len()).then(|| s.to_string())
+}
+
+/// Texts one accessor reads, each string in an indirect object once: it is decoded and
+/// charged the first time and then shared by every entry that names it. The same goes for
+/// values the accessor works out from a shared object, such as the target of an action that
+/// many links name. A direct string costs each time, as the file holds it each time.
+#[derive(Default)]
+pub(crate) struct Shared {
+    texts: HashMap<(ObjectId, Decode), Option<Arc<str>>>,
+    pub(crate) targets: HashMap<ObjectId, Option<crate::LinkTarget>>,
+    pub(crate) found: HashMap<ObjectId, Option<Arc<str>>>,
+}
+
+/// How the bytes of a string become text.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Decode {
+    /// A text string ([`text_string`]); a name as UTF-8.
+    Text,
+    /// Bytes as UTF-8, invalid sequences replaced (URIs).
+    Lossy,
+}
+
+/// The budget is spent: the accessor stops.
+#[derive(Debug)]
+pub(crate) struct Spent;
+
+impl Shared {
+    /// The text `obj` is or names: a string or a name. `Ok(None)` when it is neither.
+    pub(crate) fn text(
+        &mut self,
+        doc: &Document,
+        obj: &Object,
+        decode: Decode,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<Arc<str>>, Spent> {
+        let id = reference(obj);
+        if let Some(id) = id
+            && let Some(t) = self.texts.get(&(id, decode))
+        {
+            return Ok(t.clone());
+        }
+        let text: Option<Arc<str>> = match resolve(doc, obj) {
+            Some(Object::String(s, _)) => Some(match decode {
+                Decode::Text => text_string(s).into(),
+                Decode::Lossy => String::from_utf8_lossy(s).into(),
+            }),
+            Some(Object::Name(n)) => Some(String::from_utf8_lossy(n).into()),
+            _ => None,
+        };
+        if !budget.take(text.as_ref().map_or(0, |t| t.len() as u64)) {
+            return Err(Spent);
+        }
+        if let Some(id) = id {
+            self.texts.insert((id, decode), text.clone());
+        }
+        Ok(text)
+    }
+
+    /// The text of `key` in `d`, as [`Shared::text`].
+    pub(crate) fn text_at(
+        &mut self,
+        doc: &Document,
+        d: &Dictionary,
+        key: &[u8],
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<Arc<str>>, Spent> {
+        match d.get(key) {
+            Ok(obj) => self.text(doc, obj, Decode::Text, budget),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 /// Follows references to the object they name. A missing object gives `None`. lopdf bounds
@@ -355,10 +526,29 @@ fn walk_node<'a>(
 
 /// A date value: the text as written and, when it parses, ISO 8601.
 pub(crate) fn get_date(doc: &Document, d: &Dictionary, key: &[u8]) -> Option<crate::PdfDate> {
-    get_text(doc, d, key).map(|raw| crate::PdfDate {
-        iso: pdf_date(&raw),
-        raw,
-    })
+    match get(doc, d, key)? {
+        Object::String(s, _) => Some(date_of(s)),
+        Object::Name(n) => Some(date_of(n)),
+        _ => None,
+    }
+}
+
+/// Characters of a date's text that are kept: a real PDF date is at most 23 long, so a longer
+/// text is not a date and only its start is worth showing.
+pub(crate) const DATE_RAW_CHARS: usize = 64;
+
+/// A date from the bytes of its string. Bytes past what a date with spaces around it could
+/// take are not decoded at all: such a text is no date, and its start is kept.
+pub(crate) fn date_of(bytes: &[u8]) -> crate::PdfDate {
+    const MOST: usize = 4 * DATE_RAW_CHARS;
+    let long = bytes.len() > MOST;
+    let raw = text_string(&bytes[..bytes.len().min(MOST)]);
+    let iso = if long { None } else { pdf_date(&raw) };
+    let raw = match raw.char_indices().nth(DATE_RAW_CHARS) {
+        Some((at, _)) => raw[..at].to_string(),
+        None => raw,
+    };
+    crate::PdfDate { raw, iso }
 }
 
 /// Fixed cost of one item a reader copies out of the document, as for one parsed value.

@@ -27,7 +27,7 @@ use hayro_syntax::content::{TypedIter, UntypedIter};
 use hayro_syntax::object::{Array, Dict, Name, Object, ObjectIdentifier, Stream, dict_or_stream};
 use hayro_syntax::page::{Page, Resources};
 use kurbo::{Affine, BezPath, Point};
-use pdfparts::{LinkTarget, Pdf};
+use pdfparts::{Link as PdfLink, LinkTarget, Pdf};
 use read_fonts::TableProvider;
 use read_fonts::ps::agl;
 use read_fonts::ps::cff::CffFontRef;
@@ -229,7 +229,13 @@ impl Caps {
 /// Reads the text of `wanted` pages (1-based, ascending, none refused by the guard) from the
 /// canonical bytes. `stop` is asked before each page and while a page is read; a page the
 /// stop cuts is not kept.
-pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bool) -> Extracted {
+pub(crate) fn pages(
+    pdf: &Pdf,
+    wanted: &[u32],
+    links: &[PdfLink],
+    caps: Caps,
+    stop: &dyn Fn() -> bool,
+) -> Extracted {
     let mut out = Extracted::default();
     if wanted.is_empty() {
         return out;
@@ -279,7 +285,7 @@ pub(crate) fn pages(pdf: &Pdf, wanted: &[u32], caps: Caps, stop: &dyn Fn() -> bo
         );
         return out;
     }
-    let links = uri_links(pdf);
+    let links = uri_links(links);
     let off = switched_off(&doc);
     let mut reader = PageReader::new(pdf, caps, stop, off);
     for &n in wanted {
@@ -347,16 +353,20 @@ fn switched_off(doc: &hayro_syntax::Pdf) -> HashSet<ObjectIdentifier> {
 /// A URI link box (x0, y0, x1, y1 in user space) and its target.
 type Link = ([f32; 4], Rc<UriTarget>);
 
-/// The URI links of every page, from the object layer. They are never followed.
-fn uri_links(pdf: &Pdf) -> HashMap<u32, Vec<Link>> {
+/// The URI links of every page, from the object layer. They are never followed. Links that
+/// share one address share one target.
+fn uri_links(links: &[PdfLink]) -> HashMap<u32, Vec<Link>> {
     let mut out: HashMap<u32, Vec<Link>> = HashMap::new();
-    for link in pdf.links() {
-        if let LinkTarget::Uri(uri) = link.target {
+    let mut targets: HashMap<*const u8, Rc<UriTarget>> = HashMap::new();
+    for link in links {
+        if let LinkTarget::Uri(uri) = &link.target {
+            let target = targets
+                .entry(uri.as_ptr())
+                .or_insert_with(|| UriTarget::new(uri));
             let [a, b, c, d] = link.rect;
-            out.entry(link.page).or_default().push((
-                [a.min(c), b.min(d), a.max(c), b.max(d)],
-                UriTarget::new(&uri),
-            ));
+            out.entry(link.page)
+                .or_default()
+                .push(([a.min(c), b.min(d), a.max(c), b.max(d)], Rc::clone(target)));
         }
     }
     out
@@ -2455,7 +2465,7 @@ pub(crate) fn needs_ocr(
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Vec<(u32, Vec<String>)> {
-    let found = self::pages(pdf, pages, caps, stop);
+    let found = self::pages(pdf, pages, &[], caps, stop);
     let sizes: HashMap<u32, (f32, f32)> = pdf
         .pages(stop)
         .into_iter()
@@ -2547,7 +2557,7 @@ mod tests {
         );
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         let pdf = open(&b.finish(catalog));
-        let mut found = pages(&pdf, &[1], caps, &|| false);
+        let mut found = pages(&pdf, &[1], &pdf.links(), caps, &|| false);
         assert!(found.failed.is_empty(), "{:?}", found.failed);
         found.pages.remove(0)
     }
@@ -2728,7 +2738,7 @@ mod tests {
             asked.get() > 4
         };
         let all: Vec<u32> = (1..=10).collect();
-        let found = pages(&pdf, &all, CAPS, &stop);
+        let found = pages(&pdf, &all, &pdf.links(), CAPS, &stop);
         assert_eq!(found.pages.len(), 4);
         assert_eq!(found.stopped_at, Some(5));
         assert_eq!(asked.get(), 5);
@@ -2750,7 +2760,7 @@ mod tests {
             max_glyphs: 1_000,
             max_kept: 1 << 30,
         };
-        let found = pages(&pdf, &[1, 2, 3], caps, &|| false);
+        let found = pages(&pdf, &[1, 2, 3], &pdf.links(), caps, &|| false);
         let read: Vec<u32> = found.pages.iter().map(|p| p.page).collect();
         assert_eq!(read, [1, 2, 3]);
         assert!(found.failed.is_empty(), "{:?}", found.failed);

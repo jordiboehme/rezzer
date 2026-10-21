@@ -9,12 +9,13 @@ use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 
-use crate::objects::{get, get_date, get_dict, get_name, get_text, reference};
+use crate::objects::{get, get_date, get_dict, get_name, get_text, quote, reference};
 use crate::{Issue, IssueKind, Pdf};
 
 /// A date as written in the file and, when it parses, in ISO 8601.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PdfDate {
+    /// The text as written, cut to 64 characters: a longer one is no date.
     pub raw: String,
     pub iso: Option<String>,
 }
@@ -321,11 +322,14 @@ fn parse_xmp(bytes: &[u8], pdf: &Pdf, issues: &mut Vec<Issue>) -> Vec<Option<Str
                 };
                 match c {
                     Some(c) => push_text(&mut prop, c.encode_utf8(&mut [0; 4])),
-                    None => issues.push(Issue::new(
-                        "metadata",
-                        IssueKind::Damaged,
-                        format!("unknown entity &{};", &*r),
-                    )),
+                    // The first one is said; the name is cut, as every file value in an issue.
+                    None if !issues.iter().any(|i| i.what.starts_with("unknown entity")) => issues
+                        .push(Issue::new(
+                            "metadata",
+                            IssueKind::Damaged,
+                            format!("unknown entity {}", quote(&format!("&{};", &*r))),
+                        )),
+                    None => {}
                 }
             }
             Event::DocType(_) => {

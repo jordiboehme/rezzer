@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
-use crate::objects::{TextBudget, Work, pdf_date, text_string};
+use crate::objects::{TextBudget, Work, date_of, text_string};
 use crate::parse::history::{Entry, Loader, Part, Sections, Step, View, last_startxref};
 use crate::parse::{Budget, header_base};
 use crate::{Issue, IssueKind, Limits, Pdf, PdfDate};
@@ -30,6 +30,8 @@ pub struct Revisions {
     pub list: Vec<Revision>,
     /// Older saves that are counted but not compared.
     pub skipped: usize,
+    /// The Limit issue that says so, when `skipped` is more than 0. It is not in `issues`.
+    pub skipped_issue: Option<Issue>,
     pub issues: Vec<Issue>,
 }
 
@@ -229,7 +231,7 @@ impl Run<'_, '_> {
         }
         out.skipped = chain.total - chain.saves.len();
         if out.skipped > 0 {
-            self.issues.push(Issue::new(
+            out.skipped_issue = Some(Issue::new(
                 LOCATION,
                 IssueKind::Limit,
                 format!(
@@ -461,15 +463,12 @@ impl Run<'_, '_> {
         let Some(dict) = info.as_deref().and_then(as_dict) else {
             return Ok(None);
         };
-        let raw = match self.resolve(&after, dict.get(b"ModDate").ok())?.as_deref() {
-            Some(Object::String(s, _)) => text_string(s),
+        let date = match self.resolve(&after, dict.get(b"ModDate").ok())?.as_deref() {
+            Some(Object::String(s, _)) => date_of(s),
             _ => return Ok(None),
         };
-        self.copy(raw.len())?;
-        Ok(Some(PdfDate {
-            iso: pdf_date(&raw),
-            raw,
-        }))
+        self.copy(date.raw.len())?;
+        Ok(Some(date))
     }
 
     /// Charges copied text.

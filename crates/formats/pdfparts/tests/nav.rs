@@ -196,7 +196,7 @@ fn named_dests_and_links() {
     assert!(links.iter().all(|l| l.page == 1));
     assert_eq!(
         links[0].target,
-        LinkTarget::Named("section.1".to_string(), Some(2))
+        LinkTarget::Named("section.1".into(), Some(2))
     );
     assert!(links[0].rect[2] > links[0].rect[0]);
     assert_eq!(pdf.outline().len(), 9);

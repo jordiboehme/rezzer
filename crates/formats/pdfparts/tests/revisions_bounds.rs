@@ -389,9 +389,11 @@ fn walk_cut_by_the_bound_is_relative() {
         r.issues
     );
     assert!(
-        r.issues.iter().any(|i| i.what.contains("at least")),
+        r.skipped_issue
+            .as_ref()
+            .is_some_and(|i| i.what.contains("at least")),
         "{:?}",
-        r.issues
+        r.skipped_issue
     );
 }
 

@@ -137,7 +137,10 @@ const XMP: &str = r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 #[test]
 fn title_falls_back_to_xmp() {
     let out = read(&with_metadata("<< /Producer (Info Producer) >>", XMP));
+    // A file saved once has no history to tell.
+    assert!(out.document.facets.timeline.is_empty());
     let p = &out.document.properties;
+    assert_eq!(p.facts.revisions, Some(1));
     assert_eq!(p.title.as_deref(), Some("Title From XMP"));
     // The XMP creator list gives the authors; keywords split at commas and semicolons.
     assert_eq!(p.authors, ["Ada", "Grace"]);
@@ -182,12 +185,18 @@ fn outline_section_with_page_labels() {
     assert_eq!(items.len(), 11, "{items:?}");
     let depths: Vec<usize> = items.iter().map(|(d, _)| *d).collect();
     assert_eq!(depths, [1, 2, 3, 4, 4, 3, 4, 2, 3, 3, 1]);
-    // Each item names its page by label; the first pages have no label of their own and
-    // are named by their number. Pages 2 and 13 both read "page 2".
+    // Each item names its page by label, the first pages by their number. Pages 2 and 13
+    // are both called 2, so their items add the page number of the file.
     let texts: Vec<&str> = items.iter().map(|(_, t)| t.as_str()).collect();
     assert_eq!(texts[0], "Isís 1 -> 5: /XYZ null null null, page iv");
-    assert!(texts[2].ends_with(", page 2"), "{texts:?}");
-    assert!(texts[8].ends_with(", page 2"), "{texts:?}");
+    assert!(
+        texts[2].ends_with(", page 2 (page 13 of the file)"),
+        "{texts:?}"
+    );
+    assert!(
+        texts[8].ends_with(", page 2 (page 2 of the file)"),
+        "{texts:?}"
+    );
     assert!(texts[9].ends_with(", page 1"), "{texts:?}");
     assert!(
         items.iter().all(|(_, t)| !t.ends_with("page ")),
@@ -420,8 +429,18 @@ fn threads_listed() {
 
 #[test]
 fn revisions_on_timeline() {
-    // The file holds two saves (its first section is the linearized part of the first). A
-    // third save fills two fields, as a person would.
+    // The file holds two saves: it is linearized, and its first section is part of the first.
+    let out = read(&corpus("pdfbox-sf1199a-direct-deposit.pdf"));
+    let events = &out.document.facets.timeline;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert!(events.iter().all(|e| e.kind == "revision"));
+    assert_eq!(events[0].text.as_deref(), Some("first save"));
+    assert_eq!(out.document.properties.facts.revisions, Some(2));
+}
+
+#[test]
+fn a_third_save_adds_an_event() {
+    // A third save fills two fields, as a person would.
     let mut bytes = corpus("pdfbox-sf1199a-direct-deposit.pdf");
     append_update(
         &mut bytes,
@@ -529,4 +548,92 @@ fn issues_become_losses() {
             ..
         }
     ));
+}
+
+#[test]
+fn xmp_dates_are_checked() {
+    let xmp = |create: &str, modify: &str| {
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreateDate="{create}" xmp:ModifyDate="{modify}"/></rdf:RDF></x:xmpmeta>"#
+        )
+    };
+    // Not dates: both are said and left out, and the Info date that does not parse keeps its
+    // own loss.
+    let out = read(&with_metadata(
+        "<< /CreationDate (garbage) >>",
+        &xmp("yesterday&#10;title: injected", "2026-02-31T10:00:00Z"),
+    ));
+    let p = &out.document.properties;
+    assert_eq!((&p.created, &p.modified), (&None, &None));
+    let said: Vec<(&str, LossReason)> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| (l.what.as_str(), l.why))
+        .collect();
+    assert!(
+        said.iter().any(|(w, r)| *r == LossReason::Damaged
+            && w.starts_with("the XMP xmp:CreateDate is not a date: \"yesterday\\ntitle")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|(w, r)| *r == LossReason::Damaged
+            && w.contains("xmp:ModifyDate is not a date: \"2026-02-31T10:00:00Z\"")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|(w, _)| w.contains("the creation date of the document information")),
+        "{said:?}"
+    );
+    // Real dates in the forms XMP allows are used, with their offset.
+    let out = read(&with_metadata(
+        "<< >>",
+        &xmp("2024-02-29T23:59:30.25+05:30", "2026-01"),
+    ));
+    let p = &out.document.properties;
+    assert_eq!(
+        p.created,
+        Some(Value::DateTime {
+            value: "2024-02-29T23:59:30.25+05:30".into()
+        })
+    );
+    assert_eq!(
+        p.modified,
+        Some(Value::DateTime {
+            value: "2026-01".into()
+        })
+    );
+}
+
+#[test]
+fn an_attachment_shows_the_size_it_unpacks_to() {
+    // The file states 3 bytes; the stream unpacks to 5,000.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    let file = b.stream(
+        "/Type /EmbeddedFile /Params << /Size 3 >>",
+        &vec![b'x'; 5000],
+    );
+    let spec = b.add(format!(
+        "<< /Type /Filespec /F (x.txt) /EF << /F {file} 0 R >> >>"
+    ));
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R \
+             /Names << /EmbeddedFiles << /Names [(x.txt) {spec} 0 R] >> >> >>"
+        ),
+    );
+    let out = read(&b.finish(catalog));
+    let e = &out.document.facets.embedded[0];
+    assert_eq!(e.detail.as_deref(), Some("3 bytes stated, 5000 unpacked"));
 }

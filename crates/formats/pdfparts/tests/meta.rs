@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use lopdf::{Document, Object, Stream, dictionary};
-use pdfparts::objects::{pdf_date, text_string};
+use pdfparts::objects::{pdf_date, text_string, xmp_date};
 use pdfparts::{IssueKind, Limits, Pdf};
 
 fn never() -> bool {
@@ -74,7 +74,11 @@ fn pdfdoc_title_decodes() {
     );
 
     let pdf = corpus("qpdf-page-labels-and-outlines.pdf");
-    let titles: Vec<String> = pdf.outline().into_iter().map(|o| o.title).collect();
+    let titles: Vec<String> = pdf
+        .outline()
+        .into_iter()
+        .map(|o| o.title.to_string())
+        .collect();
     assert!(
         titles.iter().any(|t| t.starts_with("Is\u{ed}s 1 ")),
         "{titles:?}"
@@ -109,6 +113,12 @@ fn pdf_dates_keep_offset() {
         ("D:2015123025", None),
         ("D:20151230152248+25'00'", None),
         ("D:20151230152248 trailing", None),
+        // Real calendar days only.
+        ("D:20260231", None),
+        ("D:20230229", None),
+        ("D:20240229", Some("2024-02-29T00:00:00")),
+        ("D:21000229", None),
+        ("D:20000229", Some("2000-02-29T00:00:00")),
     ];
     for (raw, iso) in cases {
         assert_eq!(pdf_date(raw).as_deref(), iso, "{raw}");
@@ -266,4 +276,40 @@ fn version_from_header_or_catalog() {
     assert_eq!(open("1.6", Some("1.3")), "1.6");
     assert_eq!(open("1.6", Some("seven")), "1.6");
     assert_eq!(corpus("irs-f1040-2025.pdf").version(), "1.7");
+}
+
+#[test]
+fn xmp_dates_are_checked() {
+    for ok in [
+        "2026",
+        "2026-01",
+        "2026-01-02",
+        "2026-01-02T07:24",
+        "2026-01-02T07:24:31",
+        "2026-01-02T07:24:31.123",
+        "2026-01-02T07:24:31Z",
+        "2026-01-02T07:24:31-06:00",
+        "2024-02-29T23:59:30.25+05:30",
+    ] {
+        assert_eq!(xmp_date(ok).as_deref(), Some(ok), "{ok}");
+    }
+    assert_eq!(xmp_date(" 2026-01-02 ").as_deref(), Some("2026-01-02"));
+    for bad in [
+        "",
+        "yesterday",
+        "yesterday\ntitle: injected",
+        "2026-02-31T10:00:00Z",
+        "2023-02-29",
+        "2026-13-01",
+        "2026-01-02T25:00",
+        "2026-01-02T07:24:31+24:00",
+        "2026-01-02T07:24:31.Z",
+        "2026-01-02T07",
+        "2026-01-02 07:24",
+        "2026-1-2",
+        "2026-01-02T07:24:31Zjunk",
+        "20260102",
+    ] {
+        assert_eq!(xmp_date(bad), None, "{bad:?}");
+    }
 }

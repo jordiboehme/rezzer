@@ -394,14 +394,16 @@ fn shared_link_text_is_bounded() {
     let links = pdf.links();
     eprintln!("{} links", links.len());
     assert_rss_bounded();
-    assert!(!links.is_empty());
-    assert!(
-        pdf.issues()
-            .iter()
-            .any(|i| i.kind == IssueKind::Limit && i.what.contains("link")),
-        "{:?}",
-        pdf.issues()
-    );
+    // The address is read once and every link shares it.
+    assert_eq!(links.len(), pages);
+    let first = match &links[0].target {
+        pdfparts::LinkTarget::Uri(u) => u.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert!(links.iter().all(
+        |l| matches!(&l.target, pdfparts::LinkTarget::Uri(u) if std::sync::Arc::ptr_eq(u, &first))
+    ));
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
 }
 
 /// `k` pieces that each open a literal string and never close it (`(` alone, inside an object

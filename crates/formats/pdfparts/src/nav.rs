@@ -10,8 +10,8 @@ use std::sync::Arc;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::objects::{
-    TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, number, reference,
-    resolve, text_string, walk_tree,
+    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name,
+    number, reference, resolve, text_string, walk_tree,
 };
 use crate::pagetree::ResourcesKey;
 use crate::{Issue, IssueKind, Pdf, pagetree};
@@ -50,11 +50,12 @@ pub struct ImageInfo {
 pub struct OutlineItem {
     /// 1 for top-level entries.
     pub level: u8,
-    pub title: String,
+    /// Items that name one title object share it.
+    pub title: Arc<str>,
     /// The target page in this file, if the entry points at one.
     pub page: Option<u32>,
     /// The target of a URI action. It is never followed.
-    pub uri: Option<String>,
+    pub uri: Option<Arc<str>>,
 }
 
 /// A link annotation.
@@ -66,37 +67,24 @@ pub struct Link {
     pub target: LinkTarget,
 }
 
-/// Where a link goes. Nothing here is ever followed or opened.
+/// Where a link goes. Nothing here is ever followed or opened. Texts that many links name
+/// through one object are shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkTarget {
     /// A page of this file.
     Page(u32),
     /// A named destination and the page it names, if it resolves.
-    Named(String, Option<u32>),
-    Uri(String),
+    Named(Arc<str>, Option<u32>),
+    Uri(Arc<str>),
     /// A page in another PDF file.
     Remote {
-        file: String,
+        file: Arc<str>,
         page: Option<u32>,
     },
     /// A file or program to start.
-    Launch(String),
+    Launch(Arc<str>),
     /// Another action, by its type (`JavaScript`, `SubmitForm`, `Named` and so on).
-    Other(String),
-}
-
-impl LinkTarget {
-    /// Bytes of text the target holds.
-    fn text_len(&self) -> usize {
-        match self {
-            LinkTarget::Page(_) => 0,
-            LinkTarget::Named(s, _)
-            | LinkTarget::Uri(s)
-            | LinkTarget::Launch(s)
-            | LinkTarget::Other(s) => s.len(),
-            LinkTarget::Remote { file, .. } => file.len(),
-        }
-    }
+    Other(Arc<str>),
 }
 
 pub(crate) fn rect(doc: &Document, obj: Option<&Object>) -> Option<[f32; 4]> {
@@ -201,6 +189,7 @@ struct OutlineWalk<'a> {
     issues: Vec<Issue>,
     out: Vec<OutlineItem>,
     budget: TextBudget<'a>,
+    shared: Shared,
     /// The budget ran out; nothing more is read.
     spent: bool,
 }
@@ -596,6 +585,7 @@ impl Pdf {
             issues: Vec::new(),
             out: Vec::new(),
             budget: self.text_budget(),
+            shared: Shared::default(),
             spent: false,
         };
         walk.names = self.name_map(&mut walk.issues);
@@ -611,13 +601,15 @@ impl Pdf {
     }
 
     /// Every link annotation on every page, in page order. A link object listed several times
-    /// is listed once, and an /Annots array that pages share counts for the first of them.
+    /// is listed once, and an /Annots array that pages share counts for the first of them. An
+    /// action or string that many links name is read once and shared.
     pub fn links(&self) -> Vec<Link> {
         let doc = &self.doc;
         let mut issues = Vec::new();
         let names = self.name_map(&mut issues);
         let mut out = Vec::new();
         let mut budget = self.text_budget();
+        let mut shared = Shared::default();
         let mut seen = HashSet::new();
         self.each_annot("links", &mut issues, |page, _, a| {
             if let Some(r) = reference(a)
@@ -631,16 +623,22 @@ impl Pdf {
             if get_name(doc, ad, b"Subtype") != Some(b"Link") {
                 return Ok(());
             }
-            let target = if let Some(action) = get_dict(doc, ad, b"A") {
-                self.action_target(action, &names)
+            let spent = |budget: &TextBudget<'_>| budget.limit_issue("document", "links");
+            let target = if let Ok(action) = ad.get(b"A") {
+                self.link_action(action, &names, &mut shared, &mut budget)
+            } else if let Ok(dest) = ad.get(b"Dest") {
+                self.goto_target(dest, &names, &mut shared, &mut budget)
+                    .map(Some)
             } else {
-                ad.get(b"Dest").ok().map(|d| self.goto_target(d, &names))
+                Ok(None)
             };
-            let Some(target) = target else {
-                return Ok(());
+            let target = match target {
+                Ok(Some(t)) => t,
+                Ok(None) => return Ok(()),
+                Err(Spent) => return Err(spent(&budget)),
             };
-            if !budget.charge(target.text_len()) {
-                return Err(budget.limit_issue("document", "links"));
+            if !budget.charge(0) {
+                return Err(spent(&budget));
             }
             out.push(Link {
                 page,
@@ -653,35 +651,78 @@ impl Pdf {
         out
     }
 
-    fn goto_target(&self, dest: &Object, names: &HashMap<Vec<u8>, &Object>) -> LinkTarget {
-        match resolve(&self.doc, dest) {
-            Some(Object::Name(n) | Object::String(n, _)) => {
-                LinkTarget::Named(text_string(n), self.dest_page(dest, names, 1))
+    /// The target of the action `action` is or names; an action object is read once.
+    fn link_action(
+        &self,
+        action: &Object,
+        names: &HashMap<Vec<u8>, &Object>,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<LinkTarget>, Spent> {
+        let id = reference(action);
+        if let Some(id) = id
+            && let Some(t) = shared.targets.get(&id)
+        {
+            return Ok(t.clone());
+        }
+        let target = match dict(&self.doc, action) {
+            Some(d) => self.action_target(d, names, shared, budget)?,
+            None => None,
+        };
+        if let Some(id) = id {
+            shared.targets.insert(id, target.clone());
+        }
+        Ok(target)
+    }
+
+    fn goto_target(
+        &self,
+        dest: &Object,
+        names: &HashMap<Vec<u8>, &Object>,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<LinkTarget, Spent> {
+        Ok(match resolve(&self.doc, dest) {
+            Some(Object::Name(_) | Object::String(..)) => {
+                let name = shared
+                    .text(&self.doc, dest, Decode::Text, budget)?
+                    .unwrap_or_else(|| "".into());
+                LinkTarget::Named(name, self.dest_page(dest, names, 1))
             }
             _ => match self.dest_page(dest, names, 1) {
                 Some(p) => LinkTarget::Page(p),
                 None => LinkTarget::Other("GoTo".into()),
             },
-        }
+        })
     }
 
     fn action_target(
         &self,
         action: &Dictionary,
         names: &HashMap<Vec<u8>, &Object>,
-    ) -> Option<LinkTarget> {
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<LinkTarget>, Spent> {
         let doc = &self.doc;
-        let kind = get_name(doc, action, b"S")?;
-        Some(match kind {
-            b"GoTo" => self.goto_target(action.get(b"D").ok()?, names),
-            b"URI" => match get(doc, action, b"URI") {
-                Some(Object::String(s, _)) => {
-                    LinkTarget::Uri(String::from_utf8_lossy(s).into_owned())
+        let Some(kind) = get_name(doc, action, b"S") else {
+            return Ok(None);
+        };
+        Ok(Some(match kind {
+            b"GoTo" => match action.get(b"D") {
+                Ok(d) => self.goto_target(d, names, shared, budget)?,
+                Err(_) => return Ok(None),
+            },
+            b"URI" => match action.get(b"URI") {
+                Ok(u) if matches!(resolve(doc, u), Some(Object::String(..))) => {
+                    match shared.text(doc, u, Decode::Lossy, budget)? {
+                        Some(u) => LinkTarget::Uri(u),
+                        None => LinkTarget::Other("URI".into()),
+                    }
                 }
                 _ => LinkTarget::Other("URI".into()),
             },
             b"GoToR" => LinkTarget::Remote {
-                file: self.file_spec(action).unwrap_or_default(),
+                file: self.file_spec(action, shared, budget)?,
                 page: match get(doc, action, b"D") {
                     Some(Object::Array(a)) => match a.first() {
                         Some(Object::Integer(n)) if *n >= 0 && *n < i64::from(u32::MAX) => {
@@ -692,21 +733,52 @@ impl Pdf {
                     _ => None,
                 },
             },
-            b"Launch" => LinkTarget::Launch(self.file_spec(action).unwrap_or_default()),
-            other => LinkTarget::Other(String::from_utf8_lossy(other).into_owned()),
-        })
+            b"Launch" => LinkTarget::Launch(self.file_spec(action, shared, budget)?),
+            _ => match action.get(b"S") {
+                Ok(s) => LinkTarget::Other(
+                    shared
+                        .text(doc, s, Decode::Text, budget)?
+                        .unwrap_or_else(|| "".into()),
+                ),
+                Err(_) => return Ok(None),
+            },
+        }))
     }
 
-    /// The file name of an action's `/F` (or `/Win`) file specification.
-    fn file_spec(&self, action: &Dictionary) -> Option<String> {
+    /// The file name of an action's `/F` (or `/Win`) file specification; empty when it names
+    /// none. A file specification object is read once.
+    fn file_spec(
+        &self,
+        action: &Dictionary,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Arc<str>, Spent> {
         let doc = &self.doc;
-        let spec = get(doc, action, b"F")
-            .or_else(|| get_dict(doc, action, b"Win").and_then(|w| get(doc, w, b"F")))?;
-        match spec {
-            Object::String(s, _) => Some(text_string(s)),
-            Object::Dictionary(d) => get_text(doc, d, b"UF").or_else(|| get_text(doc, d, b"F")),
-            _ => None,
+        let spec = match action.get(b"F") {
+            Ok(f) => Some(f),
+            Err(_) => get_dict(doc, action, b"Win").and_then(|w| w.get(b"F").ok()),
+        };
+        let Some(spec) = spec else {
+            return Ok("".into());
+        };
+        let id = reference(spec);
+        if let Some(id) = id
+            && let Some(name) = shared.found.get(&id)
+        {
+            return Ok(name.clone().unwrap_or_else(|| "".into()));
         }
+        let name = match resolve(doc, spec) {
+            Some(Object::String(..)) => shared.text(doc, spec, Decode::Text, budget)?,
+            Some(Object::Dictionary(d)) => match shared.text_at(doc, d, b"UF", budget)? {
+                Some(n) => Some(n),
+                None => shared.text_at(doc, d, b"F", budget)?,
+            },
+            _ => None,
+        };
+        if let Some(id) = id {
+            shared.found.insert(id, name.clone());
+        }
+        Ok(name.unwrap_or_else(|| "".into()))
     }
 }
 
@@ -750,23 +822,31 @@ impl OutlineWalk<'_> {
             let Some(d) = dict(doc, current) else {
                 return;
             };
-            let title = get_text(doc, d, b"Title").unwrap_or_default();
-            let (page, uri) = if let Some(action) = get_dict(doc, d, b"A") {
-                match pdf.action_target(action, &self.names) {
-                    Some(LinkTarget::Page(p)) => (Some(p), None),
-                    Some(LinkTarget::Named(_, p)) => (p, None),
-                    Some(LinkTarget::Uri(u)) => (None, Some(u)),
-                    _ => (None, None),
+            let title = self.shared.text_at(doc, d, b"Title", &mut self.budget);
+            let target = match d.get(b"A") {
+                Ok(action) => {
+                    pdf.link_action(action, &self.names, &mut self.shared, &mut self.budget)
                 }
-            } else if let Ok(dest) = d.get(b"Dest") {
-                (pdf.dest_page(dest, &self.names, 1), None)
-            } else {
-                (None, None)
+                Err(_) => Ok(None),
             };
-            if !self
-                .budget
-                .charge(title.len() + uri.as_ref().map_or(0, String::len))
-            {
+            let (Ok(title), Ok(target)) = (title, target) else {
+                self.spent = true;
+                self.issues
+                    .push(self.budget.limit_issue("outline", "outline entries"));
+                return;
+            };
+            let title = title.unwrap_or_else(|| "".into());
+            let (page, uri) = match target {
+                Some(LinkTarget::Page(p)) => (Some(p), None),
+                Some(LinkTarget::Named(_, p)) => (p, None),
+                Some(LinkTarget::Uri(u)) => (None, Some(u)),
+                Some(_) => (None, None),
+                None => match d.get(b"Dest") {
+                    Ok(dest) => (pdf.dest_page(dest, &self.names, 1), None),
+                    Err(_) => (None, None),
+                },
+            };
+            if !self.budget.charge(0) {
                 self.spent = true;
                 self.issues
                     .push(self.budget.limit_issue("outline", "outline entries"));

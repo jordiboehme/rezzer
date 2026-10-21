@@ -5,13 +5,14 @@
 //! Embedded files, optional content layers and article threads.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use lopdf::{Object, ObjectId};
 
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
-    Tree, TreeKey, dict, get, get_date, get_dict, get_name, get_text, reference, resolve,
-    text_string, walk_tree,
+    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, get, get_date, get_dict, get_name,
+    reference, resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
@@ -19,11 +20,11 @@ use crate::{Issue, IssueKind, Pdf, PdfDate};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddedFile {
     /// The file name: `/UF`, else `/F`, else the key in the name tree.
-    pub name: String,
-    /// `/Desc` of the file specification.
-    pub description: Option<String>,
+    pub name: Arc<str>,
+    /// `/Desc` of the file specification. Files that name one description object share it.
+    pub description: Option<Arc<str>>,
     /// The media type of the embedded stream (`/Subtype`), for example `image/png`.
-    pub mime: Option<String>,
+    pub mime: Option<Arc<str>>,
     /// Bytes of the file: `/Params /Size`, else the length the stream guard measured at open.
     /// `None` when neither is known, for example when the stream is over a limit.
     pub size: Option<u64>,
@@ -34,7 +35,8 @@ pub struct EmbeddedFile {
 /// An optional content group (layer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layer {
-    pub name: String,
+    /// Layers that name one name object share it.
+    pub name: Arc<str>,
     /// Shown when the file opens, after `/BaseState`, `/ON` and `/OFF` of the default
     /// configuration.
     pub visible: bool,
@@ -43,7 +45,8 @@ pub struct Layer {
 /// An article thread: a chain of beads (areas) that reads as one text across pages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Thread {
-    pub title: Option<String>,
+    /// Threads that name one title or one thread information dictionary share it.
+    pub title: Option<Arc<str>>,
     /// The pages the beads lie on, in reading order, each once.
     pub pages: Vec<u32>,
     /// Number of beads read.
@@ -71,15 +74,10 @@ struct Seen {
 }
 
 impl EmbeddedFile {
-    /// The bytes it copies out of the document.
+    /// The bytes it copies out of the document besides its shared texts: its dates.
     fn weight(&self) -> usize {
-        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
         let date = |d: &Option<PdfDate>| d.as_ref().map_or(0, |d| d.raw.len() * 2);
-        self.name.len()
-            + text(&self.description)
-            + text(&self.mime)
-            + date(&self.created)
-            + date(&self.modified)
+        date(&self.created) + date(&self.modified)
     }
 }
 
@@ -165,6 +163,7 @@ impl Pdf {
         let mut out = Vec::new();
         let mut seen = Seen::default();
         let mut budget = self.text_budget();
+        let mut shared = Shared::default();
         let tree = self
             .catalog()
             .and_then(|c| get_dict(doc, c, b"Names"))
@@ -184,8 +183,14 @@ impl Pdf {
                     TreeKey::Name(n) => text_string(&n),
                     TreeKey::Number(n) => n.to_string(),
                 };
-                let Some(f) = self.found(spec, key, &mut seen) else {
-                    continue;
+                let f = match self.found(spec, key, &mut seen, &mut shared, &mut budget) {
+                    Ok(Some(f)) => f,
+                    Ok(None) => continue,
+                    Err(Spent) => {
+                        issues.push(budget.limit_issue("attachments", "attachments"));
+                        self.note(issues);
+                        return out;
+                    }
                 };
                 if !budget.charge(f.file.weight()) {
                     issues.push(budget.limit_issue("attachments", "attachments"));
@@ -209,9 +214,14 @@ impl Pdf {
             if get_name(doc, ad, b"Subtype") != Some(b"FileAttachment") {
                 return Ok(());
             }
-            if let Some(spec) = ad.get(b"FS").ok()
-                && let Some(f) = self.found(spec, String::new(), &mut seen)
-            {
+            let Ok(spec) = ad.get(b"FS") else {
+                return Ok(());
+            };
+            let found = self.found(spec, String::new(), &mut seen, &mut shared, &mut budget);
+            let Ok(found) = found else {
+                return Err(budget.limit_issue("attachments", "attachments"));
+            };
+            if let Some(f) = found {
                 if !budget.charge(f.file.weight()) {
                     return Err(budget.limit_issue("attachments", "attachments"));
                 }
@@ -224,24 +234,33 @@ impl Pdf {
     }
 
     /// One file specification. `None` when it or its stream is listed already.
-    fn found(&self, spec: &Object, key: String, seen: &mut Seen) -> Option<Found> {
+    fn found(
+        &self,
+        spec: &Object,
+        key: String,
+        seen: &mut Seen,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<Found>, Spent> {
         let doc = &self.doc;
         if let Some(id) = reference(spec)
             && !seen.specs.insert(id)
         {
-            return None;
+            return Ok(None);
         }
         let (name, description, ef) = match resolve(doc, spec) {
-            Some(Object::String(s, _)) => (text_string(s), None, None),
-            Some(Object::Dictionary(d)) => (
-                get_text(doc, d, b"UF")
-                    .or_else(|| get_text(doc, d, b"F"))
-                    .unwrap_or(key),
-                get_text(doc, d, b"Desc"),
-                get_dict(doc, d, b"EF"),
-            ),
-            _ => (key, None, None),
+            Some(Object::String(..)) => (shared.text(doc, spec, Decode::Text, budget)?, None, None),
+            Some(Object::Dictionary(d)) => {
+                let name = match shared.text_at(doc, d, b"UF", budget)? {
+                    Some(n) => Some(n),
+                    None => shared.text_at(doc, d, b"F", budget)?,
+                };
+                let description = shared.text_at(doc, d, b"Desc", budget)?;
+                (name, description, get_dict(doc, d, b"EF"))
+            }
+            _ => (None, None, None),
         };
+        let name = name.unwrap_or_else(|| key.into());
         let stream = ef.and_then(|ef| {
             ef.get(b"F")
                 .or_else(|_| ef.get(b"UF"))
@@ -251,7 +270,7 @@ impl Pdf {
         if let Some(id) = stream
             && !seen.streams.insert(id)
         {
-            return None;
+            return Ok(None);
         }
         let sd = stream.and_then(|id| match self.doc.objects.get(&id) {
             Some(Object::Stream(s)) => Some(s),
@@ -264,19 +283,21 @@ impl Pdf {
                 _ => None,
             })
             .or_else(|| self.measured(stream?));
-        Some(Found {
+        let mime = match sd {
+            Some(s) => shared.text_at(doc, &s.dict, b"Subtype", budget)?,
+            None => None,
+        };
+        Ok(Some(Found {
             file: EmbeddedFile {
                 name,
                 description,
-                mime: sd
-                    .and_then(|s| get_name(doc, &s.dict, b"Subtype"))
-                    .map(|m| String::from_utf8_lossy(m).into_owned()),
+                mime,
                 size,
                 created: params.and_then(|p| get_date(doc, p, b"CreationDate")),
                 modified: params.and_then(|p| get_date(doc, p, b"ModDate")),
             },
             stream,
-        })
+        }))
     }
 
     /// The unpacked length of a stream as the guard measured it at open. `None` when the
@@ -313,6 +334,7 @@ impl Pdf {
         let (on, off) = (set(b"ON"), set(b"OFF"));
         let base_on = config.and_then(|c| get_name(doc, c, b"BaseState")) != Some(b"OFF");
         let mut budget = self.text_budget();
+        let mut shared = Shared::default();
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for g in groups {
@@ -330,14 +352,46 @@ impl Pdf {
                 Some(id) if off.contains(&id) => false,
                 _ => base_on,
             };
-            let name = get_text(doc, gd, b"Name").unwrap_or_default();
-            if !budget.charge(name.len()) {
+            let name = shared.text_at(doc, gd, b"Name", &mut budget);
+            let Ok(name) = name.map(|n| n.unwrap_or_else(|| "".into())) else {
+                self.note(vec![budget.limit_issue("layers", "layers")]);
+                break;
+            };
+            if !budget.charge(0) {
                 self.note(vec![budget.limit_issue("layers", "layers")]);
                 break;
             }
             out.push(Layer { name, visible });
         }
         out
+    }
+
+    /// The title of a thread: `/Title` of its `/I` dictionary, read once for each dictionary
+    /// that many threads name.
+    fn thread_title(
+        &self,
+        thread: &lopdf::Dictionary,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<Arc<str>>, Spent> {
+        let doc = &self.doc;
+        let Ok(info) = thread.get(b"I") else {
+            return Ok(None);
+        };
+        let id = reference(info);
+        if let Some(id) = id
+            && let Some(t) = shared.found.get(&id)
+        {
+            return Ok(t.clone());
+        }
+        let title = match dict(doc, info) {
+            Some(i) => shared.text_at(doc, i, b"Title", budget)?,
+            None => None,
+        };
+        if let Some(id) = id {
+            shared.found.insert(id, title.clone());
+        }
+        Ok(title)
     }
 
     /// Article threads in the order of the catalog's `/Threads`.
@@ -350,15 +404,16 @@ impl Pdf {
         let mut out = Vec::new();
         let mut beads_left = self.limits.max_items;
         let mut budget = self.text_budget();
+        let mut shared = Shared::default();
         for (t, thread) in list.iter().enumerate() {
             let Some(td) = dict(doc, thread) else {
                 continue;
             };
-            let title = get_dict(doc, td, b"I").and_then(|i| get_text(doc, i, b"Title"));
-            if !budget.charge(title.as_ref().map_or(0, String::len)) {
+            let title = self.thread_title(td, &mut shared, &mut budget);
+            let (Ok(title), true) = (title, budget.charge(0)) else {
                 issues.push(budget.limit_issue(THREADS, "article threads"));
                 break;
-            }
+            };
             let mut pages = Vec::new();
             let mut beads = 0u32;
             if let Ok(first) = td.get(b"F") {

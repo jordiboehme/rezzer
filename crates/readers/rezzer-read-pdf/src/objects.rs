@@ -14,8 +14,10 @@
 
 use std::cell::Cell as Counter;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use pdfparts::{Issue, IssueKind, LinkTarget, PageInfo, Pdf, PdfDate, Revision};
+pub(crate) use pdfparts::objects::quote;
+use pdfparts::{Issue, IssueKind, Link, LinkTarget, PageInfo, Pdf, PdfDate, Revision};
 use rezzer_limits::Budget;
 use rezzer_model::{
     Anchor, Asset, Blob, Block, Edge, Embedded, Event, Graph, Inline, LossReason, Node,
@@ -41,10 +43,13 @@ const CHANGES_SHOWN: usize = 20;
 const TIME_EVERY: u32 = 1024;
 
 /// Reads the object layer into `out`, after the pages: the page text has the first claim on
-/// the bytes the file may keep.
+/// the bytes the file may keep. `links` are the file's links, read once for the pages too.
+/// The revisions are read first: they are few, and the lists after them draw on the same
+/// pdfparts budget.
 pub(crate) fn read(
     pdf: &Pdf,
     pages: &[PageInfo],
+    links: &[Link],
     opts: &ReadOptions,
     budget: &Budget,
     room: &LinkRoom,
@@ -53,28 +58,38 @@ pub(crate) fn read(
     let kept = Kept {
         room,
         budget,
+        own: Counter::new(budget.limits().max_memory_bytes / OWN_SHARE),
         calls: Counter::new(0),
     };
     meta::facts(pdf, out);
+    let events = revisions(pdf, budget, out);
     meta::properties(pdf, &kept, out);
     outline(pdf, pages, &kept, out);
-    links(pdf, pages, &kept, out);
+    link_graph(links, pages, &kept, out);
     attachments(pdf, opts, budget, &kept, out);
     threads(pdf, &kept, out);
-    revisions(pdf, budget, &kept, out);
+    timeline(events, &kept, out);
     issues(pdf, out);
 }
+
+/// The share of the memory limit the object layer's copies may take at most, besides what the
+/// pages leave: the renderer and the JSON writer copy what is kept about four times over, and
+/// the object layer of a hostile file already takes much of the memory by itself.
+const OWN_SHARE: u64 = 64;
 
 /// The charges for copies in the model.
 pub(crate) struct Kept<'a> {
     room: &'a LinkRoom,
     budget: &'a Budget,
+    /// What is left of the object layer's own share ([`OWN_SHARE`]).
+    own: Counter<u64>,
     calls: Counter<u32>,
 }
 
 impl Kept<'_> {
     /// Charges one item of `elements` model elements with copies of `texts`. `Err` says why it
     /// does not fit: then nothing more of its kind may be kept.
+    /// The bytes are checked first, so an item that does not fit costs nothing.
     pub(crate) fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
         self.calls.set(self.calls.get().wrapping_add(1));
         if self.calls.get().is_multiple_of(TIME_EVERY)
@@ -82,21 +97,30 @@ impl Kept<'_> {
         {
             return Err(hit.to_string());
         }
-        if let Err(hit) = self.budget.add_elements(elements) {
-            return Err(hit.to_string());
-        }
         let bytes = texts
             .iter()
             .map(|t| link_target_written_len(t))
             .fold(ITEM_COST, u64::saturating_add);
-        if self.room.take_kept(bytes) {
-            Ok(())
-        } else {
-            Err(format!(
+        if bytes > self.room.left() {
+            return Err(format!(
                 "the copies take more than the {} bytes left of what the file may keep",
                 self.room.left()
-            ))
+            ));
         }
+        let own = self.own.get();
+        if bytes > own {
+            return Err(format!(
+                "the copies take more than the {own} bytes left of what the metadata, outline \
+                 and links may keep (a 64th of the memory limit)"
+            ));
+        }
+        if let Err(hit) = self.budget.add_elements(elements) {
+            return Err(hit.to_string());
+        }
+        let taken = self.room.take_kept(bytes);
+        debug_assert!(taken, "checked above");
+        self.own.set(own - bytes);
+        Ok(())
     }
 }
 
@@ -123,12 +147,54 @@ fn page_info(pages: &[PageInfo], n: u32) -> Option<&PageInfo> {
         .filter(|p| p.number == n)
 }
 
-/// A page as an outline item names it: its label, else its number.
-fn page_label(pages: &[PageInfo], n: u32) -> String {
-    page_info(pages, n)
-        .and_then(|p| p.label.as_deref())
-        .filter(|l| !l.is_empty())
-        .map_or_else(|| n.to_string(), str::to_string)
+/// What names a page in the outline: its label, else its number. A label that is a number
+/// (`2`) names the same as that number, so page 13 labelled `2` and page 2 without a label
+/// share a name.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum PageName<'a> {
+    Number(u32),
+    Label(&'a str),
+}
+
+fn page_name(page: &PageInfo) -> PageName<'_> {
+    match page.label.as_deref() {
+        Some(l) if !l.is_empty() => match l.parse::<u32>() {
+            Ok(v) if v.to_string() == l => PageName::Number(v),
+            _ => PageName::Label(l),
+        },
+        _ => PageName::Number(page.number),
+    }
+}
+
+/// How the outline names pages: by label or number, and with the page number of the file
+/// after a name that more than one page has.
+struct PageNames<'a> {
+    pages: &'a [PageInfo],
+    count: HashMap<PageName<'a>, u32>,
+}
+
+impl<'a> PageNames<'a> {
+    fn new(pages: &'a [PageInfo]) -> PageNames<'a> {
+        let mut count: HashMap<PageName<'a>, u32> = HashMap::new();
+        for p in pages {
+            *count.entry(page_name(p)).or_default() += 1;
+        }
+        PageNames { pages, count }
+    }
+
+    /// `page iv`, or `page 2 (page 13 of the file)` when page 2 is not the only one called 2.
+    fn of(&self, n: u32) -> String {
+        let name = page_info(self.pages, n).map_or(PageName::Number(n), page_name);
+        let text = match name {
+            PageName::Number(n) => n.to_string(),
+            PageName::Label(l) => l.to_string(),
+        };
+        if self.count.get(&name).copied().unwrap_or(0) > 1 {
+            format!("page {text} (page {n} of the file)")
+        } else {
+            format!("page {text}")
+        }
+    }
 }
 
 /// A title on one line: runs of white space and control characters become one space.
@@ -205,21 +271,24 @@ fn outline(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
         return;
     }
     let total = items.len();
+    let names = PageNames::new(pages);
     let mut nest = Nest::new();
     let mut cut: Option<(usize, String)> = None;
     for (k, item) in items.iter().enumerate() {
         let title = one_line(&item.title);
         let (inlines, charged) = match (item.page, &item.uri) {
             (Some(p), _) => {
-                let text = format!("{title}, page {}", page_label(pages, p));
+                let text = format!("{title}, {}", names.of(p));
                 (vec![Inline::plain(text.clone())], vec![text])
             }
             (None, Some(uri)) => (
                 vec![
                     Inline::plain(format!("{title}, link to ")),
-                    Inline::Code { text: uri.clone() },
+                    Inline::Code {
+                        text: uri.to_string(),
+                    },
                 ],
-                vec![title.clone(), uri.clone()],
+                vec![title.clone(), uri.to_string()],
             ),
             (None, None) => (vec![Inline::plain(title.clone())], vec![title]),
         };
@@ -339,8 +408,7 @@ impl LinkGraph {
 /// Every link annotation: links to pages of this file and to URIs become edges of the graph
 /// `links` (one per link, from the page it stands on); Launch, remote and other actions are
 /// listed as embedded references. None is followed.
-fn links(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
-    let links = pdf.links();
+fn link_graph(links: &[Link], pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
     if links.is_empty() {
         return;
     }
@@ -354,21 +422,18 @@ fn links(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
         pages: HashSet::new(),
         uris: HashMap::new(),
     };
-    let mut dangling: Option<(usize, u32, String)> = None;
+    let mut dangling: Option<(usize, u32, Arc<str>)> = None;
     let mut cut: Option<(usize, u32, String)> = None;
     for (k, link) in links.iter().enumerate() {
         let from = link.page;
-        let mut listed = |kind: &str, name: String, detail: String, target: Option<String>| {
-            let texts = [kind, name.as_str(), detail.as_str()];
-            kept.take(1, &texts)?;
-            if let Some(t) = &target {
-                kept.take(0, &[t])?;
-            }
+        // An entry is copied only once it is charged, with its target in the same charge.
+        let mut listed = |kind: &str, name: &str, detail: String, target: Option<&str>| {
+            kept.take(1, &[kind, name, &detail, target.unwrap_or_default()])?;
             out.doc.facets.embedded.push(Embedded {
                 kind: kind.into(),
-                name,
+                name: name.to_string(),
                 detail: Some(detail),
-                target,
+                target: target.map(str::to_string),
                 text: None,
             });
             Ok::<(), String>(())
@@ -394,20 +459,17 @@ fn links(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
                     Some(p) => format!("from page {from}, to page {p} of that file"),
                     None => format!("from page {from}"),
                 };
-                listed("remote-link", file.clone(), detail, Some(file.clone()))
+                listed("remote-link", file, detail, Some(file))
             }
             LinkTarget::Launch(file) => listed(
                 "launch-action",
-                file.clone(),
+                file,
                 format!("from page {from}"),
-                Some(file.clone()),
+                Some(file),
             ),
-            LinkTarget::Other(action) => listed(
-                "link-action",
-                action.clone(),
-                format!("from page {from}"),
-                None,
-            ),
+            LinkTarget::Other(action) => {
+                listed("link-action", action, format!("from page {from}"), None)
+            }
         };
         if let Err(why) = done {
             cut = Some((links.len() - k, from, why));
@@ -420,13 +482,15 @@ fn links(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
     if let Some((n, page, name)) = dangling {
         let what = if n == 1 {
             format!(
-                "1 internal link names a destination the file does not have ({name:?}); it is \
-                 not in the link graph"
+                "1 internal link names a destination the file does not have ({}); it is not in \
+                 the link graph",
+                quote(&name)
             )
         } else {
             format!(
-                "{n} internal links name a destination the file does not have (the first is \
-                 {name:?}); they are not in the link graph"
+                "{n} internal links name a destination the file does not have (the first is {}); \
+                 they are not in the link graph",
+                quote(&name)
             )
         };
         out.loss(
@@ -440,9 +504,8 @@ fn links(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
         out.loss(
             format!("p{page}"),
             format!(
-                "{n} of {} links {} not kept, from the one on page {page} on: {why}",
-                links.len(),
-                is_are(n)
+                "{n} more link {} not kept, from the one on page {page} on: {why}",
+                if n == 1 { "entry is" } else { "entries are" }
             ),
             LossReason::Limit,
             Severity::Warning,
@@ -459,18 +522,24 @@ fn attachments(pdf: &Pdf, opts: &ReadOptions, budget: &Budget, kept: &Kept<'_>, 
     // The attachments not extracted for a limit: the first one, why, and how many.
     let mut left_out: Option<(usize, String, usize)> = None;
     for (i, f) in files.iter().enumerate() {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(m) = given(f.mime.as_deref()) {
-            parts.push(m.to_string());
-        }
-        if let Some(n) = f.size {
-            parts.push(format!("{n} bytes"));
-        }
-        if let Some(d) = given(f.description.as_deref()) {
-            parts.push(d.to_string());
-        }
-        let detail = parts.join(", ");
-        if let Err(why) = kept.take(1, &[&f.name, &detail]) {
+        let mime = given(f.mime.as_deref());
+        let description = given(f.description.as_deref());
+        // The size the guard measured; the one the file states only when there is none.
+        let size = match (f.size, pdf.embedded_file_measured(i)) {
+            (Some(stated), Some(measured)) if stated != measured => {
+                Some(format!("{stated} bytes stated, {measured} unpacked"))
+            }
+            (_, Some(n)) | (Some(n), None) => Some(format!("{n} bytes")),
+            (None, None) => None,
+        };
+        let size = size.unwrap_or_default();
+        let texts = [
+            &*f.name,
+            mime.unwrap_or_default(),
+            &size,
+            description.unwrap_or_default(),
+        ];
+        if let Err(why) = kept.take(1, &texts) {
             let left = files.len() - i;
             out.loss(
                 format!("attachment {}", i + 1),
@@ -485,23 +554,24 @@ fn attachments(pdf: &Pdf, opts: &ReadOptions, budget: &Budget, kept: &Kept<'_>, 
             );
             break;
         }
+        let detail = [
+            mime,
+            (!size.is_empty()).then_some(size.as_str()),
+            description,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
         out.doc.facets.embedded.push(Embedded {
             kind: "attachment".into(),
-            name: f.name.clone(),
+            name: f.name.to_string(),
             detail: (!detail.is_empty()).then_some(detail),
             target: None,
             text: None,
         });
         if opts.extract_assets
-            && let Err(why) = extract(
-                pdf,
-                i,
-                &f.name,
-                given(f.mime.as_deref()),
-                &mut room,
-                kept,
-                out,
-            )
+            && let Err(why) = extract(pdf, i, &f.name, mime, &mut room, kept, out)
         {
             match &mut left_out {
                 Some((_, _, n)) => *n += 1,
@@ -512,10 +582,11 @@ fn attachments(pdf: &Pdf, opts: &ReadOptions, budget: &Budget, kept: &Kept<'_>, 
     if let Some((i, why, n)) = left_out {
         let name = &files[i].name;
         let what = if n == 1 {
-            format!("{name:?} is not extracted: {why}")
+            format!("{} is not extracted: {why}", quote(name))
         } else {
             format!(
-                "{n} attachments are not extracted, the first {name:?} (attachment {}): {why}",
+                "{n} attachments are not extracted, the first {} (attachment {}): {why}",
+                quote(name),
                 i + 1
             )
         };
@@ -557,7 +628,7 @@ fn extract(
             let (why, severity) = reason(issue.kind);
             out.loss(
                 format!("attachment {}", i + 1),
-                format!("{name:?}: {}", issue.what),
+                format!("{}: {}", quote(name), issue.what),
                 why,
                 severity,
             );
@@ -600,10 +671,10 @@ fn page_list(pages: &[u32]) -> String {
 fn threads(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
     let threads = pdf.threads();
     for (k, t) in threads.iter().enumerate() {
-        let name =
-            given(t.title.as_deref()).map_or_else(|| format!("thread {}", k + 1), str::to_string);
+        let fallback = format!("thread {}", k + 1);
+        let name = given(t.title.as_deref()).unwrap_or(&fallback);
         let detail = page_list(&t.pages);
-        if let Err(why) = kept.take(1, &[&name, &detail]) {
+        if let Err(why) = kept.take(1, &[name, &detail]) {
             let left = threads.len() - k;
             out.loss(
                 "article threads",
@@ -620,7 +691,7 @@ fn threads(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
         }
         out.doc.facets.embedded.push(Embedded {
             kind: "article-thread".into(),
-            name,
+            name: name.to_string(),
             detail: Some(detail),
             target: None,
             text: None,
@@ -648,26 +719,48 @@ fn revision_text(rev: &Revision) -> String {
     text
 }
 
-/// One timeline event per revision, and their count as a fact. Older revisions over the cap
-/// are counted, not compared: that is said once as a Limit Info loss.
-fn revisions(pdf: &Pdf, budget: &Budget, kept: &Kept<'_>, out: &mut Out) {
+/// The revisions: their count as a fact, their issues as losses, and the time and words of
+/// one event per revision, when the file has 2 or more (a file saved once has no history to
+/// tell). Older revisions over the cap are counted, not compared: that is one Limit Info loss.
+fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Vec<(u32, Option<String>, String)> {
     let stop = || budget.check_time().is_err();
     let r = pdf.revisions(&stop);
     let count = r.list.len() + r.skipped;
     if count > 0 {
         out.doc.properties.facts.revisions = Some(u32::try_from(count).unwrap_or(u32::MAX));
     }
-    for rev in &r.list {
-        let text = revision_text(rev);
-        let time = iso(rev.modified.as_ref()).map(str::to_string);
+    if let Some(issue) = &r.skipped_issue {
+        out.loss(
+            location(issue),
+            issue.what.clone(),
+            LossReason::Limit,
+            Severity::Info,
+        );
+    }
+    for issue in &r.issues {
+        let (why, severity) = reason(issue.kind);
+        out.loss(location(issue), issue.what.clone(), why, severity);
+    }
+    if count < 2 {
+        return Vec::new();
+    }
+    r.list
+        .iter()
+        .map(|rev| {
+            let time = iso(rev.modified.as_ref()).map(str::to_string);
+            (rev.number, time, revision_text(rev))
+        })
+        .collect()
+}
+
+/// One timeline event per revision, charged like every other copy.
+fn timeline(events: Vec<(u32, Option<String>, String)>, kept: &Kept<'_>, out: &mut Out) {
+    let last = events.last().map_or(0, |(n, _, _)| *n);
+    for (number, time, text) in events {
         if let Err(why) = kept.take(1, &[&text, time.as_deref().unwrap_or_default()]) {
             out.loss(
                 "revisions",
-                format!(
-                    "the events of revisions {} to {} are not kept: {why}",
-                    rev.number,
-                    r.list.last().map_or(rev.number, |l| l.number)
-                ),
+                format!("the events of revisions {number} to {last} are not kept: {why}"),
                 LossReason::Limit,
                 Severity::Warning,
             );
@@ -680,15 +773,6 @@ fn revisions(pdf: &Pdf, budget: &Budget, kept: &Kept<'_>, out: &mut Out) {
             anchor: None,
             text: Some(text),
         });
-    }
-    for issue in &r.issues {
-        let (why, mut severity) = reason(issue.kind);
-        // The revisions over the cap: counted, and the newest are compared.
-        if r.skipped > 0 && issue.kind == IssueKind::Limit && issue.what.contains("only the newest")
-        {
-            severity = Severity::Info;
-        }
-        out.loss(location(issue), issue.what.clone(), why, severity);
     }
 }
 

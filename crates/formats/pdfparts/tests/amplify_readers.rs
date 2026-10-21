@@ -148,22 +148,32 @@ fn shared_text_in_annotations_attachments_layers_and_threads_is_bounded() {
     drop(annots);
     assert!(has_limit(&pdf, "annotations"), "{:?}", pdf.issues());
     drop(pdf);
+    // Attachments, layers and threads read the shared string once and share it.
     let pdf = open();
     let files = pdf.embedded_files();
-    assert!(!files.is_empty() && files.len() < n);
-    assert!(has_limit(&pdf, "attachments"), "{:?}", pdf.issues());
+    assert_eq!(files.len(), n);
+    let desc = files[0].description.clone().expect("a description");
+    assert!(files.iter().all(|f| {
+        f.description
+            .as_ref()
+            .is_some_and(|d| std::sync::Arc::ptr_eq(d, &desc))
+    }));
     drop(pdf);
     let pdf = open();
     let layers = pdf.layers();
-    assert!(!layers.is_empty() && layers.len() < n);
+    assert_eq!(layers.len(), n);
+    assert!(
+        layers
+            .iter()
+            .all(|l| std::sync::Arc::ptr_eq(&l.name, &layers[0].name))
+    );
     drop(layers);
-    assert!(has_limit(&pdf, "layers"), "{:?}", pdf.issues());
     drop(pdf);
     let pdf = open();
     let threads = pdf.threads();
-    assert!(!threads.is_empty() && threads.len() < n);
+    assert_eq!(threads.len(), n);
     drop(threads);
-    assert!(has_limit(&pdf, "article threads"), "{:?}", pdf.issues());
+    assert!(!has_limit(&pdf, "article threads"), "{:?}", pdf.issues());
     assert_rss_bounded();
 }
 
@@ -281,9 +291,15 @@ fn shared_outline_title_is_bounded() {
     let bytes = c.finish("");
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
     let outline = pdf.outline();
-    assert!(!outline.is_empty() && outline.len() < n);
+    // The title is read once and every item shares it.
+    assert_eq!(outline.len(), n);
+    assert!(
+        outline
+            .iter()
+            .all(|o| std::sync::Arc::ptr_eq(&o.title, &outline[0].title))
+    );
     assert_rss_bounded();
-    assert!(has_limit(&pdf, "outline"), "{:?}", pdf.issues());
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
 }
 
 #[test]

@@ -80,9 +80,11 @@ fn read_pdf(
     };
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
-    let extracted = extract(&pdf, &pages, budget, &mut out, text_stop);
+    // The links are read once, for the text and for the object layer.
+    let links = pdf.links();
+    let extracted = extract(&pdf, &pages, &links, budget, &mut out, text_stop);
     let room = lay_out(&pdf, &pages, extracted, budget, &mut out);
-    objects::read(&pdf, &pages, opts, budget, &room, &mut out);
+    objects::read(&pdf, &pages, &links, opts, budget, &room, &mut out);
     out.finish()
 }
 
@@ -90,6 +92,7 @@ fn read_pdf(
 fn extract(
     pdf: &Pdf,
     pages: &[PageInfo],
+    links: &[pdfparts::Link],
     budget: &Budget,
     out: &mut Out,
     stop: &dyn Fn() -> bool,
@@ -117,7 +120,7 @@ fn extract(
         budget.limits().max_memory_bytes,
         pdf.object_bytes(),
     );
-    text::pages(pdf, &wanted, caps, stop)
+    text::pages(pdf, &wanted, links, caps, stop)
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.

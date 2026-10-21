@@ -1046,11 +1046,7 @@ fn link_loss(out: &ReadOutcome) -> &Loss {
         .partition(|l| l.what.contains("targets of"));
     assert_eq!(found.len(), 1, "{:?}", out.document.losses);
     assert!(
-        graph.len() <= 1
-            && graph
-                .iter()
-                .all(|l| l.what.contains("links is not kept")
-                    || l.what.contains("links are not kept")),
+        graph.len() <= 1 && graph.iter().all(|l| l.what.contains("more link entr")),
         "{:?}",
         out.document.losses
     );
@@ -2240,11 +2236,11 @@ fn many_outline_items_are_bounded() {
 
 #[test]
 fn many_links_are_bounded() {
-    // 10,000 links over 10 pages: half to pages, half to distinct URIs of 800 bytes. At the
-    // 512 MiB limits the graph keeps them all; at 128 MiB the room is an eighth as large and
+    // 10,000 links over 10 pages: half to pages, half to distinct URIs of 400 bytes. At the
+    // 512 MiB limits the graph keeps them all; at 128 MiB its share is a quarter as large and
     // the graph keeps what fits and says how many links it left out. The object layer of a
     // much larger file of links takes more than the memory bound by itself.
-    let tail = "u".repeat(780);
+    let tail = "u".repeat(380);
     let bytes = object_file(
         10,
         &|i, kids| {
@@ -2279,7 +2275,7 @@ fn many_links_are_bounded() {
     );
     let kept = edges(&out);
     assert!(kept > 1_000 && kept < 10_000, "{kept}");
-    let loss = format!("{} of 10000 links are not kept", 10_000 - kept);
+    let loss = format!("{} more link entries are not kept", 10_000 - kept);
     assert!(
         out.document
             .losses
@@ -2402,4 +2398,441 @@ fn many_revisions_are_bounded() {
         (LossReason::Limit, Severity::Info)
     );
     assert_objects_cut(&out, start, "revisions", "only the newest 64");
+}
+
+/// Reads a file at the hostile limits, then renders, pages and serializes it as the pipeline
+/// does.
+fn read_through(bytes: &[u8]) -> ReadOutcome {
+    let out = read(bytes);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    drop(md);
+    assert!(!pages.is_empty());
+    drop(pages);
+    let j = serde_json::to_string(&out.document).expect("the model serializes");
+    drop(j);
+    out
+}
+
+/// Reads `twin`, the same objects where no reader looks, then `shape`. The shape stays under
+/// 256 MiB and within 64 MiB of what its twin took (the object layer keeps at most a 64th of
+/// the memory limit, and the renderer and JSON writer copy that about four times), and
+/// finishes in time. Returns the shape's outcome.
+fn against_twin(shape: &[u8], twin: &[u8]) -> ReadOutcome {
+    let start = Instant::now();
+    drop(read_through(twin));
+    let twin_rss = common::max_rss_bytes();
+    let out = read_through(shape);
+    let rss = common::max_rss_bytes();
+    assert!(
+        rss < twin_rss + (64 << 20),
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin_rss >> 20
+    );
+    assert_rss_under_256_mib();
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    out
+}
+
+/// The Limit loss at `location` whose text contains `words`.
+fn limit_at<'a>(out: &'a ReadOutcome, location: &str, words: &str) -> &'a Loss {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit && l.location == location && l.what.contains(words))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses))
+}
+
+/// No loss holds more than a few hundred bytes of text.
+fn assert_short_losses(out: &ReadOutcome) {
+    for l in &out.document.losses {
+        assert!(
+            l.what.len() < 600,
+            "{} bytes: {:.200}",
+            l.what.len(),
+            l.what
+        );
+    }
+}
+
+/// A one-page file with `catalog` entries and Info `info` (an empty string for none); `objects`
+/// adds objects first and gets their number back through `n`.
+fn catalog_file(objects: &mut dyn FnMut(&mut Builder) -> (String, String)) -> Vec<u8> {
+    object_file(1, &no_annots, &mut |b, _| {
+        let (catalog, info) = objects(b);
+        if info.is_empty() {
+            return (catalog, String::new());
+        }
+        let info = b.add(info);
+        (catalog, format!("/Info {info} 0 R"))
+    })
+}
+
+#[test]
+fn many_keywords_are_charged_one_by_one() {
+    // A 10 MB /Keywords of about 1.1 million different words, against one 10 MB word.
+    let words: Vec<String> = (0..1_100_000).map(|k| format!("k{k}")).collect();
+    let list = words.join(",");
+    drop(words);
+    let shape = catalog_file(&mut |b| {
+        let k = b.add(format!("({list})"));
+        (String::new(), format!("<< /Keywords {k} 0 R >>"))
+    });
+    let one = "k".repeat(list.len());
+    let twin = catalog_file(&mut |b| {
+        let k = b.add(format!("({one})"));
+        (String::new(), format!("<< /Keywords {k} 0 R >>"))
+    });
+    let out = against_twin(&shape, &twin);
+    let kept = out.document.properties.keywords.len();
+    assert!(kept > 1_000 && kept < 1_100_000, "{kept}");
+    assert_eq!(out.document.properties.keywords[0], "k0");
+    assert_eq!(out.completeness, Completeness::Partial);
+    let loss = limit_at(&out, "metadata", "keywords");
+    assert!(
+        loss.what
+            .contains(&format!("keywords {} to 1100000", kept + 1)),
+        "{loss:?}"
+    );
+}
+
+#[test]
+fn repeated_keywords_are_kept_once() {
+    let list = "a,".repeat(2_000_000);
+    let bytes = catalog_file(&mut |b| {
+        let k = b.add(format!("({list})"));
+        (String::new(), format!("<< /Keywords {k} 0 R >>"))
+    });
+    let out = read_through(&bytes);
+    assert_eq!(out.document.properties.keywords, ["a"]);
+    assert_eq!(out.completeness, Completeness::Complete);
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_xmp_authors_are_charged_one_by_one() {
+    // 400,000 creators in XMP, against the same list as contributors, which nobody reads.
+    let xmp = |tag: &str| {
+        let li: String = (0..400_000)
+            .map(|k| format!("<rdf:li>a{k}</rdf:li>"))
+            .collect();
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:{tag}><rdf:Seq>{li}</rdf:Seq></dc:{tag}></rdf:Description></rdf:RDF></x:xmpmeta>"#
+        )
+    };
+    let file = |tag: &str| {
+        let x = xmp(tag);
+        catalog_file(&mut |b| {
+            let m = b.stream("/Type /Metadata /Subtype /XML", x.as_bytes());
+            (format!("/Metadata {m} 0 R"), String::new())
+        })
+    };
+    let out = against_twin(&file("creator"), &file("contributor"));
+    let kept = out.document.properties.authors.len();
+    assert!(kept > 1_000 && kept < 400_000, "{kept}");
+    limit_at(&out, "metadata", "authors");
+}
+
+#[test]
+fn bad_dates_are_quoted_short() {
+    // The creation and modification dates name one 12 MB string of control bytes; the twin
+    // names it as the subject, which is charged and cut.
+    let mut body = b"(".to_vec();
+    body.extend(vec![1u8; 12 << 20]);
+    body.push(b')');
+    let file = |info: &str| {
+        let body = body.clone();
+        let info = info.to_string();
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        let d = b.add(body);
+        let info = b.add(info.replace('@', &d.to_string()));
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        b.finish_with(catalog, &format!("/Info {info} 0 R"))
+    };
+    let shape = file("<< /CreationDate @ 0 R /ModDate @ 0 R >>");
+    let twin = file("<< /Subject @ 0 R >>");
+    let out = against_twin(&shape, &twin);
+    assert_eq!(out.document.properties.created, None);
+    assert_short_losses(&out);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "metadata" && l.what.contains("creation date")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// `n` outline items naming `title` (a string or a reference), on page `kid`, under `key`.
+fn outline_items(b: &mut Builder, kid: u32, n: usize, title: &str, key: &str) -> String {
+    let outlines = b.reserve();
+    let ids: Vec<u32> = (0..n).map(|_| b.reserve()).collect();
+    for (k, id) in ids.iter().enumerate() {
+        let prev = if k > 0 {
+            format!("/Prev {} 0 R", ids[k - 1])
+        } else {
+            String::new()
+        };
+        let next = ids
+            .get(k + 1)
+            .map(|n| format!("/Next {n} 0 R"))
+            .unwrap_or_default();
+        b.set(
+            *id,
+            format!(
+                "<< /Title {title} /Parent {outlines} 0 R {prev} {next} /Dest [{kid} 0 R /Fit] >>"
+            ),
+        );
+    }
+    b.set(
+        outlines,
+        format!(
+            "<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count {n} >>",
+            ids[0],
+            ids[n - 1]
+        ),
+    );
+    format!("{key} {outlines} 0 R")
+}
+
+#[test]
+fn a_title_shared_by_many_outline_items_is_read_once() {
+    // 30,000 outline items name one 8 KB title: 240 MB if each item copied it.
+    let file = |key: &str| {
+        object_file(1, &no_annots, &mut |b, kids| {
+            let t = b.add(format!("({})", "t".repeat(8 << 10)));
+            (
+                outline_items(b, kids[0], 30_000, &format!("{t} 0 R"), key),
+                String::new(),
+            )
+        })
+    };
+    let out = against_twin(&file("/Outlines"), &file("/Junk"));
+    let Block::Section {
+        kind: SectionKind::Other,
+        blocks,
+        ..
+    } = &out.document.body[0]
+    else {
+        panic!("no outline section")
+    };
+    let kept = match blocks.first() {
+        Some(Block::List { items, .. }) => items.len(),
+        _ => 0,
+    };
+    assert!(kept > 1_000 && kept < 30_000, "{kept}");
+    limit_at(
+        &out,
+        "outline",
+        &format!("outline items {} to 30000", kept + 1),
+    );
+    // The revisions are read before the lists, so nothing spends what they need.
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "revisions"),
+        "{:?}",
+        out.document.losses
+    );
+    assert_short_losses(&out);
+}
+
+#[test]
+fn a_name_shared_by_many_layers_is_read_once() {
+    let file = |key: &str| {
+        catalog_file(&mut |b| {
+            let name = b.add(format!("({})", "L".repeat(8 << 10)));
+            let ids: Vec<String> = (0..30_000)
+                .map(|_| {
+                    format!(
+                        "{} 0 R",
+                        b.add(format!("<< /Type /OCG /Name {name} 0 R >>"))
+                    )
+                })
+                .collect();
+            let list = ids.join(" ");
+            (format!("{key} << /OCGs [{list}] >>"), String::new())
+        })
+    };
+    let out = against_twin(&file("/OCProperties"), &file("/Junk"));
+    assert_eq!(out.document.properties.facts.layers, Some(30_000));
+    let loss = limit_at(&out, "metadata", "layers");
+    assert!(loss.what.contains("to 30000"), "{loss:?}");
+    assert_short_losses(&out);
+}
+
+#[test]
+fn a_title_shared_by_many_threads_is_read_once() {
+    let file = |key: &str| {
+        object_file(1, &no_annots, &mut |b, kids| {
+            let t = b.add(format!("({})", "T".repeat(8 << 10)));
+            let info = b.add(format!("<< /Title {t} 0 R >>"));
+            let mut list = Vec::new();
+            for _ in 0..30_000 {
+                let th = b.reserve();
+                let bead = b.reserve();
+                b.set(
+                    bead,
+                    format!(
+                        "<< /Type /Bead /T {th} 0 R /N {bead} 0 R /V {bead} 0 R /P {} 0 R \
+                         /R [0 0 10 10] >>",
+                        kids[0]
+                    ),
+                );
+                b.set(
+                    th,
+                    format!("<< /Type /Thread /F {bead} 0 R /I {info} 0 R >>"),
+                );
+                list.push(format!("{th} 0 R"));
+            }
+            (format!("{key} [{}]", list.join(" ")), String::new())
+        })
+    };
+    let out = against_twin(&file("/Threads"), &file("/Junk"));
+    let threads = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.kind == "article-thread")
+        .count();
+    assert!(threads > 1_000 && threads < 30_000, "{threads}");
+    limit_at(&out, "article threads", "not listed");
+}
+
+#[test]
+fn a_description_shared_by_many_attachments_is_read_once() {
+    let file = |key: &str| {
+        catalog_file(&mut |b| {
+            let d = b.add(format!("({})", "D".repeat(8 << 10)));
+            let mut names = Vec::new();
+            for k in 0..30_000 {
+                let f = b.stream("/Type /EmbeddedFile", format!("{k}").as_bytes());
+                let spec = b.add(format!(
+                    "<< /Type /Filespec /F (f{k}.bin) /Desc {d} 0 R /EF << /F {f} 0 R >> >>"
+                ));
+                names.push(format!("(f{k:07}.bin) {spec} 0 R"));
+            }
+            let list = names.join(" ");
+            let catalog = if key == "/Junk" {
+                format!("/Junk [{list}]")
+            } else {
+                format!("/Names << /EmbeddedFiles << /Names [{list}] >> >>")
+            };
+            (catalog, String::new())
+        })
+    };
+    let out = against_twin(&file("/Names"), &file("/Junk"));
+    let listed = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.kind == "attachment")
+        .count();
+    assert!(listed > 1_000 && listed < 30_000, "{listed}");
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit && l.what.contains("not listed"))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert!(loss.location.starts_with("attachment "), "{loss:?}");
+}
+
+/// A one-page file with `n` link annotations whose action is `action`, given the number of a
+/// shared 8 KB string object; under `key` (`/Annots`, or `/Junk` for the twin).
+fn shared_links(n: usize, action: &dyn Fn(u32) -> String, key: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let s = b.add(format!("(http://x/{})", "u".repeat(8 << 10)));
+    let annots: Vec<String> = (0..n)
+        .map(|_| {
+            format!(
+                "{} 0 R",
+                b.add(format!(
+                    "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << {} >> >>",
+                    action(s)
+                ))
+            )
+        })
+        .collect();
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] {key} [{}] >>",
+        annots.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_file_name_shared_by_many_launch_links_is_read_once() {
+    let action = |s: u32| format!("/S /Launch /F {s} 0 R");
+    let out = against_twin(
+        &shared_links(30_000, &action, "/Annots"),
+        &shared_links(30_000, &action, "/Junk"),
+    );
+    let listed = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.kind == "launch-action")
+        .count();
+    assert!(listed > 100 && listed < 30_000, "{listed}");
+    limit_at(&out, "p1", "more link entries are not kept");
+    assert_short_losses(&out);
+}
+
+#[test]
+fn a_uri_shared_by_many_links_is_read_once() {
+    let action = |s: u32| format!("/S /URI /URI {s} 0 R");
+    let out = against_twin(
+        &shared_links(30_000, &action, "/Annots"),
+        &shared_links(30_000, &action, "/Junk"),
+    );
+    let graph = out
+        .document
+        .facets
+        .graphs
+        .iter()
+        .find(|g| g.id == "links")
+        .expect("a links graph");
+    let uris = graph
+        .nodes
+        .iter()
+        .filter(|n| n.kind.as_deref() == Some("uri"))
+        .count();
+    assert_eq!((uris, graph.edges.len()), (1, 30_000));
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
 }

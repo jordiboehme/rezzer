@@ -75,7 +75,7 @@ fn embedded_file_listed_and_bytes_guarded() {
     let files = pdf.embedded_files();
     assert_eq!(files.len(), 1);
     let f = &files[0];
-    assert_eq!(f.name, "image.png");
+    assert_eq!(&*f.name, "image.png");
     assert_eq!(f.description, None);
     assert_eq!(f.mime, None);
     // No /Params /Size: the size is measured.
@@ -124,7 +124,7 @@ fn embedded_file_details() {
     let files = pdf.embedded_files();
     assert_eq!(files.len(), 1);
     let f = &files[0];
-    assert_eq!(f.name, "data.csv");
+    assert_eq!(&*f.name, "data.csv");
     assert_eq!(f.description.as_deref(), Some("The numbers"));
     assert_eq!(f.mime.as_deref(), Some("text/csv"));
     assert_eq!(f.size, Some(11));
@@ -160,7 +160,7 @@ fn embedded_file_bomb_is_refused() {
     let pdf = Pdf::open(&bytes, None, &limits, &never).unwrap();
     let files = pdf.embedded_files();
     assert_eq!(files.len(), 1);
-    assert_eq!(files[0].name, "bomb.bin");
+    assert_eq!(&*files[0].name, "bomb.bin");
     assert_eq!(files[0].size, None);
     assert_eq!(pdf.embedded_file_measured(0), None);
     let err = pdf.embedded_file_bytes(0).unwrap_err();
@@ -194,7 +194,7 @@ fn embedded_file_measured_size_is_not_the_written_one() {
 #[test]
 fn layers_with_utf16_names_and_visibility() {
     let layers = corpus("pypdf-ocg-layers.pdf").layers();
-    let names: Vec<&str> = layers.iter().map(|l| l.name.as_str()).collect();
+    let names: Vec<&str> = layers.iter().map(|l| &*l.name).collect();
     assert_eq!(
         names,
         [
@@ -219,10 +219,7 @@ fn layers_with_utf16_names_and_visibility() {
         } }
     });
     let layers = open_bytes(&bytes).layers();
-    let seen: Vec<(&str, bool)> = layers
-        .iter()
-        .map(|l| (l.name.as_str(), l.visible))
-        .collect();
+    let seen: Vec<(&str, bool)> = layers.iter().map(|l| (&*l.name, l.visible)).collect();
     assert_eq!(seen, [("Roads", true), ("Rivers", false), ("Labels", true)]);
 
     let bytes = document(1, |doc, _| {
@@ -233,10 +230,7 @@ fn layers_with_utf16_names_and_visibility() {
         } }
     });
     let layers = open_bytes(&bytes).layers();
-    let seen: Vec<(&str, bool)> = layers
-        .iter()
-        .map(|l| (l.name.as_str(), l.visible))
-        .collect();
+    let seen: Vec<(&str, bool)> = layers.iter().map(|l| (&*l.name, l.visible)).collect();
     assert_eq!(seen, [("Roads", false), ("Rivers", true)]);
 }
 
