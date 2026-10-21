@@ -2515,8 +2515,9 @@ impl<'a> Device<'a> for TextDevice<'_> {
 /// Marks each glyph with the first of `links` whose box holds the glyph's middle (half its
 /// advance along the baseline, a quarter of its size above it), so a run ends where a link
 /// does. `x0`, `y0` move the glyphs into the links' user space. The boxes are looked up by
-/// height; past [`LINK_WORK`] tests no glyph keeps a link and the result is false.
-fn link_glyphs(glyphs: &mut [Gl], links: &[Link], x0: f64, y0: f64) -> bool {
+/// height; past [`LINK_WORK`] tests no glyph keeps a link and the result is false. A word
+/// that a box edge cuts takes the link whole: the box is drawn around words.
+fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0: f64) -> bool {
     let mut order: Vec<usize> = (0..links.len()).collect();
     order.sort_by(|&a, &b| links[a].0[1].total_cmp(&links[b].0[1]));
     let bottoms: Vec<f64> = order.iter().map(|&k| f64::from(links[k].0[1])).collect();
@@ -2550,6 +2551,41 @@ fn link_glyphs(glyphs: &mut [Gl], links: &[Link], x0: f64, y0: f64) -> bool {
             })
             .min()
             .and_then(|k| u32::try_from(k).ok());
+    }
+    // Words: glyphs with ink that follow each other along one baseline without a gap.
+    let ink = |g: &Gl| {
+        let t = text.of(g);
+        !t.is_empty() && !t.chars().all(char::is_whitespace)
+    };
+    let joins = |a: &Gl, b: &Gl| {
+        let size = a.size.max(b.size).max(0.1);
+        let adv = a.adv.unwrap_or(a.size.max(0.1) * 0.5);
+        let (ex, ey) = (a.x + a.dx * adv, a.y + a.dy * adv);
+        let along = (b.x - ex) * a.dx + (b.y - ey) * a.dy;
+        let across = -(b.x - ex) * a.dy + (b.y - ey) * a.dx;
+        (a.dx - b.dx).abs() < 0.01
+            && (a.dy - b.dy).abs() < 0.01
+            && along.abs() <= 0.15 * size
+            && across.abs() <= 0.25 * size
+    };
+    let mut k = 0;
+    while k < glyphs.len() {
+        if !ink(&glyphs[k]) {
+            k += 1;
+            continue;
+        }
+        let mut e = k + 1;
+        while e < glyphs.len() && ink(&glyphs[e]) && joins(&glyphs[e - 1], &glyphs[e]) {
+            e += 1;
+        }
+        let word = &mut glyphs[k..e];
+        let mut found = word.iter().filter_map(|g| g.link);
+        if let Some(first) = found.next()
+            && found.all(|l| l == first)
+        {
+            word.iter_mut().for_each(|g| g.link = Some(first));
+        }
+        k = e;
     }
     true
 }
@@ -2604,7 +2640,7 @@ fn lay_out(
         )));
     }
     if !items.turned && !links.is_empty() {
-        items.links_cut = !link_glyphs(&mut visible, links, x0, y0);
+        items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
     items.runs = runs_of(page, &visible, text, turn, links);
     items.invisible = runs_of(page, &hidden, text, turn, links);

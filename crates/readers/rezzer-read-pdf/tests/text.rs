@@ -953,3 +953,26 @@ fn double_spaces_inside_a_line_stay() {
         all_text(&out)
     );
 }
+
+#[test]
+fn a_link_box_that_cuts_a_word_takes_the_whole_word() {
+    // The box covers most of the address only: the link reaches the word's edges.
+    let page = Page {
+        content: show("F1", 12.0, 72.0, 700.0, "see www.example.org now"),
+        annots: vec![
+            "<< /Type /Annot /Subtype /Link /Rect [92 696 173 712] \
+             /A << /S /URI /URI (http://www.example.org) >> >>"
+                .into(),
+        ],
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    assert_eq!(
+        all_links(&out.document.body),
+        [(
+            "http://www.example.org".to_string(),
+            false,
+            "www.example.org".to_string()
+        )]
+    );
+}
