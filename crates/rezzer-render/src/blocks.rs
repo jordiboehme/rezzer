@@ -1224,10 +1224,14 @@ fn media(id: &str, ctx: &Ctx) -> String {
                         .unwrap_or_else(|| asset.id.clone()),
                     title: None,
                 }),
-                None => parts.push(text(format!(
-                    "Picture {} ({}) is not extracted.",
-                    asset.id, asset.mime
-                ))),
+                // The alt text says what the picture is or why it needs a look.
+                None => parts.push(text(match asset.alt.as_deref().map(str::trim) {
+                    Some(alt) if !alt.is_empty() => format!(
+                        "Picture {} ({}, {alt}) is not extracted.",
+                        asset.id, asset.mime
+                    ),
+                    _ => format!("Picture {} ({}) is not extracted.", asset.id, asset.mime),
+                })),
             }
             if let Some(caption) = asset.caption.as_ref().filter(|c| !c.trim().is_empty()) {
                 parts.push(text(" ".into()));

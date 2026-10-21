@@ -2680,3 +2680,46 @@ fn sheet_heading_that_clashes_with_a_section_says_sheet() {
     assert!(logic.contains("\n### Calc\n"), "{logic}");
     assert_eq!(logic.matches("\n### Names\n").count(), 1, "{logic}");
 }
+
+#[test]
+fn a_picture_not_extracted_says_why_it_needs_a_look() {
+    let mut d = doc();
+    d.body = vec![Block::Media {
+        asset: "page-3".into(),
+        anchor: None,
+    }];
+    d.assets = vec![
+        Asset {
+            id: "page-3".into(),
+            path: None,
+            sha256: String::new(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: Some("no text layer".into()),
+            needs_vision: true,
+        },
+        Asset {
+            id: "img2".into(),
+            path: None,
+            sha256: String::new(),
+            mime: "image/jpeg".into(),
+            caption: None,
+            alt: None,
+            needs_vision: false,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Picture page-3 (image/png, no text layer) is not extracted."),
+        "{md}"
+    );
+    d.body = vec![Block::Media {
+        asset: "img2".into(),
+        anchor: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Picture img2 (image/jpeg) is not extracted."),
+        "{md}"
+    );
+}
