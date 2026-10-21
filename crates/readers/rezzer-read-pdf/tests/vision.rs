@@ -1308,3 +1308,72 @@ fn large_pictures_that_differ_in_the_middle_are_two_assets() {
     let out = read(&picture_pages(&draws, &two_large_rasters()));
     assert_eq!(needing(&out), ["page-1-pic-1", "page-2-pic-1"]);
 }
+
+/// One A4 page with a line of text and a black picture drawn at `x`, `y`, 60 by 40 points;
+/// `page` adds keys to the page dictionary (a crop box, a rotation).
+fn black_picture_page(x: f32, y: f32, page: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        &[0u8; 16],
+    );
+    let c = b.stream(
+        "",
+        format!("BT /F1 11 Tf 150 650 Td (Text.) Tj ET\nq 60 0 0 40 {x} {y} cm /Im1 Do Q\n")
+            .as_bytes(),
+    );
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] {page} \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+         /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The crop `png` is `w` by `h` pixels; its dark pixels are exactly the rectangle inside the
+/// margin of 8 pixels, and the margin is white.
+fn assert_cut_at_the_box(png: &[u8], w: u16, h: u16) {
+    let pixmap =
+        hayro::vello_cpu::Pixmap::from_png(std::io::Cursor::new(png)).expect("a PNG file");
+    assert_eq!((pixmap.width(), pixmap.height()), (w, h));
+    for y in 0..h {
+        for x in 0..w {
+            let p = pixmap.sample(x, y);
+            let inside = (8..w - 8).contains(&x) && (8..h - 8).contains(&y);
+            if inside {
+                assert!(p.r < 64 && p.g < 64 && p.b < 64, "{x}, {y}: {p:?}");
+            } else {
+                assert!(p.r > 250 && p.g > 250 && p.b > 250, "{x}, {y}: {p:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_crop_is_cut_at_the_box_with_a_crop_box() {
+    // The visible page starts at 100, 100: the picture at 300, 400 stands at 200, 300 on it.
+    let file = black_picture_page(300.0, 400.0, "/CropBox [100 100 495 742]");
+    let out = read_opts(&file, true, Limits::default());
+    assert_eq!(
+        asset(&out, "page-1-pic-1").alt.as_deref(),
+        Some("small picture, box 200, 300 to 260, 340")
+    );
+    assert_cut_at_the_box(blob(&out, "page-1-pic-1"), 136, 96);
+}
+
+#[test]
+fn a_crop_is_cut_at_the_box_on_a_rotated_page() {
+    // The page is shown turned a quarter: the crop is 40 by 60 points, upright as shown.
+    let file = black_picture_page(250.0, 400.0, "/Rotate 90");
+    let out = read_opts(&file, true, Limits::default());
+    assert_cut_at_the_box(blob(&out, "page-1-pic-1"), 96, 136);
+}
