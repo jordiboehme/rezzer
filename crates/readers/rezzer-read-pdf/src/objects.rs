@@ -332,13 +332,12 @@ fn page_info(pages: &[PageInfo], n: u32) -> Option<&PageInfo> {
         .filter(|p| p.number == n)
 }
 
-/// A page as an outline item names it: `iv (6)` for a page with a label of its own, else its
-/// number. The number tells pages with the same label apart.
+/// A page as an outline item names it: its label, else its number.
 fn page_label(pages: &[PageInfo], n: u32) -> String {
-    match page_info(pages, n).and_then(|p| p.label.as_deref()) {
-        Some(label) if !label.is_empty() && label != n.to_string() => format!("{label} ({n})"),
-        _ => n.to_string(),
-    }
+    page_info(pages, n)
+        .and_then(|p| p.label.as_deref())
+        .filter(|l| !l.is_empty())
+        .map_or_else(|| n.to_string(), str::to_string)
 }
 
 /// A title on one line: runs of white space and control characters become one space.

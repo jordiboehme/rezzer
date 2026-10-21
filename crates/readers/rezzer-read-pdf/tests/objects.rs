@@ -182,11 +182,11 @@ fn outline_section_with_page_labels() {
     assert_eq!(items.len(), 11, "{items:?}");
     let depths: Vec<usize> = items.iter().map(|(d, _)| *d).collect();
     assert_eq!(depths, [1, 2, 3, 4, 4, 3, 4, 2, 3, 3, 1]);
-    // Each item names its page by label, with the page number where they differ; the first
-    // pages have no label of their own. Pages 2 and 13 both read "2" without the number.
+    // Each item names its page by label; the first pages have no label of their own and
+    // are named by their number. Pages 2 and 13 both read "page 2".
     let texts: Vec<&str> = items.iter().map(|(_, t)| t.as_str()).collect();
-    assert_eq!(texts[0], "Isís 1 -> 5: /XYZ null null null, page iv (6)");
-    assert!(texts[2].ends_with(", page 2 (13)"), "{texts:?}");
+    assert_eq!(texts[0], "Isís 1 -> 5: /XYZ null null null, page iv");
+    assert!(texts[2].ends_with(", page 2"), "{texts:?}");
     assert!(texts[8].ends_with(", page 2"), "{texts:?}");
     assert!(texts[9].ends_with(", page 1"), "{texts:?}");
     assert!(
@@ -203,7 +203,7 @@ fn outline_section_with_page_labels() {
         .nth(1)
         .and_then(|rest| rest.split("Page 1").next())
         .expect("an outline section");
-    assert!(outline.contains(", page iv (6)"), "{outline}");
+    assert!(outline.contains(", page iv"), "{outline}");
     assert!(!outline.contains("]("), "{outline}");
     assert!(!outline.contains("](#"), "{outline}");
 }
