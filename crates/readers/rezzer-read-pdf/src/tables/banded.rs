@@ -70,11 +70,6 @@ pub(super) fn banded(sh: &Shared<'_>, mut bands: Vec<Band>, take: &mut Taken<'_>
             continue;
         }
         if work > BAND_WORK {
-            take.skipped.push(format!(
-                "tables under header bands on page {} are looked for only in part: the page \
-                 has too much text in and below its bands",
-                sh.page
-            ));
             break;
         }
         // The next band below ends this one's table.
@@ -84,6 +79,15 @@ pub(super) fn banded(sh: &Shared<'_>, mut bands: Vec<Band>, take: &mut Taken<'_>
             .map(|o| o.b[3])
             .fold(f32::MIN, f32::max);
         one_band(sh, band, floor, take, &mut work);
+    }
+    // Once the budget is spent, also in the last band, one note says so; the bands it cut
+    // are left as text.
+    if work > BAND_WORK {
+        take.skipped.push(format!(
+            "tables under header bands on page {} are looked for only in part: the page has \
+             too much text in and below its bands",
+            sh.page
+        ));
     }
 }
 
@@ -154,8 +158,12 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     for &k in sh.by_y.lines[..lo].iter().rev() {
         *work += 1;
         let l = &sh.lines[k];
-        if l.y <= floor || *work > BAND_WORK {
+        if l.y <= floor {
             break;
+        }
+        if *work > BAND_WORK {
+            // The budget ran out in this body: no table and no refusal, the note says why.
+            return;
         }
         let runs: Vec<usize> = (l.start..l.end)
             .filter(|&i| {
@@ -210,6 +218,9 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         }
         body.push((l.y, l.size, placed));
         last_y = l.y;
+    }
+    if *work > BAND_WORK {
+        return;
     }
     let at = head
         .iter()
