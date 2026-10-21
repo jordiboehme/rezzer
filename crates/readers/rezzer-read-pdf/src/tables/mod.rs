@@ -7,6 +7,7 @@
 //! Each detector only claims the runs of a table and plans its cells; the layout builds the
 //! cells' text, so every limit of the layout holds for tables too.
 
+mod banded;
 mod borderless;
 mod ruled;
 mod tagged;
@@ -92,6 +93,8 @@ pub(crate) struct Found {
     /// For each run of the flow, whether a refused grid with a note holds it: no detector
     /// after it may take the run into a table. Empty when no grid holds a run.
     pub held: Vec<bool>,
+    /// Heights of the rules of header bands, sorted: no region without rules runs across one.
+    pub cuts: Vec<f32>,
 }
 
 /// Lines this close are one line, and line ends this close meet, in points.

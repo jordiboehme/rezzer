@@ -10,7 +10,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::{Builder, Page, pdf, show};
+use common::{Builder, Page, helvetica_width, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, Bytes, Cell, Completeness, Confidence, Detection, FormatId, LossReason,
@@ -796,8 +796,8 @@ fn a_grid_next_to_a_figure_caption_gets_no_note() {
 #[test]
 fn side_by_side_lists_are_no_table() {
     // Left: labels and values; right, 260 points away: a label and value column of another
-    // pitch. The baselines of the sides do not line up. No table may mix the two sides, and
-    // each side reads whole. (The key and value tables of each side come with Task 13c.)
+    // pitch. The baselines of the sides do not line up. No table may mix the two sides, each
+    // side reads whole and is a table of labels and values.
     let left = [
         ("Guest", "A. Sample"),
         ("Room", "101"),
@@ -828,6 +828,13 @@ fn side_by_side_lists_are_no_table() {
             "a table mixes both sides: {rows:?}"
         );
     }
+    // Each side is a table of labels and values.
+    let kv = |rows: &[(&str, &str)]| -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|(l, v)| vec![l.to_string(), v.to_string()])
+            .collect()
+    };
+    assert_eq!(tables(blocks), [(0, kv(&left)), (0, kv(&right))]);
     // Each side is one stretch of the page's text.
     let mut flat = String::new();
     for b in blocks {
@@ -1025,4 +1032,314 @@ fn a_dot_plot_of_many_squares_stays_complete() {
         out.document.losses
     );
     assert_eq!(out.completeness, Completeness::Complete);
+}
+
+/// An invoice table in a landscape frame of 842 by 595 points: seven columns between column
+/// rules, an outer border, a header rule, a "VAT" cell over "RATE" and "AMOUNT" and no rules
+/// between the records. Two of the three records have a second line, set closer to the
+/// record below than to their own first line.
+fn invoice_table() -> String {
+    let xs = [40.0, 130.0, 240.0, 470.0, 520.0, 600.0, 690.0, 800.0];
+    let (top, sub, head, bottom) = (500.0, 485.0, 470.0, 380.0);
+    let mut c = String::from("0.5 w ");
+    for y in [top, head, bottom] {
+        c += &format!("{} {y} m {} {y} l S ", xs[0], xs[7]);
+    }
+    c += &format!("{} {sub} m {} {sub} l S ", xs[4], xs[6]);
+    for (k, x) in xs.iter().enumerate() {
+        let upper = if k == 5 { sub } else { top };
+        c += &format!("{x} {bottom} m {x} {upper} l S ");
+    }
+    for (k, t) in ["ISSUING DATE", "DOCUMENT NUMBER", "TYPE OF SERVICE", "QTY"]
+        .iter()
+        .enumerate()
+    {
+        c += &show("F1", 7.0, xs[k] + 4.0, 482.0, t);
+    }
+    c += &show("F1", 7.0, xs[4] + 4.0, 489.0, "VAT");
+    c += &show("F1", 7.0, xs[4] + 4.0, 474.0, "RATE");
+    c += &show("F1", 7.0, xs[5] + 4.0, 474.0, "AMOUNT");
+    c += &show("F1", 7.0, xs[6] + 4.0, 482.0, "GROSS AMOUNT");
+    let records = [
+        (
+            455.0,
+            [
+                "2030-01-02",
+                "1000001",
+                "Sample ticket AAA /",
+                "1",
+                "0.00",
+                "0.00",
+                "10.00",
+            ],
+            Some("BBB / CCC"),
+        ),
+        (
+            435.0,
+            [
+                "2030-01-02",
+                "1000002",
+                "Seat Linked to",
+                "1",
+                "0.00",
+                "0.00",
+                "2.50",
+            ],
+            Some("document 1000001"),
+        ),
+        (
+            410.0,
+            ["2030-01-03", "1000003", "Seat", "1", "0.00", "0.00", "2.50"],
+            None,
+        ),
+    ];
+    for (y, cells, more) in records {
+        for (k, t) in cells.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, y, t);
+        }
+        if let Some(t) = more {
+            c += &show("F1", 8.0, xs[2] + 4.0, y - 12.0, t);
+        }
+    }
+    c
+}
+
+const INVOICE_TABLE: &str = "\
+| ISSUING DATE | DOCUMENT NUMBER | TYPE OF SERVICE | QTY | VAT RATE | VAT AMOUNT | GROSS AMOUNT |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2030-01-02 | 1000001 | Sample ticket AAA / BBB / CCC | 1 | 0.00 | 0.00 | 10.00 |
+| 2030-01-02 | 1000002 | Seat Linked to document 1000001 | 1 | 0.00 | 0.00 | 2.50 |
+| 2030-01-03 | 1000003 | Seat | 1 | 0.00 | 0.00 | 2.50 |
+";
+
+fn assert_invoice_table(out: &ReadOutcome) {
+    let md = markdown(out);
+    assert!(md.contains(INVOICE_TABLE), "{md}");
+    assert!(!md.contains("Merged cells"), "{md}");
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("Possible table")),
+        "{:?}",
+        out.document.losses
+    );
+    let found = tables(page(out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, 2, "{found:?}");
+}
+
+#[test]
+fn column_rules_without_row_rules() {
+    // The records of a table whose rules part only the columns and the header are rows by
+    // their baselines; a second line joins the record above it.
+    let out = read(&sized_page(&invoice_table(), 842.0, 595.0, ""));
+    assert_invoice_table(&out);
+}
+
+#[test]
+fn turned_invoice_table() {
+    // The same table on a portrait page turned for display, its content drawn upward: read
+    // in the turned frame, it is the same table.
+    let content = format!("q 0 1 -1 0 595 0 cm\n{}Q\n", invoice_table());
+    let out = read(&sized_page(&content, 595.0, 842.0, "/Rotate 90"));
+    assert_invoice_table(&out);
+}
+
+/// A page with a header band of filled cells over items without rules: on the right of an
+/// address, a label and value column at other baselines; the band's four labelled cells
+/// leave a gap with no label between "Description" and "Charges"; 25 items of a date, a
+/// text and an amount, one with a fourth piece in the gap and the last with its amount under
+/// "Credits"; a rule under the last item.
+fn header_band_page(body_lines: usize, prose: bool) -> String {
+    let mut c = String::new();
+    for (k, t) in ["A. Sample", "Main Road 1", "1000 Town"].iter().enumerate() {
+        c += &show("F1", 9.0, 40.0, 760.0 - 11.6 * k as f32, t);
+    }
+    for (k, (l, v)) in [
+        ("Room:", "101"),
+        ("Arrival:", "2030-01-02"),
+        ("Departure:", "2030-01-05"),
+        ("Folio:", "1000"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 756.3 - 15.9 * k as f32;
+        c += &show("F1", 9.0, 380.0, y, l);
+        c += &show("F1", 9.0, 470.0, y, v);
+    }
+    c += "0.9 g 30 666 60 14 re f 90 666 170 14 re f 400 666 80 14 re f 480 666 85 14 re f 0 g ";
+    c += "0.5 w 30 680 m 565 680 l S 30 666 m 565 666 l S ";
+    for (x, t) in [
+        (34.0, "Date"),
+        (94.0, "Description"),
+        (404.0, "Charges"),
+        (484.0, "Credits"),
+    ] {
+        c += &show("F2", 8.0, x, 670.0, t);
+    }
+    for k in 0..body_lines {
+        let y = 650.0 - 14.0 * k as f32;
+        if prose {
+            c += &show(
+                "F1",
+                8.0,
+                34.0,
+                y,
+                "and the text below the band runs on as a long line of prose across all the columns",
+            );
+            continue;
+        }
+        c += &show("F1", 8.0, 34.0, y, &format!("2030-01-{:02}", k % 28 + 1));
+        c += &show("F1", 8.0, 94.0, y, &format!("Item {k}"));
+        if k == 7 {
+            c += &show("F1", 8.0, 300.0, y, "Card 1234");
+        }
+        let x = if k + 1 == body_lines { 520.0 } else { 440.0 };
+        c += &show("F1", 8.0, x, y, &format!("{}.50", 10 + k));
+    }
+    let bottom = 650.0 - 14.0 * body_lines as f32 + 6.0;
+    c += &format!("30 {bottom} m 565 {bottom} l S ");
+    c += &show("F1", 9.0, 40.0, bottom - 30.0, "Thank you for your stay.");
+    c
+}
+
+#[test]
+fn header_band_table() {
+    let out = read(&pdf(&[Page::text(header_band_page(25, false))], ""));
+    let blocks = page(&out, 1);
+    let found = tables(blocks);
+    assert_eq!(found.len(), 2, "{found:#?}");
+    let (head, kv) = &found[0];
+    assert_eq!(*head, 0);
+    assert_eq!(
+        kv,
+        &[
+            ["Room:", "101"],
+            ["Arrival:", "2030-01-02"],
+            ["Departure:", "2030-01-05"],
+            ["Folio:", "1000"],
+        ]
+        .iter()
+        .map(|r| r.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        .collect::<Vec<_>>()
+    );
+    let (head, rows) = &found[1];
+    assert_eq!(*head, 1, "{rows:?}");
+    assert_eq!(rows.len(), 26, "{rows:?}");
+    assert_eq!(rows[0], ["Date", "Description", "", "Charges", "Credits"]);
+    assert_eq!(rows[1], ["2030-01-01", "Item 0", "", "10.50", ""]);
+    assert_eq!(rows[8], ["2030-01-08", "Item 7", "Card 1234", "17.50", ""]);
+    assert_eq!(rows[25], ["2030-01-25", "Item 24", "", "", "34.50"]);
+    let paras = paragraphs(blocks);
+    assert!(!paras.iter().any(|p| p.contains("Item")), "{paras:?}");
+    assert!(
+        paras.iter().any(|p| p == "Thank you for your stay."),
+        "{paras:?}"
+    );
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("Possible table")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn header_band_over_prose_says_so() {
+    // A header band of four labelled cells over lines of prose that cross its columns: no
+    // table, and one note says a table may stand there.
+    let out = read(&pdf(&[Page::text(header_band_page(5, true))], ""));
+    let blocks = page(&out, 1);
+    let found = tables(blocks);
+    assert!(
+        !found
+            .iter()
+            .any(|(_, rows)| rows.iter().flatten().any(|c| c.contains("prose"))),
+        "{found:?}"
+    );
+    let notes: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| {
+            l.what
+                .starts_with("Possible table on page 1 not rebuilt (reason: ")
+        })
+        .collect();
+    assert_eq!(notes.len(), 1, "{:?}", out.document.losses);
+    assert_eq!(notes[0].why, LossReason::Uncertain);
+}
+
+#[test]
+fn key_value_totals_box() {
+    // A box of five labels on the left and amounts set flush right.
+    let mut c = String::from("0.5 w 300 100 260 95 re S ");
+    let rows = [
+        ("Total excluded", "100.00"),
+        ("Total tax", "0.00"),
+        ("Shipping", "5.00"),
+        ("Discount", "2.00"),
+        ("Total", "103.00"),
+    ];
+    for (k, (l, v)) in rows.iter().enumerate() {
+        let y = 175.0 - 15.0 * k as f32;
+        c += &show("F1", 10.0, 310.0, y, l);
+        c += &show("F1", 10.0, 550.0 - helvetica_width(v, 10.0), y, v);
+    }
+    c += &show("F1", 10.0, 40.0, 400.0, "Thank you for your order.");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let md = markdown(&out);
+    let expected = "\
+|  |  |
+| --- | --- |
+| Total excluded | 100.00 |
+| Total tax | 0.00 |
+| Shipping | 5.00 |
+| Discount | 2.00 |
+| Total | 103.00 |
+";
+    assert!(md.contains(expected), "{md}");
+}
+
+#[test]
+fn header_icons_count_as_header_cells() {
+    // A ruled table whose first title is a small drawn calendar, not text: the first row is
+    // still the header, and the icon is said.
+    let mut c = String::from("0.5 w ");
+    c += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "c");
+    let out = read(&pdf(&[Page::text(c.clone())], ""));
+    assert_eq!(tables(page(&out, 1))[0].0, 0);
+    // The same grid with an icon and titles in the first row, times below.
+    let mut c = String::from("0.5 w ");
+    for k in 0..4 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("50 {y} m 290 {y} l S ");
+    }
+    for x in [50.0, 130.0, 210.0, 290.0] {
+        c += &format!("{x} 640 m {x} 700 l S ");
+    }
+    c += "84 684 m 96 684 l S 84 692 m 96 692 l S 84 684 m 84 694 l S 96 684 m 96 694 l S ";
+    c += &show("F1", 8.0, 134.0, 686.0, "Time");
+    c += &show("F1", 8.0, 214.0, 686.0, "Train");
+    for (r, (d, t, n)) in [
+        ("2030-01-02", "10:15", "IC 101"),
+        ("2030-01-03", "11:20", "IC 205"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 666.0 - 20.0 * r as f32;
+        c += &show("F1", 8.0, 54.0, y, d);
+        c += &show("F1", 8.0, 134.0, y, t);
+        c += &show("F1", 8.0, 214.0, y, n);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, 1, "{found:?}");
+    assert_eq!(found[0].1[0], ["(icon)", "Time", "Train"], "{found:?}");
 }

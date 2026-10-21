@@ -562,3 +562,40 @@ pub fn lenient_bomb(runs: usize) -> Vec<u8> {
     d.symbol(256);
     d.finish()
 }
+
+/// A one-page file of `content` on a page of `width` by `height` points, with `extra` (for
+/// example `/Rotate 90`) in the page dictionary; Helvetica as `/F1`, Helvetica-Bold as `/F2`.
+pub fn sized_page(content: &str, width: f32, height: f32, extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {width} {height}] {extra} \
+         /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The width of `text` in Helvetica at `size`, for digits, the point, the space and the
+/// capital letters and small letters a test uses to set text flush right.
+pub fn helvetica_width(text: &str, size: f32) -> f32 {
+    let units: u32 = text
+        .chars()
+        .map(|c| match c {
+            '0'..='9' => 556,
+            '.' | ' ' | ',' => 278,
+            '-' => 333,
+            ':' => 278,
+            _ => 556,
+        })
+        .sum();
+    units as f32 * size / 1000.0
+}

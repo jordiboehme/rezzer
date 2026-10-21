@@ -4234,3 +4234,148 @@ fn thousands_of_boxes_side_by_side_are_read_whole_within_bounds() {
     }
     assert!(box_loss(&out).is_none(), "{:?}", out.document.losses);
 }
+
+/// A one-page file of `content`, deflated, on a page of `w` by `h` points with `extra` in
+/// the page dictionary.
+fn turned_page_of(content: &[u8], w: usize, h: usize, extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(content));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] {extra} \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// A table of eight columns between column rules, with a header rule and `records` records
+/// of one-letter cells and no rules between them, drawn upward on a page turned for display.
+/// Many short ticks beside it give the page many rules.
+fn turned_records(records: usize) -> Vec<u8> {
+    let long = (records + 4) * 10;
+    // The content is drawn in a frame `long` high and 842 wide, turned onto a page `long`
+    // wide and 842 high.
+    let mut c = format!("q 0 1 -1 0 {long} 0 cm 0.5 w ").into_bytes();
+    let xs: Vec<usize> = (0..=8).map(|k| 40 + 60 * k).collect();
+    let (top, head, bottom) = (long - 10, long - 30, 10);
+    for y in [top, head, bottom] {
+        c.extend(format!("{} {y} m {} {y} l S ", xs[0], xs[8]).as_bytes());
+    }
+    for x in &xs {
+        c.extend(format!("{x} {bottom} m {x} {top} l S ").as_bytes());
+    }
+    for k in 0..8_000usize {
+        let y = 20 + k * long / 8_000;
+        c.extend(format!("600 {y} m 610 {y} l S ").as_bytes());
+    }
+    for (k, x) in xs[..8].iter().enumerate() {
+        c.extend(format!("BT /F1 8 Tf {} {} Td (H{k}) Tj ET\n", x + 4, head + 6).as_bytes());
+    }
+    for r in 0..records {
+        let y = head - 10 - r * 10;
+        c.extend(b"BT /F1 8 Tf ");
+        for (k, x) in xs[..8].iter().enumerate() {
+            let at = if k == 0 { (*x + 4, y) } else { (60, 0) };
+            c.extend(format!("{} {} Td (x) Tj ", at.0, at.1).as_bytes());
+        }
+        c.extend(b"ET\n");
+    }
+    c.extend(b"Q\n");
+    turned_page_of(&c, long, 842, "/Rotate 90")
+}
+
+fn cells_loss(out: &ReadOutcome) -> Option<&Loss> {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("page 1") && l.what.contains("more than 100000 cells"))
+}
+
+#[test]
+fn a_turned_table_of_many_records_is_bounded() {
+    // A turned page with many rules and a ruled table of 12,000 records without rules
+    // between them: each record is a row, quick and small.
+    let start = Instant::now();
+    let out = read(&turned_records(12_000));
+    assert_quick(start);
+    let rows = page(&out, 1)
+        .iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows.len()),
+            _ => None,
+        })
+        .unwrap_or(0);
+    assert_eq!(rows, 12_001, "{:?}", out.document.losses);
+    assert!(cells_loss(&out).is_none(), "{:?}", out.document.losses);
+}
+
+#[test]
+fn a_turned_table_past_the_cell_bound_says_so() {
+    // 13,000 records of eight cells are more cells than one table may have: the text stays
+    // paragraphs and a loss says why.
+    let start = Instant::now();
+    let out = read(&turned_records(13_000));
+    assert_quick(start);
+    assert!(cells_loss(&out).is_some(), "{:?}", out.document.losses);
+    assert!(text(page(&out, 1)).contains('x'));
+}
+
+#[test]
+fn thousands_of_key_value_lines_are_bounded() {
+    // 60,000 lines of a label and a value set flush right: more cells than one table may
+    // have. The text is read, quick and small, and a loss says why it is no table.
+    let start = Instant::now();
+    let n = 60_000usize;
+    let h = (n + 4) * 10;
+    let mut c = Vec::new();
+    for i in 0..n {
+        let y = h - 20 - i * 10;
+        c.extend(format!("BT /F1 8 Tf 40 {y} Td (k:) Tj 200 0 Td (1) Tj ET\n").as_bytes());
+    }
+    let out = read(&tall_page(&c, h));
+    assert_quick(start);
+    assert!(cells_loss(&out).is_some(), "{:?}", out.document.losses);
+    assert!(text(page(&out, 1)).contains("k:"));
+}
+
+#[test]
+fn a_header_band_over_a_huge_body_is_bounded() {
+    // A header band of five labelled cells over 25,000 lines of three pieces each: more cells
+    // than one table may have. Quick and small, and a loss says why it is no table.
+    let start = Instant::now();
+    let n = 25_000usize;
+    let h = (n + 10) * 10;
+    let top = h - 20;
+    let mut c = b"0.9 g ".to_vec();
+    for x in [30, 130, 230, 330, 430] {
+        c.extend(format!("{x} {} 100 14 re f ", top - 14).as_bytes());
+    }
+    c.extend(
+        format!(
+            "0 g 0.5 w 30 {top} m 530 {top} l S 30 {} m 530 {} l S ",
+            top - 14,
+            top - 14
+        )
+        .as_bytes(),
+    );
+    for (k, x) in [30, 130, 230, 330, 430].iter().enumerate() {
+        let title = ["Date", "Text", "Note", "Charges", "Credits"][k];
+        c.extend(format!("BT /F1 8 Tf {} {} Td ({title}) Tj ET\n", x + 4, top - 10).as_bytes());
+    }
+    for i in 0..n {
+        let y = top - 30 - i * 10;
+        c.extend(
+            format!("BT /F1 8 Tf 34 {y} Td (a) Tj 100 0 Td (b) Tj 200 0 Td (1) Tj ET\n").as_bytes(),
+        );
+    }
+    let out = read(&tall_page(&c, h));
+    assert_quick(start);
+    assert!(cells_loss(&out).is_some(), "{:?}", out.document.losses);
+}

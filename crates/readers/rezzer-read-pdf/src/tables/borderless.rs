@@ -105,6 +105,11 @@ pub(super) fn borderless(
             if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) {
                 break;
             }
+            // A header band's rule between the lines parts them.
+            let cut = found.cuts.partition_point(|y| *y <= cur.y);
+            if found.cuts.get(cut).is_some_and(|y| *y < prev.y) {
+                break;
+            }
             if counts[end] >= 2 {
                 last_multi = end;
             } else if end - last_multi > 2 {
@@ -120,6 +125,9 @@ pub(super) fn borderless(
     let mut target: Vec<Target> = vec![None; flow.runs.len()];
     // The caption lines that gated a note already: one note for each caption.
     let mut noted: Vec<usize> = Vec::new();
+    // Tables of labels and values, and their rows whose one run holds label and value.
+    let mut kv: Vec<usize> = Vec::new();
+    let mut splits: Vec<(usize, usize)> = Vec::new();
     for (g, (a, z)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -137,6 +145,62 @@ pub(super) fn borderless(
             continue;
         }
         let pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
+        // A block of labels and values is a table of two columns.
+        match key_values(flow, &lines, a, z, &pieces, &off) {
+            KeyValues::No => {}
+            KeyValues::TooMany(n) => {
+                found.skipped.push(format!(
+                    "a block of {n} label and value lines on page {page} is not read as a \
+                     table: it has more than {MAX_SQUARES} cells; its text stays paragraphs"
+                ));
+                continue;
+            }
+            KeyValues::Rows(rows) => {
+                let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
+                let first = rows
+                    .iter()
+                    .flat_map(|r| [r.label.0, r.value.map_or(r.label.0, |v| v.0)])
+                    .min()
+                    .unwrap_or(0);
+                let top = lines[rows[0].line];
+                for (k, row) in rows.iter().enumerate() {
+                    for slot in &mut target[row.label.0..row.label.1] {
+                        *slot = Some((t, k as u32, 0));
+                    }
+                    match row.value {
+                        Some((s, e)) => {
+                            for slot in &mut target[s..e] {
+                                *slot = Some((t, k as u32, 1));
+                            }
+                        }
+                        None => splits.push((claim.len(), k)),
+                    }
+                }
+                kv.push(claim.len());
+                claim.push(Planned {
+                    at: flow.at[first],
+                    top: top.y + top.size,
+                    rows: rows
+                        .iter()
+                        .map(|_| {
+                            (0..2)
+                                .map(|_| PlannedCell {
+                                    runs: Vec::new(),
+                                    row_span: 1,
+                                    col_span: 1,
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                    header_rows: 0,
+                    trs: Vec::new(),
+                    additions: Vec::new(),
+                    tagged: None,
+                    continues: false,
+                });
+                continue;
+            }
+        }
         // Two blocks side by side are judged each alone.
         let sets: Vec<Vec<Vec<Piece>>> = match side_by_side(flow, &lines[a..z], &pieces) {
             Some(x) => vec![
@@ -267,11 +331,164 @@ pub(super) fn borderless(
     // The runs of all accepted regions leave the flow at once; each goes to its cell.
     let mut planned = claim;
     fill(&mut planned, flow, &target);
-    for mut p in planned {
-        p.header_rows = header_of(&p.rows);
+    for (t, k) in splits {
+        split_label(&mut planned[t].rows[k]);
+    }
+    for (t, mut p) in planned.into_iter().enumerate() {
+        if !kv.contains(&t) {
+            p.header_rows = header_of(&p.rows);
+        }
         found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
+}
+
+/// Lines of labels and values one table may have at most.
+const MAX_KEY_VALUES: usize = MAX_SQUARES / 2;
+
+/// Labels and values line up within this many points.
+const KV_ALIGN: f32 = 1.0;
+
+/// A label is at most this many characters and words; a value at most this many characters.
+const KV_LABEL: usize = 40;
+const KV_LABEL_WORDS: usize = 6;
+const KV_VALUE: usize = 80;
+
+/// One row of a block of labels and values: its line, and the flow ranges of its label and
+/// value; a row without a value range has both in one run, cut after the label's colon.
+struct KeyValue {
+    line: usize,
+    label: (usize, usize),
+    value: Option<(usize, usize)>,
+}
+
+enum KeyValues {
+    No,
+    /// A block of this many lines: more than one table may have.
+    TooMany(usize),
+    Rows(Vec<KeyValue>),
+}
+
+/// The block of labels and values the lines `a..z` of a region are, when they are one: at
+/// least three lines in a row of exactly two pieces, the labels flush left, the values flush
+/// left or right or the labels ending in a colon, no label or value wrapping, short pieces,
+/// and no bold first line over plain ones (a header). A line right after the block whose one
+/// piece starts with a short label and a colon joins it, cut after the colon.
+fn key_values(
+    flow: &Flow,
+    lines: &[FlowLine],
+    a: usize,
+    z: usize,
+    pieces: &[Vec<Piece>],
+    off: &[bool],
+) -> KeyValues {
+    if pieces.iter().any(|p| p.len() != 2) || z - a < 2 {
+        return KeyValues::No;
+    }
+    if z - a > MAX_KEY_VALUES {
+        return KeyValues::TooMany(z - a);
+    }
+    let label = |p: &Piece| text_of(flow, p.start, p.end);
+    let labels: Vec<String> = pieces.iter().map(|p| label(&p[0])).collect();
+    let colons = labels.iter().all(|l| l.ends_with(':'));
+    // Lines after the region whose one run starts with a short label and a colon.
+    let mut extra: Vec<usize> = Vec::new();
+    let mut end = z;
+    while colons && end < lines.len() && !off[end] && extra.len() < MAX_KEY_VALUES {
+        let (prev, cur) = (&lines[end - 1], &lines[end]);
+        let gap = prev.y - cur.y;
+        if gap <= 0.0 || gap > 2.0 * prev.size.max(cur.size) || cur.end - cur.start != 1 {
+            break;
+        }
+        let text = flow.runs[cur.start].text.trim();
+        let Some(cut) = text.find(": ") else { break };
+        let head = &text[..=cut];
+        if head.chars().count() > KV_LABEL || head.split_whitespace().count() > KV_LABEL_WORDS {
+            break;
+        }
+        if (flow.runs[cur.start].x - pieces[0][0].x0).abs() > KV_ALIGN {
+            break;
+        }
+        extra.push(end);
+        end += 1;
+    }
+    let n = z - a + extra.len();
+    if n < 3 {
+        return KeyValues::No;
+    }
+    let x0 = pieces[0][0].x0;
+    let lefts = pieces.iter().all(|p| (p[0].x0 - x0).abs() <= KV_ALIGN);
+    let (v0, v1) = (pieces[0][1].x0, pieces[0][1].x1);
+    let flush_left = pieces.iter().all(|p| (p[1].x0 - v0).abs() <= KV_ALIGN);
+    let flush_right = pieces.iter().all(|p| (p[1].x1 - v1).abs() <= KV_ALIGN);
+    if !lefts || !(flush_left || flush_right || colons) {
+        return KeyValues::No;
+    }
+    let short = labels
+        .iter()
+        .all(|l| l.chars().count() <= KV_LABEL && l.split_whitespace().count() <= KV_LABEL_WORDS)
+        && pieces
+            .iter()
+            .all(|p| text_of(flow, p[1].start, p[1].end).chars().count() <= KV_VALUE);
+    if !short {
+        return KeyValues::No;
+    }
+    // Lines of the block follow each other at most two line heights apart.
+    let spaced = (a + 1..z).all(|k| {
+        let gap = lines[k - 1].y - lines[k].y;
+        gap > 0.0 && gap <= 2.0 * lines[k - 1].size.max(lines[k].size)
+    });
+    // A line right after the block that starts under the values goes on a value.
+    let wraps = lines.get(end).is_some_and(|next| {
+        let last = &lines[end - 1];
+        let gap = last.y - next.y;
+        gap > 0.0
+            && gap <= 1.6 * last.size.max(next.size)
+            && (flow.runs[next.start].x - v0).abs() <= KV_ALIGN
+    });
+    let bold = |l: &FlowLine| flow.runs[l.start..l.end].iter().all(|r| r.bold);
+    let header = bold(&lines[a]) && (a + 1..z).any(|k| !bold(&lines[k]));
+    if !spaced || wraps || header {
+        return KeyValues::No;
+    }
+    let mut rows: Vec<KeyValue> = pieces
+        .iter()
+        .enumerate()
+        .map(|(k, p)| KeyValue {
+            line: a + k,
+            label: (p[0].start, p[0].end),
+            value: Some((p[1].start, p[1].end)),
+        })
+        .collect();
+    rows.extend(extra.into_iter().map(|k| KeyValue {
+        line: k,
+        label: (lines[k].start, lines[k].end),
+        value: None,
+    }));
+    KeyValues::Rows(rows)
+}
+
+/// Cuts a row of two cells whose first cell holds label and value in one run after the
+/// label's colon: the rest goes to the second cell.
+fn split_label(row: &mut [PlannedCell]) {
+    let [label, value] = row else { return };
+    let Some(run) = label.runs.first_mut() else {
+        return;
+    };
+    let lead = run.text.len() - run.text.trim_start().len();
+    let Some(cut) = run.text[lead..].find(": ").map(|c| lead + c + 1) else {
+        return;
+    };
+    let mut rest = run.clone();
+    let chars = run.text.chars().count().max(1) as f32;
+    let before = run.text[..cut].chars().count() as f32;
+    rest.text = run.text[cut..].trim_start().to_string();
+    rest.x = run.x + run.w * before / chars;
+    rest.w = run.w - (rest.x - run.x);
+    run.text.truncate(cut);
+    run.w -= rest.w;
+    value.runs.push(rest);
+    value.runs.extend(label.runs.drain(1..));
 }
 
 /// A grid rebuilt from white space gutters: rows of cells, each cell its runs as flow ranges.
@@ -324,7 +541,7 @@ fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
 /// Where two blocks that stand side by side part, when they do: the widest gutter between
 /// columns, when no line crosses it, the white space all lines leave there is at least
 /// [`BLOCK_GUTTER`] font sizes wide and [`BLOCK_GUTTER_RATIO`] times the median gutter, and
-/// the baselines of its sides do not line up.
+/// either most lines hold text on one side only or the baselines of its sides do not line up.
 fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Option<f32> {
     let columns = columns_of(pieces);
     if columns.len() < 3 {
@@ -356,6 +573,15 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
     let size = sizes[sizes.len() / 2];
     if g1 - g0 < BLOCK_GUTTER * size || g1 - g0 < BLOCK_GUTTER_RATIO * median {
         return None;
+    }
+    // Most lines hold text on one side only: two lists that overlap in part.
+    let both = pieces
+        .iter()
+        .filter(|l| l.iter().any(|p| p.x1 <= mid) && l.iter().any(|p| p.x0 >= mid))
+        .count();
+    let used = pieces.iter().filter(|l| !l.is_empty()).count();
+    if 2 * both < used {
+        return Some(mid);
     }
     // The baselines and sizes of a side, line by line: those of its runs.
     let side = |left: bool| -> Vec<Vec<Part>> {
@@ -424,7 +650,8 @@ fn grid_of(
     if (clean as f32) < CLEAN_ROWS * lines.len() as f32 {
         return Err("its columns are not clean");
     }
-    // Rows: lines that fill at least half the columns; other lines join the nearest one.
+    // Rows: lines that fill at least half the columns; other lines join the row of the
+    // nearest one above them (lines above the first join the first).
     let filled = |row: &Vec<(usize, u32, &Piece)>| {
         let mut c: Vec<usize> = row.iter().map(|x| x.0).collect();
         c.dedup();
@@ -448,15 +675,12 @@ fn grid_of(
         })
         .collect();
     for (k, row) in placed.iter().enumerate() {
-        // The anchor rows are in order: the nearest is the one before or the one after.
+        // The anchor rows are in order: the line itself, else the one before it.
         let after = anchors.partition_point(|&a| a < k);
-        let target = match (after.checked_sub(1), anchors.get(after)) {
-            (Some(b), Some(&a)) => {
-                let d = |x: usize| (lines[x].y - lines[k].y).abs();
-                if d(a) < d(anchors[b]) { after } else { b }
-            }
-            (Some(b), None) => b,
-            (None, _) => after,
+        let target = if anchors.get(after) == Some(&k) {
+            after
+        } else {
+            after.saturating_sub(1)
         };
         for &(col, span, p) in row {
             let cell = &mut rows[target][col];
