@@ -1261,3 +1261,42 @@ fn many_small_pictures_crops_bounded() {
     // The blob room running out is in the reader's own tests (lib.rs): a memory limit small
     // enough for that leaves too little for the render itself.
 }
+
+#[test]
+fn many_places_of_one_picture_stay_linear() {
+    // The twin with one place, then 100,000 places of one picture on one page: one asset, and
+    // a read that grows with the places, not with their square. Nothing is rendered: the page
+    // with 100,000 draws is over the render room, which other tests cover.
+    let start = Instant::now();
+    let one = read_with(&common::many_places_twin(1), false);
+    let one_took = start.elapsed();
+    assert_eq!(one.document.assets.len(), 1, "{:#?}", one.document.losses);
+    let n = 100_000;
+    let file = common::many_places_twin(n);
+    let start = Instant::now();
+    let out = read_with(&file, false);
+    let took = start.elapsed();
+    eprintln!(
+        "1 place: {one_took:?}; {n} places: {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    assert!(
+        took < one_took * 20 + Duration::from_secs(5),
+        "{took:?} against {one_took:?}"
+    );
+    assert_eq!(out.document.assets.len(), 1, "{:#?}", out.document.losses);
+    let media = out
+        .document
+        .body
+        .iter()
+        .map(|s| match s {
+            Block::Section { blocks, .. } => blocks
+                .iter()
+                .filter(|b| matches!(b, Block::Media { .. }))
+                .count(),
+            _ => 0,
+        })
+        .sum::<usize>();
+    assert_eq!(media, n);
+    assert_rss_under_256_mib();
+}

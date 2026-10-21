@@ -509,17 +509,23 @@ fn lay_out(
             blocks.extend(orphans);
             // Where each picture goes among the blocks: after the block of its run when the run
             // stands above the picture's top, else before it; at the end without one.
+            let anchored = if near.iter().any(Option::is_some) {
+                render::anchor_index(&blocks)
+            } else {
+                HashMap::new()
+            };
             let spots: Vec<usize> = near
                 .iter()
                 .map(|found| {
                     let Some((at, top, probe)) = found else {
                         return blocks.len();
                     };
-                    let anchor = laid.probed.get(*probe).cloned().flatten();
+                    let anchor = laid.probed.get(*probe).and_then(Option::as_ref);
                     let after = at.1 > top.1;
-                    render::position(&blocks, anchor.as_ref(), after)
+                    render::position(&anchored, blocks.len(), anchor, after)
                 })
                 .collect();
+            drop(anchored);
             let mut media: Vec<(usize, Block)> = Vec::new();
             match seen {
                 Some(render::Seen::Page(v)) => {
@@ -578,16 +584,15 @@ fn lay_out(
                 }
                 None => {}
             }
-            // From the last place back, so the places before stay where they are; pictures at
-            // one place keep their order.
-            for (at, block) in media.into_iter().rev() {
-                blocks.insert(at, block);
-                // The tables of this page after it move one block on.
-                for (s, b, _) in placed.values_mut() {
-                    if *s == section && *b >= at {
-                        *b += 1;
-                    }
+            if !media.is_empty() {
+                // One pass: the pictures go between the blocks, and each table of this page
+                // moves on by the pictures before it.
+                media.sort_by_key(|(at, _)| *at);
+                let at: Vec<usize> = media.iter().map(|(at, _)| *at).collect();
+                for (_, b, _) in placed.values_mut().filter(|t| t.0 == section) {
+                    *b += at.partition_point(|&a| a <= *b);
                 }
+                blocks = render::merge(blocks, media);
             }
             // What a stop cuts: the page from the first part not built on, or its hidden text.
             let mut stop = laid.stop.map(|hit| {

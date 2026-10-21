@@ -528,14 +528,46 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
     }
 }
 
-/// Where a picture goes among `blocks`: after the block anchored `at` when the run found
-/// there stands above the picture, else before it. Without such a block it goes at the end.
-pub(crate) fn position(blocks: &[Block], at: Option<&Anchor>, after: bool) -> usize {
-    match at.and_then(|a| blocks.iter().position(|b| anchor_of(b) == Some(a))) {
-        Some(i) if after => i + 1,
-        Some(i) => i,
-        None => blocks.len(),
+/// The index of the first block with each anchor.
+pub(crate) fn anchor_index(blocks: &[Block]) -> HashMap<Anchor, usize> {
+    let mut out = HashMap::new();
+    for (i, b) in blocks.iter().enumerate() {
+        if let Some(a) = anchor_of(b) {
+            out.entry(a.clone()).or_insert(i);
+        }
     }
+    out
+}
+
+/// Where a picture goes among `len` blocks whose anchors `anchored` knows: after the block
+/// anchored `at` when the run found there stands above the picture, else before it. Without
+/// such a block it goes at the end.
+pub(crate) fn position(
+    anchored: &HashMap<Anchor, usize>,
+    len: usize,
+    at: Option<&Anchor>,
+    after: bool,
+) -> usize {
+    match at.and_then(|a| anchored.get(a)) {
+        Some(&i) if after => i + 1,
+        Some(&i) => i,
+        None => len,
+    }
+}
+
+/// `blocks` with `media` put in, each before the block at its index (at the end past the
+/// last), in one pass. `media` is sorted by index; pictures at one index keep their order.
+pub(crate) fn merge(blocks: Vec<Block>, media: Vec<(usize, Block)>) -> Vec<Block> {
+    let mut out = Vec::with_capacity(blocks.len() + media.len());
+    let mut media = media.into_iter().peekable();
+    for (i, b) in blocks.into_iter().enumerate() {
+        while let Some((_, m)) = media.next_if(|(at, _)| *at <= i) {
+            out.push(m);
+        }
+        out.push(b);
+    }
+    out.extend(media.map(|(_, m)| m));
+    out
 }
 
 /// A page to render: for its own asset when it needs vision, or to cut its small pictures

@@ -647,3 +647,46 @@ fn deflated(data: &[u8]) -> Vec<u8> {
     z.write_all(data).expect("deflate");
     z.finish().expect("deflate")
 }
+
+/// A square page with a line of text and one gray picture of 4 by 4 pixels drawn `n` times at
+/// 29 by 29 points (each over 1 cm2) on a grid in its middle. The page is large enough that
+/// all places together stay under 2 % of it, so each place is a small picture of one shared
+/// asset.
+pub fn many_places_twin(n: usize) -> Vec<u8> {
+    let area = n as f64 * 29.0 * 29.0 / 0.015;
+    let side = area.sqrt().max(1_000.0).ceil() as usize;
+    let cols = (n as f64).sqrt().ceil().max(1.0) as usize;
+    let (x0, y0) = (side / 2 - cols * 20, side / 2 - cols * 20);
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        &[
+            10, 40, 70, 100, 130, 160, 190, 220, 20, 50, 80, 110, 140, 170, 200, 230,
+        ],
+    );
+    let mut content = format!(
+        "BT /F1 12 Tf {} {} Td (Many places of one picture.) Tj ET\n",
+        x0,
+        y0 + cols * 40 + 100
+    );
+    for k in 0..n {
+        let (x, y) = (x0 + 40 * (k % cols), y0 + 40 * (k / cols));
+        content.push_str(&format!("q 29 0 0 29 {x} {y} cm /Im1 Do Q\n"));
+    }
+    let c = b.stream("/Filter /FlateDecode", &deflated(content.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {side} {side}] \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+         /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
