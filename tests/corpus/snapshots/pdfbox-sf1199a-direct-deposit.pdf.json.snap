@@ -490,29 +490,36 @@ source: crates/rezzer/tests/corpus.rs
           "anchor": "p4:b4",
           "inlines": [
             {
+              "strong": true,
               "text": "PLEASE READ THIS CAREFULLY",
               "type": "text"
             }
           ],
-          "level": 1,
-          "type": "heading"
+          "type": "paragraph"
         },
         {
           "anchor": "p4:b5",
           "inlines": [
             {
-              "text": "All information on this form, including the individual claim number, is required under 31 USC 3322, 31 CFR 209 and/or 210.  The information is confidential and is needed to prove entitlement to payments.  The information will be used to",
+              "text": "All information on this form, including the individual claim number, is required under 31 USC 3322, 31 CFR 209 and/or 210.  The information is confidential and is needed to prove entitlement to payments.  The information will be used to process payment data from the Federal agency to the financial institution and/or its agent.  Failure to provide the requested information may affect the processing of this form and may delay or prevent the receipt of payments through the Direct Deposit/Electronic Funds Transfer Program.",
               "type": "text"
             }
           ],
-          "level": 1,
-          "type": "heading"
+          "type": "paragraph"
         },
         {
           "anchor": "p4:b6",
           "inlines": [
             {
-              "text": "process payment data from the Federal agency to the financial institution and/or its agent.  Failure to provide the requested",
+              "strong": true,
+              "text": "INFORMATION FOUND ON CHECKS",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Most of the information needed to complete boxes A, C, and F in Section 1 is printed on your government check:",
               "type": "text"
             }
           ],
@@ -520,32 +527,6 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p4:b7",
-          "inlines": [
-            {
-              "text": "information may affect the processing of this form and may delay or prevent the receipt of payments through the Direct Deposit/Electronic Funds Transfer Program.",
-              "type": "text"
-            }
-          ],
-          "level": 1,
-          "type": "heading"
-        },
-        {
-          "anchor": "p4:b8",
-          "inlines": [
-            {
-              "text": "INFORMATION FOUND ON CHECKS",
-              "type": "text"
-            },
-            {
-              "text": " Most of the information needed to complete boxes A, C, and F in Section 1 is printed on your government check:",
-              "type": "text"
-            }
-          ],
-          "level": 1,
-          "type": "heading"
-        },
-        {
-          "anchor": "p4:b9",
           "inlines": [
             {
               "strong": true,
@@ -560,7 +541,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "paragraph"
         },
         {
-          "anchor": "p4:b10",
+          "anchor": "p4:b8",
           "inlines": [
             {
               "strong": true,
@@ -575,7 +556,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "paragraph"
         },
         {
-          "anchor": "p4:b11",
+          "anchor": "p4:b9",
           "inlines": [
             {
               "strong": true,
@@ -589,7 +570,32 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "paragraph"
         },
-        "<26 more items>"
+        {
+          "anchor": "p4:b10",
+          "inlines": [
+            {
+              "text": "15-51",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b11",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "United States Treasury",
+              "type": "text"
+            },
+            {
+              "text": " 000",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<14 more items>"
       ],
       "kind": "page",
       "type": "section"

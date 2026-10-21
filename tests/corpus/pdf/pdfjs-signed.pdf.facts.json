@@ -28,7 +28,8 @@
     "equals": "2026-05-09T00:00:00Z"
   },
   {
-    "contains": "| Signature1 | field |  | 2026-05-09T00:00:00Z |"
+    "pointer": "/facets/signatures/0/covers_whole_file",
+    "equals": true
   },
   {
     "contains": "Expected verification state: VERIFIED"

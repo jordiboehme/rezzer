@@ -16,10 +16,16 @@
     "equals": "Alice"
   },
   {
-    "contains": "| First Name | text | input | Alice |"
+    "pointer": "/facets/fields/0/name",
+    "equals": "First Name"
   },
   {
-    "contains": "| Nationality | combo | input |"
+    "pointer": "/facets/fields/7/name",
+    "equals": "Nationality"
+  },
+  {
+    "pointer": "/facets/fields/7/kind",
+    "equals": "combo"
   },
   {
     "contains": "## Example for a Form"

@@ -28,6 +28,11 @@
     "equals": "field:Source"
   },
   {
-    "contains": "| Mirror | text | result (calc 1) |  |  | script, see below | Source | read-only |"
+    "pointer": "/facets/fields/1/calc_order",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/fields/1/flags/0",
+    "equals": "read-only"
   }
 ]

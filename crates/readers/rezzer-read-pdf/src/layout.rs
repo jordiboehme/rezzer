@@ -775,9 +775,10 @@ pub(crate) fn page_blocks_at(
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
+    let page_body = page_body_size(&flow.runs);
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
-        None => untagged(runs, cx, built),
+        None => untagged(runs, page_body, cx, built),
     };
     let mut start = 0;
     for p in placed {
@@ -1574,9 +1575,43 @@ fn without_marker(runs: &[&Run], cut: usize) -> Vec<Run> {
     runs
 }
 
-/// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps.
-fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
+/// A page needs this many characters in one size for that size to be its own body size.
+const PAGE_BODY_CHARS: usize = 400;
+
+/// The size most characters of a page are set in, when they are at least
+/// [`PAGE_BODY_CHARS`]: a page set mostly in a larger size than the rest of the file (the back
+/// of a form printed in larger type) has its own body text, which is not a heading.
+fn page_body_size(runs: &[Run]) -> Option<f32> {
+    let mut chars: HashMap<i32, usize> = HashMap::new();
+    for r in runs {
+        *chars.entry(size_key(r.size)).or_default() += r.text.chars().count();
+    }
+    chars
+        .into_iter()
+        .max_by_key(|(size, n)| (*n, -*size))
+        .filter(|(_, n)| *n >= PAGE_BODY_CHARS)
+        .map(|(size, _)| size as f32 / 2.0)
+}
+
+/// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps. A line
+/// is a heading only when it is also larger than `page_body`, the page's own body size.
+fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Built) {
+    let heading_level = |l: &Line<'_>| {
+        cx.style
+            .heading_level(l)
+            .filter(|_| page_body.is_none_or(|b| l.size >= b * HEADING_RATIO))
+    };
     let all = lines(flow);
+    // A number of three digits or more that opens a line in the middle of a sentence is part
+    // of the sentence ("31 CFR 209 and/or / 210. The information"), not a list item.
+    let marker = |k: usize| {
+        let found = list_marker(&all[k].text)?;
+        let digits = all[k].text.chars().take_while(char::is_ascii_digit).count();
+        let mid_sentence = k > 0
+            && continues(&all[k - 1], &all[k])
+            && !all[k - 1].text.ends_with(['.', ':', ';', '!', '?']);
+        (!(found.0 && digits >= 3 && mid_sentence)).then_some(found)
+    };
     let mut i = 0;
     let mut open_list: Option<Option<usize>> = None;
     while i < all.len() && out.stop.is_none() {
@@ -1585,11 +1620,11 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
             i += 1;
             continue;
         }
-        if let Some(level) = cx.style.heading_level(l) {
+        if let Some(level) = heading_level(l) {
             let mut runs: Vec<&Run> = l.runs.iter().collect();
             let mut j = i + 1;
             while j < all.len()
-                && cx.style.heading_level(&all[j]) == Some(level)
+                && heading_level(&all[j]) == Some(level)
                 && continues(&all[j - 1], &all[j])
             {
                 runs.extend(all[j].runs.iter());
@@ -1600,13 +1635,13 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
             i = j;
             continue;
         }
-        if let Some((ordered, cut)) = list_marker(&l.text) {
+        if let Some((ordered, cut)) = marker(i) {
             let owned = without_marker(&l.runs.iter().collect::<Vec<_>>(), cut);
             let mut extra: Vec<&Run> = Vec::new();
             let mut j = i + 1;
             while j < all.len()
-                && cx.style.heading_level(&all[j]).is_none()
-                && list_marker(&all[j].text).is_none()
+                && heading_level(&all[j]).is_none()
+                && marker(j).is_none()
                 && continues(&all[j - 1], &all[j])
                 && all[j].x > l.x + SIZE_SLACK
             {
@@ -1628,8 +1663,8 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
         let mut runs: Vec<&Run> = l.runs.iter().collect();
         let mut j = i + 1;
         while j < all.len()
-            && cx.style.heading_level(&all[j]).is_none()
-            && list_marker(&all[j].text).is_none()
+            && heading_level(&all[j]).is_none()
+            && marker(j).is_none()
             && continues(&all[j - 1], &all[j])
         {
             runs.extend(all[j].runs.iter());

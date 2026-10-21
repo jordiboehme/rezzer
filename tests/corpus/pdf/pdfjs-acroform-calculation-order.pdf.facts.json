@@ -20,7 +20,8 @@
     "equals": 1
   },
   {
-    "contains": "| group | text | input (calc 1) |"
+    "pointer": "/facets/fields/0/role",
+    "equals": "input"
   },
   {
     "contains": "Hello"

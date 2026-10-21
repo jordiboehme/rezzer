@@ -24,10 +24,16 @@
     "len": 35
   },
   {
-    "contains": "| Phone | text | input |"
+    "pointer": "/facets/fields/10/name",
+    "equals": "Phone"
   },
   {
-    "contains": "phone number"
+    "pointer": "/facets/fields/10/role",
+    "equals": "input"
+  },
+  {
+    "pointer": "/facets/fields/10/format",
+    "equals": "phone number"
   },
   {
     "contains": "number, 2 decimals, \"$\" before the number"

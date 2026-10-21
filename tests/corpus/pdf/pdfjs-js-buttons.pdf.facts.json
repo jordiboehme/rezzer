@@ -28,9 +28,15 @@
     "contains": "function callback(x)"
   },
   {
-    "contains": "listed, not run."
+    "pointer": "/facets/embedded/0/kind",
+    "equals": "script"
   },
   {
-    "contains": "| Button3 | button | input |"
+    "pointer": "/facets/fields/9/name",
+    "equals": "Button3"
+  },
+  {
+    "pointer": "/facets/fields/9/kind",
+    "equals": "button"
   }
 ]

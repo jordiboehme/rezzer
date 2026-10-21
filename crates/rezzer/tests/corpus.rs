@@ -1424,12 +1424,8 @@ fn attachment_listed() {
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0]["name"], "image.png");
     assert_eq!(attachments[0]["detail"], "6669 bytes");
-    assert!(
-        out.markdown
-            .contains("| attachment | image.png | 6669 bytes |  |"),
-        "{}",
-        out.markdown
-    );
+    // Listed, never extracted without an output directory.
+    assert!(list(&out.json, "/assets").is_empty());
 }
 
 #[test]
@@ -1490,13 +1486,8 @@ fn scan_needs_vision() {
             .any(|b| b["type"] == "media" && b["asset"] == "page-1"),
         "{page}"
     );
-    assert!(out.markdown.contains("### Pictures that need vision"));
-    // Without an output directory nothing is rendered, and the Markdown says so.
-    assert!(
-        out.markdown.contains("| page-1 | not extracted |"),
-        "{}",
-        out.markdown
-    );
+    // Without an output directory nothing is rendered: the asset has no file.
+    assert!(assets[0].get("path").is_none(), "{}", assets[0]);
 }
 
 #[test]
@@ -1560,7 +1551,12 @@ fn nist_reads_under_limits() {
             .contains("Security and Privacy Controls for Information Systems")
     );
     assert!(took < Config::default().limits.max_time, "{took:?}");
-    assert!(rss < 1 << 30, "max RSS {} MiB", rss >> 20);
+    // The RSS is the figure of this test only under nextest (one process per test).
+    assert!(
+        std::env::var_os("NEXTEST").is_none() || rss < 1 << 30,
+        "max RSS {} MiB",
+        rss >> 20
+    );
 }
 
 #[cfg(unix)]
@@ -1609,5 +1605,91 @@ fn arxiv_tables_and_pictures() {
     assert!(md.contains("Table 1: Runtime characteristics of Docling"));
     assert!(md.contains("Apple M3 Max"));
     assert!(took < Config::default().limits.max_time, "{took:?}");
-    assert!(rss < 512 << 20, "max RSS {} MiB", rss >> 20);
+    assert!(
+        std::env::var_os("NEXTEST").is_none() || rss < 512 << 20,
+        "max RSS {} MiB",
+        rss >> 20
+    );
+}
+
+/// The text of one page section of the model, its blocks joined by blank lines.
+fn page_text(doc: &Value, page: u32) -> String {
+    fn walk(v: &Value, out: &mut String) {
+        match v {
+            Value::Object(m) => {
+                if let Some(t) = m.get("text").and_then(Value::as_str) {
+                    out.push_str(t);
+                }
+                if m.get("type").and_then(Value::as_str) == Some("line_break") {
+                    out.push(' ');
+                }
+                if let Some(inlines) = m.get("inlines") {
+                    walk(inlines, out);
+                }
+                for key in ["blocks", "items", "rows", "cells"] {
+                    if let Some(inner) = m.get(key) {
+                        walk(inner, out);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let section = list(doc, "/body")
+        .iter()
+        .find(|s| s["anchor"] == format!("p{page}"))
+        .unwrap_or_else(|| panic!("no page {page}"));
+    let mut out = String::new();
+    for block in list(section, "/blocks") {
+        walk(block, &mut out);
+        out.push_str("\n\n");
+    }
+    out
+}
+
+#[test]
+fn sf1199a_back_page_reads_as_prose() {
+    // The back of the form is set in a larger size than the front. Its body text is prose,
+    // not headings, and its sentences stay whole.
+    let doc = pdf("pdfbox-sf1199a-direct-deposit.pdf").json;
+    let section = list(&doc, "/body")
+        .iter()
+        .find(|s| s["anchor"] == "p4")
+        .unwrap();
+    let headings: Vec<&Value> = list(section, "/blocks")
+        .iter()
+        .filter(|b| b["type"] == "heading")
+        .collect();
+    assert!(headings.is_empty(), "{headings:?}");
+    let text = page_text(&doc, 4);
+    for sentence in [
+        "is required under 31 USC 3322, 31 CFR 209 and/or 210.",
+        "Failure to provide the requested information may affect the processing of this form",
+        "The financial institution cannot cancel the authorization by advice to the Government agency.",
+    ] {
+        let squeezed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(squeezed.contains(sentence), "{sentence}\n{text}");
+    }
+    // A number that goes on a sentence is not a list item.
+    assert!(
+        !list(section, "/blocks").iter().any(|b| b["type"] == "list"),
+        "{section}"
+    );
+}
+
+#[test]
+fn multicolumn_reads_column_by_column() {
+    // The left column of page 1 ends with "Donec nonummy"; the right column goes on with
+    // "pellentesque ante". The left column is read whole before the right one.
+    let text = page_text(&pdf("pypdf-multicolumn.pdf").json, 1);
+    let end_left = text
+        .find("Donec nonummy")
+        .expect("the end of the left column");
+    let start_right = text
+        .find("pellentesque ante. Phasellus")
+        .expect("the start of the right column");
+    assert!(end_left < start_right, "{text}");
+    let abstract_at = text.find("This is a sample document").unwrap();
+    assert!(abstract_at < end_left);
 }
