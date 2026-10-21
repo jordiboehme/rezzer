@@ -424,3 +424,74 @@ fn copies_draw_on_the_object_budget_left() {
     assert!(!pdf.charge_copy(1 << 20));
     assert!(!pdf.charge_copy(1));
 }
+
+/// A zlib stream of some text whose deflate data is overwritten in the middle, so the
+/// inflater stops with an error after some output.
+fn broken_zlib() -> Vec<u8> {
+    let text: String = (0..4000).map(|i| format!("BT ({i}) Tj ET\n")).collect();
+    let mut packed = common::zlib(text.as_bytes());
+    let mid = packed.len() / 2;
+    for b in &mut packed[mid..mid + 64] {
+        *b = 0xFF;
+    }
+    packed
+}
+
+#[test]
+fn a_broken_content_stream_names_its_page() {
+    let pdf = open(&content_page(&["FlateDecode"], broken_zlib())).unwrap();
+    let issues = pdf.issues();
+    let hit = issues
+        .iter()
+        .find(|i| i.what.contains("is damaged"))
+        .unwrap_or_else(|| panic!("{issues:?}"));
+    assert_eq!(hit.location, "page 1", "{hit:?}");
+    assert_eq!(hit.kind, pdfparts::IssueKind::Damaged);
+    assert!(hit.what.contains("breaks off after"), "{hit:?}");
+    // The page is still read: only a limit refuses a page.
+    assert!(pdf.refused_pages().is_empty());
+}
+
+#[test]
+fn a_cut_deflate_stream_is_not_damaged() {
+    let mut packed = common::zlib(b"BT (Some words) Tj ET");
+    packed.truncate(packed.len() - 6);
+    let pdf = open(&content_page(&["FlateDecode"], packed)).unwrap();
+    let issues = pdf.issues();
+    assert!(
+        !issues.iter().any(|i| i.what.contains("is damaged")),
+        "{issues:?}"
+    );
+}
+
+#[test]
+fn a_broken_stream_no_page_reaches_is_named_by_its_object() {
+    // The catalog holds the stream; no page does.
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let p = page(&mut doc, pages_id, dictionary! {});
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![p.into()], "Count" => 1 },
+        ),
+    );
+    let broken = doc.add_object(
+        Stream::new(dictionary! { "Filter" => "FlateDecode" }, broken_zlib())
+            .with_compression(false),
+    );
+    let catalog =
+        doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id, "Extra" => broken });
+    doc.trailer.set("Root", catalog);
+    let pdf = open(&saved(&mut doc)).unwrap();
+    let issues = pdf.issues();
+    let hit = issues
+        .iter()
+        .find(|i| i.what.contains("is damaged"))
+        .unwrap_or_else(|| panic!("{issues:?}"));
+    assert_eq!(
+        hit.location,
+        format!("object {} {}", broken.0, broken.1),
+        "{hit:?}"
+    );
+}

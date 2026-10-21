@@ -26,8 +26,10 @@ use std::io::{self, Write};
 use lopdf::xref::XrefType;
 use lopdf::{Dictionary, Document, Object};
 
+use crate::guard::{Measure, cap_words, filters_with, measure_bytes};
 use crate::{Encryption, Issue, IssueKind, Limits, OpenError};
-use lexer::Lexer;
+use lexer::{Lexer, find};
+use object::{finish, head_at, length_ref};
 use store::Store;
 use xref::{Entry, read_chain, rebuild};
 
@@ -519,6 +521,109 @@ fn scan_trailer(
         }
     }
     Ok(trailer)
+}
+
+/// What every stream of a file read as it is unpacks to, by object number and generation,
+/// and all of them together.
+pub(crate) struct Measured {
+    pub sizes: HashMap<(u32, u16), u64>,
+    pub unpacked: u64,
+}
+
+/// Measures every stream of `bytes` with the guard's decoder, for a parser that reads the
+/// file itself because it does not open. One forward pass finds every object header, also
+/// the ones a later definition replaces, since that parser may follow an old offset. Each
+/// object is read on its own and dropped, under the work bound of an open and with the object
+/// budget for one object at a time. A stream over a cap, a stream whose filters are named
+/// indirectly, and an encrypted file are refused: the parser would unpack what was not
+/// measured.
+pub(crate) fn measure_raw(
+    bytes: &[u8],
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> Result<Measured, OpenError> {
+    if find(bytes, b"/Encrypt", 0).is_some() {
+        return Err(OpenError::UnsupportedEncryption(
+            "the file names an /Encrypt dictionary; its streams cannot be measured without \
+             the object layer"
+                .into(),
+        ));
+    }
+    let mut budget = Budget::new(limits, stop, bytes.len());
+    let found = rebuild(bytes, &mut budget)?;
+    budget.ends.add_starts(found.starts());
+    let mut out = Measured {
+        sizes: HashMap::new(),
+        unpacked: 0,
+    };
+    for (k, &(pos, n, g)) in found.headers.iter().enumerate() {
+        if k % POLL_EVERY == 0 {
+            budget.poll().map_err(Fail::into_open)?;
+        }
+        // Each object is dropped before the next one is read.
+        budget.bytes = 0;
+        let head = match head_at(bytes, pos, &mut budget) {
+            Ok(head) if head.stream.is_some() => head,
+            Ok(_) | Err(Fail::Bad(_)) => continue,
+            Err(Fail::Stop(e)) => return Err(e),
+        };
+        let length = match length_ref(&head) {
+            Some(r) => raw_length(bytes, &found, r, &mut budget)?,
+            None => None,
+        };
+        let stream = match finish(bytes, head, length, &mut budget) {
+            Ok((_, Object::Stream(s))) => s,
+            Ok(_) | Err(Fail::Bad(_)) => continue,
+            Err(Fail::Stop(e)) => return Err(e),
+        };
+        let indirect = |key: &[u8]| match stream.dict.get(key) {
+            Ok(Object::Reference(_)) => true,
+            Ok(Object::Array(a)) => a.iter().any(|o| matches!(o, Object::Reference(_))),
+            _ => false,
+        };
+        if indirect(b"Filter") || indirect(b"DecodeParms") {
+            return Err(OpenError::Limit(format!(
+                "stream {n} {g} names its filters indirectly, so it cannot be measured"
+            )));
+        }
+        let filters = filters_with(&stream.dict, &|o| Some(o));
+        let left = limits.max_total_bytes.saturating_sub(out.unpacked);
+        match measure_bytes(&stream.content, &filters, limits, left, stop) {
+            Measure::Fits(size) => {
+                out.unpacked = out.unpacked.saturating_add(size);
+                let kept = out.sizes.entry((n, g)).or_insert(0);
+                *kept = (*kept).max(size);
+            }
+            Measure::Over(cap) => {
+                return Err(OpenError::Limit(format!(
+                    "stream {n} {g} {}",
+                    cap_words(cap, limits)
+                )));
+            }
+            Measure::Stopped => return Err(stopped()),
+        }
+    }
+    Ok(out)
+}
+
+/// The integer an indirect `/Length` names, read at the last definition of its number.
+fn raw_length(
+    bytes: &[u8],
+    found: &xref::Rebuilt,
+    r: lopdf::ObjectId,
+    budget: &mut Budget,
+) -> Result<Option<i64>, OpenError> {
+    let Some(&(pos, g)) = found.table.get(&r.0) else {
+        return Ok(None);
+    };
+    if g != r.1 {
+        return Ok(None);
+    }
+    match head_at(bytes, pos, budget) {
+        Ok(head) => Ok(head.value.as_i64().ok()),
+        Err(Fail::Bad(_)) => Ok(None),
+        Err(Fail::Stop(e)) => Err(e),
+    }
 }
 
 #[cfg(test)]

@@ -18,7 +18,8 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use decode::Cap;
 pub(crate) use decode::{
-    Filter, Measure, cap_words, filters_with, measure_bytes, stream_filters, unpack,
+    Filter, Measure, cap_words, filters_with, measure_bytes, measure_checked, stream_filters,
+    unpack,
 };
 
 use crate::pagetree::{self, PageNode, ResourcesKey};
@@ -63,6 +64,8 @@ pub(crate) fn measure(
         ..Verdict::default()
     };
     let mut bad: HashMap<ObjectId, String> = HashMap::new();
+    // Streams that stop with a decoding error, and what they unpack to before it.
+    let mut broken: HashMap<ObjectId, u64> = HashMap::new();
     let mut total_hit = false;
     for (&id, obj) in &doc.objects {
         let Object::Stream(stream) = obj else {
@@ -80,10 +83,14 @@ pub(crate) fn measure(
         }
         let filters = stream_filters(doc, &stream.dict);
         let budget = limits.max_total_bytes.saturating_sub(verdict.unpacked);
-        match measure_bytes(&stream.content, &filters, limits, budget, stop) {
+        let (measured, broke) = measure_checked(&stream.content, &filters, limits, budget, stop);
+        match measured {
             Measure::Fits(n) => {
                 verdict.unpacked += n;
                 verdict.sizes.insert(id, n);
+                if broke {
+                    broken.insert(id, n);
+                }
             }
             Measure::Over(cap) => {
                 if cap == Cap::Total {
@@ -101,6 +108,9 @@ pub(crate) fn measure(
             }
             Measure::Stopped => return Err(stopped()),
         }
+    }
+    if !broken.is_empty() {
+        damaged(doc, pages, &broken, limits, stop, issues)?;
     }
     if bad.is_empty() {
         return Ok(verdict);
@@ -147,10 +157,8 @@ fn is_page_node(doc: &Document, id: ObjectId) -> bool {
         if d.has_type(b"Page") || d.has_type(b"Pages"))
 }
 
-/// Which pages reach a bad stream. Reachability is computed once, backwards from the bad
-/// streams over all references, and stops at page nodes, so a link to a refused page does not
-/// refuse the page that holds the link. Inherited resources are checked once per node that
-/// holds them. Returns the refused page numbers and the bad streams that refused a page.
+/// Which pages reach a bad stream, with one Limit issue for each. Returns the refused page
+/// numbers and the bad streams that refused a page.
 fn refuse(
     doc: &Document,
     pages: &[PageNode],
@@ -159,6 +167,79 @@ fn refuse(
     stop: &dyn Fn() -> bool,
     issues: &mut Vec<Issue>,
 ) -> Result<(Vec<u32>, HashSet<ObjectId>), OpenError> {
+    let targets: HashSet<ObjectId> = bad.keys().copied().collect();
+    let mut refused = Vec::new();
+    let mut used = HashSet::new();
+    for (number, id) in reach(doc, pages, &targets, limits, stop)? {
+        used.insert(id);
+        issues.push(Issue::new(
+            &format!("page {number}"),
+            IssueKind::Limit,
+            format!(
+                "the page is not read: stream {} {} {}",
+                id.0, id.1, bad[&id]
+            ),
+        ));
+        refused.push(number);
+    }
+    Ok((refused, used))
+}
+
+/// One Damaged issue for each page that reaches a stream that stops with a decoding error,
+/// and one for each such stream no page reaches. The pages are still read: what the stream
+/// gives before the damage is there.
+fn damaged(
+    doc: &Document,
+    pages: &[PageNode],
+    broken: &HashMap<ObjectId, u64>,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+    issues: &mut Vec<Issue>,
+) -> Result<(), OpenError> {
+    let targets: HashSet<ObjectId> = broken.keys().copied().collect();
+    let words = |id: ObjectId| {
+        let n = broken[&id];
+        let bytes = if n == 1 { "byte" } else { "bytes" };
+        format!(
+            "stream {} {} is damaged: it breaks off after {n} {bytes}; what follows is not read",
+            id.0, id.1
+        )
+    };
+    let mut used = HashSet::new();
+    for (number, id) in reach(doc, pages, &targets, limits, stop)? {
+        used.insert(id);
+        issues.push(Issue::new(
+            &format!("page {number}"),
+            IssueKind::Damaged,
+            words(id),
+        ));
+    }
+    let mut rest: Vec<ObjectId> = targets
+        .into_iter()
+        .filter(|id| !used.contains(id))
+        .collect();
+    rest.sort();
+    for id in rest {
+        issues.push(Issue::new(
+            &format!("object {} {}", id.0, id.1),
+            IssueKind::Damaged,
+            words(id),
+        ));
+    }
+    Ok(())
+}
+
+/// The pages that reach one of `targets`, each with the first target it reaches, in page
+/// order. Reachability is computed once, backwards from the targets over all references, and
+/// stops at page nodes, so a link to another page does not count for the page that holds
+/// the link. Inherited resources are checked once per node that holds them.
+fn reach(
+    doc: &Document,
+    pages: &[PageNode],
+    targets: &HashSet<ObjectId>,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> Result<Vec<(u32, ObjectId)>, OpenError> {
     // Every reference is a value the parser charged against the object budget, so the
     // reverse map is bounded by that budget and needs no count of its own.
     let mut back: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
@@ -173,9 +254,9 @@ fn refuse(
             back.entry(*r).or_default().push(src);
         }
     }
-    // For each object that reaches a bad stream, the bad stream it reaches.
-    let mut origin: HashMap<ObjectId, ObjectId> = bad.keys().map(|k| (*k, *k)).collect();
-    let mut todo: Vec<ObjectId> = bad.keys().copied().collect();
+    // For each object that reaches a target, the target it reaches.
+    let mut origin: HashMap<ObjectId, ObjectId> = targets.iter().map(|k| (*k, *k)).collect();
+    let mut todo: Vec<ObjectId> = targets.iter().copied().collect();
     while let Some(t) = todo.pop() {
         if is_page_node(doc, t) {
             continue;
@@ -191,8 +272,7 @@ fn refuse(
     // What each page's resources reach, worked out once per resources object (or per node
     // that holds them as a dictionary).
     let mut inherited: HashMap<ResourcesKey, Option<ObjectId>> = HashMap::new();
-    let mut refused = Vec::new();
-    let mut used = HashSet::new();
+    let mut found = Vec::new();
     for (index, node) in pages.iter().enumerate() {
         if index % PAGES_PER_POLL == 0 && stop() {
             return Err(stopped());
@@ -214,17 +294,8 @@ fn refuse(
             };
         }
         if let Some(id) = hit {
-            used.insert(id);
-            issues.push(Issue::new(
-                &format!("page {number}"),
-                IssueKind::Limit,
-                format!(
-                    "the page is not read: stream {} {} {}",
-                    id.0, id.1, bad[&id]
-                ),
-            ));
-            refused.push(number);
+            found.push((number, id));
         }
     }
-    Ok((refused, used))
+    Ok(found)
 }

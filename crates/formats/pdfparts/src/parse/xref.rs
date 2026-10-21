@@ -502,6 +502,9 @@ pub(crate) struct Rebuilt {
     pub table: HashMap<u32, (usize, u16)>,
     /// Positions right after each `trailer` keyword.
     pub trailers: Vec<usize>,
+    /// Every header found, in file order: position, object number and generation, also the
+    /// ones a later definition of the number replaces.
+    pub headers: Vec<(usize, u32, u16)>,
 }
 
 impl Rebuilt {
@@ -560,6 +563,7 @@ pub(crate) fn rebuild(bytes: &[u8], budget: &mut Budget) -> Result<Rebuilt, Open
         {
             budget.entry().map_err(Fail::into_open)?;
             out.table.insert(n, (at, g));
+            out.headers.push((at, n, g));
         } else if run == b"trailer" {
             out.trailers.push(i);
         }

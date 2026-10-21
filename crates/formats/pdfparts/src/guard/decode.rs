@@ -99,6 +99,8 @@ struct Shared<'a> {
     stop: &'a dyn Fn() -> bool,
     /// The final output, when the caller wants the data and not only its size.
     kept: RefCell<Option<Vec<u8>>>,
+    /// A Flate or LZW layer stopped with a decoding error: what follows it is lost.
+    broke: Cell<bool>,
 }
 
 impl Shared<'_> {
@@ -177,15 +179,16 @@ impl<W: Write> Write for Meter<'_, W> {
 }
 
 /// LZW (ISO 32000-1 7.4.4) as a writer stage.
-struct LzwStage<W: Write> {
+struct LzwStage<'s, W: Write> {
     decoder: weezl::decode::Decoder,
     next: W,
     buf: Box<[u8]>,
     done: bool,
+    shared: &'s Shared<'s>,
 }
 
-impl<W: Write> LzwStage<W> {
-    fn new(next: W, early_change: bool) -> Self {
+impl<'s, W: Write> LzwStage<'s, W> {
+    fn new(next: W, early_change: bool, shared: &'s Shared<'s>) -> Self {
         use weezl::BitOrder;
         let decoder = if early_change {
             weezl::decode::Decoder::with_tiff_size_switch(BitOrder::Msb, 8)
@@ -197,6 +200,7 @@ impl<W: Write> LzwStage<W> {
             next,
             buf: vec![0; CHUNK].into_boxed_slice(),
             done: false,
+            shared,
         }
     }
 
@@ -210,14 +214,17 @@ impl<W: Write> LzwStage<W> {
                 Ok(_) if r.consumed_in == 0 && r.consumed_out == 0 => break,
                 Ok(_) => {}
                 // lopdf keeps what came out before an error.
-                Err(_) => self.done = true,
+                Err(_) => {
+                    self.done = true;
+                    self.shared.broke.set(true);
+                }
             }
         }
         Ok(())
     }
 }
 
-impl<W: Write> Write for LzwStage<W> {
+impl<W: Write> Write for LzwStage<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.pump(buf)?;
         Ok(buf.len())
@@ -414,7 +421,10 @@ impl<'s, W: Write> FlateStage<'s, W> {
                             return self.feed(&probe[2..]);
                         }
                         // lopdf keeps what came out before an error.
-                        _ => self.done = true,
+                        _ => {
+                            self.done = true;
+                            self.shared.broke.set(true);
+                        }
                     }
                 }
             }
@@ -469,7 +479,7 @@ fn chain<'s>(filters: &[Filter], shared: &'s Shared<'s>) -> Box<dyn Write + 's> 
         }
         w = match f {
             Filter::Flate => Box::new(FlateStage::new(w, shared)),
-            Filter::Lzw { early_change } => Box::new(LzwStage::new(w, *early_change)),
+            Filter::Lzw { early_change } => Box::new(LzwStage::new(w, *early_change, shared)),
             Filter::Ascii85 => Box::new(A85Stage {
                 next: w,
                 group: 0,
@@ -514,7 +524,21 @@ pub(crate) fn measure_bytes(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> Measure {
-    decode(raw, filters, limits, budget, stop, false).0
+    measure_checked(raw, filters, limits, budget, stop).0
+}
+
+/// [`measure_bytes`], and whether a Flate or LZW layer stopped with a decoding error, so the
+/// stream unpacks only to the part before the damage. A deflate stream that only ends early
+/// is not counted as broken: many writers cut its last bytes.
+pub(crate) fn measure_checked(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> (Measure, bool) {
+    let (m, _, broke) = decode(raw, filters, limits, budget, stop, false);
+    (m, broke)
 }
 
 /// Decodes `raw` through `filters` under the same caps and keeps the output. The data is
@@ -529,7 +553,8 @@ pub(crate) fn unpack(
     if filters.contains(&Filter::Opaque) {
         return (Measure::Fits(0), None);
     }
-    decode(raw, filters, limits, budget, stop, true)
+    let (m, data, _) = decode(raw, filters, limits, budget, stop, true);
+    (m, data)
 }
 
 fn decode(
@@ -539,7 +564,7 @@ fn decode(
     budget: u64,
     stop: &dyn Fn() -> bool,
     keep: bool,
-) -> (Measure, Option<Vec<u8>>) {
+) -> (Measure, Option<Vec<u8>>, bool) {
     // The chain ends at the first filter whose output stays encoded.
     let end = filters
         .iter()
@@ -560,15 +585,20 @@ fn decode(
         next_check: Cell::new(STOP_EVERY),
         stop,
         kept: RefCell::new(keep.then(Vec::new)),
+        broke: Cell::new(false),
     };
     run(raw, filters, &shared);
     if shared.stopped.get() {
-        return (Measure::Stopped, None);
+        return (Measure::Stopped, None, false);
     }
     if let Some(cap) = shared.over.get() {
-        return (Measure::Over(cap), None);
+        return (Measure::Over(cap), None, false);
     }
-    (Measure::Fits(shared.count.get()), shared.kept.take())
+    (
+        Measure::Fits(shared.count.get()),
+        shared.kept.take(),
+        shared.broke.get(),
+    )
 }
 
 pub(crate) fn cap_words(cap: Cap, limits: &Limits) -> String {

@@ -167,6 +167,65 @@ pub struct Encryption {
     pub empty_user_password: bool,
 }
 
+/// What the streams of a file that does not open unpack to, measured with the guard's
+/// decoder from the file as it is. It is for a parser that has to read such a file itself:
+/// that parser asks [`RawStreams::size`] before it unpacks a stream.
+#[derive(Debug, Clone, Default)]
+pub struct RawStreams {
+    sizes: HashMap<(u32, u16), u64>,
+    unpacked: u64,
+}
+
+impl RawStreams {
+    /// Measures every stream of `bytes`: one forward pass finds every object header, also the
+    /// ones a later definition of the number replaces. A stream over a cap, a stream whose
+    /// filters are named indirectly and an encrypted file give [`OpenError::Limit`] or
+    /// [`OpenError::UnsupportedEncryption`]: such a file must not be handed to the parser.
+    pub fn measure(
+        bytes: &[u8],
+        limits: &Limits,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<RawStreams, OpenError> {
+        let m = parse::measure_raw(bytes, limits, stop)?;
+        Ok(RawStreams {
+            sizes: m.sizes,
+            unpacked: m.unpacked,
+        })
+    }
+
+    /// What the stream with this object number and generation unpacks to; the largest when
+    /// the file defines the number more than once. `None` when no stream has that number.
+    pub fn size(&self, object: u32, generation: u16) -> Option<u64> {
+        self.sizes.get(&(object, generation)).copied()
+    }
+
+    /// Bytes all streams unpack to.
+    pub fn unpacked(&self) -> u64 {
+        self.unpacked
+    }
+}
+
+/// Measures one stream's data `raw` through the filters named `filters`, in order, with the
+/// guard's decoder and caps; `budget` is what is left of the total. `Err` says which cap it
+/// passes, or that the caller asked to stop.
+pub fn measure_stream(
+    raw: &[u8],
+    filters: &[&[u8]],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> Result<u64, String> {
+    let chain: Vec<guard::Filter> = filters
+        .iter()
+        .map(|name| guard::Filter::from_name(name, true))
+        .collect();
+    match guard::measure_bytes(raw, &chain, limits, budget, stop) {
+        guard::Measure::Fits(n) => Ok(n),
+        guard::Measure::Over(cap) => Err(format!("it {}", guard::cap_words(cap, limits))),
+        guard::Measure::Stopped => Err("stopped by the caller".into()),
+    }
+}
+
 /// An open PDF file.
 pub struct Pdf {
     doc: Document,
