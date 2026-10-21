@@ -1107,3 +1107,36 @@ fn an_exact_link_box_stays_exact() {
         assert!(all_text(&out).contains(rest), "{}", all_text(&out));
     }
 }
+
+#[test]
+fn a_link_over_the_end_of_an_actual_text_span_links_the_span() {
+    // The span's text stands on its first glyph; the box covers only its later glyphs.
+    let page = Page {
+        content: "BT /F1 12 Tf 72 700 Td (see ) Tj /Span << /ActualText (www.example.org) >> \
+                  BDC (xxx.yyyyyyy.zzz) Tj EMC ( now) Tj ET\n"
+            .into(),
+        annots: vec![
+            "<< /Type /Annot /Subtype /Link /Rect [140 696 178 712] \
+             /A << /S /URI /URI (http://www.example.org) >> >>"
+                .into(),
+        ],
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    assert_eq!(
+        all_links(&out.document.body),
+        [(
+            "http://www.example.org".to_string(),
+            false,
+            "www.example.org".to_string()
+        )]
+    );
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("not placed")),
+        "{:?}",
+        out.document.losses
+    );
+}

@@ -2549,6 +2549,27 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
             .min()
             .and_then(|k| u32::try_from(k).ok());
     }
+    // One ActualText span is one unit: its text stands on its first glyph, the others hold
+    // none. A link on any glyph of the span goes to all of them.
+    let mut k = 0;
+    while k < glyphs.len() {
+        if glyphs[k].actual.is_none() {
+            k += 1;
+            continue;
+        }
+        let mut e = k + 1;
+        while e < glyphs.len() && glyphs[e].joined && glyphs[e].actual.is_none() {
+            e += 1;
+        }
+        let span = &mut glyphs[k..e];
+        let mut found = span.iter().filter_map(|g| g.link);
+        if let Some(first) = found.next()
+            && found.all(|l| l == first)
+        {
+            span.iter_mut().for_each(|g| g.link = Some(first));
+        }
+        k = e;
+    }
     // Words: glyphs with ink that follow each other along one baseline without a gap.
     let ink = |g: &Gl| {
         let t = text.of(g);
@@ -2612,6 +2633,30 @@ fn link_glyphs(glyphs: &mut [Gl], text: &Texts<'_>, links: &[Link], x0: f64, y0:
     true
 }
 
+/// The targets of the links `glyphs` carry that no run with text carries, each once, in the
+/// order of the links. A link's target is cut to 200 characters for the loss.
+fn unplaced_links(glyphs: &[Gl], runs: &[Run], links: &[Link]) -> Vec<String> {
+    let mut on_glyphs = vec![false; links.len()];
+    for g in glyphs {
+        if let Some(k) = g.link.and_then(|k| on_glyphs.get_mut(k as usize)) {
+            *k = true;
+        }
+    }
+    let placed: HashSet<*const UriTarget> = runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .filter_map(|r| r.uri.as_ref().map(Rc::as_ptr))
+        .collect();
+    let mut said: HashSet<*const UriTarget> = HashSet::new();
+    links
+        .iter()
+        .zip(on_glyphs)
+        .filter(|((_, u), on)| *on && !placed.contains(&Rc::as_ptr(u)))
+        .filter(|((_, u), _)| said.insert(Rc::as_ptr(u)))
+        .map(|((_, u), _)| u.uri.chars().take(200).collect())
+        .collect()
+}
+
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it.
 fn lay_out(
@@ -2664,7 +2709,16 @@ fn lay_out(
     if !items.turned && !links.is_empty() {
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
+    let linked = !items.turned && !items.links_cut && !links.is_empty();
     items.runs = runs_of(page, &visible, text, turn, links);
+    if linked {
+        for uri in unplaced_links(&visible, &items.runs, links) {
+            items.notes.push(Note::Unsupported(format!(
+                "a URI link on page {page} to {uri} is not placed on its words: its glyphs \
+                 are in no run with text"
+            )));
+        }
+    }
     items.invisible = runs_of(page, &hidden, text, turn, links);
     for (name, list) in layers.iter().zip(&by_layer) {
         if !list.is_empty() {
@@ -2754,6 +2808,54 @@ pub(crate) fn ocr_reasons(items: &PageItems, width: f32, height: f32) -> Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_on_glyphs_but_on_no_run_is_named() {
+        let a = UriTarget::new("https://example.org/a");
+        let b = UriTarget::new("https://example.org/b");
+        let links: Vec<Link> = vec![([0.0; 4], a.clone()), ([0.0; 4], b.clone())];
+        let glyph = |link: Option<u32>| Gl {
+            start: 0,
+            len: 0,
+            x: 0.0,
+            y: 0.0,
+            dx: 1.0,
+            dy: 0.0,
+            size: 10.0,
+            adv: None,
+            bold: false,
+            italic: false,
+            mcid: None,
+            invisible: false,
+            layer: None,
+            vertical: false,
+            joined: false,
+            actual: None,
+            link,
+        };
+        let run = |text: &str, uri: Option<Rc<UriTarget>>| Run {
+            page: 1,
+            text: text.into(),
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 10.0,
+            size: 10.0,
+            bold: false,
+            italic: false,
+            mcid: None,
+            uri,
+            line: 0,
+            off_axis: false,
+        };
+        // Link 0 is on a run with text; link 1 only on a run of white space.
+        let glyphs = [glyph(Some(0)), glyph(Some(1)), glyph(None)];
+        let runs = [run("word", Some(a)), run(" ", Some(b))];
+        assert_eq!(
+            unplaced_links(&glyphs, &runs, &links),
+            ["https://example.org/b"]
+        );
+    }
     use crate::fixtures::{Page as FixturePage, pdf, show};
 
     fn open(bytes: &[u8]) -> Pdf {
