@@ -1743,23 +1743,51 @@ const ADDRESS_WORDS: usize = 4;
 
 /// Whether lines have the shape of an address or a list: each starts with a list marker, or
 /// none holds more than [`ADDRESS_WORDS`] words and words in small letters are rare (at most
-/// one a line, and at most one for every two lines). Prose, also German prose whose nouns
+/// one for every two lines, name particles aside). Prose, also German prose whose nouns
 /// start with capitals, holds many words in small letters.
 fn listed(lines: &[Line<'_>]) -> bool {
     if lines.iter().all(|l| list_marker(&l.text).is_some()) {
         return true;
     }
-    let small = |l: &Line<'_>| {
-        l.text
-            .split_whitespace()
-            .filter(|w| w.chars().next().is_some_and(char::is_lowercase))
-            .count()
-    };
-    let total: usize = lines.iter().map(small).sum();
+    let total: usize = lines.iter().map(|l| small_words(&l.text)).sum();
     lines
         .iter()
-        .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS && small(l) <= 1)
+        .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS)
         && 2 * total <= lines.len()
+}
+
+/// Words that start with a small letter, not counting name particles ("von der Heide",
+/// "Maria de la Cruz") before a capitalised word. German articles on their own are no
+/// particles: they precede nouns in prose.
+fn small_words(text: &str) -> usize {
+    const PARTICLES: [&str; 17] = [
+        "von", "van", "de", "del", "della", "di", "da", "du", "la", "le", "ten", "ter", "zu",
+        "zum", "zur", "bin", "al",
+    ];
+    const ARTICLES: [&str; 4] = ["der", "den", "dem", "des"];
+    const LINKS: [&str; 3] = ["von", "van", "zu"];
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let capital =
+        |w: Option<&&str>| w.is_some_and(|w| w.chars().next().is_some_and(char::is_uppercase));
+    let mut count = 0;
+    for (k, w) in words.iter().enumerate() {
+        if !w.chars().next().is_some_and(char::is_lowercase) {
+            continue;
+        }
+        let next = words.get(k + 1);
+        let exempt = if PARTICLES.contains(w) {
+            capital(next)
+                || (LINKS.contains(w)
+                    && next.is_some_and(|n| ARTICLES.contains(n))
+                    && capital(words.get(k + 2)))
+        } else {
+            ARTICLES.contains(w) && k > 0 && LINKS.contains(&words[k - 1]) && capital(next)
+        };
+        if !exempt {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or

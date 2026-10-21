@@ -1267,6 +1267,12 @@ fn short_and_aligned_lines_keep_their_breaks() {
         let x = 520.0 - common::helvetica_width(t, 10.0);
         c += &show("F1", 10.0, x, 660.0 - 12.0 * k as f32, t);
     }
+    for (k, t) in ["Johann von der Heide", "Am Markt 3", "20095 Hamburg"]
+        .iter()
+        .enumerate()
+    {
+        c += &show("F1", 10.0, 72.0, 610.0 - 12.0 * k as f32, t);
+    }
     for (k, t) in [
         "Prose that runs from one line to the next fills the measure of",
         "its column, and the next word never fits at the end of a line,",
@@ -1289,6 +1295,10 @@ fn short_and_aligned_lines_keep_their_breaks() {
     );
     assert!(
         md.contains("\nSample Hotel\\\nLake Road 7\\\n2000 Village\n"),
+        "{md}"
+    );
+    assert!(
+        md.contains("\nJohann von der Heide\\\nAm Markt 3\\\n20095 Hamburg\n"),
         "{md}"
     );
     assert!(
