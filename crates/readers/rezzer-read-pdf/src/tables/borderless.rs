@@ -541,7 +541,8 @@ fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
 /// Where two blocks that stand side by side part, when they do: the widest gutter between
 /// columns, when no line crosses it, the white space all lines leave there is at least
 /// [`BLOCK_GUTTER`] font sizes wide and [`BLOCK_GUTTER_RATIO`] times the median gutter, and
-/// either most lines hold text on one side only or the baselines of its sides do not line up.
+/// either the region begins or ends with two lines or more on one side only, or the baselines
+/// of its sides do not line up.
 fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Option<f32> {
     let columns = columns_of(pieces);
     if columns.len() < 3 {
@@ -574,13 +575,27 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
     if g1 - g0 < BLOCK_GUTTER * size || g1 - g0 < BLOCK_GUTTER_RATIO * median {
         return None;
     }
-    // Most lines hold text on one side only: two lists that overlap in part.
-    let both = pieces
+    // A list that starts earlier or ends later than the one beside it: the region begins or
+    // ends with two lines or more that hold text on the same side only. (A table's group
+    // heading is one line on one side, between rows that fill both.)
+    let side: Vec<u8> = pieces
         .iter()
-        .filter(|l| l.iter().any(|p| p.x1 <= mid) && l.iter().any(|p| p.x0 >= mid))
-        .count();
-    let used = pieces.iter().filter(|l| !l.is_empty()).count();
-    if 2 * both < used {
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let left = l.iter().any(|p| p.x1 <= mid);
+            let right = l.iter().any(|p| p.x0 >= mid);
+            u8::from(left) | (u8::from(right) << 1)
+        })
+        .collect();
+    let run = |it: &mut dyn Iterator<Item = &u8>| -> usize {
+        let mut it = it.peekable();
+        let Some(&&first) = it.peek() else { return 0 };
+        if first == 3 {
+            return 0;
+        }
+        it.take_while(|s| **s == first).count()
+    };
+    if run(&mut side.iter()) >= 2 || run(&mut side.iter().rev()) >= 2 {
         return Some(mid);
     }
     // The baselines and sizes of a side, line by line: those of its runs.

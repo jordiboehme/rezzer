@@ -1435,3 +1435,105 @@ fn nics_checks_grid_is_noted() {
     assert_eq!(losses.len(), 1, "{losses:?}");
     assert_eq!(losses[0].why, LossReason::Uncertain);
 }
+
+#[test]
+fn lists_that_overlap_in_part_are_no_table() {
+    // A label and value list on the right whose last three lines share their baselines with a
+    // short list on the left that starts lower: the lines read across, yet no table mixes the
+    // two lists.
+    let mut c = String::new();
+    let right = [
+        ("Room No.", "101"),
+        ("Arrival", "2030-01-02"),
+        ("Departure", "2030-01-05"),
+        ("Cashier", "77"),
+        ("Folio No.", "1000"),
+    ];
+    for (k, (l, v)) in right.iter().enumerate() {
+        let y = 700.0 - 12.0 * k as f32;
+        c += &show("F1", 8.0, 400.0, y, l);
+        c += &show("F1", 8.0, 470.0, y, v);
+    }
+    let left = [
+        ("Confirmation", "4711"),
+        ("Group", "Sample"),
+        ("Booking", "1234"),
+    ];
+    for (k, (l, v)) in left.iter().enumerate() {
+        let y = 676.0 - 12.0 * k as f32;
+        c += &show("F1", 8.0, 40.0, y, l);
+        c += &show("F1", 8.0, 120.0, y, v);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    for (_, rows) in tables(page(&out, 1)) {
+        let cells: Vec<&String> = rows.iter().flatten().collect();
+        let has = |words: &[(&str, &str)]| {
+            cells
+                .iter()
+                .any(|c| words.iter().any(|(l, _)| c.as_str() == *l))
+        };
+        assert!(
+            !(has(&left) && has(&right)),
+            "a table mixes both lists: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn a_note_row_across_a_ruled_table_stays_one_cell() {
+    // A fully ruled table of three columns with a row whose one cell spans the table and
+    // holds a note of two lines, each set in several runs: the note stays one cell.
+    let mut c = String::from("0.5 w ");
+    let ys = [700.0, 680.0, 660.0, 620.0, 600.0];
+    for y in ys {
+        c += &format!("50 {y} m 410 {y} l S ");
+    }
+    for x in [50.0, 410.0] {
+        c += &format!("{x} 600 m {x} 700 l S ");
+    }
+    for x in [170.0, 290.0] {
+        c += &format!("{x} 660 m {x} 700 l S {x} 600 m {x} 620 l S ");
+    }
+    for (r, row) in [["Fruit", "Count", "Price"], ["Apples", "3", "1.20"]]
+        .iter()
+        .enumerate()
+    {
+        for (k, t) in row.iter().enumerate() {
+            c += &show(
+                "F1",
+                9.0,
+                56.0 + 120.0 * k as f32,
+                686.0 - 20.0 * r as f32,
+                t,
+            );
+        }
+    }
+    for (k, y) in [646.0, 634.0].iter().enumerate() {
+        c += &format!(
+            "BT /F1 9 Tf 56 {y} Td [(Note {k}: the prices) -1500 (of the season) -1500 \
+             (change from week to week)] TJ ET\n"
+        );
+    }
+    for (k, t) in ["Pears", "12", "0.80"].iter().enumerate() {
+        c += &show("F1", 9.0, 56.0 + 120.0 * k as f32, 606.0, t);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let note: Vec<&Vec<String>> = found[0].1.iter().filter(|r| r.len() == 1).collect();
+    assert_eq!(note.len(), 1, "{found:?}");
+    assert!(
+        note[0][0].starts_with("Note 0:") && note[0][0].contains("Note 1:"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn invoice_table_turned_down_or_upside_down() {
+    // The invoice table drawn downward on a page turned the other way, and upside down on a
+    // landscape page: read in the turned frame, the same table.
+    let down = format!("q 0 -1 1 0 0 842 cm\n{}Q\n", invoice_table());
+    assert_invoice_table(&read(&sized_page(&down, 595.0, 842.0, "/Rotate 270")));
+    let half = format!("q -1 0 0 -1 842 595 cm\n{}Q\n", invoice_table());
+    assert_invoice_table(&read(&sized_page(&half, 842.0, 595.0, "/Rotate 180")));
+}

@@ -572,8 +572,9 @@ fn drawn_inside(
 }
 
 /// Opens the bands of the body below the header that one cell fills from side to side: when
-/// at least two of a band's lines hold text in two of the header's columns or more, each of
-/// its squares is a cell of its own.
+/// at least two of a band's lines hold text in two of the header's columns or more, and at
+/// most a quarter of its pieces of text reach over a column's side, each of its squares is a
+/// cell of its own.
 fn open_bands(
     flow: &Flow,
     within: &[usize],
@@ -589,48 +590,62 @@ fn open_bands(
     if !whole.contains(&true) {
         return;
     }
-    // The runs of each such band: baseline, size and column.
-    let mut bands: Vec<Vec<(f32, f32, usize)>> = vec![Vec::new(); rows];
+    // The runs of each such band: baseline, size and extent.
+    let mut bands: Vec<Vec<(f32, f32, f32, f32)>> = vec![Vec::new(); rows];
     for &i in within {
         let run = &flow.runs[i];
-        let (cx, cy) = middle(run);
+        let (_, cy) = middle(run);
         let r = ys
             .partition_point(|e| *e > cy)
             .saturating_sub(1)
             .min(rows - 1);
         if whole[r] {
-            let c = xs
-                .partition_point(|e| *e < cx)
-                .saturating_sub(1)
-                .min(cols - 1);
-            bands[r].push((run.y, run.size.max(1.0), c));
+            bands[r].push((run.y, run.size.max(1.0), run.x, run.x + run.w));
         }
     }
+    let column = |x: f32| {
+        xs.partition_point(|e| *e < x)
+            .saturating_sub(1)
+            .min(cols - 1)
+    };
     for (r, band) in bands.iter_mut().enumerate() {
         if band.len() < 4 {
             continue;
         }
-        band.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
-        let mut spread = 0usize;
+        band.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.total_cmp(&b.2)));
+        // Lines of pieces (runs closer than a cell gap): those in two columns or more, and
+        // pieces that reach over a column's side.
+        let (mut spread, mut pieces, mut crossing) = (0usize, 0usize, 0usize);
         let mut k = 0;
         while k < band.len() {
-            let (y, size, first) = band[k];
+            let (y, size, _, _) = band[k];
             let mut e = k + 1;
-            let mut columns = 1;
-            let mut last = first;
             while e < band.len() && y - band[e].0 <= 0.3 * size {
-                if band[e].2 != last {
-                    columns += 1;
-                    last = band[e].2;
-                }
                 e += 1;
             }
-            if columns >= 2 {
+            let line = &mut band[k..e];
+            line.sort_by(|a, b| a.2.total_cmp(&b.2));
+            let mut spans: Vec<(f32, f32)> = Vec::new();
+            for &(_, size, x0, x1) in line.iter() {
+                match spans.last_mut() {
+                    Some(p) if x0 - p.1 <= CELL_GAP * size => p.1 = p.1.max(x1),
+                    _ => spans.push((x0, x1)),
+                }
+            }
+            let mut used: Vec<usize> = spans.iter().map(|p| column((p.0 + p.1) / 2.0)).collect();
+            used.dedup();
+            if used.len() >= 2 {
                 spread += 1;
             }
+            pieces += spans.len();
+            crossing += spans
+                .iter()
+                .filter(|p| column(p.0 + SNAP) != column(p.1 - SNAP))
+                .count();
             k = e;
         }
-        if spread >= 2 {
+        // Text that runs over the columns (a note across the table) keeps the band whole.
+        if spread >= 2 && 4 * crossing <= pieces {
             owner[r] = (0..cols).map(|c| (r, c)).collect();
         }
     }

@@ -1300,3 +1300,40 @@ fn short_and_aligned_lines_keep_their_breaks() {
         "{md}"
     );
 }
+
+#[test]
+fn running_footers_are_found_on_turned_pages() {
+    // Three pages whose text is drawn upward, each with the same footer line at the bottom of
+    // the turned frame: the footer is a running footer, not body text.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = Vec::new();
+    for n in 1..=3 {
+        let content = format!(
+            "q 0 1 -1 0 595 0 cm BT /F1 10 Tf 72 500 Td (Body text of page {n}.) Tj ET \
+             BT /F1 8 Tf 72 20 Td (Sample Company - confidential) Tj ET Q\n"
+        );
+        let c = b.stream("", content.as_bytes());
+        kids.push(b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Rotate 90 \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+        )));
+    }
+    let refs: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count 3 >>", refs.join(" ")),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    for n in 1..=3 {
+        let footer = page(&out, n).iter().any(|b| {
+            matches!(b, Block::Paragraph { inlines, role, .. }
+                if role.as_deref() == Some("page-footer")
+                    && plain_text(inlines).contains("confidential"))
+        });
+        assert!(footer, "page {n}: {:#?}", page(&out, n));
+    }
+}
