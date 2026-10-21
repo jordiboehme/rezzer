@@ -376,7 +376,8 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .filter(|e| e.kind == "links_to")
             .count(),
     );
-    count("Images", images(doc));
+    let (places, distinct) = images(doc);
+    count("Images", places);
     if !workbook {
         count("Annotations", doc.facets.annotations.len());
     }
@@ -401,6 +402,12 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .count(),
     );
     count("Not read", doc.losses.len());
+    // One picture drawn at several places (a logo on every page) is one file.
+    if distinct < places
+        && let Some((_, v)) = out.iter_mut().find(|(k, _)| k == "Images")
+    {
+        *v = format!("{places} ({distinct} distinct)");
+    }
     let changed = [&doc.properties.modified, &doc.properties.created]
         .into_iter()
         .flatten()
@@ -420,14 +427,16 @@ fn date_text(v: &Value) -> Option<String> {
     }
 }
 
-/// Media blocks whose asset is an image, plus image inlines in the body.
-fn images(doc: &Document) -> usize {
+/// Media blocks whose asset is an image, plus image inlines in the body: how many places,
+/// and how many distinct pictures (assets, and image inlines by their target).
+fn images(doc: &Document) -> (usize, usize) {
     let mime: HashMap<&str, &str> = doc
         .assets
         .iter()
         .map(|a| (a.id.as_str(), a.mime.as_str()))
         .collect();
     let mut n = 0;
+    let mut seen: HashSet<String> = HashSet::new();
     walk::blocks(&doc.body, |b| {
         if let Block::Media { asset, .. } = b
             && mime
@@ -435,15 +444,21 @@ fn images(doc: &Document) -> usize {
                 .is_some_and(|m| m.starts_with("image/"))
         {
             n += 1;
+            if !seen.contains(asset.as_str()) {
+                seen.insert(asset.clone());
+            }
         }
         walk::block_inlines(b, |list| {
             walk::inlines(list, |i| {
-                if matches!(i, Inline::Image { .. }) {
+                if let Inline::Image { target, .. } = i {
                     n += 1;
+                    if !seen.contains(target.as_str()) {
+                        seen.insert(target.clone());
+                    }
                 }
             });
         });
         true
     });
-    n
+    (n, seen.len())
 }

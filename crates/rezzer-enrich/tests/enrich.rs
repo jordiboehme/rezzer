@@ -322,6 +322,33 @@ fn overview_lists_sections_and_counts() {
 }
 
 #[test]
+fn overview_counts_one_picture_at_several_places_once_more() {
+    // One picture at three places and one at one: four images, two distinct.
+    let mut d = doc();
+    let place = |asset: &str| Block::Media {
+        asset: asset.into(),
+        alt: None,
+        anchor: None,
+    };
+    d.body = vec![place("logo"), place("logo"), place("chart"), place("logo")];
+    for id in ["logo", "chart"] {
+        d.assets.push(Asset {
+            id: id.into(),
+            path: None,
+            sha256: "00".into(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: None,
+            needs_vision: false,
+        });
+    }
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    let images = o.facts.iter().find(|(k, _)| k == "Images").map(|(_, v)| v);
+    assert_eq!(images.map(String::as_str), Some("4 (2 distinct)"));
+}
+
+#[test]
 fn last_changed_falls_back_to_created() {
     let mut d = doc();
     d.properties.created = Some(Value::Date {
