@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV and spreadsheets (XLSX, XLSM, XLSB and ODS) today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -50,6 +50,8 @@ rezzer read notes.md              # Markdown with OKF frontmatter to stdout
 rezzer rez budget.xlsx -o out/    # writes out/budget.xlsx.md (rez is short for read)
 rezzer read data.csv --json       # the document model as JSON
 rezzer read calc.xlsx --sections logic   # only the formulas and what they read
+rezzer read scan.pdf -o out/      # also writes pages that need vision to out/scan.pdf.assets/
+rezzer read locked.pdf --password-stdin < password.txt   # the password comes from stdin, never from the command line
 rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
@@ -60,7 +62,7 @@ Use it from an agent (Claude Code shown, any MCP client works):
 claude mcp add rezzer -- rezzer mcp
 ```
 
-The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages.
+The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages. `rez` also takes a `password` for a protected PDF and an `output_dir` for the pages that need vision.
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
 
@@ -179,11 +181,11 @@ flowchart LR
 
 ## Formats
 
-Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB and ODS work today. The other formats are planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations.
+Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB, ODS and PDF work today. The other formats are planned for the first release. Each format has its own page with what Rezzer extracts and the known limitations. The pages of the formats that work today also show real output and how they are tested: the test files, the hostile cases and the speed.
 
 | Format | What Rezzer gets | Built on |
 |---|---|---|
-| [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, signatures, revisions | [lopdf](https://crates.io/crates/lopdf), [hayro](https://crates.io/crates/hayro) |
+| [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, scripts, signatures, revisions, pages that need vision | own reader on [lopdf](https://crates.io/crates/lopdf), [hayro](https://crates.io/crates/hayro) |
 | [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, inputs and results, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [XLS](docs/formats/xls.md) | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
 | [ODS](docs/formats/ods.md) | Values, formulas with references, inputs and results, names, comments, validation | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |

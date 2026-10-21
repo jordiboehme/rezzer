@@ -2,88 +2,130 @@
 
 Rezzer reads the text of a PDF in reading order, and also the layer behind it: outline, annotations with author and date, form fields with their calculations, scripts, signatures and saved revisions.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: available in the development version (no release yet).
 
 File types: `.pdf`. Rezzer detects the format by content, not by extension.
 
-Built on (versions as tested on 2026-10-19):
+Built on (versions as used in the development version):
 
-- [lopdf](https://crates.io/crates/lopdf) 0.45.0 for the object layer: metadata, outline, annotations, forms, scripts, layers, signatures, revisions
-- [pdf-inspector](https://crates.io/crates/pdf-inspector) 1.25.2 for text in reading order, tables and the "does this page need OCR" check
-- [hayro](https://crates.io/crates/hayro) 0.8.0 to render pages for OCR and vision, for exact glyph boxes and as a fallback for broken files
-- Rezzer's own reader for the interpretation: page labels, name trees, the form logic, revision diffs and XMP
+- Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.45.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
+- [hayro](https://crates.io/crates/hayro) 0.8.0 (with hayro-interpret and hayro-syntax) for the text with its position on the page, the exact glyph boxes under an annotation, page renders and as a fallback parser for broken files
+- Rezzer's own reader for the interpretation: reading order, headings, tables, the form logic, field formats in words and revision diffs
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
-- Text in reading order, also on two-column pages
-- Headings, lists, tables and footnotes from the tag tree when the PDF is tagged. Untagged PDFs get headings from font size
-- Tables as cells. A tagged PDF gives its tables from the tag tree, with header rows and cells that span. A table that goes on over several pages stays one table, and the column titles it repeats on each page are left out
+- Text in reading order, also on two-column pages. Every page starts with a marker that names its label and its number in the file
+- Headings, lists and tables from the tag tree when the PDF is tagged. Untagged PDFs get headings from the font size
+- Tables as cells. A tagged PDF gives its tables from the tag tree. On untagged pages Rezzer rebuilds a table from drawn lines and from the white space between columns, but only when the evidence is strong
+- Running headers and footers, and text that is invisible on the page, are marked as such
 - Outline (bookmarks) with level, title and target page
 - Page labels (i, ii, iii, then 1, 2, 3 and so on)
-- Links: internal targets, named destinations and web links
+- Links: web links in the text, internal targets and named destinations. Internal links stay text, because there is no target to link to in the output
 - Article threads (reading paths across pages)
-- Alt text, ActualText and table header attributes from the tag tree
+- Arabic text and vertical Japanese text in logical order
 
 ### Metadata
 
 - Info dictionary: title, author, subject, keywords, creator, producer, dates with their time zone
-- XMP metadata
-- Document language
+- XMP metadata, also PDF/A
+- Document language and PDF version
+- File facts in the frontmatter: pages, tagged, encrypted, signed, signatures, revisions, form fields, whether it has scripts and layers
 
 ### Hidden logic
 
-- Annotations: highlight, underline, strikeout, free text, sticky notes, ink and others, with author, dates, color and the text they cover. Replies and popups stay with their annotation
-- Form fields: name, type, value and flags (read-only, required)
-- Form calculations: the calculation order and the field each calculation reads (from `getField("...")` calls)
-- Field formats in words: `AFNumber_Format(2, 0, 0, 0, "$", true)` becomes "number, 2 decimals, $ before the number". The same for date, percent and special formats (ZIP, phone, SSN)
+- Annotations: highlight, underline, strikeout, squiggly, free text, sticky notes, ink, caret, stamps, shapes and others, with author and date. A markup annotation quotes the exact words under it. Replies stay with their annotation, and a review state marks it as resolved
+- Form fields: name, label, type, value, flags (read-only, required, multiline and others) and options
+- Form calculations: the calculation order and the fields each calculation reads (from `getField("...")` calls)
+- Field formats in words: `AFNumber_Format(2, 0, 0, 0, "$", true)` becomes `number, 2 decimals, "$" before the number`. The same for date, time, percent and special formats (ZIP code, phone number, social security number)
 - Each field gets a role: input (the user fills it), result (a calculation sets it) or constant (read-only, no calculation)
-- Scripts: document JavaScript, open actions, page and field actions. Listed as text, never run
-- Digital signatures: signer, date, reason, type and whether the signature covers the whole file
+- Scripts: document JavaScript, open actions, page and field actions. Listed with their text, never run
+- Digital signatures: signer, date, reason, location, kind (field, usage rights, certification), whether the signature covers the whole file and how many saves came after it. Signatures are not verified
 - Revisions: each incremental save, with its date and what changed
 - Layers (optional content) with name and default visibility
+- XFA form data is found and said, not read
 
 ### Pictures and embedded files
 
-- Pages that need OCR or hold pictures are rendered to PNG and listed as "needs vision" with page number and reason
-- Embedded files are listed and can be read by Rezzer as well
+- A page without a text layer, with glyphs that have no Unicode mapping or with large pictures needs vision. It is listed with the reason. With an output directory (`-o` on the command line), Rezzer renders it to a PNG file at 144 dpi, at most 16 million pixels
+- Attachments are listed with name and size. They are never opened
+- A PDF with a user password is read with `--password-stdin` (command line) or the `password` option (MCP). The password never shows up in the output, in the logs or in the cache
 
-## How it shows up in the output
+## Example
 
-The text comes first, with annotations next to their passage. Then a `Form logic` section with one table per form, a Mermaid graph when a field reads another field, a `Scripts` section and a `Revisions` section. Signatures, revision count, layers and the form field count go into the frontmatter.
+Real output of `rezzer read` for two files of the test corpus, cut to the parts that show the form logic and an annotation. From `pdfjs-text-field-calc.pdf` (the empty page markers and the Embedded section are cut):
 
-Example (not final):
+````markdown
+## Logic
 
-```markdown
-## Form logic
+### Form
 
-| Field | Type | Role | Format | Rule | Reads | Flags |
-|---|---|---|---|---|---|---|
-| Source | text | input | | | | |
-| Mirror | text | result (calc 1) | | `event.value = this.getField("Source").value` | Source | read-only |
-| Allottment Amount | text | input | number, 2 decimals, "$" before | | | |
-```
+| Field | Type | Role | Value | Format | Rule | Reads | Flags |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Source | text | input |  |  |  |  |  |
+| Mirror | text | result (calc 1) |  |  | script, see below | Source | read-only |
 
+### Graph: form
+
+Kind dependency, 2 nodes, 1 edge.
 ```mermaid
 flowchart LR
-  Source["Source (input)"] --> Mirror["Mirror (result, calc 1)"]
+    n_f1["Source (input)"]
+    n_f2["Mirror (result, calc 1)"]
+    n_f2 -->|"reads"| n_f1
+```
+
+### Calculations
+
+Mirror, calc 1:
+```javascript
+event.value = this.getField("Source").value;
+```
+````
+
+From `pdfjs-annotation-highlight.pdf` (the frontmatter and the overview are cut):
+
+```markdown
+:status[Page 1]{grey}
+
+Highlight
+
+Lorem ipsum dolor sit amet
+
+> [!NOTE] Highlight by Tim van der Meij, 2015-12-30T15:22:48+01:00
+> > Lorem ipsum dolor sit amet
+>
+> Highlight content
 ```
 
 ## Known limitations
 
 - XFA forms are not read. The output says "XFA form data present, not read"
 - Scripts are listed, never run. When a script builds field names at run time, the dependency is marked "unknown, see script"
-- Tables on untagged PDFs are found from drawn lines and from the white space between columns. Rezzer only rebuilds such a table when the evidence is strong. When it is not sure, the text stays as paragraphs and a note says "Possible table on page N not rebuilt" with the reason. Complex tables, for example with two header rows or values between rows, often get this note
+- Tables marked only by a rule at the top and at the bottom (as in many scientific papers) stay paragraphs. A note says "Possible table on page N not rebuilt" with the reason
+- A header row of several lines is found by bold text or font size, not by its fill color alone
+- Header icons drawn with curves are not marked
+- Some line breaks are joined: lines of verse with five words or more, two-line blocks that are aligned right, label pairs, and lines like "Suite 200 of the / Old Mill Building". No word is lost
 - Tables on pages with form fields and tables inside pictures are not rebuilt
-- Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer
-- lopdf 0.45.0 decodes some outline titles wrongly ("Isís" as "Is?s"). Rezzer decodes titles itself
-- pdf-inspector 1.25.2 does not decode UTF-16 form values and reports a file with a broken cross-reference table as "scanned". Rezzer reads form values through lopdf and checks pages with fonts before it trusts a "scanned" result
-- When lopdf can't load a file, Rezzer falls back to hayro for that file and says so in the output
-- Revision diffs skip the first save of a linearized file
-- No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the crate API but are not proven on a real file
-- Form flags inherited from parent fields are not handled yet
+- Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
+- A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
+- At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
+- Under a short time limit, the text of a long file may be read in part only. The output says from which page on
+- When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
+- Revision diffs count the first save of a linearized file as one save
+- No public test file was found for `AFSimple_Calculate`, `AFPercent_Format` or a field with the required flag. These parts follow the format specification but are not proven on a real file
 
-## Tested with
+## How it is tested
 
-33 public test files from the pdf.js, qpdf, PDFBox and py-pdf test suites, arXiv, US government sites and the US National Archives. See [MANIFEST-pdf.md](../spike-2026-10-19/MANIFEST-pdf.md).
+The corpus has 38 public PDF files from the test suites of pdf.js, qpdf, PDFBox, py-pdf and pdfplumber, and from the IRS, the National Archives, NIST and arXiv. Two large files (NIST and arXiv) are fetched by a script and not kept in the repository.
+
+Extreme cases that were held, at the default limits:
+
+- A content stream of 1 MB that unpacks to 1 GiB: the page is not read, the other page is, peak memory 12 MiB
+- An object stream of 1 MB that unpacks to 1 GiB: the file is refused, peak memory 74 MiB
+- A picture of 40,000 by 40,000 pixels on a page that needs vision: not rendered, peak memory 9 MiB
+- 100,000 pages that share one content stream of 40 lines, with a time limit of 2 seconds: the read stops after 2.3 seconds and says so, peak memory 416 MiB
+- A script of 64 MiB: listed without its text, peak memory 250 MiB
+
+Speed: the NIST report SP 800-53 revision 5 (6.1 MB, 492 pages) reads in 2.2 seconds with a peak memory of 209 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.

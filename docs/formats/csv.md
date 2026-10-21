@@ -12,7 +12,7 @@ Built on (versions as tested on 2026-10-19):
 - The same encoding detection as for [plain text](text.md): [encoding_rs](https://crates.io/crates/encoding_rs) 0.8.42 and [chardetng](https://crates.io/crates/chardetng) 1.0.0
 - Rezzer's own reader for the delimiter, the header row, column types and the relation check
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
@@ -35,15 +35,28 @@ Built on (versions as tested on 2026-10-19):
 
 ## How it shows up in the output
 
-The table, then a `Columns` table (name, type, unit, missing, distinct, key) and a `Relations` section with the checked relations.
+The table, then a `Columns` table (column, type, unit, missing, unique, key) and a Logic section with the relations that were checked, marked as found in the data and not written in the file.
 
-Example (not final):
+## Example
+
+Real output of `rezzer read` for `csv-datahub-co2-fossil-global.csv` from the test corpus. The overview and the Logic section; the table of 275 rows between them is cut:
 
 ```markdown
-## Relations
+## Overview
 
-- Total ~ Gas Fuel + Liquid Fuel + Solid Fuel + Cement + Gas Flaring
-  (210 of 275 rows within rounding, residual up to 125)
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| csv-datahub-co2-fossil-global | sheet | 275 rows x 8 columns | result |  |
+
+- Formulas: 1
+
+## Logic
+
+Found in the data, not written as formulas in the file.
+
+| Cells | Formula | Reads | Role | Value | Note |
+| --- | --- | --- | --- | --- | --- |
+| csv-datahub-co2-fossil-global!B:B | `Total = Gas Fuel + Liquid Fuel + Solid Fuel + Cement + Gas Flaring` | csv-datahub-co2-fossil-global!C:C, csv-datahub-co2-fossil-global!D:D, csv-datahub-co2-fossil-global!E:E, csv-datahub-co2-fossil-global!F:F, csv-datahub-co2-fossil-global!G:G | result |  | holds 210 of 275 rows |
 ```
 
 ## Known limitations
@@ -56,6 +69,14 @@ Example (not final):
 - The table shows at most 10,000 rows, 1,000 columns and 200,000 cells (counted after short rows are padded). The Columns table lists at most 500 columns. The output says what is not shown
 - qsv-sniffer 0.12.2 was tested for delimiter and header detection. It failed or was wrong on 8 of 13 files and its repository is archived, so Rezzer does its own detection
 
-## Tested with
+## How it is tested
 
-14 public test files from csv-spectrum, pandas, the German weather service (DWD), GeoNames and the datahub datasets. Two of them were made from public files (one changed to Latin-1 without a header, one broken on purpose). See [MANIFEST-web-text.md](../spike-2026-10-19/MANIFEST-web-text.md).
+The corpus has 12 public files: 11 CSV files (one of them a semicolon file named `.txt`) and 1 TSV file, from csv-spectrum, pandas, the German weather service (DWD), GeoNames and the datahub datasets. Two of them were made from public files (one changed to Latin-1 without a header, one broken on purpose). See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+
+Extreme cases that were held, at the default limits:
+
+- One row of 50 MB without a line break, with a time limit of 1 second: the read ends within the limit plus 2 seconds
+- 100 MB of short rows with a time limit of 50 ms: the read stops in time and says so
+- 1 MB of random bytes: reported as a format Rezzer does not know, not as a broken file
+
+Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.05 seconds with a peak memory of 9 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
