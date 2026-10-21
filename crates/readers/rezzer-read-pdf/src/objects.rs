@@ -43,13 +43,14 @@ const CHANGES_SHOWN: usize = 20;
 const TIME_EVERY: u32 = 1024;
 
 /// Reads the object layer into `out`, after the pages: the page text has the first claim on
-/// the bytes the file may keep. `links` are the file's links, read once for the pages too.
-/// The revisions are read first: they are few, and the lists after them draw on the same
-/// pdfparts budget.
+/// the bytes the file may keep. `links` are the file's links, read once for the pages too;
+/// `events` are the revisions' events, read by [`revisions`] before any list.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn read(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[Link],
+    events: Events,
     opts: &ReadOptions,
     budget: &Budget,
     room: &LinkRoom,
@@ -62,7 +63,6 @@ pub(crate) fn read(
         calls: Counter::new(0),
     };
     meta::facts(pdf, out);
-    let events = revisions(pdf, budget, out);
     meta::properties(pdf, &kept, out);
     outline(pdf, pages, &kept, out);
     link_graph(links, pages, &kept, out);
@@ -77,6 +77,15 @@ pub(crate) fn read(
 /// the object layer of a hostile file already takes much of the memory by itself.
 const OWN_SHARE: u64 = 64;
 
+/// What one item with copies of `texts` costs: [`ITEM_COST`] plus the most bytes each text
+/// can be written as.
+fn item_bytes(texts: &[&str]) -> u64 {
+    texts
+        .iter()
+        .map(|t| link_target_written_len(t))
+        .fold(ITEM_COST, u64::saturating_add)
+}
+
 /// The charges for copies in the model.
 pub(crate) struct Kept<'a> {
     room: &'a LinkRoom,
@@ -89,6 +98,32 @@ pub(crate) struct Kept<'a> {
 impl Kept<'_> {
     /// Charges one item of `elements` model elements with copies of `texts`. `Err` says why it
     /// does not fit: then nothing more of its kind may be kept.
+    /// The share of the memory limit the object layer may keep at most.
+    pub(crate) fn share(&self) -> u64 {
+        self.budget.limits().max_memory_bytes / OWN_SHARE
+    }
+
+    /// As [`Kept::take`], within `cap` too, which it takes from: a part that must leave room
+    /// for the others.
+    pub(crate) fn take_within(
+        &self,
+        cap: &Counter<u64>,
+        elements: u64,
+        texts: &[&str],
+    ) -> Result<(), String> {
+        let bytes = item_bytes(texts);
+        if bytes > cap.get() {
+            return Err(format!(
+                "the copies take more than the {} bytes left of the half of that share the \
+                 lists may take",
+                cap.get()
+            ));
+        }
+        self.take(elements, texts)?;
+        cap.set(cap.get() - bytes);
+        Ok(())
+    }
+
     /// The bytes are checked first, so an item that does not fit costs nothing.
     pub(crate) fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
         self.calls.set(self.calls.get().wrapping_add(1));
@@ -97,10 +132,7 @@ impl Kept<'_> {
         {
             return Err(hit.to_string());
         }
-        let bytes = texts
-            .iter()
-            .map(|t| link_target_written_len(t))
-            .fold(ITEM_COST, u64::saturating_add);
+        let bytes = item_bytes(texts);
         if bytes > self.room.left() {
             return Err(format!(
                 "the copies take more than the {} bytes left of what the file may keep",
@@ -121,6 +153,15 @@ impl Kept<'_> {
         debug_assert!(taken, "checked above");
         self.own.set(own - bytes);
         Ok(())
+    }
+}
+
+/// `n` things with their verb: "1 keyword is", "3 keywords are".
+pub(crate) fn count_is(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one} is")
+    } else {
+        format!("{n} {many} are")
     }
 }
 
@@ -722,7 +763,12 @@ fn revision_text(rev: &Revision) -> String {
 /// The revisions: their count as a fact, their issues as losses, and the time and words of
 /// one event per revision, when the file has 2 or more (a file saved once has no history to
 /// tell). Older revisions over the cap are counted, not compared: that is one Limit Info loss.
-fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Vec<(u32, Option<String>, String)> {
+/// The revisions' events: number, time and words.
+pub(crate) type Events = Vec<(u32, Option<String>, String)>;
+
+/// They are read before the links and every other list, which draw on the same pdfparts
+/// budget: they are few and small.
+pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Events {
     let stop = || budget.check_time().is_err();
     let r = pdf.revisions(&stop);
     let count = r.list.len() + r.skipped;
@@ -754,7 +800,7 @@ fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> Vec<(u32, Option<Stri
 }
 
 /// One timeline event per revision, charged like every other copy.
-fn timeline(events: Vec<(u32, Option<String>, String)>, kept: &Kept<'_>, out: &mut Out) {
+fn timeline(events: Events, kept: &Kept<'_>, out: &mut Out) {
     let last = events.last().map_or(0, |(n, _, _)| *n);
     for (number, time, text) in events {
         if let Err(why) = kept.take(1, &[&text, time.as_deref().unwrap_or_default()]) {

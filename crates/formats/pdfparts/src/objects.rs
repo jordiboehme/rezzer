@@ -271,7 +271,7 @@ impl Shared {
         decode: Decode,
         budget: &mut TextBudget<'_>,
     ) -> Result<Option<Arc<str>>, Spent> {
-        let id = reference(obj);
+        let id = final_id(doc, obj);
         if let Some(id) = id
             && let Some(t) = self.texts.get(&(id, decode))
         {
@@ -307,6 +307,13 @@ impl Shared {
             Err(_) => Ok(None),
         }
     }
+}
+
+/// The object a chain of references from `obj` ends at, `None` when `obj` is direct (or the
+/// chain is broken). Memos of shared data are keyed by it, so items that each name an object
+/// of their own that only refers on to one shared object still share it.
+pub(crate) fn final_id(doc: &Document, obj: &Object) -> Option<ObjectId> {
+    doc.dereference(obj).ok().and_then(|(id, _)| id)
 }
 
 /// Follows references to the object they name. A missing object gives `None`. lopdf bounds

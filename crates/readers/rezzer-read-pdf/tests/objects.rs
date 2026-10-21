@@ -637,3 +637,28 @@ fn an_attachment_shows_the_size_it_unpacks_to() {
     let e = &out.document.facets.embedded[0];
     assert_eq!(e.detail.as_deref(), Some("3 bytes stated, 5000 unpacked"));
 }
+
+#[test]
+fn one_keyword_too_long_is_said_in_the_singular() {
+    // At 8 MiB the lists may take 64 KiB; the one keyword is 100 KB.
+    let info = format!("<< /Keywords ({}) /Title (T) >>", "k".repeat(100_000));
+    let bytes = with_metadata(&info, "");
+    let limits = Limits {
+        max_memory_bytes: 8 << 20,
+        ..Limits::default()
+    };
+    let out = read_opts(&bytes, &ReadOptions::default(), limits);
+    assert!(out.document.properties.keywords.is_empty());
+    assert_eq!(out.document.properties.title.as_deref(), Some("T"));
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("keyword"))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert!(
+        loss.what
+            .starts_with("1 keyword is not kept, from keyword 1 on: "),
+        "{loss:?}"
+    );
+}

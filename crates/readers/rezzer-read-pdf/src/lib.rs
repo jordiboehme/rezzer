@@ -80,11 +80,13 @@ fn read_pdf(
     };
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
-    // The links are read once, for the text and for the object layer.
+    // The revisions are read before any list that draws on pdfparts' budget; the links once,
+    // for the text and for the object layer.
+    let events = objects::revisions(&pdf, budget, &mut out);
     let links = pdf.links();
     let extracted = extract(&pdf, &pages, &links, budget, &mut out, text_stop);
     let room = lay_out(&pdf, &pages, extracted, budget, &mut out);
-    objects::read(&pdf, &pages, &links, opts, budget, &room, &mut out);
+    objects::read(&pdf, &pages, &links, events, opts, budget, &room, &mut out);
     out.finish()
 }
 

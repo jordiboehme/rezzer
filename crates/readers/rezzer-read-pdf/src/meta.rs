@@ -5,6 +5,7 @@
 //! The Info dictionary and XMP as properties, and the facts of the file as a whole. Every copy
 //! is charged like the rest of the object layer ([`Kept`]).
 
+use std::cell::Cell as Counter;
 use std::collections::HashSet;
 
 use pdfparts::objects::xmp_date;
@@ -12,7 +13,7 @@ use pdfparts::{Info, IssueKind, Pdf};
 use rezzer_model::{LossReason, Severity, Value};
 
 use crate::Out;
-use crate::objects::{Kept, given, is_are, iso, quote};
+use crate::objects::{Kept, count_is, given, is_are, iso, quote};
 
 /// The facts of the file as a whole that need no copy.
 pub(crate) fn facts(pdf: &Pdf, out: &mut Out) {
@@ -97,31 +98,7 @@ pub(crate) fn properties(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
     let mut lists_cut: Vec<(&str, (usize, usize, String))> = Vec::new();
     // The Info author is one name; the XMP creators are a list, joined with "; ".
     let (author, xmp_author) = pick(info.author.as_deref(), "dc:creator");
-    if let Some(a) = author {
-        let names: Box<dyn Iterator<Item = &str>> = if given(info.author.as_deref()).is_some() {
-            Box::new(std::iter::once(a.as_str()))
-        } else {
-            Box::new(a.split("; ").map(str::trim).filter(|n| !n.is_empty()))
-        };
-        if let Some(cut) = copy_list(names, false, kept, &mut props.authors) {
-            lists_cut.push(("authors", cut));
-        }
-    }
     let (keywords, xmp_keywords) = pick(info.keywords.as_deref(), "pdf:Keywords");
-    if let Some(k) = keywords {
-        // Some producers write the whole list in quotes.
-        let list = k
-            .strip_prefix('"')
-            .and_then(|k| k.strip_suffix('"'))
-            .unwrap_or(&k);
-        let words = list
-            .split([',', ';'])
-            .map(str::trim)
-            .filter(|w| !w.is_empty());
-        if let Some(cut) = copy_list(words, true, kept, &mut props.keywords) {
-            lists_cut.push(("keywords", cut));
-        }
-    }
     let dates = [
         ("created", iso(info.created.as_ref()), "xmp:CreateDate"),
         ("modified", iso(info.modified.as_ref()), "xmp:ModifyDate"),
@@ -204,6 +181,33 @@ pub(crate) fn properties(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
             props.custom.insert(name.to_string(), Value::Text { value });
         }
     }
+    // The lists come after every single value, so a long list never costs one of them, and
+    // together they take at most half of the object layer's share.
+    let lists = Counter::new(kept.share() / 2);
+    if let Some(a) = author {
+        let names: Box<dyn Iterator<Item = &str>> = if given(info.author.as_deref()).is_some() {
+            Box::new(std::iter::once(a.as_str()))
+        } else {
+            Box::new(a.split("; ").map(str::trim).filter(|n| !n.is_empty()))
+        };
+        if let Some(cut) = copy_list(names, false, kept, &lists, &mut props.authors) {
+            lists_cut.push(("authors", cut));
+        }
+    }
+    if let Some(k) = keywords {
+        // Some producers write the whole list in quotes.
+        let list = k
+            .strip_prefix('"')
+            .and_then(|k| k.strip_suffix('"'))
+            .unwrap_or(&k);
+        let words = list
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|w| !w.is_empty());
+        if let Some(cut) = copy_list(words, true, kept, &lists, &mut props.keywords) {
+            lists_cut.push(("keywords", cut));
+        }
+    }
     // The layers, each charged as it is added to the list.
     let layers = pdf.layers();
     if !layers.is_empty() {
@@ -236,15 +240,18 @@ pub(crate) fn properties(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
         }
     }
     for (what, (first, total, why)) in lists_cut {
-        let verb = if what == "layers" { "listed" } else { "kept" };
-        let span = if first == total {
-            format!("{what} {first} is")
-        } else {
-            format!("{what} {first} to {total} are")
+        let (one, verb) = match what {
+            "layers" => ("layer", "listed"),
+            "authors" => ("author", "kept"),
+            _ => ("keyword", "kept"),
         };
+        let left = total - first + 1;
         out.loss(
             "metadata",
-            format!("{span} not {verb}: {why}"),
+            format!(
+                "{} not {verb}, from {one} {first} on: {why}",
+                count_is(left, one, what)
+            ),
             LossReason::Limit,
             Severity::Warning,
         );
@@ -270,6 +277,7 @@ fn copy_list<'w>(
     items: impl Iterator<Item = &'w str>,
     dedup: bool,
     kept: &Kept<'_>,
+    cap: &Counter<u64>,
     into: &mut Vec<String>,
 ) -> Option<(usize, usize, String)> {
     let mut seen: HashSet<&str> = HashSet::new();
@@ -280,7 +288,7 @@ fn copy_list<'w>(
         if cut.is_some() || (dedup && seen.contains(item)) {
             continue;
         }
-        if let Err(why) = kept.take(1, &[item]) {
+        if let Err(why) = kept.take_within(cap, 1, &[item]) {
             cut = Some((n, why));
             continue;
         }

@@ -2485,7 +2485,10 @@ fn many_keywords_are_charged_one_by_one() {
     drop(words);
     let shape = catalog_file(&mut |b| {
         let k = b.add(format!("({list})"));
-        (String::new(), format!("<< /Keywords {k} 0 R >>"))
+        (
+            String::new(),
+            format!("<< /Keywords {k} 0 R /Title (Kept) /Producer (Also kept) >>"),
+        )
     });
     let one = "k".repeat(list.len());
     let twin = catalog_file(&mut |b| {
@@ -2496,11 +2499,22 @@ fn many_keywords_are_charged_one_by_one() {
     let kept = out.document.properties.keywords.len();
     assert!(kept > 1_000 && kept < 1_100_000, "{kept}");
     assert_eq!(out.document.properties.keywords[0], "k0");
+    // The single values are kept before any list, and the lists leave room for the rest.
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_deref(), Some("Kept"));
+    assert!(
+        p.custom.contains_key("producer") && p.custom.contains_key("pdf_version"),
+        "{:?}",
+        p.custom
+    );
     assert_eq!(out.completeness, Completeness::Partial);
     let loss = limit_at(&out, "metadata", "keywords");
     assert!(
-        loss.what
-            .contains(&format!("keywords {} to 1100000", kept + 1)),
+        loss.what.starts_with(&format!(
+            "{} keywords are not kept, from keyword {} on",
+            1_100_000 - kept,
+            kept + 1
+        )),
         "{loss:?}"
     );
 }
@@ -2677,7 +2691,10 @@ fn a_name_shared_by_many_layers_is_read_once() {
     let out = against_twin(&file("/OCProperties"), &file("/Junk"));
     assert_eq!(out.document.properties.facts.layers, Some(30_000));
     let loss = limit_at(&out, "metadata", "layers");
-    assert!(loss.what.contains("to 30000"), "{loss:?}");
+    assert!(
+        loss.what.contains("layers are not listed, from layer"),
+        "{loss:?}"
+    );
     assert_short_losses(&out);
 }
 
@@ -2835,4 +2852,125 @@ fn a_uri_shared_by_many_links_is_read_once() {
         "{:?}",
         out.document.losses
     );
+}
+
+#[test]
+fn a_title_reached_through_a_chain_of_references_is_read_once() {
+    // 30,000 outline items each name an object of their own that only refers to one 8 KB
+    // title.
+    let file = |key: &str| {
+        object_file(1, &no_annots, &mut |b, kids| {
+            let t = b.add(format!("({})", "t".repeat(8 << 10)));
+            let outlines = b.reserve();
+            let ids: Vec<u32> = (0..30_000).map(|_| b.reserve()).collect();
+            for (k, id) in ids.iter().enumerate() {
+                let hop = b.add(format!("{t} 0 R"));
+                let prev = if k > 0 {
+                    format!("/Prev {} 0 R", ids[k - 1])
+                } else {
+                    String::new()
+                };
+                let next = ids
+                    .get(k + 1)
+                    .map(|n| format!("/Next {n} 0 R"))
+                    .unwrap_or_default();
+                b.set(
+                    *id,
+                    format!(
+                        "<< /Title {hop} 0 R /Parent {outlines} 0 R {prev} {next} \
+                         /Dest [{} 0 R /Fit] >>",
+                        kids[0]
+                    ),
+                );
+            }
+            b.set(
+                outlines,
+                format!(
+                    "<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count 30000 >>",
+                    ids[0], ids[29_999]
+                ),
+            );
+            (format!("{key} {outlines} 0 R"), String::new())
+        })
+    };
+    let out = against_twin(&file("/Outlines"), &file("/Junk"));
+    limit_at(&out, "outline", "outline items");
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "revisions"),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn a_uri_reached_through_a_chain_of_references_is_read_once() {
+    let file = |key: &str| {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let u = b.add(format!("(http://x/{})", "u".repeat(8 << 10)));
+        let annots: Vec<String> = (0..30_000)
+            .map(|_| {
+                let hop = b.add(format!("{u} 0 R"));
+                format!(
+                    "{} 0 R",
+                    b.add(format!(
+                        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] \
+                         /A << /S /URI /URI {hop} 0 R >> >>"
+                    ))
+                )
+            })
+            .collect();
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] {key} [{}] >>",
+            annots.join(" ")
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        b.finish(catalog)
+    };
+    let out = against_twin(&file("/Annots"), &file("/Junk"));
+    let graph = out
+        .document
+        .facets
+        .graphs
+        .iter()
+        .find(|g| g.id == "links")
+        .expect("a links graph");
+    assert_eq!(graph.edges.len(), 30_000);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "revisions"),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn a_layer_name_reached_through_a_chain_of_references_is_read_once() {
+    let file = |key: &str| {
+        catalog_file(&mut |b| {
+            let name = b.add(format!("({})", "L".repeat(8 << 10)));
+            let ids: Vec<String> = (0..30_000)
+                .map(|_| {
+                    let hop = b.add(format!("{name} 0 R"));
+                    format!("{} 0 R", b.add(format!("<< /Type /OCG /Name {hop} 0 R >>")))
+                })
+                .collect();
+            (
+                format!("{key} << /OCGs [{}] >>", ids.join(" ")),
+                String::new(),
+            )
+        })
+    };
+    let out = against_twin(&file("/OCProperties"), &file("/Junk"));
+    assert_eq!(out.document.properties.facts.layers, Some(30_000));
 }

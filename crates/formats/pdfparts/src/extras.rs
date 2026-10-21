@@ -11,8 +11,8 @@ use lopdf::{Object, ObjectId};
 
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
-    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, get, get_date, get_dict, get_name,
-    reference, resolve, text_string, walk_tree,
+    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_date, get_dict,
+    get_name, reference, resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
@@ -243,7 +243,7 @@ impl Pdf {
         budget: &mut TextBudget<'_>,
     ) -> Result<Option<Found>, Spent> {
         let doc = &self.doc;
-        if let Some(id) = reference(spec)
+        if let Some(id) = final_id(doc, spec)
             && !seen.specs.insert(id)
         {
             return Ok(None);
@@ -378,7 +378,7 @@ impl Pdf {
         let Ok(info) = thread.get(b"I") else {
             return Ok(None);
         };
-        let id = reference(info);
+        let id = final_id(doc, info);
         if let Some(id) = id
             && let Some(t) = shared.found.get(&id)
         {

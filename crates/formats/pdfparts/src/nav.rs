@@ -10,8 +10,8 @@ use std::sync::Arc;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::objects::{
-    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name,
-    number, reference, resolve, text_string, walk_tree,
+    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_dict, get_int,
+    get_name, number, reference, resolve, text_string, walk_tree,
 };
 use crate::pagetree::ResourcesKey;
 use crate::{Issue, IssueKind, Pdf, pagetree};
@@ -659,7 +659,7 @@ impl Pdf {
         shared: &mut Shared,
         budget: &mut TextBudget<'_>,
     ) -> Result<Option<LinkTarget>, Spent> {
-        let id = reference(action);
+        let id = final_id(&self.doc, action);
         if let Some(id) = id
             && let Some(t) = shared.targets.get(&id)
         {
@@ -761,7 +761,7 @@ impl Pdf {
         let Some(spec) = spec else {
             return Ok("".into());
         };
-        let id = reference(spec);
+        let id = final_id(doc, spec);
         if let Some(id) = id
             && let Some(name) = shared.found.get(&id)
         {
