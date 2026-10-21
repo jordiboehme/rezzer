@@ -101,6 +101,8 @@ struct Shared<'a> {
     kept: RefCell<Option<Vec<u8>>>,
     /// A Flate or LZW layer stopped with a decoding error: what follows it is lost.
     broke: Cell<bool>,
+    /// A zlib layer unpacked all its data, but its Adler-32 checksum does not match it.
+    bad_sum: Cell<bool>,
 }
 
 impl Shared<'_> {
@@ -366,37 +368,55 @@ impl<W: Write> Write for RunStage<W> {
     }
 }
 
-/// Input a Flate stage keeps until its first output byte, so it can replay a stream with a
-/// broken zlib header as raw deflate. No output after this much input counts as over the cap:
-/// lopdf would keep inflating, and the guard cannot keep buffering.
+/// Input a Flate stage takes without any output before it counts as over the cap: lopdf
+/// would keep inflating, and the guard cannot tell how far.
 const PROBE_MAX: usize = 64 * 1024;
 
-/// FlateDecode as a writer stage. Like lopdf, a zlib stream that fails before any output is
-/// tried again as raw deflate from its third byte, at any place in the chain.
+/// FlateDecode as a writer stage. The two bytes of the zlib header are skipped and the rest is
+/// inflated as raw deflate, as lopdf does when the header is broken: the data then ends at the
+/// end of the last block, and the Adler-32 checksum after it is not checked. A checksum that
+/// does not match the data is no damage: every byte was unpacked.
 struct FlateStage<'s, W: Write> {
     inflater: flate2::Decompress,
-    zlib: bool,
+    /// Header bytes still to skip.
+    header: usize,
     next: W,
     buf: Box<[u8]>,
-    probe: Option<Vec<u8>>,
+    /// Input taken before the first output, to find a stream that gives none.
+    probe: Option<usize>,
     done: bool,
+    /// Input after the end of the last block.
+    tail: usize,
+    /// The zlib header, and the first bytes after the last block: the checksum.
+    head: Vec<u8>,
+    sum: Vec<u8>,
+    /// The Adler-32 of the output so far.
+    adler: (u32, u32),
     shared: &'s Shared<'s>,
 }
 
 impl<'s, W: Write> FlateStage<'s, W> {
     fn new(next: W, shared: &'s Shared<'s>) -> Self {
         FlateStage {
-            inflater: flate2::Decompress::new(true),
-            zlib: true,
+            inflater: flate2::Decompress::new(false),
+            header: 2,
             next,
             buf: vec![0; CHUNK].into_boxed_slice(),
-            probe: Some(Vec::new()),
+            probe: Some(0),
             done: false,
+            tail: 0,
+            head: Vec::new(),
+            sum: Vec::new(),
+            adler: (1, 0),
             shared,
         }
     }
 
     fn feed(&mut self, mut input: &[u8]) -> io::Result<()> {
+        let skip = self.header.min(input.len());
+        self.head.extend_from_slice(&input[..skip]);
+        self.header -= skip;
+        input = &input[skip..];
         while !self.done {
             let (in0, out0) = (self.inflater.total_in(), self.inflater.total_out());
             let res = self
@@ -407,37 +427,62 @@ impl<'s, W: Write> FlateStage<'s, W> {
             input = &input[used.min(input.len())..];
             if made > 0 {
                 self.probe = None;
+                let (mut a, mut b) = self.adler;
+                for chunk in self.buf[..made].chunks(5552) {
+                    for &x in chunk {
+                        a += u32::from(x);
+                        b += a;
+                    }
+                    a %= 65_521;
+                    b %= 65_521;
+                }
+                self.adler = (a, b);
                 self.next.write_all(&self.buf[..made])?;
             }
             match res {
-                Ok(flate2::Status::StreamEnd) => self.done = true,
+                Ok(flate2::Status::StreamEnd) => {
+                    self.done = true;
+                    self.tail += filled(input);
+                    self.keep_sum(input);
+                    return Ok(());
+                }
                 Ok(_) if used == 0 && made == 0 => break,
                 Ok(_) => {}
+                // lopdf keeps what came out before an error; what follows may be more.
                 Err(_) => {
-                    match self.probe.take() {
-                        Some(probe) if self.zlib && probe.len() > 2 => {
-                            self.zlib = false;
-                            self.inflater = flate2::Decompress::new(false);
-                            return self.feed(&probe[2..]);
-                        }
-                        // lopdf keeps what came out before an error.
-                        _ => {
-                            self.done = true;
-                            self.shared.broke.set(true);
-                        }
-                    }
+                    self.done = true;
+                    self.shared.broke.set(true);
+                    return Ok(());
                 }
             }
         }
+        if self.done {
+            self.tail += filled(input);
+            self.keep_sum(input);
+        }
         Ok(())
+    }
+
+    /// Keeps the first four bytes after the last block.
+    fn keep_sum(&mut self, input: &[u8]) {
+        let k = (4 - self.sum.len().min(4)).min(input.len());
+        self.sum.extend_from_slice(&input[..k]);
+    }
+
+    /// The stream has a zlib header and a checksum after its data, and they do not match.
+    fn wrong_sum(&self) -> bool {
+        let zlib = matches!(self.head[..], [cmf, flg]
+            if cmf & 0x0F == 8 && flg & 0x20 == 0 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0);
+        let (a, b) = self.adler;
+        zlib && self.sum.len() == 4 && self.sum[..] != ((b << 16) | a).to_be_bytes()
     }
 }
 
 impl<W: Write> Write for FlateStage<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Some(probe) = self.probe.as_mut() {
-            probe.extend_from_slice(buf);
-            if probe.len() > PROBE_MAX {
+        if let Some(taken) = self.probe.as_mut().filter(|_| !self.done) {
+            *taken += buf.len();
+            if *taken > PROBE_MAX {
                 self.shared.over.set(Some(Cap::Stall));
                 return Err(io::Error::other("no output from a long deflate stream"));
             }
@@ -448,8 +493,26 @@ impl<W: Write> Write for FlateStage<'_, W> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.feed(&[])?;
+        // More than the checksum and a line end after the last block: data the stream holds
+        // but its deflate data ends before, as when a block in the middle is broken.
+        if self.tail > TAIL_MAX {
+            self.shared.broke.set(true);
+        } else if self.done && !self.shared.broke.get() && self.wrong_sum() {
+            self.shared.bad_sum.set(true);
+        }
         self.next.flush()
     }
+}
+
+/// Bytes after the last deflate block, besides white space and zero bytes, that are not
+/// counted as data cut off: the Adler-32 checksum.
+const TAIL_MAX: usize = 4;
+
+/// The bytes of `data` that are neither white space nor zero.
+fn filled(data: &[u8]) -> usize {
+    data.iter()
+        .filter(|b| !matches!(b, 0 | b'\t' | b'\n' | b'\r' | b'\x0c' | b' '))
+        .count()
 }
 
 /// Passes data on unchanged.
@@ -517,6 +580,7 @@ fn run<'s>(raw: &[u8], filters: &[Filter], shared: &'s Shared<'s>) {
 }
 
 /// Decodes `raw` through `filters` into a counting sink. `budget` is what is left of the total.
+#[cfg(test)]
 pub(crate) fn measure_bytes(
     raw: &[u8],
     filters: &[Filter],
@@ -537,8 +601,29 @@ pub(crate) fn measure_checked(
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> (Measure, bool) {
-    let (m, _, broke) = decode(raw, filters, limits, budget, stop, false);
-    (m, broke)
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, false);
+    (m, health.broke)
+}
+
+/// What decoding found besides the size.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Health {
+    /// A Flate or LZW layer stopped with a decoding error.
+    pub broke: bool,
+    /// A zlib layer unpacked all its data, but its checksum does not match.
+    pub bad_sum: bool,
+}
+
+/// [`measure_checked`] with the checksum check too.
+pub(crate) fn measure_health(
+    raw: &[u8],
+    filters: &[Filter],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> (Measure, Health) {
+    let (m, _, health) = decode(raw, filters, limits, budget, stop, false);
+    (m, health)
 }
 
 /// Decodes `raw` through `filters` under the same caps and keeps the output. The data is
@@ -564,7 +649,7 @@ fn decode(
     budget: u64,
     stop: &dyn Fn() -> bool,
     keep: bool,
-) -> (Measure, Option<Vec<u8>>, bool) {
+) -> (Measure, Option<Vec<u8>>, Health) {
     // The chain ends at the first filter whose output stays encoded.
     let end = filters
         .iter()
@@ -586,18 +671,23 @@ fn decode(
         stop,
         kept: RefCell::new(keep.then(Vec::new)),
         broke: Cell::new(false),
+        bad_sum: Cell::new(false),
     };
     run(raw, filters, &shared);
     if shared.stopped.get() {
-        return (Measure::Stopped, None, false);
+        return (Measure::Stopped, None, Health::default());
     }
     if let Some(cap) = shared.over.get() {
-        return (Measure::Over(cap), None, false);
+        return (Measure::Over(cap), None, Health::default());
     }
+    let health = Health {
+        broke: shared.broke.get(),
+        bad_sum: shared.bad_sum.get(),
+    };
     (
         Measure::Fits(shared.count.get()),
         shared.kept.take(),
-        shared.broke.get(),
+        health,
     )
 }
 

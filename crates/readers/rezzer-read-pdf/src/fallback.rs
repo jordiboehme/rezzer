@@ -12,13 +12,14 @@
 //! the canonical read, and hayro's page walk keeps each page tree node once.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
-use hayro_syntax::object::{Array, Name, Stream};
+use hayro_syntax::object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier, Stream};
+use hayro_syntax::page::Page;
 use hayro_syntax::page::Rotation;
-use pdfparts::{OpenError, PageInfo, Pdf, RawStreams, measure_stream};
+use pdfparts::{FilterParms, OpenError, PageInfo, Pdf, RawStreams, measure_stream};
 use rezzer_limits::Budget;
 use rezzer_model::{Bytes, LossReason, ReadOptions, ReadOutcome, Severity, Source};
 
@@ -110,24 +111,22 @@ impl<'b> Raw<'b> {
             (Ok(n), Ok(g)) => (n, g),
             _ => return u64::MAX,
         };
+        // A damaged stream counts as more than any page may take: it is never unpacked.
+        if self.streams.broken(key.0, key.1) {
+            return u64::MAX;
+        }
         if let Some(n) = self.streams.size(key.0, key.1) {
             return n;
         }
         if let Some(n) = self.measured.borrow().get(&key) {
             return *n;
         }
-        let dict = s.dict();
-        let names: Vec<Vec<u8>> = match dict.get::<Name<'_>>(b"Filter") {
-            Some(name) => vec![name.as_ref().to_vec()],
-            None => dict
-                .get::<Array<'_>>(b"Filter")
-                .map(|a| a.iter::<Name<'_>>().map(|n| n.as_ref().to_vec()).collect())
-                .unwrap_or_default(),
-        };
+        let (names, parms) = filters_of(s.dict());
         let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
         let size = measure_stream(
             &s.raw_data(),
             &names,
+            &parms,
             &self.limits,
             self.limits.max_total_bytes,
             self.stop,
@@ -136,6 +135,158 @@ impl<'b> Raw<'b> {
         self.measured.borrow_mut().insert(key, size);
         size
     }
+}
+
+/// Objects one page's check for damaged streams may visit.
+const REACH_MAX: usize = 100_000;
+
+impl Raw<'_> {
+    /// Why the parser must not read `page`: it reaches a stream that stops with a decoding
+    /// error, which a lenient decoder may unpack further than was measured. The walk follows
+    /// what the text walk unpacks: the page's content and its resources, with all they
+    /// reach but parents.
+    pub(crate) fn unsafe_page<'p>(&self, page: &Page<'p>) -> Option<String> {
+        if !self.streams.any_broken() {
+            return None;
+        }
+        let xref: &'p hayro_syntax::xref::XRef = page.xref();
+        // The page's content, and its resources with the ones it inherits.
+        let mut todo: Vec<Object<'p>> = Vec::new();
+        let res = page.resources();
+        for d in [
+            &res.ext_g_states,
+            &res.fonts,
+            &res.color_spaces,
+            &res.properties,
+            &res.x_objects,
+            &res.patterns,
+            &res.shadings,
+        ] {
+            todo.push(Object::Dict(d.clone()));
+        }
+        let mut seen: HashSet<ObjectIdentifier> = HashSet::new();
+        let contents = page.raw().get_raw::<Object<'p>>(b"Contents");
+        let mut pending: Vec<MaybeRef<Object<'p>>> = contents.into_iter().collect();
+        loop {
+            let obj = match (pending.pop(), todo.pop()) {
+                (Some(v), back) => {
+                    todo.extend(back);
+                    match v {
+                        MaybeRef::NotRef(o) => o,
+                        MaybeRef::Ref(r) => {
+                            let (n, g) = (
+                                u32::try_from(r.obj_number).unwrap_or(0),
+                                u16::try_from(r.gen_number).unwrap_or(0),
+                            );
+                            if self.streams.broken(n, g) {
+                                return Some(format!(
+                                    "it uses stream {n} {g}, which stops with a decoding error"
+                                ));
+                            }
+                            let id: ObjectIdentifier = r.into();
+                            if !seen.insert(id) {
+                                continue;
+                            }
+                            match xref.get::<Object<'p>>(id) {
+                                Some(o) => o,
+                                None => continue,
+                            }
+                        }
+                    }
+                }
+                (None, Some(o)) => o,
+                (None, None) => break,
+            };
+            let mut take = |v: MaybeRef<Object<'p>>,
+                            todo: &mut Vec<Object<'p>>|
+             -> Option<String> {
+                match v {
+                    MaybeRef::Ref(r) => {
+                        let id: ObjectIdentifier = r.into();
+                        let (n, g) = (
+                            u32::try_from(r.obj_number).unwrap_or(0),
+                            u16::try_from(r.gen_number).unwrap_or(0),
+                        );
+                        if self.streams.broken(n, g) {
+                            return Some(format!(
+                                "it uses stream {n} {g}, which stops with a decoding error"
+                            ));
+                        }
+                        if seen.insert(id) {
+                            if seen.len() > REACH_MAX {
+                                return Some(format!(
+                                    "it reaches more than {REACH_MAX} objects, too many to check \
+                                     for damaged streams"
+                                ));
+                            }
+                            todo.extend(xref.get::<Object<'p>>(id));
+                        }
+                        None
+                    }
+                    MaybeRef::NotRef(o) => {
+                        todo.push(o);
+                        None
+                    }
+                }
+            };
+            let dict = match &obj {
+                Object::Dict(d) => Some(d.clone()),
+                Object::Stream(s) => Some(s.dict().clone()),
+                Object::Array(a) => {
+                    for v in a.raw_iter() {
+                        if let Some(why) = take(v, &mut todo) {
+                            return Some(why);
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            };
+            if let Some(d) = dict {
+                for (k, v) in d.entries() {
+                    let k = k.as_ref();
+                    if k == b"Parent" || k == b"P" {
+                        continue;
+                    }
+                    if let Some(why) = take(v, &mut todo) {
+                        return Some(why);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// The filter names of a stream dictionary (or an inline image's), in order, with the
+/// parameters that change what each unpacks to.
+pub(crate) fn filters_of(dict: &Dict<'_>) -> (Vec<Vec<u8>>, Vec<FilterParms>) {
+    let names: Vec<Vec<u8>> = match dict
+        .get::<Name<'_>>(b"Filter")
+        .or_else(|| dict.get::<Name<'_>>(b"F"))
+    {
+        Some(name) => vec![name.as_ref().to_vec()],
+        None => dict
+            .get::<Array<'_>>(b"Filter")
+            .or_else(|| dict.get::<Array<'_>>(b"F"))
+            .map(|a| a.iter::<Name<'_>>().map(|n| n.as_ref().to_vec()).collect())
+            .unwrap_or_default(),
+    };
+    let one = |d: Option<Dict<'_>>| FilterParms {
+        early_change: d.and_then(|d| d.get::<i64>(b"EarlyChange")) != Some(0),
+    };
+    let parms: Vec<FilterParms> = match dict
+        .get::<Dict<'_>>(b"DecodeParms")
+        .or_else(|| dict.get::<Dict<'_>>(b"DP"))
+    {
+        Some(d) => vec![one(Some(d))],
+        None => dict
+            .get::<Array<'_>>(b"DecodeParms")
+            .or_else(|| dict.get::<Array<'_>>(b"DP"))
+            .map(|a| a.iter::<Object<'_>>().map(|o| one(o.into_dict())).collect())
+            .unwrap_or_default(),
+    };
+    (names, parms)
 }
 
 /// The page sizes as the parser sees them, without labels, fonts or pictures.
@@ -265,6 +416,8 @@ pub(crate) fn pages(
         stop,
     )
     .ok()?;
+    // What the parser may unpack counts like the first read's streams.
+    budget.add_unpacked(raw.streams.unpacked()).ok()?;
     let extracted = text::pages_of(
         Origin::Fallback(&raw),
         wanted,

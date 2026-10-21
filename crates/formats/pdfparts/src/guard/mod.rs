@@ -18,7 +18,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use decode::Cap;
 pub(crate) use decode::{
-    Filter, Measure, cap_words, filters_with, measure_bytes, measure_checked, stream_filters,
+    Filter, Measure, cap_words, filters_with, measure_checked, measure_health, stream_filters,
     unpack,
 };
 
@@ -47,6 +47,9 @@ pub(crate) struct Verdict {
     pub unpacked: u64,
     /// What each stream that fits unpacks to, up to the first filter that stays encoded.
     pub sizes: HashMap<ObjectId, u64>,
+    /// Streams a Flate or LZW layer stops in with a decoding error. Another decoder may go on
+    /// past the error, so the canonical copy holds only what was measured.
+    pub broken: HashSet<ObjectId>,
 }
 
 /// Measures every stream of the document once, then refuses each page that reaches a stream
@@ -66,6 +69,8 @@ pub(crate) fn measure(
     let mut bad: HashMap<ObjectId, String> = HashMap::new();
     // Streams that stop with a decoding error, and what they unpack to before it.
     let mut broken: HashMap<ObjectId, u64> = HashMap::new();
+    // Streams with all their data whose checksum does not match it.
+    let mut bad_sums: HashSet<ObjectId> = HashSet::new();
     let mut total_hit = false;
     for (&id, obj) in &doc.objects {
         let Object::Stream(stream) = obj else {
@@ -83,13 +88,15 @@ pub(crate) fn measure(
         }
         let filters = stream_filters(doc, &stream.dict);
         let budget = limits.max_total_bytes.saturating_sub(verdict.unpacked);
-        let (measured, broke) = measure_checked(&stream.content, &filters, limits, budget, stop);
+        let (measured, health) = measure_health(&stream.content, &filters, limits, budget, stop);
         match measured {
             Measure::Fits(n) => {
                 verdict.unpacked += n;
                 verdict.sizes.insert(id, n);
-                if broke {
+                if health.broke {
                     broken.insert(id, n);
+                } else if health.bad_sum {
+                    bad_sums.insert(id);
                 }
             }
             Measure::Over(cap) => {
@@ -111,6 +118,10 @@ pub(crate) fn measure(
     }
     if !broken.is_empty() {
         damaged(doc, pages, &broken, limits, stop, issues)?;
+        verdict.broken = broken.keys().copied().collect();
+    }
+    if !bad_sums.is_empty() {
+        wrong_sums(doc, pages, &bad_sums, limits, stop, issues)?;
     }
     if bad.is_empty() {
         return Ok(verdict);
@@ -229,6 +240,49 @@ fn damaged(
     Ok(())
 }
 
+/// One Uncertain issue for each page that reaches a stream whose checksum does not match its
+/// data, and one for each such stream no page reaches. Every byte was unpacked: the data may
+/// be right or not.
+fn wrong_sums(
+    doc: &Document,
+    pages: &[PageNode],
+    streams: &HashSet<ObjectId>,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+    issues: &mut Vec<Issue>,
+) -> Result<(), OpenError> {
+    let words = |id: ObjectId| {
+        format!(
+            "stream {} {} has a wrong checksum: all its data was unpacked, but it may hold \
+             wrong bytes",
+            id.0, id.1
+        )
+    };
+    let mut used = HashSet::new();
+    for (number, id) in reach(doc, pages, streams, limits, stop)? {
+        used.insert(id);
+        issues.push(Issue::new(
+            &format!("page {number}"),
+            IssueKind::Uncertain,
+            words(id),
+        ));
+    }
+    let mut rest: Vec<ObjectId> = streams
+        .iter()
+        .filter(|id| !used.contains(id))
+        .copied()
+        .collect();
+    rest.sort();
+    for id in rest {
+        issues.push(Issue::new(
+            &format!("object {} {}", id.0, id.1),
+            IssueKind::Uncertain,
+            words(id),
+        ));
+    }
+    Ok(())
+}
+
 /// The pages that reach one of `targets`, each with the first target it reaches, in page
 /// order. Reachability is computed once, backwards from the targets over all references, and
 /// stops at page nodes, so a link to another page does not count for the page that holds
@@ -298,4 +352,32 @@ fn reach(
         }
     }
     Ok(found)
+}
+
+/// The canonical form of a stream a decoding error stops in: the data the guard measured,
+/// unpacked and without filters, so no parser can unpack more than was measured. A chain
+/// with a filter whose output stays encoded (an image codec) cannot be cut so, and the stream
+/// is emptied instead, as a refused one.
+pub(crate) fn cut_to_measured(
+    doc: &Document,
+    stream: &mut lopdf::Stream,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) {
+    let filters = stream_filters(doc, &stream.dict);
+    let data = match unpack(
+        &stream.content,
+        &filters,
+        limits,
+        limits.max_total_bytes,
+        stop,
+    ) {
+        (Measure::Fits(_), Some(data)) => {
+            crate::parse::unpredict(data, crate::parse::last_parms(&stream.dict))
+        }
+        _ => Vec::new(),
+    };
+    stream.dict.remove(b"Filter");
+    stream.dict.remove(b"DecodeParms");
+    stream.set_content(data);
 }

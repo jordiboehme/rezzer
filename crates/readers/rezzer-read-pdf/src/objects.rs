@@ -829,6 +829,7 @@ fn reason(kind: IssueKind) -> (LossReason, Severity) {
         IssueKind::Damaged => (LossReason::Damaged, Severity::Warning),
         IssueKind::Limit => (LossReason::Limit, Severity::Warning),
         IssueKind::Unsupported => (LossReason::Unsupported, Severity::Info),
+        IssueKind::Uncertain => (LossReason::Uncertain, Severity::Info),
     }
 }
 

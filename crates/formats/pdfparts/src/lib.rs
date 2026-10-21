@@ -100,6 +100,8 @@ pub enum IssueKind {
     Limit,
     /// The part uses something that is not read, on purpose.
     Unsupported,
+    /// The part was read in full, but a check says it may hold wrong values.
+    Uncertain,
 }
 
 /// One thing that went wrong while reading, with the place it concerns.
@@ -174,13 +176,16 @@ pub struct Encryption {
 pub struct RawStreams {
     sizes: HashMap<(u32, u16), u64>,
     unpacked: u64,
+    broken: HashSet<(u32, u16)>,
 }
 
 impl RawStreams {
     /// Measures every stream of `bytes`: one forward pass finds every object header, also the
-    /// ones a later definition of the number replaces. A stream over a cap, a stream whose
-    /// filters are named indirectly and an encrypted file give [`OpenError::Limit`] or
-    /// [`OpenError::UnsupportedEncryption`]: such a file must not be handed to the parser.
+    /// ones a later definition of the number replaces, and every extent a parser may take
+    /// for each. A stream over a cap, a stream whose filters are named indirectly, an object
+    /// or cross-reference stream that stops with a decoding error and an encrypted file give
+    /// [`OpenError::Limit`], [`OpenError::Damaged`] or [`OpenError::UnsupportedEncryption`]:
+    /// such a file must not be handed to the parser.
     pub fn measure(
         bytes: &[u8],
         limits: &Limits,
@@ -190,6 +195,7 @@ impl RawStreams {
         Ok(RawStreams {
             sizes: m.sizes,
             unpacked: m.unpacked,
+            broken: m.broken,
         })
     }
 
@@ -203,26 +209,63 @@ impl RawStreams {
     pub fn unpacked(&self) -> u64 {
         self.unpacked
     }
+
+    /// The stream stops with a decoding error: a lenient decoder may unpack more of it than
+    /// was measured, so the parser must not unpack it. An object or cross-reference stream
+    /// like that refuses the whole measure.
+    pub fn broken(&self, object: u32, generation: u16) -> bool {
+        self.broken.contains(&(object, generation))
+    }
+
+    /// Some stream stops with a decoding error.
+    pub fn any_broken(&self) -> bool {
+        !self.broken.is_empty()
+    }
 }
 
-/// Measures one stream's data `raw` through the filters named `filters`, in order, with the
-/// guard's decoder and caps; `budget` is what is left of the total. `Err` says which cap it
-/// passes, or that the caller asked to stop.
+/// The decode parameters of one filter that change what it unpacks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilterParms {
+    /// `/EarlyChange` of LZWDecode: true (1) unless the stream says 0.
+    pub early_change: bool,
+}
+
+impl Default for FilterParms {
+    fn default() -> Self {
+        FilterParms { early_change: true }
+    }
+}
+
+/// Measures one stream's data `raw` through the filters named `filters`, in order, each with
+/// its parameters from `parms` (the default where `parms` has none), with the guard's decoder
+/// and caps; `budget` is what is left of the total. `Err` says which cap it passes, that it
+/// stops with a decoding error (another decoder may go on and unpack more), or that the
+/// caller asked to stop.
 pub fn measure_stream(
     raw: &[u8],
     filters: &[&[u8]],
+    parms: &[FilterParms],
     limits: &Limits,
     budget: u64,
     stop: &dyn Fn() -> bool,
 ) -> Result<u64, String> {
     let chain: Vec<guard::Filter> = filters
         .iter()
-        .map(|name| guard::Filter::from_name(name, true))
+        .enumerate()
+        .map(|(i, name)| {
+            let early = parms.get(i).copied().unwrap_or_default().early_change;
+            guard::Filter::from_name(name, early)
+        })
         .collect();
-    match guard::measure_bytes(raw, &chain, limits, budget, stop) {
-        guard::Measure::Fits(n) => Ok(n),
-        guard::Measure::Over(cap) => Err(format!("it {}", guard::cap_words(cap, limits))),
-        guard::Measure::Stopped => Err("stopped by the caller".into()),
+    match guard::measure_checked(raw, &chain, limits, budget, stop) {
+        (guard::Measure::Fits(_), true) => Err(
+            "it stops with a decoding error, and a lenient decoder may unpack more than can be \
+             measured"
+                .into(),
+        ),
+        (guard::Measure::Fits(n), false) => Ok(n),
+        (guard::Measure::Over(cap), _) => Err(format!("it {}", guard::cap_words(cap, limits))),
+        (guard::Measure::Stopped, _) => Err("stopped by the caller".into()),
     }
 }
 
@@ -328,6 +371,14 @@ impl Pdf {
                 stream.dict.remove(b"DecodeParms");
                 stream.set_content(Vec::new());
             }
+        }
+        // A stream that stops with a decoding error keeps only what the guard measured.
+        for id in &verdict.broken {
+            let Some(lopdf::Object::Stream(mut stream)) = doc.objects.remove(id) else {
+                continue;
+            };
+            guard::cut_to_measured(&doc, &mut stream, limits, stop);
+            doc.objects.insert(*id, lopdf::Object::Stream(stream));
         }
         let (canonical, charged) = parse::write_canonical(&mut doc, limits, built.charged)?;
         // A page listed twice keeps its first number.

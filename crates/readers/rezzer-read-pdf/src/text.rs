@@ -112,6 +112,8 @@ pub(crate) struct PageItems {
     /// The quotes are charged to the bytes the file may keep for good: they go into the
     /// model as they are.
     pub quotes: Vec<Quote>,
+    /// The text was read from the file itself by the fallback parser.
+    pub fallback: bool,
 }
 
 impl PageItems {
@@ -566,6 +568,11 @@ impl<'p, 'a> PageReader<'p, 'a> {
         let fail = |why: String, kind: Fail| Read::Failed(Failure { page: n, why, kind });
         if let Some(why) = &self.kept_spent {
             return fail(why.clone(), Fail::Limit);
+        }
+        if let Origin::Fallback(raw) = self.origin
+            && let Some(why) = raw.unsafe_page(page)
+        {
+            return fail(why, Fail::Damaged);
         }
         let max_bytes = (self.caps.max_items as u64).saturating_mul(BYTES_PER_UNIT);
         let streams = content_streams(page.raw());

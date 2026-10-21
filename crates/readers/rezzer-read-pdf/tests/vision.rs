@@ -257,14 +257,14 @@ fn render_cap_gives_limit_loss() {
         .find(|l| l.why == LossReason::Limit && l.what.contains("not rendered"))
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
     assert_eq!(loss.location, "p1");
-    assert!(loss.what.contains("256000000"), "{loss:?}");
+    assert!(loss.what.contains("its pictures"), "{loss:?}");
     assert_eq!(out.completeness, Completeness::Partial);
 }
 
 #[test]
 fn render_room_gives_limit_loss() {
-    // Noise does not pack: the PNG of the page is larger than the eighth of the memory limit
-    // that extracted pictures may take.
+    // Noise does not pack: twelve pages of it take more than the eighth of the memory limit
+    // that extracted pictures may take, though each page renders within its render room.
     let mut state = 12345u32;
     let noise: Vec<u8> = (0..1000 * 1000)
         .map(|_| {
@@ -272,20 +272,35 @@ fn render_room_gives_limit_loss() {
             (state >> 16) as u8
         })
         .collect();
-    let file = image_page(
-        595,
-        842,
-        "q 595 0 0 842 0 0 cm /Im1 Do Q\n",
-        1000,
-        1000,
-        &noise,
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 1000 /Height 1000 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&noise),
     );
+    let c = b.stream("", b"q 595 0 0 842 0 0 cm /Im1 Do Q\n");
+    let mut kids = String::new();
+    for _ in 0..12 {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /XObject << /Im1 {image} 0 R >> >> /Contents {c} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 12 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let limits = Limits {
-        max_memory_bytes: 8 << 20,
+        max_memory_bytes: 128 << 20,
         ..Limits::default()
     };
-    let out = read_opts(&file, true, limits);
-    assert!(out.blobs.is_empty());
+    let out = read_opts(&b.finish(catalog), true, limits);
+    assert!(
+        !out.blobs.is_empty() && out.blobs.len() < 12,
+        "{}",
+        out.blobs.len()
+    );
     let loss = out
         .document
         .losses
@@ -390,15 +405,16 @@ fn damaged_stream_is_partial() {
 
 #[test]
 fn a_broken_content_stream_names_its_page() {
-    // Task 11's carry: a FlateDecode content stream that does not unpack in full.
-    let text: String = (0..4000)
-        .map(|i| format!("BT /F1 9 Tf 72 700 Td ({i}) Tj ET\n"))
-        .collect();
-    let mut packed = deflate(text.as_bytes());
-    let mid = packed.len() / 2;
-    for b in &mut packed[mid..mid + 64] {
-        *b = 0xFF;
+    // Task 11's carry: a FlateDecode content stream that does not unpack in full (a copy from
+    // before the start of the data, after some text).
+    let mut d = common::Deflate::zlib();
+    d.fixed_block(true);
+    for c in b"BT /F1 12 Tf 72 700 Td (Read.) Tj ET\n" {
+        d.symbol(u32::from(*c));
     }
+    d.far_copy();
+    d.symbol(256);
+    let packed = d.finish();
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();

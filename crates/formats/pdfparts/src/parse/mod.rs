@@ -20,13 +20,13 @@ mod predict;
 mod store;
 mod xref;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
 use lopdf::xref::XrefType;
 use lopdf::{Dictionary, Document, Object};
 
-use crate::guard::{Measure, cap_words, filters_with, measure_bytes};
+use crate::guard::{Measure, cap_words, filters_with, measure_checked};
 use crate::{Encryption, Issue, IssueKind, Limits, OpenError};
 use lexer::{Lexer, find};
 use object::{finish, head_at, length_ref};
@@ -34,6 +34,7 @@ use store::Store;
 use xref::{Entry, read_chain, rebuild};
 
 pub(crate) use crypt::Crypt;
+pub(crate) use predict::{last_parms, unpredict};
 
 /// What every parsed value costs, on top of its bytes. Measured on a file of 1,000,117 small
 /// values (structure elements of five entries each): parsing them took 178 MiB, about 187
@@ -528,6 +529,9 @@ fn scan_trailer(
 pub(crate) struct Measured {
     pub sizes: HashMap<(u32, u16), u64>,
     pub unpacked: u64,
+    /// Streams that stop with a decoding error: a lenient decoder may unpack more of them
+    /// than was measured, so the parser must not unpack them.
+    pub broken: HashSet<(u32, u16)>,
 }
 
 /// Measures every stream of `bytes` with the guard's decoder, for a parser that reads the
@@ -544,8 +548,8 @@ pub(crate) fn measure_raw(
 ) -> Result<Measured, OpenError> {
     if find(bytes, b"/Encrypt", 0).is_some() {
         return Err(OpenError::UnsupportedEncryption(
-            "the file names an /Encrypt dictionary; its streams cannot be measured without \
-             the object layer"
+            "the file contains the name /Encrypt; its streams cannot be measured without the \
+             object layer"
                 .into(),
         ));
     }
@@ -555,6 +559,7 @@ pub(crate) fn measure_raw(
     let mut out = Measured {
         sizes: HashMap::new(),
         unpacked: 0,
+        broken: HashSet::new(),
     };
     for (k, &(pos, n, g)) in found.headers.iter().enumerate() {
         if k % POLL_EVERY == 0 {
@@ -567,11 +572,22 @@ pub(crate) fn measure_raw(
             Ok(_) | Err(Fail::Bad(_)) => continue,
             Err(Fail::Stop(e)) => return Err(e),
         };
-        let length = match length_ref(&head) {
-            Some(r) => raw_length(bytes, &found, r, &mut budget)?,
-            None => None,
+        let start = head.stream.unwrap_or(0);
+        // Every length a parser may take: the direct one, or each definition of an indirect
+        // one, since a parser that follows an old offset takes an earlier definition.
+        let lengths: Vec<i64> = match length_ref(&head) {
+            Some(r) => raw_lengths(bytes, &found, r, &mut budget)?,
+            None => match &head.value {
+                Object::Dictionary(d) => d
+                    .get(b"Length")
+                    .and_then(Object::as_i64)
+                    .ok()
+                    .into_iter()
+                    .collect(),
+                _ => Vec::new(),
+            },
         };
-        let stream = match finish(bytes, head, length, &mut budget) {
+        let stream = match finish(bytes, head, lengths.last().copied(), &mut budget) {
             Ok((_, Object::Stream(s))) => s,
             Ok(_) | Err(Fail::Bad(_)) => continue,
             Err(Fail::Stop(e)) => return Err(e),
@@ -587,43 +603,82 @@ pub(crate) fn measure_raw(
             )));
         }
         let filters = filters_with(&stream.dict, &|o| Some(o));
-        let left = limits.max_total_bytes.saturating_sub(out.unpacked);
-        match measure_bytes(&stream.content, &filters, limits, left, stop) {
-            Measure::Fits(size) => {
-                out.unpacked = out.unpacked.saturating_add(size);
-                let kept = out.sizes.entry((n, g)).or_insert(0);
-                *kept = (*kept).max(size);
+        // The data as found here, and as a parser takes it that ends a stream at its length
+        // when `endstream` (or a word that starts with it) follows.
+        let mut extents: Vec<&[u8]> = vec![&stream.content];
+        for l in lengths {
+            if let Some(end) = usize::try_from(l).ok().and_then(|l| start.checked_add(l))
+                && end <= bytes.len()
+                && end - start != stream.content.len()
+                && ends_at(bytes, end)
+            {
+                extents.push(&bytes[start..end]);
             }
-            Measure::Over(cap) => {
-                return Err(OpenError::Limit(format!(
-                    "stream {n} {g} {}",
-                    cap_words(cap, limits)
-                )));
+        }
+        // The parser unpacks object and cross-reference streams as it opens the file.
+        let opened = stream.dict.has_type(b"ObjStm") || stream.dict.has_type(b"XRef");
+        let mut size = 0u64;
+        for raw in extents {
+            let left = limits.max_total_bytes.saturating_sub(out.unpacked);
+            match measure_checked(raw, &filters, limits, left, stop) {
+                (Measure::Fits(_), true) if opened => {
+                    return Err(OpenError::Damaged(format!(
+                        "stream {n} {g} stops with a decoding error, and a lenient decoder may \
+                         unpack more than can be measured"
+                    )));
+                }
+                (Measure::Fits(m), broke) => {
+                    size = size.max(m);
+                    if broke {
+                        out.broken.insert((n, g));
+                    }
+                }
+                (Measure::Over(cap), _) => {
+                    return Err(OpenError::Limit(format!(
+                        "stream {n} {g} {}",
+                        cap_words(cap, limits)
+                    )));
+                }
+                (Measure::Stopped, _) => return Err(stopped()),
             }
-            Measure::Stopped => return Err(stopped()),
+        }
+        out.unpacked = out.unpacked.saturating_add(size);
+        let kept = out.sizes.entry((n, g)).or_insert(0);
+        *kept = (*kept).max(size);
+    }
+    Ok(out)
+}
+
+/// The integers an indirect `/Length` names, one for each definition of its number in file
+/// order, the last definition last.
+fn raw_lengths(
+    bytes: &[u8],
+    found: &xref::Rebuilt,
+    r: lopdf::ObjectId,
+    budget: &mut Budget,
+) -> Result<Vec<i64>, OpenError> {
+    let mut out = Vec::new();
+    for &(pos, n, g) in &found.headers {
+        if (n, g) != r {
+            continue;
+        }
+        match head_at(bytes, pos, budget) {
+            Ok(head) => out.extend(head.value.as_i64().ok()),
+            Err(Fail::Bad(_)) => {}
+            Err(Fail::Stop(e)) => return Err(e),
         }
     }
     Ok(out)
 }
 
-/// The integer an indirect `/Length` names, read at the last definition of its number.
-fn raw_length(
-    bytes: &[u8],
-    found: &xref::Rebuilt,
-    r: lopdf::ObjectId,
-    budget: &mut Budget,
-) -> Result<Option<i64>, OpenError> {
-    let Some(&(pos, g)) = found.table.get(&r.0) else {
-        return Ok(None);
-    };
-    if g != r.1 {
-        return Ok(None);
-    }
-    match head_at(bytes, pos, budget) {
-        Ok(head) => Ok(head.value.as_i64().ok()),
-        Err(Fail::Bad(_)) => Ok(None),
-        Err(Fail::Stop(e)) => Err(e),
-    }
+/// White space, then `endstream` or a word that starts with it, follows `end`.
+fn ends_at(bytes: &[u8], end: usize) -> bool {
+    let rest = &bytes[end..];
+    let skip = rest
+        .iter()
+        .take_while(|c| matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'\x0c' | b'\0'))
+        .count();
+    rest[skip..].starts_with(b"endstream")
 }
 
 #[cfg(test)]

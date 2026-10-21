@@ -102,7 +102,7 @@ fn read_pdf(
     let extracted = extract(&pdf, &pages, &links, &marked, &read, &mut out, text_stop);
     drop(marked);
     let (room, placed, needs) = lay_out(Some(&pdf), &pages, extracted, &annots, budget, &mut out);
-    render::render_pages(&pdf, &pages, &needs, opts, budget, &mut out);
+    render::render_pages(&pdf, &needs, opts, budget, &mut out);
     drop(needs);
     annots::read(&annots, placed, budget, &room, &mut out);
     drop(annots);
@@ -191,6 +191,7 @@ fn extract(
         left += old.kept;
         let n = items.page;
         *old = items;
+        old.fallback = true;
         out.loss(
             format!("p{n}"),
             format!("page {n}: text read with the fallback parser"),
@@ -467,6 +468,7 @@ fn lay_out(
                             page: n,
                             asset: out.doc.assets.len(),
                             cut: items.in_part,
+                            fallback: items.fallback,
                         });
                         out.doc.assets.push(render::asset(n, v.alt, caption));
                     }

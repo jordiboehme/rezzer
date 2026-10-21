@@ -95,9 +95,92 @@ fn an_encrypted_file_is_not_measured() {
 fn one_stream_is_measured_by_its_filter_names() {
     let packed = common::zlib(&[b'y'; 300]);
     assert_eq!(
-        measure_stream(&packed, &[b"FlateDecode"], &limits(), u64::MAX, &never),
+        measure_stream(&packed, &[b"FlateDecode"], &[], &limits(), u64::MAX, &never),
         Ok(300)
     );
     let bomb = common::zlib_fill(0, 100 << 20);
-    assert!(measure_stream(&bomb, &[b"Fl"], &limits(), u64::MAX, &never).is_err());
+    assert!(measure_stream(&bomb, &[b"Fl"], &[], &limits(), u64::MAX, &never).is_err());
+}
+
+/// A zlib stream that inflate refuses at its first copy (from 32,768 bytes back).
+fn far_copy_first() -> Vec<u8> {
+    // Header, then bits: final fixed block, length code 257, distance code 29, 13 extra bits,
+    // end of block.
+    vec![0x78, 0x9c, 0x03, 0xde, 0xff, 0x0f, 0x00]
+}
+
+#[test]
+fn a_damaged_stream_is_marked_and_a_damaged_object_stream_refuses_the_file() {
+    let file = objects(&[stream(4, "/Filter /FlateDecode", &far_copy_first())]);
+    let raw = RawStreams::measure(&file, &limits(), &never).unwrap();
+    assert!(raw.broken(4, 0));
+    assert!(raw.any_broken());
+    let file = objects(&[stream(
+        4,
+        "/Type /ObjStm /N 1 /First 4 /Filter /FlateDecode",
+        &far_copy_first(),
+    )]);
+    match RawStreams::measure(&file, &limits(), &never) {
+        Err(OpenError::Damaged(why)) => assert!(why.contains("decoding error"), "{why}"),
+        other => panic!("{:?}", other.map(|r| r.unpacked())),
+    }
+}
+
+#[test]
+fn every_extent_a_parser_may_take_is_measured() {
+    // The data holds `endstream` in a stored block; the real end is `endstreamX` after the
+    // stated length, followed by data that unpacks past the caps.
+    let mut data = vec![0x78, 0x9c, 0x00];
+    let inner = b"\nendstream\n";
+    data.extend((inner.len() as u16).to_le_bytes());
+    data.extend((!(inner.len() as u16)).to_le_bytes());
+    data.extend(inner);
+    data.extend(common::zlib_fill(0, 200 << 20).iter().skip(2));
+    let mut obj = format!(
+        "4 0 obj\n<< /Filter /FlateDecode /Length {} >>\nstream\n",
+        data.len()
+    )
+    .into_bytes();
+    obj.extend(&data);
+    obj.extend(b"\nendstreamX\nendobj");
+    let file = objects(&[obj]);
+    assert!(
+        matches!(
+            RawStreams::measure(&file, &limits(), &never),
+            Err(OpenError::Limit(_))
+        ),
+        "the length-based extent is a bomb"
+    );
+    // An indirect length with two definitions: the first one, which a parser following an
+    // old offset takes, covers the whole data.
+    let mut obj = b"4 0 obj\n<< /Filter /FlateDecode /Length 9 0 R >>\nstream\n".to_vec();
+    obj.extend(&data);
+    obj.extend(b"\nendstreamX\nendobj");
+    let file = objects(&[
+        format!("9 0 obj {} endobj", data.len()).into_bytes(),
+        obj,
+        b"9 0 obj 5 endobj".to_vec(),
+    ]);
+    assert!(
+        matches!(
+            RawStreams::measure(&file, &limits(), &never),
+            Err(OpenError::Limit(_))
+        ),
+        "every definition of the length is tried"
+    );
+}
+
+#[test]
+fn a_stream_is_measured_with_its_decode_parameters() {
+    // EarlyChange 0 decodes LZW codes one code later; measured with it, the size is right.
+    let names: [&[u8]; 1] = [b"LZWDecode"];
+    let parms = [pdfparts::FilterParms {
+        early_change: false,
+    }];
+    // Clear code, 'a', end of data, in 9-bit codes, MSB first: 256, 97, 257.
+    let data = [0x80, 0x18, 0x60, 0x20, 0x00];
+    assert_eq!(
+        measure_stream(&data, &names, &parms, &limits(), u64::MAX, &never),
+        Ok(1)
+    );
 }

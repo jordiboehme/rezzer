@@ -495,3 +495,100 @@ fn a_broken_stream_no_page_reaches_is_named_by_its_object() {
         "{hit:?}"
     );
 }
+
+#[test]
+fn a_wrong_checksum_with_all_data_is_not_damage() {
+    let mut packed = common::zlib(b"BT /F1 12 Tf 72 700 Td (Some words) Tj ET");
+    let n = packed.len();
+    packed[n - 1] ^= 0xFF;
+    let pdf = open(&content_page(&["FlateDecode"], packed)).unwrap();
+    let issues = pdf.issues();
+    assert!(
+        !issues.iter().any(|i| i.what.contains("is damaged")),
+        "{issues:?}"
+    );
+    // It is said, as a fact that may be wrong, not as data cut off.
+    let sum = issues
+        .iter()
+        .find(|i| i.what.contains("wrong checksum"))
+        .unwrap_or_else(|| panic!("{issues:?}"));
+    assert_eq!(sum.kind, pdfparts::IssueKind::Uncertain);
+    assert_eq!(sum.location, "page 1");
+}
+
+#[test]
+fn a_right_checksum_says_nothing() {
+    let packed = common::zlib(b"BT /F1 12 Tf 72 700 Td (Some words) Tj ET");
+    let pdf = open(&content_page(&["FlateDecode"], packed)).unwrap();
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
+}
+
+/// A zlib stream of `text` in fixed codes, then a copy from 32,768 bytes back, which inflate
+/// refuses, then 1,000 copies of 258 bytes that a lenient decoder unpacks.
+fn text_then_far_copy(text: &[u8]) -> Vec<u8> {
+    let mut bits: Vec<bool> = Vec::new();
+    let put = |v: u32, len: u32, bits: &mut Vec<bool>| {
+        for i in 0..len {
+            bits.push((v >> i) & 1 == 1);
+        }
+    };
+    let code = |c: u32, len: u32, bits: &mut Vec<bool>| {
+        for i in (0..len).rev() {
+            bits.push((c >> i) & 1 == 1);
+        }
+    };
+    put(1, 1, &mut bits);
+    put(1, 2, &mut bits);
+    for &c in text {
+        let c = u32::from(c);
+        if c < 144 {
+            code(0x30 + c, 8, &mut bits);
+        } else {
+            code(0x190 + c - 144, 9, &mut bits);
+        }
+    }
+    // Length 3 (code 257), distance code 29 with 13 extra bits of 8191: 32,768 back.
+    code(1, 7, &mut bits);
+    code(29, 5, &mut bits);
+    put(8191, 13, &mut bits);
+    for _ in 0..1000 {
+        // Length 258 (code 285), distance 1 (code 0).
+        code(0xC5, 8, &mut bits);
+        code(0, 5, &mut bits);
+    }
+    code(0, 7, &mut bits);
+    let mut out = vec![0x78, 0x9c];
+    for chunk in bits.chunks(8) {
+        out.push(
+            chunk
+                .iter()
+                .enumerate()
+                .fold(0u8, |b, (i, &on)| b | (u8::from(on) << i)),
+        );
+    }
+    out
+}
+
+#[test]
+fn the_canonical_copy_of_a_damaged_stream_holds_what_was_measured() {
+    let text = b"BT /F1 12 Tf 72 700 Td (Kept.) Tj ET\n";
+    let pdf = open(&content_page(&["FlateDecode"], text_then_far_copy(text))).unwrap();
+    let issues = pdf.issues();
+    assert!(
+        issues.iter().any(|i| i.what.contains("is damaged")),
+        "{issues:?}"
+    );
+    // Another parser reads the measured text as it is, without a filter that could unpack
+    // more.
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    let content = doc
+        .objects
+        .values()
+        .find_map(|o| match o {
+            Object::Stream(s) if s.content.windows(5).any(|w| w == b"Kept.") => Some(s),
+            _ => None,
+        })
+        .expect("the content stream holds its text");
+    assert!(content.dict.get(b"Filter").is_err(), "{:?}", content.dict);
+    assert_eq!(content.content, text);
+}

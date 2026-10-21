@@ -7,11 +7,23 @@
 //! reading position of its first picture. With `extract_assets` the page is rendered to PNG
 //! with hayro from pdfparts' canonical bytes, one page at a time.
 //!
-//! hayro cannot be stopped inside a render, so a render is bounded before it starts: the
-//! guard refused the pages whose streams break a limit, a page whose text was cut by a limit
-//! is not rendered, nor one whose pictures hold too many pixels, the pixmap has at most
-//! [`MAX_PIXELS`], the time is checked before each render and a file renders at most
-//! [`MAX_RENDERS`] pages.
+//! A render is bounded before it starts, because hayro cannot be stopped inside one, and an
+//! allocation that fails inside it ends the process:
+//! - the guard refused the pages whose streams break a limit, and a stream that stops with a
+//!   decoding error holds only what the guard measured;
+//! - a page whose text was cut by a limit is not rendered;
+//! - the page pixmap has at most [`MAX_PIXELS`];
+//! - `cost.rs` works out every buffer the renderer would build from the file's values
+//!   (pictures, tiling pattern cells, shading textures, soft masks, Type3 glyphs, annotation
+//!   appearances) by running the page through the interpreter into a device that draws
+//!   nothing; a page over the render room (a quarter of the memory limit) is not rendered,
+//!   and a file with a stencil mask whose size cannot be known renders nothing;
+//! - the time is checked before each render, and a file renders at most [`MAX_RENDERS`]
+//!   pages.
+//!
+//! One render can still run past the time limit: it cannot stop in the middle of a page.
+
+mod cost;
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
@@ -35,9 +47,6 @@ const SCALE: f64 = 2.0;
 
 /// The most pixels one render may have; a larger page is rendered at a smaller scale.
 pub(crate) const MAX_PIXELS: u64 = 16_000_000;
-
-/// A page whose pictures have more pixels together is not rendered.
-pub(crate) const MAX_IMAGE_PIXELS: u64 = 256_000_000;
 
 /// The most pages one file renders.
 pub(crate) const MAX_RENDERS: usize = 1_000;
@@ -173,11 +182,13 @@ pub(crate) fn place(
     i
 }
 
-/// A page that needs vision, to render: its asset, and whether a limit cut its text.
+/// A page that needs vision, to render: its asset, whether a limit cut its text, and whether
+/// its text came from the fallback parser (its content is then missing in the canonical copy).
 pub(crate) struct Need {
     pub page: u32,
     pub asset: usize,
     pub cut: bool,
+    pub fallback: bool,
 }
 
 /// The asset of page `n`, listed without a file until it is rendered.
@@ -198,7 +209,6 @@ pub(crate) fn asset(n: u32, alt: String, caption: Option<String>) -> Asset {
 /// cap or a render that failed, one for all pages past the render count or the blob room.
 pub(crate) fn render_pages(
     pdf: &Pdf,
-    pages: &[PageInfo],
     needs: &[Need],
     opts: &ReadOptions,
     budget: &Budget,
@@ -233,8 +243,21 @@ pub(crate) fn render_pages(
             return;
         }
     };
-    // The pages left out for the render count or the blob room: the first, why, how many.
+    let limits = crate::open::limits(budget);
+    let stop = || budget.check_time().is_err();
+    let sizes = |n: u32, g: u16| pdf.unpacked_size(n, g);
+    let facts = cost::Facts {
+        sizes: &sizes,
+        limits: &limits,
+        stop: &stop,
+    };
+    let room = budget.limits().max_memory_bytes / 4;
+    // The pages left out for the render count, the blob room or the time: the first, why,
+    // how many.
     let mut left_out: Option<(u32, String, usize)> = None;
+    if let Err(why) = cost::stencils(&doc, room, &facts) {
+        left_out = Some((needs[0].page, why, 0));
+    }
     let mut rendered = 0;
     for need in needs {
         let n = need.page;
@@ -254,22 +277,16 @@ pub(crate) fn render_pages(
             left_out = Some((n, format!("a file renders at most {MAX_RENDERS} pages"), 1));
             continue;
         }
-        let pixels: u64 = pages
-            .get(n as usize - 1)
-            .map(|p| {
-                p.images
-                    .iter()
-                    .map(|i| u64::from(i.width) * u64::from(i.height))
-                    .fold(0u64, u64::saturating_add)
-            })
-            .unwrap_or(0);
-        if pixels > MAX_IMAGE_PIXELS {
-            skip(
+        if need.fallback {
+            out.loss(
+                format!("p{n}"),
                 format!(
-                    "its pictures have {pixels} pixels, more than the {MAX_IMAGE_PIXELS} a \
-                     page may have to be rendered"
+                    "page {n} is not rendered: its text was read with the fallback parser, and \
+                     the renderer reads only the object layer's copy, where its content is \
+                     missing"
                 ),
-                out,
+                LossReason::Unsupported,
+                Severity::Warning,
             );
             continue;
         }
@@ -280,10 +297,14 @@ pub(crate) fn render_pages(
             );
             continue;
         }
-        let png = match render_png(&doc, n, budget) {
+        let png = match render_png(&doc, n, budget, room, &facts) {
             Ok(png) => png,
             Err(Failed::Limit(why)) => {
                 left_out = Some((n, why, 1));
+                continue;
+            }
+            Err(Failed::Room(why)) => {
+                skip(why, out);
                 continue;
             }
             Err(Failed::Damaged(why)) => {
@@ -341,12 +362,21 @@ pub(crate) fn render_pages(
 enum Failed {
     /// The time ran out: no later page is rendered either.
     Limit(String),
+    /// The page would take more than the render room, or what it takes cannot be known.
+    Room(String),
     Damaged(String),
 }
 
 /// Renders page `page` (1-based) of `doc`, opened from the canonical bytes, to PNG at 144
-/// dpi, at a smaller scale when that would pass [`MAX_PIXELS`]. The time is checked first.
-fn render_png(doc: &hayro_syntax::Pdf, page: u32, budget: &Budget) -> Result<Vec<u8>, Failed> {
+/// dpi, at a smaller scale when that would pass [`MAX_PIXELS`]. The time is checked first,
+/// then what the render takes is worked out against `room` bytes.
+fn render_png(
+    doc: &hayro_syntax::Pdf,
+    page: u32,
+    budget: &Budget,
+    room: u64,
+    facts: &cost::Facts<'_>,
+) -> Result<Vec<u8>, Failed> {
     budget
         .check_time()
         .map_err(|hit| Failed::Limit(hit.to_string()))?;
@@ -365,6 +395,21 @@ fn render_png(doc: &hayro_syntax::Pdf, page: u32, budget: &Budget) -> Result<Vec
     let (px, py) = pixel_size(w, h);
     let transform = Affine::scale_non_uniform(f64::from(px) / w, f64::from(py) / h)
         * p.initial_transform(true).to_kurbo();
+    let settings = InterpreterSettings::default();
+    match cost::estimate(p, transform, (px, py), &settings, room, facts) {
+        Ok(_) => {}
+        Err(cost::Unknown::Over(kind, bytes)) => {
+            return Err(Failed::Room(format!(
+                "{} would take {bytes} bytes or more to render, more than the {room} bytes a \
+                 render may take (a quarter of the memory limit)",
+                kind.words()
+            )));
+        }
+        Err(cost::Unknown::Unbounded(why)) => return Err(Failed::Room(why)),
+        Err(cost::Unknown::Stopped) => {
+            return Err(Failed::Limit("the time limit was reached".into()));
+        }
+    }
     let run = panic::catch_unwind(AssertUnwindSafe(|| {
         // A cache of its own, so nothing a page decoded stays for the next.
         let cache = RenderCache::new();
@@ -372,7 +417,7 @@ fn render_png(doc: &hayro_syntax::Pdf, page: u32, budget: &Budget) -> Result<Vec
         hayro::render_into(
             p,
             &cache,
-            &InterpreterSettings::default(),
+            &settings,
             &RenderSettings::default(),
             &mut ctx,
             transform,

@@ -455,3 +455,105 @@ pub fn row_pages(p: usize, c: usize, table: bool) -> Vec<u8> {
     );
     b.finish(catalog)
 }
+
+/// A deflate stream written bit by bit, with fixed Huffman codes (RFC 1951, 3.2.6), for
+/// streams no encoder writes.
+#[derive(Default)]
+pub struct Deflate {
+    out: Vec<u8>,
+    acc: u64,
+    bits: u32,
+}
+
+impl Deflate {
+    /// A zlib stream: the two header bytes come first.
+    pub fn zlib() -> Deflate {
+        Deflate {
+            out: vec![0x78, 0x9c],
+            ..Deflate::default()
+        }
+    }
+
+    /// `len` bits of `v`, least significant first.
+    pub fn bits(&mut self, v: u32, len: u32) {
+        self.acc |= u64::from(v) << self.bits;
+        self.bits += len;
+        while self.bits >= 8 {
+            self.out.push(self.acc as u8);
+            self.acc >>= 8;
+            self.bits -= 8;
+        }
+    }
+
+    /// A Huffman code of `len` bits, most significant first.
+    fn code(&mut self, code: u32, len: u32) {
+        let mut r = 0;
+        for i in 0..len {
+            r |= ((code >> i) & 1) << (len - 1 - i);
+        }
+        self.bits(r, len);
+    }
+
+    /// Starts a block with fixed codes.
+    pub fn fixed_block(&mut self, last: bool) {
+        self.bits(u32::from(last), 1);
+        self.bits(1, 2);
+    }
+
+    /// A literal byte or the end of the block (256), or a length code (257 to 287).
+    pub fn symbol(&mut self, s: u32) {
+        match s {
+            0..=143 => self.code(0x30 + s, 8),
+            144..=255 => self.code(0x190 + s - 144, 9),
+            256..=279 => self.code(s - 256, 7),
+            _ => self.code(0xC0 + s - 280, 8),
+        }
+    }
+
+    /// A copy of 258 bytes from 1 byte back.
+    pub fn run(&mut self) {
+        self.symbol(285);
+        self.code(0, 5);
+    }
+
+    /// A copy of 3 bytes from 32,768 bytes back: past the start of any output so far.
+    pub fn far_copy(&mut self) {
+        self.symbol(257);
+        self.code(29, 5);
+        self.bits(8191, 13);
+    }
+
+    /// A stored block with `data` (at most 65,535 bytes).
+    pub fn stored(&mut self, last: bool, data: &[u8]) {
+        self.bits(u32::from(last), 1);
+        self.bits(0, 2);
+        if self.bits > 0 {
+            self.bits(0, 8 - self.bits);
+        }
+        let n = data.len() as u16;
+        self.out.extend(n.to_le_bytes());
+        self.out.extend((!n).to_le_bytes());
+        self.out.extend(data);
+    }
+
+    pub fn finish(mut self) -> Vec<u8> {
+        if self.bits > 0 {
+            self.bits(0, 8 - self.bits);
+        }
+        self.out
+    }
+}
+
+/// A zlib stream that inflate stops on at once (a copy from before the start), followed by
+/// `runs` copies of 258 bytes that a lenient decoder goes on to unpack.
+pub fn lenient_bomb(runs: usize) -> Vec<u8> {
+    let mut d = Deflate::zlib();
+    d.fixed_block(true);
+    d.far_copy();
+    d.symbol(u32::from(b' '));
+    for _ in 0..runs {
+        d.run();
+    }
+    d.symbol(256);
+    d.finish()
+}
