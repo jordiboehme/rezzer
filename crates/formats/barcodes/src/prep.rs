@@ -38,24 +38,35 @@ pub(crate) fn tiles(w: u32, h: u32, limits: &Limits) -> Vec<Rect> {
     if u64::from(w) * u64::from(h) <= max {
         return vec![Rect { x: 0, y: 0, w, h }];
     }
-    let side = (max as f64).sqrt().floor() as u32;
-    let (tw, th) = if w <= side {
-        (w, (max / u64::from(w)).min(u64::from(h)) as u32)
-    } else if h <= side {
-        ((max / u64::from(h)).min(u64::from(w)) as u32, h)
-    } else {
-        (side, side)
-    };
-    let (tw, th) = (tw.max(1), th.max(1));
     // A step of at least half a tile, so a small tile size cannot make the tiles too many.
     let step = |size: u32| size.saturating_sub(limits.overlap).max(size / 2).max(1);
-    let mut out = Vec::new();
-    for y in starts(h, th, step(th)) {
-        for x in starts(w, tw, step(tw)) {
-            out.push(Rect { x, y, w: tw, h: th });
+    let grid = |tw: u32, th: u32| {
+        let (tw, th) = (tw.clamp(1, w), th.clamp(1, h));
+        let mut out = Vec::new();
+        for y in starts(h, th, step(th)) {
+            for x in starts(w, tw, step(tw)) {
+                out.push(Rect { x, y, w: tw, h: th });
+            }
         }
+        out
+    };
+    let side = (max as f64).sqrt().floor() as u32;
+    let fit = |len: u32| (max / u64::from(len.max(1))).min(u64::from(u32::MAX)) as u32;
+    // Square tiles, or strips as wide or as high as the picture: the layout that reads the
+    // fewest pixels.
+    let mut layouts = vec![grid(side, side)];
+    if fit(w) > limits.overlap {
+        layouts.push(grid(w, fit(w)));
     }
-    out
+    if fit(h) > limits.overlap {
+        layouts.push(grid(fit(h), h));
+    }
+    let read = |t: &Vec<Rect>| {
+        t.iter()
+            .map(|r| u64::from(r.w) * u64::from(r.h))
+            .sum::<u64>()
+    };
+    layouts.into_iter().min_by_key(read).unwrap_or_default()
 }
 
 /// Rec. 709 luma of a color already put onto white.
@@ -401,6 +412,13 @@ mod tests {
         // A long thin picture keeps its tiles under the cap.
         let thin = tiles(100, 1_000_000, &limits);
         assert!(thin.iter().all(|r| r.w == 100 && r.h == 40_000));
+        // An A4 page at 300 dpi is read in strips, not in six square tiles.
+        let page = tiles(2481, 3508, &limits);
+        assert_eq!(page.len(), 3, "{page:?}");
+        assert!(
+            page.iter()
+                .all(|r| u64::from(r.w) * u64::from(r.h) <= 4_000_000)
+        );
     }
 
     #[test]
