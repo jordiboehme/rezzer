@@ -172,6 +172,8 @@ impl<'a> Lexer<'a> {
                     match self.peek() {
                         Some(b']') => {
                             self.i += 1;
+                            // Parsed objects are kept until the file is closed: no spare room.
+                            items.shrink_to_fit();
                             return Ok(Object::Array(items));
                         }
                         None => return Err(Fail::Bad("an array is not closed")),
@@ -211,6 +213,8 @@ impl<'a> Lexer<'a> {
             match self.peek() {
                 Some(b'>') if self.b.get(self.i + 1) == Some(&b'>') => {
                     self.i += 2;
+                    // A map grown entry by entry keeps room for about twice its entries.
+                    dict.as_hashmap_mut().shrink_to_fit();
                     return Ok(dict);
                 }
                 Some(b'/') => {

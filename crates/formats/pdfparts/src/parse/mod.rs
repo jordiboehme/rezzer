@@ -33,8 +33,11 @@ use xref::{Entry, read_chain, rebuild};
 
 pub(crate) use crypt::Crypt;
 
-/// What every parsed value costs, on top of its bytes. About the size of a lopdf object.
-pub(crate) const VALUE_COST: u64 = 128;
+/// What every parsed value costs, on top of its bytes. Measured on a file of 1,000,117 small
+/// values (structure elements of five entries each): parsing them took 178 MiB, about 187
+/// bytes a value, where 128 had been charged. A lopdf dictionary entry is about 160 bytes
+/// with its key, and maps keep spare room.
+pub(crate) const VALUE_COST: u64 = 192;
 
 /// What one cross-reference entry costs.
 const ENTRY_COST: u64 = 32;

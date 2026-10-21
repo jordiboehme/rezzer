@@ -329,6 +329,11 @@ impl Pdf {
         self.text_budget().take(bytes)
     }
 
+    /// The bytes charged for the objects parsed at open, against `max_object_bytes`.
+    pub fn object_bytes(&self) -> u64 {
+        self.object_bytes
+    }
+
     /// The bytes the file was opened from, for checks that need them as they are (signature
     /// byte ranges, revisions). They must not be handed to another parser.
     pub fn original(&self) -> &[u8] {
