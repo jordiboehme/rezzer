@@ -18,7 +18,7 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, Severity};
 
-use crate::tables::{self, Planned, Rule, Tables, Unsure};
+use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -748,6 +748,18 @@ pub(crate) fn page_blocks(
     for l in lines(&footers) {
         built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
     }
+    if built.tables_as_text > 0 {
+        let k = built.tables_as_text;
+        let (s, them) = if k == 1 { ("", "its") } else { ("s", "their") };
+        notes.push((
+            format!(
+                "{k} table{s} on page {page} kept as paragraphs: the room for the cells of \
+                 tables is spent; {them} text is kept"
+            ),
+            LossReason::Limit,
+            Severity::Info,
+        ));
+    }
     let mut laid = built.laid(notes);
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
@@ -815,6 +827,8 @@ struct Built {
     tagged: Vec<Option<usize>>,
     /// Text for cells of rows begun on earlier pages.
     added: Vec<(usize, usize, usize, Vec<Inline>)>,
+    /// Tables whose overhead did not fit and that were laid out as paragraphs.
+    tables_as_text: usize,
     /// The link room before the block (or the table row) now being built, to go back to if
     /// it is dropped.
     mark: Option<LinkMark>,
@@ -913,21 +927,40 @@ impl Built {
     /// table begun on an earlier page. The table, each row and each cell are charged as
     /// elements, and each cell also by its fixed cost and its text against the room the model
     /// may keep; a stop inside a table keeps the rows built before.
-    fn table(&mut self, plan: Planned, cx: &Context<'_>) {
+    fn table(&mut self, mut plan: Planned, cx: &Context<'_>) {
         if self.stop.is_some() {
             return;
         }
         let earlier = plan.tagged.filter(|_| plan.continues);
+        // What the table's cells and rows cost beyond their text is set aside at once. When it
+        // does not fit, the table's text is laid out as paragraphs: the overhead of a table
+        // never stops the text.
+        let cells: usize = plan.rows.iter().map(Vec::len).sum();
+        let overhead = if earlier.is_some() { 0 } else { TABLE_COST }
+            + ROW_COST * plan.rows.len() as u64
+            + CELL_COST * cells as u64;
+        if !plan.rows.is_empty() {
+            let mark = cx.links.mark();
+            if cx.links.take_bytes(overhead).is_err() {
+                cx.links.restore(mark);
+                let rows = std::mem::take(&mut plan.rows);
+                self.as_text(rows, cx);
+                if plan.additions.is_empty() {
+                    return;
+                }
+            } else {
+                // The overhead goes back with the table's first row if that is dropped.
+                self.mark = Some(mark);
+            }
+        }
         let table = match earlier {
             Some(t) => TableRef::Earlier(t),
             None => {
                 self.pending = Pending::Table;
-                // The table's own cost goes back with its first row if that is dropped.
-                self.mark = Some(cx.links.mark());
-                if let Err(hit) = time_over(cx.budget)
-                    .and_then(|()| cx.budget.add_elements(1))
-                    .and_then(|()| cx.links.take_bytes(TABLE_COST))
-                {
+                if self.mark.is_none() {
+                    self.mark = Some(cx.links.mark());
+                }
+                if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.add_elements(1)) {
                     self.stop_at(hit, cx);
                     return;
                 }
@@ -956,11 +989,7 @@ impl Built {
             if self.mark.is_none() {
                 self.mark = Some(cx.links.mark());
             }
-            if let Err(hit) = cx
-                .budget
-                .add_elements(1)
-                .and_then(|()| cx.links.take_bytes(ROW_COST))
-            {
+            if let Err(hit) = cx.budget.add_elements(1) {
                 self.stop_at(hit, cx);
                 break;
             }
@@ -1002,13 +1031,23 @@ impl Built {
         }
     }
 
-    /// The inlines of one table cell, charged as an element and by its fixed cost against the
-    /// room the model may keep (its text was charged when the page was read); `None` once a
-    /// limit stopped the page.
+    /// The text of a table whose overhead does not fit, laid out as paragraphs in reading
+    /// order. The page counts it for one loss.
+    fn as_text(&mut self, rows: Vec<Vec<PlannedCell>>, cx: &Context<'_>) {
+        let mut runs: Vec<Run> = rows.into_iter().flatten().flat_map(|c| c.runs).collect();
+        if runs.is_empty() {
+            return;
+        }
+        runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+        self.tables_as_text += 1;
+        let free = vec![Slot::Free; runs.len()];
+        tagged(&runs, &free, cx, self);
+    }
+
+    /// The inlines of one table cell, charged as an element (its text was charged when the
+    /// page was read, its overhead with its table); `None` once a limit stopped the page.
     fn cell_inlines(&mut self, runs: &[Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
-        let charged = time_over(cx.budget)
-            .and_then(|()| cx.budget.add_elements(1))
-            .and_then(|()| cx.links.take_bytes(CELL_COST));
+        let charged = time_over(cx.budget).and_then(|()| cx.budget.add_elements(1));
         if let Err(hit) = charged {
             self.stop_at(hit, cx);
             return None;
@@ -2054,10 +2093,13 @@ mod tests {
     #[test]
     fn a_stop_in_the_text_added_to_an_earlier_row_is_named() {
         // Two rows, each with a cell on page 1 and one on page 2. Page 2 adds to both rows; the
-        // room runs out at the second addition.
+        // text limit stops the second addition.
         let (tree, cells) = table_tree(&[&["TD", "TD"], &["TD", "TD"]]);
         let style = Style::default();
-        let budget = Budget::new(rezzer_limits::Limits::default());
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_text_bytes: 4,
+            ..rezzer_limits::Limits::default()
+        });
         let tables = Tables::default();
         let links = LinkRoom::new(u64::MAX);
         let one = [cells[0][0], cells[1][0]];
@@ -2079,18 +2121,16 @@ mod tests {
             &cx,
         );
         assert_eq!(first.blocks.len(), 1);
-        let small = LinkRoom::new(CELL_COST + CELL_COST / 2);
         let two = [cells[0][1], cells[1][1]];
         let roles = |m: u32| two.get(m as usize).copied();
         let cx = Context {
             roles: &roles,
-            links: &small,
             ..cx
         };
         let second = page_blocks(
             2,
             Some(842.0),
-            tagged_runs(&["c", "d"], 700.0),
+            tagged_runs(&["c", "a longer cell"], 700.0),
             &NOTHING_DRAWN,
             &cx,
         );

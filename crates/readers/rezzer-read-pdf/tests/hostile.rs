@@ -1804,3 +1804,93 @@ fn tables_cost_about_what_their_text_costs_as_paragraphs() {
     assert!(cut[0].what.contains("not read"), "{cut:?}");
     assert_rss_under_256_mib();
 }
+
+/// `n` pages, each with 1,000 ruled grids of 15 by 2 cells with a word in each cell of the
+/// first row and the second row empty; without `rules` only the words.
+fn half_ruled_pages(n: usize, rules: bool) -> Vec<u8> {
+    let (grids, cols, rows, cw, rh) = (1_000usize, 15usize, 2usize, 10usize, 10usize);
+    let gh = rows * rh + 10;
+    let h = grids * gh + 100;
+    let w = cols * cw + 200;
+    let mut c = b"0.1 w ".to_vec();
+    let mut t = b"BT /F1 6 Tf ".to_vec();
+    for g in 0..grids {
+        let top = h - 50 - g * gh;
+        for r in 0..=rows {
+            let y = top - r * rh;
+            c.extend(format!("50 {y} m {} {y} l S ", 50 + cols * cw).as_bytes());
+        }
+        for k in 0..=cols {
+            let x = 50 + k * cw;
+            c.extend(format!("{x} {} m {x} {top} l S ", top - rows * rh).as_bytes());
+        }
+        for k in 0..cols {
+            t.extend(format!("1 0 0 1 {} {} Tm (x) Tj ", 52 + k * cw, top - rh + 2).as_bytes());
+        }
+    }
+    t.extend(b"ET\n");
+    if rules {
+        c.extend(t);
+    } else {
+        c = t;
+    }
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let mut kids = String::new();
+    for _ in 0..n {
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {n} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn table_overhead_never_stops_the_text() {
+    // 17 pages of half-empty ruled tables in a file whose kept text is near its bound: the
+    // empty cells give nothing back, so the overhead runs out. The tables that do not fit
+    // stay paragraphs and every page is read, as without the rules.
+    let start = Instant::now();
+    let plain = read(&half_ruled_pages(17, false));
+    let ruled = read(&half_ruled_pages(17, true));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let (p, r) = (pages_with_text(&plain), pages_with_text(&ruled));
+    assert!(
+        r + 1 >= p,
+        "ruled read {r} pages, plain {p}: {:?}",
+        ruled.document.losses
+    );
+    assert!(
+        !ruled
+            .document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("kept text limit")),
+        "{:?}",
+        ruled.document.losses
+    );
+    assert!(
+        ruled
+            .document
+            .losses
+            .iter()
+            .any(|l| l.severity == Severity::Info && l.what.contains("kept as paragraphs")),
+        "{:?}",
+        ruled.document.losses
+    );
+    assert_rss_under_256_mib();
+}
