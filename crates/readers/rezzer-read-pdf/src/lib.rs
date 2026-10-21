@@ -1430,6 +1430,62 @@ mod tests {
     }
 
     #[test]
+    fn listing_many_small_pictures_asks_the_clock() {
+        // 5,000 different small pictures on one page of a read whose time is spent: the
+        // listing asks the clock after 4,096 pictures, keeps those it listed and says how
+        // many are not listed and why.
+        let mut out = Out::new(Document::new(source_info(&Source {
+            path: None,
+            name: "f.pdf".into(),
+            bytes: Bytes::Owned(Arc::new(Vec::new())),
+            sha256: "00".repeat(32),
+            size: 0,
+            format: FormatId::Pdf,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "x".into(),
+            },
+            modified: None,
+        })));
+        let budget = Budget::new(Limits::default());
+        budget.cancel();
+        let list: Vec<render::Small> = (0..5_000u64)
+            .map(|k| {
+                let x = (k % 100) as f32 * 5.0;
+                let b = [x, 100.0, x + 30.0, 130.0];
+                render::Small {
+                    b,
+                    framed: b,
+                    id: k,
+                    code: false,
+                    logo: false,
+                    mcid: None,
+                }
+            })
+            .collect();
+        let spots = vec![1; list.len()];
+        let room = LinkRoom::new(1 << 30);
+        let mut pictures = Pictures::default();
+        let (mut media, mut unmatched) = (Vec::new(), Vec::new());
+        pictures.list(
+            1,
+            (&list, &spots, &[]),
+            (&budget, &room),
+            (&mut media, &mut unmatched),
+            &mut out,
+        );
+        pictures.finish(&mut out);
+        assert_eq!(media.len(), PICTURES_PER_CHECK - 1);
+        let said: Vec<&str> = out.doc.losses.iter().map(|l| l.what.as_str()).collect();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].starts_with("905 small pictures on page 1 not listed: ")
+                && said[0].contains("cancelled"),
+            "{said:?}"
+        );
+    }
+
+    #[test]
     fn failures_are_grouped_by_run_of_pages() {
         let mut out = Out::new(Document::new(source_info(&Source {
             path: None,
