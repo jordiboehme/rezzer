@@ -1343,3 +1343,35 @@ fn header_icons_count_as_header_cells() {
     assert_eq!(found[0].0, 1, "{found:?}");
     assert_eq!(found[0].1[0], ["(icon)", "Time", "Train"], "{found:?}");
 }
+
+#[test]
+fn a_page_wide_grid_full_of_text_says_so() {
+    // A ruled grid of 20 columns and 16 rows over most of a landscape page, with a number in
+    // every cell: too many columns for a table, and as large as the page; still a note says a
+    // table may stand there, as text fills it.
+    let mut c = String::from("0.5 w ");
+    let (cols, rows) = (20usize, 16usize);
+    let (x0, top, w, h) = (30.0f32, 580.0f32, 39.0f32, 34.0f32);
+    for k in 0..=rows {
+        let y = top - h * k as f32;
+        c += &format!("{x0} {y} m {} {y} l S ", x0 + w * cols as f32);
+    }
+    for k in 0..=cols {
+        let x = x0 + w * k as f32;
+        c += &format!("{x} {} m {x} {top} l S ", top - h * rows as f32);
+    }
+    for r in 0..rows {
+        for k in 0..cols {
+            let x = x0 + 3.0 + w * k as f32;
+            let y = top - h * r as f32 - 20.0;
+            c += &show("F1", 8.0, x, y, &format!("{}", r * 100 + k));
+        }
+    }
+    let out = read(&sized_page(&c, 842.0, 595.0, ""));
+    let note = "Possible table on page 1 not rebuilt (reason: it has more than 15 columns)";
+    assert!(
+        out.document.losses.iter().any(|l| l.what == note),
+        "{:?}",
+        out.document.losses
+    );
+}

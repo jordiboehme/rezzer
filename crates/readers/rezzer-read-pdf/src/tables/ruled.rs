@@ -205,10 +205,16 @@ pub(super) fn ruled(
             text_rows.insert(r);
             text_squares.insert((r, c));
         }
+        // A grid over most of the page is its frame, unless text fills at least half of its
+        // squares in three rows and three columns or more: a table as large as the page.
+        let dense = rows >= 3 && 2 * text_squares.len() >= rows * cols;
         let noted = table_caption
             || (cols >= 3
                 && (text_rows.len() >= 2 || text_squares.len() >= 6)
-                && area.refuses(b, &sizes).is_none());
+                && match area.refuses(b, &sizes) {
+                    None => true,
+                    Some(why) => why == PAGE_FRAME && dense,
+                });
         // A figure caption speaks against a table: no note for it.
         let mut refuse = |why: &'static str| {
             if !noted || why == FIGURE_NEAR {

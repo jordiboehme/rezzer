@@ -166,6 +166,9 @@ pub(crate) fn untagged(
     found
 }
 
+/// Why a grid or region is the page's frame.
+const PAGE_FRAME: &str = "it covers most of the page";
+
 /// The page a detector looks at: its size and what rules out a table.
 struct Area<'a> {
     width: f32,
@@ -180,7 +183,7 @@ impl Area<'_> {
     fn refuses(&self, b: [f32; 4], sizes: &[f32]) -> Option<&'static str> {
         let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
         if size > PAGE_SHARE * self.width * self.height {
-            return Some("it covers most of the page");
+            return Some(PAGE_FRAME);
         }
         if self.images.iter().any(|i| overlap(*i, b) > 0.5 * size) {
             return Some("it lies on a picture");
