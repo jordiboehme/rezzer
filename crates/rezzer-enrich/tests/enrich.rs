@@ -959,3 +959,39 @@ fn form_field_anchors_and_their_parents_resolve() {
     let missing: Vec<&str> = d.losses.iter().map(|l| l.what.as_str()).collect();
     assert_eq!(missing, ["reference to field:other not found"]);
 }
+
+#[test]
+fn deep_dotted_field_names_resolve_quickly() {
+    use rezzer_model::FormField;
+    // One field whose full name is about 1 MB of `a.` parts, read by a formula that names it
+    // and many of its parents.
+    let name = "a.".repeat(500_000) + "z";
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.facets.fields = vec![FormField {
+        anchor: a(&format!("field:{name}")),
+        name: name.clone(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: Some(Role::Input),
+        format: None,
+        calc_order: None,
+        actions: Vec::new(),
+        flags: Vec::new(),
+        options: Vec::new(),
+        pages: Vec::new(),
+    }];
+    let refs: Vec<String> = (1..200)
+        .map(|k| format!("field:{}", &name[..name.len() - 2 * k - 2]))
+        .chain([format!("field:{name}")])
+        .collect();
+    let refs: Vec<&str> = refs.iter().map(String::as_str).collect();
+    let mut f = formula(&format!("field:{name}"), &refs);
+    f.dialect = "pdf-js".into();
+    d.facets.formulas = vec![f];
+    let start = Instant::now();
+    enrich(&mut d, &only(&[]));
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert!(d.losses.is_empty(), "{:?}", d.losses.len());
+}

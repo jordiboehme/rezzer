@@ -121,6 +121,8 @@ impl Pass for Anchors {
 pub(crate) struct AnchorSet<'a> {
     all: HashSet<&'a str>,
     sections: HashSet<&'a str>,
+    /// The anchors of the form fields, sorted, so a parent is found by its prefix.
+    fields: Vec<&'a str>,
 }
 
 impl<'a> AnchorSet<'a> {
@@ -128,6 +130,7 @@ impl<'a> AnchorSet<'a> {
         let mut set = AnchorSet {
             all: HashSet::new(),
             sections: HashSet::new(),
+            fields: Vec::new(),
         };
         set.add_blocks(&doc.body);
         // Defined names have no place in the body; their formula is where they are defined.
@@ -138,12 +141,14 @@ impl<'a> AnchorSet<'a> {
                 .filter(|f| matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda)))
                 .map(|f| f.anchor.0.as_str()),
         );
-        // Form fields have no block either: each field and every parent it names.
-        for f in &doc.facets.fields {
-            let a = f.anchor.0.as_str();
-            set.all.insert(a);
-            set.all.extend(a.match_indices('.').map(|(at, _)| &a[..at]));
-        }
+        // Form fields have no block either; a parent is looked up by prefix in `resolves`.
+        set.fields = doc
+            .facets
+            .fields
+            .iter()
+            .map(|f| f.anchor.0.as_str())
+            .collect();
+        set.fields.sort_unstable();
         set
     }
 
@@ -160,6 +165,16 @@ impl<'a> AnchorSet<'a> {
     pub(crate) fn resolves(&self, anchor: &str) -> bool {
         if self.all.contains(anchor) || anchor.starts_with("ext:") {
             return true;
+        }
+        if anchor.starts_with("field:") {
+            // The field itself, or the first field after `<anchor>.` when it is a parent.
+            let at = self.fields.partition_point(|f| *f < anchor);
+            if self.fields.get(at) == Some(&anchor) {
+                return true;
+            }
+            let child = format!("{anchor}.");
+            let at = at + self.fields[at..].partition_point(|f| *f < child.as_str());
+            return self.fields.get(at).is_some_and(|f| f.starts_with(&child));
         }
         sheet_prefixes(anchor).iter().any(|sheet| {
             self.sections.contains(sheet.as_str())
