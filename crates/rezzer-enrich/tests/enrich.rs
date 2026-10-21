@@ -919,6 +919,8 @@ fn pages_fact_and_no_page_parts() {
     assert_eq!(fact("Form fields"), Some("1"));
     assert_eq!(fact("Signatures"), Some("1"));
     assert_eq!(fact("Scripts"), Some("2"));
+    // Scripts are not counted again as embedded objects.
+    assert_eq!(fact("Embedded"), None);
     assert_eq!(o.facts[0].0, "Pages");
     // A document without pages, fields, signatures or scripts has none of these facts.
     let mut plain = doc();

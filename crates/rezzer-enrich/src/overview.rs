@@ -391,7 +391,15 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
     );
     count("Signatures", doc.facets.signatures.len());
     count("Changes", doc.facets.timeline.len());
-    count("Embedded", doc.facets.embedded.len());
+    // Scripts have their own count.
+    count(
+        "Embedded",
+        doc.facets
+            .embedded
+            .iter()
+            .filter(|e| e.kind != "script")
+            .count(),
+    );
     count("Not read", doc.losses.len());
     let changed = [&doc.properties.modified, &doc.properties.created]
         .into_iter()
