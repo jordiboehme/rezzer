@@ -425,3 +425,90 @@ fn shared_annotations_are_listed_once() {
     assert_eq!(annots.len(), 1);
     assert_eq!(annots[0].page, 1);
 }
+
+/// `n` objects that each only refer to the next, the last to `to`. Returns the first.
+fn hops(doc: &mut Document, n: usize, to: lopdf::ObjectId) -> lopdf::ObjectId {
+    let mut at = to;
+    for _ in 0..n {
+        at = doc.add_object(Object::Reference(at));
+    }
+    at
+}
+
+fn comment(contents: Object, author: Object) -> Dictionary {
+    dictionary! {
+        "Type" => "Annot",
+        "Subtype" => "Text",
+        "Rect" => vec![10.into(), 10.into(), 30.into(), 30.into()],
+        "Contents" => contents,
+        "T" => author,
+    }
+}
+
+#[test]
+fn a_comment_many_annotations_name_is_read_once() {
+    let pdf = with_annots(|doc, _| {
+        let s = doc.add_object(text("one long comment"));
+        let t = doc.add_object(text("Ana"));
+        // Each names the text through an object of its own.
+        let a = comment(hops(doc, 1, s).into(), t.into());
+        let b = comment(hops(doc, 2, s).into(), t.into());
+        Object::Array(vec![doc.add_object(a).into(), doc.add_object(b).into()])
+    });
+    let annots = pdf.annotations();
+    assert_eq!(annots.len(), 2);
+    let [a, b] = [&annots[0], &annots[1]];
+    assert_eq!(a.contents.as_deref(), Some("one long comment"));
+    assert!(std::sync::Arc::ptr_eq(
+        a.contents.as_ref().unwrap(),
+        b.contents.as_ref().unwrap()
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        a.author.as_ref().unwrap(),
+        b.author.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn an_annotation_reached_through_hops_is_listed_once() {
+    // /Annots names two objects of their own that only refer on to one annotation; the
+    // reply's /IRT names a third.
+    let pdf = with_annots(|doc, _| {
+        let parent = doc.add_object(note("Parent", Dictionary::new()));
+        let first = hops(doc, 1, parent);
+        let second = hops(doc, 2, parent);
+        let via = hops(doc, 1, parent);
+        let reply = doc.add_object(note("Reply", dictionary! { "IRT" => via }));
+        Object::Array(vec![first.into(), second.into(), reply.into()])
+    });
+    let annots = pdf.annotations();
+    assert_eq!(annots.len(), 2, "{annots:?}");
+    assert_eq!(annots[0].contents.as_deref(), Some("Parent"));
+    assert_eq!(
+        annots[1].in_reply_to.as_deref(),
+        Some(annots[0].id.as_str())
+    );
+}
+
+#[test]
+fn a_comment_behind_a_reference_loop_is_damaged() {
+    let pdf = with_annots(|doc, _| {
+        let (x, y) = (doc.new_object_id(), doc.new_object_id());
+        doc.objects.insert(x, Object::Reference(y));
+        doc.objects.insert(y, Object::Reference(x));
+        let a = doc.add_object(comment(x.into(), text("Ana")));
+        Object::Array(vec![a.into()])
+    });
+    let annots = pdf.annotations();
+    assert_eq!(annots.len(), 1);
+    assert_eq!(annots[0].contents, None);
+    let id = &annots[0].id;
+    assert!(
+        pdf.issues().iter().any(|i| i.kind == IssueKind::Damaged
+            && i.what.starts_with(&format!(
+                "1 text could not be read, the first in annotation {id}: "
+            ))),
+        "{:?}",
+        pdf.issues()
+    );
+}

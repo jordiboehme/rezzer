@@ -6,12 +6,13 @@
 //! scripts, the calculation order, and whether the file also holds an XFA form.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::actions::{Chains, event_word};
 use crate::objects::{
-    TextBudget, Work, dict, get, get_dict, get_text, reference, resolve, text_string,
+    Decode, TextBudget, Work, dict, get, get_dict, get_text, quote, reference, resolve,
 };
 use crate::{Issue, IssueKind, Pdf};
 
@@ -29,27 +30,28 @@ pub struct Form {
 }
 
 /// One terminal field: a field without child fields. `/FT`, `/Ff`, `/V` and `/Opt` are
-/// taken from the nearest parent that has them.
+/// taken from the nearest parent that has them. Texts that many fields name through one
+/// object are shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     /// The partial names (`/T`) from the root down, joined by dots.
     pub full_name: String,
     /// `/TU`, the name shown to the user.
-    pub alt_name: Option<String>,
+    pub alt_name: Option<Arc<str>>,
     pub kind: FieldKind,
     /// `/V` as text: a string, a name such as `Yes` or `Off`, or the items of a list joined
     /// by `, `. `None` when it is not set or holds a signature.
-    pub value: Option<String>,
+    pub value: Option<Arc<str>>,
     /// `/Ff` as written.
     pub flags: u32,
     /// The flags in words, for example `read-only`, `required`, `multiline`.
     pub flag_words: Vec<&'static str>,
     /// `/Opt` of a choice field: the shown text, followed by the export value in brackets
     /// when it differs.
-    pub options: Vec<String>,
+    pub options: Vec<Arc<str>>,
     /// JavaScript of the field and its widgets: the event (`format`, `keystroke`,
     /// `validate`, `calculate`, `activate`, `mouse-up` and so on) and the script text.
-    pub actions: Vec<(String, String)>,
+    pub actions: Vec<(String, Arc<str>)>,
     /// The pages its widgets lie on, each once, in order.
     pub pages: Vec<u32>,
 }
@@ -141,7 +143,7 @@ pub(crate) struct FieldAction {
     pub field: usize,
     pub event: String,
     pub kind: String,
-    pub target: Option<String>,
+    pub target: Option<Arc<str>>,
     /// Index into the field's `actions` for a JavaScript action.
     pub js: Option<usize>,
 }
@@ -303,6 +305,32 @@ impl<'a> Build<'a> {
         Err(Stop)
     }
 
+    /// The text `obj` is or names, read once for an object that many fields name; when the
+    /// budget is spent, one Limit issue and the walk ends.
+    fn text(&mut self, obj: &Object) -> Result<Option<Arc<str>>, Stop> {
+        let doc = &self.pdf.doc;
+        match self
+            .chains
+            .shared
+            .text(doc, obj, Decode::Text, &mut self.budget)
+        {
+            Ok(t) => Ok(t),
+            Err(_) => {
+                self.issues
+                    .push(self.budget.limit_issue(FORM, "form fields"));
+                Err(Stop)
+            }
+        }
+    }
+
+    /// The text of one `/Opt` entry: a string, read as [`Build::text`].
+    fn option_text(&mut self, obj: &Object) -> Result<Option<Arc<str>>, Stop> {
+        match resolve(&self.pdf.doc, obj) {
+            Some(Object::String(..)) => self.text(obj),
+            _ => Ok(None),
+        }
+    }
+
     /// Charges a copy; when the budget is spent, one Limit issue and the walk ends.
     fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
         if self.budget.charge(bytes) {
@@ -456,50 +484,55 @@ impl<'a> Build<'a> {
         let doc = &pdf.doc;
         let ff = here.ff.unwrap_or(0);
         let kind = kind_of(here.ft, ff);
-        let value = match here.v.and_then(|v| resolve(doc, v)) {
-            Some(Object::String(s, _)) => Some(text_string(s)),
-            Some(Object::Name(n)) => Some(String::from_utf8_lossy(n).into_owned()),
-            Some(Object::Integer(i)) => Some(i.to_string()),
-            Some(Object::Real(r)) => Some(r.to_string()),
-            Some(Object::Array(items)) => {
+        let value: Option<Arc<str>> = match (here.v, here.v.and_then(|v| resolve(doc, v))) {
+            (Some(v), Some(Object::String(..) | Object::Name(_))) => self.text(v)?,
+            (_, Some(Object::Integer(i))) => Some(i.to_string().into()),
+            (_, Some(Object::Real(r))) => Some(r.to_string().into()),
+            (_, Some(Object::Array(items))) => {
                 self.count(items.len())?;
-                let parts: Vec<String> = items
-                    .iter()
-                    .filter_map(|o| match resolve(doc, o)? {
-                        Object::String(s, _) => Some(text_string(s)),
-                        Object::Name(n) => Some(String::from_utf8_lossy(n).into_owned()),
-                        _ => None,
-                    })
-                    .collect();
-                Some(parts.join(", "))
+                let mut parts: Vec<Arc<str>> = Vec::new();
+                for o in items {
+                    if matches!(resolve(doc, o), Some(Object::String(..) | Object::Name(_)))
+                        && let Some(t) = self.text(o)?
+                    {
+                        parts.push(t);
+                    }
+                }
+                let joined = parts.join(", ");
+                self.charge(joined.len())?;
+                Some(joined.into())
             }
             _ => None,
         };
-        let alt_name = get_text(doc, d, b"TU");
-        self.charge(
-            value.as_ref().map_or(0, String::len) + alt_name.as_ref().map_or(0, String::len),
-        )?;
+        let alt_name = match d.get(b"TU") {
+            Ok(tu) => self.text(tu)?,
+            Err(_) => None,
+        };
         let mut options = Vec::new();
         if let Some(Object::Array(opt)) = here.opt.and_then(|o| resolve(doc, o)) {
             self.count(opt.len())?;
             for o in opt {
-                let text = |o: &Object| match resolve(doc, o)? {
-                    Object::String(s, _) => Some(text_string(s)),
-                    _ => None,
-                };
                 let shown = match resolve(doc, o) {
                     Some(Object::Array(pair)) => match pair.as_slice() {
-                        [export, display] => match (text(export), text(display)) {
-                            (Some(e), Some(d)) if e == d => Some(d),
-                            (Some(e), Some(d)) => Some(format!("{d} ({e})")),
-                            (_, d) => d,
-                        },
+                        [export, display] => {
+                            let e = self.option_text(export)?;
+                            let d = self.option_text(display)?;
+                            match (e, d) {
+                                (Some(e), Some(d)) if e == d => Some(d),
+                                (Some(e), Some(d)) => {
+                                    let both = format!("{d} ({e})");
+                                    self.charge(both.len())?;
+                                    Some(both.into())
+                                }
+                                (_, d) => d,
+                            }
+                        }
                         _ => None,
                     },
-                    _ => text(o),
+                    _ => self.option_text(o)?,
                 };
                 if let Some(s) = shown {
-                    self.charge(s.len())?;
+                    self.charge(0)?;
                     options.push(s);
                 }
             }
@@ -534,6 +567,9 @@ impl<'a> Build<'a> {
                 self.data.sigs.push((index, v));
             }
         }
+        self.chains.broken.after(&mut self.chains.shared, || {
+            format!("field {}", quote(&full_name))
+        });
         self.fields.push(Field {
             full_name,
             alt_name,
@@ -557,7 +593,7 @@ impl<'a> Build<'a> {
         d: &'a Dictionary,
         index: usize,
         widgets: &[(Option<ObjectId>, &'a Dictionary)],
-    ) -> Result<Vec<(String, String)>, Stop> {
+    ) -> Result<Vec<(String, Arc<str>)>, Stop> {
         let pdf = self.pdf;
         let doc = &pdf.doc;
         let mut sources: Vec<(Option<&Object>, Option<&Dictionary>)> =

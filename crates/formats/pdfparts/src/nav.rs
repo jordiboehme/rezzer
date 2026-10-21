@@ -10,8 +10,8 @@ use std::sync::Arc;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::objects::{
-    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_dict, get_int,
-    get_name, number, reference, resolve, text_string, walk_tree,
+    BrokenTexts, Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_dict,
+    get_int, get_name, number, reference, resolve, text_string, walk_tree,
 };
 use crate::pagetree::ResourcesKey;
 use crate::{Issue, IssueKind, Pdf, pagetree};
@@ -190,6 +190,7 @@ struct OutlineWalk<'a> {
     out: Vec<OutlineItem>,
     budget: TextBudget<'a>,
     shared: Shared,
+    broken: BrokenTexts,
     /// The budget ran out; nothing more is read.
     spent: bool,
 }
@@ -586,6 +587,7 @@ impl Pdf {
             out: Vec::new(),
             budget: self.text_budget(),
             shared: Shared::default(),
+            broken: BrokenTexts::default(),
             spent: false,
         };
         walk.names = self.name_map(&mut walk.issues);
@@ -596,6 +598,7 @@ impl Pdf {
         if let Some(first) = first {
             walk.siblings(first, 1);
         }
+        walk.issues.extend(walk.broken.issue("outline"));
         self.note(walk.issues);
         walk.out
     }
@@ -610,9 +613,12 @@ impl Pdf {
         let mut out = Vec::new();
         let mut budget = self.text_budget();
         let mut shared = Shared::default();
+        let mut broken = BrokenTexts::default();
         let mut seen = HashSet::new();
+        let mut on_page = (0, 0);
         self.each_annot("links", &mut issues, |page, _, a| {
-            if let Some(r) = reference(a)
+            // One link object named through several chains of references is one link.
+            if let Some(r) = final_id(doc, a)
                 && !seen.insert(r)
             {
                 return Ok(());
@@ -632,6 +638,11 @@ impl Pdf {
             } else {
                 Ok(None)
             };
+            if on_page.0 != page {
+                on_page = (page, 0);
+            }
+            on_page.1 += 1;
+            broken.after(&mut shared, || format!("link {} on page {page}", on_page.1));
             let target = match target {
                 Ok(Some(t)) => t,
                 Ok(None) => return Ok(()),
@@ -647,6 +658,7 @@ impl Pdf {
             });
             Ok(())
         });
+        issues.extend(broken.issue("document"));
         self.note(issues);
         out
     }
@@ -719,7 +731,11 @@ impl Pdf {
                         None => LinkTarget::Other("URI".into()),
                     }
                 }
-                _ => LinkTarget::Other("URI".into()),
+                Ok(u) => {
+                    shared.check(doc, u);
+                    LinkTarget::Other("URI".into())
+                }
+                Err(_) => LinkTarget::Other("URI".into()),
             },
             b"GoToR" => LinkTarget::Remote {
                 file: self.file_spec(action, shared, budget)?,
@@ -829,6 +845,9 @@ impl OutlineWalk<'_> {
                 }
                 Err(_) => Ok(None),
             };
+            let k = self.out.len() + 1;
+            self.broken
+                .after(&mut self.shared, || format!("outline item {k}"));
             let (Ok(title), Ok(target)) = (title, target) else {
                 self.spent = true;
                 self.issues

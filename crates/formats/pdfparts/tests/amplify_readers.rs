@@ -142,13 +142,19 @@ fn shared_text_in_annotations_attachments_layers_and_threads_is_bounded() {
     let bytes = c.finish("");
     // Each reader gets its own open file, so only one result is held at a time.
     let open = || Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    // Annotations, attachments, layers and threads read the shared string once and share it.
     let pdf = open();
     let annots = pdf.annotations();
-    assert!(!annots.is_empty() && annots.len() < n);
+    assert_eq!(annots.len(), n);
+    let state = annots[0].state.clone().expect("a state");
+    assert!(annots.iter().all(|a| {
+        a.state
+            .as_ref()
+            .is_some_and(|s| std::sync::Arc::ptr_eq(s, &state))
+    }));
     drop(annots);
-    assert!(has_limit(&pdf, "annotations"), "{:?}", pdf.issues());
+    assert!(!has_limit(&pdf, "annotations"), "{:?}", pdf.issues());
     drop(pdf);
-    // Attachments, layers and threads read the shared string once and share it.
     let pdf = open();
     let files = pdf.embedded_files();
     assert_eq!(files.len(), n);
@@ -304,11 +310,12 @@ fn shared_outline_title_is_bounded() {
 
 #[test]
 fn readers_share_one_budget() {
-    // 300 annotations and 300 layers name one 1 MB string. The first reader spends what the
-    // object limit leaves; the second gets nothing.
+    // 300 annotations each hold a 20 KB comment of their own, and 300 layers a name. The pool
+    // left after open holds half of the comments: the first reader spends it, the second gets
+    // nothing.
     let n = 300;
     let mut c = Classic::new();
-    let layers: String = (0..n).map(|_| "<< /Type /OCG /Name 5 0 R >> ").collect();
+    let layers: String = (0..n).map(|_| "<< /Type /OCG /Name (L) >> ").collect();
     c.object(
         1,
         format!("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [{layers}] >> >>")
@@ -323,21 +330,24 @@ fn readers_share_one_budget() {
         3,
         format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>").as_bytes(),
     );
-    c.object(5, &big_string(1 << 20));
+    let comment = String::from_utf8(big_string(20_000)).unwrap();
     for i in 0..n {
         c.object(
             100 + i as u32,
-            b"<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents 5 0 R >>",
+            format!("<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents {comment} >>")
+                .as_bytes(),
         );
     }
     let bytes = c.finish("");
+    let opened = Pdf::open(&bytes, None, &Limits::default(), &never).unwrap();
     let tight = Limits {
-        max_object_bytes: 64 << 20,
+        max_object_bytes: opened.object_bytes() + (n as u64 * 20_000) / 2,
         ..Limits::default()
     };
+    drop(opened);
     let pdf = Pdf::open(&bytes, None, &tight, &never).unwrap();
     let annots = pdf.annotations();
-    assert!(!annots.is_empty() && annots.len() < n);
+    assert!(!annots.is_empty() && annots.len() < n, "{}", annots.len());
     let layers = pdf.layers();
     assert!(layers.is_empty(), "{} layers", layers.len());
     assert!(has_limit(&pdf, "annotations"), "{:?}", pdf.issues());
@@ -660,9 +670,9 @@ fn shared_byte_range_is_bounded() {
 }
 
 #[test]
-fn shared_action_target_is_bounded() {
+fn shared_action_target_is_shared() {
     // 3,000 buttons name one URI action with a 1 MB address, and 3,000 more one launch action
-    // with a 1 MB file name.
+    // with a 1 MB file name. The action is read once and its target shared.
     let n = 3000;
     let big = "a".repeat(1 << 20);
     for action in [
@@ -680,10 +690,15 @@ fn shared_action_target_is_bounded() {
         let bytes = form_file(&fields, objects);
         let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
         let fields = pdf.form().unwrap().fields.len();
-        let scripts = pdf.scripts().len();
-        eprintln!("{fields} fields, {scripts} scripts");
-        assert!(fields < n);
-        assert!(has_limit(&pdf, "form fields"), "{:?}", pdf.issues());
+        let scripts = pdf.scripts();
+        assert_eq!((fields, scripts.len()), (n, n));
+        let target = scripts[0].target.clone().expect("a target");
+        assert!(scripts.iter().all(|s| {
+            s.target
+                .as_ref()
+                .is_some_and(|t| std::sync::Arc::ptr_eq(t, &target))
+        }));
+        assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
         drop(pdf);
         assert_rss_bounded();
     }

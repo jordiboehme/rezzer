@@ -5,27 +5,33 @@
 //! Markup annotations: comments, highlights, notes and drawings with their author and dates.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::nav::{page_list, rect};
-use crate::objects::{Work, dict, get_date, get_name, get_text, number, reference, resolve};
+use crate::objects::{
+    BrokenTexts, Shared, Spent, TextBudget, Work, dict, final_id, get_date, get_name, number,
+    reference, resolve,
+};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
-/// One annotation that is not a link, a popup or a form widget.
+/// One annotation that is not a link, a popup or a form widget. Texts that many annotations
+/// name through one object are shared.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Annot {
-    /// The object (`12 0`), or `p<N>#<i>` for a dictionary written straight into the page's
-    /// `/Annots`: page N, position i in that array counted from 1.
+    /// The object (`12 0`) its chain of references ends at, or `p<N>#<i>` for a dictionary
+    /// written straight into the page's `/Annots`: page N, position i in that array counted
+    /// from 1.
     pub id: String,
     /// The 1-based page number.
     pub page: u32,
     /// `Highlight`, `Text`, `Ink`, `FreeText` and so on, as written.
     pub subtype: String,
     /// `/T`, by convention the author.
-    pub author: Option<String>,
-    pub contents: Option<String>,
-    pub subject: Option<String>,
+    pub author: Option<Arc<str>>,
+    pub contents: Option<Arc<str>>,
+    pub subject: Option<Arc<str>>,
     pub created: Option<PdfDate>,
     pub modified: Option<PdfDate>,
     /// `/C` as `#rrggbb`. Gray and CMYK are converted; no colour gives `None`.
@@ -34,29 +40,25 @@ pub struct Annot {
     pub rect: [f32; 4],
     /// `/QuadPoints` in groups of eight numbers (four corners), in order.
     pub quads: Vec<[f32; 8]>,
-    /// The id of the annotation this one replies to (`/IRT`).
+    /// The id of the annotation this one replies to (`/IRT`), by the object its chain of
+    /// references ends at.
     pub in_reply_to: Option<String>,
     /// `/RT` as written: `R` for a reply, `Group` for a part of the parent.
-    pub reply_type: Option<String>,
+    pub reply_type: Option<Arc<str>>,
     /// `/State` of a review reply, for example `Accepted` or `Completed`.
-    pub state: Option<String>,
+    pub state: Option<Arc<str>>,
 }
 
 impl Annot {
-    /// What the annotation copies beyond the fixed part: its texts and quads.
+    /// What the annotation copies beyond the fixed part and its texts, which were charged as
+    /// they were read: its id, subtype, dates and quads.
     fn weight(&self) -> usize {
-        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
         let dates = |d: &Option<PdfDate>| d.as_ref().map_or(0, |d| d.raw.len() * 2);
         self.id.len()
             + self.subtype.len()
-            + text(&self.author)
-            + text(&self.contents)
-            + text(&self.subject)
             + dates(&self.created)
             + dates(&self.modified)
-            + text(&self.in_reply_to)
-            + text(&self.reply_type)
-            + text(&self.state)
+            + self.in_reply_to.as_ref().map_or(0, String::len)
             + self.quads.len() * 32
     }
 }
@@ -218,7 +220,7 @@ impl Pdf {
         let mut seen = HashSet::new();
         let mut budget = self.text_budget();
         self.each_annot("form widgets", &mut issues, |page, _, a| {
-            if let Some(r) = reference(a)
+            if let Some(r) = final_id(doc, a)
                 && !seen.insert((page, r))
             {
                 return Ok(());
@@ -244,7 +246,8 @@ impl Pdf {
 
     /// Every annotation on every page in page order, except links, popups and form widgets.
     /// An annotation that several pages share is listed once, on the first, and so is an
-    /// `/Annots` array that pages share.
+    /// `/Annots` array that pages share. A string that many annotations name through one
+    /// object is read once and shared.
     pub fn annotations(&self) -> Vec<Annot> {
         let doc = &self.doc;
         let mut issues = Vec::new();
@@ -252,10 +255,13 @@ impl Pdf {
         let mut seen = HashSet::new();
         let mut budget = self.text_budget();
         let mut work = Work::new(&self.limits);
+        let mut shared = Shared::default();
+        let mut unread = BrokenTexts::default();
         // Pages with QuadPoints that do not form whole quads, and how many annotations each.
         let mut broken: Vec<(u32, usize)> = Vec::new();
         self.each_annot("annotations", &mut issues, |page, k, a| {
-            let id = match reference(a) {
+            // One annotation named through several chains of references is one annotation.
+            let id = match final_id(doc, a) {
                 Some(r) => {
                     if !seen.insert(r) {
                         return Ok(());
@@ -276,9 +282,14 @@ impl Pdf {
                 return Err(work.issue("document", "annotations"));
             }
             let mut bad = 0usize;
-            let Some(annot) = self.annot(ad, id, page, &mut bad) else {
+            let read = self.annot(ad, id, page, &mut bad, &mut shared, &mut budget);
+            let Ok(read) = read else {
+                return Err(budget.limit_issue("document", "annotations"));
+            };
+            let Some(annot) = read else {
                 return Ok(());
             };
+            unread.after(&mut shared, || format!("annotation {}", annot.id));
             if bad > 0 {
                 match broken.last_mut() {
                     Some((p, n)) if *p == page => *n += 1,
@@ -305,41 +316,53 @@ impl Pdf {
                 ),
             ));
         }
+        issues.extend(unread.issue("document"));
         self.note(issues);
         out
     }
 
+    /// One annotation, `Ok(None)` for a kind that is not listed. Its texts are read through
+    /// `shared`; `Err` when the budget is spent.
     fn annot(
         &self,
         ad: &Dictionary,
         id: String,
         page: u32,
         broken_quads: &mut usize,
-    ) -> Option<Annot> {
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
+    ) -> Result<Option<Annot>, Spent> {
         let doc = &self.doc;
-        let subtype = get_name(doc, ad, b"Subtype")?;
+        let Some(subtype) = get_name(doc, ad, b"Subtype") else {
+            return Ok(None);
+        };
         if matches!(subtype, b"Link" | b"Popup" | b"Widget") {
-            return None;
+            return Ok(None);
         }
         let (quads, broken) = quads(doc, ad.get(b"QuadPoints").ok());
         if broken {
             *broken_quads += 1;
         }
-        Some(Annot {
+        let mut text = |key: &[u8]| shared.text_at(doc, ad, key, budget);
+        Ok(Some(Annot {
             id,
             page,
             subtype: String::from_utf8_lossy(subtype).into_owned(),
-            author: get_text(doc, ad, b"T"),
-            contents: get_text(doc, ad, b"Contents"),
-            subject: get_text(doc, ad, b"Subj"),
+            author: text(b"T")?,
+            contents: text(b"Contents")?,
+            subject: text(b"Subj")?,
+            reply_type: text(b"RT")?,
+            state: text(b"State")?,
             created: get_date(doc, ad, b"CreationDate"),
             modified: get_date(doc, ad, b"M"),
             color: color(doc, ad.get(b"C").ok()),
             rect: rect(doc, ad.get(b"Rect").ok()).unwrap_or([0.0; 4]),
             quads,
-            in_reply_to: ad.get(b"IRT").ok().and_then(reference).map(id_text),
-            reply_type: get_name(doc, ad, b"RT").map(|n| String::from_utf8_lossy(n).into_owned()),
-            state: get_text(doc, ad, b"State"),
-        })
+            in_reply_to: ad
+                .get(b"IRT")
+                .ok()
+                .and_then(|r| final_id(doc, r))
+                .map(id_text),
+        }))
     }
 }

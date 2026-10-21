@@ -314,3 +314,60 @@ fn direct_bead_link_has_its_own_message() {
     );
     assert!(!issues.iter().any(|i| i.what.contains("loops back")));
 }
+
+/// `n` objects that each only refer to the next, the last to `to`. Returns the first.
+fn hops(doc: &mut Document, n: usize, to: ObjectId) -> ObjectId {
+    let mut at = to;
+    for _ in 0..n {
+        at = doc.add_object(Object::Reference(at));
+    }
+    at
+}
+
+#[test]
+fn a_layer_reached_through_hops_is_listed_once() {
+    let bytes = document(1, |doc, _| {
+        let roads = doc.add_object(dictionary! { "Type" => "OCG", "Name" => text("Roads") });
+        let (a, b) = (hops(doc, 1, roads), hops(doc, 2, roads));
+        dictionary! { "OCProperties" => dictionary! {
+            "OCGs" => vec![a.into(), b.into()],
+            "D" => dictionary! { "OFF" => vec![hops(doc, 1, roads).into()] },
+        } }
+    });
+    let layers = open_bytes(&bytes).layers();
+    let seen: Vec<(&str, bool)> = layers.iter().map(|l| (&*l.name, l.visible)).collect();
+    assert_eq!(seen, [("Roads", false)]);
+}
+
+#[test]
+fn an_attachment_annotation_reached_through_hops_is_listed_once() {
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    // The spec is written into the annotation and embeds no stream, so only the
+    // annotation's own id can join the two entries.
+    let spec = dictionary! { "Type" => "Filespec", "F" => text("a.txt") };
+    let annot = doc.add_object(dictionary! {
+        "Type" => "Annot", "Subtype" => "FileAttachment",
+        "Rect" => vec![0.into(), 0.into(), 10.into(), 10.into()],
+        "FS" => spec,
+    });
+    let (a, b) = (hops(&mut doc, 1, annot), hops(&mut doc, 2, annot));
+    let page = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id,
+        "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        "Annots" => vec![a.into(), b.into()],
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
+        ),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let files = pdf.embedded_files();
+    assert_eq!(files.len(), 1, "{files:?}");
+}

@@ -96,15 +96,13 @@ pub(crate) struct Kept<'a> {
 }
 
 impl Kept<'_> {
-    /// Charges one item of `elements` model elements with copies of `texts`. `Err` says why it
-    /// does not fit: then nothing more of its kind may be kept.
     /// The share of the memory limit the object layer may keep at most.
     pub(crate) fn share(&self) -> u64 {
         self.budget.limits().max_memory_bytes / OWN_SHARE
     }
 
-    /// As [`Kept::take`], within `cap` too, which it takes from: a part that must leave room
-    /// for the others.
+    /// As [`Kept::take`], within `cap` too, which it takes from: the room of the keywords and
+    /// authors, which must leave room for the others.
     pub(crate) fn take_within(
         &self,
         cap: &Counter<u64>,
@@ -114,8 +112,8 @@ impl Kept<'_> {
         let bytes = item_bytes(texts);
         if bytes > cap.get() {
             return Err(format!(
-                "the copies take more than the {} bytes left of the half of that share the \
-                 lists may take",
+                "the keywords and authors take more than the {} bytes left of their room, half \
+                 of what the metadata, outline and links may keep (a 64th of the memory limit)",
                 cap.get()
             ));
         }
@@ -124,7 +122,9 @@ impl Kept<'_> {
         Ok(())
     }
 
-    /// The bytes are checked first, so an item that does not fit costs nothing.
+    /// Charges one item of `elements` model elements with copies of `texts`. `Err` says why it
+    /// does not fit: then nothing more of its kind may be kept. The bytes are checked first,
+    /// so an item that does not fit costs nothing.
     pub(crate) fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
         self.calls.set(self.calls.get().wrapping_add(1));
         if self.calls.get().is_multiple_of(TIME_EVERY)

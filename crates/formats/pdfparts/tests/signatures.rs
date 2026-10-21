@@ -119,3 +119,44 @@ fn certification_signature_is_listed_once() {
     // The unsigned field is still a form field.
     assert_eq!(pdf.form().unwrap().fields.len(), 2);
 }
+
+#[test]
+fn texts_many_signatures_name_are_read_once() {
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let name = doc.add_object(Object::string_literal("Jane Roe"));
+    let fields: Vec<Object> = (0..2)
+        .map(|i| {
+            let sig = doc.add_object(dictionary! {
+                "Type" => "Sig", "Name" => name, "Reason" => name,
+                "ByteRange" => vec![0.into(), 10.into(), 20.into(), 30.into()],
+            });
+            doc.add_object(dictionary! {
+                "T" => Object::string_literal(format!("S{i}")), "FT" => "Sig", "V" => sig,
+            })
+            .into()
+        })
+        .collect();
+    let catalog = doc.add_object(dictionary! {
+        "Type" => "Catalog", "Pages" => pages_id,
+        "AcroForm" => dictionary! { "Fields" => fields },
+    });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    let sigs = pdf.signatures();
+    assert_eq!(sigs.len(), 2);
+    assert_eq!(sigs[0].signer.as_deref(), Some("Jane Roe"));
+    assert!(std::sync::Arc::ptr_eq(
+        sigs[0].signer.as_ref().unwrap(),
+        sigs[1].reason.as_ref().unwrap()
+    ));
+}

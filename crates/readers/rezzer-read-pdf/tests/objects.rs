@@ -661,4 +661,54 @@ fn one_keyword_too_long_is_said_in_the_singular() {
             .starts_with("1 keyword is not kept, from keyword 1 on: "),
         "{loss:?}"
     );
+    // The reason names only what the reader can see.
+    assert!(
+        loss.what.contains(
+            "the keywords and authors take more than the 65536 bytes left of their room, half \
+             of what the metadata, outline and links may keep (a 64th of the memory limit)"
+        ),
+        "{loss:?}"
+    );
+}
+
+#[test]
+fn a_title_behind_a_reference_loop_is_a_damaged_loss() {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    let (x, y) = (b.reserve(), b.reserve());
+    b.set(x, format!("{y} 0 R"));
+    b.set(y, format!("{x} 0 R"));
+    let outlines = b.reserve();
+    let item = b.add(format!(
+        "<< /Title {x} 0 R /Parent {outlines} 0 R /Dest [{kid} 0 R /Fit] >>"
+    ));
+    b.set(
+        outlines,
+        format!("<< /Type /Outlines /First {item} 0 R /Last {item} 0 R /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R /Outlines {outlines} 0 R >>"),
+    );
+    let out = read(&b.finish(catalog));
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.location == "outline" && l.why == LossReason::Damaged)
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert!(
+        loss.what
+            .starts_with("1 text could not be read, the first in outline item 1: "),
+        "{loss:?}"
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
 }

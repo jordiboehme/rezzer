@@ -11,8 +11,8 @@ use lopdf::{Object, ObjectId};
 
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
-    Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_date, get_dict,
-    get_name, reference, resolve, text_string, walk_tree,
+    BrokenTexts, Decode, Shared, Spent, TextBudget, Tree, TreeKey, dict, final_id, get, get_date,
+    get_dict, get_name, reference, resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
@@ -164,6 +164,7 @@ impl Pdf {
         let mut seen = Seen::default();
         let mut budget = self.text_budget();
         let mut shared = Shared::default();
+        let mut broken = BrokenTexts::default();
         let tree = self
             .catalog()
             .and_then(|c| get_dict(doc, c, b"Names"))
@@ -183,27 +184,32 @@ impl Pdf {
                     TreeKey::Name(n) => text_string(&n),
                     TreeKey::Number(n) => n.to_string(),
                 };
-                let f = match self.found(spec, key, &mut seen, &mut shared, &mut budget) {
+                let found = self.found(spec, key, &mut seen, &mut shared, &mut budget);
+                broken.after(&mut shared, || format!("attachment {}", out.len() + 1));
+                let f = match found {
                     Ok(Some(f)) => f,
                     Ok(None) => continue,
                     Err(Spent) => {
                         issues.push(budget.limit_issue("attachments", "attachments"));
+                        issues.extend(broken.issue("attachments"));
                         self.note(issues);
                         return out;
                     }
                 };
                 if !budget.charge(f.file.weight()) {
                     issues.push(budget.limit_issue("attachments", "attachments"));
+                    issues.extend(broken.issue("attachments"));
                     self.note(issues);
                     return out;
                 }
                 out.push(f);
             }
         }
-        // File attachment annotations, each annotation once.
+        // File attachment annotations, each annotation once, however many chains of
+        // references name it.
         let mut annots = HashSet::new();
         self.each_annot("attachments", &mut issues, |_, _, a| {
-            if let Some(r) = reference(a)
+            if let Some(r) = final_id(doc, a)
                 && !annots.insert(r)
             {
                 return Ok(());
@@ -218,6 +224,7 @@ impl Pdf {
                 return Ok(());
             };
             let found = self.found(spec, String::new(), &mut seen, &mut shared, &mut budget);
+            broken.after(&mut shared, || format!("attachment {}", out.len() + 1));
             let Ok(found) = found else {
                 return Err(budget.limit_issue("attachments", "attachments"));
             };
@@ -229,6 +236,7 @@ impl Pdf {
             }
             Ok(())
         });
+        issues.extend(broken.issue("attachments"));
         self.note(issues);
         out
     }
@@ -265,7 +273,7 @@ impl Pdf {
             ef.get(b"F")
                 .or_else(|_| ef.get(b"UF"))
                 .ok()
-                .and_then(reference)
+                .and_then(|f| final_id(doc, f))
         });
         if let Some(id) = stream
             && !seen.streams.insert(id)
@@ -327,7 +335,7 @@ impl Pdf {
         let config = get_dict(doc, props, b"D");
         let set = |key: &[u8]| -> HashSet<ObjectId> {
             match config.and_then(|c| get(doc, c, key)) {
-                Some(Object::Array(a)) => a.iter().filter_map(reference).collect(),
+                Some(Object::Array(a)) => a.iter().filter_map(|o| final_id(doc, o)).collect(),
                 _ => HashSet::new(),
             }
         };
@@ -335,10 +343,12 @@ impl Pdf {
         let base_on = config.and_then(|c| get_name(doc, c, b"BaseState")) != Some(b"OFF");
         let mut budget = self.text_budget();
         let mut shared = Shared::default();
+        let mut broken = BrokenTexts::default();
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for g in groups {
-            let id = reference(g);
+            // A group named through several chains of references is one layer.
+            let id = final_id(doc, g);
             if let Some(id) = id
                 && !seen.insert(id)
             {
@@ -353,6 +363,7 @@ impl Pdf {
                 _ => base_on,
             };
             let name = shared.text_at(doc, gd, b"Name", &mut budget);
+            broken.after(&mut shared, || format!("layer {}", out.len() + 1));
             let Ok(name) = name.map(|n| n.unwrap_or_else(|| "".into())) else {
                 self.note(vec![budget.limit_issue("layers", "layers")]);
                 break;
@@ -363,6 +374,7 @@ impl Pdf {
             }
             out.push(Layer { name, visible });
         }
+        self.note(broken.issue("layers").into_iter().collect());
         out
     }
 
@@ -405,11 +417,13 @@ impl Pdf {
         let mut beads_left = self.limits.max_items;
         let mut budget = self.text_budget();
         let mut shared = Shared::default();
+        let mut broken = BrokenTexts::default();
         for (t, thread) in list.iter().enumerate() {
             let Some(td) = dict(doc, thread) else {
                 continue;
             };
             let title = self.thread_title(td, &mut shared, &mut budget);
+            broken.after(&mut shared, || format!("thread {}", t + 1));
             let (Ok(title), true) = (title, budget.charge(0)) else {
                 issues.push(budget.limit_issue(THREADS, "article threads"));
                 break;
@@ -475,6 +489,7 @@ impl Pdf {
                 beads,
             });
         }
+        issues.extend(broken.issue(THREADS));
         self.note(issues);
         out
     }

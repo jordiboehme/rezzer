@@ -6,27 +6,32 @@
 //! never verified.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::forms::SigValue;
-use crate::objects::{Work, dict, get, get_date, get_dict, get_name, get_text, reference, resolve};
+use crate::objects::{
+    BrokenTexts, Shared, Spent, TextBudget, Work, dict, get, get_date, get_dict, quote, reference,
+    resolve,
+};
 use crate::{Issue, IssueKind, Pdf, PdfDate};
 
-/// One signature as the file describes it. It is not verified.
+/// One signature as the file describes it. It is not verified. Texts that many signatures
+/// name through one object are shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sig {
     /// The full name of the signature field, `None` for a signature that only `/Perms` holds.
     pub field: Option<String>,
     pub kind: SigKind,
     /// `/Name`, the signer as the signing software wrote it.
-    pub signer: Option<String>,
-    pub reason: Option<String>,
-    pub location: Option<String>,
+    pub signer: Option<Arc<str>>,
+    pub reason: Option<Arc<str>>,
+    pub location: Option<Arc<str>>,
     /// `/ContactInfo`.
-    pub contact: Option<String>,
+    pub contact: Option<Arc<str>>,
     /// `/SubFilter` without the slash, for example `adbe.pkcs7.detached`.
-    pub sub_filter: Option<String>,
+    pub sub_filter: Option<Arc<str>>,
     /// `/M`, the signing time the signer claims.
     pub date: Option<PdfDate>,
     /// `/ByteRange` as written: offset and length pairs of the signed bytes.
@@ -51,14 +56,9 @@ pub enum SigKind {
 const WHERE: &str = "signatures";
 
 impl Sig {
+    /// What it copies besides its texts, which were charged as they were read.
     fn weight(&self) -> usize {
-        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
-        text(&self.field)
-            + text(&self.signer)
-            + text(&self.reason)
-            + text(&self.location)
-            + text(&self.contact)
-            + text(&self.sub_filter)
+        self.field.as_ref().map_or(0, String::len)
             + self.date.as_ref().map_or(0, |d| d.raw.len() * 2)
             + self.byte_range.len() * 8
     }
@@ -138,8 +138,27 @@ impl Pdf {
             }
         }
         let mut out = Vec::new();
+        let mut shared = Shared::default();
+        let mut broken = BrokenTexts::default();
         for (field, kind, sd) in found {
-            let Some(sig) = self.sig(field, kind, sd, &mut work, &mut issues) else {
+            let name = match &field {
+                Some(f) => format!("signature field {}", quote(f)),
+                None => format!("signature {}", out.len() + 1),
+            };
+            let read = self.sig(
+                field,
+                kind,
+                sd,
+                &mut work,
+                &mut shared,
+                &mut budget,
+                &mut issues,
+            );
+            broken.after(&mut shared, || name);
+            let Ok(Some(sig)) = read else {
+                if read.is_err() {
+                    issues.push(budget.limit_issue(WHERE, "signatures"));
+                }
                 break;
             };
             if !budget.charge(sig.weight()) {
@@ -148,18 +167,23 @@ impl Pdf {
             }
             out.push(sig);
         }
+        issues.extend(broken.issue(WHERE));
         self.note(issues);
         out
     }
 
+    /// One signature, `Ok(None)` when the visits ran out; `Err` when the budget is spent.
+    #[allow(clippy::too_many_arguments)]
     fn sig(
         &self,
         field: Option<String>,
         kind: SigKind,
         sd: &Dictionary,
         work: &mut Work,
+        shared: &mut Shared,
+        budget: &mut TextBudget<'_>,
         issues: &mut Vec<Issue>,
-    ) -> Option<Sig> {
+    ) -> Result<Option<Sig>, Spent> {
         let doc = &self.doc;
         let place = match &field {
             Some(f) => format!("field {f}"),
@@ -170,7 +194,7 @@ impl Pdf {
             Some(Object::Array(a)) => {
                 if !work.take(a.len()) {
                     issues.extend(work.limit_issue(WHERE, "signatures"));
-                    return None;
+                    return Ok(None);
                 }
                 let values: Option<Vec<u64>> = a
                     .iter()
@@ -201,19 +225,19 @@ impl Pdf {
         };
         let covers_whole_file =
             contents.is_some_and(|len| covers_whole_file(self.original(), &byte_range, len));
-        Some(Sig {
+        let mut text = |key: &[u8]| shared.text_at(doc, sd, key, budget);
+        Ok(Some(Sig {
             field,
             kind,
-            signer: get_text(doc, sd, b"Name"),
-            reason: get_text(doc, sd, b"Reason"),
-            location: get_text(doc, sd, b"Location"),
-            contact: get_text(doc, sd, b"ContactInfo"),
-            sub_filter: get_name(doc, sd, b"SubFilter")
-                .map(|n| String::from_utf8_lossy(n).into_owned()),
+            signer: text(b"Name")?,
+            reason: text(b"Reason")?,
+            location: text(b"Location")?,
+            contact: text(b"ContactInfo")?,
+            sub_filter: text(b"SubFilter")?,
             date: get_date(doc, sd, b"M"),
             byte_range,
             covers_whole_file,
-        })
+        }))
     }
 }
 

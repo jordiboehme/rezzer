@@ -35,7 +35,7 @@ fn script<'a>(f: &'a Field, event: &str) -> &'a str {
     f.actions
         .iter()
         .find(|(e, _)| e == event)
-        .map(|(_, s)| s.as_str())
+        .map(|(_, s)| &**s)
         .unwrap_or_else(|| panic!("no {event} script on {}", f.full_name))
 }
 
@@ -155,7 +155,8 @@ fn inherited_flags_and_type() {
     let sub = field(&pdf, "list.sub");
     assert_eq!(sub.kind, FieldKind::List);
     assert_eq!(sub.flag_words, ["required", "multi-select"]);
-    assert_eq!(sub.options, ["One", "Two (2)", "x"]);
+    let options: Vec<&str> = sub.options.iter().map(|o| &**o).collect();
+    assert_eq!(options, ["One", "Two (2)", "x"]);
     assert_eq!(sub.value.as_deref(), Some("One, 2"));
 }
 
@@ -177,7 +178,7 @@ fn utf16_value_decoded() {
     let nat = field(&pdf, "Nationality");
     assert_eq!(nat.kind, FieldKind::Combo);
     assert_eq!(nat.options.len(), 7);
-    assert_eq!(nat.options[1], "German");
+    assert_eq!(&*nat.options[1], "German");
 }
 
 #[test]
@@ -432,8 +433,8 @@ fn large_calculate_script_is_kept_as_text() {
     assert_eq!(s.trigger, "field Total calculate");
     assert_eq!(s.text.as_ref().unwrap().len(), big.len());
 
-    // Two fields share the script action; the second goes past the object limit and is
-    // left out with one Limit issue.
+    // Two fields share the script action: it is read once, and both fields share its text
+    // within an object limit that holds one copy.
     let mut doc = Document::with_version("1.7");
     let pages_id = doc.new_object_id();
     let page_id = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id });
@@ -462,14 +463,13 @@ fn large_calculate_script_is_kept_as_text() {
         ..Limits::default()
     };
     let pdf = Pdf::open(&out, None, &tight, &never).unwrap();
-    assert_eq!(pdf.form().unwrap().fields.len(), 1);
-    let limits: Vec<_> = pdf
-        .issues()
-        .into_iter()
-        .filter(|i| i.kind == IssueKind::Limit)
-        .collect();
-    assert_eq!(limits.len(), 1, "{limits:?}");
-    assert_eq!(limits[0].location, "form");
+    let fields = &pdf.form().unwrap().fields;
+    assert_eq!(fields.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        &fields[0].actions[0].1,
+        &fields[1].actions[0].1
+    ));
+    assert!(pdf.issues().is_empty(), "{:?}", pdf.issues());
 }
 
 #[test]
@@ -602,13 +602,8 @@ fn unreadable_and_shared_kids() {
     assert_eq!(names, ["a.child", "c"]);
     let c = field(&pdf, "c");
     assert_eq!(c.pages, [1]);
-    assert_eq!(
-        c.actions,
-        [
-            ("keystroke".to_string(), "k".to_string()),
-            ("activate".to_string(), "act".to_string())
-        ]
-    );
+    let actions: Vec<(&str, &str)> = c.actions.iter().map(|(e, s)| (e.as_str(), &**s)).collect();
+    assert_eq!(actions, [("keystroke", "k"), ("activate", "act")]);
     let triggers: Vec<&str> = pdf.scripts().iter().map(|s| s.trigger.as_str()).collect();
     assert_eq!(triggers, ["field c keystroke", "field c activate"]);
     assert!(
@@ -618,4 +613,40 @@ fn unreadable_and_shared_kids() {
         "{:?}",
         pdf.issues()
     );
+}
+
+#[test]
+fn texts_many_fields_name_are_read_once() {
+    let pdf = with_form(|doc, _| {
+        let tu = doc.add_object(text("Shown name"));
+        let v = doc.add_object(text("Value"));
+        let js = doc.add_object(text("event.value = 1;"));
+        let opt = doc.add_object(text("Choice"));
+        let fields: Vec<Object> = (0..2)
+            .map(|i| {
+                doc.add_object(dictionary! {
+                    "FT" => "Ch", "T" => text(&format!("f{i}")), "TU" => tu, "V" => v,
+                    "Opt" => vec![Object::Reference(opt)],
+                    "AA" => dictionary! { "C" => dictionary! { "S" => "JavaScript", "JS" => js } },
+                })
+                .into()
+            })
+            .collect();
+        dictionary! { "Fields" => fields }
+    });
+    let form = pdf.form().unwrap();
+    let [a, b] = [&form.fields[0], &form.fields[1]];
+    let same = |x: &Option<std::sync::Arc<str>>, y: &Option<std::sync::Arc<str>>| {
+        std::sync::Arc::ptr_eq(x.as_ref().unwrap(), y.as_ref().unwrap())
+    };
+    assert_eq!(a.alt_name.as_deref(), Some("Shown name"));
+    assert!(same(&a.alt_name, &b.alt_name));
+    assert!(same(&a.value, &b.value));
+    assert!(std::sync::Arc::ptr_eq(&a.options[0], &b.options[0]));
+    assert_eq!(&*a.actions[0].1, "event.value = 1;");
+    assert!(std::sync::Arc::ptr_eq(&a.actions[0].1, &b.actions[0].1));
+    // The scripts list shares the form's texts.
+    let scripts = pdf.scripts();
+    assert_eq!(scripts.len(), 2, "{scripts:?}");
+    assert!(same(&scripts[0].text, &scripts[1].text));
 }

@@ -6,17 +6,19 @@
 //! field and link actions. They are listed, never run or followed.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
-    TextBudget, Tree, TreeKey, Work, dict, get, get_dict, get_name, reference, resolve,
-    text_string, walk_tree,
+    BrokenTexts, Decode, Shared, TextBudget, Tree, TreeKey, Work, dict, final_id, get_dict,
+    get_name, reference, resolve, text_string, walk_tree,
 };
 use crate::{Issue, IssueKind, Limits, Pdf};
 
 /// One action the document holds, with what starts it. Nothing here is run or followed.
+/// Texts that many actions name through one object are shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Script {
     /// What starts it: `document` (a document-level script), `open`, `will-close`,
@@ -29,22 +31,16 @@ pub struct Script {
     /// `goto-embedded`, `reset-form`, `named`, `hide` and so on.
     pub kind: String,
     /// The file, address or name the action points at.
-    pub target: Option<String>,
+    pub target: Option<Arc<str>>,
     /// The script text of a JavaScript action.
-    pub text: Option<String>,
+    pub text: Option<Arc<str>>,
 }
 
 impl Script {
-    /// What it adds to the action it lists: its trigger and name. The action's kind, target
-    /// and text were charged as they were read.
+    /// What it adds to the action it lists: its trigger and name. The action's kind was
+    /// charged as it was read, its target and text are shared.
     pub(crate) fn weight(&self) -> usize {
         self.trigger.len() + self.name.as_ref().map_or(0, String::len)
-    }
-
-    /// What a copy of an action that was read before holds.
-    fn copied(&self) -> usize {
-        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
-        self.kind.len() + text(&self.target) + text(&self.text)
     }
 }
 
@@ -52,29 +48,29 @@ impl Script {
 #[derive(Debug, Clone)]
 pub(crate) struct Action {
     pub kind: String,
-    pub target: Option<String>,
-    pub text: Option<String>,
+    pub target: Option<Arc<str>>,
+    pub text: Option<Arc<str>>,
 }
 
 impl Action {
-    /// What one copy of it holds.
+    /// What one copy of it holds besides the texts it shares.
     fn weight(&self) -> usize {
-        let text = |s: &Option<String>| s.as_ref().map_or(0, String::len);
-        self.kind.len() + text(&self.target) + text(&self.text)
+        self.kind.len()
     }
 }
 
-/// The spent budget ends the reader.
-pub(crate) struct Spent;
+pub(crate) use crate::objects::Spent;
 
-/// The action chains one reader has read: its visits, the chains by their first action, and
-/// the actions reached a second time.
+/// The action chains one reader has read: its visits, the chains by their first action, the
+/// actions reached a second time, and the texts read once and shared.
 pub(crate) struct Chains {
     work: Work,
     cache: HashMap<ObjectId, Vec<Action>>,
     repeats: usize,
     first_repeat: Option<ObjectId>,
     location: &'static str,
+    pub(crate) shared: Shared,
+    pub(crate) broken: BrokenTexts,
 }
 
 impl Chains {
@@ -85,11 +81,15 @@ impl Chains {
             repeats: 0,
             first_repeat: None,
             location,
+            shared: Shared::default(),
+            broken: BrokenTexts::default(),
         }
     }
 
-    /// Adds the one issue for actions reached a second time.
+    /// Adds the one issue for actions reached a second time, and the one for texts that
+    /// could not be read.
     pub(crate) fn finish(&self, issues: &mut Vec<Issue>) {
+        issues.extend(self.broken.issue(self.location));
         if let Some(id) = self.first_repeat {
             issues.push(Issue::new(
                 self.location,
@@ -253,8 +253,8 @@ impl Pdf {
                     target: fa.target.clone(),
                     text: fa.js.map(|j| field.actions[j].1.clone()),
                 };
-                // Kind, target and text are copies of what the form keeps, so they are charged again.
-                if !budget.charge(s.weight() + s.copied()) {
+                // The kind is a copy of what the form keeps; target and text are shared.
+                if !budget.charge(s.weight() + s.kind.len()) {
                     return Err(Spent);
                 }
                 out.push(s);
@@ -265,7 +265,12 @@ impl Pdf {
         let mut found_issues = Vec::new();
         self.each_annot(SCRIPTS, issues, |page, _, a| {
             if let Some(r) = reference(a)
-                && (data.widgets.contains(&r) || !seen.insert(r))
+                && data.widgets.contains(&r)
+            {
+                return Ok(());
+            }
+            if let Some(r) = final_id(doc, a)
+                && !seen.insert(r)
             {
                 return Ok(());
             }
@@ -288,7 +293,11 @@ impl Pdf {
                 }
             }
             for (trigger, action) in entries {
-                let Ok(found) = self.action_chain(action, budget, chains, &mut found_issues) else {
+                let found = self.action_chain(action, budget, chains, &mut found_issues);
+                chains
+                    .broken
+                    .after(&mut chains.shared, || format!("the {trigger} action"));
+                let Ok(found) = found else {
                     return Err(budget.limit_issue(SCRIPTS, "scripts"));
                 };
                 // Link addresses are listed by `links()`.
@@ -326,7 +335,12 @@ impl Pdf {
         chains: &mut Chains,
         issues: &mut Vec<Issue>,
     ) -> Result<(), Spent> {
-        for a in self.action_chain(action, budget, chains, issues)? {
+        let found = self.action_chain(action, budget, chains, issues);
+        chains.broken.after(&mut chains.shared, || match &name {
+            Some(n) => format!("{trigger} script {}", crate::objects::quote(n)),
+            None => format!("{trigger} action"),
+        });
+        for a in found? {
             let s = Script {
                 trigger: trigger.to_string(),
                 name: name.clone(),
@@ -397,7 +411,7 @@ impl Pdf {
             if let Some(s) = get_name(doc, d, b"S")
                 && s != b"GoTo"
             {
-                out.push(self.action(d, s, budget, location, issues)?);
+                out.push(self.action(d, s, budget, &mut chains.shared, location, issues)?);
             }
             // /Next is one action or an array of them, read in order. Each entry counts as
             // it is stacked, so a list that many actions share costs each time.
@@ -426,46 +440,70 @@ impl Pdf {
         d: &Dictionary,
         s: &[u8],
         budget: &mut TextBudget<'_>,
+        shared: &mut Shared,
         location: &str,
         issues: &mut Vec<Issue>,
     ) -> Result<Action, Spent> {
         let doc = &self.doc;
         let kind = kind_word(s);
-        let file = |key: &[u8]| -> Option<String> {
-            match get(doc, d, key)? {
-                Object::String(s, _) => Some(text_string(s)),
-                Object::Dictionary(fs) => get(doc, fs, b"UF")
-                    .or_else(|| get(doc, fs, b"F"))
-                    .and_then(|o| match o {
-                        Object::String(s, _) => Some(text_string(s)),
-                        _ => None,
-                    }),
-                _ => None,
+        // A file specification: a string, or the `/UF` or `/F` of a dictionary.
+        let file = |shared: &mut Shared, budget: &mut TextBudget<'_>, f: Option<&Object>| {
+            let Some(f) = f else {
+                return Ok(None);
+            };
+            match resolve(doc, f) {
+                Some(Object::String(..)) => shared.text(doc, f, Decode::Text, budget),
+                Some(Object::Dictionary(fs)) => match shared.text_at(doc, fs, b"UF", budget)? {
+                    Some(n) => Ok(Some(n)),
+                    None => shared.text_at(doc, fs, b"F", budget),
+                },
+                _ => {
+                    shared.check(doc, f);
+                    Ok(None)
+                }
             }
         };
         let target = match s {
-            b"URI" => match get(doc, d, b"URI") {
-                Some(Object::String(u, _)) => Some(String::from_utf8_lossy(u).into_owned()),
+            b"URI" => match d.get(b"URI") {
+                Ok(u) if matches!(resolve(doc, u), Some(Object::String(..))) => {
+                    shared.text(doc, u, Decode::Lossy, budget)?
+                }
+                Ok(u) => {
+                    shared.check(doc, u);
+                    None
+                }
+                Err(_) => None,
+            },
+            b"Launch" => match file(shared, budget, d.get(b"F").ok())? {
+                Some(f) => Some(f),
+                None => {
+                    let win = get_dict(doc, d, b"Win").and_then(|w| w.get(b"F").ok());
+                    match win {
+                        Some(f) if matches!(resolve(doc, f), Some(Object::String(..))) => {
+                            shared.text(doc, f, Decode::Text, budget)?
+                        }
+                        _ => None,
+                    }
+                }
+            },
+            b"SubmitForm" | b"ImportData" | b"GoToR" | b"GoToE" => {
+                file(shared, budget, d.get(b"F").ok())?
+            }
+            b"Named" => match d.get(b"N") {
+                Ok(n) if matches!(resolve(doc, n), Some(Object::Name(_))) => {
+                    shared.text(doc, n, Decode::Text, budget)?
+                }
                 _ => None,
             },
-            b"Launch" => file(b"F").or_else(|| {
-                get_dict(doc, d, b"Win").and_then(|w| match get(doc, w, b"F") {
-                    Some(Object::String(s, _)) => Some(text_string(s)),
-                    _ => None,
-                })
-            }),
-            b"SubmitForm" | b"ImportData" | b"GoToR" | b"GoToE" => file(b"F"),
-            b"Named" => get_name(doc, d, b"N").map(|n| String::from_utf8_lossy(n).into_owned()),
             _ => None,
         };
         let text = if s == b"JavaScript" {
-            self.script_text(d, budget, location, issues)?
+            self.script_text(d, budget, shared, location, issues)?
         } else {
             None
         };
-        // The kind and target are copies; the text was charged as it was read.
-        let copied = kind.len() + target.as_ref().map_or(0, String::len);
-        if !budget.take(copied as u64) {
+        // The kind is a copy; the texts were charged as they were read.
+        if !budget.take(kind.len() as u64) {
             return Err(Spent);
         }
         Ok(Action { kind, target, text })
@@ -477,18 +515,50 @@ impl Pdf {
         &self,
         d: &Dictionary,
         budget: &mut TextBudget<'_>,
+        shared: &mut Shared,
         location: &str,
         issues: &mut Vec<Issue>,
-    ) -> Result<Option<String>, Spent> {
+    ) -> Result<Option<Arc<str>>, Spent> {
         let doc = &self.doc;
         let Ok(js) = d.get(b"JS") else {
             return Ok(None);
         };
-        let (id, obj) = match js {
-            Object::Reference(id) => (Some(*id), doc.objects.get(id)),
-            other => (None, Some(other)),
+        // A script object that many actions name is read once.
+        let (id, obj) = match doc.dereference(js) {
+            Ok(found) => found,
+            Err(_) => {
+                shared.check(doc, js);
+                return Ok(None);
+            }
         };
-        match obj {
+        if let Some(id) = id
+            && let Some(t) = shared.scripts.get(&id)
+        {
+            return Ok(t.clone());
+        }
+        let text: Option<Arc<str>> = self
+            .read_script(id, obj, budget, location, issues)?
+            .map(Into::into);
+        if text.is_none() && !matches!(obj, Object::Stream(_) | Object::Null) {
+            shared.check(doc, js);
+        }
+        if let Some(id) = id {
+            shared.scripts.insert(id, text.clone());
+        }
+        Ok(text)
+    }
+
+    /// The text of a `/JS` value `obj` (object `id`, if indirect).
+    fn read_script(
+        &self,
+        id: Option<ObjectId>,
+        obj: &Object,
+        budget: &mut TextBudget<'_>,
+        location: &str,
+        issues: &mut Vec<Issue>,
+    ) -> Result<Option<String>, Spent> {
+        let doc = &self.doc;
+        match Some(obj) {
             Some(Object::String(s, _)) => {
                 if !budget.take(s.len() as u64) {
                     return Err(Spent);

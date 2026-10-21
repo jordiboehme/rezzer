@@ -335,3 +335,134 @@ fn page_issues_are_grouped() {
     assert_eq!(boxes.len(), 1, "{boxes:?}");
     assert!(boxes[0].what.contains("50 pages"), "{boxes:?}");
 }
+
+/// A one-page document with the page's `/Annots` and the catalog's extra entries, both from
+/// `build`, which gets the page id.
+fn one_page(
+    build: impl FnOnce(&mut Document, lopdf::ObjectId) -> (Object, lopdf::Dictionary),
+) -> Pdf {
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.new_object_id();
+    let (annots, extra) = build(&mut doc, page_id);
+    doc.objects.insert(
+        page_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Page", "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => annots,
+        }),
+    );
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+        ),
+    );
+    let mut catalog = dictionary! { "Type" => "Catalog", "Pages" => pages_id };
+    catalog.extend(&extra);
+    let catalog = doc.add_object(catalog);
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    open_bytes(&out)
+}
+
+/// `n` objects that each only refer to the next, the last to `to`. Returns the first.
+fn hops(doc: &mut Document, n: usize, to: lopdf::ObjectId) -> lopdf::ObjectId {
+    let mut at = to;
+    for _ in 0..n {
+        at = doc.add_object(Object::Reference(at));
+    }
+    at
+}
+
+fn uri_link(uri: Object) -> lopdf::Dictionary {
+    dictionary! {
+        "Type" => "Annot", "Subtype" => "Link",
+        "Rect" => vec![10.into(), 20.into(), 30.into(), 40.into()],
+        "A" => dictionary! { "S" => "URI", "URI" => uri },
+    }
+}
+
+#[test]
+fn a_link_reached_through_hops_is_listed_once() {
+    let pdf = one_page(|doc, _| {
+        let link = doc.add_object(uri_link(Object::string_literal("http://x/")));
+        let (a, b) = (hops(doc, 1, link), hops(doc, 2, link));
+        (
+            Object::Array(vec![a.into(), b.into()]),
+            lopdf::Dictionary::new(),
+        )
+    });
+    assert_eq!(pdf.links().len(), 1, "{:?}", pdf.links());
+}
+
+#[test]
+fn an_outline_title_behind_a_reference_loop_is_damaged() {
+    let pdf = one_page(|doc, page| {
+        let (x, y) = (doc.new_object_id(), doc.new_object_id());
+        doc.objects.insert(x, Object::Reference(y));
+        doc.objects.insert(y, Object::Reference(x));
+        let outlines = doc.new_object_id();
+        let b = doc.add_object(dictionary! {
+            "Title" => x, "Parent" => outlines, "Dest" => vec![page.into(), "Fit".into()],
+        });
+        let a = doc.add_object(dictionary! {
+            "Title" => Object::string_literal("A"), "Parent" => outlines, "Next" => b,
+            "Dest" => vec![page.into(), "Fit".into()],
+        });
+        doc.objects.insert(
+            outlines,
+            Object::Dictionary(dictionary! { "Type" => "Outlines", "First" => a }),
+        );
+        (
+            Object::Array(Vec::new()),
+            dictionary! { "Outlines" => outlines },
+        )
+    });
+    let outline = pdf.outline();
+    assert_eq!(outline.len(), 2);
+    assert_eq!(&*outline[1].title, "");
+    let issue = pdf
+        .issues()
+        .into_iter()
+        .find(|i| i.location == "outline" && i.kind == IssueKind::Damaged)
+        .unwrap_or_else(|| panic!("{:?}", pdf.issues()));
+    assert!(
+        issue
+            .what
+            .starts_with("1 text could not be read, the first in outline item 2: "),
+        "{issue:?}"
+    );
+}
+
+#[test]
+fn a_uri_behind_a_chain_past_the_bound_is_damaged() {
+    let pdf = one_page(|doc, _| {
+        let s = doc.add_object(Object::string_literal("http://x/"));
+        // 130 hops: past lopdf's bound of 128.
+        let far = hops(doc, 130, s);
+        let near = hops(doc, 3, s);
+        let links = vec![
+            doc.add_object(uri_link(far.into())).into(),
+            doc.add_object(uri_link(near.into())).into(),
+        ];
+        (Object::Array(links), lopdf::Dictionary::new())
+    });
+    let targets: Vec<LinkTarget> = pdf.links().into_iter().map(|l| l.target).collect();
+    assert_eq!(
+        targets,
+        [
+            LinkTarget::Other("URI".into()),
+            LinkTarget::Uri("http://x/".into())
+        ]
+    );
+    assert!(
+        pdf.issues().iter().any(|i| i.kind == IssueKind::Damaged
+            && i.what
+                .starts_with("1 text could not be read, the first in link 1 on page 1: ")),
+        "{:?}",
+        pdf.issues()
+    );
+}

@@ -247,6 +247,13 @@ pub(crate) struct Shared {
     texts: HashMap<(ObjectId, Decode), Option<Arc<str>>>,
     pub(crate) targets: HashMap<ObjectId, Option<crate::LinkTarget>>,
     pub(crate) found: HashMap<ObjectId, Option<Arc<str>>>,
+    /// Script texts by the object of their `/JS`.
+    pub(crate) scripts: HashMap<ObjectId, Option<Arc<str>>>,
+    /// Objects a text was asked of that are no text.
+    not_text: HashSet<ObjectId>,
+    /// Texts asked for since the last [`Shared::take_broken`] whose reference chain is broken
+    /// or ends at something that is not text.
+    broken: usize,
 }
 
 /// How the bytes of a string become text.
@@ -275,15 +282,30 @@ impl Shared {
         if let Some(id) = id
             && let Some(t) = self.texts.get(&(id, decode))
         {
+            if self.not_text.contains(&id) {
+                self.broken += 1;
+            }
             return Ok(t.clone());
         }
-        let text: Option<Arc<str>> = match resolve(doc, obj) {
-            Some(Object::String(s, _)) => Some(match decode {
+        let text: Option<Arc<str>> = match doc.dereference(obj) {
+            Ok((_, Object::String(s, _))) => Some(match decode {
                 Decode::Text => text_string(s).into(),
                 Decode::Lossy => String::from_utf8_lossy(s).into(),
             }),
-            Some(Object::Name(n)) => Some(String::from_utf8_lossy(n).into()),
-            _ => None,
+            Ok((_, Object::Name(n))) => Some(String::from_utf8_lossy(n).into()),
+            // A reference to a missing object stands for null, as the standard says.
+            Ok((_, Object::Null)) | Err(lopdf::Error::ObjectNotFound(_)) => None,
+            Ok(_) => {
+                self.broken += 1;
+                if let Some(id) = id {
+                    self.not_text.insert(id);
+                }
+                None
+            }
+            Err(_) => {
+                self.broken += 1;
+                None
+            }
         };
         if !budget.take(text.as_ref().map_or(0, |t| t.len() as u64)) {
             return Err(Spent);
@@ -292,6 +314,21 @@ impl Shared {
             self.texts.insert((id, decode), text.clone());
         }
         Ok(text)
+    }
+
+    /// Counts `obj` as a text that cannot be read when its reference chain is broken (a loop,
+    /// or more than lopdf's 128 references) or ends at something that is not a string; for a
+    /// value a reader checks itself before it asks for its text.
+    pub(crate) fn check(&mut self, doc: &Document, obj: &Object) {
+        match doc.dereference(obj) {
+            Ok((_, Object::String(..) | Object::Null)) | Err(lopdf::Error::ObjectNotFound(_)) => {}
+            _ => self.broken += 1,
+        }
+    }
+
+    /// How many texts asked for since the last call could not be read.
+    pub(crate) fn take_broken(&mut self) -> usize {
+        std::mem::take(&mut self.broken)
     }
 
     /// The text of `key` in `d`, as [`Shared::text`].
@@ -306,6 +343,42 @@ impl Shared {
             Ok(obj) => self.text(doc, obj, Decode::Text, budget),
             Err(_) => Ok(None),
         }
+    }
+}
+
+/// The texts of one reader that could not be read: their reference chain loops, runs past 128
+/// references, or ends at something that is not text. The reader gives one Damaged issue for
+/// all of them, naming the first item.
+#[derive(Default)]
+pub(crate) struct BrokenTexts {
+    count: usize,
+    first: Option<String>,
+}
+
+impl BrokenTexts {
+    /// Takes what `shared` counted while `item` was read; `item` names it.
+    pub(crate) fn after(&mut self, shared: &mut Shared, item: impl FnOnce() -> String) {
+        let n = shared.take_broken();
+        if n > 0 {
+            self.count += n;
+            self.first.get_or_insert_with(item);
+        }
+    }
+
+    /// The one issue, if a text could not be read.
+    pub(crate) fn issue(&self, location: &str) -> Option<Issue> {
+        let first = self.first.as_ref()?;
+        let (n, texts, they) = match self.count {
+            1 => (1, "text", "it is"),
+            n => (n, "texts", "they are"),
+        };
+        Some(Issue::new(
+            location,
+            IssueKind::Damaged,
+            format!(
+                "{n} {texts} could not be read, the first in {first}: a reference loops, runs past 128 references or ends at something that is not text; {they} left out"
+            ),
+        ))
     }
 }
 
