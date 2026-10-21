@@ -228,9 +228,10 @@ impl Area {
     }
 }
 
-/// Quotes the text under each annotation of `marked` from the glyphs of page `page`. Glyphs
-/// of switched-off layers are not on the page and are left out; text that puts no glyphs on
-/// the page (an OCR layer behind a scan) is quoted. Each quote is charged to `kept_left`
+/// Quotes the text under each annotation of `marked` from the glyphs of page `page`, the
+/// glyphs the body reads: glyphs of switched-off layers are not on the page and are left
+/// out, and so is text that puts no glyphs on the page, unless the page shows nothing else
+/// (an OCR layer behind a scan). Each quote is charged to `kept_left`
 /// (the bytes the file may keep); a stop from `stop` or the visit bound leaves the rest of
 /// the page's quotes out.
 #[allow(clippy::too_many_arguments)]
@@ -245,11 +246,12 @@ pub(crate) fn quote_page(
     stop: &dyn Fn() -> bool,
 ) -> Vec<Quote> {
     let mut out = Vec::with_capacity(marked.len());
+    let shown = glyphs.iter().any(|g| g.layer.is_none() && !g.invisible);
     // The glyphs on the page by the height of their middle.
     let mut by_y: Vec<(f32, f32, u32)> = glyphs
         .iter()
         .enumerate()
-        .filter(|(_, g)| g.layer.is_none() && !(g.joined && g.len == 0))
+        .filter(|(_, g)| g.layer.is_none() && !(shown && g.invisible) && !(g.joined && g.len == 0))
         .map(|(i, g)| {
             let (x, y) = middle(g);
             (y, x, i as u32)
@@ -370,14 +372,28 @@ fn in_lines(glyphs: &[Gl], mut hits: Vec<u32>) -> Vec<Vec<u32>> {
 
 /// The text of the lines, a space between them and where a gap along a line is over a
 /// quarter of the glyph height, runs of white space as one; and the middle of the first
-/// glyph.
+/// glyph. A glyph drawn again on top of one of the four before it (a fake bold) is read
+/// once, as the body reads it.
 fn join(glyphs: &[Gl], texts: &Texts<'_>, lines: &[Vec<u32>]) -> (String, Option<(f32, f32)>) {
     let mut raw = String::new();
     let mut at = None;
     for line in lines {
         let mut prev: Option<&Gl> = None;
+        let mut kept: Vec<&Gl> = Vec::with_capacity(line.len());
         for &i in line {
             let g = &glyphs[i as usize];
+            // Within half an advance: the same letter twice in a word stands a whole
+            // advance on.
+            let again = kept.iter().rev().take(4).any(|k| {
+                let reach = 0.5 * k.adv.unwrap_or(k.size / 2.0);
+                texts.of(k) == texts.of(g)
+                    && (k.x - g.x).abs() < reach
+                    && (k.y - g.y).abs() < 0.1 * k.size
+            });
+            if again {
+                continue;
+            }
+            kept.push(g);
             at.get_or_insert_with(|| middle(g));
             match prev {
                 None => raw.push(' '),

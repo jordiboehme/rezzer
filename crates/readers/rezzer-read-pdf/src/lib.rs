@@ -275,8 +275,8 @@ fn lay_out(
             };
             let runs = std::mem::take(&mut items.runs);
             let laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
-            for (&i, anchor) in here.iter().zip(&laid.probed) {
-                spots[i].anchor = anchor.clone();
+            for (&i, two) in here.iter().zip(laid.probed.chunks(2)) {
+                spots[i].anchor = two.iter().flatten().next().cloned();
             }
             if laid.probes_cut {
                 out.loss(
@@ -447,9 +447,10 @@ fn lay_out(
     (links, spots)
 }
 
-/// The points whose blocks the annotations of page `n` stand at, one for each of `here`: the
-/// middle of the first quoted glyph, else of the run nearest to the top of the rectangle.
-/// Takes the page's quotes into `placed`. On a page read in a turned frame the points are not
+/// The points whose blocks the annotations of page `n` stand at, two for each of `here`: the
+/// middle of the first quoted glyph (not a number when nothing is quoted), and the middle of
+/// the run nearest to the top of the rectangle, for when the first lies in no block. Takes
+/// the page's quotes into `placed`. On a page read in a turned frame the points are not
 /// in the frame of the runs: the annotations stand at the page, with one Info loss.
 fn annotation_points(
     n: u32,
@@ -502,16 +503,10 @@ fn annotation_points(
             ((x0 + x1) / 2.0 - ox, y0.max(y1) - oy)
         })
         .collect();
-    let missing: Vec<usize> = (0..here.len()).filter(|&k| at[k].is_none()).collect();
-    let wanted: Vec<(f32, f32)> = missing.iter().map(|&k| tops[k]).collect();
-    for (k, near) in missing
-        .into_iter()
-        .zip(annots::nearest_runs(&items.runs, &wanted))
-    {
-        at[k] = near;
-    }
+    let none = (f32::NAN, f32::NAN);
     at.into_iter()
-        .map(|p| p.unwrap_or((f32::NAN, f32::NAN)))
+        .zip(annots::nearest_runs(&items.runs, &tops))
+        .flat_map(|(quoted, near)| [quoted.unwrap_or(none), near.unwrap_or(none)])
         .collect()
 }
 

@@ -357,3 +357,42 @@ fn a_highlight_on_a_page_whose_text_is_not_read_is_said() {
             .all(|l| l.why != LossReason::Internal)
     );
 }
+
+/// One highlight over the line at height 700 of a page with `content`.
+fn highlighted(content: &str) -> Vec<u8> {
+    let hl = "<< /Type /Annot /Subtype /Highlight /Rect [60 695 400 715] \
+              /QuadPoints [60 715 400 715 60 695 400 695] >>";
+    pdf(
+        &[Page {
+            annots: vec![hl.into()],
+            ..Page::text(content)
+        }],
+        "",
+    )
+}
+
+#[test]
+fn hidden_text_under_a_highlight_is_not_quoted() {
+    // Text that puts no glyphs on the page lies under the highlight too.
+    let out = read(&highlighted(
+        "BT /F1 12 Tf 72 700 Td (Seen words) Tj ET BT 3 Tr /F1 12 Tf 74 701 Td (Other text) Tj ET",
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("Seen words"));
+}
+
+#[test]
+fn fake_bold_is_quoted_once() {
+    // The line is drawn twice, half a point apart.
+    let out = read(&highlighted(
+        "BT /F1 12 Tf 72 700 Td (Bold words) Tj ET BT /F1 12 Tf 72.5 700 Td (Bold words) Tj ET",
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("Bold words"));
+}
+
+#[test]
+fn letters_twice_in_a_word_are_kept() {
+    let out = read(&highlighted(
+        "BT /F1 12 Tf 72 700 Td (Hello all, 1100 sheep) Tj ET",
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("Hello all, 1100 sheep"));
+}
