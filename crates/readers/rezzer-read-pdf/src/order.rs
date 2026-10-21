@@ -597,6 +597,14 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         });
         prev = Some(f);
     }
+    // Padding at the end of a line (a label whose value is empty) opens a gap to nothing: it
+    // is dropped. One space there stays as drawn.
+    if let Some(last) = runs.last_mut() {
+        let kept = last.text.trim_end_matches(is_pad).len();
+        if last.text[kept..].chars().count() > 1 {
+            last.text.truncate(kept);
+        }
+    }
     if runs.iter().any(|r| r.text.chars().any(is_rtl)) {
         // The glyphs stand in visual order. Reordering a visual line by the bidi rules gives
         // the logical order back; the text of one glyph (a ligature mapped to several
@@ -927,6 +935,15 @@ mod tests {
         let runs = line_runs(1, &[see, frag("www", 76.0, 700.0)], &[0, 1], 0, &[]);
         assert_eq!(runs[0].text, "see  ");
         assert!(is_pad('\u{3000}') && is_pad('\u{202f}') && is_pad('\t'));
+        // Padding at the end of a line is dropped.
+        let runs = line_runs(
+            1,
+            &[frag("Codes:\u{a0}\u{a0}\u{a0}", 50.0, 700.0)],
+            &[0],
+            0,
+            &[],
+        );
+        assert_eq!(runs[0].text, "Codes:");
     }
 
     #[test]
