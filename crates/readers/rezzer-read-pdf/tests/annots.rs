@@ -396,3 +396,103 @@ fn letters_twice_in_a_word_are_kept() {
     ));
     assert_eq!(one(&out).quoted.as_deref(), Some("Hello all, 1100 sheep"));
 }
+
+/// A one-page file with `content` and one highlight over `quads`, each x0, y0, x1, y1.
+fn with_quads(content: &str, quads: &[[f32; 4]]) -> Vec<u8> {
+    let nums: Vec<String> = quads
+        .iter()
+        .flat_map(|&[x0, y0, x1, y1]| [x0, y1, x1, y1, x0, y0, x1, y0])
+        .map(|v| v.to_string())
+        .collect();
+    let hl = format!(
+        "<< /Type /Annot /Subtype /Highlight /Rect [60 600 400 720] /QuadPoints [{}] >>",
+        nums.join(" ")
+    );
+    pdf(
+        &[Page {
+            annots: vec![hl],
+            ..Page::text(content)
+        }],
+        "",
+    )
+}
+
+const LOREM: &str = "BT /F1 12 Tf 72 700 Td (Lorem ipsum dolor) Tj ET";
+
+#[test]
+fn a_word_split_over_two_quads_stays_one_word() {
+    let out = read(&with_quads(
+        LOREM,
+        &[[70.0, 697.0, 88.0, 711.0], [88.0, 697.0, 140.0, 711.0]],
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("Lorem ipsum"));
+}
+
+#[test]
+fn one_quad_per_glyph_quotes_the_word() {
+    // Helvetica advances of L, o, r, e, m at 12 points.
+    let mut x = 72.0;
+    let mut quads = Vec::new();
+    for w in [6.672f32, 6.672, 3.996, 6.672, 9.996] {
+        quads.push([x, 697.0, x + w, 711.0]);
+        x += w;
+    }
+    let out = read(&with_quads(LOREM, &quads));
+    assert_eq!(one(&out).quoted.as_deref(), Some("Lorem"));
+}
+
+#[test]
+fn a_word_broken_at_a_line_end_is_joined() {
+    let out = read(&with_quads(
+        "BT /F1 12 Tf 72 700 Td (An exam-) Tj 0 -14 Td (ple of text) Tj ET",
+        &[[70.0, 697.0, 200.0, 711.0], [70.0, 683.0, 200.0, 697.0]],
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("An exam-ple of text"));
+}
+
+#[test]
+fn actual_text_partly_under_a_quad_is_quoted_whole() {
+    let out = read(&with_quads(
+        "BT /F1 12 Tf 72 700 Td /Span << /ActualText (HELLO) >> BDC (Hello) Tj EMC ( world) Tj ET",
+        &[[82.0, 697.0, 140.0, 711.0]],
+    ));
+    assert_eq!(one(&out).quoted.as_deref(), Some("HELLO world"));
+}
+
+#[test]
+fn the_latest_review_state_counts() {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream("", LOREM.as_bytes());
+    let note = |extra: &str| {
+        format!("<< /Type /Annot /Subtype /Text /Rect [10 690 30 710] /Contents (x) {extra} >>")
+    };
+    let parent = b.add(note(""));
+    // The reopening state is written first but dated later.
+    let reopened = b.add(note(&format!(
+        "/IRT {parent} 0 R /State (None) /StateModel (Review) /M (D:20240102000000Z)"
+    )));
+    let accepted = b.add(note(&format!(
+        "/IRT {parent} 0 R /State (Accepted) /StateModel (Review) /M (D:20240101000000Z)"
+    )));
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R \
+             /Annots [{parent} 0 R {reopened} 0 R {accepted} 0 R] >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    let a = one(&out);
+    assert_eq!(a.resolved, None);
+    assert_eq!(a.replies.len(), 2);
+}

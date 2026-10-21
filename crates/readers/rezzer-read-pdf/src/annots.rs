@@ -247,11 +247,21 @@ pub(crate) fn quote_page(
 ) -> Vec<Quote> {
     let mut out = Vec::with_capacity(marked.len());
     let shown = glyphs.iter().any(|g| g.layer.is_none() && !g.invisible);
+    // Each glyph of an ActualText span stands for the span, whose text is on its first glyph:
+    // the span is quoted whole when the middle of any of its glyphs lies in a quad.
+    let mut head: Vec<u32> = Vec::with_capacity(glyphs.len());
+    let mut last = 0u32;
+    for (i, g) in glyphs.iter().enumerate() {
+        if !g.joined {
+            last = i as u32;
+        }
+        head.push(if g.joined { last } else { i as u32 });
+    }
     // The glyphs on the page by the height of their middle.
     let mut by_y: Vec<(f32, f32, u32)> = glyphs
         .iter()
         .enumerate()
-        .filter(|(_, g)| g.layer.is_none() && !(shown && g.invisible) && !(g.joined && g.len == 0))
+        .filter(|(_, g)| g.layer.is_none() && !(shown && g.invisible))
         .map(|(i, g)| {
             let (x, y) = middle(g);
             (y, x, i as u32)
@@ -299,9 +309,10 @@ pub(crate) fn quote_page(
                     halted = Some(CutWhy::Time);
                     break 'quads;
                 }
-                if taken[i as usize] != mark && area.holds((x, y)) {
-                    taken[i as usize] = mark;
-                    hits.push(i);
+                let h = head[i as usize];
+                if taken[h as usize] != mark && area.holds((x, y)) {
+                    taken[h as usize] = mark;
+                    hits.push(h);
                 }
             }
             lines.extend(in_lines(glyphs, hits));
@@ -370,15 +381,16 @@ fn in_lines(glyphs: &[Gl], mut hits: Vec<u32>) -> Vec<Vec<u32>> {
     lines
 }
 
-/// The text of the lines, a space between them and where a gap along a line is over a
-/// quarter of the glyph height, runs of white space as one; and the middle of the first
-/// glyph. A glyph drawn again on top of one of the four before it (a fake bold) is read
-/// once, as the body reads it.
+/// The text of the lines of all quads, in order, and the middle of the first glyph. Glyphs
+/// on one baseline, in one quad or the next, get a space only where the gap is over a quarter
+/// of the glyph height; a new line gets one space, none after a line that ends in a hyphen,
+/// as the body joins lines. Runs of white space count as one. A glyph drawn again on top of
+/// one of the four before it (a fake bold) is read once, as the body reads it.
 fn join(glyphs: &[Gl], texts: &Texts<'_>, lines: &[Vec<u32>]) -> (String, Option<(f32, f32)>) {
     let mut raw = String::new();
     let mut at = None;
+    let mut prev: Option<&Gl> = None;
     for line in lines {
-        let mut prev: Option<&Gl> = None;
         let mut kept: Vec<&Gl> = Vec::with_capacity(line.len());
         for &i in line {
             let g = &glyphs[i as usize];
@@ -396,12 +408,21 @@ fn join(glyphs: &[Gl], texts: &Texts<'_>, lines: &[Vec<u32>]) -> (String, Option
             kept.push(g);
             at.get_or_insert_with(|| middle(g));
             match prev {
-                None => raw.push(' '),
+                None => {}
                 Some(p) => {
+                    let up = |q: &Gl| -q.x * p.dy + q.y * p.dx;
+                    let same_line = (up(p) - up(g)).abs() <= p.size.max(g.size).max(1.0) / 2.0;
                     let end = p.x * p.dx + p.y * p.dy + p.adv.unwrap_or(0.0);
                     let gap = g.x * p.dx + g.y * p.dy - end;
-                    if gap > 0.25 * p.size.max(g.size) {
+                    if same_line && gap > -0.25 * p.size.max(g.size) {
+                        if gap > 0.25 * p.size.max(g.size) {
+                            raw.push(' ');
+                        }
+                    } else if !raw.trim_end().ends_with('-') {
                         raw.push(' ');
+                    } else {
+                        let end = raw.trim_end().len();
+                        raw.truncate(end);
                     }
                 }
             }
@@ -584,6 +605,57 @@ fn body(contents: Option<&str>) -> Vec<Inline> {
         out.pop();
     }
     out
+}
+
+/// When an annotation was last changed, else made, in seconds since 1970 UTC; the earliest
+/// time there is when it has no date that parses.
+fn when(a: &Annot) -> i64 {
+    fn iso(d: &Option<pdfparts::PdfDate>) -> Option<&str> {
+        d.as_ref().and_then(|d| d.iso.as_deref())
+    }
+    iso(&a.modified)
+        .or_else(|| iso(&a.created))
+        .and_then(seconds)
+        .unwrap_or(i64::MIN)
+}
+
+/// Seconds since 1970 UTC of an ISO 8601 date as pdfparts writes it: `YYYY`, then `-MM`,
+/// `-DD`, `THH:MM:SS` as far as given, then `Z` or an offset `+hh:mm`. Without an offset
+/// the time counts as UTC.
+fn seconds(iso: &str) -> Option<i64> {
+    let b = iso.as_bytes();
+    let num = |from: usize, len: usize| -> Option<i64> {
+        let part = iso.get(from..from + len)?;
+        part.bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| part.parse().ok())?
+    };
+    let year = num(0, 4)?;
+    let field = |at: usize, sep: u8, default: i64| match b.get(at) {
+        Some(&c) if c == sep => num(at + 1, 2),
+        _ => Some(default),
+    };
+    let month = field(4, b'-', 1)?;
+    let day = field(7, b'-', 1)?;
+    let hour = field(10, b'T', 0)?;
+    let minute = field(13, b':', 0)?;
+    let second = field(16, b':', 0)?;
+    let offset = match b.get(19) {
+        Some(&c @ (b'+' | b'-')) => {
+            let sign = if c == b'-' { -1 } else { 1 };
+            sign * (num(20, 2)? * 3600 + num(23, 2).unwrap_or(0) * 60)
+        }
+        _ => 0,
+    };
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second - offset)
 }
 
 /// The date: when it was last changed, else when it was made, in ISO 8601.
@@ -865,6 +937,7 @@ impl Tree {
         depth: usize,
     ) -> Option<Annotation> {
         let mut a = built[i].take()?;
+        let mut latest: Option<((i64, usize), bool)> = None;
         // Group members join here, with their own members and replies.
         let mut todo: Vec<usize> = self.children[i].iter().rev().copied().collect();
         while let Some(c) = todo.pop() {
@@ -884,12 +957,19 @@ impl Tree {
                 todo.extend(self.children[c].iter().rev());
                 continue;
             }
-            if annots[c].state.as_deref().is_some_and(closes) {
-                a.resolved = Some(true);
+            // The latest review state counts: by date, else by place in the file.
+            if let Some(state) = annots[c].state.as_deref() {
+                let key = (when(&annots[c]), c);
+                if latest.as_ref().is_none_or(|(k, _)| key > *k) {
+                    latest = Some((key, closes(state)));
+                }
             }
             if let Some(reply) = self.node(c, built, annots, depth + 1) {
                 a.replies.push(reply);
             }
+        }
+        if let Some((_, closed)) = latest {
+            a.resolved = closed.then_some(true);
         }
         Some(a)
     }
@@ -948,6 +1028,15 @@ mod tests {
         let area = Area::new(&[5.0, 0.0, 10.0, 5.0, 5.0, 10.0, 0.0, 5.0], (0.0, 0.0));
         assert!(area.holds((5.0, 5.0)));
         assert!(!area.holds((1.0, 1.0)));
+    }
+
+    #[test]
+    fn dates_compare_across_offsets() {
+        assert_eq!(seconds("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(seconds("1970-01-01T01:00:00+01:00"), Some(0));
+        assert_eq!(seconds("1969-12-31T23:00:00-01:00"), Some(0));
+        assert_eq!(seconds("2024-03-01"), Some(1_709_251_200));
+        assert_eq!(seconds("x"), None);
     }
 
     #[test]

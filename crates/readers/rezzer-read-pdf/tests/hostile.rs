@@ -3138,3 +3138,66 @@ fn a_long_reply_chain_and_a_loop_of_replies_are_bounded() {
     );
     assert_short_losses(&out);
 }
+
+/// One block of `runs` overlapping runs at height 700 and `notes` notes whose nearest run
+/// lies in all of them.
+fn overlapping_runs(runs: usize, notes: usize) -> Vec<u8> {
+    let mut c = String::from("BT /F1 12 Tf ");
+    for i in 0..runs {
+        c.push_str(&format!(
+            "1 0 0 1 {} 700 Tm (w{i}) Tj ",
+            72.0 + (i % 7) as f32 * 0.05
+        ));
+    }
+    c.push_str("ET");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream("/Filter /FlateDecode", &deflate(c.as_bytes()));
+    let refs: Vec<String> = (0..notes)
+        .map(|_| {
+            let n = b.add("<< /Type /Annot /Subtype /Text /Rect [70 690 90 712] /Contents (n) >>");
+            format!("{n} 0 R")
+        })
+        .collect();
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R /Annots [{}] >>",
+        refs.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn notes_near_many_overlapping_runs_are_placed_once_each() {
+    // 4,000 notes whose nearest run lies in each of 4,000 overlapping runs of one block. The
+    // points of the block are listed once each, not once per run that holds them, so the
+    // shape stays within 32 MiB of its twin without notes: the 4,000 notes themselves take
+    // about 16 MiB through the model, the renderer and JSON (listed once per run, the points
+    // took about 140 MiB more).
+    drop(read_through(&overlapping_runs(4000, 0)));
+    let twin = common::max_rss_bytes();
+    let out = read_through(&overlapping_runs(4000, 4000));
+    let rss = common::max_rss_bytes();
+    assert!(
+        rss < twin + (32 << 20),
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin >> 20
+    );
+    let anchors: std::collections::HashSet<_> = out
+        .document
+        .facets
+        .annotations
+        .iter()
+        .map(|a| a.anchor.clone())
+        .collect();
+    assert_eq!(anchors.len(), 1, "{anchors:?}");
+    assert_eq!(out.document.facets.annotations.len(), 4000);
+}

@@ -674,6 +674,8 @@ pub(crate) fn page_blocks_at(
     let mut built = Built {
         probes,
         probe_block: vec![None; points.len()],
+        probe_seen: vec![0; points.len()],
+        probe_round: 1,
         probe_work: PROBE_WORK,
         ..Built::default()
     };
@@ -917,8 +919,13 @@ struct Built {
     probes: Vec<(f32, f32, usize)>,
     /// The block each point lies in, by its place in `blocks`.
     probe_block: Vec<Option<usize>>,
-    /// The points the runs of the block now being built hold.
+    /// The points the runs of the block now being built hold, each once.
     probe_pending: Vec<usize>,
+    /// For each point, the round of `probe_pending` it was last put in, so a point that many
+    /// runs of one block hold is listed once: the list never holds more than the points.
+    probe_seen: Vec<u32>,
+    /// The round of `probe_pending`, from 1; it moves on each time the list is emptied.
+    probe_round: u32,
     /// Run and point pairs the page may still test.
     probe_work: usize,
     probes_cut: bool,
@@ -965,6 +972,7 @@ impl Built {
             cx.links.restore(mark);
         }
         self.probe_pending.clear();
+        self.probe_round += 1;
         let tables = self
             .blocks
             .iter()
@@ -1026,7 +1034,12 @@ impl Built {
                     return;
                 }
                 self.probe_work -= 1;
-                if x >= x0 && x <= x1 && self.probe_block[i].is_none() {
+                if x >= x0
+                    && x <= x1
+                    && self.probe_block[i].is_none()
+                    && self.probe_seen[i] != self.probe_round
+                {
+                    self.probe_seen[i] = self.probe_round;
                     self.probe_pending.push(i);
                 }
             }
@@ -1039,6 +1052,7 @@ impl Built {
         for i in self.probe_pending.drain(..) {
             self.probe_block[i].get_or_insert(k);
         }
+        self.probe_round += 1;
     }
 
     /// A paragraph that says something about the page, not its text.
@@ -1144,12 +1158,14 @@ impl Built {
         self.mark = None;
         if rows.is_empty() {
             self.probe_pending.clear();
+            self.probe_round += 1;
             return;
         }
         match earlier {
             Some(t) => {
                 // The rows join a table of an earlier page, which no point here can name.
                 self.probe_pending.clear();
+                self.probe_round += 1;
                 self.continued.push((t, rows))
             }
             None => {
