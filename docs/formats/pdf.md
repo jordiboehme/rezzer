@@ -115,7 +115,7 @@ Lorem ipsum dolor sit amet
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
 - A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
 - A small picture in a corner or in the top or bottom band is taken as a logo, even when it shows content. It is listed with its box, but not marked as needing vision
-- Equal pictures are found by their pixel data. A picture that is too large to compare is known by its object, so two copies of it in different objects get two files. A stencil mask drawn in two colors is one picture
+- Equal pictures are found by all of their data. Two copies of one picture stored with different compression, and pictures past the first 65,536 picture objects of a file, get a file each. A stencil mask drawn in two colors is one picture
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
 - The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so
 - A word split by a hyphen at a line end keeps its hyphen ("adip-iscing"). Rezzer cannot tell a break hyphen from a real one, so it keeps both

@@ -1274,3 +1274,37 @@ fn vision_table_lists_shared_asset_once_with_pages() {
     assert_eq!(rows.len(), 1, "{md}");
     assert!(rows[0].contains("pages 1, 2, 4"), "{}", rows[0]);
 }
+
+/// Two gray pictures of 300 by 300 pixels, uncompressed (90,000 bytes each, longer than
+/// what a partial hash reads), that differ only in rows 230 to 279: black in the second.
+fn two_large_rasters() -> Vec<(&'static str, Vec<u8>)> {
+    let dict = "/Type /XObject /Subtype /Image /Width 300 /Height 300 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let first = vec![200u8; 90_000];
+    let mut second = first.clone();
+    second[230 * 300..280 * 300].fill(0);
+    vec![(dict, first), (dict, second)]
+}
+
+#[test]
+fn large_pictures_that_differ_in_the_middle_are_two_assets() {
+    // On one page, at two places.
+    let draws = vec![vec![
+        (250.0, 400.0, 60.0, 40.0, 0),
+        (250.0, 300.0, 60.0, 40.0, 1),
+    ]];
+    let out = read_opts(
+        &picture_pages(&draws, &two_large_rasters()),
+        true,
+        Limits::default(),
+    );
+    assert_eq!(needing(&out), ["page-1-pic-1", "page-1-pic-2"]);
+    assert_eq!(out.blobs.len(), 2);
+    // On two pages at one place, as two tickets: not one picture on every page, not a logo.
+    let draws = vec![
+        vec![(250.0, 400.0, 60.0, 40.0, 0)],
+        vec![(250.0, 400.0, 60.0, 40.0, 1)],
+    ];
+    let out = read(&picture_pages(&draws, &two_large_rasters()));
+    assert_eq!(needing(&out), ["page-1-pic-1", "page-2-pic-1"]);
+}

@@ -2168,10 +2168,6 @@ struct Open {
     used: bool,
 }
 
-/// Bytes at the start of a picture's data its identity hash reads; its length counts too.
-const ID_BYTES: usize = 64 << 10;
-/// Bytes at the end of a picture's data its identity hash reads.
-const ID_TAIL: usize = 4 << 10;
 /// Values an identity hash follows in a picture's dictionary, and how deep.
 const ID_VALUES: usize = 256;
 const ID_DEPTH: usize = 4;
@@ -2179,8 +2175,8 @@ const ID_DEPTH: usize = 4;
 /// profile, a palette).
 const ID_STREAMS: usize = 8;
 
-/// Identities [`Pictures`] keeps in each of its maps; past them an identity is computed again
-/// at each use.
+/// Identities [`Pictures`] keeps in each of its maps. Past them a picture object is known by
+/// its object: its data is not read again at each use.
 const ID_KEPT: usize = 1 << 16;
 
 /// Identities computed once per object for the whole document (see [`picture_id`]): of
@@ -2208,10 +2204,12 @@ const PIXEL_KEYS: [(&[u8], &[u8]); 9] = [
     (b"SMaskInData", b"SMaskInData"),
 ];
 
-/// What a picture is, for finding the same picture on many pages. A raster picture is known
-/// by the values that describe its pixels and by its data (see [`pixels_id`]), computed once
-/// per image object (`ids`); one whose values are past the bounds is known by its image
-/// object, an inline one then being a picture of its own, `own` making it unique. A stencil
+/// What a picture is, for finding the same picture on many pages and for sharing one asset.
+/// Two different pictures never get one identity. A raster picture is known by the values
+/// that describe its pixels and by all of its data (see [`pixels_id`]), computed once per
+/// image object (`ids`); one whose values are past the bounds, or that comes after
+/// [`ID_KEPT`] picture objects, is known by its image object (two copies then stay two), an
+/// inline one being a picture of its own, `own` making it unique. A stencil
 /// mask shows no data: it is known by its image object, which the walk found by its
 /// dictionary (`stencils`); one whose object is not known for sure (an inline one, or several
 /// objects with one dictionary) is a picture of its own.
@@ -2230,8 +2228,10 @@ fn picture_id(
             if let Some(id) = object.and_then(|o| ids.images.get(&o)) {
                 return *id;
             }
+            // Past the objects kept, the data is not read at every use.
+            let full = object.is_some() && ids.images.len() >= ID_KEPT;
             let mut left = (ID_VALUES, ID_STREAMS);
-            if pixels_id(s, true, &mut left, ids, &mut h) {
+            if !full && pixels_id(s, true, &mut left, ids, &mut h) {
                 "pixels".hash(&mut h);
             } else {
                 h = DefaultHasher::new();
@@ -2257,8 +2257,8 @@ fn picture_id(
 }
 
 /// Adds to `h` what a picture stream's pixels are: the values of [`PIXEL_KEYS`], resolved so
-/// that no object number counts, the first [`ID_BYTES`] and last [`ID_TAIL`] of its data
-/// with its length, and with `masks` its soft mask and mask the same way. False when the
+/// that no object number counts, all of its data with its length, and with `masks` its soft
+/// mask and mask the same way. False when the
 /// values are past the bounds (`left`: values and streams) or a color space is named by a
 /// resource, which says nothing of the colors here.
 fn pixels_id(
@@ -2321,7 +2321,8 @@ fn stream_id(
     if let Some(id) = key.and_then(|k| ids.streams.get(&k)) {
         return Some(*id);
     }
-    if left.1 == 0 {
+    // Past the streams kept, a stream's data is not read at every use.
+    if left.1 == 0 || (key.is_some() && ids.streams.len() >= ID_KEPT) {
         return None;
     }
     left.1 -= 1;
@@ -2354,11 +2355,12 @@ fn device_space(name: &[u8]) -> bool {
     )
 }
 
-/// Adds the first [`ID_BYTES`] and last [`ID_TAIL`] of `data` with its length to `h`.
+/// Adds all of `data` with its length to `h`. A stream is read once (the identities are kept
+/// per object), and its size was measured by the guard; a part of it would let two pictures
+/// that differ in the part not read look the same.
 fn data_id(data: &[u8], h: &mut DefaultHasher) {
     data.len().hash(h);
-    data[..data.len().min(ID_BYTES)].hash(h);
-    data[data.len().saturating_sub(ID_TAIL)..].hash(h);
+    data.hash(h);
 }
 
 /// Adds a value to `h`, following references to what they hold, so that only content
