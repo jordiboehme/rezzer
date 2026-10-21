@@ -1340,11 +1340,11 @@ fn running_footers_are_found_on_turned_pages() {
 
 #[test]
 fn narrow_german_prose_keeps_joining() {
-    // Two short paragraphs of German prose in a narrow column: nouns start with capitals, so
-    // every line does, yet the lines of each paragraph are one text.
-    let mut c = String::new();
-    let mut y = 700.0;
-    for para in [
+    // Paragraphs of German prose in a narrow column: nouns start with capitals, so every line
+    // does, yet the lines of each paragraph are one text, whatever its last word (a small
+    // word, a year, an abbreviation in capitals, a capital word part, or none: the paragraph
+    // goes on in the next column).
+    let paras = [
         [
             "Am Montag hat der Vorstand die neue",
             "Satzung beschlossen und den Termin der",
@@ -1355,7 +1355,30 @@ fn narrow_german_prose_keeps_joining() {
             "Geprueft und ohne Beanstandung",
             "Entlastet, wie es die Satzung will.",
         ],
-    ] {
+        [
+            "Am Montag hat der Vorstand die neue",
+            "Satzung beschlossen und den Termin der",
+            "Mitgliederversammlung auf den 5. Mai 2027.",
+        ],
+        [
+            "Die Kasse wurde von zwei Mitgliedern",
+            "Geprueft und ohne Beanstandung an die",
+            "Revisoren der Sparkasse Musterstadt AG.",
+        ],
+        [
+            "Der neue Beitrag gilt ab dem Januar",
+            "Fuer alle Mitglieder laut Beschluss",
+            "Nummer 12 der Versammlung im EU-Raum.",
+        ],
+        [
+            "Die Mitglieder haben ueber die neue",
+            "Satzung und den Haushalt des Vereins",
+            "Abgestimmt, und der Vorstand hat die",
+        ],
+    ];
+    let mut c = String::new();
+    let mut y = 760.0;
+    for para in &paras {
         for line in para {
             c += &show("F1", 10.0, 72.0, y, line);
             y -= 12.0;
@@ -1364,18 +1387,27 @@ fn narrow_german_prose_keeps_joining() {
     }
     let out = read(&pdf(&[Page::text(c)], ""));
     let md = markdown_of(&out);
+    for para in &paras {
+        let joined = format!("\n{}\n", para.join(" "));
+        assert!(md.contains(&joined), "{joined} in {md}");
+    }
+}
+
+#[test]
+fn two_centred_lines_keep_their_break() {
+    // A title block of two lines centred on the page: a break between them.
+    let mut c = String::new();
+    for (k, t) in ["Sample Research Group", "Lake Town, Country"]
+        .iter()
+        .enumerate()
+    {
+        let x = 297.5 - common::helvetica_width(t, 10.0) / 2.0;
+        c += &show("F1", 10.0, x, 700.0 - 12.0 * k as f32, t);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let md = markdown_of(&out);
     assert!(
-        md.contains(
-            "\nAm Montag hat der Vorstand die neue Satzung beschlossen und den Termin der \
-             Mitgliederversammlung auf Mai gelegt.\n"
-        ),
-        "{md}"
-    );
-    assert!(
-        md.contains(
-            "\nDie Kasse wurde von zwei Mitgliedern Geprueft und ohne Beanstandung \
-             Entlastet, wie es die Satzung will.\n"
-        ),
+        md.contains("\nSample Research Group\\\nLake Town, Country\n"),
         "{md}"
     );
 }

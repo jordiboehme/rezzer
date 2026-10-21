@@ -1644,17 +1644,22 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
 /// Lines of a block whose widest line is at most this many font sizes are short lines.
 const SHORT_MEASURE: f32 = 24.0;
 
+/// A line is short when the next first word fits after it with this share of the widest
+/// line to spare.
+const SHORT_ROOM: f32 = 0.15;
+
 /// Line ends this close, in points, are one edge.
 const EDGE: f32 = 1.0;
 
 /// The lines of a paragraph (by page and line, sorted) that start after a line break: the
 /// first word of the line would have fit at the end of the line before within the widest
-/// line (and that line does not end in a hyphen), or the paragraph is set flush right or
-/// centred and the two lines share a right edge or a centre but not a left edge, or the
+/// line with [`SHORT_ROOM`] of it to spare (and that line does not end in a hyphen), or the
+/// paragraph is set flush right or centred and the two lines share a right edge or a centre
+/// but not a left edge, or the
 /// paragraph is a block of short lines (its widest line at most [`SHORT_MEASURE`] font
 /// sizes) each of which after the first starts with a capital or a digit, none ends in a
-/// hyphen or a comma, the lines do not read as sentences, and they either end well before the
-/// widest line, most of them, or share their left edge (an address or a list of labels).
+/// hyphen or a comma, the lines do not read as sentences, share their left edge and have the
+/// shape of an address or a list (list markers, or at most [`ADDRESS_WORDS`] words a line).
 /// Prose that fills its measure keeps joining, also where every line starts with a capital.
 fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     if lines.len() < 2 {
@@ -1682,7 +1687,8 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         })
         && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
         && !sentences(lines)
-        && (ragged(&edges, right) || edges.iter().all(|e| (e.0 - left).abs() <= EDGE));
+        && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
+        && listed(lines);
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
     // justified prose is not that.
@@ -1695,7 +1701,13 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         .windows(2)
         .filter(|w| aligned_pair(w[0], w[1]))
         .count();
-    let set_aligned = pairs >= 2 && 2 * pairs >= edges.len() - 1;
+    // Two lines centred on one another (their right edges apart) are a centred block too: an
+    // indented first line of prose shares the right edge, not the centre.
+    let centred_pair = edges.len() == 2 && {
+        let (a, b) = (edges[0], edges[1]);
+        ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE && (a.1 - b.1).abs() > EDGE
+    };
+    let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
     let mut out = Vec::new();
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
@@ -1711,8 +1723,11 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
                 let first = text.split_whitespace().next().unwrap_or("");
                 r.w * first.chars().count() as f32 / chars
             });
-        // A word cut at the line end goes on in the next line.
-        let fits = a.1 + 0.25 * next.size + word <= right && !lines[k].text.ends_with('-');
+        // A short line: it ends well before the widest line, so far that the next line's
+        // first word and a good share of the measure more would still fit. Ragged prose
+        // misses a word by a little. A word cut at the line end goes on in the next line.
+        let room = SHORT_ROOM * (right - left);
+        let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
         let aligned = set_aligned && aligned_pair(a, b);
         if fits || aligned || short {
             out.push((next.runs[0].page, next.runs[0].line));
@@ -1722,40 +1737,42 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     out
 }
 
-/// A line that ends this close to the widest line, as a share of its width, fills the
-/// measure.
-const FULL_LINE: f32 = 0.9;
+/// Lines of an address or a list of labels hold at most this many words; lines of prose in a
+/// narrow column hold more.
+const ADDRESS_WORDS: usize = 4;
 
-/// Whether the lines but the last end well before the widest line, most of them: prose fills
-/// its measure, an address or a list of labels does not. A block of two lines passes.
-fn ragged(edges: &[(f32, f32)], right: f32) -> bool {
-    let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
-    let measure = (right - left).max(1.0);
-    let n = edges.len() - 1;
-    // Two lines say nothing by their ends: the first is often the wider one.
-    if n < 2 {
-        return true;
-    }
-    let full = edges[..n]
-        .iter()
-        .filter(|e| e.1 - left >= FULL_LINE * measure)
-        .count();
-    2 * full <= n
+/// Whether lines have the shape of an address or a list: each starts with a list marker, or
+/// none holds more than [`ADDRESS_WORDS`] words.
+fn listed(lines: &[Line<'_>]) -> bool {
+    lines.iter().all(|l| list_marker(&l.text).is_some())
+        || lines
+            .iter()
+            .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS)
 }
 
-/// Whether the lines read as sentences: one holds a sentence end with more text after it,
-/// or the last ends a sentence after a word in small letters.
+/// Whether the lines read as sentences: one holds a sentence end with more text after it, or
+/// the last ends a sentence after a word in small letters. One pass over each line.
 fn sentences(lines: &[Line<'_>]) -> bool {
-    // A stop after a word of three letters or more, then a word in capitals: "ul. 18" or
+    // A stop after a word of three letters or more, then a space and a capital: "ul. 18" or
     // "Nr. 5" are no sentence ends.
     let inner = lines.iter().any(|l| {
-        let t = l.text.as_str();
-        t.match_indices(['.', '!', '?']).any(|(i, _)| {
-            let word = t[..i].rsplit(' ').next().unwrap_or("");
-            let next = t[i + 1..].strip_prefix(' ').unwrap_or("");
-            word.chars().filter(|c| c.is_alphabetic()).count() >= 3
-                && next.chars().next().is_some_and(char::is_uppercase)
-        })
+        let chars: Vec<char> = l.text.chars().collect();
+        let mut letters = 0usize;
+        for (k, &c) in chars.iter().enumerate() {
+            if c == ' ' {
+                letters = 0;
+            } else if matches!(c, '.' | '!' | '?') {
+                if letters >= 3
+                    && chars.get(k + 1) == Some(&' ')
+                    && chars.get(k + 2).is_some_and(|n| n.is_uppercase())
+                {
+                    return true;
+                }
+            } else if c.is_alphabetic() {
+                letters += 1;
+            }
+        }
+        false
     });
     let last = lines.last().map_or("", |l| l.text.as_str());
     let mut tail = last.chars().rev();

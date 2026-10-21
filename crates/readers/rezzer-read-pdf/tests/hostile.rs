@@ -4446,9 +4446,18 @@ fn a_header_band_of_thousands_of_empty_cells_is_bounded() {
 /// A page of `lines` lines of 25 one-letter words in two fonts, with `bands` one-row grids of two
 /// cells, each as tall as the page.
 fn tall_bands(bands: usize, lines: usize) -> Vec<u8> {
+    tall_bands_with(bands, lines, false)
+}
+
+/// [`tall_bands`], with one letter of 30,000 points beside the grids when `big`: the largest
+/// text of the page then lets every band past the height test.
+fn tall_bands_with(bands: usize, lines: usize, big: bool) -> Vec<u8> {
     let w = (bands * 12 + 40).max(612);
     let h = lines * 12 + 40;
     let mut c = b"0.2 w ".to_vec();
+    if big {
+        c.extend(format!("BT /F1 30000 Tf {} 20 Td (X) Tj ET\n", w + 10).as_bytes());
+    }
     for k in 0..bands {
         let x = 20 + k * 12;
         c.extend(
@@ -4475,7 +4484,7 @@ fn tall_bands(bands: usize, lines: usize) -> Vec<u8> {
         }
         c.extend(b"ET\n");
     }
-    two_font_page(&c, w, h)
+    two_font_page(&c, if big { w + 30_040 } else { w }, h)
 }
 
 #[test]
@@ -4495,4 +4504,120 @@ fn many_tall_one_row_grids_cost_about_as_much_as_their_text() {
     // Both files are read in this process, so its peak memory is not that of one read; the
     // time against the twin is the measure here.
     assert!(text(page(&out, 1)).contains('a'));
+}
+
+#[test]
+fn tall_one_row_grids_past_the_height_test_are_charged_first() {
+    // The page of the test above with one letter of 30,000 points, so every grid passes the
+    // height test: the text in each grid's height is charged before it is copied, and the
+    // page costs about as much as the same page without the grids.
+    let start = Instant::now();
+    let _twin = read(&tall_bands_with(0, 8_000, true));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = read(&tall_bands_with(800, 8_000, true));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(1),
+        "{took:?} against {twin:?}"
+    );
+    assert!(text(page(&out, 1)).contains('a'));
+}
+
+#[test]
+fn a_band_budget_spent_in_the_last_band_says_so() {
+    // 39 page-tall grids without titles and one letter of 30,000 points spend the band
+    // budget so it runs out in the body of the last band, a real one of 20 rows: one Limit
+    // note says the bands were looked at only in part, and no note gives a wrong reason.
+    let (nb, long, short) = (39usize, 1_020usize, 563usize);
+    let top0 = 400usize;
+    let h = top0 + (long + short) * 12 + 40;
+    let mut c = b"0.2 w ".to_vec();
+    c.extend(format!("BT /F1 30000 Tf 1900 {} Td (X) Tj ET\n", top0 + 20).as_bytes());
+    for j in 0..nb {
+        let x = 600 + j * 12;
+        c.extend(
+            format!(
+                "{x} {top0} m {a} {top0} l S {x} {t} m {a} {t} l S {x} {top0} m {x} {t} l S \
+                 {m} {top0} m {m} {t} l S {a} {top0} m {a} {t} l S ",
+                a = x + 6,
+                m = x + 3,
+                t = h - 10
+            )
+            .as_bytes(),
+        );
+    }
+    let mut y = h - 25;
+    for _ in 0..long {
+        c.extend(format!("BT /F1 9 Tf 20 {y} Td ").as_bytes());
+        for _ in 0..100 {
+            c.extend(b"(ab) Tj 5 0 Td ");
+        }
+        c.extend(b"ET\n");
+        y -= 12;
+    }
+    for _ in 0..short {
+        c.extend(format!("BT /F1 9 Tf 20 {y} Td (q) Tj ET\n").as_bytes());
+        y -= 12;
+    }
+    c.extend(b"0.9 g 50 350 100 14 re f 150 350 250 14 re f 400 350 100 14 re f ");
+    c.extend(b"0 g 0.5 w 50 364 m 500 364 l S 50 350 m 500 350 l S ");
+    for (x, t) in [(54, "Date"), (154, "Text"), (404, "Amount")] {
+        c.extend(format!("BT /F1 8 Tf {x} 354 Td ({t}) Tj ET\n").as_bytes());
+    }
+    for r in 0..20usize {
+        let y = 338 - 12 * r;
+        c.extend(
+            format!(
+                "BT /F1 8 Tf 54 {y} Td (2030-01-{:02}) Tj ET\nBT /F1 8 Tf 154 {y} Td (Item{r}) Tj \
+                 ET\nBT /F1 8 Tf 470 {y} Td ({r}.00) Tj ET\n",
+                r + 1
+            )
+            .as_bytes(),
+        );
+    }
+    let out = read(&two_font_page(&c, 2_000, h));
+    let whole = page(&out, 1).iter().any(|b| match b {
+        Block::Table { rows, .. } => rows.len() == 21,
+        _ => false,
+    });
+    let losses = &out.document.losses;
+    assert!(
+        !losses
+            .iter()
+            .any(|l| l.what.contains("too few rows follow")),
+        "{losses:?}"
+    );
+    if !whole {
+        assert!(
+            losses
+                .iter()
+                .any(|l| l.what.contains("tables under header bands on page 1")),
+            "{losses:?}"
+        );
+    }
+}
+
+#[test]
+fn a_line_of_stops_costs_about_as_much_as_its_text() {
+    // A block of two short lines, the second 70,000 times "ab." without a space, squeezed so
+    // it stays narrow: the sentence test reads it once, about as quick as the same line with
+    // "abx" instead.
+    let line = |piece: &str| {
+        format!(
+            "BT /F1 10 Tf 72 700 Td (Ab Cd) Tj ET\nBT /F1 10 Tf 0.001 Tz 72 688 Td (A{}) Tj ET\n",
+            piece.repeat(70_000)
+        )
+    };
+    let start = Instant::now();
+    let _twin = read(&one_page(line("abx").as_bytes(), nothing));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = read(&one_page(line("ab.").as_bytes(), nothing));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(1),
+        "{took:?} against {twin:?}"
+    );
+    assert!(text(page(&out, 1)).contains("Ab Cd"));
 }
