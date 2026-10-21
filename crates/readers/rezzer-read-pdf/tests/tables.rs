@@ -772,3 +772,22 @@ fn form_boxes_give_one_note_per_page() {
     assert_eq!(losses.len(), 1, "{losses:?}");
     assert_eq!(losses[0].why, LossReason::Uncertain);
 }
+
+#[test]
+fn a_grid_next_to_a_figure_caption_gets_no_note() {
+    // A ruled grid with text in every cell, its first row spanning, under a figure caption:
+    // not a table, and no note says it may be one.
+    let mut c = String::from("0.5 w ");
+    c += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "f");
+    c += &show("F1", 9.0, 50.0, 630.0, "Figure 3: A chart of the results");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert!(tables(page(&out, 1)).is_empty());
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("Possible table")),
+        "{:?}",
+        out.document.losses
+    );
+}
