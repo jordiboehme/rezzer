@@ -8,10 +8,12 @@
 //! pdfparts opens the file with its stream guard and gives the object layer: pages, labels
 //! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
-//! `objects.rs` adds the metadata, outline, links, attachments, threads and revisions.
+//! `meta.rs` and `objects.rs` add the metadata, outline, links, attachments, threads and
+//! revisions.
 //! Scripts and actions are never run, links are never followed.
 
 mod layout;
+mod meta;
 mod objects;
 mod open;
 mod order;

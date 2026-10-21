@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The object layer in the model: the Info dictionary and XMP as properties, the file facts,
-//! the outline as a section before the first page, links as a graph, attachments, article
-//! threads, layers and revisions, and every issue pdfparts found as a loss.
+//! The object layer in the model: the outline as a section before the first page, links as a
+//! graph, attachments, article threads and revisions, and every issue pdfparts found as a
+//! loss. The properties and file facts are in `meta.rs`.
 //!
 //! Every copy put in the model is charged to what the pages left of the bytes the file may
 //! keep ([`LinkRoom`]): a fixed cost per item plus the most bytes its texts can be written as.
@@ -15,16 +15,16 @@
 use std::cell::Cell as Counter;
 use std::collections::{HashMap, HashSet};
 
-use pdfparts::{Info, Issue, IssueKind, LinkTarget, PageInfo, Pdf, PdfDate, Revision};
+use pdfparts::{Issue, IssueKind, LinkTarget, PageInfo, Pdf, PdfDate, Revision};
 use rezzer_limits::Budget;
 use rezzer_model::{
     Anchor, Asset, Blob, Block, Edge, Embedded, Event, Graph, Inline, LossReason, Node,
-    ReadOptions, SectionKind, Severity, Value, link_target_written_len,
+    ReadOptions, SectionKind, Severity, link_target_written_len,
 };
 use sha2::{Digest, Sha256};
 
 use crate::layout::LinkRoom;
-use crate::{Out, marker};
+use crate::{Out, marker, meta};
 
 /// What one item in the model costs besides its texts: the struct, its strings' headers and
 /// the slot in its list.
@@ -55,8 +55,8 @@ pub(crate) fn read(
         budget,
         calls: Counter::new(0),
     };
-    facts(pdf, out);
-    properties(pdf, &kept, out);
+    meta::facts(pdf, out);
+    meta::properties(pdf, &kept, out);
     outline(pdf, pages, &kept, out);
     links(pdf, pages, &kept, out);
     attachments(pdf, opts, budget, &kept, out);
@@ -66,7 +66,7 @@ pub(crate) fn read(
 }
 
 /// The charges for copies in the model.
-struct Kept<'a> {
+pub(crate) struct Kept<'a> {
     room: &'a LinkRoom,
     budget: &'a Budget,
     calls: Counter<u32>,
@@ -75,7 +75,7 @@ struct Kept<'a> {
 impl Kept<'_> {
     /// Charges one item of `elements` model elements with copies of `texts`. `Err` says why it
     /// does not fit: then nothing more of its kind may be kept.
-    fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
+    pub(crate) fn take(&self, elements: u64, texts: &[&str]) -> Result<(), String> {
         self.calls.set(self.calls.get().wrapping_add(1));
         if self.calls.get().is_multiple_of(TIME_EVERY)
             && let Err(hit) = self.budget.check_time()
@@ -101,227 +101,18 @@ impl Kept<'_> {
 }
 
 /// "is" or "are" after `n` things.
-fn is_are(n: usize) -> &'static str {
+pub(crate) fn is_are(n: usize) -> &'static str {
     if n == 1 { "is" } else { "are" }
 }
 
-/// The facts of the file as a whole that need no copy.
-fn facts(pdf: &Pdf, out: &mut Out) {
-    let facts = &mut out.doc.properties.facts;
-    facts.pages = Some(pdf.page_count());
-    facts.tagged = Some(pdf.tagged());
-    facts.encrypted = Some(pdf.encryption().is_some());
-}
-
 /// A text value of the Info dictionary or XMP, trimmed; `None` when empty.
-fn given(v: Option<&str>) -> Option<&str> {
+pub(crate) fn given(v: Option<&str>) -> Option<&str> {
     v.map(str::trim).filter(|v| !v.is_empty())
 }
 
 /// The ISO form of a date, if it parses.
-fn iso(d: Option<&PdfDate>) -> Option<&str> {
+pub(crate) fn iso(d: Option<&PdfDate>) -> Option<&str> {
     d.and_then(|d| d.iso.as_deref())
-}
-
-/// Properties from the Info dictionary, else from XMP; an XMP value that differs from the Info
-/// value it stands beside is kept as `xmp_<name>`. Then the language, version, PDF/A and
-/// PDF/UA parts and the layers.
-fn properties(pdf: &Pdf, kept: &Kept<'_>, out: &mut Out) {
-    let info: Info = pdf.info();
-    let xmp = pdf.xmp();
-    let x = |key: &str| given(xmp.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()));
-    // A date in the Info dictionary that does not parse, with no XMP date to stand in.
-    for (name, d, key) in [
-        ("creation", info.created.as_ref(), "xmp:CreateDate"),
-        ("modification", info.modified.as_ref(), "xmp:ModifyDate"),
-    ] {
-        if let Some(d) = d
-            && d.iso.is_none()
-            && x(key).is_none()
-        {
-            out.loss(
-                "metadata",
-                format!(
-                    "the {name} date of the document information is not a PDF date: {:?}",
-                    d.raw
-                ),
-                LossReason::Unsupported,
-                Severity::Info,
-            );
-        }
-    }
-    let mut left_out: Vec<&str> = Vec::new();
-    let mut why: Option<String> = None;
-    let props = &mut out.doc.properties;
-    // The Info value, else the XMP value at `key`; and the XMP value when it differs.
-    let pick = |info: Option<&str>, key: &str| -> (Option<String>, Option<String>) {
-        let info = given(info);
-        let xmp = x(key);
-        match (info, xmp) {
-            (Some(i), Some(v)) if i != v => (Some(i.to_string()), Some(v.to_string())),
-            (Some(i), _) => (Some(i.to_string()), None),
-            (None, v) => (v.map(str::to_string), None),
-        }
-    };
-    let mut keep = |name: &'static str, texts: &[&str]| -> bool {
-        match kept.take(1, texts) {
-            Ok(()) => true,
-            Err(w) => {
-                why.get_or_insert(w);
-                left_out.push(name);
-                false
-            }
-        }
-    };
-    let mut custom: Vec<(&str, String)> = Vec::new();
-    let (title, xmp_title) = pick(info.title.as_deref(), "dc:title");
-    if let Some(t) = title
-        && keep("title", &[&t])
-    {
-        props.title = Some(t);
-    }
-    // The Info author is one name; the XMP creators are a list, joined with "; ".
-    let (author, xmp_author) = pick(info.author.as_deref(), "dc:creator");
-    if let Some(a) = author {
-        let names: Vec<String> = if given(info.author.as_deref()).is_some() {
-            vec![a]
-        } else {
-            a.split("; ")
-                .map(str::trim)
-                .filter(|n| !n.is_empty())
-                .map(str::to_string)
-                .collect()
-        };
-        let texts: Vec<&str> = names.iter().map(String::as_str).collect();
-        if keep("authors", &texts) {
-            props.authors = names;
-        }
-    }
-    let (keywords, xmp_keywords) = pick(info.keywords.as_deref(), "pdf:Keywords");
-    if let Some(k) = keywords {
-        // Some producers write the whole list in quotes.
-        let list = k
-            .strip_prefix('"')
-            .and_then(|k| k.strip_suffix('"'))
-            .unwrap_or(&k);
-        let words: Vec<String> = list
-            .split([',', ';'])
-            .map(str::trim)
-            .filter(|w| !w.is_empty())
-            .map(str::to_string)
-            .collect();
-        let texts: Vec<&str> = words.iter().map(String::as_str).collect();
-        if keep("keywords", &texts) {
-            props.keywords = words;
-        }
-    }
-    let dates = [
-        ("created", iso(info.created.as_ref()), "xmp:CreateDate"),
-        ("modified", iso(info.modified.as_ref()), "xmp:ModifyDate"),
-    ];
-    for (name, from_info, key) in dates {
-        let (date, xmp_date) = pick(from_info, key);
-        if let Some(d) = date
-            && keep(name, &[&d])
-        {
-            let value = Some(Value::DateTime { value: d });
-            match name {
-                "created" => props.created = value,
-                _ => props.modified = value,
-            }
-        }
-        if let Some(v) = xmp_date {
-            custom.push((
-                if name == "created" {
-                    "xmp_create_date"
-                } else {
-                    "xmp_modify_date"
-                },
-                v,
-            ));
-        }
-    }
-    let pairs = [
-        (
-            info.subject.as_deref(),
-            "dc:description",
-            "subject",
-            "xmp_description",
-        ),
-        (
-            info.creator.as_deref(),
-            "xmp:CreatorTool",
-            "creator",
-            "xmp_creator_tool",
-        ),
-        (
-            info.producer.as_deref(),
-            "pdf:Producer",
-            "producer",
-            "xmp_producer",
-        ),
-    ];
-    for (from_info, key, name, xmp_name) in pairs {
-        let (v, xv) = pick(from_info, key);
-        if let Some(v) = v {
-            custom.push((name, v));
-        }
-        if let Some(v) = xv {
-            custom.push((xmp_name, v));
-        }
-    }
-    for (name, v) in [
-        ("xmp_title", xmp_title),
-        ("xmp_creator", xmp_author),
-        ("xmp_keywords", xmp_keywords),
-    ] {
-        if let Some(v) = v {
-            custom.push((name, v));
-        }
-    }
-    if let Some(lang) = pdf.language()
-        && keep("language", &[&lang])
-    {
-        props.language = Some(lang);
-    }
-    custom.push(("pdf_version", pdf.version()));
-    if let Some(part) = x("pdfaid:part") {
-        let conformance = x("pdfaid:conformance").unwrap_or_default().to_lowercase();
-        custom.push(("pdfa", format!("PDF/A-{part}{conformance}")));
-    }
-    if let Some(part) = x("pdfuaid:part") {
-        custom.push(("pdfua", format!("PDF/UA-{part}")));
-    }
-    let layers = pdf.layers();
-    if !layers.is_empty() {
-        props.facts.layers = Some(u32::try_from(layers.len()).unwrap_or(u32::MAX));
-        let list: Vec<String> = layers
-            .iter()
-            .map(|l| {
-                let name = given(Some(&l.name)).unwrap_or("unnamed layer");
-                let shown = if l.visible { "shown" } else { "hidden" };
-                format!("{name} ({shown})")
-            })
-            .collect();
-        custom.push(("layers", list.join(", ")));
-    }
-    for (name, value) in custom {
-        if keep(name, &[name, &value]) {
-            props.custom.insert(name.to_string(), Value::Text { value });
-        }
-    }
-    if let Some(why) = why {
-        out.loss(
-            "metadata",
-            format!(
-                "{} {} not kept: {why}",
-                left_out.join(", "),
-                is_are(left_out.len())
-            ),
-            LossReason::Limit,
-            Severity::Warning,
-        );
-    }
 }
 
 /// Page `n` (from 1) of `pages`, if it was listed.
