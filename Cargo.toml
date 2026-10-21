@@ -15,6 +15,7 @@ members = [
     "crates/formats/formulakit",
     "crates/formats/sheetparts",
     "crates/formats/pdfparts",
+    "crates/formats/barcodes",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
@@ -80,6 +81,9 @@ skrifa = "=0.46.2"
 # skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
 read-fonts = { version = "=0.43.3", features = ["agl"] }
 unicode-bidi = "=0.3.18"
+# Barcode and QR code reading. Its default features pull in the image crate and the encoders;
+# Rezzer hands it Luma8 pixels. MaxiCode stays off through the formats each pass asks for.
+rxing = { version = "=0.9.3", default-features = false, features = ["decoders", "multi_barcode_readers", "full_barcode_format_support", "encoding_rs"] }
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.

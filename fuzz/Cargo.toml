@@ -25,6 +25,7 @@ formulakit = { path = "../crates/formats/formulakit" }
 sheetparts = { path = "../crates/formats/sheetparts" }
 rezzer-read-sheet = { path = "../crates/readers/rezzer-read-sheet" }
 pdfparts = { path = "../crates/formats/pdfparts" }
+barcodes = { path = "../crates/formats/barcodes" }
 rezzer-read-pdf = { path = "../crates/readers/rezzer-read-pdf" }
 # Builds the small packages of the part reader targets (stored entries only).
 zip = { version = "=9.0.5", default-features = false }
@@ -136,6 +137,13 @@ bench = false
 [[bin]]
 name = "pdf_reader"
 path = "fuzz_targets/pdf_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "barcodes_decode"
+path = "fuzz_targets/barcodes_decode.rs"
 test = false
 doc = false
 bench = false
