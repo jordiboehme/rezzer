@@ -1465,8 +1465,9 @@ fn model_table(
         .max()
         .unwrap_or(1)
         .clamp(1, MAX_COLUMNS);
-    // Place every cell on a grid; spanned positions repeat the text. Rows stop once the
-    // grid would pass MAX_CELLS; the header row is always shown.
+    // Place every cell on a grid; a merged cell's text stands once, in its first position,
+    // and the positions it spans stay empty. Rows stop once the grid would pass MAX_CELLS;
+    // the header row is always shown.
     let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
     // (row, column, column span, row span) of every merged cell.
     let mut merged: Vec<(usize, usize, usize, usize)> = Vec::new();
@@ -1502,9 +1503,10 @@ fn model_table(
                     grid_row.resize(c + fill_cols, None);
                 }
                 for slot in &mut grid_row[c..c + fill_cols] {
-                    *slot = Some(text.clone());
+                    *slot = Some(String::new());
                 }
             }
+            grid[r][c] = Some(text);
             if rs > 1 || cs > 1 {
                 merged.push((r, c, cs, rs));
             }
@@ -1534,21 +1536,43 @@ fn model_table(
     out.push_str(&pipe_table(&header, aligns, body));
     let mut notes: Vec<String> = Vec::new();
     // Only rows that are shown are named; a span into hidden rows ends at the last one.
+    // A sheet's table (its cells carry sheet anchors) names ranges as the sheet does; any
+    // other table names rows and columns, counted from 1.
+    let sheet = rows
+        .iter()
+        .flatten()
+        .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
     let merged: Vec<String> = merged
         .into_iter()
         .filter(|(r, ..)| *r < shown)
         .map(|(r, c, cs, rs)| {
+            let last = (r + rs).min(shown);
+            if sheet {
+                return format!(
+                    "{}{}:{}{}",
+                    column_letter(c),
+                    r + 1,
+                    column_letter(c + cs - 1),
+                    last
+                );
+            }
+            let span = |word: &str, from: usize, to: usize| {
+                if from == to {
+                    format!("{word} {from}")
+                } else {
+                    format!("{word}s {from} to {to}")
+                }
+            };
             format!(
-                "{}{}:{}{}",
-                column_letter(c),
-                r + 1,
-                column_letter(c + cs - 1),
-                (r + rs).min(shown)
+                "{}, {}",
+                span("row", r + 1, last),
+                span("column", c + 1, c + cs)
             )
         })
         .collect();
     if !merged.is_empty() {
-        notes.push(format!("Merged cells: {}", merged.join(", ")));
+        let joint = if sheet { ", " } else { "; " };
+        notes.push(format!("Merged cells: {}", merged.join(joint)));
     }
     if shown < rows.len() {
         notes.push(format!(

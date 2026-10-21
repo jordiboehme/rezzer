@@ -570,6 +570,71 @@ fn a_row_split_by_a_page_break_is_one_row() {
     assert_eq!(out.completeness, Completeness::Complete);
 }
 
+fn markdown(out: &ReadOutcome) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    )
+}
+
+#[test]
+fn ticket_box_next_to_table() {
+    // A 6-column ruled table, and above it a box whose left side is drawn twice, 1.5 and
+    // 0.8 points left of the table's fourth column rule. The column rules stop in row 3 (one
+    // cell over the whole row); in row 4 only the fourth one is drawn (two cells).
+    let xs = [56.0, 105.0, 143.0, 413.0, 461.0, 500.0, 539.0];
+    let ys = [600.0, 580.0, 560.0, 540.0, 520.0];
+    let mut c = String::from("0.5 w ");
+    c += "411.5 640 127 50 re S 412.2 640.5 126.1 49 re S ";
+    c += &show("F1", 9.0, 420.0, 670.0, "Fare");
+    c += &show("F1", 9.0, 420.0, 652.0, "10.00");
+    for y in ys {
+        c += &format!("56 {y} m 539 {y} l S ");
+    }
+    for x in [56.0, 539.0] {
+        c += &format!("{x} 520 m {x} 600 l S ");
+    }
+    for x in &xs[1..6] {
+        c += &format!("{x} 560 m {x} 600 l S ");
+    }
+    c += "413 520 m 413 540 l S ";
+    let rows = [
+        ["Date", "Time", "From / To", "Car", "Seat", "Class"],
+        ["2030-01-02", "10:15", "Alpha / Beta", "3", "*", "2"],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        for (k, text) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, ys[r] - 14.0, text);
+        }
+    }
+    c += &show("F1", 8.0, 60.0, 546.0, "Reserved seats only");
+    c += &show("F1", 8.0, 60.0, 526.0, "Ticket 1000001");
+    c += &show("F1", 8.0, 417.0, 526.0, "Price 10.00");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[0].len(), 6, "{rows:?}");
+    assert_eq!(rows[1].len(), 6, "{rows:?}");
+    assert_eq!(rows[1][4], "*", "{rows:?}");
+    assert_eq!(rows[2], ["Reserved seats only"], "{rows:?}");
+    assert_eq!(rows[3], ["Ticket 1000001", "Price 10.00"], "{rows:?}");
+    let md = markdown(&out);
+    assert!(
+        md.contains("| Reserved seats only |  |  |  |  |  |\n"),
+        "{md}"
+    );
+    assert_eq!(md.matches("Reserved seats only").count(), 1, "{md}");
+    assert!(
+        md.contains(
+            "Merged cells: row 3, columns 1 to 6; row 4, columns 1 to 3; row 4, columns 4 to 6"
+        ),
+        "{md}"
+    );
+}
+
 #[test]
 fn wide_ruled_grid_says_so() {
     // A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.

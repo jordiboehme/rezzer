@@ -447,11 +447,41 @@ fn table_alignment_merged_cells_and_pipes() {
     let expected = "**Costs**\n\n\
 | A | B | C |\n\
 | :--- | :---: | ---: |\n\
-| x \\| y | wide | wide |\n\
+| x \\| y | wide |  |\n\
 | `a\\|b` | -5 |  |\n\
 \n\
-Merged cells: B2:C2\n";
+Merged cells: row 2, columns 2 to 3\n";
     assert!(md.contains(expected), "{md}");
+}
+
+#[test]
+fn sheet_tables_keep_a1_merge_notes() {
+    // Cells with sheet anchors: the note names the range as the sheet does. The text stands
+    // once, in the first cell, as in the sheet.
+    let cell = |text: &str, at: &str| {
+        let mut c = Cell::new(vec![txt(text)]);
+        c.anchor = Some(Anchor(format!("Sheet1!{at}")));
+        c
+    };
+    let mut merged = cell("wide", "B2");
+    merged.col_span = 2;
+    merged.row_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![cell("A", "A1"), cell("B", "B1"), cell("C", "C1")],
+            vec![cell("x", "A2"), merged],
+            vec![cell("y", "A3")],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains("| x | wide |  |\n| y |  |  |\n\nMerged cells: B2:C3\n"),
+        "{md}"
+    );
 }
 
 #[test]
@@ -1049,7 +1079,11 @@ fn hostile_spans_stay_bounded() {
         alignments: Vec::new(),
         anchor: None,
     }]);
-    assert!(md.contains("Merged cells: A2:B3"), "{}", &md[..300]);
+    assert!(
+        md.contains("Merged cells: rows 2 to 3, columns 1 to 2"),
+        "{}",
+        &md[..300]
+    );
     assert!(md.len() < 1_000_000, "{}", md.len());
 }
 
@@ -1625,7 +1659,7 @@ fn merge_note_names_only_shown_rows() {
         anchor: None,
     }]);
     assert!(
-        md.contains("Merged cells: A1:A200\n"),
+        md.contains("Merged cells: rows 1 to 200, column 1\n"),
         "{}",
         &md[md.len() - 200..]
     );
