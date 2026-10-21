@@ -584,17 +584,25 @@ pub fn sized_page(content: &str, width: f32, height: f32, extra: &str) -> Vec<u8
     b.finish(catalog)
 }
 
-/// The width of `text` in Helvetica at `size`, for digits, the point, the space and the
-/// capital letters and small letters a test uses to set text flush right.
+/// The width of `text` in Helvetica at `size` (the font's standard widths for letters,
+/// digits, the space and common signs), for setting text flush right.
 pub fn helvetica_width(text: &str, size: f32) -> f32 {
+    const LOWER: [u32; 26] = [
+        556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333,
+        500, 278, 556, 500, 722, 500, 500, 500,
+    ];
+    const UPPER: [u32; 26] = [
+        667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722,
+        667, 611, 722, 667, 944, 667, 667, 611,
+    ];
     let units: u32 = text
         .chars()
         .map(|c| match c {
+            'a'..='z' => LOWER[c as usize - 'a' as usize],
+            'A'..='Z' => UPPER[c as usize - 'A' as usize],
             '0'..='9' => 556,
-            '.' | ' ' | ',' => 278,
             '-' => 333,
-            ':' => 278,
-            _ => 556,
+            _ => 278,
         })
         .sum();
     units as f32 * size / 1000.0

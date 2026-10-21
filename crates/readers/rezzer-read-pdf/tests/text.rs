@@ -1337,3 +1337,45 @@ fn running_footers_are_found_on_turned_pages() {
         assert!(footer, "page {n}: {:#?}", page(&out, n));
     }
 }
+
+#[test]
+fn narrow_german_prose_keeps_joining() {
+    // Two short paragraphs of German prose in a narrow column: nouns start with capitals, so
+    // every line does, yet the lines of each paragraph are one text.
+    let mut c = String::new();
+    let mut y = 700.0;
+    for para in [
+        [
+            "Am Montag hat der Vorstand die neue",
+            "Satzung beschlossen und den Termin der",
+            "Mitgliederversammlung auf Mai gelegt.",
+        ],
+        [
+            "Die Kasse wurde von zwei Mitgliedern",
+            "Geprueft und ohne Beanstandung",
+            "Entlastet, wie es die Satzung will.",
+        ],
+    ] {
+        for line in para {
+            c += &show("F1", 10.0, 72.0, y, line);
+            y -= 12.0;
+        }
+        y -= 10.0;
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let md = markdown_of(&out);
+    assert!(
+        md.contains(
+            "\nAm Montag hat der Vorstand die neue Satzung beschlossen und den Termin der \
+             Mitgliederversammlung auf Mai gelegt.\n"
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "\nDie Kasse wurde von zwei Mitgliedern Geprueft und ohne Beanstandung \
+             Entlastet, wie es die Satzung will.\n"
+        ),
+        "{md}"
+    );
+}

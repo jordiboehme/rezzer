@@ -1652,8 +1652,10 @@ const EDGE: f32 = 1.0;
 /// line (and that line does not end in a hyphen), or the paragraph is set flush right or
 /// centred and the two lines share a right edge or a centre but not a left edge, or the
 /// paragraph is a block of short lines (its widest line at most [`SHORT_MEASURE`] font
-/// sizes) each of which after the first starts with a capital or a digit, and none ends in a
-/// hyphen or a comma. Ragged prose that fills its measure keeps joining.
+/// sizes) each of which after the first starts with a capital or a digit, none ends in a
+/// hyphen or a comma, the lines do not read as sentences, and they either end well before the
+/// widest line, most of them, or share their left edge (an address or a list of labels).
+/// Prose that fills its measure keeps joining, also where every line starts with a capital.
 fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     if lines.len() < 2 {
         return Vec::new();
@@ -1678,7 +1680,9 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
                 .next()
                 .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
         })
-        && lines.iter().all(|l| !l.text.ends_with(['-', ',']));
+        && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
+        && !sentences(lines)
+        && (ragged(&edges, right) || edges.iter().all(|e| (e.0 - left).abs() <= EDGE));
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
     // justified prose is not that.
@@ -1716,6 +1720,48 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     }
     out.sort_unstable();
     out
+}
+
+/// A line that ends this close to the widest line, as a share of its width, fills the
+/// measure.
+const FULL_LINE: f32 = 0.9;
+
+/// Whether the lines but the last end well before the widest line, most of them: prose fills
+/// its measure, an address or a list of labels does not. A block of two lines passes.
+fn ragged(edges: &[(f32, f32)], right: f32) -> bool {
+    let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
+    let measure = (right - left).max(1.0);
+    let n = edges.len() - 1;
+    // Two lines say nothing by their ends: the first is often the wider one.
+    if n < 2 {
+        return true;
+    }
+    let full = edges[..n]
+        .iter()
+        .filter(|e| e.1 - left >= FULL_LINE * measure)
+        .count();
+    2 * full <= n
+}
+
+/// Whether the lines read as sentences: one holds a sentence end with more text after it,
+/// or the last ends a sentence after a word in small letters.
+fn sentences(lines: &[Line<'_>]) -> bool {
+    // A stop after a word of three letters or more, then a word in capitals: "ul. 18" or
+    // "Nr. 5" are no sentence ends.
+    let inner = lines.iter().any(|l| {
+        let t = l.text.as_str();
+        t.match_indices(['.', '!', '?']).any(|(i, _)| {
+            let word = t[..i].rsplit(' ').next().unwrap_or("");
+            let next = t[i + 1..].strip_prefix(' ').unwrap_or("");
+            word.chars().filter(|c| c.is_alphabetic()).count() >= 3
+                && next.chars().next().is_some_and(char::is_uppercase)
+        })
+    });
+    let last = lines.last().map_or("", |l| l.text.as_str());
+    let mut tail = last.chars().rev();
+    let ends =
+        matches!(tail.next(), Some('.' | '!' | '?')) && tail.next().is_some_and(char::is_lowercase);
+    inner || ends
 }
 
 fn list_gap_ok(prev: &Line<'_>, cur: &Line<'_>) -> bool {
