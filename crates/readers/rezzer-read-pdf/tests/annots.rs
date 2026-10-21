@@ -602,3 +602,31 @@ fn a_deep_state_reply_answers_its_own_parent() {
     resolved.sort_unstable();
     assert_eq!(resolved, ["accept", "n18"], "{found:?}");
 }
+
+#[test]
+fn a_checkmark_under_the_review_model_changes_nothing() {
+    let out = read(&notes(&[
+        ("", "parent"),
+        (
+            "/IRT @0 /State (Accepted) /StateModel (Review) /M (D:20240101000000Z)",
+            "accepted",
+        ),
+        (
+            "/IRT @0 /State (Marked) /StateModel (Review) /M (D:20240102000000Z)",
+            "checked",
+        ),
+    ]));
+    assert_eq!(one(&out).resolved, Some(true));
+}
+
+#[test]
+fn a_state_that_answers_a_group_member_answers_its_parent() {
+    let out = read(&notes(&[
+        ("", "parent"),
+        ("/IRT @0 /RT /Group", "member"),
+        ("/IRT @1 /State (Completed) /StateModel (Review)", "done"),
+    ]));
+    let a = one(&out);
+    assert_eq!(a.resolved, Some(true));
+    assert_eq!(plain_text(&a.body), "parent member");
+}

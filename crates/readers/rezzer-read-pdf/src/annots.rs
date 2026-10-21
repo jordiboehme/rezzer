@@ -66,9 +66,12 @@ fn closes(state: &str) -> bool {
 
 /// Whether a reply's review state closes what it answers, `None` when it has no review state.
 /// Only states of the Review model count: a state without `/StateModel` counts as one when it
-/// is a Review word. Marked and Unmarked (the Marked model, a checkmark) never do.
+/// is a Review word. Marked and Unmarked (a checkmark) never do, whatever the model says.
 fn review(a: &Annot) -> Option<bool> {
     let state = a.state.as_deref()?;
+    if matches!(state, "Marked" | "Unmarked") {
+        return None;
+    }
     let counts = match a.state_model.as_deref() {
         Some(model) => model == "Review",
         None => matches!(
@@ -406,11 +409,33 @@ fn nest(annots: &[Annot]) -> Tree {
     }
     // Each review state answers its own parent, however deep the reply is shown. The latest
     // counts: by date when both have one, else by place in the file.
+    // A group member merges into its parent, so the states that answer it answer the
+    // annotation it merges into: the first one up the chain that is no group member.
+    let mut into: Vec<usize> = (0..n).collect();
+    let mut placed = vec![false; n];
+    for start in 0..n {
+        let mut at = start;
+        while !placed[at] {
+            path.push(at);
+            match parent[at] {
+                Some(p) if group[at] => at = p,
+                _ => break,
+            }
+        }
+        while let Some(i) = path.pop() {
+            into[i] = match parent[i] {
+                Some(p) if group[i] && placed[p] => into[p],
+                _ => i,
+            };
+            placed[i] = true;
+        }
+    }
     let mut latest: Vec<Option<(Option<i64>, bool)>> = vec![None; n];
     for i in 0..n {
         let (Some(p), Some(closed)) = (parent[i], review(&annots[i])) else {
             continue;
         };
+        let p = into[p];
         let at = when(&annots[i]);
         let earlier = matches!((at, latest[p]), (Some(t), Some((Some(before), _))) if t < before);
         if !earlier {
