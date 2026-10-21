@@ -279,7 +279,7 @@ impl Dry<'_> {
         // kurbo never finishes a pattern of negative length (measured: `[1 -2]`, `[-1 -1]`);
         // hayro makes each 0 in a pattern 0.01, so a valid one has a length.
         let period: f64 = stroke.dash_array.iter().map(|d| f64::from(*d)).sum();
-        if stroke.dash_array.iter().any(|d| !d.is_finite() || *d < 0.0) || !(period > 0.0) {
+        if stroke.dash_array.iter().any(|d| !d.is_finite() || *d < 0.0) || period <= 0.0 {
             Self::unbounded("it strokes with a dash pattern the renderer cannot finish".into());
         }
         // The renderer dashes the path in user space, where the pattern is; the control
