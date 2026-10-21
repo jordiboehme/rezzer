@@ -26,6 +26,7 @@
 
 mod cost;
 mod headers;
+mod inline;
 mod stencils;
 
 use std::collections::{HashMap, HashSet};

@@ -962,3 +962,153 @@ fn dashes_in_a_form_drawn_many_times_stay_small() {
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("drawing operations"), "{loss:?}");
 }
+
+/// `n` bytes of zeros, deflated as small as they go.
+fn zeros_tight(n: usize) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    let chunk = vec![0u8; 1 << 20];
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(chunk.len());
+        z.write_all(&chunk[..k]).expect("deflate");
+        left -= k;
+    }
+    z.finish().expect("deflate")
+}
+
+/// Plain line drawing of about `bytes` bytes.
+fn plain_lines(bytes: usize) -> String {
+    let mut c = String::from("0 g 0.5 w\n");
+    let mut i = 0;
+    while c.len() < bytes {
+        c.push_str(&format!(
+            "{} {} m {} {} l S\n",
+            20 + i % 500,
+            20 + i % 700,
+            30 + i % 500,
+            30 + i % 700
+        ));
+        i += 1;
+    }
+    c
+}
+
+/// An 8 by 8 inline stencil whose 300 MB of data packs into a few hundred KB, placed over
+/// the whole page: the dry run charges only its 64 pixels, so only the stencil check sees it.
+fn bomb_stencil() -> Vec<u8> {
+    let mut c = b"q 595 0 0 842 0 0 cm BI /W 8 /H 8 /IM true /BPC 1 /F /Fl ID ".to_vec();
+    c.extend(zeros_tight(300 << 20));
+    c.extend(b" EI Q\n");
+    c
+}
+
+/// A page whose text says "Quarterly BI report", then `gap` bytes of plain drawing, then
+/// `tail`.
+fn bi_text_twin(gap: usize, tail: &[u8]) -> Vec<u8> {
+    let mut c = b"BT /F1 12 Tf 72 800 Td (Quarterly BI report) Tj ET\n".to_vec();
+    c.extend(plain_lines(gap).as_bytes());
+    c.extend(tail);
+    // Text after it with the bytes ID and EI, as the old byte search took them.
+    c.extend(b"BT /F1 12 Tf 72 700 Td (ID card, EI unit) Tj ET\n");
+    draw_twin_bytes(&c)
+}
+
+/// [`draw_twin`] with content that need not be text.
+fn draw_twin_bytes(content: &[u8]) -> Vec<u8> {
+    let packed = deflate(content);
+    render_twin(595, 842, "/Body Do\n", |b| {
+        let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let body = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Filter /FlateDecode \
+                 /Resources << /Font << /F1 {font} 0 R >> >>"
+            ),
+            &packed,
+        );
+        Extra {
+            xobjects: format!("/Body {body} 0 R"),
+            ..Extra::default()
+        }
+    })
+}
+
+#[test]
+fn bi_in_a_text_string_does_not_stop_the_render() {
+    // 1.3 MB of plain drawing after the words, and no inline picture.
+    assert_rendered(&read_with(&bi_text_twin(1_300_000, b""), true));
+}
+
+#[test]
+fn an_inline_stencil_after_bi_in_a_text_string_is_counted() {
+    let start = Instant::now();
+    let out = read_with(&bi_text_twin(1_000, &bomb_stencil()), true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("stencil mask"), "{loss:?}");
+}
+
+#[test]
+fn an_inline_stencil_far_after_bi_in_a_text_string_is_counted() {
+    // The stencil comes 1.3 MB after the words, past the scan's window.
+    let start = Instant::now();
+    let out = read_with(&bi_text_twin(1_300_000, &bomb_stencil()), true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("stencil mask"), "{loss:?}");
+}
+
+#[test]
+fn an_inline_picture_before_much_drawing_renders() {
+    // The scan decides where the picture ends with a window of the content after it, and
+    // follows the rest piece by piece.
+    let mut c = b"q 10 0 0 10 0 0 cm BI /W 8 /H 8 /BPC 8 /CS /G /F /Fl ID ".to_vec();
+    c.extend(deflate(&[40u8; 64]));
+    c.extend(b" EI Q\n");
+    c.extend(plain_lines(1_100_000).as_bytes());
+    assert_rendered(&read_with(&draw_twin_bytes(&c), true));
+}
+
+#[test]
+fn an_inline_picture_that_cannot_be_read_is_not_rendered() {
+    // `/H` has no value: the renderer stops at this `BI`.
+    let start = Instant::now();
+    let content = "q 8 0 0 8 0 0 cm BI /W 8 /H ID \x00\x00\x00\x00\x00\x00\x00\x00 EI Q\n";
+    let out = read_with(&render_twin(595, 842, content, |_| Extra::default()), true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("cannot be read"), "{loss:?}");
+}
+
+#[test]
+fn an_inline_stencil_split_over_two_content_streams_is_counted() {
+    // The renderer joins a page's content streams with a space: the stencil's dictionary ends
+    // the first and its data starts the second.
+    let start = Instant::now();
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&[90u8; 64]),
+    );
+    let first = b.stream(
+        "",
+        b"q 595 0 0 842 0 0 cm /Im0 Do Q\nq 595 0 0 842 0 0 cm BI /W 8 /H 8 /IM true /BPC 1 \
+          /F /Fl ID",
+    );
+    let mut data = zeros_tight(300 << 20);
+    data.extend(b" EI Q\n");
+    let second = b.stream("", &data);
+    drop(data);
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /XObject << /Im0 {image} 0 R >> >> \
+         /Contents [{first} 0 R {second} 0 R] >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_with(&b.finish(catalog), true);
+    let loss = assert_render_skipped(&out, start);
+    assert!(loss.what.contains("stencil mask"), "{loss:?}");
+}

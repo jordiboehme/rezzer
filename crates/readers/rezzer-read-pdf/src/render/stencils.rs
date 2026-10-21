@@ -7,120 +7,65 @@
 
 use std::collections::HashSet;
 
-use hayro_syntax::content::TypedIter;
-use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::object::{Array, Dict, Name, ObjectIdentifier, Stream};
 use hayro_syntax::page::{Page, Resources};
 
 use super::cost::{Facts, Spec, decoded_size};
+use super::inline::InlineScan;
 use crate::fallback::filters_of;
 
-/// The most bytes of content the scan for inline pictures holds at once: an inline picture
-/// with its dictionary and data must fit in it.
-const WINDOW: usize = 1 << 20;
-
-/// Checks the inline pictures of content stream `s` with `check`, reading the stream as it
-/// is unpacked and holding at most [`WINDOW`] bytes of it.
+/// Checks the inline pictures of content `streams` with `check`, read one after the other
+/// with a space between, as the renderer joins a page's content streams, each as it is
+/// unpacked.
 fn inline_stencils(
-    s: &Stream<'_>,
+    streams: &[Stream<'_>],
     facts: &Facts<'_>,
     check: &dyn Fn(&Stream<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
-    let (names, parms) = filters_of(s.dict());
-    let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
-    let mut buf: Vec<u8> = Vec::new();
-    let mut failed: Option<String> = None;
-    let mut each = |piece: &[u8]| -> bool {
-        buf.extend_from_slice(piece);
-        match scan(&mut buf, false, check) {
-            Ok(()) => true,
-            Err(why) => {
-                failed = Some(why);
-                false
-            }
+    let mut scan = InlineScan::new(check);
+    for (i, s) in streams.iter().enumerate() {
+        if i > 0 {
+            scan.feed(b" ")?;
         }
-    };
-    let read = pdfparts::read_stream(
-        &s.raw_data(),
-        &names,
-        &parms,
-        facts.limits,
-        facts.limits.max_total_bytes,
-        facts.stop,
-        &mut each,
-    );
-    if let Some(why) = failed {
-        return Err(why);
-    }
-    if let Err(why) = read {
-        let id = s.obj_id();
-        return Err(format!(
-            "its content stream {} {} cannot be read to check its pictures: {why}",
-            id.obj_number, id.gen_number
-        ));
-    }
-    scan(&mut buf, true, check)
-}
-
-/// Checks each inline picture whose `BI` ... `EI` lies whole in `buf`, then drops what is
-/// done. With `last` false, an inline picture whose end has not come yet stays for the next
-/// piece, unless it passes [`WINDOW`].
-fn scan(
-    buf: &mut Vec<u8>,
-    last: bool,
-    check: &dyn Fn(&Stream<'_>) -> Result<(), String>,
-) -> Result<(), String> {
-    let space = |c: u8| matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'\x0c' | 0);
-    let mut from = 0;
-    let mut keep = buf.len().saturating_sub(2);
-    while let Some(at) = buf[from..]
-        .windows(2)
-        .position(|w| w == b"BI")
-        .map(|p| p + from)
-    {
-        let before = at == 0 || space(buf[at - 1]) || matches!(buf[at - 1], b']' | b')' | b'>');
-        let after = buf.get(at + 2).copied();
-        if !before || after.is_some_and(|c| !space(c) && c != b'/') {
-            from = at + 2;
-            continue;
-        }
-        // The data ends at an `EI` after `ID`; until both came, the picture is not whole.
-        let end = buf[at..]
-            .windows(2)
-            .position(|w| w == b"ID")
-            .and_then(|id| {
-                buf[at + id + 2..]
-                    .windows(2)
-                    .position(|w| w == b"EI")
-                    .map(|e| at + id + 2 + e + 2)
-            });
-        match end {
-            Some(end) => {
-                if let Some(TypedInstruction::InlineImage(i)) = TypedIter::new(&buf[at..]).next() {
-                    check(i.0)?;
+        let (names, parms) = filters_of(s.dict());
+        let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
+        let mut failed: Option<String> = None;
+        let mut each = |piece: &[u8]| -> bool {
+            match scan.feed(piece) {
+                Ok(()) => true,
+                Err(why) => {
+                    failed = Some(why);
+                    false
                 }
-                from = end;
-                keep = buf.len().saturating_sub(2).max(end);
             }
-            None if last => break,
-            None => {
-                if buf.len() - at > WINDOW {
-                    return Err(format!(
-                        "it has an inline picture of more than {WINDOW} bytes, too large to \
-                         check before a render"
-                    ));
-                }
-                keep = at;
-                break;
-            }
+        };
+        let read = pdfparts::read_stream(
+            &s.raw_data(),
+            &names,
+            &parms,
+            facts.limits,
+            facts.limits.max_total_bytes,
+            facts.stop,
+            &mut each,
+        );
+        if let Some(why) = failed {
+            return Err(why);
+        }
+        if let Err(why) = read {
+            let id = s.obj_id();
+            return Err(format!(
+                "its content stream {} {} cannot be read to check its pictures: {why}",
+                id.obj_number, id.gen_number
+            ));
         }
     }
-    buf.drain(..keep.min(buf.len()));
-    Ok(())
+    scan.finish()
 }
 
 /// One step of the walk of what a page's render reads as content.
 enum Visit<'p> {
+    /// The page's content streams, read as one.
+    Page(Vec<Stream<'p>>),
     Content(Stream<'p>),
     Resources(Resources<'p>),
     Image(Stream<'p>),
@@ -177,7 +122,7 @@ pub(crate) fn page_stencils<'p>(
         todo.push(Visit::Content(c));
     }
     if let Some(a) = raw.get::<Array<'p>>(b"Contents") {
-        todo.extend(a.iter::<Stream<'p>>().map(Visit::Content));
+        todo.push(Visit::Page(a.iter::<Stream<'p>>().collect()));
     }
     for annot in raw
         .get::<Array<'p>>(b"Annots")
@@ -218,11 +163,21 @@ pub(crate) fn page_stencils<'p>(
                     check(&mask)?;
                 }
             }
+            // Joined, they read differently than each alone, so they are read again for
+            // each page.
+            Visit::Page(streams) => {
+                inline_stencils(&streams, facts, &check)?;
+                for s in &streams {
+                    if let Some(r) = s.dict().get::<Dict<'p>>(b"Resources") {
+                        todo.push(Visit::Resources(Resources::new(r)));
+                    }
+                }
+            }
             Visit::Content(s) => {
                 if !seen.insert(s.obj_id()) {
                     continue;
                 }
-                inline_stencils(&s, facts, &check)?;
+                inline_stencils(std::slice::from_ref(&s), facts, &check)?;
                 if let Some(r) = s.dict().get::<Dict<'p>>(b"Resources") {
                     todo.push(Visit::Resources(Resources::new(r)));
                 }
