@@ -1,6 +1,6 @@
 # Markdown
 
-Rezzer reads Markdown files, keeps their own frontmatter and adds an outline and a table of the links, including wikilinks.
+Rezzer reads Markdown files, keeps their own frontmatter and adds an outline and a graph of the links, including wikilinks.
 
 Status: available in the development version (no release yet).
 
@@ -74,10 +74,10 @@ flowchart LR
 
 The corpus has 3 public Markdown files from GitHub Docs, the Rust blog and Foam. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
-Extreme cases that were held, at the default limits:
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - 100,000 levels of block quotes: the read stops at the depth limit and says so
 - 1.2 million emphasized words: the read stops at 2 million elements and says so
 - Bytes that are not valid UTF-8: decoded, the text around them is kept
 
-Speed: `md-toml-frontmatter-rust-blog-traits.md` (18 KB) reads in 0.01 seconds or less with a peak memory of 5 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
+Speed: `md-toml-frontmatter-rust-blog-traits.md` (18 KB) reads in under 0.01 seconds with a peak memory of 5 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

@@ -80,10 +80,10 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 The corpus has 4 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
-Extreme cases that were held, at the default limits:
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
-- Repeat counts that ask for about 3.9 TB of cells: refused in under 10 seconds, peak heap under 512 MB
+- Repeat counts that ask for about 3.9 TB of cells, with a time limit of 10 seconds: refused within the limit plus 2 seconds, peak heap under 512 MB
 - 100,000 nested spans in one cell: refused for its depth before any parser reads it
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
-Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in 0.01 seconds with a peak memory of 6 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
+Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 7 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

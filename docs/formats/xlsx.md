@@ -115,11 +115,11 @@ Rezzer reads every file as untrusted data:
 
 The corpus has 24 XLSX, 3 XLSM and 2 XLSB public test files from Apache POI, Apache Tika, LibreOffice, calamine, IronCalc and two open engineering projects. One XLSB file is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
-Extreme cases that were held, at the default limits:
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - A sheet of 64 MB of spaces, packed far over 100 times: refused before it is unpacked, peak heap under 512 MB
 - Two cells, A1 and XFD1048576, 17 billion cells apart: peak heap under 64 MB, the far formula is still listed
 - 100,000 nested XML elements after the cells: the read stops at 256 levels and keeps the cells before
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
-Speed: `ex012.PVT_z_factor.xlsm` (130 KB, 2,133 formulas) reads in 0.07 seconds with a peak memory of 13 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
+Speed: `ex012.PVT_z_factor.xlsm` (130 KB, 2,133 formulas) reads in 0.02 seconds with a peak memory of 14 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

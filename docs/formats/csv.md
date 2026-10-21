@@ -39,7 +39,7 @@ The table, then a `Columns` table (column, type, unit, missing, unique, key) and
 
 ## Example
 
-Real output of `rezzer read` for `csv-datahub-co2-fossil-global.csv` from the test corpus. The overview and the Logic section; the table of 275 rows between them is cut:
+Real output of `rezzer read` for `csv-datahub-co2-fossil-global.csv` from the test corpus. The overview and the Logic section; the Properties section, the table of 275 rows and the Columns table between them are cut:
 
 ```markdown
 ## Overview
@@ -73,10 +73,10 @@ Found in the data, not written as formulas in the file.
 
 The corpus has 12 public files: 11 CSV files (one of them a semicolon file named `.txt`) and 1 TSV file, from csv-spectrum, pandas, the German weather service (DWD), GeoNames and the datahub datasets. Two of them were made from public files (one changed to Latin-1 without a header, one broken on purpose). See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
-Extreme cases that were held, at the default limits:
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - One row of 50 MB without a line break, with a time limit of 1 second: the read ends within the limit plus 2 seconds
 - 100 MB of short rows with a time limit of 50 ms: the read stops in time and says so
-- 3,000 columns by 200 rows: the table shows 1,000 columns and 200,000 cells, the Columns table 500 columns, and the output says what is not shown
+- 3,000 columns by 200 rows: the table shows 1,000 columns and 200,000 cells, the Columns table 500 columns. The output says what is not shown
 
-Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.05 seconds with a peak memory of 9 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
+Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.02 seconds with a peak memory of 9 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

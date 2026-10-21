@@ -66,7 +66,7 @@ language: "en"
 The Project Gutenberg eBook of Alice's Adventures in Wonderland
 ```
 
-The `resource` path is shortened here; Rezzer writes the full path of the file.
+The `resource` path is shortened here (Rezzer writes the full path of the file), and the time in `generated` was set to midnight for the example.
 
 ## Known limitations
 
@@ -79,10 +79,10 @@ The `resource` path is shortened here; Rezzer writes the full path of the file.
 
 The corpus has 4 public text files from Project Gutenberg and Aozora Bunko (UTF-8, ISO-8859-1, Windows-1252 and Shift_JIS; the Windows-1252 file was transcoded from a public file). See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
-Extreme cases that were held, at the default limits:
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - 100 MB without a line break: one paragraph, peak heap under 4 times the file size
 - 1.1 million short paragraphs: the read stops at 2 million elements and says so
 - A file of 3 GB: refused by its size before it is read
 
-Speed: `text-utf8-gutenberg-faust.txt` (218 KB) reads in 0.02 seconds with a peak memory of 8 MiB. Measured on an Apple M5 (Mac17,3, 32 GB) with the release build of the development version on 2026-10-21.
+Speed: `text-utf8-gutenberg-faust.txt` (218 KB) reads in under 0.01 seconds with a peak memory of 8 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
