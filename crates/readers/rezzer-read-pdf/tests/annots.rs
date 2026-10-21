@@ -496,3 +496,109 @@ fn the_latest_review_state_counts() {
     assert_eq!(a.resolved, None);
     assert_eq!(a.replies.len(), 2);
 }
+
+/// A one-page file of notes, each `(extra entries, comment)`; `@k` in the entries names note
+/// `k` (from 0).
+fn notes(list: &[(&str, &str)]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream("", LOREM.as_bytes());
+    let ids: Vec<u32> = list.iter().map(|_| b.reserve()).collect();
+    for (k, (extra, text)) in list.iter().enumerate() {
+        let mut extra = extra.to_string();
+        for (j, id) in ids.iter().enumerate().rev() {
+            extra = extra.replace(&format!("@{j}"), &format!("{id} 0 R"));
+        }
+        b.set(
+            ids[k],
+            format!(
+                "<< /Type /Annot /Subtype /Text /Rect [10 690 30 710] /Contents ({text}) \
+                 {extra} >>"
+            ),
+        );
+    }
+    let refs: Vec<String> = ids.iter().map(|i| format!("{i} 0 R")).collect();
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R \
+             /Annots [{}] >>",
+            refs.join(" ")
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn a_checkmark_does_not_undo_a_review() {
+    for mark in ["Marked", "Unmarked"] {
+        let out = read(&notes(&[
+            ("", "parent"),
+            (
+                "/IRT @0 /State (Accepted) /StateModel (Review) /M (D:20240101000000Z)",
+                "accepted",
+            ),
+            (
+                &format!("/IRT @0 /State ({mark}) /StateModel (Marked) /M (D:20240102000000Z)"),
+                "checked",
+            ),
+        ]));
+        assert_eq!(one(&out).resolved, Some(true), "{mark}");
+    }
+    // A Marked-model state never closes, whatever its word.
+    let out = read(&notes(&[
+        ("", "parent"),
+        ("/IRT @0 /State (Accepted) /StateModel (Marked)", "odd"),
+    ]));
+    assert_eq!(one(&out).resolved, None);
+}
+
+#[test]
+fn an_undated_state_is_ordered_by_its_place_in_the_file() {
+    let out = read(&notes(&[
+        ("", "parent"),
+        (
+            "/IRT @0 /State (None) /StateModel (Review) /M (D:20240101000000Z)",
+            "reopened",
+        ),
+        ("/IRT @0 /State (Completed) /StateModel (Review)", "done"),
+    ]));
+    assert_eq!(one(&out).resolved, Some(true));
+}
+
+#[test]
+fn a_deep_state_reply_answers_its_own_parent() {
+    // A chain of 20 notes; the last, at level 19, accepts note 18.
+    let mut list: Vec<(String, String)> = vec![(String::new(), "n0".into())];
+    for k in 1..19 {
+        list.push((format!("/IRT @{}", k - 1), format!("n{k}")));
+    }
+    list.push((
+        "/IRT @18 /State (Accepted) /StateModel (Review)".into(),
+        "accept".into(),
+    ));
+    let refs: Vec<(&str, &str)> = list.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let out = read(&notes(&refs));
+    let mut found: Vec<(String, Option<bool>)> = Vec::new();
+    let mut stack: Vec<&Annotation> = out.document.facets.annotations.iter().collect();
+    while let Some(a) = stack.pop() {
+        found.push((plain_text(&a.body), a.resolved));
+        stack.extend(a.replies.iter());
+    }
+    let mut resolved: Vec<&str> = found
+        .iter()
+        .filter(|(_, r)| *r == Some(true))
+        .map(|(t, _)| t.as_str())
+        .collect();
+    resolved.sort_unstable();
+    assert_eq!(resolved, ["accept", "n18"], "{found:?}");
+}

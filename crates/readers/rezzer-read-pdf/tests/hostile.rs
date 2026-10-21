@@ -3201,3 +3201,25 @@ fn notes_near_many_overlapping_runs_are_placed_once_each() {
     assert_eq!(anchors.len(), 1, "{anchors:?}");
     assert_eq!(out.document.facets.annotations.len(), 4000);
 }
+
+#[test]
+fn a_probe_bound_with_every_note_placed_says_nothing() {
+    // 8,000 runs and 8,000 notes reach the bound on run and point pairs, but every note has
+    // its block by then.
+    let out = read(&overlapping_runs(8000, 8000));
+    assert!(
+        out.document
+            .facets
+            .annotations
+            .iter()
+            .all(|a| a.anchor.as_ref().is_some_and(|a| a.0.contains(":b")))
+    );
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("stand at the page")),
+        "{:?}",
+        out.document.losses
+    );
+}

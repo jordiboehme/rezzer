@@ -280,7 +280,7 @@ fn lay_out(
             for (&i, two) in here.iter().zip(laid.probed.chunks(2)) {
                 spots[i].anchor = two.iter().flatten().next().cloned();
             }
-            if laid.probes_cut {
+            if laid.probes_cut && here.iter().any(|&i| spots[i].anchor.is_none()) {
                 out.loss(
                     format!("p{n}"),
                     "some annotations stand at the page, not at their block: the page has too \

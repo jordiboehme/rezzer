@@ -64,6 +64,21 @@ fn closes(state: &str) -> bool {
     matches!(state, "Accepted" | "Completed" | "Cancelled")
 }
 
+/// Whether a reply's review state closes what it answers, `None` when it has no review state.
+/// Only states of the Review model count: a state without `/StateModel` counts as one when it
+/// is a Review word. Marked and Unmarked (the Marked model, a checkmark) never do.
+fn review(a: &Annot) -> Option<bool> {
+    let state = a.state.as_deref()?;
+    let counts = match a.state_model.as_deref() {
+        Some(model) => model == "Review",
+        None => matches!(
+            state,
+            "Accepted" | "Rejected" | "Cancelled" | "Completed" | "None"
+        ),
+    };
+    counts.then(|| closes(state))
+}
+
 /// Where each annotation of the file stands and what it quotes, once its page is laid out.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Placed {
@@ -99,16 +114,15 @@ fn body(contents: Option<&str>) -> Vec<Inline> {
     out
 }
 
-/// When an annotation was last changed, else made, in seconds since 1970 UTC; the earliest
-/// time there is when it has no date that parses.
-fn when(a: &Annot) -> i64 {
+/// When an annotation was last changed, else made, in seconds since 1970 UTC; `None` when
+/// it has no date that parses.
+fn when(a: &Annot) -> Option<i64> {
     fn iso(d: &Option<pdfparts::PdfDate>) -> Option<&str> {
         d.as_ref().and_then(|d| d.iso.as_deref())
     }
     iso(&a.modified)
         .or_else(|| iso(&a.created))
         .and_then(seconds)
-        .unwrap_or(i64::MIN)
 }
 
 /// Seconds since 1970 UTC of an ISO 8601 date as pdfparts writes it: `YYYY`, then `-MM`,
@@ -191,7 +205,7 @@ pub(crate) fn read(
         let kind = kind_word(&a.subtype);
         let date = date(a);
         let anchor = p.anchor.unwrap_or_else(|| Anchor(format!("p{}", a.page)));
-        let resolved = a.state.as_deref().filter(|s| closes(s)).map(|_| true);
+        let resolved = review(a).filter(|c| *c).map(|_| true);
         // The quote was charged to the room when it was read; it counts toward the share.
         let bytes = [
             kind.as_str(),
@@ -244,7 +258,7 @@ pub(crate) fn read(
     }
     let kept = built.len();
     let tree = nest(&annots[..kept]);
-    out.doc.facets.annotations = tree.build(&mut built, &annots[..kept]);
+    out.doc.facets.annotations = tree.build(&mut built);
     if let Some((first, why)) = cut {
         let what = if first == n {
             format!("annotation {first} is")
@@ -298,6 +312,8 @@ struct Tree {
     roots: Vec<usize>,
     /// Members of a group, which join their parent instead of replying to it.
     group: Vec<bool>,
+    /// Whether the latest review state among the replies closes each annotation.
+    verdict: Vec<Option<bool>>,
     loops: usize,
     flattened: usize,
 }
@@ -388,6 +404,20 @@ fn nest(annots: &[Annot]) -> Tree {
             flattened += 1;
         }
     }
+    // Each review state answers its own parent, however deep the reply is shown. The latest
+    // counts: by date when both have one, else by place in the file.
+    let mut latest: Vec<Option<(Option<i64>, bool)>> = vec![None; n];
+    for i in 0..n {
+        let (Some(p), Some(closed)) = (parent[i], review(&annots[i])) else {
+            continue;
+        };
+        let at = when(&annots[i]);
+        let earlier = matches!((at, latest[p]), (Some(t), Some((Some(before), _))) if t < before);
+        if !earlier {
+            latest[p] = Some((at, closed));
+        }
+    }
+    let verdict = latest.into_iter().map(|l| l.map(|(_, c)| c)).collect();
     let mut children = vec![Vec::new(); n];
     let mut roots = Vec::new();
     for (i, p) in hang.iter().enumerate() {
@@ -400,6 +430,7 @@ fn nest(annots: &[Annot]) -> Tree {
         children,
         roots,
         group,
+        verdict,
         loops,
         flattened,
     }
@@ -407,12 +438,12 @@ fn nest(annots: &[Annot]) -> Tree {
 
 impl Tree {
     /// The annotations as a tree: each root with its replies. Members of a group add their
-    /// comment and replies to their parent; a reply that closes its parent marks it
-    /// resolved.
-    fn build(&self, built: &mut [Option<Annotation>], annots: &[Annot]) -> Vec<Annotation> {
+    /// comment and replies to their parent; the latest review state of a reply sets whether
+    /// its parent is resolved.
+    fn build(&self, built: &mut [Option<Annotation>]) -> Vec<Annotation> {
         let mut out = Vec::with_capacity(self.roots.len());
         for &r in &self.roots {
-            if let Some(a) = self.node(r, built, annots, 0) {
+            if let Some(a) = self.node(r, built, 0) {
                 out.push(a);
             }
         }
@@ -421,15 +452,8 @@ impl Tree {
 
     /// One annotation with its replies. The depth of the tree is at most [`REPLY_DEPTH`]
     /// plus one, so the recursion is bounded.
-    fn node(
-        &self,
-        i: usize,
-        built: &mut [Option<Annotation>],
-        annots: &[Annot],
-        depth: usize,
-    ) -> Option<Annotation> {
+    fn node(&self, i: usize, built: &mut [Option<Annotation>], depth: usize) -> Option<Annotation> {
         let mut a = built[i].take()?;
-        let mut latest: Option<((i64, usize), bool)> = None;
         // Group members join here, with their own members and replies.
         let mut todo: Vec<usize> = self.children[i].iter().rev().copied().collect();
         while let Some(c) = todo.pop() {
@@ -449,18 +473,11 @@ impl Tree {
                 todo.extend(self.children[c].iter().rev());
                 continue;
             }
-            // The latest review state counts: by date, else by place in the file.
-            if let Some(state) = annots[c].state.as_deref() {
-                let key = (when(&annots[c]), c);
-                if latest.as_ref().is_none_or(|(k, _)| key > *k) {
-                    latest = Some((key, closes(state)));
-                }
-            }
-            if let Some(reply) = self.node(c, built, annots, depth + 1) {
+            if let Some(reply) = self.node(c, built, depth + 1) {
                 a.replies.push(reply);
             }
         }
-        if let Some((_, closed)) = latest {
+        if let Some(closed) = self.verdict[i] {
             a.resolved = closed.then_some(true);
         }
         Some(a)

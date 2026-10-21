@@ -47,6 +47,8 @@ pub struct Annot {
     pub reply_type: Option<Arc<str>>,
     /// `/State` of a review reply, for example `Accepted` or `Completed`.
     pub state: Option<Arc<str>>,
+    /// `/StateModel`: `Review` for review states, `Marked` for a checkmark.
+    pub state_model: Option<Arc<str>>,
 }
 
 /// What one listed annotation takes besides its copied bytes, as measured: 100,000 highlights
@@ -361,6 +363,7 @@ impl Pdf {
             subject: text(b"Subj")?,
             reply_type: text(b"RT")?,
             state: text(b"State")?,
+            state_model: text(b"StateModel")?,
             created: get_date(doc, ad, b"CreationDate"),
             modified: get_date(doc, ad, b"M"),
             color: color(doc, ad.get(b"C").ok()),
