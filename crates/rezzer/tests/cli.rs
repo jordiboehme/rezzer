@@ -560,10 +560,32 @@ fn pdf_corpus(name: &str) -> PathBuf {
 #[cfg(feature = "fmt-pdf")]
 const PDF_PASSWORD: &str = "view";
 
-/// The text without the word "overview", in lower case: the password `view` must not be in
-/// what is left.
+/// The text without the paths of the checkout and of the test's own folder, and without the
+/// word "overview", in lower case: the password `view` must not be in what is left. A path
+/// may hold the password by chance (a folder named "review"); what Rezzer writes must not.
 #[cfg(feature = "fmt-pdf")]
-fn without_overview(text: &str) -> String {
+fn scrubbed(text: &str, env: &Env) -> String {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths: Vec<std::path::PathBuf> = vec![
+        manifest.clone(),
+        manifest.join("../.."),
+        env.root.path().to_path_buf(),
+    ];
+    let canonical: Vec<std::path::PathBuf> = paths
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
+    paths.extend(canonical);
+    // The longest first, so a path inside another goes as a whole.
+    let mut paths: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    let mut text = text.to_string();
+    for p in paths {
+        text = text.replace(&p, "<path>");
+    }
     text.to_lowercase().replace("overview", "")
 }
 
@@ -677,7 +699,7 @@ fn password_never_in_output_or_cache() {
         seen.push(std::fs::read_to_string(entry.unwrap().path()).unwrap());
     }
     for text in &seen {
-        assert!(!without_overview(text).contains(PDF_PASSWORD), "{text}");
+        assert!(!scrubbed(text, &env).contains(PDF_PASSWORD), "{text}");
     }
     // A read with a password is never cached.
     assert_eq!(env.cache_entries(), 0);
@@ -726,10 +748,7 @@ fn password_never_in_logs() {
         .unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(
-        !without_overview(&stderr).contains(PDF_PASSWORD),
-        "{stderr}"
-    );
+    assert!(!scrubbed(&stderr, &env).contains(PDF_PASSWORD), "{stderr}");
     // Rezzer logs nothing today, even with RUST_LOG=trace. Empty stderr guards a logger added
     // later: it must not start to write the password, or anything else, here.
     assert_eq!(stderr, "", "a read writes nothing to stderr");
@@ -761,7 +780,7 @@ fn password_never_in_logs() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stdout.contains("encrypted: true"), "{stdout}");
     for text in [&stdout, &stderr] {
-        assert!(!without_overview(text).contains(PDF_PASSWORD), "{text}");
+        assert!(!scrubbed(text, &env).contains(PDF_PASSWORD), "{text}");
     }
     // The same guard for the server: it logs nothing to stderr.
     assert_eq!(stderr, "", "the server writes nothing to stderr");
