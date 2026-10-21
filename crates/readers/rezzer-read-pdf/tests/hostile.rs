@@ -4039,3 +4039,149 @@ fn links_are_matched_per_glyph_within_bounds() {
     );
     assert_rss_under_256_mib();
 }
+
+/// A one-page file of `w` by `h` points with Helvetica as `/F1`.
+fn sized_page(content: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(content));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The loss that says the drawn boxes of page 1 are not used as reading regions.
+fn box_loss(out: &ReadOutcome) -> Option<&Loss> {
+    out.document.losses.iter().find(|l| {
+        l.what
+            .contains("drawn boxes on page 1 are not used as reading regions")
+    })
+}
+
+fn assert_quick(start: Instant) {
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_boxes_with_text_are_bounded() {
+    // 4,500 boxes in a column on a tall page, each with a word: more than a page may use as
+    // reading regions. The text is read, and a loss says the boxes are not used.
+    let start = Instant::now();
+    let n = 4_500usize;
+    let h = (n + 2) * 20;
+    let mut c = b"0.5 w ".to_vec();
+    for i in 0..n {
+        let y = h - 20 - i * 20;
+        c.extend(
+            format!(
+                "72 {y} 100 16 re S BT /F1 8 Tf 76 {} Td (b{i}) Tj ET\n",
+                y + 5
+            )
+            .as_bytes(),
+        );
+    }
+    let out = read(&tall_page(&c, h));
+    assert_quick(start);
+    let loss = box_loss(&out).unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Limit);
+    assert!(text(page(&out, 1)).contains("b4499"));
+}
+
+#[test]
+fn many_rounded_boxes_are_bounded() {
+    // 60,000 small rounded boxes (four corner curves and four sides each): more straight
+    // lines than the box search looks at.
+    let start = Instant::now();
+    let mut c = b"BT /F1 12 Tf 72 2500 Td (Before.) Tj ET 0.1 w ".to_vec();
+    for k in 0..60_000usize {
+        let (x, y) = ((10 + (k % 250) * 10) as f32, (10 + (k / 250) * 10) as f32);
+        let (x1, y1) = (x + 8.0, y + 8.0);
+        c.extend(
+            format!(
+                "{} {y} m {} {y} l {x1} {y} {x1} {y} {x1} {} c {x1} {} l {x1} {y1} {x1} {y1} {} {y1} c \
+                 {} {y1} l {x} {y1} {x} {y1} {x} {} c {x} {} l {x} {y} {x} {y} {} {y} c h S\n",
+                x + 1.0,
+                x1 - 1.0,
+                y + 1.0,
+                y1 - 1.0,
+                x1 - 1.0,
+                x + 1.0,
+                y1 - 1.0,
+                y + 1.0,
+                x + 1.0,
+            )
+            .as_bytes(),
+        );
+    }
+    let out = read(&sized_page(&c, 2_600, 2_600));
+    assert_quick(start);
+    assert!(text(page(&out, 1)).contains("Before."));
+    let loss = box_loss(&out).unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Limit);
+}
+
+#[test]
+fn deeply_nested_boxes_are_bounded() {
+    // 1,000 boxes inside each other, 2.5 points apart, with two lines in the innermost one,
+    // and two lines on the same baselines to the right of all of them. The inner box is
+    // read whole.
+    let start = Instant::now();
+    let (w, h) = (6_000usize, 6_000usize);
+    let mut c = b"0.2 w ".to_vec();
+    for k in 0..1_000usize {
+        let d = 2.5 * k as f32;
+        c.extend(
+            format!(
+                "{} {} {} {} re S\n",
+                2_800.0 - d,
+                2_900.0 - d,
+                200.0 + 2.0 * d,
+                40.0 + 2.0 * d
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"BT /F1 10 Tf 2810 2925 Td (Inner one) Tj ET BT /F1 10 Tf 2810 2911 Td (Inner two) Tj ET\n");
+    c.extend(b"BT /F1 10 Tf 5600 2925 Td (Outer one) Tj ET BT /F1 10 Tf 5600 2911 Td (Outer two) Tj ET\n");
+    let out = read(&sized_page(&c, w, h));
+    assert_quick(start);
+    let body = text(page(&out, 1));
+    let at = |t: &str| body.find(t).unwrap_or_else(|| panic!("{t} in {body}"));
+    assert!(at("Inner two") < at("Outer one"), "{body}");
+}
+
+#[test]
+fn overlapping_boxes_are_bounded() {
+    // 3,000 boxes of 300 points, each 2.1 points right of and below the one before: their
+    // sides cross everywhere. A guard: the page is read and stays small and quick.
+    let start = Instant::now();
+    let mut c = b"BT /F1 12 Tf 72 7900 Td (Before.) Tj ET 0.1 w ".to_vec();
+    for k in 0..3_000usize {
+        let (x, y) = (10.0 + 2.1 * k as f32, 7_500.0 - 2.1 * k as f32);
+        c.extend(
+            format!(
+                "{x} {y} 300 300 re S BT /F1 4 Tf {} {} Td (o{k}) Tj ET\n",
+                x + 2.0,
+                y + 2.0
+            )
+            .as_bytes(),
+        );
+    }
+    let out = read(&sized_page(&c, 8_000, 8_000));
+    assert_quick(start);
+    assert!(text(page(&out, 1)).contains("Before."));
+}

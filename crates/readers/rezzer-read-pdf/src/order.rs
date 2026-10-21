@@ -11,6 +11,7 @@ use std::rc::Rc;
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::Run;
+use crate::regions::{BOX_WORK, Index, offset_baselines};
 use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
@@ -85,6 +86,9 @@ struct Frag {
     mcid: Option<u32>,
     /// The URI link over the glyphs, an index into the page's links.
     link: Option<u32>,
+    /// The drawn box the run's middle lies in, the innermost one, as an index into the
+    /// page's boxes: a reading region.
+    region: Option<u32>,
     chars: usize,
     /// Where the text of each glyph (and each space put in) starts in `text`: the units
     /// right-to-left reordering moves as a whole.
@@ -205,6 +209,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             italic: g.italic,
             mcid: g.mcid,
             link: g.link,
+            region: None,
             chars: t.chars().count(),
             units: vec![0],
         });
@@ -226,9 +231,15 @@ struct Piece {
     padded: bool,
     y0: f32,
     y1: f32,
+    /// The baseline of the piece's first fragment.
+    y: f32,
     size: f32,
     chars: usize,
     frags: Vec<usize>,
+    /// The piece stands in for the text of a drawn box (the index of the box's group), read
+    /// whole where the piece is read; its rows are counted in `rows`.
+    stand: Option<usize>,
+    rows: usize,
 }
 
 /// The white space between a run or piece whose gap counts from `free` (`padded` when white
@@ -244,10 +255,37 @@ fn extent(f: &Frag) -> (f32, f32) {
     (f.y - 0.25 * f.size, f.y + 0.75 * f.size)
 }
 
+/// For each fragment, the first of the chain it goes on in content order: a fragment that
+/// goes on right where the one before it ends, on its baseline in its size and in its box (a
+/// run cut at a link's edge or a change of style), moves with it, so other text that shares
+/// the row is never put in between.
+fn chain_heads(frags: &[Frag]) -> Vec<usize> {
+    let mut head: Vec<usize> = Vec::with_capacity(frags.len());
+    for (i, f) in frags.iter().enumerate() {
+        let joins = i > 0 && {
+            let p = &frags[i - 1];
+            let size = p.size.max(f.size);
+            p.region == f.region
+                && (f.y - p.y).abs() <= 0.1 * size
+                && (f.size - p.size).abs() <= 0.05 * size
+                && (f.x - p.pen).abs() <= 0.1 * size
+        };
+        head.push(if joins { head[i - 1] } else { i });
+    }
+    head
+}
+
 /// Rows of fragments that share a baseline (by vertical overlap), top to bottom, each split
 /// into pieces at wide gaps. Fragments drawn twice in one place are dropped.
+#[cfg(test)]
 fn pieces(frags: &[Frag]) -> Vec<Piece> {
-    let mut order: Vec<usize> = (0..frags.len()).collect();
+    let all: Vec<usize> = (0..frags.len()).collect();
+    pieces_in(frags, &all, &chain_heads(frags), 0).0
+}
+
+/// [`pieces`] of the fragments `ids`, rows numbered from `base`, with the number of rows.
+fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec<Piece>, usize) {
+    let mut order: Vec<usize> = ids.to_vec();
     order.sort_by(|&a, &b| {
         frags[b]
             .y
@@ -269,20 +307,7 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
         rows.push(vec![i]);
         core = (lo, hi);
     }
-    // A fragment that goes on right where the one before it in content order ends, on its
-    // baseline in its size (a run cut at a link's edge or a change of style), moves with it:
-    // other text that shares the row is never put in between.
-    let mut head: Vec<usize> = Vec::with_capacity(frags.len());
-    for (i, f) in frags.iter().enumerate() {
-        let joins = i > 0 && {
-            let p = &frags[i - 1];
-            let size = p.size.max(f.size);
-            (f.y - p.y).abs() <= 0.1 * size
-                && (f.size - p.size).abs() <= 0.05 * size
-                && (f.x - p.pen).abs() <= 0.1 * size
-        };
-        head.push(if joins { head[i - 1] } else { i });
-    }
+    let count = rows.len();
     let mut out = Vec::new();
     for (r, mut row) in rows.into_iter().enumerate() {
         row.sort_by(|&a, &b| frags[a].x.total_cmp(&frags[b].x));
@@ -329,21 +354,24 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
                 out.push(piece.take().expect("a piece"));
             }
             piece = Some(Piece {
-                row: r,
+                row: base + r,
                 x0: f.x,
                 x1: f.pen.max(f.x),
                 free: f.free,
                 padded: f.padded,
                 y0: lo,
                 y1: hi,
+                y: f.y,
                 size: f.size,
                 chars: f.chars,
                 frags: vec![i],
+                stand: None,
+                rows: 1,
             });
         }
         out.extend(piece);
     }
-    out
+    (out, count)
 }
 
 /// The pieces in reading order: columns one after the other, with the pieces that cross the
@@ -355,11 +383,20 @@ fn reading_order(pieces: &[Piece]) -> Vec<usize> {
 }
 
 fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) {
-    if ids.len() > 3
-        && depth < COLUMN_DEPTH
-        && ids.len() <= COLUMN_PIECES
-        && let Some((g0, g1)) = gutter(p, &ids)
-    {
+    let deep = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
+    let found = if deep { gutter(p, &ids) } else { None };
+    // A gutter that only a drawn box makes is taken after the bands of white space across:
+    // text above or below the boxes is not part of their columns.
+    if let Some((_, _, true)) = found {
+        ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
+        if let Some(at) = widest_gap(p, &ids) {
+            let rest = ids.split_off(at);
+            region(p, ids, depth + 1, out);
+            region(p, rest, depth + 1, out);
+            return;
+        }
+    }
+    if let Some((g0, g1, _)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         let mut band: Vec<usize> = Vec::new();
         let flush = |band: &mut Vec<usize>, out: &mut Vec<usize>| {
@@ -424,8 +461,9 @@ fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
 }
 
 /// A column gutter in a region: the widest vertical band of white space that only a few
-/// pieces cross, with prose columns on both sides that stand side by side.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32)> {
+/// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
+/// baselines do not line up, or a drawn box. The flag says that only a box makes it.
+fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, bool)> {
     let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
     let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
     if !(hi - lo).is_finite() || hi - lo < 2.0 {
@@ -496,7 +534,29 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32)> {
         chars.sort_unstable();
         chars[chars.len() / 2] >= PROSE_CHARS
     };
-    if !prose(&left) || !prose(&right) {
+    // A side that holds a drawn box of two lines or more is a block of its own.
+    let boxed = |side: &[usize]| side.iter().any(|&i| p[i].stand.is_some() && p[i].rows >= 2);
+    // The baselines of a side, one for each of its rows.
+    // The baselines of a side, line by line: those of the pieces of each row.
+    let baselines = |side: &[usize]| {
+        let mut rows: Vec<(usize, f32)> = side.iter().map(|&i| (p[i].row, p[i].y)).collect();
+        rows.sort_by_key(|r| r.0);
+        let mut out: Vec<Vec<f32>> = Vec::new();
+        let mut last = None;
+        for (row, y) in rows {
+            match out.last_mut() {
+                Some(l) if last == Some(row) => l.push(y),
+                _ => out.push(vec![y]),
+            }
+            last = Some(row);
+        }
+        out
+    };
+    let size = sizes[sizes.len() / 2];
+    let apart = || offset_baselines(&baselines(&left), &baselines(&right), size);
+    let text = (prose(&left) && prose(&right)) || apart();
+    let by_box = !text && !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right));
+    if !text && !by_box {
         return None;
     }
     // The columns stand side by side: their heights overlap.
@@ -509,24 +569,42 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32)> {
     let (a, b) = (span(&left), span(&right));
     let overlap = a.1.min(b.1) - a.0.max(b.0);
     let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
-    (overlap / smaller >= 0.3).then_some((g0, g1))
+    (overlap / smaller >= 0.3).then_some((g0, g1, by_box))
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices.
+#[cfg(test)]
 fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
-    let ps = pieces(frags);
-    let order = if columns {
-        reading_order(&ps)
+    lines_in(frags, columns, &[])
+}
+
+/// Lines of fragments in reading order, as lists of fragment indices. A fragment tagged with
+/// one of `boxes` (in the frame of the fragments) is read with the rest of its box: the box
+/// stands as one piece among the others, ordered as they are, and its text is read whole
+/// where it stands.
+fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
+    let head = chain_heads(frags);
+    let boxed = columns && frags.iter().any(|f| f.region.is_some());
+    let order: Vec<usize>;
+    let ps: Vec<Piece>;
+    if !boxed {
+        let all: Vec<usize> = (0..frags.len()).collect();
+        ps = pieces_in(frags, &all, &head, 0).0;
+        order = if columns {
+            reading_order(&ps)
+        } else {
+            let mut o: Vec<usize> = (0..ps.len()).collect();
+            o.sort_by(|&a, &b| {
+                ps[a]
+                    .row
+                    .cmp(&ps[b].row)
+                    .then(ps[a].x0.total_cmp(&ps[b].x0))
+            });
+            o
+        };
     } else {
-        let mut o: Vec<usize> = (0..ps.len()).collect();
-        o.sort_by(|&a, &b| {
-            ps[a]
-                .row
-                .cmp(&ps[b].row)
-                .then(ps[a].x0.total_cmp(&ps[b].x0))
-        });
-        o
-    };
+        (ps, order) = boxed_order(frags, &head, boxes);
+    }
     let mut lines: Vec<Vec<usize>> = Vec::new();
     let mut last_row = None;
     for i in order {
@@ -541,6 +619,177 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
         last_row = Some(p.row);
     }
     lines
+}
+
+/// The pieces of a page with drawn boxes, and their reading order. The pieces outside any
+/// box and one stand-in piece for each box (its extent, its characters summed) are ordered as
+/// a page without boxes is; each stand-in is then replaced by the pieces of its box in their
+/// own reading order. Rows never join fragments of different boxes.
+fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece>, Vec<usize>) {
+    // Free text first, then the fragments of each box, in the order the boxes are first met.
+    let mut group_of: Vec<Option<usize>> = vec![None; boxes.len()];
+    let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
+    let mut free: Vec<usize> = Vec::new();
+    for (i, f) in frags.iter().enumerate() {
+        match f.region.filter(|&b| (b as usize) < boxes.len()) {
+            Some(b) => {
+                let g = *group_of[b as usize].get_or_insert_with(|| {
+                    groups.push((b, Vec::new()));
+                    groups.len() - 1
+                });
+                groups[g].1.push(i);
+            }
+            None => free.push(i),
+        }
+    }
+    let (mut ps, free_rows) = pieces_in(frags, &free, head, 0);
+    // The rows of the free text, top to bottom: their baselines and vertical extents.
+    let mut bands: Vec<(f32, f32, f32)> = vec![(f32::MAX, f32::MAX, f32::MIN); free_rows];
+    for p in &ps {
+        let b = &mut bands[p.row];
+        if b.0 == f32::MAX {
+            b.0 = p.y;
+        }
+        b.1 = b.1.min(p.y0);
+        b.2 = b.2.max(p.y1);
+    }
+    // The pieces of each box, rows numbered after all others for now; and its stand-in.
+    let mut inner: Vec<std::ops::Range<usize>> = Vec::with_capacity(groups.len());
+    let mut stands: Vec<Piece> = Vec::with_capacity(groups.len());
+    let mut next = free_rows;
+    for (g, (b, ids)) in groups.iter().enumerate() {
+        let (list, rows) = pieces_in(frags, ids, head, next);
+        let at = ps.len();
+        let first = list.iter().filter(|p| p.row == next).collect::<Vec<_>>();
+        let (lo, hi) = first.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            (lo.min(p.y0), hi.max(p.y1))
+        });
+        let y = first.first().map_or(0.0, |p| p.y);
+        let mut sizes: Vec<f32> = list.iter().map(|p| p.size).collect();
+        sizes.sort_by(f32::total_cmp);
+        let bx = boxes[*b as usize];
+        stands.push(Piece {
+            row: 0,
+            x0: bx[0],
+            x1: bx[2],
+            free: bx[2],
+            padded: false,
+            // The first row's extent decides which row the stand-in shares; the box's own
+            // extent is set once rows are numbered.
+            y0: lo,
+            y1: hi,
+            y,
+            size: sizes.get(sizes.len() / 2).copied().unwrap_or(1.0),
+            chars: list.iter().map(|p| p.chars).sum(),
+            frags: Vec::new(),
+            stand: Some(g),
+            rows,
+        });
+        ps.extend(list);
+        inner.push(at..ps.len());
+        next += rows;
+    }
+    // Rows of free text and stand-ins, top to bottom: a stand-in shares the row of free text
+    // (or of another stand-in) its first row overlaps by half, else it has a row of its own.
+    // Free rows keep their order.
+    let shares = |a: (f32, f32), b: (f32, f32)| {
+        let overlap = a.1.min(b.1) - a.0.max(b.0);
+        let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
+        overlap / smaller >= 0.5
+    };
+    let mut by_y: Vec<usize> = (0..stands.len()).collect();
+    by_y.sort_by(|&a, &b| stands[b].y.total_cmp(&stands[a].y));
+    // Each stand-in's place: after how many free rows, and the free row it shares if any.
+    let mut place: Vec<(usize, Option<usize>)> = vec![(0, None); stands.len()];
+    for &k in &by_y {
+        let st = &stands[k];
+        let at = bands.partition_point(|b| b.0 > st.y);
+        let shared = [at.checked_sub(1), Some(at)]
+            .into_iter()
+            .flatten()
+            .find(|&r| r < bands.len() && shares((bands[r].1, bands[r].2), (st.y0, st.y1)));
+        place[k] = (at, shared);
+    }
+    // Number the rows: free rows in order, with the stand-ins that have rows of their own
+    // put in before the free row they stand above.
+    let mut row_of_free: Vec<usize> = Vec::with_capacity(free_rows);
+    let mut stand_row: Vec<usize> = vec![0; stands.len()];
+    let mut own: Vec<usize> = by_y
+        .iter()
+        .copied()
+        .filter(|&k| place[k].1.is_none())
+        .collect();
+    own.sort_by(|&a, &b| {
+        place[a]
+            .0
+            .cmp(&place[b].0)
+            .then(stands[b].y.total_cmp(&stands[a].y))
+    });
+    let mut n = 0usize;
+    let mut o = 0usize;
+    // The band of the last row given out to a stand-in of its own, to let the next one share it.
+    let mut last_own: Option<(usize, f32, f32)> = None;
+    for r in 0..=free_rows {
+        while o < own.len() && place[own[o]].0 == r {
+            let st = &stands[own[o]];
+            match last_own {
+                Some((row, lo, hi)) if shares((lo, hi), (st.y0, st.y1)) => {
+                    stand_row[own[o]] = row;
+                }
+                _ => {
+                    stand_row[own[o]] = n;
+                    last_own = Some((n, st.y0, st.y1));
+                    n += 1;
+                }
+            }
+            o += 1;
+        }
+        if r < free_rows {
+            row_of_free.push(n);
+            last_own = None;
+            n += 1;
+        }
+    }
+    for (k, pl) in place.iter().enumerate() {
+        if let Some(r) = pl.1 {
+            stand_row[k] = row_of_free[r];
+        }
+    }
+    let base = n;
+    let free_end = inner.first().map_or(ps.len(), |r| r.start);
+    for p in &mut ps[..free_end] {
+        p.row = row_of_free[p.row];
+    }
+    for (k, range) in inner.iter().enumerate() {
+        let one_row = stands[k].rows == 1;
+        for p in &mut ps[range.clone()] {
+            // A box of one row reads in the row it shares: its text stays on that line.
+            p.row = if one_row {
+                stand_row[k]
+            } else {
+                base + p.row - free_rows
+            };
+        }
+    }
+    let first_stand = ps.len();
+    for (k, mut st) in stands.into_iter().enumerate() {
+        let bx = boxes[groups[k].0 as usize];
+        (st.row, st.y0, st.y1) = (stand_row[k], bx[1], bx[3]);
+        ps.push(st);
+    }
+    let top: Vec<usize> = (0..free_end.min(first_stand))
+        .chain(first_stand..ps.len())
+        .collect();
+    let mut out = Vec::with_capacity(ps.len());
+    region(&ps, top, 0, &mut out);
+    let mut order = Vec::with_capacity(ps.len());
+    for id in out {
+        match ps[id].stand {
+            Some(g) => region(&ps, inner[g].clone().collect(), 0, &mut order),
+            None => order.push(id),
+        }
+    }
+    (ps, order)
 }
 
 /// The runs of one line, numbered `line`. A run that starts a new word gets a leading space;
@@ -774,6 +1023,20 @@ pub(crate) fn runs_of(
     turn: Turn,
     links: &[Link],
 ) -> Vec<Run> {
+    runs_in(page, glyphs, text, turn, links, &[]).0
+}
+
+/// [`runs_of`], with the drawn boxes of the page (in the frame of the page box) as reading
+/// regions for the main text: the text of a box is read whole. Also says why the boxes were
+/// not used, when a bound kept them out.
+pub(crate) fn runs_in(
+    page: u32,
+    glyphs: &[Gl],
+    text: &Texts<'_>,
+    turn: Turn,
+    links: &[Link],
+    boxes: &[[f32; 4]],
+) -> (Vec<Run>, Option<String>) {
     let mut main = Vec::with_capacity(glyphs.len());
     let mut vertical = Vec::new();
     let mut others: Vec<(Turn, Vec<Gl>)> = Vec::new();
@@ -806,8 +1069,20 @@ pub(crate) fn runs_of(
     }
     let mut runs = Vec::with_capacity(main.len());
     let mut line = 0u32;
-    let frags = fragments(&main, text, turn, turn);
-    for ids in lines_of(&frags, true) {
+    let mut frags = fragments(&main, text, turn, turn);
+    let turned: Vec<[f32; 4]> = boxes
+        .iter()
+        .map(|b| {
+            let (a, c) = (turn.apply(b[0], b[1]), turn.apply(b[2], b[3]));
+            [a.0.min(c.0), a.1.min(c.1), a.0.max(c.0), a.1.max(c.1)]
+        })
+        .collect();
+    let unused = if turned.is_empty() {
+        None
+    } else {
+        tag_regions(&mut frags, &turned).err()
+    };
+    for ids in lines_in(&frags, true, &turned) {
         runs.extend(line_runs(page, &frags, &ids, line, links));
         line += 1;
     }
@@ -816,7 +1091,7 @@ pub(crate) fn runs_of(
         // position of their first glyph in the page's frame.
         let frame = compose(turn, dir);
         let frags = fragments(&list, text, frame, turn);
-        for ids in lines_of(&frags, false) {
+        for ids in lines_in(&frags, false, &[]) {
             let mut r = line_runs(page, &frags, &ids, line, links);
             for (run, &i) in r.iter_mut().zip(&ids) {
                 (run.x, run.y) = (frags[i].ox, frags[i].oy);
@@ -827,7 +1102,53 @@ pub(crate) fn runs_of(
         }
     }
     runs.extend(vertical_runs(page, &vertical, text, turn, line));
-    runs
+    (runs, unused)
+}
+
+/// Tags each fragment with the innermost of `boxes` its middle lies in. A box that holds
+/// another box with text is no region: the inner one is. Past the bounds no fragment is
+/// tagged, and the reason is given.
+fn tag_regions(frags: &mut [Frag], boxes: &[[f32; 4]]) -> Result<(), String> {
+    let cut = |frags: &mut [Frag], why: &str| {
+        frags.iter_mut().for_each(|f| f.region = None);
+        Err(why.to_string())
+    };
+    let Some(mut index) = Index::new(boxes) else {
+        return cut(frags, "its boxes overlap too much");
+    };
+    let mut held = vec![false; boxes.len()];
+    for f in frags.iter_mut() {
+        let (x, y) = ((f.x + f.pen.max(f.x)) / 2.0, f.y + 0.25 * f.size);
+        f.region = index.innermost(x, y);
+        if let Some(b) = f.region {
+            held[b as usize] = true;
+        }
+        if index.work > BOX_WORK {
+            return cut(frags, "its boxes take too many steps to look up");
+        }
+    }
+    // Boxes that hold a box with text are outer ones.
+    let mut outer = vec![false; boxes.len()];
+    for (k, b) in boxes.iter().enumerate() {
+        if !held[k] {
+            continue;
+        }
+        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, |o| {
+            let a = boxes[o as usize];
+            if o as usize != k && a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3] {
+                outer[o as usize] = true;
+            }
+        });
+        if index.work > BOX_WORK {
+            return cut(frags, "its boxes take too many steps to look up");
+        }
+    }
+    for f in frags.iter_mut() {
+        if f.region.is_some_and(|b| outer[b as usize]) {
+            f.region = None;
+        }
+    }
+    Ok(())
 }
 
 /// The frame that first turns by `a` and then reads text of direction `b` (in the frame `a`)
@@ -881,6 +1202,7 @@ mod tests {
             italic: false,
             mcid: None,
             link: None,
+            region: None,
             chars: text.chars().count(),
             units: vec![0],
         }
@@ -1009,5 +1331,71 @@ mod tests {
         let lines = lines_of(&frags, true);
         assert_eq!(lines.len(), 4);
         assert_eq!(lines[0], [0, 1]);
+    }
+
+    #[test]
+    fn offset_baselines_make_columns() {
+        // Two blocks of short lines side by side whose baselines do not line up (an address
+        // and a column of document facts): each block reads whole.
+        let mut frags = Vec::new();
+        for (k, t) in ["Sample Ltd", "Main Road 1", "1000 Town", "Country"]
+            .iter()
+            .enumerate()
+        {
+            frags.push(frag(t, 50.0, 700.0 - 14.0 * k as f32));
+        }
+        for (k, t) in ["Invoice 4711", "Date 2030", "Customer 9", "Page 1", "Euro"]
+            .iter()
+            .enumerate()
+        {
+            frags.push(frag(t, 300.0, 703.0 - 11.6 * k as f32));
+        }
+        let lines = lines_of(&frags, true);
+        let want: Vec<Vec<usize>> = (0..9).map(|i| vec![i]).collect();
+        assert_eq!(lines, want);
+    }
+
+    #[test]
+    fn boxes_are_read_whole() {
+        // Two boxes side by side whose lines share their baselines, a title above both and a
+        // line below them: each box is read whole, left box first.
+        let boxes = [[40.0, 600.0, 240.0, 720.0], [290.0, 600.0, 520.0, 720.0]];
+        let mut frags = vec![frag("A title over both boxes", 40.0, 760.0)];
+        for k in 0..3 {
+            let y = 700.0 - 14.0 * k as f32;
+            let mut l = frag(&format!("left {k}"), 50.0, y);
+            l.region = Some(0);
+            frags.push(l);
+            let mut r = frag(&format!("right {k}"), 300.0, y);
+            r.region = Some(1);
+            frags.push(r);
+        }
+        frags.push(frag("A line under the boxes", 40.0, 560.0));
+        let lines = lines_in(&frags, true, &boxes);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|l| l.iter().map(|&i| frags[i].text.clone()).collect())
+            .collect();
+        assert_eq!(
+            text,
+            [
+                "A title over both boxes",
+                "left 0",
+                "left 1",
+                "left 2",
+                "right 0",
+                "right 1",
+                "right 2",
+                "A line under the boxes"
+            ]
+        );
+        // Without the boxes, the same lines read row by row.
+        frags.iter_mut().for_each(|f| f.region = None);
+        assert_eq!(lines_of(&frags, true)[1], [1, 2]);
+        // Text beside a box of one line stays on its line.
+        let mut frags = vec![frag("Total", 50.0, 700.0), frag("10.00", 300.0, 700.0)];
+        frags[1].region = Some(0);
+        let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]]);
+        assert_eq!(lines, [vec![0, 1]]);
     }
 }

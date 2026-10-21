@@ -95,7 +95,7 @@ pub(crate) struct Found {
 }
 
 /// Lines this close are one line, and line ends this close meet, in points.
-const SNAP: f32 = 2.0;
+pub(crate) const SNAP: f32 = 2.0;
 
 /// A grid of drawn rules with more columns than this is a form or a chart, not a table.
 const MAX_COLUMNS: usize = 15;
@@ -104,12 +104,12 @@ const MAX_COLUMNS: usize = 15;
 const EMPTY_SHARE: f32 = 0.6;
 
 /// A grid or region that covers more of the page than this is the page's frame.
-const PAGE_SHARE: f32 = 0.6;
+pub(crate) const PAGE_SHARE: f32 = 0.6;
 
 /// Straight segments the ruled grid search looks at on one page, and pairs of segments it
 /// tests; past them it gives up on the page and says so.
-const MAX_SEGMENTS: usize = 20_000;
-const GRID_WORK: usize = 4_000_000;
+pub(crate) const MAX_SEGMENTS: usize = 20_000;
+pub(crate) const GRID_WORK: usize = 4_000_000;
 
 /// Lines of a caption paragraph above a table looked at for its start.
 const CAPTION_LINES: usize = 8;

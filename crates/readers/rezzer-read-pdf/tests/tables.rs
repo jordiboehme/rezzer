@@ -791,3 +791,68 @@ fn a_grid_next_to_a_figure_caption_gets_no_note() {
         out.document.losses
     );
 }
+
+#[test]
+fn side_by_side_lists_are_no_table() {
+    // Left: labels and values; right, 260 points away: a label and value column of another
+    // pitch. The baselines of the sides do not line up. No table may mix the two sides, and
+    // each side reads whole. (The key and value tables of each side come with Task 13c.)
+    let left = [
+        ("Guest", "A. Sample"),
+        ("Room", "101"),
+        ("Arrival", "2030-01-02"),
+        ("Departure", "2030-01-05"),
+    ];
+    let right = [("Folio", "1000"), ("Copy", "Original"), ("Cashier", "77")];
+    let mut c = String::new();
+    for (k, (l, v)) in left.iter().enumerate() {
+        let y = 650.6 - 11.6 * k as f32;
+        c += &show("F1", 8.0, 18.0, y, l);
+        c += &show("F1", 8.0, 90.0, y, v);
+    }
+    for (k, (l, v)) in right.iter().enumerate() {
+        let y = 646.3 - 15.9 * k as f32;
+        c += &show("F1", 8.0, 432.0, y, l);
+        c += &show("F1", 8.0, 500.0, y, v);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let blocks = page(&out, 1);
+    let left_words: Vec<&str> = left.iter().flat_map(|(l, v)| [*l, *v]).collect();
+    let right_words: Vec<&str> = right.iter().flat_map(|(l, v)| [*l, *v]).collect();
+    for (_, rows) in tables(blocks) {
+        let cells: Vec<&String> = rows.iter().flatten().collect();
+        let has = |words: &[&str]| cells.iter().any(|c| words.iter().any(|w| c.contains(w)));
+        assert!(
+            !(has(&left_words) && has(&right_words)),
+            "a table mixes both sides: {rows:?}"
+        );
+    }
+    // Each side is one stretch of the page's text.
+    let mut flat = String::new();
+    for b in blocks {
+        match b {
+            Block::Paragraph { inlines, .. } => {
+                flat.push_str(&plain_text(inlines));
+                flat.push('\n');
+            }
+            Block::Table { rows, .. } => {
+                for c in rows.iter().flatten() {
+                    flat.push_str(&plain_text(&c.inlines));
+                    flat.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+    let at = |w: &str| flat.find(w).unwrap_or_else(|| panic!("{w} in {flat}"));
+    let (l0, l1) = (at("Guest"), at("2030-01-05"));
+    for w in &right_words {
+        let p = at(w);
+        assert!(p > l1 || p < l0, "{w} inside the left side: {flat}");
+    }
+    let (r0, r1) = (at("Folio"), at("77"));
+    for w in &left_words {
+        let p = at(w);
+        assert!(p > r1 || p < r0, "{w} inside the right side: {flat}");
+    }
+}

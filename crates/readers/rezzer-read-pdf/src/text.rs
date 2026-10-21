@@ -35,8 +35,9 @@ use skrifa::{FontRef, MetadataProvider};
 
 use crate::fallback::Raw;
 use crate::layout::{Run, UriTarget};
-use crate::order::{Turn, runs_of};
+use crate::order::{Turn, runs_in, runs_of};
 use crate::quote::{Marked, Quote, Quoting};
+use crate::regions;
 use crate::tables::{Rule, RuleKind};
 
 /// Glyphs and device calls between two questions to the stop callback.
@@ -120,7 +121,12 @@ pub(crate) struct PageItems {
     pub quotes: Vec<Quote>,
     /// The text was read from the file itself by the fallback parser.
     pub fallback: bool,
+    /// Why the page's drawn boxes were not used as reading regions, while it is laid out.
+    pub boxes_unused: Option<String>,
 }
+
+/// The boxes of the form fields of each page, in user space.
+pub(crate) type Widgets = HashMap<u32, Vec<[f32; 4]>>;
 
 impl PageItems {
     /// Whether the page gave any text, visible or not.
@@ -296,10 +302,19 @@ pub(crate) fn pages(
     wanted: &[u32],
     links: &[PdfLink],
     marked: &Marked<'_>,
+    widgets: &Widgets,
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Extracted {
-    pages_of(Origin::Canonical(pdf), wanted, links, marked, caps, stop)
+    pages_of(
+        Origin::Canonical(pdf),
+        wanted,
+        links,
+        marked,
+        widgets,
+        caps,
+        stop,
+    )
 }
 
 /// [`pages`] from either origin.
@@ -308,6 +323,7 @@ pub(crate) fn pages_of(
     wanted: &[u32],
     links: &[PdfLink],
     marked: &Marked<'_>,
+    widgets: &Widgets,
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Extracted {
@@ -381,7 +397,8 @@ pub(crate) fn pages_of(
         };
         let on_page = links.get(&n).map_or(&[][..], Vec::as_slice);
         let marks = marked.get(&n).map_or(&[][..], Vec::as_slice);
-        match reader.page(n, page, on_page, marks) {
+        let fields = widgets.get(&n).map_or(&[][..], Vec::as_slice);
+        match reader.page(n, page, on_page, marks, fields) {
             Read::Page(items) => out.pages.push(*items),
             Read::Failed(f) => out.failed.push(f),
             Read::Stopped => {
@@ -573,6 +590,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         page: &Page<'a>,
         links: &[Link],
         marked: &[(usize, &[[f32; 8]])],
+        widgets: &[[f32; 4]],
     ) -> Read {
         let fail = |why: String, kind: Fail| Read::Failed(Failure { page: n, why, kind });
         if let Some(why) = &self.kept_spent {
@@ -809,7 +827,36 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 self.stop,
             )
         };
-        let mut items = lay_out(n, &dev.glyphs, &texts, links, crop.x0, crop.y0, &layers);
+        // Drawn boxes are reading regions for the text; a box that holds a form field is part
+        // of the form. Both are moved into the visible page box.
+        let (ox, oy) = (crop.x0 as f32, crop.y0 as f32);
+        let fields: Vec<[f32; 4]> = widgets
+            .iter()
+            .map(|b| [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy])
+            .collect();
+        let width = (crop.x1 - crop.x0) as f32;
+        let height = (crop.y1 - crop.y0) as f32;
+        let (boxes, unused) = match regions::boxes(&dev.rules, width, height, &fields) {
+            Ok(b) => (b, None),
+            Err(why) => (Vec::new(), Some(why)),
+        };
+        drop(fields);
+        let mut items = lay_out(
+            n,
+            &dev.glyphs,
+            &texts,
+            links,
+            (crop.x0, crop.y0),
+            &layers,
+            &boxes,
+        );
+        drop(boxes);
+        if let Some(why) = unused.or(items.boxes_unused.take()) {
+            notes.push(Note::Limit(format!(
+                "drawn boxes on page {n} are not used as reading regions: {why}; the text there \
+                 is read in the page's order"
+            )));
+        }
         items.quotes = quotes;
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
@@ -2435,26 +2482,118 @@ const THIN: f32 = 2.0;
 /// Straight segments shorter than this many points are not rules.
 const SHORTEST: f32 = 1.0;
 
-/// The rules a path draws once `transform` maps it into the page box: each straight
-/// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
-/// rectangle is a line when thin and a rectangle otherwise. Curves and slanted segments are
-/// not rules.
-fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
-    use kurbo::PathEl;
-    // The first points of the subpath being drawn (a rectangle has at most five) and how
-    // many it has, and whether it holds a curve.
-    let mut corners: [Point; 5] = [Point::ZERO; 5];
-    let mut count = 0usize;
-    let mut curved = false;
-    let mut start = Point::ZERO;
-    let mut last = Point::ZERO;
-    // A filled subpath that ends is a rule when it is a rectangle.
-    let filled = |corners: &[Point; 5], count: usize, curved: bool| -> Option<Rule> {
-        if stroke || curved || !(4..=5).contains(&count) {
+/// Elements a subpath with corner curves may have to be read as a box: four sides and four
+/// corners, each corner drawn in up to two curves.
+const BOX_ELEMENTS: usize = 16;
+
+/// How far a corner curve of a box may move along each axis, in points; it moves at most a
+/// quarter of the box's shorter side too.
+const CORNER: f32 = 10.0;
+
+/// A subpath being drawn: its stroked lines held back until it is known whether it is a box
+/// with rounded corners, and what that takes.
+struct Subpath {
+    /// The first points of the subpath (a rectangle has at most five) and how many it has.
+    corners: [Point; 5],
+    count: usize,
+    curved: bool,
+    start: Point,
+    last: Point,
+    closed: bool,
+    /// Lines of a stroked subpath not handed on yet; `None` once the subpath is too long to
+    /// be a box, and its lines go out as they come.
+    held: Option<Vec<Rule>>,
+    /// Every straight segment lies along an axis, so far.
+    square: bool,
+    /// The largest move of a curve along either axis.
+    bend: f32,
+    lo: Point,
+    hi: Point,
+}
+
+impl Subpath {
+    fn new(p: Point) -> Subpath {
+        let mut corners = [Point::ZERO; 5];
+        corners[0] = p;
+        Subpath {
+            corners,
+            count: 1,
+            curved: false,
+            start: p,
+            last: p,
+            closed: false,
+            held: Some(Vec::new()),
+            square: true,
+            bend: 0.0,
+            lo: p,
+            hi: p,
+        }
+    }
+
+    fn reach(&mut self, p: Point) {
+        self.lo = Point::new(self.lo.x.min(p.x), self.lo.y.min(p.y));
+        self.hi = Point::new(self.hi.x.max(p.x), self.hi.y.max(p.y));
+        if self.count < self.corners.len() {
+            self.corners[self.count] = p;
+        }
+        self.count += 1;
+        if self.count > BOX_ELEMENTS + 1 {
+            self.square = false;
+        }
+        self.last = p;
+    }
+
+    /// The box this subpath draws when it is made of sides along the axes and small corner
+    /// curves, and is closed.
+    fn rounded_box(&self, stroke: bool) -> Option<Rule> {
+        let closed = self.closed
+            || !stroke
+            || ((self.last.x - self.start.x).abs() <= 0.5
+                && (self.last.y - self.start.y).abs() <= 0.5);
+        if !self.curved || !self.square || !closed {
             return None;
         }
-        rectangle(&corners[..count])
-    };
+        let (w, h) = (
+            (self.hi.x - self.lo.x) as f32,
+            (self.hi.y - self.lo.y) as f32,
+        );
+        if self.bend > CORNER.min(0.25 * w.min(h)) {
+            return None;
+        }
+        bounds_rule(
+            self.lo.x as f32,
+            self.lo.y as f32,
+            self.hi.x as f32,
+            self.hi.y as f32,
+        )
+    }
+
+    /// Hands on what the subpath draws once it ends.
+    fn end(self, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+        if let Some(r) = self.rounded_box(stroke) {
+            keep(r);
+            return;
+        }
+        for r in self.held.into_iter().flatten() {
+            keep(r);
+        }
+        if !stroke
+            && !self.curved
+            && (4..=5).contains(&self.count)
+            && let Some(r) = rectangle(&self.corners[..self.count])
+        {
+            keep(r);
+        }
+    }
+}
+
+/// The rules a path draws once `transform` maps it into the page box: each straight
+/// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
+/// rectangle is a line when thin and a rectangle otherwise. A closed subpath of sides along
+/// the axes and small corner curves, stroked or filled, is the rectangle of its bounds (a
+/// box with rounded corners). Other curves and slanted segments are not rules.
+fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+    use kurbo::PathEl;
     let segment = |a: Point, b: Point| -> Option<Rule> {
         let (dx, dy) = ((b.x - a.x).abs() as f32, (b.y - a.y).abs() as f32);
         let line = |x0: f64, y0: f64, x1: f64, y1: f64| Rule {
@@ -2474,42 +2613,64 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
             None
         }
     };
+    // A straight piece from the subpath's last point to `p`.
+    let straight = |sub: &mut Subpath, p: Point, keep: &mut dyn FnMut(Rule)| {
+        let a = sub.last;
+        if (p.x - a.x).abs() > 0.5 && (p.y - a.y).abs() > 0.5 {
+            sub.square = false;
+        }
+        if stroke && let Some(r) = segment(a, p) {
+            match sub.held.as_mut() {
+                Some(held) if held.len() < BOX_ELEMENTS => held.push(r),
+                Some(_) => {
+                    // Too long to be a box: what was held goes out, and the rest as it comes.
+                    for h in sub.held.take().into_iter().flatten() {
+                        keep(h);
+                    }
+                    keep(r);
+                }
+                None => keep(r),
+            }
+        }
+    };
+    let mut sub: Option<Subpath> = None;
     for el in path.elements() {
         match *el {
             PathEl::MoveTo(p) => {
-                if let Some(r) = filled(&corners, count, curved) {
-                    keep(r);
+                if let Some(done) = sub.take() {
+                    done.end(stroke, keep);
                 }
-                let p = transform * p;
-                (start, last, count, curved) = (p, p, 1, false);
-                corners[0] = p;
+                sub = Some(Subpath::new(transform * p));
             }
             PathEl::LineTo(p) => {
                 let p = transform * p;
-                if stroke && let Some(r) = segment(last, p) {
-                    keep(r);
-                }
-                if count < corners.len() {
-                    corners[count] = p;
-                }
-                count += 1;
-                last = p;
+                let s = sub.get_or_insert_with(|| Subpath::new(Point::ZERO));
+                straight(s, p, keep);
+                s.reach(p);
             }
             PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => {
-                curved = true;
-                last = transform * p;
-                count += 1;
+                let p = transform * p;
+                let s = sub.get_or_insert_with(|| Subpath::new(Point::ZERO));
+                s.curved = true;
+                let a = s.last;
+                s.bend = s
+                    .bend
+                    .max((p.x - a.x).abs() as f32)
+                    .max((p.y - a.y).abs() as f32);
+                s.reach(p);
             }
             PathEl::ClosePath => {
-                if stroke && let Some(r) = segment(last, start) {
-                    keep(r);
+                if let Some(s) = sub.as_mut() {
+                    let start = s.start;
+                    straight(s, start, keep);
+                    s.last = start;
+                    s.closed = true;
                 }
-                last = start;
             }
         }
     }
-    if let Some(r) = filled(&corners, count, curved) {
-        keep(r);
+    if let Some(done) = sub {
+        done.end(stroke, keep);
     }
 }
 
@@ -2533,6 +2694,11 @@ fn rectangle(points: &[Point]) -> Option<Rule> {
     let x1 = points.iter().map(|p| p.x).fold(f64::MIN, f64::max) as f32;
     let y0 = points.iter().map(|p| p.y).fold(f64::MAX, f64::min) as f32;
     let y1 = points.iter().map(|p| p.y).fold(f64::MIN, f64::max) as f32;
+    bounds_rule(x0, y0, x1, y1)
+}
+
+/// The rule an area of these bounds is: a line when it is thin, a rectangle otherwise.
+fn bounds_rule(x0: f32, y0: f32, x1: f32, y1: f32) -> Option<Rule> {
     let (w, h) = (x1 - x0, y1 - y0);
     if w.max(h) < SHORTEST {
         return None;
@@ -2977,9 +3143,9 @@ fn lay_out(
     glyphs: &[Gl],
     text: &Texts<'_>,
     links: &[Link],
-    x0: f64,
-    y0: f64,
+    (x0, y0): (f64, f64),
     layers: &[String],
+    boxes: &[[f32; 4]],
 ) -> PageItems {
     let mut by_layer: Vec<Vec<Gl>> = vec![Vec::new(); layers.len()];
     let mut rest: Vec<Gl> = Vec::with_capacity(glyphs.len());
@@ -3023,7 +3189,7 @@ fn lay_out(
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
     let linked = !items.turned && !items.links_cut && !links.is_empty();
-    items.runs = runs_of(page, &visible, text, turn, links);
+    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes);
     if linked {
         for uri in unplaced_links(&visible, &items.runs, links) {
             items.notes.push(Note::Unsupported(format!(
@@ -3071,7 +3237,7 @@ pub(crate) fn needs_ocr(
     caps: Caps,
     stop: &dyn Fn() -> bool,
 ) -> Vec<(u32, Vec<String>)> {
-    let found = self::pages(pdf, pages, &[], &Marked::new(), caps, stop);
+    let found = self::pages(pdf, pages, &[], &Marked::new(), &Widgets::new(), caps, stop);
     let sizes: HashMap<u32, (f32, f32)> = pdf
         .pages(stop)
         .into_iter()
@@ -3211,7 +3377,15 @@ mod tests {
         );
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         let pdf = open(&b.finish(catalog));
-        let mut found = pages(&pdf, &[1], &pdf.links(), &Marked::new(), caps, &|| false);
+        let mut found = pages(
+            &pdf,
+            &[1],
+            &pdf.links(),
+            &Marked::new(),
+            &Widgets::new(),
+            caps,
+            &|| false,
+        );
         assert!(found.failed.is_empty(), "{:?}", found.failed);
         found.pages.remove(0)
     }
@@ -3270,6 +3444,55 @@ mod tests {
                 y1: 130.0,
                 kind: RuleKind::Rect
             }]
+        );
+    }
+
+    #[test]
+    fn a_rounded_box_is_a_rectangle_rule() {
+        // Stroked and filled boxes with corner curves of 10 points: each is one rectangle.
+        // A circle and a box whose corners move more than a quarter of its short side are
+        // not.
+        let rounded = |x0: f32, y0: f32, x1: f32, y1: f32, r: f32, op: &str| {
+            let k = 0.552 * r;
+            format!(
+                "{a} {y0} m {b} {y0} l {c} {y0} {x1} {d} {x1} {e} c {x1} {f} l {x1} {g} {c} {y1} \
+                 {b} {y1} c {a} {y1} l {h} {y1} {x0} {g} {x0} {f} c {x0} {e} l {x0} {d} {h} {y0} \
+                 {a} {y0} c h {op} ",
+                a = x0 + r,
+                b = x1 - r,
+                c = x1 - r + k,
+                d = y0 + r - k,
+                e = y0 + r,
+                f = y1 - r,
+                g = y1 - r + k,
+                h = x0 + r - k,
+            )
+        };
+        let content = rounded(40.0, 600.0, 240.0, 720.0, 10.0, "S")
+            + &rounded(300.0, 600.0, 520.0, 720.0, 10.0, "f")
+            + &rounded(100.0, 100.0, 120.0, 120.0, 10.0, "S")
+            + &rounded(200.0, 100.0, 240.0, 130.0, 9.0, "S");
+        let items = rules_of_page(&content, "", CAPS);
+        let rects: Vec<(f32, f32, f32, f32)> = items
+            .rules
+            .iter()
+            .filter(|r| r.kind == RuleKind::Rect)
+            .map(|r| (r.x0.round(), r.y0.round(), r.x1.round(), r.y1.round()))
+            .collect();
+        assert_eq!(
+            rects,
+            [(40.0, 600.0, 240.0, 720.0), (300.0, 600.0, 520.0, 720.0)],
+            "{:?}",
+            items.rules
+        );
+        // The stroked rounded box gives no side lines of its own besides the rectangle.
+        assert!(
+            !items.rules.iter().any(|r| r.kind == RuleKind::Line
+                && r.x0 >= 40.0
+                && r.x1 <= 240.0
+                && r.y0 >= 600.0),
+            "{:?}",
+            items.rules
         );
     }
 
@@ -3392,7 +3615,15 @@ mod tests {
             asked.get() > 4
         };
         let all: Vec<u32> = (1..=10).collect();
-        let found = pages(&pdf, &all, &pdf.links(), &Marked::new(), CAPS, &stop);
+        let found = pages(
+            &pdf,
+            &all,
+            &pdf.links(),
+            &Marked::new(),
+            &Widgets::new(),
+            CAPS,
+            &stop,
+        );
         assert_eq!(found.pages.len(), 4);
         assert_eq!(found.stopped_at, Some(5));
         assert_eq!(asked.get(), 5);
@@ -3419,6 +3650,7 @@ mod tests {
             &[1, 2, 3],
             &pdf.links(),
             &Marked::new(),
+            &Widgets::new(),
             caps,
             &|| false,
         );

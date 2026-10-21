@@ -1140,3 +1140,68 @@ fn a_link_over_the_end_of_an_actual_text_span_links_the_span() {
         out.document.losses
     );
 }
+
+/// A box from `(x0, y0)` to `(x1, y1)` with corners rounded by `r` (curves), stroked.
+fn rounded_box(x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> String {
+    let k = 0.552 * r;
+    format!(
+        "{a} {y0} m {b} {y0} l {c} {y0} {x1} {d} {x1} {e} c {x1} {f} l {x1} {g} {c} {y1} {b} {y1} c \
+         {a} {y1} l {h} {y1} {x0} {g} {x0} {f} c {x0} {e} l {x0} {d} {h} {y0} {a} {y0} c h S\n",
+        a = x0 + r,
+        b = x1 - r,
+        c = x1 - r + k,
+        d = y0 + r - k,
+        e = y0 + r,
+        f = y1 - r,
+        g = y1 - r + k,
+        h = x0 + r - k,
+    )
+}
+
+#[test]
+fn rounded_boxes_side_by_side() {
+    // Two rounded boxes side by side, 4 and 5 short lines (invented sender and document
+    // facts). First at offset baselines, then with the lines of both boxes on the same
+    // baselines, where only the boxes keep them apart.
+    let left = ["Sample Air Ltd", "Main Road 1", "1000 Town", "Country"];
+    let right = [
+        "Invoice 4711",
+        "Date 2030-01-02",
+        "Customer 12345",
+        "Page 1 of 1",
+        "Currency EUR",
+    ];
+    for (pitch, start) in [(11.6f32, 703.0f32), (14.0, 700.0)] {
+        let mut c = String::from("0.8 w ");
+        c += &rounded_box(40.0, 600.0, 240.0, 720.0, 10.0);
+        c += &rounded_box(300.0, 600.0, 520.0, 720.0, 10.0);
+        for (k, t) in left.iter().enumerate() {
+            c += &show("F1", 10.0, 50.0, 700.0 - 14.0 * k as f32, t);
+        }
+        for (k, t) in right.iter().enumerate() {
+            c += &show("F1", 10.0, 310.0, start - pitch * k as f32, t);
+        }
+        let out = read(&pdf(&[Page::text(c)], ""));
+        let blocks = page(&out, 1);
+        assert!(
+            !blocks.iter().any(|b| matches!(b, Block::Table { .. })),
+            "{blocks:#?}"
+        );
+        assert!(
+            !out.document
+                .losses
+                .iter()
+                .any(|l| l.what.contains("Possible table")),
+            "{:?}",
+            out.document.losses
+        );
+        // Box by box, each box whole and in its order.
+        let body = body_text(blocks);
+        let at = |t: &str| body.find(t).unwrap_or_else(|| panic!("{t} in {body}"));
+        let mut last = 0;
+        for t in left.iter().chain(right.iter()) {
+            assert!(at(t) >= last, "{t} out of order in {body}");
+            last = at(t);
+        }
+    }
+}

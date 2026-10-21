@@ -370,6 +370,7 @@ pub(crate) fn read_file(
         &wanted,
         &[],
         &Marked::new(),
+        &text::Widgets::new(),
         caps,
         text_stop,
     );
@@ -423,6 +424,7 @@ pub(crate) fn pages(
         wanted,
         &[],
         &Marked::new(),
+        &text::Widgets::new(),
         caps,
         stop,
     );

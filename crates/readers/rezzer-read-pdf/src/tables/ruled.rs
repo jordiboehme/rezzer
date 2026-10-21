@@ -7,83 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-
-/// A straight horizontal (`at` is y, `from`..`to` along x) or vertical segment.
-#[derive(Debug, Clone, Copy)]
-struct Seg {
-    at: f32,
-    from: f32,
-    to: f32,
-}
-
-/// Joined lines a group of segments keeps open for joining at once; past them the oldest is
-/// closed. Only a page of many long overlapping lines at slightly different places has more.
-const OPEN_LINES: usize = 32;
-
-/// Collinear segments that touch become one. Segments are grouped by where they lie: a
-/// segment joins the group when it lies within [`SNAP`] of the group's mean place, so lines
-/// in a dense run (bars of a barcode, hatching) never chain far apart. Within a group, a
-/// piece joins a line that it overlaps or touches within [`SNAP`] and that lies within
-/// [`SNAP`] of it; the joined line lies at the mean of its pieces. Two lines a point apart
-/// that never meet along their length stay apart.
-fn merged(mut segs: Vec<Seg>) -> Vec<Seg> {
-    segs.sort_by(|a, b| a.at.total_cmp(&b.at));
-    let mut out: Vec<Seg> = Vec::with_capacity(segs.len());
-    let mut start = 0;
-    while start < segs.len() {
-        let mut end = start + 1;
-        let mut sum = f64::from(segs[start].at);
-        while end < segs.len() {
-            let mean = sum / (end - start) as f64;
-            if f64::from(segs[end].at) - mean > f64::from(SNAP) {
-                break;
-            }
-            sum += f64::from(segs[end].at);
-            end += 1;
-        }
-        let group = &mut segs[start..end];
-        group.sort_by(|a, b| a.from.total_cmp(&b.from));
-        // Open lines: the joined segment, the sum of its pieces' places and their number.
-        let mut open: Vec<(Seg, f64, u32)> = Vec::new();
-        let close = |(mut s, sum, n): (Seg, f64, u32), out: &mut Vec<Seg>| {
-            s.at = (sum / f64::from(n)) as f32;
-            out.push(s);
-        };
-        for s in group.iter() {
-            let mut k = 0;
-            while k < open.len() {
-                if open[k].0.to + SNAP < s.from {
-                    close(open.remove(k), &mut out);
-                } else {
-                    k += 1;
-                }
-            }
-            let near = open.iter_mut().find(|(_, sum, n)| {
-                (f64::from(s.at) - sum / f64::from(*n)).abs() <= f64::from(SNAP)
-            });
-            match near {
-                Some((line, sum, n)) => {
-                    line.to = line.to.max(s.to);
-                    *sum += f64::from(s.at);
-                    *n += 1;
-                }
-                None => {
-                    if open.len() == OPEN_LINES {
-                        close(open.remove(0), &mut out);
-                    }
-                    open.push((*s, f64::from(s.at), 1));
-                }
-            }
-        }
-        for line in open {
-            close(line, &mut out);
-        }
-        start = end;
-    }
-    // The grid search looks segments up by where they lie.
-    out.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
-    out
-}
+use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 
 /// Why a grid with a figure caption next to it is not a table.
 const FIGURE_NEAR: &str = "a figure caption stands next to it";
@@ -138,27 +62,6 @@ fn plural(why: &str) -> &str {
     }
 }
 
-/// Values closer than [`SNAP`] are one, sorted.
-fn clustered(mut values: Vec<f32>) -> Vec<f32> {
-    values.sort_by(f32::total_cmp);
-    let mut out: Vec<f32> = Vec::new();
-    for v in values {
-        match out.last() {
-            Some(l) if v - l <= SNAP => {}
-            _ => out.push(v),
-        }
-    }
-    out
-}
-
-fn find(parent: &mut [usize], mut i: usize) -> usize {
-    while parent[i] != i {
-        parent[i] = parent[parent[i]];
-        i = parent[i];
-    }
-    i
-}
-
 /// Grids of drawn rules: horizontal and vertical lines that meet, with text in their cells.
 pub(super) fn ruled(
     page: u32,
@@ -168,94 +71,23 @@ pub(super) fn ruled(
     stop: &dyn Fn() -> bool,
     found: &mut Found,
 ) {
-    let mut hs = Vec::new();
-    let mut vs = Vec::new();
-    for r in rules {
-        let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
-        let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
-        match r.kind {
-            RuleKind::Line if y1 - y0 <= SNAP / 2.0 => hs.push(Seg {
-                at: (y0 + y1) / 2.0,
-                from: x0,
-                to: x1,
-            }),
-            RuleKind::Line => vs.push(Seg {
-                at: (x0 + x1) / 2.0,
-                from: y0,
-                to: y1,
-            }),
-            RuleKind::Rect => {
-                hs.push(Seg {
-                    at: y0,
-                    from: x0,
-                    to: x1,
-                });
-                hs.push(Seg {
-                    at: y1,
-                    from: x0,
-                    to: x1,
-                });
-                vs.push(Seg {
-                    at: x0,
-                    from: y0,
-                    to: y1,
-                });
-                vs.push(Seg {
-                    at: x1,
-                    from: y0,
-                    to: y1,
-                });
-            }
+    let Grids { hs, vs, groups } = match grids(rules) {
+        Ok(g) => g,
+        Err(Unsearched::TooMany) => {
+            found.skipped.push(format!(
+                "ruled tables on page {page} are not looked for: the page draws more than \
+                 {MAX_SEGMENTS} straight lines"
+            ));
+            return;
         }
-    }
-    if hs.is_empty() || vs.is_empty() {
-        return;
-    }
-    if hs.len() + vs.len() > MAX_SEGMENTS {
-        found.skipped.push(format!(
-            "ruled tables on page {page} are not looked for: the page draws more than \
-             {MAX_SEGMENTS} straight lines"
-        ));
-        return;
-    }
-    let hs = merged(hs);
-    let vs = merged(vs);
-    // Segments that meet are one grid. Horizontal ones are sorted by y.
-    let n = hs.len();
-    let mut parent: Vec<usize> = (0..n + vs.len()).collect();
-    let mut work = 0usize;
-    for (k, v) in vs.iter().enumerate() {
-        let lo = hs.partition_point(|h| h.at < v.from - SNAP);
-        for (j, h) in hs.iter().enumerate().skip(lo) {
-            if h.at > v.to + SNAP {
-                break;
-            }
-            work += 1;
-            if work > GRID_WORK {
-                found.skipped.push(format!(
-                    "ruled tables on page {page} are not looked for: its lines meet too often"
-                ));
-                return;
-            }
-            if v.at >= h.from - SNAP && v.at <= h.to + SNAP {
-                let (a, b) = (find(&mut parent, j), find(&mut parent, n + k));
-                parent[a] = b;
-            }
+        Err(Unsearched::MeetTooOften) => {
+            found.skipped.push(format!(
+                "ruled tables on page {page} are not looked for: its lines meet too often"
+            ));
+            return;
         }
-    }
-    let mut groups: HashMap<usize, (Vec<usize>, Vec<usize>)> = HashMap::new();
-    for j in 0..n {
-        let root = find(&mut parent, j);
-        groups.entry(root).or_default().0.push(j);
-    }
-    for k in 0..vs.len() {
-        let root = find(&mut parent, n + k);
-        groups.entry(root).or_default().1.push(k);
-    }
-    let mut grids: Vec<(Vec<usize>, Vec<usize>)> = groups
-        .into_values()
-        .filter(|(h, v)| h.len() >= 2 && v.len() >= 2)
-        .collect();
+    };
+    let mut grids = groups;
     // Top to bottom.
     grids.sort_by(|a, b| {
         let top =
@@ -558,6 +390,7 @@ pub(super) fn ruled(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::regions::merged;
 
     fn seg(at: f32, from: f32, to: f32) -> Seg {
         Seg { at, from, to }

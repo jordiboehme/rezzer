@@ -24,6 +24,7 @@ mod objects;
 mod open;
 mod order;
 mod quote;
+mod regions;
 mod render;
 mod tables;
 mod text;
@@ -145,7 +146,7 @@ fn extract(
             Severity::Error,
         );
         // What the pages may keep stays for the object layer.
-        return text::pages(pdf, &[], links, marked, caps, stop);
+        return text::pages(pdf, &[], links, marked, &text::Widgets::new(), caps, stop);
     }
     // pdfparts writes refused streams empty, so the other pages are safe to read; the refused
     // ones keep the guard's loss.
@@ -155,7 +156,9 @@ fn extract(
         .map(|p| p.number)
         .filter(|n| !refused.contains(n))
         .collect();
-    let mut extracted = text::pages(pdf, &wanted, links, marked, caps, stop);
+    let widgets = widget_boxes(pdf);
+    let mut extracted = text::pages(pdf, &wanted, links, marked, &widgets, caps, stop);
+    drop(widgets);
     let fonts: HashSet<u32> = pages
         .iter()
         .filter(|p| p.has_fonts)
