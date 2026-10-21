@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use lopdf::{Dictionary, Object, ObjectId};
 
-use crate::guard::{Filter, Measure, cap_words, stream_filters, unpack};
+use crate::guard::{Cap, Filter, Measure, cap_words, stream_filters, unpack};
 use crate::objects::{
     BrokenTexts, Decode, Shared, TextBudget, Tree, TreeKey, Work, dict, final_id, get_dict,
-    get_name, resolve, text_string, walk_tree,
+    get_name, resolve, text_string, text_string_owned, walk_tree,
 };
 use crate::{Issue, IssueKind, Limits, Pdf};
 
@@ -549,7 +549,11 @@ impl Pdf {
         Ok(text)
     }
 
-    /// The text of a `/JS` value `obj` (object `id`, if indirect).
+    /// The text of a `/JS` value `obj` (object `id`, if indirect). A script longer than
+    /// `max_script_bytes` is not read: a string is left as it is, a stream is refused by the
+    /// size the guard measured before it is unpacked, and a stream the guard has no size for
+    /// is unpacked only up to that cap. Every copy held is charged to `budget`: the unpacked
+    /// bytes and the text.
     fn read_script(
         &self,
         id: Option<ObjectId>,
@@ -559,18 +563,35 @@ impl Pdf {
         issues: &mut Vec<Issue>,
     ) -> Result<Option<String>, Spent> {
         let doc = &self.doc;
+        let cap = self.limits.max_script_bytes;
+        let fail = |kind, what: String| Issue::new(location, kind, what);
+        let named = || match id {
+            Some((n, g)) => format!("the script in object {n} {g}"),
+            None => "a script".to_string(),
+        };
+        let too_long = |what: String| {
+            fail(
+                IssueKind::Limit,
+                format!("{what}, more than the {cap} bytes a script may have; it is not read"),
+            )
+        };
         match Some(obj) {
             Some(Object::String(s, _)) => {
-                if !budget.take(s.len() as u64) {
+                if s.len() as u64 > cap {
+                    issues.push(too_long(format!("{} is {} bytes long", named(), s.len())));
+                    return Ok(None);
+                }
+                // The string itself is an object already charged; the text is the copy.
+                let text = text_string(s);
+                if !budget.take(text.len() as u64) {
                     return Err(Spent);
                 }
-                Ok(Some(text_string(s)))
+                Ok(Some(text))
             }
             Some(Object::Stream(stream)) => {
                 let refused = id.is_some_and(|id| self.verdict.refused_objects.contains(&id));
                 let filters = stream_filters(doc, &stream.dict);
                 let size = id.and_then(|id| self.verdict.sizes.get(&id).copied());
-                let fail = |kind, what: String| Issue::new(location, kind, what);
                 if refused || filters.contains(&Filter::Opaque) {
                     issues.push(fail(
                         if refused {
@@ -586,21 +607,43 @@ impl Pdf {
                     ));
                     return Ok(None);
                 }
+                if let Some(n) = size
+                    && n > cap
+                {
+                    issues.push(too_long(format!("{} unpacks to {n} bytes", named())));
+                    return Ok(None);
+                }
                 if !budget.take(size.unwrap_or(stream.content.len() as u64)) {
                     return Err(Spent);
                 }
+                let limits = Limits {
+                    max_stream_bytes: cap.min(self.limits.max_stream_bytes),
+                    ..self.limits
+                };
                 match unpack(
                     &stream.content,
                     &filters,
-                    &self.limits,
+                    &limits,
                     self.limits.max_total_bytes,
                     &|| false,
                 ) {
-                    (Measure::Fits(_), Some(bytes)) => Ok(Some(text_string(&bytes))),
-                    (Measure::Over(cap), _) => {
+                    (Measure::Fits(_), Some(bytes)) => {
+                        // The unpacked bytes were charged; the text is a second copy only when
+                        // the script is not plain ASCII.
+                        let (text, copied) = text_string_owned(bytes);
+                        if copied && !budget.take(text.len() as u64) {
+                            return Err(Spent);
+                        }
+                        Ok(Some(text))
+                    }
+                    (Measure::Over(Cap::Stream), _) => {
+                        issues.push(too_long(format!("{} unpacks to more bytes", named())));
+                        Ok(None)
+                    }
+                    (Measure::Over(over), _) => {
                         issues.push(fail(
                             IssueKind::Limit,
-                            format!("a script stream {}", cap_words(cap, &self.limits)),
+                            format!("a script stream {}", cap_words(over, &self.limits)),
                         ));
                         Ok(None)
                     }

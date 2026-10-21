@@ -75,6 +75,8 @@ pub struct Limits {
     /// Most bytes the parsed objects and the canonical copy may take: every value counts a
     /// fixed 128 bytes plus its strings, names and stream data.
     pub max_object_bytes: u64,
+    /// Most bytes one script (`/JS`) may have, packed or unpacked: a longer one is not read.
+    pub max_script_bytes: u64,
 }
 
 impl Default for Limits {
@@ -87,6 +89,7 @@ impl Default for Limits {
             max_ratio: 100,
             max_revisions: 64,
             max_object_bytes: 1 << 30,
+            max_script_bytes: 4 << 20,
         }
     }
 }

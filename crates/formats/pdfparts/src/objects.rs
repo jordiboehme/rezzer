@@ -51,7 +51,21 @@ pub fn text_string(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         return String::from_utf8_lossy(rest).replace('\0', "");
     }
-    bytes.iter().filter_map(|&b| pdfdoc_char(b)).collect()
+    let mut out = String::with_capacity(bytes.len());
+    out.extend(bytes.iter().filter_map(|&b| pdfdoc_char(b)));
+    out
+}
+
+/// [`text_string`] of bytes the caller gives up: plain ASCII text (tabs and line ends allowed)
+/// becomes the string without a copy. The flag says whether the text is a second copy.
+pub fn text_string_owned(bytes: Vec<u8>) -> (String, bool) {
+    let plain = bytes
+        .iter()
+        .all(|&b| matches!(b, 0x20..=0x7E | b'\t' | b'\n' | b'\r'));
+    if plain {
+        return (String::from_utf8(bytes).unwrap_or_default(), false);
+    }
+    (text_string(&bytes), true)
 }
 
 fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
