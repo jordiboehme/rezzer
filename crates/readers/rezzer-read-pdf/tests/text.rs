@@ -1162,7 +1162,7 @@ fn rounded_box(x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> String {
 fn rounded_boxes_side_by_side() {
     // Two rounded boxes side by side, 4 and 5 short lines (invented sender and document
     // facts). First at offset baselines, then with the lines of both boxes on the same
-    // baselines, where only the boxes keep them apart.
+    // baselines, where only the boxes keep them apart. Each box keeps its lines.
     let left = ["Sample Air Ltd", "Main Road 1", "1000 Town", "Country"];
     let right = [
         "Invoice 4711",
@@ -1195,6 +1195,16 @@ fn rounded_boxes_side_by_side() {
             "{:?}",
             out.document.losses
         );
+        // Each box keeps its line breaks.
+        let md = rezzer_render::render(
+            &out.document,
+            out.completeness,
+            &rezzer_render::RenderOptions::default(),
+        );
+        for lines in [&left[..], &right[..]] {
+            let broken = lines.join("\\\n");
+            assert!(md.contains(&format!("\n{broken}\n")), "{broken} in {md}");
+        }
         // Box by box, each box whole and in its order.
         let body = body_text(blocks);
         let at = |t: &str| body.find(t).unwrap_or_else(|| panic!("{t} in {body}"));
@@ -1224,4 +1234,69 @@ fn known_limit_a_side_heading_lands_inside_the_question_above_it() {
         at("exchange, or otherwise"),
     );
     assert!(first < heading && heading < second, "{body}");
+}
+
+fn markdown_of(out: &ReadOutcome) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    )
+}
+
+#[test]
+fn short_and_aligned_lines_keep_their_breaks() {
+    // A paragraph whose second line ends where the next line's first word would still have
+    // fit: a break. A block of lines set flush right: a break after each. Ragged prose that
+    // fills its measure: one paragraph of joined lines.
+    let mut c = String::new();
+    for (k, t) in [
+        "A long first line of the text sets the measure of this paragraph",
+        "Short line.",
+        "Next line goes on to the end",
+    ]
+    .iter()
+    .enumerate()
+    {
+        c += &show("F1", 10.0, 72.0, 760.0 - 12.0 * k as f32, t);
+    }
+    for (k, t) in ["Sample Hotel", "Lake Road 7", "2000 Village"]
+        .iter()
+        .enumerate()
+    {
+        let x = 520.0 - common::helvetica_width(t, 10.0);
+        c += &show("F1", 10.0, x, 660.0 - 12.0 * k as f32, t);
+    }
+    for (k, t) in [
+        "Prose that runs from one line to the next fills the measure of",
+        "its column, and the next word never fits at the end of a line,",
+        "so the lines of the paragraph are joined into one text again as",
+        "they were written.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        c += &show("F1", 10.0, 72.0, 560.0 - 12.0 * k as f32, t);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let md = markdown_of(&out);
+    assert!(
+        md.contains(
+            "A long first line of the text sets the measure of this paragraph Short line.\\\n\
+             Next line goes on to the end\n"
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains("\nSample Hotel\\\nLake Road 7\\\n2000 Village\n"),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "\nProse that runs from one line to the next fills the measure of its column, and \
+             the next word never fits at the end of a line, so the lines of the paragraph are \
+             joined into one text again as they were written.\n"
+        ),
+        "{md}"
+    );
 }

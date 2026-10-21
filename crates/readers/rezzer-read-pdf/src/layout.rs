@@ -1233,6 +1233,17 @@ impl Built {
     /// under one link becomes one link with its own copy of the target, charged to the link
     /// room.
     fn inlines(&mut self, runs: &[&Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
+        self.broken_inlines(runs, &[], cx)
+    }
+
+    /// [`Built::inlines`] with a line break before each line `breaks` names by page and line,
+    /// sorted.
+    fn broken_inlines(
+        &mut self,
+        runs: &[&Run],
+        breaks: &[(u32, u32)],
+        cx: &Context<'_>,
+    ) -> Option<Vec<Inline>> {
         if self.stop.is_some() {
             return None;
         }
@@ -1245,7 +1256,7 @@ impl Built {
             return None;
         }
         self.probe(runs);
-        match inlines(runs, cx.links, cx.budget) {
+        match inlines(runs, breaks, cx.links, cx.budget) {
             Ok(mut built) => {
                 // Most blocks hold one or two inlines: the list keeps no spare room.
                 built.shrink_to_fit();
@@ -1259,8 +1270,19 @@ impl Built {
     }
 
     fn paragraph(&mut self, runs: Vec<&Run>, role: Option<&str>, cx: &Context<'_>) {
+        self.broken_paragraph(runs, &[], role, cx);
+    }
+
+    /// A paragraph with a line break before each line `breaks` names (page, line), sorted.
+    fn broken_paragraph(
+        &mut self,
+        runs: Vec<&Run>,
+        breaks: &[(u32, u32)],
+        role: Option<&str>,
+        cx: &Context<'_>,
+    ) {
         self.pending = Pending::Block;
-        if let Some(inlines) = self.inlines(&runs, cx) {
+        if let Some(inlines) = self.broken_inlines(&runs, breaks, cx) {
             self.push(
                 Block::Paragraph {
                     inlines,
@@ -1335,15 +1357,23 @@ impl Built {
 }
 
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
-/// after a hyphen. Bold, italic and URI links are kept while `links` has room for their
-/// targets; past it a link's text stays without the link.
-fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inline>, LimitHit> {
+/// after a hyphen; a line `breaks` names (page, line; sorted) starts after a line break.
+/// Bold, italic and URI links are kept while `links` has room for their targets; past it a
+/// link's text stays without the link.
+fn inlines(
+    runs: &[&Run],
+    breaks: &[(u32, u32)],
+    links: &LinkRoom,
+    budget: &Budget,
+) -> Result<Vec<Inline>, LimitHit> {
     struct Piece {
         text: String,
         bold: bool,
         italic: bool,
         uri: Option<Rc<UriTarget>>,
         page: u32,
+        /// A line break stands before it.
+        broken: bool,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
@@ -1363,12 +1393,18 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
             continue;
         }
         last = Some((r.page, r.line));
+        let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
         let glued = pieces.last().is_none_or(|p| p.text.ends_with(['-', ' ']));
-        if new_line && !glued {
+        if new_line && !glued && !broken {
             text.insert(0, ' ');
         }
+        if broken && let Some(p) = pieces.last_mut() {
+            // White space at the end of a line before a break is dropped.
+            let end = p.text.trim_end().len();
+            p.text.truncate(end);
+        }
         match pieces.last_mut() {
-            Some(p) if p.bold == r.bold && p.italic == r.italic && p.uri == r.uri => {
+            Some(p) if !broken && p.bold == r.bold && p.italic == r.italic && p.uri == r.uri => {
                 p.text.push_str(&text)
             }
             _ => pieces.push(Piece {
@@ -1377,6 +1413,7 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
                 italic: r.italic,
                 uri: r.uri.clone(),
                 page: r.page,
+                broken,
             }),
         }
     }
@@ -1397,6 +1434,12 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
         }
         if p.text.is_empty() {
             continue;
+        }
+        if p.broken && !out.is_empty() {
+            // White space after a link before the break ends the line: it is dropped.
+            trail.clear();
+            refused = None;
+            out.push(Inline::LineBreak);
         }
         // White space at the edge of a link belongs outside it.
         let (inner, lead) = match p.uri {
@@ -1592,9 +1635,87 @@ fn untagged(flow: &[Run], cx: &Context<'_>, out: &mut Built) {
             runs.extend(all[j].runs.iter());
             j += 1;
         }
-        out.paragraph(runs, None, cx);
+        let breaks = line_breaks(&all[i..j]);
+        out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
+}
+
+/// Lines of a block whose widest line is at most this many font sizes are short lines.
+const SHORT_MEASURE: f32 = 24.0;
+
+/// Line ends this close, in points, are one edge.
+const EDGE: f32 = 1.0;
+
+/// The lines of a paragraph (by page and line, sorted) that start after a line break: the
+/// first word of the line would have fit at the end of the line before within the widest
+/// line (and that line does not end in a hyphen), or the paragraph is set flush right or
+/// centred and the two lines share a right edge or a centre but not a left edge, or the
+/// paragraph is a block of short lines (its widest line at most [`SHORT_MEASURE`] font
+/// sizes) each of which after the first starts with a capital or a digit, and none ends in a
+/// hyphen or a comma. Ragged prose that fills its measure keeps joining.
+fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
+    if lines.len() < 2 {
+        return Vec::new();
+    }
+    // The ends of each line's ink.
+    let edges: Vec<(f32, f32)> = lines
+        .iter()
+        .map(|l| {
+            let inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
+            let x0 = inked.clone().map(|r| r.x).fold(f32::MAX, f32::min);
+            let x1 = inked.map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+            (x0, x1)
+        })
+        .collect();
+    let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
+    let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
+    let size = lines.iter().map(|l| l.size).fold(0.0f32, f32::max).max(1.0);
+    let short = right - left <= SHORT_MEASURE * size
+        && lines[1..].iter().all(|l| {
+            l.text
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
+        })
+        && lines.iter().all(|l| !l.text.ends_with(['-', ',']));
+    // Lines set flush right or centred: most pairs of lines in a row, and at least two,
+    // share a right edge or a centre but not a left edge. One indented first line of
+    // justified prose is not that.
+    let same_left = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() <= EDGE;
+    let aligned_pair = |a: (f32, f32), b: (f32, f32)| {
+        ((a.1 - b.1).abs() <= EDGE || ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE)
+            && !same_left(a, b)
+    };
+    let pairs = edges
+        .windows(2)
+        .filter(|w| aligned_pair(w[0], w[1]))
+        .count();
+    let set_aligned = pairs >= 2 && 2 * pairs >= edges.len() - 1;
+    let mut out = Vec::new();
+    for k in 0..lines.len() - 1 {
+        let (a, b) = (edges[k], edges[k + 1]);
+        let next = &lines[k + 1];
+        // The first word of the next line, by its share of the first run with text.
+        let word = next
+            .runs
+            .iter()
+            .find(|r| !r.text.trim().is_empty())
+            .map_or(f32::MAX, |r| {
+                let text = r.text.trim_start();
+                let chars = text.chars().count().max(1) as f32;
+                let first = text.split_whitespace().next().unwrap_or("");
+                r.w * first.chars().count() as f32 / chars
+            });
+        // A word cut at the line end goes on in the next line.
+        let fits = a.1 + 0.25 * next.size + word <= right && !lines[k].text.ends_with('-');
+        let aligned = set_aligned && aligned_pair(a, b);
+        if fits || aligned || short {
+            out.push((next.runs[0].page, next.runs[0].line));
+        }
+    }
+    out.sort_unstable();
+    out
 }
 
 fn list_gap_ok(prev: &Line<'_>, cur: &Line<'_>) -> bool {
@@ -1901,6 +2022,7 @@ mod tests {
         let refs: Vec<&Run> = runs.iter().collect();
         let built = inlines(
             &refs,
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -1929,6 +2051,7 @@ mod tests {
         let refs: Vec<&Run> = runs.iter().collect();
         let built = inlines(
             &refs,
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -1949,6 +2072,7 @@ mod tests {
         let refs: Vec<&Run> = runs.iter().collect();
         let built = inlines(
             &refs,
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -1979,7 +2103,13 @@ mod tests {
         let refs: Vec<&Run> = runs.iter().collect();
         // Room for two copies of `a`, not for `a` and `b`.
         let room = LinkRoom::new(2 * (a.written + LINK_COST));
-        let built = inlines(&refs, &room, &Budget::new(rezzer_limits::Limits::default())).unwrap();
+        let built = inlines(
+            &refs,
+            &[],
+            &room,
+            &Budget::new(rezzer_limits::Limits::default()),
+        )
+        .unwrap();
         assert!(
             matches!(&built[0], Inline::Link { target, .. } if target == "https://example.org/a"),
             "{built:?}"
