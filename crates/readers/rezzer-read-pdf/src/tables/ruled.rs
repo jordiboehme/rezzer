@@ -180,6 +180,8 @@ pub(super) fn ruled(
     let by_y = ByY::new(flow, &lines);
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
+    // Runs of grids refused with a note.
+    let mut held: Vec<bool> = vec![false; flow.runs.len()];
     let mut tables: Vec<Planned> = Vec::new();
     'grids: for (g, (gh, gv)) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
@@ -241,15 +243,45 @@ pub(super) fn ruled(
             let (_, cy) = middle(&flow.runs[i]);
             inside(i) && cy > b[1] && cy < b[3]
         });
+        // A refused grid gets a note when a caption names a table, or when it looks like one:
+        // three columns or more with text in two rows or in six squares, and nothing about
+        // the area (the page's frame, a picture, tiny text) that rules out a table. Its text
+        // then stays paragraphs and no detector without rules takes it.
+        let mut text_rows: HashSet<usize> = HashSet::new();
+        let mut text_squares: HashSet<(usize, usize)> = HashSet::new();
+        for &i in &within {
+            let (cx, cy) = middle(&flow.runs[i]);
+            let r = ys
+                .partition_point(|e| *e > cy)
+                .saturating_sub(1)
+                .min(rows - 1);
+            let c = xs
+                .partition_point(|e| *e < cx)
+                .saturating_sub(1)
+                .min(cols - 1);
+            text_rows.insert(r);
+            text_squares.insert((r, c));
+        }
+        let noted = table_caption
+            || (cols >= 3
+                && (text_rows.len() >= 2 || text_squares.len() >= 6)
+                && area.refuses(b, &sizes).is_none());
+        let mut refuse = |why: &str, found: &mut Found| {
+            if !noted {
+                return;
+            }
+            found.unsure.push(Unsure {
+                at,
+                top: b[3],
+                reason: why.to_string(),
+            });
+            for &i in &mine {
+                held[i] = true;
+            }
+        };
         // A grid of many columns is refused before its cells are worked out.
         if cols > MAX_COLUMNS {
-            if table_caption {
-                found.unsure.push(Unsure {
-                    at,
-                    top: b[3],
-                    reason: "it has more than 15 columns".into(),
-                });
-            }
+            refuse("it has more than 15 columns", found);
             continue;
         }
         // The segments on each boundary of the grid, found once.
@@ -371,13 +403,7 @@ pub(super) fn ruled(
             area.refuses(b, &sizes)
         };
         if let Some(why) = refused {
-            if table_caption {
-                found.unsure.push(Unsure {
-                    at,
-                    top: b[3],
-                    reason: why.to_string(),
-                });
-            }
+            refuse(why, found);
             continue;
         }
         // The place of each cell in the planned rows.
@@ -417,9 +443,20 @@ pub(super) fn ruled(
         });
     }
     if tables.is_empty() {
+        if held.contains(&true) {
+            found.held = held;
+        }
         return;
     }
-    // The runs of all grids leave the flow at once.
+    // The runs of all grids leave the flow at once; the runs held stay where they are.
+    if held.contains(&true) {
+        found.held = held
+            .iter()
+            .zip(&claimed)
+            .filter(|(_, c)| c.is_none())
+            .map(|(h, _)| *h)
+            .collect();
+    }
     let target: Vec<Target> = claimed
         .into_iter()
         .map(|c| c.map(|(t, r, k)| (t as u32, r as u32, k as u32)))

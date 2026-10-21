@@ -87,6 +87,9 @@ pub(crate) struct Found {
     pub tables: Vec<Planned>,
     pub unsure: Vec<Unsure>,
     pub skipped: Vec<String>,
+    /// For each run of the flow, whether a refused grid with a note holds it: no detector
+    /// after it may take the run into a table. Empty when no grid holds a run.
+    pub held: Vec<bool>,
 }
 
 /// Lines this close are one line, and line ends this close meet, in points.

@@ -569,3 +569,40 @@ fn a_row_split_by_a_page_break_is_one_row() {
     assert!(tables(page(&out, 2)).is_empty());
     assert_eq!(out.completeness, Completeness::Complete);
 }
+
+#[test]
+fn wide_ruled_grid_says_so() {
+    // A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.
+    let mut c = String::from("0.5 w ");
+    for k in 0..=3 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("40 {y} m 540 {y} l S ");
+    }
+    for k in 0..=20 {
+        let x = 40.0 + 25.0 * k as f32;
+        c += &format!("{x} 640 m {x} 700 l S ");
+    }
+    for r in 0..3 {
+        for k in 0..20 {
+            let x = 43.0 + 25.0 * k as f32;
+            let y = 686.0 - 20.0 * r as f32;
+            c += &show("F1", 8.0, x, y, &format!("{}{k}", ['a', 'b', 'c'][r]));
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let blocks = page(&out, 1);
+    assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
+    let note = "Possible table on page 1 not rebuilt (reason: it has more than 15 columns)";
+    let paras = paragraphs(blocks);
+    assert!(paras.iter().any(|p| p == note), "{paras:?}");
+    let losses: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("Possible table"))
+        .collect();
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].what, note);
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+    assert_eq!(losses[0].severity, Severity::Info);
+}

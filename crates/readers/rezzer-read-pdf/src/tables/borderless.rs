@@ -81,9 +81,11 @@ pub(super) fn borderless(
     let by_y = ByY::new(flow, &lines);
     // The number of pieces of each line; the pieces themselves are built for a region only.
     let counts: Vec<usize> = lines.iter().map(|l| piece_count(flow, l)).collect();
+    // Lines of other directions, and lines a refused ruled grid holds, are in no region.
+    let held = |i: usize| found.held.get(i).copied().unwrap_or(false);
     let off: Vec<bool> = lines
         .iter()
-        .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis))
+        .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis) || (l.start..l.end).any(held))
         .collect();
     // Regions: lines that follow each other down the page, most of them in two pieces or
     // more; at most two lines of one piece in a row (cell text that wraps).

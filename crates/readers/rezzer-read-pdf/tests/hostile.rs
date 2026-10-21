@@ -1538,6 +1538,52 @@ fn many_small_ruled_tables_on_one_page_are_bounded() {
 }
 
 #[test]
+fn many_refused_ruled_grids_with_notes_are_bounded() {
+    // 2,000 ruled grids of three by two cells with a word in two cells of the first column:
+    // each is refused (most of its cells are empty) with a note, and its text stays
+    // paragraphs.
+    let start = Instant::now();
+    let n = 2_000usize;
+    let h = (n + 2) * 30;
+    let mut c = b"0.5 w ".to_vec();
+    for i in 0..n {
+        let top = h - 10 - i * 30;
+        for k in 0..3 {
+            let y = top - k * 10;
+            c.extend(format!("72 {y} m 372 {y} l S ").as_bytes());
+        }
+        for k in 0..4 {
+            let x = 72 + k * 100;
+            c.extend(format!("{x} {top} m {x} {} l S ", top - 20).as_bytes());
+        }
+        c.extend(
+            format!(
+                "BT /F1 6 Tf 1 0 0 1 76 {} Tm (r{i}a) Tj 1 0 0 1 76 {} Tm (r{i}b) Tj ET\n",
+                top - 8,
+                top - 18
+            )
+            .as_bytes(),
+        );
+    }
+    let out = read(&tall_page(&c, h));
+    assert!(
+        start.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        start.elapsed()
+    );
+    let blocks = page(&out, 1);
+    assert!(!blocks.iter().any(|b| matches!(b, Block::Table { .. })));
+    let notes = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("Possible table"))
+        .count();
+    assert!(notes > 0 && notes <= n, "{notes}");
+    assert_rss_under_256_mib();
+}
+
+#[test]
 fn many_small_tables_without_rules_on_one_page_are_bounded() {
     // 6,000 blocks of three rows in two columns, 60 points apart.
     let start = Instant::now();
