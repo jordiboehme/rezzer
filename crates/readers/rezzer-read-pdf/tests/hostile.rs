@@ -3504,6 +3504,47 @@ fn many_form_fields_are_bounded() {
 }
 
 #[test]
+fn many_scripted_form_fields_stay_within_the_object_budget() {
+    // 100,000 fields with a format script each. pdfparts keeps what it reads of the form
+    // within its object budget (half the memory limit, shared with the objects) and cuts the
+    // form there; its form data, which the twin never builds, takes about 80 MiB of it. The
+    // reader keeps a part of what pdfparts read, within its own share.
+    let file = |key: &str| {
+        form_file(key, &mut |b| {
+            let js =
+                b.add(r#"<< /S /JavaScript /JS (AFNumber_Format\(2, 0, 0, 0, "", true\);) >>"#);
+            (0..100_000)
+                .map(|k| {
+                    format!("<< /T (field{k}) /FT /Tx /V (value {k}) /AA << /F {js} 0 R >> >>")
+                })
+                .collect()
+        })
+    };
+    let start = Instant::now();
+    drop(read_through(&file("/Junk")));
+    let twin = common::max_rss_bytes();
+    let out = read_through(&file("/AcroForm"));
+    let rss = common::max_rss_bytes();
+    assert!(
+        rss < twin + (128 << 20) && rss < 384 << 20,
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin >> 20
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let kept = out.document.facets.fields.len();
+    assert!(kept > 1_000 && kept < 100_000, "{kept}");
+    form_cut(&out, "form", "form fields are not kept");
+    form_cut(&out, "form", "the object limit");
+    // The count pdfparts cut is not the file's count.
+    assert_eq!(out.document.properties.facts.form_fields, None);
+}
+
+#[test]
 fn one_field_read_by_many_calculations_is_bounded() {
     // 50,000 fields calculate from one field through one shared script.
     let file = |key: &str| {
