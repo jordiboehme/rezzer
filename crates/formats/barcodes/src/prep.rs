@@ -276,6 +276,39 @@ pub(crate) fn inside_2d(c: &Code, codes: &[Code]) -> bool {
     })
 }
 
+/// Whether a linear code read along a line of `v` (`w` by `h` pixels) between the hit's
+/// points has bars: the row a little above or below the line shows the same pattern. Noise
+/// can read as a linear code along one row, but its rows differ.
+pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool {
+    if points.is_empty() {
+        return false;
+    }
+    let y = points.iter().map(|p| p.1).sum::<f32>() / points.len() as f32;
+    let x0 = points.iter().map(|p| p.0).fold(f32::MAX, f32::min).max(0.0) as u32;
+    let x1 = points
+        .iter()
+        .map(|p| p.0)
+        .fold(f32::MIN, f32::max)
+        .min(w as f32 - 1.0) as u32;
+    if x1 <= x0 + 8 || !(y >= 0.0 && (y as u32) < h) {
+        return false;
+    }
+    let y = y as u32;
+    let d = ((x1 - x0) / 20).max(3);
+    let row = |r: u32| &v[(r * w + x0) as usize..=(r * w + x1) as usize];
+    let (t, _) = otsu(row(y));
+    let line: Vec<bool> = row(y).iter().map(|&p| p <= t).collect();
+    let agrees = |r: u32| {
+        let same = row(r)
+            .iter()
+            .zip(&line)
+            .filter(|&(&p, &dark)| (p <= t) == dark)
+            .count();
+        same * 10 >= line.len() * 9
+    };
+    (y >= d && agrees(y - d)) || (y + d < h && agrees(y + d))
+}
+
 /// The most Aztec finders looked at in one tile.
 pub(crate) const MAX_BULLSEYES: usize = 64;
 

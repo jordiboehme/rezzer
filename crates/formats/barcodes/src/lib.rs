@@ -353,6 +353,9 @@ pub(crate) fn scan(
                 };
                 let mut added = Vec::new();
                 for hit in hits {
+                    if !hit.symbology.two_d() && !prep::bars_hold(&padded, pw, ph, &hit.points) {
+                        continue;
+                    }
                     let Some(code) = read::code_of(&hit, &map, w, h, limits.max_payload) else {
                         continue;
                     };

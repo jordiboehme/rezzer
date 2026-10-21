@@ -511,3 +511,40 @@ fn the_calling_thread_scan_stops_between_calls_at_the_time_limit() {
     );
     assert_eq!(got, Err(Stop::Time(Scan::default())));
 }
+
+#[test]
+fn block_noise_gives_no_linear_code() {
+    // Noise of 4 pixel blocks reads as an EAN-13 along one row; its rows differ, so it has no
+    // bars and is not a code.
+    let (w, h) = (2000u32, 2000u32);
+    let mut state = 0x9e37_79b9u32;
+    let cols = w.div_ceil(4);
+    let mut blocks = vec![0u8; cols as usize];
+    let mut noise = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        if y % 4 == 0 {
+            for v in &mut blocks {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                *v = if state & 1 == 0 { 0 } else { 255 };
+            }
+        }
+        for x in 0..w {
+            noise.push(blocks[(x / 4) as usize]);
+        }
+    }
+    let got = decode(
+        &Picture {
+            pixels: Pixels::Gray(&noise),
+            width: w,
+            height: h,
+        },
+        &Limits::default(),
+    );
+    // A busy machine may stop it at the time limit; what it found until then counts too.
+    match got {
+        Ok(scan) | Err(Stop::Time(scan)) => assert!(scan.codes.is_empty(), "{scan:?}"),
+        other => panic!("{other:?}"),
+    }
+}

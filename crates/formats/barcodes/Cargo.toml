@@ -20,7 +20,12 @@ rxing.workspace = true
 
 [dev-dependencies]
 rxing = { workspace = true, features = ["encoders"] }
+libc.workspace = true
 
 [[test]]
 name = "decode"
+required-features = ["encode"]
+
+[[test]]
+name = "hostile"
 required-features = ["encode"]
