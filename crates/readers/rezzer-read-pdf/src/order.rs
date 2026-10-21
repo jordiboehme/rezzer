@@ -60,6 +60,9 @@ struct Frag {
     end: f32,
     /// The end of the last glyph, white space too.
     pen: f32,
+    /// Whether a glyph with ink is in the run yet: white space before the first one joins
+    /// it whatever the gap.
+    inked: bool,
     size: f32,
     bold: bool,
     italic: bool,
@@ -133,7 +136,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             // White space joins the white space or ink before it; ink joins the ink before
             // it, so a wide stretch of white space between two words splits them.
             let pad = !t.is_empty() && t.chars().all(is_pad);
-            let gap = x - if pad { f.pen } else { f.end };
+            let gap = x - if pad || !f.inked { f.pen } else { f.end };
             let on_line = (y - f.y).abs() <= 0.25 * f.size.max(size);
             if same_style && on_line && gap >= -0.5 * size && gap <= PIECE_GAP * size {
                 let glued = g.joined
@@ -150,7 +153,8 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                 f.chars += t.chars().count();
                 f.pen = f.pen.max(x + adv);
                 if !pad {
-                    f.end = f.end.max(x + adv);
+                    f.end = if f.inked { f.end.max(x + adv) } else { x + adv };
+                    f.inked = true;
                 }
                 continue;
             }
@@ -165,6 +169,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             oy,
             end: if pad { x } else { x + adv },
             pen: x + adv,
+            inked: !pad,
             size,
             bold: g.bold,
             italic: g.italic,
@@ -183,7 +188,10 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
 struct Piece {
     row: usize,
     x0: f32,
+    /// The end of the piece's last glyph, white space too.
     x1: f32,
+    /// The end of its last glyph with ink, where the gap to the next fragment is measured.
+    ink: f32,
     y0: f32,
     y1: f32,
     size: f32,
@@ -222,9 +230,29 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
         rows.push(vec![i]);
         core = (lo, hi);
     }
+    // A fragment that goes on right where the one before it in content order ends, on its
+    // baseline in its size (a run cut at a link's edge or a change of style), moves with it:
+    // other text that shares the row is never put in between.
+    let mut head: Vec<usize> = Vec::with_capacity(frags.len());
+    for (i, f) in frags.iter().enumerate() {
+        let joins = i > 0 && {
+            let p = &frags[i - 1];
+            let size = p.size.max(f.size);
+            (f.y - p.y).abs() <= 0.1 * size
+                && (f.size - p.size).abs() <= 0.05 * size
+                && (f.x - p.pen).abs() <= 0.1 * size
+        };
+        head.push(if joins { head[i - 1] } else { i });
+    }
     let mut out = Vec::new();
     for (r, mut row) in rows.into_iter().enumerate() {
-        row.sort_by(|&a, &b| frags[a].x.total_cmp(&frags[b].x));
+        row.sort_by(|&a, &b| {
+            frags[head[a]]
+                .x
+                .total_cmp(&frags[head[b]].x)
+                .then(head[a].cmp(&head[b]))
+                .then(a.cmp(&b))
+        });
         // The same text drawn again on top of itself (a fake bold) is read once.
         let mut kept: Vec<usize> = Vec::with_capacity(row.len());
         for i in row {
@@ -243,8 +271,9 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
             let f = &frags[i];
             let (lo, hi) = extent(f);
             if let Some(p) = piece.as_mut() {
-                if f.x - p.x1 <= PIECE_GAP * f.size.max(p.size) {
-                    p.x1 = p.x1.max(f.end);
+                if f.x - p.ink <= PIECE_GAP * f.size.max(p.size) {
+                    p.x1 = p.x1.max(f.pen);
+                    p.ink = p.ink.max(f.end);
                     p.y0 = p.y0.min(lo);
                     p.y1 = p.y1.max(hi);
                     p.size = p.size.max(f.size);
@@ -257,7 +286,8 @@ fn pieces(frags: &[Frag]) -> Vec<Piece> {
             piece = Some(Piece {
                 row: r,
                 x0: f.x,
-                x1: f.end.max(f.x),
+                x1: f.pen.max(f.x),
+                ink: f.end.max(f.x),
                 y0: lo,
                 y1: hi,
                 size: f.size,
@@ -772,6 +802,7 @@ mod tests {
             oy: y,
             end: x + 6.0 * text.chars().count() as f32,
             pen: x + 6.0 * text.chars().count() as f32,
+            inked: true,
             size: 10.0,
             bold: false,
             italic: false,
