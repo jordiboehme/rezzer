@@ -992,3 +992,31 @@ fn an_inline_picture_with_a_named_color_space_is_its_own() {
     let out = read(&b.finish(catalog));
     assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
 }
+
+#[test]
+fn small_square_picture_on_a_turned_page_stays_in_place() {
+    // The ticket shape drawn upward on a page turned for display: the picture marker stands
+    // between the paragraphs in the turned frame, as on an upright page.
+    let content = "q 0 1 -1 0 595 0 cm\n\
+                   BT /F1 12 Tf 72 500 Td (Above the code.) Tj ET\n\
+                   q 85 0 0 85 400 300 cm /Im1 Do Q\n\
+                   BT /F1 12 Tf 72 200 Td (Below the code.) Tj ET\nQ\n";
+    let out = read(&image_page_bits(
+        595,
+        842,
+        content,
+        21,
+        21,
+        1,
+        &[0x5au8; 63],
+    ));
+    assert_eq!(
+        lines(page(&out, 1)),
+        [
+            "Page 1",
+            "Above the code.",
+            "[media page-1]",
+            "Below the code."
+        ]
+    );
+}

@@ -45,6 +45,7 @@ use rezzer_model::{Anchor, Asset, Blob, Block, LossReason, ReadOptions, Severity
 use sha2::{Digest, Sha256};
 
 use crate::Out;
+use crate::order::Turn;
 use crate::text::PageItems;
 
 /// Pixels per point: 144 dpi.
@@ -277,9 +278,10 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
     )
 }
 
-/// The top middle of the first picture, where the run nearest to it is looked for.
-pub(crate) fn picture_top(v: &Vision) -> Option<(f32, f32)> {
-    let b = v.first?;
+/// The top middle of the first picture in the frame of the runs (`turn` of a page `width`
+/// by `height`), where the run nearest to it is looked for.
+pub(crate) fn picture_top(v: &Vision, turn: Turn, width: f32, height: f32) -> Option<(f32, f32)> {
+    let b = turn.place_box(v.first?, width, height);
     Some(((b[0] + b[2]) / 2.0, b[1].max(b[3])))
 }
 

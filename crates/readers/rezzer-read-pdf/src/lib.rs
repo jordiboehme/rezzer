@@ -363,12 +363,11 @@ fn lay_out(
             let here = on_page.get(&n).map_or(&[][..], Vec::as_slice);
             let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
             // The picture's block is looked for at the run nearest to its top, after the
-            // annotations' points; a turned frame has no points.
+            // annotations' points, in the frame of the runs.
             let vision = render::vision(info, &items, &furniture);
             let picture = vision
                 .as_ref()
-                .and_then(render::picture_top)
-                .filter(|_| !items.turned)
+                .and_then(|v| render::picture_top(v, items.turn, info.width, info.height))
                 .and_then(|top| quote::nearest_runs(&items.runs, &[top])[0].map(|at| (at, top)));
             if let Some((at, _)) = picture {
                 points.push(at);
