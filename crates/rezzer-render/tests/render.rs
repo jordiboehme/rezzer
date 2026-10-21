@@ -2746,7 +2746,7 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
     // The list of pictures that need vision says why each needs a look.
     assert!(
         md.contains(
-            "| Picture | File | Caption | Why |\n| --- | --- | --- | --- |\n\
+            "| Picture | File | Caption | Note |\n| --- | --- | --- | --- |\n\
              | page-3 | not extracted |  | no text layer |\n"
         ),
         "{md}"
