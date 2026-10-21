@@ -178,11 +178,94 @@ pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots
     out
 }
 
-/// Whether page `info` with the items read from it needs vision: it has no text layer over
-/// a picture (a scan), its glyphs have no Unicode mapping, or it is only an invisible text
-/// layer over a picture (an OCR layer); or its pictures, without the page furniture
-/// `skip`, cover at least 2 % of it.
-pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &Spots) -> Option<Vision> {
+/// What a page shows that an agent may need to look at.
+pub(crate) enum Seen {
+    /// The whole page needs vision.
+    Page(Vision),
+    /// Only small pictures, each of at least 1 cm2, in the order the page draws them.
+    Small(Vec<Small>),
+}
+
+/// A small picture on a page that does not need vision as a whole.
+pub(crate) struct Small {
+    /// Its box in the visible page box (`PageItems::images`), where its crop is cut.
+    pub b: [f32; 4],
+    /// Its box in the frame of the runs (turned when the page is), which the text names.
+    pub framed: [f32; 4],
+    /// What the picture is (`PageItems::images_id`): equal pictures share one asset.
+    pub id: u64,
+    /// It looks like a barcode or QR code.
+    pub code: bool,
+    /// A logo: it needs no vision.
+    pub logo: bool,
+}
+
+/// The top or bottom band of a page, as a share of its height, where a small picture is a
+/// logo.
+const LOGO_BAND: f32 = 0.15;
+
+/// The corner regions of a page, as a share of its width and height, where a small picture
+/// is a logo.
+const LOGO_CORNER: f32 = 0.2;
+
+/// Whether box `b` lies wholly in the top or bottom band or in a corner region of a page `w`
+/// by `h` points (all in one frame).
+fn in_logo_place(b: &[f32; 4], w: f32, h: f32) -> bool {
+    let (x0, y0) = (b[0].max(0.0), b[1].max(0.0));
+    let (x1, y1) = (b[2].min(w), b[3].min(h));
+    let band = y0 >= (1.0 - LOGO_BAND) * h || y1 <= LOGO_BAND * h;
+    let side = x1 <= LOGO_CORNER * w || x0 >= (1.0 - LOGO_CORNER) * w;
+    let end = y1 <= LOGO_CORNER * h || y0 >= (1.0 - LOGO_CORNER) * h;
+    band || (side && end)
+}
+
+/// Whether picture `k` of a page looks like a barcode or QR code: near square, 1-bit pixels,
+/// at least 21 a side.
+fn looks_like_code(items: &PageItems, k: usize) -> bool {
+    let b = items.images[k];
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    let square = (w - h).abs() <= 0.1 * w.max(h);
+    square && items.images_code.get(k).copied().unwrap_or(false)
+}
+
+/// The pictures (by `PageItems::images_id`) drawn on every page of a document of two pages
+/// or more, anywhere on the page. `count` is the document's page count; when fewer pages
+/// were read, no picture is known to be on every page.
+pub(crate) fn on_every_page<'a>(
+    pages: impl Iterator<Item = &'a PageItems>,
+    count: usize,
+) -> HashSet<u64> {
+    let mut read = 0usize;
+    let mut found: Option<HashSet<u64>> = None;
+    for items in pages {
+        read += 1;
+        let here: HashSet<u64> = items.images_id.iter().copied().collect();
+        found = Some(match found {
+            None => here,
+            Some(mut all) => {
+                all.retain(|id| here.contains(id));
+                all
+            }
+        });
+    }
+    match found {
+        Some(all) if count >= 2 && read == count => all,
+        _ => HashSet::new(),
+    }
+}
+
+/// What on page `info` with the items read from it needs a look. The whole page needs
+/// vision when it has no text layer over a picture (a scan), its glyphs have no Unicode
+/// mapping, or it is only an invisible text layer over a picture (an OCR layer); or when its
+/// pictures, without the page furniture `skip`, cover at least 2 % of it. Otherwise each of
+/// its pictures of at least 1 cm2 is a small picture of its own; one that does not look like
+/// a code and lies in the top or bottom band or a corner, or is in `everywhere`, is a logo.
+pub(crate) fn vision(
+    info: &PageInfo,
+    items: &PageItems,
+    skip: &Spots,
+    everywhere: &HashSet<u64>,
+) -> Option<Seen> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
     let visible = |b: &[f32; 4]| {
@@ -223,47 +306,73 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &Spots) -> Option
         words.push("only an invisible text layer".into());
     }
     let mut first = shown.first().map(|b| **b);
-    if !shown.is_empty() && pictured >= PICTURE_SHARE {
+    let large = !shown.is_empty() && pictured >= PICTURE_SHARE;
+    if large {
         let k = shown.len();
         words.push(format!(
             "{k} {}",
             if k == 1 { "picture" } else { "pictures" }
         ));
+    }
+    // Pictures too small to make the page need vision are still not dropped: each one of at
+    // least 1 cm2 is named with its box.
+    let small: Vec<usize> = if large {
+        Vec::new()
     } else {
-        // Pictures too small to make the page need vision are still not dropped: each one of
-        // at least 1 cm2 is named with its box.
-        let small: Vec<usize> = shown_at
+        shown_at
             .iter()
             .copied()
             .filter(|&k| visible(&items.images[k]) >= SMALL_PICTURE)
-            .collect();
+            .collect()
+    };
+    if !words.is_empty() {
+        // The page is rendered whole: its small pictures are named in its alt text and not
+        // cut out again.
         if let Some(&k) = small.first() {
             first = Some(items.images[k]);
             words.push(small_pictures(items, &small));
         }
+        return Some(Seen::Page(Vision {
+            alt: words.join(", "),
+            first,
+        }));
     }
-    (!words.is_empty()).then(|| Vision {
-        alt: words.join(", "),
-        first,
-    })
+    if small.is_empty() {
+        return None;
+    }
+    let (fw, fh) = items.turn.size(width, height);
+    let list = small
+        .into_iter()
+        .map(|k| {
+            let b = items.images[k];
+            let framed = items.turn.place_box(b, width, height);
+            let id = items.images_id.get(k).copied().unwrap_or(0);
+            let code = looks_like_code(items, k);
+            let logo = !code && (in_logo_place(&framed, fw, fh) || everywhere.contains(&id));
+            Small {
+                b,
+                framed,
+                id,
+                code,
+                logo,
+            }
+        })
+        .collect();
+    Some(Seen::Small(list))
 }
 
-/// The alt text for small pictures `small` of a page: how many, and the box of each of the
-/// first [`SMALL_LISTED`] in points. A near-square one of 1-bit pixels, at least 21 a side, is
-/// named a likely code.
+/// The alt text for small pictures `small` of a page that needs vision as a whole: how many,
+/// and the box of each of the first [`SMALL_LISTED`] in points. A near-square one of 1-bit
+/// pixels, at least 21 a side, is named a likely code.
 fn small_pictures(items: &PageItems, small: &[usize]) -> String {
     let n = small.len();
     let mut boxes: Vec<String> = small
         .iter()
         .take(SMALL_LISTED)
         .map(|&k| {
-            let b = items.images[k];
-            let r = |v: f32| v.round() as i64;
-            let mut s = format!("box {}, {} to {}, {}", r(b[0]), r(b[1]), r(b[2]), r(b[3]));
-            let (w, h) = (b[2] - b[0], b[3] - b[1]);
-            let square = (w - h).abs() <= 0.1 * w.max(h);
-            if square && items.images_code.get(k).copied().unwrap_or(false) {
-                s.push_str(", likely a barcode or QR code, not decoded");
+            let mut s = box_words(&items.images[k]);
+            if looks_like_code(items, k) {
+                s.push_str(CODE_WORDS);
             }
             s
         })
@@ -276,6 +385,122 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
         if n == 1 { "picture" } else { "pictures" },
         boxes.join("; ")
     )
+}
+
+/// What a likely code is called.
+const CODE_WORDS: &str = ", likely a barcode or QR code, not decoded";
+
+/// `box 40, 760 to 100, 800`: a box in whole points.
+fn box_words(b: &[f32; 4]) -> String {
+    let r = |v: f32| v.round() as i64;
+    format!("box {}, {} to {}, {}", r(b[0]), r(b[1]), r(b[2]), r(b[3]))
+}
+
+/// What a small picture is called: a logo, or a small picture (which needs vision).
+fn small_name(logo: bool) -> &'static str {
+    if logo {
+        "logo or small picture"
+    } else {
+        "small picture"
+    }
+}
+
+/// The words for one place of a small picture: `small picture, box 40, 760 to 100, 800`.
+pub(crate) fn place_alt(s: &Small) -> String {
+    let mut out = format!("{}, {}", small_name(s.logo), box_words(&s.framed));
+    if s.code {
+        out.push_str(CODE_WORDS);
+    }
+    out
+}
+
+/// The places of one small picture asset: the page and box of each of the first
+/// [`SMALL_LISTED`], the pages it is on (at most [`SMALL_LISTED`] named), and how many places
+/// there are.
+#[derive(Default)]
+pub(crate) struct Places {
+    listed: Vec<(u32, [f32; 4])>,
+    pages: Vec<u32>,
+    more_pages: usize,
+    count: usize,
+    /// The last page a place was added on: places come in page order.
+    last: u32,
+    /// Every place is a logo: the asset needs no vision.
+    pub logo: bool,
+    code: bool,
+}
+
+impl Places {
+    /// The places of the small picture `s`, first seen on page `n`.
+    pub(crate) fn new(n: u32, s: &Small) -> Places {
+        let mut p = Places {
+            logo: true,
+            code: s.code,
+            ..Places::default()
+        };
+        p.add(n, s);
+        p
+    }
+
+    /// Adds the place of `s` on page `n`. One place that is not a logo makes the asset need
+    /// vision.
+    pub(crate) fn add(&mut self, n: u32, s: &Small) {
+        if self.listed.len() < SMALL_LISTED {
+            self.listed.push((n, s.framed));
+        }
+        if n != self.last {
+            if self.pages.len() < SMALL_LISTED {
+                self.pages.push(n);
+            } else {
+                self.more_pages += 1;
+            }
+            self.last = n;
+        }
+        self.count += 1;
+        self.logo &= s.logo;
+    }
+
+    /// The asset's alt text: the place's words for one place; for more, the pages and the
+    /// box of each place listed, then how many more places there are.
+    pub(crate) fn alt(&self) -> String {
+        let name = small_name(self.logo);
+        let code = if self.code { CODE_WORDS } else { "" };
+        if self.count == 1 {
+            let b = self
+                .listed
+                .first()
+                .map(|(_, b)| box_words(b))
+                .unwrap_or_default();
+            return format!("{name}, {b}{code}");
+        }
+        let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
+        if self.more_pages > 0 {
+            pages.push(format!("{} more", self.more_pages));
+        }
+        let mut places: Vec<String> = self
+            .listed
+            .iter()
+            .map(|(n, b)| format!("{} on page {n}", box_words(b)))
+            .collect();
+        if self.count > self.listed.len() {
+            let more = self.count - self.listed.len();
+            places.push(format!(
+                "{more} more {}",
+                if more == 1 { "place" } else { "places" }
+            ));
+        }
+        let word = if self.pages.len() + self.more_pages == 1 {
+            "page"
+        } else {
+            "pages"
+        };
+        format!(
+            "{name}{code}, {} places on {word} {}: {}",
+            self.count,
+            pages.join(", "),
+            places.join("; ")
+        )
+    }
 }
 
 /// The top middle of the first picture in the frame of the runs (`turn` of a page `width`
@@ -303,50 +528,130 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
     }
 }
 
-/// Puts `media` next to the block anchored `at`: after it when the run found there stands
-/// above the picture, else before it. Without such a block it goes at the end. Returns where
-/// it went.
-pub(crate) fn place(
-    blocks: &mut Vec<Block>,
-    at: Option<&Anchor>,
-    after: bool,
-    media: Block,
-) -> usize {
-    let found = at.and_then(|a| blocks.iter().position(|b| anchor_of(b) == Some(a)));
-    let i = match found {
+/// Where a picture goes among `blocks`: after the block anchored `at` when the run found
+/// there stands above the picture, else before it. Without such a block it goes at the end.
+pub(crate) fn position(blocks: &[Block], at: Option<&Anchor>, after: bool) -> usize {
+    match at.and_then(|a| blocks.iter().position(|b| anchor_of(b) == Some(a))) {
         Some(i) if after => i + 1,
         Some(i) => i,
         None => blocks.len(),
-    };
-    blocks.insert(i, media);
-    i
+    }
 }
 
-/// A page that needs vision, to render: its asset, whether a limit cut its text, and whether
-/// its text came from the fallback parser (its content is then missing in the canonical copy).
+/// A page to render: for its own asset when it needs vision, or to cut its small pictures
+/// out. Also whether a limit cut its text, and whether its text came from the fallback
+/// parser (its content is then missing in the canonical copy).
 pub(crate) struct Need {
     pub page: u32,
-    pub asset: usize,
+    /// The index of the page's asset in the document, when the whole page needs vision.
+    pub whole: Option<usize>,
+    /// The small pictures first seen on this page, in reading order.
+    pub crops: Vec<Crop>,
+    /// The lower left corner of the visible page box in user space (`PageItems::origin`).
+    pub origin: (f32, f32),
     pub cut: bool,
     pub fallback: bool,
 }
 
+/// A small picture to cut out of its page's render.
+pub(crate) struct Crop {
+    /// The index of its asset in the document.
+    pub asset: usize,
+    /// Its box in the visible page box.
+    pub b: [f32; 4],
+}
+
 /// The asset of page `n`, listed without a file until it is rendered.
 pub(crate) fn asset(n: u32, alt: String, caption: Option<String>) -> Asset {
+    picture_asset(format!("page-{n}"), alt, caption, true)
+}
+
+/// A picture asset, listed without a file until it is rendered.
+pub(crate) fn picture_asset(
+    id: String,
+    alt: String,
+    caption: Option<String>,
+    needs_vision: bool,
+) -> Asset {
     Asset {
-        id: format!("page-{n}"),
+        id,
         path: None,
         sha256: String::new(),
         mime: "image/png".into(),
         caption,
         alt: Some(alt),
-        needs_vision: true,
+        needs_vision,
     }
 }
 
-/// Renders the pages of `needs` with `extract_assets`, each into a blob of its asset. One
-/// render buffer lives at a time. What is not rendered gets a loss: one per page for a page
-/// cap or a render that failed, one for all pages past the render count or the blob room.
+/// The margin around a small picture's crop, in pixels.
+pub(crate) const CROP_MARGIN: u32 = 8;
+
+/// What was not written because a limit was reached: the page it began on, why, and how many
+/// pages and small pictures.
+struct LeftOut {
+    first: u32,
+    /// What the first one left out is: `page 3 is not rendered`.
+    what: String,
+    why: String,
+    pages: usize,
+    pictures: usize,
+}
+
+impl LeftOut {
+    fn page(n: u32, why: String) -> LeftOut {
+        LeftOut {
+            first: n,
+            what: format!("page {n} is not rendered"),
+            why,
+            pages: 1,
+            pictures: 0,
+        }
+    }
+
+    fn picture(n: u32, id: &str, why: String) -> LeftOut {
+        LeftOut {
+            first: n,
+            what: format!("picture {id} is not written"),
+            why,
+            pages: 0,
+            pictures: 1,
+        }
+    }
+
+    /// Counts the next need left out.
+    fn add(&mut self, need: &Need) {
+        if need.whole.is_some() {
+            self.pages += 1;
+        } else {
+            self.pictures += need.crops.len();
+        }
+    }
+
+    fn words(&self) -> String {
+        let (n, why) = (self.first, &self.why);
+        let s = |k: usize| if k == 1 { "" } else { "s" };
+        match (self.pages, self.pictures) {
+            (1, 0) | (0, 1) => format!("{}: {why}", self.what),
+            (k, 0) => {
+                format!("{k} pages that need vision are not rendered, from page {n} on: {why}")
+            }
+            (0, k) => format!("{k} small pictures are not written, from page {n} on: {why}"),
+            (k, m) => format!(
+                "{k} page{} that need vision and {m} small picture{} are not written, from page \
+                 {n} on: {why}",
+                s(k),
+                s(m)
+            ),
+        }
+    }
+}
+
+/// Renders the pages of `needs` with `extract_assets`: a page that needs vision into a blob
+/// of its asset, a page with small pictures into one blob for each picture first seen there,
+/// cut from the render. One render buffer lives at a time. What is not rendered gets a loss:
+/// one per page for a page cap or a render that failed, one for all that is left past the
+/// render count, the blob room or the time.
 pub(crate) fn render_pages(
     pdf: &Pdf,
     needs: &[Need],
@@ -410,9 +715,8 @@ pub(crate) fn render_pages(
         stop: &stop,
     };
     let room = budget.limits().max_memory_bytes / 4;
-    // The pages left out for the render count, the blob room or the time: the first, why,
-    // how many.
-    let mut left_out: Option<(u32, String, usize)> = None;
+    // What is left out for the render count, the blob room or the time.
+    let mut left_out: Option<LeftOut> = None;
     // The content streams and stencils checked for earlier pages.
     let mut seen = HashSet::new();
     let mut rendered = 0;
@@ -426,12 +730,23 @@ pub(crate) fn render_pages(
                 Severity::Warning,
             );
         };
-        if let Some((_, _, k)) = &mut left_out {
-            *k += 1;
+        if let Some(left) = &mut left_out {
+            left.add(need);
             continue;
         }
+        let first_out = |why: String| match need.whole {
+            Some(_) => LeftOut::page(n, why),
+            None => {
+                let mut left = LeftOut::page(n, why);
+                left.pages = 0;
+                left.add(need);
+                left
+            }
+        };
         if rendered == MAX_RENDERS {
-            left_out = Some((n, format!("a file renders at most {MAX_RENDERS} pages"), 1));
+            left_out = Some(first_out(format!(
+                "a file renders at most {MAX_RENDERS} pages"
+            )));
             continue;
         }
         if need.fallback {
@@ -454,10 +769,10 @@ pub(crate) fn render_pages(
             );
             continue;
         }
-        let png = match render_png(&doc, n, budget, room, &facts, &mut seen) {
-            Ok(png) => png,
+        let page = match render_page(&doc, n, budget, room, &facts, &mut seen) {
+            Ok(page) => page,
             Err(Failed::Limit(why)) => {
-                left_out = Some((n, why, 1));
+                left_out = Some(first_out(why));
                 continue;
             }
             Err(Failed::Room(why)) => {
@@ -475,44 +790,128 @@ pub(crate) fn render_pages(
             }
         };
         rendered += 1;
-        let size = png.len() as u64;
-        if size > out.blob_room {
-            left_out = Some((
-                n,
-                format!(
-                    "its picture takes {size} bytes, more than the {} bytes left for extracted \
-                     pictures and attachments (an eighth of the memory limit)",
-                    out.blob_room
-                ),
-                1,
-            ));
-            continue;
+        match need.whole {
+            Some(asset) => {
+                let png = match encode(page.pixmap) {
+                    Ok(png) => png,
+                    Err(why) => {
+                        out.loss(
+                            format!("p{n}"),
+                            format!("page {n} is not rendered: {why}"),
+                            LossReason::Damaged,
+                            Severity::Warning,
+                        );
+                        continue;
+                    }
+                };
+                if let Err(why) = keep(png, asset, out) {
+                    left_out = Some(LeftOut::page(n, why));
+                }
+            }
+            None => left_out = cut_out(need, page, budget, room, out),
         }
-        out.blob_room -= size;
-        let sha256: String = Sha256::digest(&png)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let asset = &mut out.doc.assets[need.asset];
-        asset.sha256 = sha256;
-        out.blobs.push(Blob {
-            asset: asset.id.clone(),
-            bytes: png,
-        });
     }
-    if let Some((first, why, k)) = left_out {
-        let what = if k == 1 {
-            format!("page {first} is not rendered: {why}")
-        } else {
-            format!("{k} pages that need vision are not rendered, from page {first} on: {why}")
-        };
+    if let Some(left) = left_out {
         out.loss(
-            format!("p{first}"),
-            what,
+            format!("p{}", left.first),
+            left.words(),
             LossReason::Limit,
             Severity::Warning,
         );
     }
+}
+
+/// Keeps `png` as the blob of asset `asset`, if it fits the blob room; else says why not.
+fn keep(png: Vec<u8>, asset: usize, out: &mut Out) -> Result<(), String> {
+    let size = png.len() as u64;
+    if size > out.blob_room {
+        return Err(format!(
+            "its picture takes {size} bytes, more than the {} bytes left for extracted \
+             pictures and attachments (an eighth of the memory limit)",
+            out.blob_room
+        ));
+    }
+    out.blob_room -= size;
+    let sha256: String = Sha256::digest(&png)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let asset = &mut out.doc.assets[asset];
+    asset.sha256 = sha256;
+    out.blobs.push(Blob {
+        asset: asset.id.clone(),
+        bytes: png,
+    });
+    Ok(())
+}
+
+/// Cuts the small pictures of `need` out of its render, one at a time, each into a blob of
+/// its asset. The render is dropped before the last one is written. A crop takes its pixels
+/// and its PNG next to the render, which must fit the render room the page was checked
+/// against. Returns what is left out when the time or the blob room runs out.
+fn cut_out(
+    need: &Need,
+    page: Rendered,
+    budget: &Budget,
+    room: u64,
+    out: &mut Out,
+) -> Option<LeftOut> {
+    let n = need.page;
+    let mut page = Some(page);
+    let pixels = |p: &Rendered| u64::from(p.pixmap.width()) * u64::from(p.pixmap.height());
+    for (i, c) in need.crops.iter().enumerate() {
+        let id = out.doc.assets[c.asset].id.clone();
+        let left = |why: String| {
+            let mut left = LeftOut::picture(n, &id, why);
+            left.pictures = need.crops.len() - i;
+            Some(left)
+        };
+        if let Err(hit) = budget.check_time() {
+            return left(hit.to_string());
+        }
+        let p = page.as_ref()?;
+        let user = [
+            c.b[0] + need.origin.0,
+            c.b[1] + need.origin.1,
+            c.b[2] + need.origin.0,
+            c.b[3] + need.origin.1,
+        ];
+        let Some(rect) = crop_rect(p, user, CROP_MARGIN) else {
+            continue;
+        };
+        // The render's pixels, the crop's and its PNG (twice its pixels).
+        let takes = pixels(p) * 4 + rect.pixels() * cost::PNG_BYTES;
+        if takes > room {
+            out.loss(
+                format!("p{n}"),
+                format!(
+                    "picture {id} is not written: cutting it out would take {takes} bytes, more \
+                     than the {room} bytes a render may take (a quarter of the memory limit)"
+                ),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+            continue;
+        }
+        let pixmap = crop(p, rect);
+        if i + 1 == need.crops.len() {
+            page = None;
+        }
+        match encode(pixmap) {
+            Ok(png) => {
+                if let Err(why) = keep(png, c.asset, out) {
+                    return left(why);
+                }
+            }
+            Err(why) => out.loss(
+                format!("p{n}"),
+                format!("picture {id} is not written: {why}"),
+                LossReason::Damaged,
+                Severity::Warning,
+            ),
+        }
+    }
+    None
 }
 
 /// Why a render did not happen.
@@ -524,17 +923,93 @@ enum Failed {
     Damaged(String),
 }
 
-/// Renders page `page` (1-based) of `doc`, opened from the canonical bytes, to PNG at 144
-/// dpi, at a smaller scale when that would pass [`MAX_PIXELS`]. The time is checked first,
-/// then what the render takes is worked out against `room` bytes.
-fn render_png(
+/// A rendered page: its pixels, and the transform from user space to them.
+pub(crate) struct Rendered {
+    pub pixmap: Pixmap,
+    pub transform: Affine,
+}
+
+/// A rectangle of pixels in a render: left, top, width and height.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PixelRect {
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+}
+
+impl PixelRect {
+    fn pixels(&self) -> u64 {
+        u64::from(self.w) * u64::from(self.h)
+    }
+}
+
+/// The pixels of `page` under box `b` (points in user space), at the render's own scale,
+/// with `margin` pixels on each side, clipped to the page. `None` when the box lies outside
+/// the page.
+pub(crate) fn crop_rect(page: &Rendered, b: [f32; 4], margin: u32) -> Option<PixelRect> {
+    let corners = [(b[0], b[1]), (b[2], b[1]), (b[0], b[3]), (b[2], b[3])]
+        .map(|(x, y)| page.transform * kurbo::Point::new(f64::from(x), f64::from(y)));
+    let xs = corners.map(|p| p.x);
+    let ys = corners.map(|p| p.y);
+    let min = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
+    let max = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
+    let m = f64::from(margin);
+    let (pw, ph) = (
+        f64::from(page.pixmap.width()),
+        f64::from(page.pixmap.height()),
+    );
+    // Rounded to a hundredth first, so a box on whole pixels does not grow by one.
+    let snap = |v: f64| (v * 100.0).round() / 100.0;
+    let x0 = (snap(min(xs)).floor() - m).clamp(0.0, pw);
+    let y0 = (snap(min(ys)).floor() - m).clamp(0.0, ph);
+    let x1 = (snap(max(xs)).ceil() + m).clamp(0.0, pw);
+    let y1 = (snap(max(ys)).ceil() + m).clamp(0.0, ph);
+    if !(x1 > x0 && y1 > y0) {
+        return None;
+    }
+    Some(PixelRect {
+        x: x0 as u16,
+        y: y0 as u16,
+        w: (x1 - x0) as u16,
+        h: (y1 - y0) as u16,
+    })
+}
+
+/// The pixels of `rect` of `page`, as a pixmap of their own.
+pub(crate) fn crop(page: &Rendered, rect: PixelRect) -> Pixmap {
+    let mut out = Pixmap::new(rect.w, rect.h);
+    let src = page.pixmap.data();
+    let width = usize::from(page.pixmap.width());
+    let (x, w) = (usize::from(rect.x), usize::from(rect.w));
+    for (row, dst) in out.data_mut().chunks_exact_mut(w).enumerate() {
+        let at = (usize::from(rect.y) + row) * width + x;
+        dst.copy_from_slice(&src[at..at + w]);
+    }
+    out.set_may_have_transparency(page.pixmap.may_have_transparency());
+    out
+}
+
+/// Writes `pixmap` as PNG.
+fn encode(pixmap: Pixmap) -> Result<Vec<u8>, String> {
+    match panic::catch_unwind(AssertUnwindSafe(|| pixmap.into_png())) {
+        Ok(Ok(png)) => Ok(png),
+        Ok(Err(e)) => Err(format!("the PNG could not be written ({e})")),
+        Err(_) => Err("the PNG writer stopped with an internal error".into()),
+    }
+}
+
+/// Renders page `page` (1-based) of `doc`, opened from the canonical bytes, at 144 dpi, at a
+/// smaller scale when that would pass [`MAX_PIXELS`]. The time is checked first, then what
+/// the render and its PNG take is worked out against `room` bytes.
+fn render_page(
     doc: &hayro_syntax::Pdf,
     page: u32,
     budget: &Budget,
     room: u64,
     facts: &cost::Facts<'_>,
     seen: &mut HashSet<hayro_syntax::object::ObjectIdentifier>,
-) -> Result<Vec<u8>, Failed> {
+) -> Result<Rendered, Failed> {
     budget
         .check_time()
         .map_err(|hit| Failed::Limit(hit.to_string()))?;
@@ -594,13 +1069,10 @@ fn render_png(
         );
         drop(ctx);
         drop(cache);
-        pixmap.into_png()
+        pixmap
     }));
     match run {
-        Ok(Ok(png)) => Ok(png),
-        Ok(Err(e)) => Err(Failed::Damaged(format!(
-            "the PNG could not be written ({e})"
-        ))),
+        Ok(pixmap) => Ok(Rendered { pixmap, transform }),
         Err(_) => Err(Failed::Damaged(
             "the renderer stopped with an internal error".into(),
         )),

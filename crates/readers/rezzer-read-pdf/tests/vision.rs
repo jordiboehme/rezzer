@@ -528,43 +528,50 @@ fn small_square_picture_is_listed() {
         1,
         &[0x5au8; 63],
     ));
-    let a = asset(&out, "page-1");
+    let a = asset(&out, "page-1-pic-1");
     assert!(a.needs_vision);
-    let alt = a.alt.as_deref().unwrap_or_default();
-    assert!(alt.contains("1 small picture"), "{alt}");
-    assert!(alt.contains("400, 600 to 485, 685"), "{alt}");
-    assert!(
-        alt.contains("likely a barcode or QR code, not decoded"),
-        "{alt}"
+    assert_eq!(
+        a.alt.as_deref(),
+        Some("small picture, box 400, 600 to 485, 685, likely a barcode or QR code, not decoded")
     );
     assert_eq!(
         lines(page(&out, 1)),
         [
             "Page 1",
             "Above the code.",
-            "[media page-1]",
+            "[media page-1-pic-1]",
             "Below the code."
         ]
     );
     // A small picture that is not near square is listed, but not named a code.
     let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 85 0 0 40 400 600 cm /Im1 Do Q\n";
     let out = read(&image_page(595, 842, content, 21, 10, &[0u8; 210]));
-    let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
-    assert!(alt.contains("1 small picture"), "{alt}");
-    assert!(!alt.contains("barcode"), "{alt}");
-    // Eleven small pictures: the first ten are named with their box, then how many more.
+    let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
+    assert_eq!(alt, "small picture, box 400, 600 to 485, 640");
+    // One picture drawn eleven times: one asset, eleven places; its alt text names the first
+    // ten with their box, then how many more.
     let mut content = String::from("BT /F1 12 Tf 72 780 Td (Text.) Tj ET\n");
     for k in 0..11 {
         content += &format!("q 30 0 0 30 {} 600 cm /Im1 Do Q\n", 40 + 45 * k);
     }
     let out = read(&image_page(595, 842, &content, 21, 21, &[0u8; 441]));
-    let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
+    assert_eq!(out.document.assets.len(), 1, "{:#?}", out.document.assets);
+    let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
     assert!(
-        alt.starts_with("11 small pictures (box 40, 600 to 70, 630"),
+        alt.starts_with("small picture, 11 places on page 1: box 40, 600 to 70, 630 on page 1;"),
         "{alt}"
     );
     assert_eq!(alt.matches("box ").count(), 10, "{alt}");
-    assert!(alt.ends_with("; 1 more)"), "{alt}");
+    assert!(alt.ends_with("; 1 more place"), "{alt}");
+    let shown = lines(page(&out, 1));
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|l| *l == "[media page-1-pic-1]")
+            .count(),
+        11,
+        "{shown:?}"
+    );
     // Not named a code: a gray photo of 8 by 8 pixels drawn square, a stencil icon of 8 by 8
     // pixels, and a picture of 21 by 21 gray pixels of 8 bits.
     let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 60 0 0 60 72 600 cm /Im1 Do Q\n";
@@ -573,9 +580,8 @@ fn small_square_picture_is_listed() {
         read(&image_page_bits(595, 842, content, 8, 8, 1, &[0x5au8; 8])),
         read(&image_page(595, 842, content, 21, 21, &[0u8; 441])),
     ] {
-        let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
-        assert!(alt.contains("1 small picture"), "{alt}");
-        assert!(!alt.contains("barcode"), "{alt}");
+        let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
+        assert_eq!(alt, "small picture, box 72, 600 to 132, 660");
     }
     // A picture under 1 square centimeter is not listed.
     let content = "BT /F1 12 Tf 72 780 Td (Text.) Tj ET\nq 20 0 0 20 400 600 cm /Im1 Do Q\n";
@@ -585,8 +591,8 @@ fn small_square_picture_is_listed() {
 
 #[test]
 fn a_small_logo_on_every_page_is_not_listed() {
-    // 30 pages with the same small picture at the same place: furniture, no asset. A page with
-    // a small picture of its own is one asset.
+    // 30 pages with the same small picture at the same place: furniture, no asset. A page that
+    // draws it once more at another place lists that place.
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
@@ -615,12 +621,10 @@ fn a_small_logo_on_every_page_is_not_listed() {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let out = read(&b.finish(catalog));
     let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, ["page-7"], "{:#?}", out.document.assets);
-    let alt = asset(&out, "page-7").alt.clone().unwrap_or_default();
-    assert!(
-        alt.starts_with("1 small picture (box 200, 300 to 240, 340"),
-        "{alt}"
-    );
+    assert_eq!(ids, ["page-7-pic-1"], "{:#?}", out.document.assets);
+    let alt = asset(&out, "page-7-pic-1").alt.clone().unwrap_or_default();
+    // It is the picture drawn on every page: a logo, also at its other place.
+    assert_eq!(alt, "logo or small picture, box 200, 300 to 240, 340");
 }
 
 #[test]
@@ -705,7 +709,8 @@ fn different_pictures_at_one_place_are_not_furniture() {
         .collect();
     let out = read(&picture_pages(&draws, &codes));
     assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
-    // Two logos taking turns 1.5 points apart on four pages: each is on two pages only.
+    // Two logos taking turns 1.5 points apart on four pages: each is on two pages only, so
+    // not furniture, and each is one asset for its two pages.
     let rgb = "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB \
                /BitsPerComponent 8";
     let logos = [(rgb, vec![200u8; 36]), (rgb, vec![50u8; 36])];
@@ -719,13 +724,15 @@ fn different_pictures_at_one_place_are_not_furniture() {
         })
         .collect();
     let out = read(&picture_pages(&draws, &logos));
-    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
-    // The same two logos taking turns at exactly one place: four pictures too.
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1", "page-2-pic-1"]);
+    // The same two logos taking turns at exactly one place: not furniture either.
     let draws: Vec<_> = (0..4)
         .map(|n| vec![(480.0, 780.0, 60.0, 45.0, n % 2)])
         .collect();
     let out = read(&picture_pages(&draws, &logos));
-    assert_eq!(out.document.assets.len(), 4, "{:#?}", out.document.assets);
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1", "page-2-pic-1"]);
     // The same logo on four pages stays furniture.
     let draws: Vec<_> = (0..4)
         .map(|_| vec![(480.0, 780.0, 60.0, 45.0, 0)])
@@ -1015,8 +1022,255 @@ fn small_square_picture_on_a_turned_page_stays_in_place() {
         [
             "Page 1",
             "Above the code.",
-            "[media page-1]",
+            "[media page-1-pic-1]",
             "Below the code."
         ]
     );
+}
+
+/// The ids of the assets that need vision.
+fn needing(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .assets
+        .iter()
+        .filter(|a| a.needs_vision)
+        .map(|a| a.id.as_str())
+        .collect()
+}
+
+/// The Markdown of a read.
+fn markdown(out: &ReadOutcome) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    )
+}
+
+/// The bytes written for asset `id`.
+fn blob<'a>(out: &'a ReadOutcome, id: &str) -> &'a [u8] {
+    &out.blobs
+        .iter()
+        .find(|b| b.asset == id)
+        .unwrap_or_else(|| panic!("no blob {id}"))
+        .bytes
+}
+
+/// A gray picture of 4 by 4 pixels with values from `base` on, as dictionary and data.
+fn gray(base: u8) -> (&'static str, Vec<u8>) {
+    (
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        (0..16u8).map(|i| base.wrapping_add(i * 9)).collect(),
+    )
+}
+
+#[test]
+fn logo_on_a_two_page_invoice_needs_no_vision() {
+    // An invoice of two pages: the same logo top left on both, text below it.
+    let draws = vec![
+        vec![(40.0, 760.0, 60.0, 40.0, 0)],
+        vec![(40.0, 760.0, 60.0, 40.0, 0)],
+    ];
+    let out = read_opts(&picture_pages(&draws, &[gray(10)]), true, Limits::default());
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    // One file for the logo, linked from both pages.
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1"]);
+    for n in 1..=2 {
+        let l = lines(page(&out, n));
+        assert_eq!(
+            l.iter().filter(|l| *l == "[media page-1-pic-1]").count(),
+            1,
+            "{l:?}"
+        );
+    }
+    // The crop is the box at 144 dpi plus 8 pixels on each side: 60 by 40 points.
+    assert_eq!(png_size(blob(&out, "page-1-pic-1")), (136, 96));
+    assert_eq!(out.blobs.len(), 1);
+    let md = markdown(&out);
+    assert_eq!(
+        md.matches("logo or small picture, box 40, 760 to 100, 800")
+            .count(),
+        2,
+        "{md}"
+    );
+    assert!(!md.contains("Needs vision"), "{md}");
+    assert!(!md.contains("Pictures that need vision"), "{md}");
+}
+
+#[test]
+fn single_logo_in_corner_needs_no_vision() {
+    // Bottom right, in the corner but above the bottom band.
+    let out = read(&picture_pages(
+        &[vec![(500.0, 130.0, 60.0, 35.0, 0)]],
+        &[gray(10)],
+    ));
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
+    assert_eq!(alt, "logo or small picture, box 500, 130 to 560, 165");
+}
+
+#[test]
+fn small_code_keeps_needs_vision_with_crop() {
+    // A 1-bit square code in the bottom right corner.
+    let content = "BT /F1 12 Tf 72 780 Td (Ticket.) Tj ET\nq 85 0 0 85 480 20 cm /Im1 Do Q\n";
+    let file = image_page_bits(595, 842, content, 21, 21, 1, &[0x5au8; 63]);
+    let out = read_opts(&file, true, Limits::default());
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    let alt = asset(&out, "page-1-pic-1").alt.clone().unwrap_or_default();
+    assert_eq!(
+        alt,
+        "small picture, box 480, 20 to 565, 105, likely a barcode or QR code, not decoded"
+    );
+    // The crop, not the page.
+    assert_eq!(png_size(blob(&out, "page-1-pic-1")), (186, 186));
+    assert_eq!(out.blobs.len(), 1);
+    let md = markdown(&out);
+    assert!(md.contains("### Pictures that need vision"), "{md}");
+    assert!(md.contains("| page-1-pic-1 |"), "{md}");
+    assert!(md.contains("Needs vision"), "{md}");
+}
+
+#[test]
+fn small_picture_mid_page_keeps_needs_vision_with_crop() {
+    let file = picture_pages(&[vec![(250.0, 400.0, 60.0, 40.0, 0)]], &[gray(10)]);
+    let out = read_opts(&file, true, Limits::default());
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    assert_eq!(
+        asset(&out, "page-1-pic-1").alt.as_deref(),
+        Some("small picture, box 250, 400 to 310, 440")
+    );
+    assert_eq!(png_size(blob(&out, "page-1-pic-1")), (136, 96));
+    assert_eq!(out.blobs.len(), 1);
+}
+
+#[test]
+fn scan_page_still_renders_whole_page() {
+    let out = read_opts(
+        &corpus("scan-truman-letter-nara.pdf"),
+        true,
+        Limits::default(),
+    );
+    let ids: Vec<&str> = out.blobs.iter().map(|b| b.asset.as_str()).collect();
+    assert_eq!(ids, ["page-1"]);
+    // A page with a large picture and a small logo: the whole page, the logo not cut twice.
+    let content = "BT /F1 12 Tf 72 700 Td (Text.) Tj ET\n\
+                   q 300 0 0 300 150 200 cm /Im1 Do Q\nq 60 0 0 40 40 760 cm /Im1 Do Q\n";
+    let out = read_opts(
+        &image_page(595, 842, content, 4, 4, &[90u8; 16]),
+        true,
+        Limits::default(),
+    );
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1"]);
+    assert_eq!(png_size(blob(&out, "page-1")), (1190, 1684));
+}
+
+#[test]
+fn turned_page_logo_band_in_turned_frame() {
+    // Text that reads upward, and a picture at x 20 to 80, y 400 to 460: in no band or corner
+    // of the upright page, but in the top band of the turned frame.
+    let content = "q 0 1 -1 0 595 0 cm\n\
+                   BT /F1 12 Tf 72 500 Td (First line of the turned page.) Tj ET\n\
+                   BT /F1 12 Tf 72 480 Td (Second line of the turned page.) Tj ET\n\
+                   BT /F1 12 Tf 72 200 Td (Third line of the turned page.) Tj ET\nQ\n\
+                   q 60 0 0 60 20 400 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, content, 4, 4, &[90u8; 16]));
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    assert_eq!(
+        asset(&out, "page-1-pic-1").alt.as_deref(),
+        Some("logo or small picture, box 400, 515 to 460, 575")
+    );
+}
+
+#[test]
+fn same_picture_on_every_page_is_a_logo() {
+    // The same picture mid-page on both pages of a document: a logo.
+    let draws = vec![
+        vec![(250.0, 400.0, 60.0, 40.0, 0)],
+        vec![(250.0, 400.0, 60.0, 40.0, 0)],
+    ];
+    let out = read(&picture_pages(&draws, &[gray(10)]));
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    // On one of two pages only: it needs vision.
+    let draws = vec![
+        vec![(250.0, 400.0, 60.0, 40.0, 0)],
+        vec![(250.0, 400.0, 60.0, 40.0, 1)],
+    ];
+    let out = read(&picture_pages(&draws, &[gray(10), gray(100)]));
+    assert_eq!(needing(&out), ["page-1-pic-1", "page-2-pic-1"]);
+}
+
+#[test]
+fn equal_pictures_share_one_asset() {
+    // One picture at three places on two pages of three: one file, three links.
+    let draws = vec![
+        vec![(250.0, 400.0, 60.0, 40.0, 0), (100.0, 300.0, 60.0, 40.0, 0)],
+        vec![(300.0, 300.0, 60.0, 40.0, 0)],
+        vec![],
+    ];
+    let out = read_opts(&picture_pages(&draws, &[gray(10)]), true, Limits::default());
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    assert_eq!(out.document.assets.len(), 1);
+    assert_eq!(out.blobs.len(), 1);
+    let links: usize = (1..=3)
+        .map(|n| {
+            lines(page(&out, n))
+                .iter()
+                .filter(|l| *l == "[media page-1-pic-1]")
+                .count()
+        })
+        .sum();
+    assert_eq!(links, 3);
+    // Each place says its own box.
+    let md = markdown(&out);
+    for b in [
+        "box 250, 400 to 310, 440",
+        "box 100, 300 to 160, 340",
+        "box 300, 300 to 360, 340",
+    ] {
+        assert!(md.contains(&format!("small picture, {b})")), "{b}: {md}");
+    }
+}
+
+#[test]
+fn different_codes_at_one_place_stay_separate() {
+    // Four tickets, each with its own code at the same place: four files.
+    let mask = "/Type /XObject /Subtype /Image /Width 24 /Height 24 /ImageMask true \
+                /BitsPerComponent 1";
+    let codes: Vec<(&str, Vec<u8>)> = (0..4u32)
+        .map(|k| (mask, (0..72u32).map(|i| (i * 7 + k * 13) as u8).collect()))
+        .collect();
+    let draws: Vec<_> = (0..4)
+        .map(|k| vec![(400.0, 600.0, 85.0, 85.0, k)])
+        .collect();
+    let out = read_opts(&picture_pages(&draws, &codes), true, Limits::default());
+    assert_eq!(
+        needing(&out),
+        [
+            "page-1-pic-1",
+            "page-2-pic-1",
+            "page-3-pic-1",
+            "page-4-pic-1"
+        ]
+    );
+    assert_eq!(out.blobs.len(), 4);
+}
+
+#[test]
+fn vision_table_lists_shared_asset_once_with_pages() {
+    // One picture on pages 1, 2 and 4 of four, each time at another place (at one place on
+    // three pages it would be page furniture).
+    let at = |y: f32| vec![(250.0, y, 60.0, 40.0, 0)];
+    let draws = vec![at(400.0), at(300.0), vec![], at(200.0)];
+    let out = read(&picture_pages(&draws, &[gray(10)]));
+    assert_eq!(needing(&out), ["page-1-pic-1"]);
+    let md = markdown(&out);
+    let rows: Vec<&str> = md
+        .lines()
+        .filter(|l| l.starts_with("| page-1-pic-1 |"))
+        .collect();
+    assert_eq!(rows.len(), 1, "{md}");
+    assert!(rows[0].contains("pages 1, 2, 4"), "{}", rows[0]);
 }

@@ -82,14 +82,27 @@ fn read_pdf(
     budget: &Budget,
     text_stop: &dyn Fn() -> bool,
 ) -> ReadOutcome {
+    // Rendered pages and extracted attachments share one room.
+    let blob_room = budget.limits().max_memory_bytes / 8;
+    read_pdf_in(reader, src, opts, budget, text_stop, blob_room)
+}
+
+/// [`read_pdf`] with `blob_room` bytes for rendered pages and extracted attachments.
+fn read_pdf_in(
+    reader: &PdfReader,
+    src: &Source,
+    opts: &ReadOptions,
+    budget: &Budget,
+    text_stop: &dyn Fn() -> bool,
+    blob_room: u64,
+) -> ReadOutcome {
     let mut info = source_info(src);
     info.reader = Some(ReaderInfo {
         id: reader.id().to_string(),
         version: reader.version().to_string(),
     });
     let mut out = Out::new(Document::new(info));
-    // Rendered pages and extracted attachments share one room.
-    out.blob_room = budget.limits().max_memory_bytes / 8;
+    out.blob_room = blob_room;
     let (pdf, mut out) = match open::open(src.bytes(), opts.password.as_deref(), budget, out) {
         Ok(opened) => opened,
         Err(open::Refused::Done(outcome)) => return *outcome,
@@ -308,6 +321,10 @@ fn lay_out(
     };
     let captions = pdf.map(render::figure_captions).unwrap_or_default();
     let furniture = render::furniture(read.values());
+    let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
+    let everywhere = render::on_every_page(read.values(), count);
+    // Small pictures by what they are: equal pictures share one asset.
+    let mut pictures = Pictures::default();
     let mut needs: Vec<render::Need> = Vec::new();
     let tables = Tables::default();
     // The model's link targets share what is left of the bytes the pages could keep.
@@ -368,16 +385,32 @@ fn lay_out(
             read_pages.insert(n);
             let here = on_page.get(&n).map_or(&[][..], Vec::as_slice);
             let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
-            // The picture's block is looked for at the run nearest to its top, after the
+            // Each picture's block is looked for at the run nearest to its top, after the
             // annotations' points, in the frame of the runs.
-            let vision = render::vision(info, &items, &furniture);
-            let picture = vision
-                .as_ref()
-                .and_then(|v| render::picture_top(v, items.turn, info.width, info.height))
-                .and_then(|top| quote::nearest_runs(&items.runs, &[top])[0].map(|at| (at, top)));
-            if let Some((at, _)) = picture {
-                points.push(at);
-            }
+            let seen = render::vision(info, &items, &furniture, &everywhere);
+            let tops: Vec<Option<(f32, f32)>> = match &seen {
+                Some(render::Seen::Page(v)) => {
+                    vec![render::picture_top(v, items.turn, info.width, info.height)]
+                }
+                Some(render::Seen::Small(list)) => list
+                    .iter()
+                    .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
+                    .collect(),
+                None => Vec::new(),
+            };
+            let found: Vec<(f32, f32)> = tops.iter().flatten().copied().collect();
+            let mut nearest = quote::nearest_runs(&items.runs, &found).into_iter();
+            // For each picture: the run found and its top, and the index of its point.
+            let probes_from = points.len();
+            let near: Vec<Option<Near>> = tops
+                .iter()
+                .map(|top| {
+                    let top = (*top)?;
+                    let at = nearest.next().flatten()?;
+                    points.push(at);
+                    Some((at, top, points.len() - 1))
+                })
+                .collect();
             let (ox, oy) = items.origin;
             let fields: Vec<[f32; 4]> = widgets
                 .get(&n)
@@ -411,7 +444,8 @@ fn lay_out(
             };
             let runs = std::mem::take(&mut items.runs);
             let laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
-            for (&i, two) in here.iter().zip(laid.probed.chunks(2)) {
+            let annot_probes = &laid.probed[..probes_from.min(laid.probed.len())];
+            for (&i, two) in here.iter().zip(annot_probes.chunks(2)) {
                 spots[i].anchor = two.iter().flatten().next().cloned();
             }
             if laid.probes_cut && here.iter().any(|&i| spots[i].anchor.is_none()) {
@@ -471,43 +505,88 @@ fn lay_out(
                     placed.insert(table, (section, first_table + k, anchor));
                 }
             }
-            let picture_block = picture.and_then(|_| laid.probed.last().cloned().flatten());
             blocks.extend(laid.blocks);
             blocks.extend(orphans);
-            if let Some(v) = vision {
-                let caption = captions.get(&n).cloned();
-                let charged = budget.add_elements(1).and_then(|()| {
-                    budget.charge_text(v.alt.len() + caption.as_ref().map_or(0, String::len))
-                });
-                match charged {
-                    Ok(()) => {
-                        let media = Block::Media {
-                            asset: format!("page-{n}"),
-                            anchor: None,
-                        };
-                        // After the block when its run stands above the picture's top.
-                        let after = picture.is_some_and(|(at, top)| at.1 > top.1);
-                        let at = render::place(&mut blocks, picture_block.as_ref(), after, media);
-                        // The tables of this page after it move one block on.
-                        for (s, b, _) in placed.values_mut() {
-                            if *s == section && *b >= at {
-                                *b += 1;
-                            }
+            // Where each picture goes among the blocks: after the block of its run when the run
+            // stands above the picture's top, else before it; at the end without one.
+            let spots: Vec<usize> = near
+                .iter()
+                .map(|found| {
+                    let Some((at, top, probe)) = found else {
+                        return blocks.len();
+                    };
+                    let anchor = laid.probed.get(*probe).cloned().flatten();
+                    let after = at.1 > top.1;
+                    render::position(&blocks, anchor.as_ref(), after)
+                })
+                .collect();
+            let mut media: Vec<(usize, Block)> = Vec::new();
+            match seen {
+                Some(render::Seen::Page(v)) => {
+                    let caption = captions.get(&n).cloned();
+                    let charged = budget.add_elements(1).and_then(|()| {
+                        budget.charge_text(v.alt.len() + caption.as_ref().map_or(0, String::len))
+                    });
+                    match charged {
+                        Ok(()) => {
+                            media.push((
+                                spots.first().copied().unwrap_or(blocks.len()),
+                                Block::Media {
+                                    asset: format!("page-{n}"),
+                                    alt: None,
+                                    anchor: None,
+                                },
+                            ));
+                            needs.push(render::Need {
+                                page: n,
+                                whole: Some(out.doc.assets.len()),
+                                crops: Vec::new(),
+                                origin: items.origin,
+                                cut: items.in_part,
+                                fallback: items.fallback,
+                            });
+                            out.doc.assets.push(render::asset(n, v.alt, caption));
                         }
+                        Err(hit) => out.loss(
+                            format!("p{n}"),
+                            format!("page {n} needs vision but is not listed: {hit}"),
+                            LossReason::Limit,
+                            Severity::Warning,
+                        ),
+                    }
+                }
+                Some(render::Seen::Small(list)) => {
+                    let crops = pictures.list(
+                        n,
+                        &list,
+                        &spots,
+                        captions.get(&n),
+                        (budget, &links),
+                        &mut media,
+                        out,
+                    );
+                    if !crops.is_empty() {
                         needs.push(render::Need {
                             page: n,
-                            asset: out.doc.assets.len(),
+                            whole: None,
+                            crops,
+                            origin: items.origin,
                             cut: items.in_part,
                             fallback: items.fallback,
                         });
-                        out.doc.assets.push(render::asset(n, v.alt, caption));
                     }
-                    Err(hit) => out.loss(
-                        format!("p{n}"),
-                        format!("page {n} needs vision but is not listed: {hit}"),
-                        LossReason::Limit,
-                        Severity::Warning,
-                    ),
+                }
+                None => {}
+            }
+            // From the last place back, so the places before stay where they are; pictures at
+            // one place keep their order.
+            for (at, block) in media.into_iter().rev() {
+                blocks.insert(at, block);
+                // The tables of this page after it move one block on.
+                for (s, b, _) in placed.values_mut() {
+                    if *s == section && *b >= at {
+                        *b += 1;
+                    }
                 }
             }
             // What a stop cuts: the page from the first part not built on, or its hidden text.
@@ -571,6 +650,7 @@ fn lay_out(
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
     }
+    pictures.finish(out);
     quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
         let (s, them) = if count == 1 {
@@ -610,7 +690,6 @@ fn lay_out(
             Severity::Warning,
         );
     }
-    let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
     if pages.len() < count {
         out.loss(
             "document",
@@ -623,6 +702,127 @@ fn lay_out(
         );
     }
     (links, spots, needs)
+}
+
+/// Where a picture is placed: the middle of the run found nearest to its top, its top, and
+/// the index of the point the layout probes for the run's block.
+type Near = ((f32, f32), (f32, f32), usize);
+
+/// What one more small picture asset keeps in the model besides its alt text: the asset,
+/// its id and its entry in the identity map.
+const PICTURE_COST: u64 = 256;
+
+/// The most bytes the alt text of a small picture asset takes: its name, the pages and the
+/// boxes of the places it lists (`render::Places::alt`).
+const PICTURE_ALT: u64 = 1_200;
+
+/// What one more place of a small picture keeps besides its words: its block.
+const PLACE_COST: u64 = 64;
+
+/// The small pictures of the document by what they are (`PageItems::images_id`), so equal
+/// pictures share one asset: the index of the asset and its places.
+#[derive(Default)]
+struct Pictures {
+    known: HashMap<u64, usize>,
+    assets: Vec<(usize, render::Places)>,
+}
+
+impl Pictures {
+    /// Lists the small pictures `list` of page `n`, whose places among the blocks are
+    /// `spots`: one block each, into `media` in reading order, and an asset for each picture
+    /// not seen before, named `page-<n>-pic-<k>` with `k` its place in reading order on the
+    /// page. The page's figure caption goes to the first new asset. Returns the pictures to
+    /// cut out of the page's render. What the element budget or the kept bytes no longer
+    /// take is left out with one loss.
+    #[allow(clippy::too_many_arguments)]
+    fn list(
+        &mut self,
+        n: u32,
+        list: &[render::Small],
+        spots: &[usize],
+        caption: Option<&String>,
+        (budget, room): (&Budget, &LinkRoom),
+        media: &mut Vec<(usize, Block)>,
+        out: &mut Out,
+    ) -> Vec<render::Crop> {
+        let mut order: Vec<usize> = (0..list.len()).collect();
+        // Reading order: by place among the blocks, then from the top, then from the left.
+        order.sort_by(|&a, &b| {
+            let (pa, pb) = (&list[a].framed, &list[b].framed);
+            spots[a]
+                .cmp(&spots[b])
+                .then(pb[3].total_cmp(&pa[3]))
+                .then(pa[0].total_cmp(&pb[0]))
+        });
+        let mut crops = Vec::new();
+        let mut caption = caption.cloned();
+        for (k, &i) in order.iter().enumerate() {
+            let p = &list[i];
+            let words = render::place_alt(p);
+            let known = self.known.get(&p.id).copied();
+            let charged = budget.add_elements(1).and_then(|()| {
+                let new = if known.is_none() {
+                    PICTURE_COST + PICTURE_ALT
+                } else {
+                    0
+                };
+                room.take_bytes(words.len() as u64 + PLACE_COST + new)
+            });
+            if let Err(hit) = charged {
+                let left = order.len() - k;
+                let what = if left == 1 {
+                    "1 small picture".to_string()
+                } else {
+                    format!("{left} small pictures")
+                };
+                out.loss(
+                    format!("p{n}"),
+                    format!("{what} on page {n} not listed: {hit}"),
+                    LossReason::Limit,
+                    Severity::Warning,
+                );
+                break;
+            }
+            let asset = match known {
+                Some(at) => {
+                    self.assets[at].1.add(n, p);
+                    self.assets[at].0
+                }
+                None => {
+                    let asset = out.doc.assets.len();
+                    out.doc.assets.push(render::picture_asset(
+                        format!("page-{n}-pic-{}", k + 1),
+                        words.clone(),
+                        caption.take(),
+                        !p.logo,
+                    ));
+                    self.known.insert(p.id, self.assets.len());
+                    self.assets.push((asset, render::Places::new(n, p)));
+                    crops.push(render::Crop { asset, b: p.b });
+                    asset
+                }
+            };
+            media.push((
+                spots[i],
+                Block::Media {
+                    asset: out.doc.assets[asset].id.clone(),
+                    alt: Some(words),
+                    anchor: None,
+                },
+            ));
+        }
+        crops
+    }
+
+    /// Writes each asset's alt text with all its places; one place that is not a logo makes
+    /// the asset need vision.
+    fn finish(self, out: &mut Out) {
+        for (asset, places) in self.assets {
+            let a = &mut out.doc.assets[asset];
+            a.alt = Some(places.alt());
+            a.needs_vision = !places.logo;
+        }
+    }
 }
 
 /// The points whose blocks the annotations of page `n` stand at, two for each of `here`: the
@@ -1179,6 +1379,57 @@ mod tests {
             ),
             "row 13 of table p3:t1 on"
         );
+    }
+
+    #[test]
+    fn crops_stop_when_the_blob_room_is_spent() {
+        let bytes = crate::fixtures::small_pictures_twin(2_000);
+        let src = Source {
+            path: None,
+            name: "file.pdf".into(),
+            bytes: Bytes::Owned(Arc::new(bytes.clone())),
+            sha256: "00".repeat(32),
+            size: bytes.len() as u64,
+            format: FormatId::Pdf,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "%PDF-".into(),
+            },
+            modified: None,
+        };
+        let opts = ReadOptions {
+            extract_assets: true,
+            ..ReadOptions::default()
+        };
+        let budget = Budget::new(Limits::default());
+        let room = 100_000;
+        let out = read_pdf_in(&PdfReader, &src, &opts, &budget, &|| false, room);
+        let kept: u64 = out.blobs.iter().map(|b| b.bytes.len() as u64).sum();
+        assert!(kept <= room, "{kept}");
+        assert!(
+            !out.blobs.is_empty() && out.blobs.len() < 2_000,
+            "{}: {:#?}",
+            out.blobs.len(),
+            out.document.losses
+        );
+        let left: Vec<&Loss> = out
+            .document
+            .losses
+            .iter()
+            .filter(|l| l.why == LossReason::Limit)
+            .collect();
+        assert_eq!(left.len(), 1, "{:#?}", out.document.losses);
+        let rest = 2_000 - out.blobs.len();
+        assert_eq!(left[0].location, "p1");
+        assert!(
+            left[0].what.starts_with(&format!(
+                "{rest} small pictures are not written, from page 1 on: "
+            )),
+            "{}",
+            left[0].what
+        );
+        assert!(left[0].what.contains("bytes left for extracted pictures"));
+        assert_eq!(out.completeness, Completeness::Partial);
     }
 
     #[test]

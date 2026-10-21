@@ -607,3 +607,43 @@ pub fn helvetica_width(text: &str, size: f32) -> f32 {
         .sum();
     units as f32 * size / 1000.0
 }
+
+/// A page of 10,000 by 10,000 points with a line of text and `n` different small pictures
+/// of 30 by 30 points (each over 1 cm2, all of them under 2 % of the page) on a grid in the
+/// middle: no band, no corner, so each needs vision and is cut out of the page's render.
+/// Each picture is an inline picture of one RGB pixel of its own color, so the file and its
+/// objects stay small.
+pub fn small_pictures_twin(n: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut content = String::from("BT /F1 12 Tf 3000 8500 Td (Many small pictures.) Tj ET\n");
+    let mut state = 7u32;
+    for k in 0..n {
+        state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        let color = (state >> 8) & 0xff_ffff;
+        let (x, y) = (2500 + 100 * (k % 50), 2500 + 100 * (k / 50));
+        content.push_str(&format!(
+            "q 30 0 0 30 {x} {y} cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID {color:06x}> EI Q\n"
+        ));
+    }
+    let c = b.stream("/Filter /FlateDecode", &deflated(content.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 10000 10000] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// `data` deflated.
+fn deflated(data: &[u8]) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    z.write_all(data).expect("deflate");
+    z.finish().expect("deflate")
+}

@@ -1232,3 +1232,32 @@ fn a_page_at_the_pixel_cap_renders_small_enough_for_its_png() {
     assert!(w > 3000 && h > 3000, "{w} x {h}");
     assert_rss_under_256_mib();
 }
+
+#[test]
+fn many_small_pictures_crops_bounded() {
+    // The twin with one picture, for the time a page with crops takes.
+    let start = Instant::now();
+    let one = read_with(&common::small_pictures_twin(1), true);
+    let one_took = start.elapsed();
+    assert_eq!(one.blobs.len(), 1, "{:#?}", one.document.losses);
+    let file = common::small_pictures_twin(2_000);
+    let start = Instant::now();
+    let out = read_with(&file, true);
+    let took = start.elapsed();
+    eprintln!(
+        "1 picture: {one_took:?}; 2,000 pictures: {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    assert!(took < Duration::from_secs(60), "{took:?}");
+    assert_rss_under_256_mib();
+    // Each picture is an asset of its own that needs vision; the page is not one.
+    assert_eq!(out.document.assets.len(), 2_000);
+    assert!(out.document.assets.iter().all(|a| a.needs_vision));
+    assert!(!out.document.assets.iter().any(|a| a.id == "page-1"));
+    // The crops fit the blob room, an eighth of the memory limit.
+    let kept: u64 = out.blobs.iter().map(|b| b.bytes.len() as u64).sum();
+    assert!(kept <= hostile().max_memory_bytes / 8, "{kept}");
+    assert_eq!(out.blobs.len(), 2_000, "{:#?}", out.document.losses);
+    // The blob room running out is in the reader's own tests (lib.rs): a memory limit small
+    // enough for that leaves too little for the render itself.
+}

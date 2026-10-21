@@ -452,7 +452,7 @@ impl LinkRoom {
 
     /// Takes `bytes` of overhead for the cells of a table: first from what laid-out pages
     /// gave back, then from the room the link targets share.
-    fn take_bytes(&self, bytes: u64) -> Result<(), LimitHit> {
+    pub(crate) fn take_bytes(&self, bytes: u64) -> Result<(), LimitHit> {
         let (freed, left) = (self.freed.get(), self.left.get());
         if bytes > freed.saturating_add(left) {
             return Err(LimitHit {

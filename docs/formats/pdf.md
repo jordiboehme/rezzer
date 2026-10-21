@@ -49,6 +49,10 @@ Built on (versions as used in the development version):
 ### Pictures and embedded files
 
 - A page without a text layer, with glyphs that have no Unicode mapping or with large pictures needs vision. It is listed with the reason. With an output directory (`-o` on the command line), Rezzer renders it to a PNG file at 144 dpi, at most 16 million pixels
+- Small pictures (1 square centimeter or more, together under 2 % of the page) do not make the whole page need vision. Each one is written at its place in the text with its box in points. With an output directory, Rezzer cuts it out of the page render with a margin of 8 pixels and writes it as `page-<N>-pic-<K>.png` (picture K on page N, in reading order)
+- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 15 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures, and likely codes, are marked "Needs vision"
+- Equal pictures share one file. The same picture on three pages is one PNG, and each place links to it with its own box. The list of pictures that need vision has it once, with its pages and boxes
+- A picture at the same place on at least 3 pages and half the pages is page furniture, like a running header. It is not listed
 - Attachments are listed with name and size. They are never opened
 - A PDF with a user password is read with `--password-stdin` (command line) or the `password` option (MCP). The password never shows up in the output, in the logs or in the cache
 
@@ -110,6 +114,8 @@ Lorem ipsum dolor sit amet
 - Tables on pages with form fields and tables inside pictures are not rebuilt
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
 - A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
+- A small picture in a corner or in the top or bottom band is taken as a logo, even when it shows content. It is listed with its box, but not marked as needing vision
+- Equal pictures are found by their pixel data. A picture that is too large to compare is known by its object, so two copies of it in different objects get two files. A stencil mask drawn in two colors is one picture
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
 - The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so
 - A word split by a hyphen at a line end keeps its hyphen ("adip-iscing"). Rezzer cannot tell a break hyphen from a real one, so it keeps both
