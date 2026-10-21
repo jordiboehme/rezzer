@@ -13,16 +13,16 @@
 //! field that does not fit ends the fields with one loss; a script whose text does not fit is
 //! kept without the text, and one loss says how many.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use pdfparts::{FieldKind, Form, Issue, IssueKind, Pdf, Script, Sig, SigKind};
+use pdfparts::{FieldKind, Form, Issue, IssueKind, Link, LinkTarget, Pdf, Script, Sig, SigKind};
 use rezzer_model::{
     Anchor, Edge, Embedded, FieldAction, FormField, Formula, Graph, LossReason, Node, Role,
     Severity, Signature, Value,
 };
 
 use crate::Out;
-use crate::objects::{Kept, iso, quote};
+use crate::objects::{History, Kept, iso, quote};
 
 /// How many characters of a format script stand for the format when there are no words for it.
 const FORMAT_CHARS: usize = 80;
@@ -30,9 +30,9 @@ const FORMAT_CHARS: usize = 80;
 /// The note of a calculation that builds field names at run time.
 const DYNAMIC: &str = "reads unknown fields, see script";
 
-/// Reads the form logic of `pdf` into `out`. `ends` are where the saves of the file end,
-/// oldest first.
-pub(crate) fn read(pdf: &Pdf, ends: &[u64], kept: &Kept<'_>, out: &mut Out) {
+/// Reads the form logic of `pdf` into `out`. `links` are the file's links, which the link list
+/// names already; `history` says where the saves of the file end.
+pub(crate) fn read(pdf: &Pdf, links: &[Link], history: &History, kept: &Kept<'_>, out: &mut Out) {
     let form = pdf.form();
     let scripts = pdf.scripts();
     let sigs = pdf.signatures();
@@ -62,11 +62,11 @@ pub(crate) fn read(pdf: &Pdf, ends: &[u64], kept: &Kept<'_>, out: &mut Out) {
             Severity::Warning,
         );
     }
-    signatures(sigs, ends, kept, out);
+    signatures(sigs, history, kept, out);
     if let Some(form) = form {
-        fields(form, kept, out);
+        fields(form, scripts, kept, out);
     }
-    list_scripts(scripts, kept, out);
+    list_scripts(scripts, links, kept, out);
 }
 
 /// The facts about the form, scripts and signatures; a fact a cut list cannot tell is left
@@ -92,8 +92,11 @@ fn facts(
     if javascript || !scripts_cut {
         facts.has_javascript = Some(javascript);
     }
-    if !sigs.is_empty() || !sigs_cut {
-        facts.signed = Some(!sigs.is_empty());
+    // Approval and certification signatures sign the content; a usage rights signature only
+    // unlocks features of a viewer, so it is listed but does not make the file signed.
+    let signs = sigs.iter().any(|s| s.kind != SigKind::UsageRights);
+    if signs || !sigs_cut {
+        facts.signed = Some(signs);
     }
     if !sigs.is_empty() && !sigs_cut {
         facts.signatures = Some(count(sigs.len()));
@@ -117,11 +120,27 @@ fn signed_end(range: &[u64]) -> Option<u64> {
         .try_fold(0u64, |end, e| e.map(|e| end.max(e)))
 }
 
-/// One model signature per signature, with the saves that end after its signed bytes.
-fn signatures(sigs: &[Sig], ends: &[u64], kept: &Kept<'_>, out: &mut Out) {
+/// How many of the kept saves came after signed bytes that end at `end`: a save is later when
+/// the save before it ends at or after `end`, so the line end after `%%EOF`, signed or not,
+/// counts with the save it ends. The oldest kept save is later only when older saves were
+/// skipped, and then not known: the second value says whether the count is only a lower bound.
+fn saves_after(end: u64, history: &History) -> (usize, bool) {
+    let ends = &history.ends;
+    let later = ends.windows(2).filter(|w| w[0] >= end).count();
+    let bound = history.skipped > 0 && ends.first().is_none_or(|&first| first >= end);
+    (later, bound)
+}
+
+/// One model signature per signature, with the saves after its signed bytes. Past the
+/// revisions that are compared, the count is a lower bound, which one loss says.
+fn signatures(sigs: &[Sig], history: &History, kept: &Kept<'_>, out: &mut Out) {
+    let mut bounds: Vec<usize> = Vec::new();
     for (k, s) in sigs.iter().enumerate() {
-        let later =
-            signed_end(&s.byte_range).map_or(0, |end| ends.iter().filter(|&&e| e > end).count());
+        let (later, bound) =
+            signed_end(&s.byte_range).map_or((0, false), |end| saves_after(end, history));
+        if bound {
+            bounds.push(k + 1);
+        }
         let model = Signature {
             anchor: s.field.as_deref().map(anchor),
             kind: match s.kind {
@@ -160,9 +179,28 @@ fn signatures(sigs: &[Sig], ends: &[u64], kept: &Kept<'_>, out: &mut Out) {
                 LossReason::Limit,
                 Severity::Warning,
             );
-            return;
+            break;
         }
         out.doc.facets.signatures.push(model);
+    }
+    if let Some(first) = bounds.first() {
+        let n = bounds.len();
+        out.loss(
+            "signatures",
+            format!(
+                "the saves after {} are counted only among the newest {} saves, so there may \
+                 be more: at least that many came after {}",
+                if n == 1 {
+                    format!("signature {first}")
+                } else {
+                    format!("{n} signatures (the first is signature {first})")
+                },
+                history.ends.len(),
+                if n == 1 { "it" } else { "each" }
+            ),
+            LossReason::Limit,
+            Severity::Info,
+        );
     }
 }
 
@@ -228,7 +266,14 @@ impl Dropped {
 }
 
 /// The fields with their calculations, then the graph of which field reads which.
-fn fields(form: &Form, kept: &Kept<'_>, out: &mut Out) {
+fn fields(form: &Form, scripts: &[Script], kept: &Kept<'_>, out: &mut Out) {
+    // The field actions of every kind, also those whose script was not read (too long, or no
+    // text), by their trigger `field <full name> <event>`.
+    let triggers: HashSet<&str> = scripts
+        .iter()
+        .filter(|s| s.trigger.starts_with("field "))
+        .map(|s| s.trigger.as_str())
+        .collect();
     let mut calc: HashMap<&str, u32> = HashMap::new();
     for (k, name) in form.calc_order.iter().enumerate() {
         calc.entry(name.as_str())
@@ -236,12 +281,15 @@ fn fields(form: &Form, kept: &Kept<'_>, out: &mut Out) {
     }
     let total = form.fields.len();
     let mut dropped = Dropped::default();
+    // Calculations kept as a field action but not as a formula.
+    let mut calcs_dropped = Dropped::default();
     // The kept fields' names in model order, each with the names its calculation reads.
     let mut kept_fields: Vec<(&str, Vec<String>)> = Vec::new();
     for (k, f) in form.fields.iter().enumerate() {
         let name = f.full_name.as_str();
         let order = calc.get(name).copied();
-        let calculates = f.actions.iter().any(|(event, _)| event == "calculate");
+        let calculates = f.actions.iter().any(|(event, _)| event == "calculate")
+            || triggers.contains(format!("field {name} calculate").as_str());
         let role = if calculates {
             Role::Result
         } else if f.flags & 1 != 0 {
@@ -344,7 +392,7 @@ fn fields(form: &Form, kept: &Kept<'_>, out: &mut Out) {
                 let mut texts: Vec<&str> = vec![&formula.anchor.0, &**text, &formula.dialect, note];
                 texts.extend(formula.references.iter().map(|a| a.0.as_str()));
                 if let Err(why) = kept.take(1 + formula.references.len() as u64, &texts) {
-                    dropped.add(name, event, why);
+                    calcs_dropped.add(name, event, why);
                 } else {
                     out.doc.facets.formulas.push(formula);
                     reads.extend(refs.names);
@@ -372,6 +420,24 @@ fn fields(form: &Form, kept: &Kept<'_>, out: &mut Out) {
             Severity::Warning,
         );
     }
+    if let Some((field, _)) = calcs_dropped.first {
+        let n = calcs_dropped.count;
+        out.loss(
+            "form",
+            format!(
+                "{n} {} not kept as formulas, the first that of field {field}; the script \
+                 stays with its field: {}",
+                if n == 1 {
+                    "calculation is"
+                } else {
+                    "calculations are"
+                },
+                calcs_dropped.why
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
+    }
     graph(&kept_fields, kept, out);
 }
 
@@ -386,7 +452,7 @@ fn graph(kept_fields: &[(&str, Vec<String>)], kept: &Kept<'_>, out: &mut Out) {
         .map(|(i, (name, _))| (*name, i))
         .collect();
     let mut edges: Vec<(usize, usize)> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     for (i, (_, reads)) in kept_fields.iter().enumerate() {
         for r in reads {
             if let Some(&j) = index.get(r.as_str())
@@ -474,15 +540,104 @@ fn role_word(role: Role) -> &'static str {
     }
 }
 
+/// The action word pdfparts gives an action type, for the types the links list by name.
+fn action_word(name: &str) -> String {
+    match name {
+        "GoToR" => "goto-remote".into(),
+        "GoToE" => "goto-embedded".into(),
+        "GoTo3DView" => "goto-3d-view".into(),
+        "SetOCGState" => "set-layer-state".into(),
+        "URI" => "uri".into(),
+        _ => {
+            let mut out = String::new();
+            for (i, c) in name.chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    out.push('-');
+                }
+                out.extend(c.to_lowercase());
+            }
+            out
+        }
+    }
+}
+
+/// A link action: its page, action word and file.
+type LinkKey = (u32, String, Option<String>);
+
+/// The first action of each link that the links list names, by page and action word, with its
+/// file for a Launch or remote link, each with how many links name it.
+fn listed_by_links(links: &[Link]) -> HashMap<LinkKey, usize> {
+    let mut out = HashMap::new();
+    for l in links {
+        let key = match &l.target {
+            LinkTarget::Launch(file) => (l.page, "launch".to_string(), Some(file.to_string())),
+            LinkTarget::Remote { file, .. } => {
+                (l.page, "goto-remote".to_string(), Some(file.to_string()))
+            }
+            // A script link is listed here, with its text.
+            LinkTarget::Other(action) if &**action == "JavaScript" => continue,
+            LinkTarget::Other(action) => (l.page, action_word(action), None),
+            _ => continue,
+        };
+        *out.entry(key).or_insert(0) += 1;
+    }
+    out
+}
+
 /// Every script and action of the file as an embedded `script`, with its text: the trigger
-/// as the name, the action's kind and the script's name as the detail. Link actions without a
-/// script are left out: the links list names them. A text that does not fit is left out of
-/// its entry; an entry that does not fit ends the list.
-fn list_scripts(scripts: &[Script], kept: &Kept<'_>, out: &mut Out) {
+/// as the name, the action's kind and the script's name as the detail. The first action of a
+/// link that the links list names already is left out; actions later in a link's chain are
+/// listed here. A JavaScript action without a readable script is listed without a text, and
+/// one loss says so. A text that does not fit is left out of its entry; an entry that does
+/// not fit ends the list.
+fn list_scripts(scripts: &[Script], links: &[Link], kept: &Kept<'_>, out: &mut Out) {
+    let mut by_links = listed_by_links(links);
+    let mut take = |key: LinkKey| match by_links.get_mut(&key) {
+        Some(n) if *n > 0 => {
+            *n -= 1;
+            true
+        }
+        _ => false,
+    };
     let listed: Vec<&Script> = scripts
         .iter()
-        .filter(|s| s.text.is_some() || !s.trigger.starts_with("link page "))
+        .filter(|s| {
+            let Some(page) = s
+                .trigger
+                .strip_prefix("link page ")
+                .and_then(|p| p.parse::<u32>().ok())
+            else {
+                return true;
+            };
+            if s.kind == "javascript" {
+                return true;
+            }
+            let target = s.target.as_deref().map(str::to_string);
+            let named = match s.kind.as_str() {
+                "launch" | "goto-remote" => take((page, s.kind.clone(), target)),
+                other => take((page, other.to_string(), None)),
+            };
+            !named
+        })
         .collect();
+    let unread: Vec<&&Script> = listed
+        .iter()
+        .filter(|s| s.kind == "javascript" && s.text.is_none())
+        .collect();
+    if let Some(first) = unread.first() {
+        let n = unread.len();
+        out.loss(
+            "scripts",
+            format!(
+                "{n} JavaScript {} listed without a script, which could not be read (the first is \
+                 the {} one); a limit or damage loss may say why",
+                if n == 1 { "action is" } else { "actions are" },
+                quote(&first.trigger)
+            ),
+            LossReason::Uncertain,
+            Severity::Warning,
+        );
+    }
     let total = listed.len();
     let mut dropped = 0usize;
     let mut first_dropped: Option<(String, String)> = None;

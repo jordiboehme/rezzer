@@ -2419,9 +2419,10 @@ fn read_through(bytes: &[u8]) -> ReadOutcome {
 }
 
 /// Reads `twin`, the same objects where no reader looks, then `shape`. The shape stays under
-/// 256 MiB and within 64 MiB of what its twin took (the object layer keeps at most a 64th of
-/// the memory limit, and the renderer and JSON writer copy that about four times), and
-/// finishes in time. Returns the shape's outcome.
+/// 256 MiB and within 64 MiB of what its twin took (each list of the object layer keeps at most
+/// a 64th of the memory limit in one of its shares, the metadata, outline and links in one and
+/// the form logic in another, and the renderer and JSON writer copy what is kept about four
+/// times), and finishes in time. Returns the shape's outcome.
 fn against_twin(shape: &[u8], twin: &[u8]) -> ReadOutcome {
     let start = Instant::now();
     drop(read_through(twin));
@@ -3526,11 +3527,13 @@ fn many_scripted_form_fields_stay_within_the_object_budget() {
     let out = read_through(&file("/AcroForm"));
     let rss = common::max_rss_bytes();
     assert!(
-        rss < twin + (128 << 20) && rss < 384 << 20,
+        rss < twin + (128 << 20),
         "max RSS {} MiB, twin {} MiB",
         rss >> 20,
         twin >> 20
     );
+    // The binding bound; the margin over the twin rule is pdfparts' own form data.
+    assert_rss_under_256_mib();
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -3559,7 +3562,27 @@ fn one_field_read_by_many_calculations_is_bounded() {
             fields
         })
     };
-    let out = against_twin(&file("/AcroForm"), &file("/Junk"));
+    // Measured at the 512 MiB limits: the twin 68 MiB, pdfparts' own form data for 50,000
+    // fields about 35 MiB more, the reader's copies and the renderer 24 MiB more. The rule of
+    // the twins (64 MiB) leaves only 5 MiB for a busy machine, so the bound here also counts
+    // pdfparts' part, and the binding 256 MiB holds.
+    let start = Instant::now();
+    drop(read_through(&file("/Junk")));
+    let twin = common::max_rss_bytes();
+    let out = read_through(&file("/AcroForm"));
+    let rss = common::max_rss_bytes();
+    assert!(
+        rss < twin + (96 << 20),
+        "max RSS {} MiB, twin {} MiB",
+        rss >> 20,
+        twin >> 20
+    );
+    assert_rss_under_256_mib();
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
     let facets = &out.document.facets;
     let kept = facets.fields.len();
     assert!(kept > 100 && kept < 50_001, "{kept}");
@@ -3572,14 +3595,38 @@ fn one_field_read_by_many_calculations_is_bounded() {
     form_cut(&out, "form", "form fields are not kept");
 }
 
+/// `n` bytes of script text, packed with FlateDecode about 10 to 1, so the guard's ratio check
+/// lets it pass. The text is packed piece by piece and never held whole.
+fn packed_script(n: usize) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut x: u64 = 12345;
+    let mut piece = Vec::with_capacity(1 << 16);
+    let mut written = 0;
+    while written < n {
+        piece.clear();
+        while piece.len() < 1 << 16 {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let c = (x >> 59) as u8;
+            piece.push(if c < 26 { b'a' + c } else { b' ' });
+            piece.extend_from_slice(&[b'x'; 47]);
+            piece.push(b'\n');
+        }
+        z.write_all(&piece).expect("deflate");
+        written += piece.len();
+    }
+    z.finish().expect("deflate")
+}
+
 #[test]
-fn a_huge_script_is_not_copied() {
-    // A 50 MB calculate script, beside a small field that reads nothing. Shape and twin are
-    // built and read one after the other, so the test holds one file at a time.
-    const SIZE: usize = 50 << 20;
+fn a_huge_script_is_not_unpacked() {
+    // A packed calculate script of 100 MiB, beside a small field that reads nothing. pdfparts
+    // refuses a script over its size before it unpacks it.
+    let packed = packed_script(100 << 20);
     let file = |key: &str| {
         form_file(key, &mut |b| {
-            let js = b.stream("", "var x = 1;\n".repeat(SIZE / 11).as_bytes());
+            let js = b.stream("/Filter /FlateDecode", &packed);
             let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R >>"));
             vec![
                 format!("<< /T (Big) /FT /Tx /AA << /C {action} 0 R >> >>"),
@@ -3587,26 +3634,9 @@ fn a_huge_script_is_not_copied() {
             ]
         })
     };
-    let start = Instant::now();
-    drop(read_through(&file("/Junk")));
-    let twin_rss = common::max_rss_bytes();
-    let out = read_through(&file("/AcroForm"));
-    let rss = common::max_rss_bytes();
-    // pdfparts unpacks the stream and keeps its text once (at most three copies of it while it
-    // does); nothing of it reaches the model.
-    assert!(
-        rss < twin_rss + (64 << 20) + 3 * SIZE as u64,
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
-        twin_rss >> 20
-    );
-    assert!(
-        start.elapsed() < Duration::from_secs(60),
-        "{:?}",
-        start.elapsed()
-    );
-    let json = serde_json::to_string(&out.document).unwrap();
-    assert!(json.len() < 1 << 20, "{} bytes", json.len());
+    let (shape, twin) = (file("/AcroForm"), file("/Junk"));
+    drop(packed);
+    let out = against_twin(&shape, &twin);
     let facets = &out.document.facets;
     let names: Vec<&str> = facets.fields.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Big", "Small"]);
@@ -3619,9 +3649,48 @@ fn a_huge_script_is_not_copied() {
         .find(|e| e.name == "field Big calculate")
         .expect("the script is listed");
     assert_eq!(script.text, None);
-    form_cut(&out, "form", "field script is not kept");
-    form_cut(&out, "scripts", "the text of 1 script is not kept");
+    form_cut(&out, "form", "a script may have");
     assert_eq!(out.document.properties.facts.has_javascript, Some(true));
+}
+
+#[test]
+fn both_shares_of_the_object_layer_full_at_once_are_bounded() {
+    // Keywords fill the share of the metadata, scripted fields the share of the form logic;
+    // the twin names both under keys nobody reads.
+    // 200,000 keywords and 50,000 fields fill each share many times over.
+    let words: Vec<String> = (0..200_000).map(|k| format!("k{k}")).collect();
+    let list = words.join(",");
+    drop(words);
+    let file = |shape: bool| {
+        catalog_file(&mut |b| {
+            let js =
+                b.add(r#"<< /S /JavaScript /JS (AFNumber_Format\(2, 0, 0, 0, "", true\);) >>"#);
+            let fields: Vec<String> = (0..50_000)
+                .map(|k| {
+                    format!("<< /T (field{k}) /FT /Tx /V (value {k}) /AA << /F {js} 0 R >> >>")
+                })
+                .collect();
+            let fields = format!("[{}]", fields.join("\n"));
+            let fields = b.add(fields);
+            let k = b.add(format!("({list})"));
+            if shape {
+                (
+                    format!("/AcroForm << /Fields {fields} 0 R >>"),
+                    format!("<< /Keywords {k} 0 R /Title (Kept) >>"),
+                )
+            } else {
+                (
+                    format!("/Junk << /Fields {fields} 0 R >>"),
+                    format!("<< /JunkKeywords {k} 0 R >>"),
+                )
+            }
+        })
+    };
+    let out = against_twin(&file(true), &file(false));
+    assert!(out.document.properties.keywords.len() > 1_000);
+    assert!(out.document.facets.fields.len() > 1_000);
+    limit_at(&out, "metadata", "keywords");
+    form_cut(&out, "form", "form fields are not kept");
 }
 
 #[test]

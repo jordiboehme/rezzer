@@ -50,7 +50,7 @@ pub(crate) fn read(
     pdf: &Pdf,
     pages: &[PageInfo],
     links: &[Link],
-    history: History,
+    mut history: History,
     opts: &ReadOptions,
     budget: &Budget,
     room: &LinkRoom,
@@ -63,12 +63,13 @@ pub(crate) fn read(
     link_graph(links, pages, &kept, out);
     attachments(pdf, opts, &kept, out);
     threads(pdf, &kept, out);
-    timeline(history.events, &kept, out);
+    timeline(std::mem::take(&mut history.events), &kept, out);
     // The form logic has a share of its own, so a large form never costs the outline or
     // links, nor they the form. Its pdfparts issues are among those listed next.
     forms::read(
         pdf,
-        &history.ends,
+        links,
+        &history,
         &Kept::new(room, budget, "the form logic"),
         out,
     );
@@ -802,7 +803,10 @@ pub(crate) type Events = Vec<(u32, Option<String>, String)>;
 /// ends, oldest first, for the saves after a signature.
 pub(crate) struct History {
     events: Events,
-    ends: Vec<u64>,
+    /// Where each kept save ends, oldest first.
+    pub ends: Vec<u64>,
+    /// Older saves that are counted but not compared.
+    pub skipped: usize,
 }
 
 /// The revisions: their count as a fact, their issues as losses, and the time and words of
@@ -834,6 +838,7 @@ pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> History {
         return History {
             events: Vec::new(),
             ends,
+            skipped: r.skipped,
         };
     }
     let events = r
@@ -844,7 +849,11 @@ pub(crate) fn revisions(pdf: &Pdf, budget: &Budget, out: &mut Out) -> History {
             (rev.number, time, revision_text(rev))
         })
         .collect();
-    History { events, ends }
+    History {
+        events,
+        ends,
+        skipped: r.skipped,
+    }
 }
 
 /// One timeline event per revision, charged like every other copy.

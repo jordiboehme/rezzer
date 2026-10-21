@@ -11,7 +11,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::append_update;
+use common::{Builder, Page, append_update, pdf, show};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Bytes, Confidence, Detection, FormField, FormatId, LossReason, ReadOptions,
@@ -227,7 +227,8 @@ fn signature_with_later_revisions() {
     // The save that signed ends where the signature does: no save came after it.
     assert_eq!(s.later_revisions, 0);
     let facts = &out.document.properties.facts;
-    assert_eq!(facts.signed, Some(true));
+    // A usage rights signature unlocks features of a viewer; it does not sign the content.
+    assert_eq!(facts.signed, Some(false));
     assert_eq!(facts.signatures, Some(1));
     assert_eq!(facts.form_fields, Some(199));
     let xfa = out
@@ -265,4 +266,177 @@ fn field_values_and_options() {
             assert!(matches!(v, Value::Text { .. }), "{f:?}");
         }
     }
+}
+
+#[test]
+fn link_actions_without_text_are_listed() {
+    // Two script links without a readable script, a Launch after a URI and a Launch after a
+    // script: every action is listed once, none is followed.
+    let link = |rect: &str, action: &str| {
+        format!("<< /Type /Annot /Subtype /Link /Rect [{rect}] /A << {action} >> >>")
+    };
+    let page = Page {
+        content: show("F1", 12.0, 72.0, 700.0, "Hello"),
+        annots: vec![
+            link("0 0 50 50", "/S /JavaScript"),
+            link("60 0 110 50", "/S /JavaScript /JS 99"),
+            link(
+                "120 0 170 50",
+                "/S /URI /URI (http://x.example/) /Next << /S /Launch /F (evil.exe) >>",
+            ),
+            link(
+                "180 0 230 50",
+                r"/S /JavaScript /JS (app.alert\(1\)) /Next << /S /Launch /F (evil2.exe) >>",
+            ),
+            link("240 0 290 50", "/S /Launch /F (first.exe)"),
+        ],
+        ..Page::default()
+    };
+    let out = read(&pdf(&[page], ""));
+    let listed: Vec<(&str, &str, Option<&str>, bool)> = out
+        .document
+        .facets
+        .embedded
+        .iter()
+        .map(|e| {
+            (
+                e.kind.as_str(),
+                e.detail.as_deref().unwrap_or_default(),
+                e.target.as_deref(),
+                e.text.is_some(),
+            )
+        })
+        .collect();
+    let count = |kind: &str, detail: &str, target: Option<&str>| {
+        listed
+            .iter()
+            .filter(|(k, d, t, _)| *k == kind && *d == detail && *t == target)
+            .count()
+    };
+    assert_eq!(count("script", "launch", Some("evil.exe")), 1, "{listed:?}");
+    assert_eq!(
+        count("script", "launch", Some("evil2.exe")),
+        1,
+        "{listed:?}"
+    );
+    // The Launch a link starts with is listed by the links, once.
+    assert_eq!(
+        count("launch-action", "from page 1", Some("first.exe")),
+        1,
+        "{listed:?}"
+    );
+    assert_eq!(
+        count("script", "launch", Some("first.exe")),
+        0,
+        "{listed:?}"
+    );
+    let scripts: Vec<bool> = listed
+        .iter()
+        .filter(|(k, d, _, _)| *k == "script" && *d == "javascript")
+        .map(|(_, _, _, text)| *text)
+        .collect();
+    assert_eq!(scripts, [false, false, true], "{listed:?}");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "scripts" && l.what.contains("2 JavaScript actions")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// A one-page file with a signature field. The signed range leaves out the last `unsigned`
+/// bytes; without `final_eol` the file ends right after `%%EOF`.
+fn signed(unsigned: usize, final_eol: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let contents = b.stream("", b"BT ET");
+    let page = b.reserve();
+    let sig = b.add(format!(
+        "<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /Name (Ann) \
+         /ByteRange [0 AAAAAAAAAA BBBBBBBBBB CCCCCCCCCC] /Contents <{}> >>",
+        "0".repeat(64)
+    ));
+    let field = b.add(format!(
+        "<< /FT /Sig /T (Sig1) /V {sig} 0 R /Type /Annot /Subtype /Widget /Rect [0 0 0 0] \
+         /P {page} 0 R >>"
+    ));
+    b.set(
+        page,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Contents {contents} 0 R \
+             /Annots [{field} 0 R] >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{page} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /AcroForm << /Fields [{field} 0 R] /SigFlags 3 \
+             >> >>"
+        ),
+    );
+    let mut f = b.finish(catalog);
+    if !final_eol {
+        assert_eq!(f.pop(), Some(b'\n'));
+    }
+    let find = |f: &[u8], pat: &[u8]| f.windows(pat.len()).position(|w| w == pat).unwrap();
+    let lt = find(&f, b"/Contents <") + 10;
+    let gt = find(&f[lt..], b">") + lt + 1;
+    let rest = f.len() - gt - unsigned;
+    for (mark, v) in [("AAAAAAAAAA", lt), ("BBBBBBBBBB", gt), ("CCCCCCCCCC", rest)] {
+        let at = find(&f, mark.as_bytes());
+        f[at..at + 10].copy_from_slice(format!("{v:010}").as_bytes());
+    }
+    f
+}
+
+fn saves_after(bytes: &[u8]) -> (u32, bool) {
+    let out = read(bytes);
+    let s = &out.document.facets.signatures[0];
+    (s.later_revisions, s.covers_whole_file)
+}
+
+fn one_more_save(mut f: Vec<u8>) -> Vec<u8> {
+    append_update(&mut f, &[(99, b"<< >>".to_vec())], "/Size 100 /Root 1 0 R");
+    f
+}
+
+#[test]
+fn saves_after_a_signature_count_from_its_end() {
+    assert_eq!(saves_after(&signed(0, true)), (0, true));
+    assert_eq!(saves_after(&one_more_save(signed(0, true))), (1, false));
+    assert_eq!(saves_after(&signed(0, false)), (0, true));
+    // The update starts with the line end the signed file did not have.
+    assert_eq!(saves_after(&one_more_save(signed(0, false))).0, 1);
+    // The signed range stops at %%EOF; the line end after it is not a save.
+    assert_eq!(saves_after(&signed(1, true)).0, 0);
+}
+
+#[test]
+fn saves_after_a_signature_past_the_revision_cap_are_a_lower_bound() {
+    let mut f = signed(0, true);
+    for k in 0..80u32 {
+        append_update(
+            &mut f,
+            &[(100 + k, b"<< >>".to_vec())],
+            &format!("/Size {} /Root 1 0 R", 101 + k),
+        );
+    }
+    let out = read(&f);
+    let s = &out.document.facets.signatures[0];
+    assert!(s.later_revisions >= 63, "{}", s.later_revisions);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.location == "signatures")
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert!(loss.what.contains("at least"), "{loss:?}");
+    assert_eq!(loss.why, LossReason::Limit);
 }

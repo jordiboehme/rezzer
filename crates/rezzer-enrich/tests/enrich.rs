@@ -997,3 +997,28 @@ fn deep_dotted_field_names_resolve_quickly() {
     assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
     assert!(d.losses.is_empty(), "{:?}", d.losses.len());
 }
+
+#[test]
+fn references_to_fields_the_form_did_not_keep_are_said_once() {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.losses.push(Loss {
+        location: "form".into(),
+        what: "5 of 9 form fields are not kept, from field \"e\" on: room".into(),
+        why: LossReason::Limit,
+        severity: Severity::Warning,
+    });
+    let mut f = formula("field:a", &["field:e", "field:f"]);
+    f.dialect = "pdf-js".into();
+    let mut g = formula("field:b", &["field:g"]);
+    g.dialect = "pdf-js".into();
+    d.facets.formulas = vec![f, g];
+    enrich(&mut d, &only(&[]));
+    let said: Vec<&str> = d.losses[1..].iter().map(|l| l.what.as_str()).collect();
+    assert_eq!(
+        said,
+        [
+            "5 references point at form fields that were not kept (the form was cut), the first from field:a"
+        ]
+    );
+}

@@ -20,7 +20,8 @@
 //! parent of one (`field:a`), as a script reads a group of fields by its name. An external
 //! reference (`ext:[1]Sheet1!A1`) points outside the document by
 //! definition (the link is listed under Embedded) and is not checked. Everything else that is
-//! missing becomes a Warning loss.
+//! missing becomes a Warning loss, except references to form fields when the reader cut the
+//! form (a `form` Limit loss): those get one Info loss together.
 
 use std::collections::HashSet;
 
@@ -85,6 +86,25 @@ impl Pass for Anchors {
                 check(format!("change ({})", e.kind), a);
             }
         }
+        // When the reader cut the form, a reference to a field it did not keep is no sign of a
+        // broken file: one loss says so for all of them.
+        let form_cut = doc
+            .losses
+            .iter()
+            .any(|l| l.location == "form" && l.why == LossReason::Limit);
+        let mut uncut: Option<(usize, String)> = None;
+        if form_cut {
+            missing.retain(|(location, anchor)| {
+                if !anchor.starts_with("field:") {
+                    return true;
+                }
+                match &mut uncut {
+                    Some((n, _)) => *n += 1,
+                    None => uncut = Some((1, location.clone())),
+                }
+                false
+            });
+        }
         let total = missing.len();
         let mut new: Vec<Loss> = missing
             .into_iter()
@@ -105,6 +125,22 @@ impl Pass for Anchors {
                 ),
                 why: LossReason::Uncertain,
                 severity: Severity::Warning,
+            });
+        }
+        if let Some((n, first)) = uncut {
+            new.push(Loss {
+                location: "form".into(),
+                what: format!(
+                    "{n} {} at form fields that were not kept (the form was cut), the first from \
+                     {first}",
+                    if n == 1 {
+                        "reference points"
+                    } else {
+                        "references point"
+                    }
+                ),
+                why: LossReason::Uncertain,
+                severity: Severity::Info,
             });
         }
         // A loss equal to one already in the document is not added again, so the pass can run

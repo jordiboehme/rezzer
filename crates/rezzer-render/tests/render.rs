@@ -3255,3 +3255,20 @@ fn field_names_render_valid_table_and_mermaid() {
         "{md}"
     );
 }
+
+#[test]
+fn a_note_too_deep_for_its_passage_stays_in_the_list() {
+    let mut inner = anchored("Deep words.", "deep");
+    for _ in 0..62 {
+        inner = Block::Quote {
+            blocks: vec![inner],
+            anchor: None,
+        };
+    }
+    let mut d = doc();
+    d.body = vec![inner];
+    d.facets.annotations = vec![note("note", "deep", None, "Deep body.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    let listed = md.split("## Annotations").nth(1).expect("the list");
+    assert!(listed.contains("Deep body."), "{md}");
+}

@@ -85,6 +85,9 @@ impl<'a> Notes<'a> {
     }
 }
 
+/// The nesting levels a note at a passage may take below that passage.
+const NOTE_DEPTH: usize = 8;
+
 /// The anchor a block's annotations stand at, for every block but sections.
 fn passage_anchor(b: &Block) -> Option<&str> {
     match b {
@@ -108,6 +111,11 @@ fn with_notes(text: String, anchor: Option<&str>, ctx: &Ctx, depth: usize, level
     let (Some(notes), Some(anchor)) = (ctx.notes, anchor) else {
         return text;
     };
+    // A note needs a few levels of its own (callout, quote, reply lists); too deep a passage
+    // leaves its notes to `## Annotations`, where they are shown whole.
+    if depth + NOTE_DEPTH > MAX_DEPTH {
+        return text;
+    }
     let mut out = text;
     for a in notes.take(anchor) {
         let note = block(&crate::facets::passage_note(a), ctx, depth + 1, level);
