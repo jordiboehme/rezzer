@@ -16,34 +16,67 @@ struct Seg {
     to: f32,
 }
 
-/// Collinear segments that touch become one. Segments are grouped by where they lie first
-/// (positions closer than [`SNAP`] are one line); within a group, pieces that overlap or
-/// touch within [`SNAP`] join, and the joined piece lies at the mean of its pieces. Two lines
-/// a point apart that never meet along their length stay apart.
+/// Joined lines a group of segments keeps open for joining at once; past them the oldest is
+/// closed. Only a page of many long overlapping lines at slightly different places has more.
+const OPEN_LINES: usize = 32;
+
+/// Collinear segments that touch become one. Segments are grouped by where they lie: a
+/// segment joins the group when it lies within [`SNAP`] of the group's mean place, so lines
+/// in a dense run (bars of a barcode, hatching) never chain far apart. Within a group, a
+/// piece joins a line that it overlaps or touches within [`SNAP`] and that lies within
+/// [`SNAP`] of it; the joined line lies at the mean of its pieces. Two lines a point apart
+/// that never meet along their length stay apart.
 fn merged(mut segs: Vec<Seg>) -> Vec<Seg> {
     segs.sort_by(|a, b| a.at.total_cmp(&b.at));
     let mut out: Vec<Seg> = Vec::with_capacity(segs.len());
     let mut start = 0;
     while start < segs.len() {
         let mut end = start + 1;
-        while end < segs.len() && segs[end].at - segs[end - 1].at <= SNAP {
+        let mut sum = f64::from(segs[start].at);
+        while end < segs.len() {
+            let mean = sum / (end - start) as f64;
+            if f64::from(segs[end].at) - mean > f64::from(SNAP) {
+                break;
+            }
+            sum += f64::from(segs[end].at);
             end += 1;
         }
         let group = &mut segs[start..end];
         group.sort_by(|a, b| a.from.total_cmp(&b.from));
-        let mut k = 0;
-        while k < group.len() {
-            let mut joined = group[k];
-            let (mut sum, mut n) = (f64::from(joined.at), 1u32);
-            k += 1;
-            while k < group.len() && group[k].from <= joined.to + SNAP {
-                joined.to = joined.to.max(group[k].to);
-                sum += f64::from(group[k].at);
-                n += 1;
-                k += 1;
+        // Open lines: the joined segment, the sum of its pieces' places and their number.
+        let mut open: Vec<(Seg, f64, u32)> = Vec::new();
+        let close = |(mut s, sum, n): (Seg, f64, u32), out: &mut Vec<Seg>| {
+            s.at = (sum / f64::from(n)) as f32;
+            out.push(s);
+        };
+        for s in group.iter() {
+            let mut k = 0;
+            while k < open.len() {
+                if open[k].0.to + SNAP < s.from {
+                    close(open.remove(k), &mut out);
+                } else {
+                    k += 1;
+                }
             }
-            joined.at = (sum / f64::from(n)) as f32;
-            out.push(joined);
+            let near = open.iter_mut().find(|(_, sum, n)| {
+                (f64::from(s.at) - sum / f64::from(*n)).abs() <= f64::from(SNAP)
+            });
+            match near {
+                Some((line, sum, n)) => {
+                    line.to = line.to.max(s.to);
+                    *sum += f64::from(s.at);
+                    *n += 1;
+                }
+                None => {
+                    if open.len() == OPEN_LINES {
+                        close(open.remove(0), &mut out);
+                    }
+                    open.push((*s, f64::from(s.at), 1));
+                }
+            }
+        }
+        for line in open {
+            close(line, &mut out);
         }
         start = end;
     }
@@ -507,5 +540,19 @@ mod tests {
             seg(100.0, 30.0, 40.0),
         ]);
         assert_eq!(out.len(), 2, "{out:?}");
+        // Bars every 1.8 points and two column rules 40 points apart among them, over other
+        // heights: the rules stay apart.
+        let mut segs: Vec<Seg> = (0..56)
+            .map(|k| seg(400.0 + 1.8 * k as f32, 100.0, 140.0))
+            .collect();
+        segs.push(seg(410.0, 640.0, 700.0));
+        segs.push(seg(450.0, 640.0, 700.0));
+        let out = merged(segs);
+        let rules: Vec<f32> = out
+            .iter()
+            .filter(|s| s.from == 640.0)
+            .map(|s| s.at)
+            .collect();
+        assert_eq!(rules, [410.0, 450.0], "{out:?}");
     }
 }

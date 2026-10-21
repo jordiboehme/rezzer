@@ -671,3 +671,63 @@ fn wide_ruled_grid_says_so() {
     assert_eq!(losses[0].why, LossReason::Uncertain);
     assert_eq!(losses[0].severity, Severity::Info);
 }
+
+/// A ruled table of 3 by `xs.len() - 1` cells between the column rules `xs`, rows of 20
+/// points from y 700 down, each cell holding `<tag><row><column>`.
+fn ruled_cells(xs: &[f32], tag: &str) -> String {
+    let (x0, x1) = (xs[0], xs[xs.len() - 1]);
+    let mut c = String::new();
+    for k in 0..4 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("{x0} {y} m {x1} {y} l S ");
+    }
+    for x in xs {
+        c += &format!("{x} 640 m {x} 700 l S ");
+    }
+    for r in 0..3 {
+        for k in 0..xs.len() - 1 {
+            let y = 686.0 - 20.0 * r as f32;
+            c += &show("F1", 8.0, xs[k] + 4.0, y, &format!("{tag}{r}{k}"));
+        }
+    }
+    c
+}
+
+#[test]
+fn rules_close_together_do_not_chain() {
+    // Two tables 3.6 points apart with a short tick between their positions far below: two
+    // tables of three columns.
+    let mut c = String::from("0.5 w ");
+    c += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "L");
+    c += &ruled_cells(&[293.6, 373.6, 453.6, 533.6], "R");
+    c += "291.8 100 m 291.8 110 l S ";
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .all(|(_, rows)| rows.iter().all(|r| r.len() == 3)),
+        "{found:?}"
+    );
+    // A barcode of bars every 1.8 points, stroked or filled thin, below a table whose column
+    // rules lie in the bars' range: the table keeps its four columns.
+    let xs = [330.0, 370.0, 410.0, 450.0, 490.0];
+    for filled in [false, true] {
+        let mut c = String::from("0.5 w ");
+        let mut x = 400.0f32;
+        while x < 500.0 {
+            c += &if filled {
+                format!("{x} 100 0.5 40 re f ")
+            } else {
+                format!("{x} 100 m {x} 140 l S ")
+            };
+            x += 1.8;
+        }
+        c += &ruled_cells(&xs, "c");
+        let out = read(&pdf(&[Page::text(c)], ""));
+        let found = tables(page(&out, 1));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].1[0], ["c00", "c01", "c02", "c03"], "{found:?}");
+    }
+}
