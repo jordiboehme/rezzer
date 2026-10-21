@@ -468,6 +468,24 @@ impl LinkRoom {
         Ok(())
     }
 
+    /// Takes `bytes` for a copy the object layer puts in the model (titles, outline items,
+    /// graph nodes, events) from the room the link targets share; `false` when they do not
+    /// fit, and nothing is taken. What laid-out pages gave back is not drawn on: it stays for
+    /// tables.
+    pub(crate) fn take_kept(&self, bytes: u64) -> bool {
+        let left = self.left.get();
+        if bytes > left {
+            return false;
+        }
+        self.left.set(left - bytes);
+        true
+    }
+
+    /// The bytes the room still holds for copies.
+    pub(crate) fn left(&self) -> u64 {
+        self.left.get()
+    }
+
     /// The counts now, to go back to if the block they were taken for is dropped.
     fn mark(&self) -> LinkMark {
         LinkMark {

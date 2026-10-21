@@ -229,3 +229,41 @@ fn xmp_doctype_is_refused() {
         pdf.issues()
     );
 }
+
+#[test]
+fn version_from_header_or_catalog() {
+    let open = |header: &str, catalog: Option<&str>| {
+        let mut doc = Document::with_version(header);
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let mut cat = dictionary! { "Type" => "Catalog", "Pages" => pages_id };
+        if let Some(v) = catalog {
+            cat.set("Version", Object::Name(v.as_bytes().to_vec()));
+        }
+        let catalog_id = doc.add_object(cat);
+        doc.trailer.set("Root", catalog_id);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        Pdf::open(&out, None, &Limits::default(), &never)
+            .unwrap()
+            .version()
+    };
+    assert_eq!(open("1.4", None), "1.4");
+    assert_eq!(open("1.4", Some("1.7")), "1.7");
+    // An earlier or broken catalog version does not lower the header's.
+    assert_eq!(open("1.6", Some("1.3")), "1.6");
+    assert_eq!(open("1.6", Some("seven")), "1.6");
+    assert_eq!(corpus("irs-f1040-2025.pdf").version(), "1.7");
+}

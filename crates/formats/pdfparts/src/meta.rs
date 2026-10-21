@@ -2,14 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Document metadata: the Info dictionary, XMP, language and the tagged flag.
+//! Document metadata: the Info dictionary, XMP, language, the version and the tagged flag.
 
 use quick_xml::NsReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 
-use crate::objects::{get, get_date, get_dict, get_text, reference};
+use crate::objects::{get, get_date, get_dict, get_name, get_text, reference};
 use crate::{Issue, IssueKind, Pdf};
 
 /// A date as written in the file and, when it parses, in ISO 8601.
@@ -85,6 +85,21 @@ impl Pdf {
         get_text(&self.doc, self.catalog()?, b"Lang").filter(|l| !l.trim().is_empty())
     }
 
+    /// The PDF version, for example `1.7`: the header's, or the catalog's `/Version` when that
+    /// is later (an incremental save may raise it there).
+    pub fn version(&self) -> String {
+        let header = self.doc.version.clone();
+        let catalog = self
+            .catalog()
+            .and_then(|c| get_name(&self.doc, c, b"Version"))
+            .and_then(|v| version_number(v).map(|n| (n, v)));
+        match (catalog, version_number(header.as_bytes())) {
+            (Some((n, v)), Some(h)) if n > h => String::from_utf8_lossy(v).into_owned(),
+            (Some((_, v)), None) => String::from_utf8_lossy(v).into_owned(),
+            _ => header,
+        }
+    }
+
     /// The file says its tag tree is reliable (`/MarkInfo /Marked true`).
     pub fn tagged(&self) -> bool {
         let doc = &self.doc;
@@ -127,6 +142,20 @@ impl Pdf {
             .filter_map(|(i, v)| v.map(|v| (KEYS[i].2.to_string(), v)))
             .collect()
     }
+}
+
+/// A version such as `1.7` as (major, minor); `None` when it is not one.
+fn version_number(v: &[u8]) -> Option<(u32, u32)> {
+    if v.len() > 8 {
+        return None;
+    }
+    let text = std::str::from_utf8(v).ok()?;
+    let (major, minor) = text.split_once('.')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !digits(major) || !digits(minor) {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 /// The property being read and what it has collected.

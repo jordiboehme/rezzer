@@ -1035,16 +1035,25 @@ fn links_in(blocks: &[Block]) -> (usize, usize) {
     (n, bytes)
 }
 
-/// The one Limit loss that says link targets were left out.
+/// The one Limit loss that says link targets were left out of the text. The link graph draws
+/// on what the pages leave, so it may add one more for the links it could not keep.
 fn link_loss(out: &ReadOutcome) -> &Loss {
-    let found: Vec<&Loss> = out
+    let (found, graph): (Vec<&Loss>, Vec<&Loss>) = out
         .document
         .losses
         .iter()
         .filter(|l| l.why == LossReason::Limit)
-        .collect();
+        .partition(|l| l.what.contains("targets of"));
     assert_eq!(found.len(), 1, "{:?}", out.document.losses);
-    assert!(found[0].what.contains("link"), "{:?}", found[0]);
+    assert!(
+        graph.len() <= 1
+            && graph
+                .iter()
+                .all(|l| l.what.contains("links is not kept")
+                    || l.what.contains("links are not kept")),
+        "{:?}",
+        out.document.losses
+    );
     found[0]
 }
 
@@ -2062,4 +2071,335 @@ fn a_tagged_table_with_room_keeps_both_pages_in_the_table() {
         cells.contains("first") && cells.contains("second"),
         "{cells:?}"
     );
+}
+
+/// Adds objects to a file with the page object numbers; returns more catalog entries and
+/// trailer entries.
+type Extra<'a> = &'a mut dyn FnMut(&mut Builder, &[u32]) -> (String, String);
+
+/// A file of `n` pages that each show `Page.`. `annots` gives the annotation dictionaries of
+/// page `i` (from 0), with the page object numbers; `extra` adds objects and returns more
+/// catalog entries and trailer entries.
+fn object_file(
+    n: usize,
+    annots: &dyn Fn(usize, &[u32]) -> Vec<String>,
+    extra: Extra<'_>,
+) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let content = b.stream("", b"BT /F1 12 Tf 72 700 Td (Page.) Tj ET");
+    let kids: Vec<u32> = (0..n).map(|_| b.reserve()).collect();
+    for (i, kid) in kids.iter().enumerate() {
+        let refs: Vec<String> = annots(i, &kids)
+            .into_iter()
+            .map(|a| format!("{} 0 R", b.add(a)))
+            .collect();
+        b.set(
+            *kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {content} 0 R \
+                 /Annots [{}] >>",
+                refs.join(" ")
+            ),
+        );
+    }
+    let list: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            list.join(" "),
+            kids.len()
+        ),
+    );
+    let (more, trailer) = extra(&mut b, &kids);
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R {more} >>"),
+    );
+    b.finish_with(catalog, &trailer)
+}
+
+fn no_annots(_: usize, _: &[u32]) -> Vec<String> {
+    Vec::new()
+}
+
+fn read_extracting(bytes: &[u8]) -> ReadOutcome {
+    let src = Source {
+        path: None,
+        name: "file.pdf".into(),
+        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format: FormatId::Pdf,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "%PDF-".into(),
+        },
+        modified: None,
+    };
+    let opts = ReadOptions {
+        extract_assets: true,
+        ..ReadOptions::default()
+    };
+    PdfReader.read(&src, &opts, &Budget::new(hostile()))
+}
+
+/// The read renders and serializes, stays within the time and memory bounds and is partial
+/// with a Limit loss at `location` that contains `words`.
+fn assert_objects_cut(out: &ReadOutcome, start: Instant, location: &str, words: &str) {
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let pages = rezzer_render::paginate(&md, hostile().page_tokens);
+    drop(md);
+    assert!(!pages.is_empty());
+    drop(pages);
+    let j = serde_json::to_string(&out.document).expect("the model serializes");
+    drop(j);
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit
+                && l.location == location
+                && l.what.contains(words)),
+        "{:?}",
+        out.document.losses
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn many_outline_items_are_bounded() {
+    // 6,000 outline items whose titles all name one 8 KB string: a file of about 700 KB whose
+    // titles copy to 48 MB, more than the room the file may keep at the 512 MiB limits.
+    let start = Instant::now();
+    let n = 6_000usize;
+    let bytes = object_file(4, &no_annots, &mut |b, kids| {
+        let title = b.add(format!("({})", "t".repeat(8_000)));
+        let outlines = b.reserve();
+        let ids: Vec<u32> = (0..n).map(|_| b.reserve()).collect();
+        for (k, id) in ids.iter().enumerate() {
+            let prev = if k > 0 {
+                format!("/Prev {} 0 R", ids[k - 1])
+            } else {
+                String::new()
+            };
+            let next = match ids.get(k + 1) {
+                Some(next) => format!("/Next {next} 0 R"),
+                None => String::new(),
+            };
+            b.set(
+                *id,
+                format!(
+                    "<< /Title {title} 0 R /Parent {outlines} 0 R {prev} {next} \
+                     /Dest [{} 0 R /Fit] >>",
+                    kids[k % kids.len()]
+                ),
+            );
+        }
+        b.set(
+            outlines,
+            format!(
+                "<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count {n} >>",
+                ids[0],
+                ids[n - 1]
+            ),
+        );
+        (format!("/Outlines {outlines} 0 R"), String::new())
+    });
+    assert!(bytes.len() < 1_000_000, "{}", bytes.len());
+    let out = read(&bytes);
+    let Block::Section {
+        kind: SectionKind::Other,
+        blocks,
+        ..
+    } = &out.document.body[0]
+    else {
+        panic!("no outline section")
+    };
+    let kept = match blocks.first() {
+        Some(Block::List { items, .. }) => items.len(),
+        _ => 0,
+    };
+    assert!(kept > 1_000 && kept < n, "{kept}");
+    assert_objects_cut(&out, start, "outline", "outline items");
+}
+
+#[test]
+fn many_links_are_bounded() {
+    // 10,000 links over 10 pages: half to pages, half to distinct URIs of 800 bytes. At the
+    // 512 MiB limits the graph keeps them all; at 128 MiB the room is an eighth as large and
+    // the graph keeps what fits and says how many links it left out. The object layer of a
+    // much larger file of links takes more than the memory bound by itself.
+    let tail = "u".repeat(780);
+    let bytes = object_file(
+        10,
+        &|i, kids| {
+            (0..1_000)
+                .map(|k| {
+                    let target = if k % 2 == 0 {
+                        format!("/Dest [{} 0 R /Fit]", kids[(k / 2) % kids.len()])
+                    } else {
+                        format!("/A << /S /URI /URI (http://x/{i}/{k}/{tail}) >>")
+                    };
+                    format!("<< /Type /Annot /Subtype /Link /Rect [300 300 310 310] {target} >>")
+                })
+                .collect()
+        },
+        &mut |_, _| (String::new(), String::new()),
+    );
+    let edges = |out: &ReadOutcome| {
+        out.document
+            .facets
+            .graphs
+            .iter()
+            .find(|g| g.id == "links")
+            .map_or(0, |g| g.edges.len())
+    };
+    let start = Instant::now();
+    let out = read_with(
+        &bytes,
+        &Budget::new(Limits {
+            max_memory_bytes: 128 << 20,
+            ..hostile()
+        }),
+    );
+    let kept = edges(&out);
+    assert!(kept > 1_000 && kept < 10_000, "{kept}");
+    let loss = format!("{} of 10000 links are not kept", 10_000 - kept);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.why == LossReason::Limit && l.what.starts_with(&loss)),
+        "{:?}",
+        out.document.losses
+    );
+    drop(out);
+    let out = read(&bytes);
+    assert_eq!(edges(&out), 10_000);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    assert!(!md.is_empty());
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn huge_document_information_is_bounded() {
+    // Six fields of the document information name one 7 MiB string: the copies take more
+    // than the room the file may keep, so the later ones are left out with one loss.
+    let start = Instant::now();
+    let bytes = object_file(1, &no_annots, &mut |b, _| {
+        let big = b.add(format!("({})", "A".repeat(7 << 20)));
+        let info = b.add(format!(
+            "<< /Title {big} 0 R /Author {big} 0 R /Subject {big} 0 R /Keywords {big} 0 R \
+             /Creator {big} 0 R /Producer {big} 0 R >>"
+        ));
+        (String::new(), format!("/Info {info} 0 R"))
+    });
+    let out = read(&bytes);
+    drop(bytes);
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_ref().map(String::len), Some(7 << 20));
+    assert_objects_cut(&out, start, "metadata", "not kept");
+}
+
+#[test]
+fn many_attachments_are_bounded() {
+    // 3,000 attachments of 64 KiB each: an eighth of the memory limit takes 1,024 of them.
+    let start = Instant::now();
+    let packed = deflate(&vec![0u8; 64 << 10]);
+    let bytes = object_file(1, &no_annots, &mut |b, _| {
+        let mut names = Vec::new();
+        for k in 0..3_000 {
+            let file = b.stream("/Type /EmbeddedFile /Filter /FlateDecode", &packed);
+            let spec = b.add(format!(
+                "<< /Type /Filespec /F (f{k}.bin) /EF << /F {file} 0 R >> >>"
+            ));
+            names.push(format!("(f{k:05}.bin) {spec} 0 R"));
+        }
+        (
+            format!(
+                "/Names << /EmbeddedFiles << /Names [{}] >> >>",
+                names.join(" ")
+            ),
+            String::new(),
+        )
+    });
+    let out = read_extracting(&bytes);
+    assert_eq!(out.document.facets.embedded.len(), 3_000);
+    assert_eq!(out.blobs.len(), 1_024);
+    assert_eq!(out.document.assets.len(), 1_024);
+    let total: usize = out.blobs.iter().map(|b| b.bytes.len()).sum();
+    assert!(total as u64 <= hostile().max_memory_bytes / 8, "{total}");
+    let limits: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{limits:?}");
+    assert_objects_cut(
+        &out,
+        start,
+        "attachment 1025",
+        "1976 attachments are not extracted",
+    );
+}
+
+#[test]
+fn many_revisions_are_bounded() {
+    // The first save and 9,999 updates that each change the document information.
+    let start = Instant::now();
+    let mut info = 0;
+    let mut bytes = object_file(1, &no_annots, &mut |b, _| {
+        info = b.add("<< /Title (Base) /ModDate (D:20260101120000Z) >>");
+        (String::new(), format!("/Info {info} 0 R"))
+    });
+    for k in 0..9_999u32 {
+        let date = format!("2026{:02}{:02}{:06}Z", 1 + k % 12, 1 + k % 28, k % 240_000);
+        common::append_update(
+            &mut bytes,
+            &[(
+                info,
+                format!("<< /Title (Base) /ModDate (D:{date}) >>").into_bytes(),
+            )],
+            &format!("/Size {} /Root 1 0 R /Info {info} 0 R", info + 1),
+        );
+    }
+    let out = read(&bytes);
+    assert_eq!(out.document.properties.facts.revisions, Some(10_000));
+    assert_eq!(out.document.facets.timeline.len(), 64);
+    let skipped = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("only the newest"))
+        .expect("a loss for the revisions not compared");
+    assert_eq!(
+        (skipped.why, skipped.severity),
+        (LossReason::Limit, Severity::Info)
+    );
+    assert_objects_cut(&out, start, "revisions", "only the newest 64");
 }

@@ -59,6 +59,11 @@ impl Builder {
     }
 
     pub fn finish(self, root: u32) -> Vec<u8> {
+        self.finish_with(root, "")
+    }
+
+    /// The file with `trailer_extra` (for example `/Info 5 0 R`) in its trailer.
+    pub fn finish_with(self, root: u32, trailer_extra: &str) -> Vec<u8> {
         let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
         let mut offsets = Vec::new();
         for (i, body) in self.objects.iter().enumerate() {
@@ -74,13 +79,47 @@ impl Builder {
         }
         out.extend(
             format!(
-                "trailer\n<< /Size {} /Root {root} 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                "trailer\n<< /Size {} /Root {root} 0 R {trailer_extra} >>\nstartxref\n{xref}\n%%EOF\n",
                 self.objects.len() + 1
             )
             .as_bytes(),
         );
         out
     }
+}
+
+/// Appends an incremental update to `file`: the objects `(number, body)`, a classic table and
+/// a trailer with `keys` (for example `/Size 9 /Root 1 0 R`) and `/Prev`.
+pub fn append_update(file: &mut Vec<u8>, objects: &[(u32, Vec<u8>)], keys: &str) {
+    let at = file
+        .windows(9)
+        .rposition(|w| w == b"startxref")
+        .expect("startxref")
+        + 9;
+    let prev: String = file[at..]
+        .iter()
+        .skip_while(|c| c.is_ascii_whitespace())
+        .take_while(|c| c.is_ascii_digit())
+        .map(|c| char::from(*c))
+        .collect();
+    if !file.ends_with(b"\n") {
+        file.push(b'\n');
+    }
+    let mut offsets = Vec::new();
+    for (n, body) in objects {
+        offsets.push((*n, file.len()));
+        file.extend(format!("{n} 0 obj\n").as_bytes());
+        file.extend(body);
+        file.extend(b"\nendobj\n");
+    }
+    let xref = file.len();
+    file.extend(b"xref\n");
+    for (n, off) in offsets {
+        file.extend(format!("{n} 1\n{off:010} 00000 n \n").as_bytes());
+    }
+    file.extend(
+        format!("trailer\n<< {keys} /Prev {prev} >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
 }
 
 /// A file with the given pages (A4, Helvetica as `/F1`, Helvetica-Bold as `/F2`).

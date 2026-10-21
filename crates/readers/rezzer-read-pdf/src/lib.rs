@@ -8,9 +8,11 @@
 //! pdfparts opens the file with its stream guard and gives the object layer: pages, labels
 //! and the structure tree. hayro-interpret reads the text with positions from pdfparts'
 //! canonical bytes, never from the file itself, and only for pages the guard let through.
+//! `objects.rs` adds the metadata, outline, links, attachments, threads and revisions.
 //! Scripts and actions are never run, links are never followed.
 
 mod layout;
+mod objects;
 mod open;
 mod order;
 mod tables;
@@ -22,12 +24,12 @@ mod fixtures;
 
 use std::collections::{HashMap, HashSet};
 
-use pdfparts::{IssueKind, PageInfo, Pdf};
+use pdfparts::{PageInfo, Pdf};
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Anchor, Block, CalloutKind, Cell, Completeness, Document, FormatId, Inline, Loss, LossReason,
-    ReadOptions, ReadOutcome, Reader, ReaderInfo, SectionKind, Severity, Source, StatusColor,
-    source_info,
+    Anchor, Blob, Block, CalloutKind, Cell, Completeness, Document, FormatId, Inline, Loss,
+    LossReason, ReadOptions, ReadOutcome, Reader, ReaderInfo, SectionKind, Severity, Source,
+    StatusColor, source_info,
 };
 
 use layout::{Context, Cut, Drawn, LinkRoom, PageText, Run, Style, TableRef};
@@ -74,13 +76,11 @@ fn read_pdf(
         Ok(opened) => opened,
         Err(outcome) => return *outcome,
     };
-    out.doc.properties.facts.pages = Some(pdf.page_count());
-    out.doc.properties.facts.tagged = Some(pdf.tagged());
     let stop = || budget.check_time().is_err();
     let pages = pdf.pages(&stop);
     let extracted = extract(&pdf, &pages, budget, &mut out, text_stop);
-    lay_out(&pdf, &pages, extracted, budget, &mut out);
-    issues(&pdf, &mut out);
+    let room = lay_out(&pdf, &pages, extracted, budget, &mut out);
+    objects::read(&pdf, &pages, opts, budget, &room, &mut out);
     out.finish()
 }
 
@@ -119,7 +119,7 @@ fn extract(
 }
 
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
-fn marker(page: &PageInfo) -> String {
+pub(crate) fn marker(page: &PageInfo) -> String {
     let n = page.number;
     match page.label.as_deref() {
         Some(label) if !label.is_empty() && label != n.to_string() => {
@@ -135,8 +135,15 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
 }
 
 /// One page section per page, with the laid out text. Pages already read are laid out even
-/// when a stop cut the reading: layout is bounded by the element and text budgets.
-fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget, out: &mut Out) {
+/// when a stop cut the reading: layout is bounded by the element and text budgets. Returns
+/// what is left of the bytes the file may keep, for the object layer.
+fn lay_out(
+    pdf: &Pdf,
+    pages: &[PageInfo],
+    extracted: Extracted,
+    budget: &Budget,
+    out: &mut Out,
+) -> LinkRoom {
     let Extracted {
         pages: read,
         failed,
@@ -370,6 +377,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             Severity::Warning,
         );
     }
+    links
 }
 
 /// Where each tagged table stands: its section and block in the body, and its anchor.
@@ -643,26 +651,11 @@ fn widget_boxes(pdf: &Pdf) -> HashMap<u32, Vec<[f32; 4]>> {
     out
 }
 
-/// The issues pdfparts found, as losses. `page 3` becomes the page anchor `p3`.
-fn issues(pdf: &Pdf, out: &mut Out) {
-    for issue in pdf.issues() {
-        let location = match issue.location.strip_prefix("page ") {
-            Some(n) if n.parse::<u32>().is_ok() => format!("p{n}"),
-            _ => issue.location.clone(),
-        };
-        let (why, severity) = match issue.kind {
-            IssueKind::Damaged => (LossReason::Damaged, Severity::Warning),
-            IssueKind::Limit => (LossReason::Limit, Severity::Warning),
-            IssueKind::Unsupported => (LossReason::Unsupported, Severity::Info),
-        };
-        out.loss(location, issue.what, why, severity);
-    }
-}
-
-/// The document being built, with whether something was not read.
+/// The document being built, with whether something was not read, and the asset bytes.
 pub(crate) struct Out {
     pub doc: Document,
     pub partial: bool,
+    pub blobs: Vec<Blob>,
 }
 
 impl Out {
@@ -670,6 +663,7 @@ impl Out {
         Out {
             doc,
             partial: false,
+            blobs: Vec::new(),
         }
     }
 
@@ -702,7 +696,7 @@ impl Out {
 
     pub fn finish(self) -> ReadOutcome {
         ReadOutcome {
-            blobs: Vec::new(),
+            blobs: self.blobs,
             document: self.doc,
             completeness: if self.partial {
                 Completeness::Partial

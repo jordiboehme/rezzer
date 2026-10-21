@@ -1629,6 +1629,7 @@ dependencies = [
  "rezzer-model",
  "rezzer-render",
  "serde_json",
+ "sha2",
  "skrifa",
  "unicode-bidi",
 ]

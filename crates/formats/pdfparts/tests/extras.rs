@@ -83,6 +83,8 @@ fn embedded_file_listed_and_bytes_guarded() {
     let bytes = pdf.embedded_file_bytes(0).unwrap();
     assert_eq!(bytes.len(), 6669);
     assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert_eq!(pdf.embedded_file_measured(0), Some(6669));
+    assert_eq!(pdf.embedded_file_measured(1), None);
     let missing = pdf.embedded_file_bytes(1).unwrap_err();
     assert_eq!(missing.kind, IssueKind::Damaged);
 }
@@ -160,9 +162,33 @@ fn embedded_file_bomb_is_refused() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].name, "bomb.bin");
     assert_eq!(files[0].size, None);
+    assert_eq!(pdf.embedded_file_measured(0), None);
     let err = pdf.embedded_file_bytes(0).unwrap_err();
     assert_eq!(err.kind, IssueKind::Limit);
     assert_eq!(err.location, "attachment 1");
+}
+
+#[test]
+fn embedded_file_measured_size_is_not_the_written_one() {
+    let bytes = document(1, |doc, _| {
+        let mut file = Stream::new(
+            dictionary! { "Type" => "EmbeddedFile", "Params" => dictionary! { "Size" => 3 } },
+            vec![b'x'; 5000],
+        );
+        file.compress().unwrap();
+        let file = doc.add_object(file);
+        attachments(vec![(
+            "big.txt",
+            Object::Dictionary(
+                dictionary! { "Type" => "Filespec", "EF" => dictionary! { "F" => file } },
+            ),
+        )])
+    });
+    let pdf = open_bytes(&bytes);
+    // The file says 3 bytes; the guard measured what the stream unpacks to.
+    assert_eq!(pdf.embedded_files()[0].size, Some(3));
+    assert_eq!(pdf.embedded_file_measured(0), Some(5000));
+    assert_eq!(pdf.embedded_file_bytes(0).unwrap().len(), 5000);
 }
 
 #[test]

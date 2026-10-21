@@ -96,6 +96,13 @@ impl Pdf {
         &self.attachment_list().files
     }
 
+    /// The unpacked length of embedded file `index` as the stream guard measured it at open:
+    /// what [`Pdf::embedded_file_bytes`] would return, known before anything is unpacked.
+    /// `None` when the file has no stream, the guard refused it or a filter stays encoded.
+    pub fn embedded_file_measured(&self, index: usize) -> Option<u64> {
+        self.measured((*self.attachment_list().streams.get(index)?)?)
+    }
+
     /// The bytes of embedded file `index` (as listed by [`Pdf::embedded_files`]), unpacked
     /// under the same limits as every stream. A file over a limit is an issue, not data.
     pub fn embedded_file_bytes(&self, index: usize) -> Result<Vec<u8>, Issue> {
