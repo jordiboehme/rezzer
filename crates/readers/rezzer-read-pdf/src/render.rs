@@ -80,37 +80,106 @@ pub(crate) struct Vision {
     pub first: Option<[f32; 4]>,
 }
 
-/// A picture box rounded to whole points, to find the same picture on many pages.
-type Spot = [i32; 4];
+/// How far the edges of one picture may move between pages, in points, and as a share of its
+/// larger side: a logo scaled a little differently on each page is still the same logo.
+const SAME_SPOT: f32 = 2.0;
+const SAME_SHARE: f32 = 0.02;
 
-fn spot(b: &[f32; 4]) -> Spot {
-    b.map(|v| v.round() as i32)
+/// Pictures a bucket of [`Spots`] compares with; past them a box starts a spot of its own.
+const SPOTS_PER_BUCKET: usize = 64;
+
+/// Whether two picture boxes stand at the same place on their pages.
+fn same_spot(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    let side = (a[2] - a[0]).abs().max((a[3] - a[1]).abs());
+    let near = SAME_SPOT.max(SAME_SHARE * side);
+    a.iter().zip(b).all(|(p, q)| (p - q).abs() <= near)
 }
 
-/// Pictures drawn at the same place on at least three pages and on at least half of the pages
-/// read. When they are small, they are page furniture (a logo in the margin, a strip along
-/// the edge), like a running header, and do not make a page need vision.
-pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> HashSet<Spot> {
-    let mut seen: HashMap<Spot, usize> = HashMap::new();
+/// Picture places, found by their lower left corner on a grid of 4 points.
+#[derive(Default)]
+pub(crate) struct Spots {
+    buckets: HashMap<(i32, i32), Vec<usize>>,
+    boxes: Vec<[f32; 4]>,
+}
+
+impl Spots {
+    fn cell(b: &[f32; 4]) -> (i32, i32) {
+        ((b[0] / 4.0).floor() as i32, (b[1] / 4.0).floor() as i32)
+    }
+
+    /// The spot `b` stands at, if one is known.
+    fn find(&self, b: &[f32; 4]) -> Option<usize> {
+        let (cx, cy) = Self::cell(b);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                let Some(list) = self.buckets.get(&(cx + dx, cy + dy)) else {
+                    continue;
+                };
+                if let Some(&k) = list
+                    .iter()
+                    .take(SPOTS_PER_BUCKET)
+                    .find(|&&k| same_spot(&self.boxes[k], b))
+                {
+                    return Some(k);
+                }
+            }
+        }
+        None
+    }
+
+    /// The spot of `b`, a new one when none is known.
+    fn add(&mut self, b: &[f32; 4]) -> usize {
+        if let Some(k) = self.find(b) {
+            return k;
+        }
+        let k = self.boxes.len();
+        self.boxes.push(*b);
+        self.buckets.entry(Self::cell(b)).or_default().push(k);
+        k
+    }
+
+    pub(crate) fn holds(&self, b: &[f32; 4]) -> bool {
+        self.find(b).is_some()
+    }
+}
+
+/// Pictures drawn at the same place (within [`SAME_SPOT`]) on at least three pages and on at
+/// least half of the pages read. When they are small, they are page furniture (a logo in the
+/// margin, a strip along the edge), like a running header, and do not make a page need vision.
+pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
+    let mut all = Spots::default();
+    // For each spot: the pages it is on and the last page it was counted for.
+    let mut seen: Vec<(usize, usize)> = Vec::new();
     let mut read = 0usize;
     for items in pages {
         read += 1;
-        let on_page: HashSet<Spot> = items.images.iter().map(spot).collect();
-        for s in on_page {
-            *seen.entry(s).or_insert(0) += 1;
+        for b in &items.images {
+            let k = all.add(b);
+            if k == seen.len() {
+                seen.push((0, 0));
+            }
+            if seen[k].1 != read {
+                seen[k] = (seen[k].0 + 1, read);
+            }
         }
     }
-    seen.into_iter()
-        .filter(|&(_, k)| k >= 3 && k * 2 >= read)
-        .map(|(s, _)| s)
-        .collect()
+    let mut out = Spots::default();
+    for (k, &(n, _)) in seen.iter().enumerate() {
+        if n >= 3 && n * 2 >= read {
+            let b = all.boxes[k];
+            let i = out.boxes.len();
+            out.boxes.push(b);
+            out.buckets.entry(Spots::cell(&b)).or_default().push(i);
+        }
+    }
+    out
 }
 
 /// Whether page `info` with the items read from it needs vision: it has no text layer over
 /// a picture (a scan), its glyphs have no Unicode mapping, or it is only an invisible text
 /// layer over a picture (an OCR layer); or its pictures, without the page furniture
 /// `skip`, cover at least 2 % of it.
-pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -> Option<Vision> {
+pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &Spots) -> Option<Vision> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
     let visible = |b: &[f32; 4]| {
@@ -132,7 +201,7 @@ pub(crate) fn vision(info: &PageInfo, items: &PageItems, skip: &HashSet<Spot>) -
         .into_iter()
         .filter(|&k| {
             let b = &items.images[k];
-            !(skip.contains(&spot(b)) && visible(b) < FURNITURE_SHARE * area)
+            !(skip.holds(b) && visible(b) < FURNITURE_SHARE * area)
         })
         .collect();
     let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();

@@ -622,3 +622,35 @@ fn a_small_logo_on_every_page_is_not_listed() {
         "{alt}"
     );
 }
+
+#[test]
+fn a_repeated_logo_whose_size_changes_a_little_is_furniture() {
+    // 30 pages with one logo at one place, 60, 60.4 or 60.8 points wide: one picture.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /FlateDecode",
+        &deflate(&[200u8; 36]),
+    );
+    let mut kids = String::new();
+    for n in 1..=30 {
+        let w = 60.0 + 0.4 * (n % 3) as f32;
+        let c = format!(
+            "BT /F1 11 Tf 72 700 Td (Body {n}.) Tj ET\nq {w} 0 0 45 480 780 cm /Im1 Do Q\n"
+        );
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 30 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
