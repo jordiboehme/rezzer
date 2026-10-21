@@ -1353,10 +1353,12 @@ fn inlines(runs: &[&Run], links: &LinkRoom, budget: &Budget) -> Result<Vec<Inlin
         } else {
             r.text.clone()
         };
-        last = Some((r.page, r.line));
+        // A run that is only white space does not take the line change: the first run with
+        // text on the new line does.
         if text.is_empty() {
             continue;
         }
+        last = Some((r.page, r.line));
         let glued = pieces.last().is_none_or(|p| p.text.ends_with(['-', ' ']));
         if new_line && !glued {
             text.insert(0, ' ');
@@ -1889,6 +1891,25 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn space_only_first_run() {
+        // The second line starts with a run that is only a space: the line change still
+        // puts a space between the words.
+        let runs = [
+            run("A", 0, 700.0, 10.0),
+            run(" ", 1, 688.0, 10.0),
+            run("B", 1, 688.0, 10.0),
+        ];
+        let refs: Vec<&Run> = runs.iter().collect();
+        let built = inlines(
+            &refs,
+            &LinkRoom::new(u64::MAX),
+            &Budget::new(rezzer_limits::Limits::default()),
+        )
+        .unwrap();
+        assert_eq!(rezzer_model::plain_text(&built), "A B");
     }
 
     #[test]
