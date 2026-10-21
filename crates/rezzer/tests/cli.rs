@@ -706,3 +706,59 @@ fn o_bundle_holds_page_png() {
     // Reads that extract assets bypass the cache.
     assert_eq!(env.cache_entries(), 0);
 }
+
+/// With every log level on, the password shows up neither on stderr nor in the MCP
+/// replies, for the CLI and for the MCP `rez` tool.
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_never_in_logs() {
+    let env = Env::new();
+    let file = pdf_corpus("qpdf-user-password.pdf");
+    let out = env
+        .cmd()
+        .env("RUST_LOG", "trace")
+        .env("RUST_BACKTRACE", "1")
+        .arg("read")
+        .arg(&file)
+        .arg("--password-stdin")
+        .write_stdin(format!("{PDF_PASSWORD}\n"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        !without_overview(&stderr).contains(PDF_PASSWORD),
+        "{stderr}"
+    );
+
+    let call = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "rez",
+            "arguments": { "path": file.to_str().unwrap(), "password": PDF_PASSWORD }
+        }
+    });
+    let input = format!(
+        "{}\n{}\n{}\n",
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        call
+    );
+    let out = env
+        .cmd()
+        .env("RUST_LOG", "trace")
+        .arg("mcp")
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stdout.contains("encrypted: true"), "{stdout}");
+    for text in [&stdout, &stderr] {
+        assert!(!without_overview(text).contains(PDF_PASSWORD), "{text}");
+    }
+    assert_eq!(env.cache_entries(), 0);
+}

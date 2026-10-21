@@ -1,0 +1,6 @@
+# The hostile tests stop themselves inside their limits. One that loops or hangs anyway is
+# reported as slow after 60 seconds and ended after 3 minutes, so a regression fails the run
+# instead of hanging it.
+[[profile.default.overrides]]
+filter = 'binary(hostile) | binary(hostile_render)'
+slow-timeout = { period = "60s", terminate-after = 3 }
