@@ -4185,3 +4185,42 @@ fn overlapping_boxes_are_bounded() {
     assert_quick(start);
     assert!(text(page(&out, 1)).contains("Before."));
 }
+
+#[test]
+fn thousands_of_boxes_side_by_side_are_read_whole_within_bounds() {
+    // 4,000 boxes, two in each row, each with two lines on the same baselines as the box
+    // beside it: every box is read whole, quick and small.
+    let start = Instant::now();
+    let rows = 2_000usize;
+    let h = (rows + 2) * 40;
+    let mut c = b"0.5 w ".to_vec();
+    for r in 0..rows {
+        let top = h - 20 - r * 40;
+        for (side, x) in [("l", 72usize), ("r", 300)] {
+            c.extend(format!("{x} {} 200 32 re S ", top - 32).as_bytes());
+            c.extend(
+                format!(
+                    "BT /F1 8 Tf {} {} Td ({side}{r:04}a) Tj ET BT /F1 8 Tf {} {} Td ({side}{r:04}b) Tj ET\n",
+                    x + 6,
+                    top - 12,
+                    x + 6,
+                    top - 24
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    let out = read(&tall_page(&c, h));
+    assert_quick(start);
+    let body = text(page(&out, 1));
+    let at = |t: &str| body.find(t).unwrap_or_else(|| panic!("{t} missing"));
+    for r in [0usize, 1_000, 1_999] {
+        let (la, lb, ra) = (
+            at(&format!("l{r:04}a")),
+            at(&format!("l{r:04}b")),
+            at(&format!("r{r:04}a")),
+        );
+        assert!(la < lb && lb < ra, "box {r} not read whole");
+    }
+    assert!(box_loss(&out).is_none(), "{:?}", out.document.losses);
+}

@@ -145,13 +145,29 @@ pub(crate) struct Grids {
 
 /// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides.
 pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
-    let mut hs = Vec::new();
-    let mut vs = Vec::new();
+    let flat = |r: &Rule| (r.y0 - r.y1).abs() <= SNAP / 2.0;
+    // Counted before anything is built: a page may keep many more lines than are searched.
+    let (mut h, mut v) = (0usize, 0usize);
+    for r in rules {
+        match r.kind {
+            RuleKind::Line if flat(r) => h += 1,
+            RuleKind::Line => v += 1,
+            RuleKind::Rect => (h, v) = (h + 2, v + 2),
+        }
+    }
+    if h == 0 || v == 0 {
+        return Ok(Grids::default());
+    }
+    if h + v > MAX_SEGMENTS {
+        return Err(Unsearched::TooMany);
+    }
+    let mut hs = Vec::with_capacity(h);
+    let mut vs = Vec::with_capacity(v);
     for r in rules {
         let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
         let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
         match r.kind {
-            RuleKind::Line if y1 - y0 <= SNAP / 2.0 => hs.push(Seg {
+            RuleKind::Line if flat(r) => hs.push(Seg {
                 at: (y0 + y1) / 2.0,
                 from: x0,
                 to: x1,
@@ -184,12 +200,6 @@ pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
                 });
             }
         }
-    }
-    if hs.is_empty() || vs.is_empty() {
-        return Ok(Grids::default());
-    }
-    if hs.len() + vs.len() > MAX_SEGMENTS {
-        return Err(Unsearched::TooMany);
     }
     let hs = merged(hs);
     let vs = merged(vs);
