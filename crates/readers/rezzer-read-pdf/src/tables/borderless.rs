@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
+use crate::regions::offset_baselines;
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
 #[derive(Debug, Clone)]
@@ -117,6 +118,8 @@ pub(super) fn borderless(
     // Accepted regions, and for each run the table, row and cell it goes to.
     let mut claim: Vec<Planned> = Vec::new();
     let mut target: Vec<Target> = vec![None; flow.runs.len()];
+    // A region without rules was noted on this page already.
+    let mut noted = false;
     for (g, (a, z)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -134,86 +137,125 @@ pub(super) fn borderless(
             continue;
         }
         let pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
-        let x0 = (a..z)
-            .flat_map(|k| pieces[k - a].iter().map(|p| p.x0))
-            .fold(f32::MAX, f32::min);
-        let x1 = (a..z)
-            .flat_map(|k| pieces[k - a].iter().map(|p| p.x1))
-            .fold(f32::MIN, f32::max);
-        let b = [
-            x0,
-            lines[z - 1].y - 0.25 * lines[z - 1].size,
-            x1,
-            lines[a].y + lines[a].size,
-        ];
-        let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
-        let line_sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
-        let (table_caption, figure_caption) =
-            captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
-        let rows_needed = if table_caption { 2 } else { 3 };
-        let verdict =
-            grid_of(flow, &lines[a..z], &pieces, rows_needed, table_caption).and_then(|grid| {
-                if figure_caption {
-                    return Err("a figure caption stands next to it");
-                }
-                let sizes: Vec<f32> = flow.runs[lines[a].start..lines[z - 1].end]
+        // Two blocks side by side are judged each alone.
+        let sets: Vec<Vec<Vec<Piece>>> = match side_by_side(flow, &lines[a..z], &pieces) {
+            Some(x) => vec![
+                pieces
                     .iter()
-                    .map(|r| r.size)
-                    .collect();
-                match area.refuses(b, &sizes) {
-                    Some(why) => Err(why),
-                    None => Ok(grid),
-                }
-            });
-        match verdict {
-            Ok(grid) => {
-                let planned = Planned {
-                    at: flow.at[lines[a].start],
-                    top: b[3],
-                    rows: grid
-                        .rows
-                        .iter()
-                        .map(|r| {
-                            r.iter()
-                                .map(|c| PlannedCell {
-                                    // Filled in below, once the runs are taken out.
-                                    runs: Vec::new(),
-                                    row_span: 1,
-                                    col_span: c.span,
-                                })
-                                .collect()
-                        })
-                        .collect(),
-                    header_rows: 0,
-                    trs: Vec::new(),
-                    additions: Vec::new(),
-                    tagged: None,
-                    continues: false,
-                };
-                let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
-                for (r, cells) in grid.rows.iter().enumerate() {
-                    for (c, g) in cells.iter().enumerate() {
-                        for &(s, e) in &g.ranges {
-                            for slot in &mut target[s..e] {
-                                *slot = Some((t, r as u32, c as u32));
+                    .map(|l| l.iter().filter(|p| p.x1 <= x).cloned().collect())
+                    .collect(),
+                pieces
+                    .iter()
+                    .map(|l| l.iter().filter(|p| p.x0 >= x).cloned().collect())
+                    .collect(),
+            ],
+            None => vec![pieces],
+        };
+        let split = sets.len() > 1;
+        let mut refused: Option<(&'static str, f32)> = None;
+        let mut taken = false;
+        for pieces in &sets {
+            let runs: Vec<usize> = pieces
+                .iter()
+                .flatten()
+                .flat_map(|p| p.start..p.end)
+                .collect();
+            let Some(&first) = runs.iter().min() else {
+                continue;
+            };
+            let used: Vec<usize> = (0..pieces.len())
+                .filter(|&k| !pieces[k].is_empty())
+                .collect();
+            let (Some(&top), Some(&bottom)) = (used.first(), used.last()) else {
+                continue;
+            };
+            let x0 = pieces
+                .iter()
+                .flatten()
+                .map(|p| p.x0)
+                .fold(f32::MAX, f32::min);
+            let x1 = pieces
+                .iter()
+                .flatten()
+                .map(|p| p.x1)
+                .fold(f32::MIN, f32::max);
+            let (lt, lb) = (&lines[a + top], &lines[a + bottom]);
+            let b = [x0, lb.y - 0.25 * lb.size, x1, lt.y + lt.size];
+            let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
+            let line_sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
+            let (table_caption, figure_caption) =
+                captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
+            let rows_needed = if table_caption { 2 } else { 3 };
+            let verdict =
+                grid_of(flow, &lines[a..z], pieces, rows_needed, table_caption).and_then(|grid| {
+                    if figure_caption {
+                        return Err("a figure caption stands next to it");
+                    }
+                    let sizes: Vec<f32> = runs.iter().map(|&i| flow.runs[i].size).collect();
+                    match area.refuses(b, &sizes) {
+                        Some(why) => Err(why),
+                        None => Ok(grid),
+                    }
+                });
+            match verdict {
+                Ok(grid) => {
+                    taken = true;
+                    let planned = Planned {
+                        at: flow.at[first],
+                        top: b[3],
+                        rows: grid
+                            .rows
+                            .iter()
+                            .map(|r| {
+                                r.iter()
+                                    .map(|c| PlannedCell {
+                                        // Filled in below, once the runs are taken out.
+                                        runs: Vec::new(),
+                                        row_span: 1,
+                                        col_span: c.span,
+                                    })
+                                    .collect()
+                            })
+                            .collect(),
+                        header_rows: 0,
+                        trs: Vec::new(),
+                        additions: Vec::new(),
+                        tagged: None,
+                        continues: false,
+                    };
+                    let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
+                    for (r, cells) in grid.rows.iter().enumerate() {
+                        for (c, g) in cells.iter().enumerate() {
+                            for &(s, e) in &g.ranges {
+                                for slot in &mut target[s..e] {
+                                    *slot = Some((t, r as u32, c as u32));
+                                }
                             }
                         }
                     }
+                    claim.push(planned);
                 }
-                claim.push(planned);
+                Err(why) => {
+                    if table_caption && refused.is_none() {
+                        let why = if split { SIDE_BY_SIDE } else { why };
+                        refused = Some((why, b[3]));
+                    }
+                }
             }
-            Err(why) => {
-                // A grid of rules over the same text may have said so already.
-                let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
-                let said = found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
-                if table_caption && !said {
-                    found.unsure.push(Unsure {
-                        at: flow.at[lines[a].start],
-                        top: b[3],
-                        reason: why.to_string(),
-                        text: None,
-                    });
-                }
+        }
+        if let (false, Some((why, top))) = (taken, refused) {
+            // A grid of rules over the same text may have said so already, and a page gets
+            // one note for its regions without rules.
+            let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
+            let said = noted || found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
+            if !said {
+                noted = true;
+                found.unsure.push(Unsure {
+                    at: flow.at[lines[a].start],
+                    top,
+                    reason: why.to_string(),
+                    text: None,
+                });
             }
         }
     }
@@ -240,16 +282,17 @@ struct GridCell {
     span: u32,
 }
 
-/// Rebuilds the grid of a region and tests it, or says why it is no table.
-fn grid_of(
-    flow: &Flow,
-    lines: &[FlowLine],
-    pieces: &[Vec<Piece>],
-    rows_needed: usize,
-    table_caption: bool,
-) -> Result<Grid, &'static str> {
-    // Columns: the x ranges the pieces of the lines with the most common number of pieces
-    // fill; the first line may be a header that spans columns.
+/// Why a region of two blocks side by side is no table.
+const SIDE_BY_SIDE: &str = "two blocks stand side by side";
+
+/// A gutter this many font sizes wide or more, and this many times the median gutter, that
+/// no line crosses may part two blocks side by side.
+const BLOCK_GUTTER: f32 = 8.0;
+const BLOCK_GUTTER_RATIO: f32 = 3.0;
+
+/// Columns: the x ranges the pieces of the lines with the most common number of pieces fill;
+/// the first line may be a header that spans columns.
+fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
     let mut counts: HashMap<usize, usize> = HashMap::new();
     for p in pieces.iter().filter(|p| p.len() >= 2) {
         *counts.entry(p.len()).or_default() += 1;
@@ -273,6 +316,70 @@ fn grid_of(
             _ => columns.push((s, e)),
         }
     }
+    columns
+}
+
+/// Where two blocks that stand side by side part, when they do: the widest gutter between
+/// columns, when no line crosses it, the white space all lines leave there is at least
+/// [`BLOCK_GUTTER`] font sizes wide and [`BLOCK_GUTTER_RATIO`] times the median gutter, and
+/// the baselines of its sides do not line up.
+fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Option<f32> {
+    let columns = columns_of(pieces);
+    if columns.len() < 3 {
+        return None;
+    }
+    let gutters: Vec<(f32, f32)> = columns.windows(2).map(|w| (w[0].1, w[1].0)).collect();
+    let mut widths: Vec<f32> = gutters.iter().map(|g| g.1 - g.0).collect();
+    widths.sort_by(f32::total_cmp);
+    let median = widths[(widths.len() - 1) / 2];
+    let (g0, g1) = gutters
+        .into_iter()
+        .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))?;
+    // The white space every line leaves around the middle of that gutter.
+    let mid = (g0 + g1) / 2.0;
+    if pieces.iter().flatten().any(|p| p.x0 < mid && p.x1 > mid) {
+        return None;
+    }
+    let all = || pieces.iter().flatten();
+    let g0 = all()
+        .filter(|p| p.x1 <= mid)
+        .map(|p| p.x1)
+        .fold(f32::MIN, f32::max);
+    let g1 = all()
+        .filter(|p| p.x0 >= mid)
+        .map(|p| p.x0)
+        .fold(f32::MAX, f32::min);
+    let mut sizes: Vec<f32> = lines.iter().map(|l| l.size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let size = sizes[sizes.len() / 2];
+    if g1 - g0 < BLOCK_GUTTER * size || g1 - g0 < BLOCK_GUTTER_RATIO * median {
+        return None;
+    }
+    // The baselines of a side, line by line: those of its runs.
+    let side = |left: bool| -> Vec<Vec<f32>> {
+        pieces
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .filter(|p| if left { p.x1 <= mid } else { p.x0 >= mid })
+                    .flat_map(|p| flow.runs[p.start..p.end].iter().map(|r| r.y))
+                    .collect::<Vec<f32>>()
+            })
+            .filter(|l| !l.is_empty())
+            .collect()
+    };
+    offset_baselines(&side(true), &side(false), size).then_some(mid)
+}
+
+/// Rebuilds the grid of a region and tests it, or says why it is no table.
+fn grid_of(
+    flow: &Flow,
+    lines: &[FlowLine],
+    pieces: &[Vec<Piece>],
+    rows_needed: usize,
+    table_caption: bool,
+) -> Result<Grid, &'static str> {
+    let columns = columns_of(pieces);
     let cols = columns.len();
     if cols < 2 {
         return Err("no columns");
@@ -436,4 +543,80 @@ fn grid_of(
         return Err("it reads like a table of contents");
     }
     Ok(Grid { rows })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::Slot;
+
+    fn run(text: &str, x: f32, y: f32, line: u32) -> Run {
+        Run {
+            page: 1,
+            text: text.into(),
+            x,
+            y,
+            w: 5.0 * text.chars().count() as f32,
+            h: 8.0,
+            size: 8.0,
+            bold: false,
+            italic: false,
+            mcid: None,
+            uri: None,
+            line,
+            off_axis: false,
+        }
+    }
+
+    #[test]
+    fn side_by_side_blocks_are_refused() {
+        // Lines read row by row across two lists that stand side by side: labels and values
+        // on the left, labels and values 270 points to the right, 4 points lower. No table
+        // may mix the two lists.
+        let rows = [
+            ("Guest", "Sample", "Folio", "1000"),
+            ("Room", "101", "Copy", "Original"),
+            ("Arrival", "2030", "Cashier", "77"),
+            ("Nights", "3", "Desk", "Front"),
+        ];
+        let mut runs = Vec::new();
+        for (k, (a, b, c, d)) in rows.iter().enumerate() {
+            let y = 650.0 - 16.0 * k as f32;
+            let line = k as u32;
+            runs.push(run(a, 18.0, y, line));
+            runs.push(run(b, 70.0, y, line));
+            runs.push(run(c, 400.0, y - 4.0, line));
+            runs.push(run(d, 450.0, y - 4.0, line));
+        }
+        let n = runs.len();
+        let mut flow = Flow {
+            runs,
+            slots: vec![Slot::Free; n],
+            at: (0..n).collect(),
+        };
+        let area = Area {
+            width: 595.0,
+            height: 842.0,
+            images: &[],
+            body_size: 8.0,
+        };
+        let mut found = Found::default();
+        borderless(1, &mut flow, &area, &|| false, &mut found);
+        let left = [
+            "Guest", "Sample", "Room", "101", "Arrival", "2030", "Nights", "3",
+        ];
+        for t in &found.tables {
+            let words: Vec<&str> = t
+                .rows
+                .iter()
+                .flatten()
+                .flat_map(|c| c.runs.iter().map(|r| r.text.as_str()))
+                .collect();
+            let l = words.iter().filter(|w| left.contains(w)).count();
+            assert!(
+                l == 0 || l == words.len(),
+                "a table mixes both lists: {words:?}"
+            );
+        }
+    }
 }
