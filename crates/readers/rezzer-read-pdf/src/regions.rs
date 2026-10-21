@@ -572,13 +572,24 @@ pub(crate) fn offset_baselines(left: &[Vec<Part>], right: &[Vec<Part>], size: f3
     if left.len() < 2 || right.len() < 2 {
         return false;
     }
-    // The first part of a line: its highest baseline, with its size.
-    let head = |l: &Vec<Part>| -> Part {
-        l.iter().copied().fold(
-            (f32::MIN, size, false),
-            |a, p| if p.0 > a.0 { p } else { a },
-        )
-    };
+    // The first part of a line: its highest baseline with ink, with its size. White space
+    // beside the text does not stand for the line; a line of white space only stands for
+    // itself.
+    let head =
+        |l: &Vec<Part>| -> Part {
+            let top =
+                |inked: bool| {
+                    l.iter().copied().filter(|p| p.2 || !inked).fold(
+                        (f32::MIN, size, false),
+                        |a, p| if p.0 > a.0 { p } else { a },
+                    )
+                };
+            if l.iter().any(|p| p.2) {
+                top(true)
+            } else {
+                top(false)
+            }
+        };
     let block = |side: &[Vec<Part>]| {
         let mut t: Vec<f32> = side.iter().map(|l| head(l).0).collect();
         t.sort_by(f32::total_cmp);
@@ -817,6 +828,13 @@ mod tests {
             &at(&values, 12.0),
             8.0
         ));
+        // A run of white space on each value line, above the value or first: the value
+        // stands for its line, and the cells are rows.
+        let padded: Vec<Vec<Part>> = values
+            .iter()
+            .map(|&y| vec![(y + 0.5, 12.0, false), (y, 12.0, true)])
+            .collect();
+        assert!(!offset_baselines(&at(&labels, 8.0), &padded, 8.0));
         // The same shift between lines of one size is not explained: two blocks.
         assert!(offset_baselines(
             &at(&labels, 10.0),

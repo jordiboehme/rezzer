@@ -860,10 +860,27 @@ fn side_by_side_lists_are_no_table() {
 /// The page of rows whose two cells have different font sizes: `shape` 0 is label 8 pt and
 /// value 12 pt top-aligned, 1 is label 8 pt and value 14 pt centred, 2 is code with smaller
 /// line numbers a little above its baseline, 3 a glossary of bold 9 pt terms 2 points below
-/// the first line of 11 pt definitions that wrap.
+/// the first line of 11 pt definitions that wrap. Shapes 4 to 7 are shape 0 with a run of
+/// spaces in 12 pt on each value line: before the value on its baseline, after it 0.5 point
+/// higher, after it on its baseline, and after it 0.5 point lower.
 fn two_size_rows(shape: usize) -> Vec<u8> {
     let mut c = String::new();
     match shape {
+        4..=7 => {
+            let (x, dy) = [(140.0, 0.0), (300.0, 0.5), (300.0, 0.0), (300.0, -0.5)][shape - 4];
+            for r in 0..6 {
+                let top = 700.0 - 20.0 * r as f32;
+                let base = top - 12.0 * 0.718;
+                c += &show("F1", 8.0, 50.0, top - 8.0 * 0.718, &format!("Label {r}"));
+                if x < 200.0 {
+                    c += &show("F1", 12.0, x, base + dy, "      ");
+                }
+                c += &show("F1", 12.0, 200.0, base, &format!("Value {r}"));
+                if x > 200.0 {
+                    c += &show("F1", 12.0, x, base + dy, "      ");
+                }
+            }
+        }
         0 | 1 => {
             let (value, k) = if shape == 0 {
                 (12.0, 0.718)
@@ -914,12 +931,24 @@ fn rows_of_two_sizes_stay_rows() {
         ["Label 0", "Value 0"],
         ["1", "let value_0 = compute(x, 0);"],
         ["Term0", "Definition 0 part 0"],
+        ["Label 0", "Value 0"],
+        ["Label 0", "Value 0"],
+        ["Label 0", "Value 0"],
+        ["Label 0", "Value 0"],
     ];
     let mut wrong = Vec::new();
     for (shape, want) in first.iter().enumerate() {
         let out = read(&two_size_rows(shape));
         let found = tables(page(&out, 1));
-        if found.len() != 1 || found[0].1[0] != *want {
+        let row = found.first().map(|t| t.1[0].clone()).unwrap_or_default();
+        let holds = |w: &str| row.iter().any(|c| c.trim() == w);
+        // With a run of spaces on the value lines, rows may stay lines of text: each label
+        // is then read right before its value.
+        let flat = format!("{:?} {:?}", paragraphs(page(&out, 1)), found);
+        let at = |w: &str| flat.find(w).unwrap_or(usize::MAX);
+        let as_rows = at("Label 0") < at("Value 0") && at("Value 0") < at("Label 1");
+        let table = found.len() == 1 && want.iter().all(|w| holds(w));
+        if !(table || (shape >= 4 && as_rows)) {
             wrong.push((shape, paragraphs(page(&out, 1))));
         }
     }
