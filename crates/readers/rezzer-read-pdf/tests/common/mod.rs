@@ -281,3 +281,70 @@ pub fn tagged_lines(n: usize, kind: &str, uri: Option<&str>) -> Vec<u8> {
     );
     b.finish(catalog)
 }
+
+/// One tagged table of one row with `n` cells, cell `i` (text `w<i>`) on page `i + 1`.
+pub fn wide_row(n: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let table = b.reserve();
+    let tr = b.reserve();
+    let mut kids = Vec::new();
+    let mut tds = Vec::new();
+    let mut nums = String::new();
+    for i in 0..n {
+        let kid = b.reserve();
+        let cs = b.stream(
+            "",
+            format!("/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (w{i}) Tj ET EMC").as_bytes(),
+        );
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {i} \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        let td = b.add(format!(
+            "<< /Type /StructElem /S /TD /P {tr} 0 R /Pg {kid} 0 R /K 0 >>"
+        ));
+        nums.push_str(&format!("{i} [{td} 0 R] "));
+        kids.push(kid);
+        tds.push(td);
+    }
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    b.set(
+        tr,
+        format!(
+            "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+            refs(&tds)
+        ),
+    );
+    b.set(
+        table,
+        format!("<< /Type /StructElem /S /Table /P {doc} 0 R /K [{tr} 0 R] >>"),
+    );
+    b.set(
+        doc,
+        format!("<< /Type /StructElem /S /Document /P {root} 0 R /K [{table} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", refs(&kids)),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}

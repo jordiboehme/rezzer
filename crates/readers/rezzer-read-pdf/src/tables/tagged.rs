@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use pdfparts::StructTree;
 
-use super::{Planned, PlannedCell};
+use super::{Addition, Planned, PlannedCell};
 use crate::layout::{Flow, Run, Slot};
 
 /// The rows of the tagged tables met so far, each table read once for all its pages, and what
@@ -22,6 +22,10 @@ pub(crate) struct Tables {
     started: RefCell<HashMap<usize, (u32, Vec<String>)>>,
     /// What was found broken in the tag tree, once per table, in words.
     issues: RefCell<Vec<String>>,
+    /// The place in its table of each tag tree row built so far, and the rows each table
+    /// has: a row is planned once, and later pages add to its cells.
+    built: RefCell<HashMap<(usize, usize), usize>>,
+    counts: RefCell<HashMap<usize, usize>>,
 }
 
 /// The rows of one tagged table: the `TD` and `TH` cells of each row, the row of each cell
@@ -59,6 +63,7 @@ impl Tables {
         let mut rows = Vec::with_capacity(trs.len());
         let mut row_of = HashMap::new();
         let mut twice = 0usize;
+        let mut repeated = 0usize;
         for (i, tr) in trs.into_iter().enumerate() {
             let mut cells: Vec<usize> = Vec::new();
             for &c in &elems[tr].children {
@@ -68,10 +73,18 @@ impl Tables {
                 {
                     continue;
                 }
-                // A cell that a broken tree puts in two rows stays in the first.
-                if row_of.contains_key(&c) {
-                    twice += 1;
-                    continue;
+                // A cell that a broken tree puts in two rows stays in the first; one that a
+                // row lists twice is kept once.
+                match row_of.get(&c) {
+                    Some(&r) if r == i => {
+                        repeated += 1;
+                        continue;
+                    }
+                    Some(_) => {
+                        twice += 1;
+                        continue;
+                    }
+                    None => {}
                 }
                 row_of.insert(c, i);
                 cells.push(c);
@@ -89,6 +102,17 @@ impl Tables {
                  tag tree; {kept} kept in its first row"
             ));
         }
+        if repeated > 0 {
+            let (cells, is) = if repeated == 1 {
+                ("1 cell", "it is")
+            } else {
+                (&*format!("{repeated} cells"), "each is")
+            };
+            self.issues.borrow_mut().push(format!(
+                "{cells} of a tagged table on page {page} listed twice in the same row of the \
+                 tag tree; {is} kept once"
+            ));
+        }
         let mut content_cells: HashMap<u32, usize> = HashMap::new();
         for &c in row_of.keys() {
             for p in content_pages(tree, c) {
@@ -104,6 +128,18 @@ impl Tables {
         Some(found)
     }
 
+    /// Notes that row `tr` of tagged table `table` was built: it is the next row of the table.
+    pub(crate) fn row_built(&self, table: usize, tr: usize) {
+        let mut counts = self.counts.borrow_mut();
+        let n = counts.entry(table).or_default();
+        self.built.borrow_mut().insert((table, tr), *n);
+        *n += 1;
+    }
+
+    fn row_at(&self, table: usize, tr: usize) -> Option<usize> {
+        self.built.borrow().get(&(table, tr)).copied()
+    }
+
     /// What was found broken in the tag tree since the last call, in words.
     pub(crate) fn take_issues(&self) -> Vec<String> {
         std::mem::take(&mut self.issues.borrow_mut())
@@ -111,8 +147,8 @@ impl Tables {
 }
 
 /// The pages a cell has marked content on, from its element and the elements below it.
-fn content_pages(tree: &StructTree, cell: usize) -> Vec<u32> {
-    let mut pages: Vec<u32> = Vec::new();
+fn content_pages(tree: &StructTree, cell: usize) -> HashSet<u32> {
+    let mut pages: HashSet<u32> = HashSet::new();
     let mut stack = vec![cell];
     let mut seen = 0;
     while let Some(i) = stack.pop() {
@@ -123,9 +159,8 @@ fn content_pages(tree: &StructTree, cell: usize) -> Vec<u32> {
         let Some(e) = tree.elems.get(i) else { continue };
         if !e.mcids.is_empty()
             && let Some(p) = e.page
-            && !pages.contains(&p)
         {
-            pages.push(p);
+            pages.insert(p);
         }
         stack.extend(e.children.iter().copied());
     }
@@ -155,6 +190,7 @@ pub(crate) fn tagged(
     flow: &mut Flow,
     tree: &StructTree,
     tables: &Tables,
+    in_part: bool,
 ) -> (Vec<Planned>, Vec<String>) {
     let elems = &tree.elems;
     // The cells with text on this page, by table, in order of the tables' first run.
@@ -180,7 +216,8 @@ pub(crate) fn tagged(
         };
         let resolved = with_text[&t].len();
         let content = index.content_cells.get(&page).copied().unwrap_or(0);
-        if resolved * 2 < content {
+        // On a page a limit cut, cells without text may only be unread: no judgement.
+        if !in_part && resolved * 2 < content {
             fallbacks.push(format!(
                 "a tagged table on page {page} is not used: only {resolved} of its {content} \
                  cells with content on the page have text; the page is looked at as if it were \
@@ -219,14 +256,35 @@ pub(crate) fn tagged(
         touched.sort_unstable();
         touched.dedup();
         let mut rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(touched.len());
+        let mut trs: Vec<usize> = Vec::with_capacity(touched.len());
+        let mut additions: Vec<Addition> = Vec::new();
         let mut header_rows = 0;
         let mut in_header = true;
         for row in touched {
             let row_cells = &index.rows[row];
+            // A row an earlier page began gets this page's runs in its own cells.
+            if let Some(at) = tables.row_at(t, row) {
+                for (k, c) in row_cells.iter().enumerate() {
+                    if let Some(runs) = cells.remove(c) {
+                        additions.push(Addition {
+                            row: at,
+                            cell: k,
+                            runs,
+                        });
+                    }
+                }
+                continue;
+            }
             let built: Vec<PlannedCell> = row_cells
                 .iter()
                 .map(|c| PlannedCell {
-                    runs: cells.remove(c).unwrap_or_default(),
+                    runs: cells
+                        .remove(c)
+                        .map(|mut runs| {
+                            runs.shrink_to_fit();
+                            runs
+                        })
+                        .unwrap_or_default(),
                     row_span: elems[*c].row_span.max(1),
                     col_span: elems[*c].col_span.max(1),
                 })
@@ -237,12 +295,14 @@ pub(crate) fn tagged(
                 in_header = false;
             }
             rows.push(built);
+            trs.push(row);
         }
         // A table without any text (a layout box, an empty frame) is no table.
         let blank = rows
             .iter()
             .flatten()
             .flat_map(|c| &c.runs)
+            .chain(additions.iter().flat_map(|a| &a.runs))
             .all(|r| r.text.trim().is_empty());
         if blank {
             continue;
@@ -250,6 +310,7 @@ pub(crate) fn tagged(
         let mut started = tables.started.borrow_mut();
         let continues = match started.get(&t) {
             Some((p, _)) => *p != page,
+            None if rows.is_empty() => continue,
             None => {
                 // The column titles a later page may repeat: the header rows, or the first
                 // row of a table whose titles are not tagged as headers, unless the row
@@ -276,9 +337,10 @@ pub(crate) fn tagged(
                 .take_while(|(row, h)| row_text(row) == **h)
                 .count();
             rows.drain(..repeated);
+            trs.drain(..repeated);
             header_rows = 0;
         }
-        if rows.is_empty() {
+        if rows.is_empty() && additions.is_empty() {
             continue;
         }
         let (at, top) = first[&t];
@@ -286,6 +348,8 @@ pub(crate) fn tagged(
             at,
             top,
             rows,
+            trs,
+            additions,
             header_rows,
             tagged: Some(t),
             continues,

@@ -101,6 +101,9 @@ pub(crate) struct PageItems {
     pub unmapped_visible: u64,
     /// What on this page was not read, and why.
     pub notes: Vec<Note>,
+    /// A limit cut the page's text: what is missing was not read, it is not missing in the
+    /// file.
+    pub in_part: bool,
 }
 
 impl PageItems {
@@ -203,11 +206,16 @@ pub(crate) struct Caps {
 }
 
 impl Caps {
-    /// The caps for a read with `max_items` and `max_memory` bytes: a page's glyphs cost about
-    /// 600 bytes each until laid out and may take a quarter of the memory; what the pages
-    /// keep for layout may take a sixteenth, as building each page leaves memory behind.
-    pub(crate) fn new(max_items: usize, max_memory: u64) -> Caps {
-        let glyphs = usize::try_from(max_memory / 4 / 600).unwrap_or(usize::MAX);
+    /// The caps for a read with `max_items` and `max_memory` bytes, of which the object layer
+    /// took `objects` at open: a page's glyphs cost about 600 bytes each until laid out and
+    /// may take a quarter of the memory, less half of what the objects take, but never less
+    /// than a sixteenth; what the pages keep for layout may take a sixteenth, as building
+    /// each page leaves memory behind.
+    pub(crate) fn new(max_items: usize, max_memory: u64, objects: u64) -> Caps {
+        let for_glyphs = (max_memory / 4)
+            .saturating_sub(objects / 2)
+            .max(max_memory / 16);
+        let glyphs = usize::try_from(for_glyphs / 600).unwrap_or(usize::MAX);
         Caps {
             max_items,
             max_glyphs: glyphs.max(1_000),
@@ -522,6 +530,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         } = walked;
         self.cache_bytes = self.cache_bytes.saturating_add(font_bytes);
         let (placed, failed) = edit(&mut data, cut.as_ref().map(|(at, _)| *at), &rewrites);
+        let mut in_part = cut.is_some();
         if let Some((_, why)) = &cut {
             if placed {
                 notes.push(Note::Limit(format!(
@@ -609,11 +618,14 @@ impl<'p, 'a> PageReader<'p, 'a> {
         if let Err(payload) = run {
             match payload.downcast_ref::<Abort>() {
                 Some(Abort::Stop) => return Read::Stopped,
-                Some(Abort::Cap) => notes.push(Note::Limit(format!(
-                    "text of page {n} read only in part: it draws more than {} glyphs; the \
-                     rest of the page is not read",
-                    dev.cap
-                ))),
+                Some(Abort::Cap) => {
+                    in_part = true;
+                    notes.push(Note::Limit(format!(
+                        "text of page {n} read only in part: it draws more than {} glyphs; the \
+                         rest of the page is not read",
+                        dev.cap
+                    )))
+                }
                 None => {
                     // Whatever the interpreter cached may be half built.
                     self.cache = InterpreterCache::new();
@@ -689,6 +701,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         text.clear();
         self.glyph_buf = glyphs;
         self.text_buf = text;
+        items.in_part = in_part;
         notes.append(&mut items.notes);
         items.notes = notes;
         // What every page keeps until layout counts against one bound for the file. It is

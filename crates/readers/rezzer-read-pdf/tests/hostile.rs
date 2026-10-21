@@ -1296,8 +1296,8 @@ fn an_element_stop_keeps_the_blocks_before_it() {
 #[test]
 fn a_tagged_table_of_40000_rows_is_bounded_through_render() {
     // 40,000 rows of one cell each under one link: 120,000 structure elements, an 8 MB file.
-    // The table and its render add nothing to the peak of the read. The read itself peaks
-    // while the object layer parses the file; that bound belongs to the object layer.
+    // The objects take most of what the read may use, so the text gets less; the table and
+    // its render add little to the peak of the read.
     let start = Instant::now();
     let bytes = common::tagged_lines(40_000, "table", Some("http://x/u"));
     let out = read(&bytes);
@@ -1342,6 +1342,7 @@ fn a_tagged_table_of_40000_rows_is_bounded_through_render() {
         read_peak >> 20,
         render_peak >> 20
     );
+    assert_rss_under_256_mib();
 }
 
 #[test]
@@ -1571,4 +1572,138 @@ fn many_small_tables_without_rules_on_one_page_are_bounded() {
         );
     }
     assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_row_over_3000_pages_is_bounded() {
+    // One tagged row with a cell on each of 3,000 pages: the row is planned once and every
+    // page adds its cell's text to it.
+    let start = Instant::now();
+    let out = read(&common::wide_row(3_000));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    let rows: Vec<usize> = page(&out, 1)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows.len()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rows, [1], "{:?}", out.document.losses);
+    assert_rss_under_256_mib();
+}
+
+/// One page `w` points wide and `h` high with Helvetica as `/F1` and `content`.
+fn page_of(content: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(content));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// `n` small tables of three rows in two columns, 60 points apart, on one page; with `big`,
+/// one glyph as high as the page as well.
+fn tiny_tables(n: usize, big: bool) -> Vec<u8> {
+    let h = (n + 2) * 60;
+    let size = if big { h } else { 8 };
+    let mut c = format!("BT /F1 {size} Tf 1 0 0 1 400 1 Tm (Z) Tj /F1 8 Tf ").into_bytes();
+    for i in 0..n {
+        let top = h - 20 - i * 60;
+        for r in 0..3 {
+            let y = top - r * 10;
+            c.extend(
+                format!(
+                    "1 0 0 1 72 {y} Tm (a) Tj 1 0 0 1 300 {y} Tm ({}) Tj ",
+                    (i + r) % 10
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    c.extend(b"ET\n");
+    page_of(&c, 595, h)
+}
+
+#[test]
+fn the_cells_of_36000_small_tables_are_charged() {
+    let start = Instant::now();
+    let out = read(&tiny_tables(36_000, false));
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    let tables = page(&out, 1)
+        .iter()
+        .filter(|b| matches!(b, Block::Table { .. }))
+        .count();
+    assert!(tables > 0);
+    if tables < 36_000 {
+        assert!(
+            !losses(&out, LossReason::Limit).is_empty(),
+            "{tables} tables, {:?}",
+            out.document.losses
+        );
+    }
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn one_huge_glyph_does_not_widen_the_caption_search() {
+    // The caption band once came from the largest size on the page: one glyph as high as the
+    // page made every region look at every line.
+    let start = Instant::now();
+    let out = read(&tiny_tables(36_000, true));
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(
+        page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Table { .. }))
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn a_grid_of_20000_columns_is_refused_quickly() {
+    // Six full-width rules and 19,990 vertical rules 2.5 points apart, one word inside.
+    let n = 19_990usize;
+    let w = 100 + n * 5 / 2;
+    let mut c = b"0.1 w ".to_vec();
+    for k in 0..6 {
+        let y = 100 + k * 20;
+        c.extend(format!("50 {y} m {} {y} l S ", w - 40).as_bytes());
+    }
+    for k in 0..n {
+        let x = 50.0 + 2.5 * k as f64;
+        c.extend(format!("{x} 100 m {x} 200 l S ").as_bytes());
+    }
+    c.extend(b"BT /F1 1 Tf 1 0 0 1 51 105 Tm (x) Tj ET");
+    let bytes = page_of(&c, w, 400);
+    let start = Instant::now();
+    let out = read(&bytes);
+    let took = start.elapsed();
+    assert!(took < Duration::from_millis(500), "{took:?}");
+    assert!(
+        !page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Table { .. }))
+    );
 }

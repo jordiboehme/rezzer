@@ -11,6 +11,8 @@ mod borderless;
 mod ruled;
 mod tagged;
 
+use std::collections::HashMap;
+
 use crate::layout::{Drawn, Flow, Run};
 
 pub(crate) use tagged::{Tables, tagged};
@@ -41,12 +43,25 @@ pub(crate) struct Planned {
     /// The top of the table, in the frame of the runs.
     pub top: f32,
     pub rows: Vec<Vec<PlannedCell>>,
+    /// For a tagged table, the row of the tag tree each of `rows` is.
+    pub trs: Vec<usize>,
+    /// Text for rows of a tagged table that earlier pages began.
+    pub additions: Vec<Addition>,
     /// The leading rows made only of header cells.
     pub header_rows: usize,
     /// The tagged table the rows belong to, which may have started on an earlier page.
     pub tagged: Option<usize>,
     /// The rows go on a table that started on an earlier page.
     pub continues: bool,
+}
+
+/// Runs for a cell of a row an earlier page began: the row's place in its table and the
+/// cell's place in the row.
+#[derive(Debug)]
+pub(crate) struct Addition {
+    pub row: usize,
+    pub cell: usize,
+    pub runs: Vec<Run>,
 }
 
 #[derive(Debug, Default)]
@@ -228,12 +243,14 @@ fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
 
 /// The caption kinds next to a box: a caption whose paragraph ends within three line heights
 /// above the box, or starts within three line heights below it, and overlaps it across.
-/// Lines `skip` names (the box's own) are not looked at.
+/// Lines `skip` names (the box's own) are not looked at. `sizes` are the font sizes of the
+/// box's text: their median sets how far from the box a caption may stand.
 fn captions_near(
     flow: &Flow,
     lines: &[FlowLine],
     by_y: &ByY,
     b: [f32; 4],
+    sizes: &[f32],
     skip: &dyn Fn(usize) -> bool,
 ) -> (bool, bool) {
     let (mut table, mut figure) = (false, false);
@@ -254,8 +271,16 @@ fn captions_near(
         Some(false) => figure = true,
         None => {}
     };
-    // Only lines in a band around the box can be near it.
-    let band = 4.0 * by_y.size;
+    // Only lines in a band around the box can be near it: a caption is set about as large as
+    // the table's own text.
+    let mut sorted = sizes.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let size = sorted
+        .get(sorted.len() / 2)
+        .copied()
+        .unwrap_or(10.0)
+        .clamp(1.0, MAX_CAPTION_SIZE);
+    let band = 4.0 * size;
     let lo = by_y.line_y.partition_point(|y| *y < b[1] - band);
     let hi = by_y.line_y.partition_point(|y| *y <= b[3] + band);
     for &k in &by_y.lines[lo..hi] {
@@ -263,7 +288,7 @@ fn captions_near(
         if skip(l.start) || !across(l) {
             continue;
         }
-        let near = 3.0 * l.size;
+        let near = 3.0 * l.size.min(2.0 * size);
         if l.y < b[1] && b[1] - (l.y + l.size) <= near {
             note(l);
         } else if l.y > b[3] && l.y - b[3] <= near {
@@ -294,8 +319,6 @@ struct ByY {
     /// Line indices by baseline, and the baselines.
     lines: Vec<usize>,
     line_y: Vec<f32>,
-    /// The largest font size of the page.
-    size: f32,
 }
 
 impl ByY {
@@ -314,7 +337,6 @@ impl ByY {
             runs: runs.into_iter().map(|r| r.1).collect(),
             line_y: ls.iter().map(|l| l.0).collect(),
             lines: ls.into_iter().map(|l| l.1).collect(),
-            size: lines.iter().map(|l| l.size).fold(1.0, f32::max),
         }
     }
 
@@ -331,6 +353,48 @@ impl ByY {
 /// The point of a run that decides which cell it is in.
 fn middle(r: &Run) -> (f32, f32) {
     (r.x + r.w / 2.0, r.y + r.h * 0.3)
+}
+
+/// Where a run of the page goes: the table, row and cell of `planned`.
+type Target = Option<(u32, u32, u32)>;
+
+/// Moves the runs `target` names out of `flow` into the cells of `planned`. Each cell is sized
+/// for its runs first: a list grown one run at a time keeps room for four.
+fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
+    let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+    for t in target.iter().flatten() {
+        *counts.entry(*t).or_default() += 1;
+    }
+    for ((t, r, c), n) in counts {
+        planned[t as usize].rows[r as usize][c as usize]
+            .runs
+            .reserve_exact(n);
+    }
+    let stay = target.iter().filter(|t| t.is_none()).count()
+        + flow.runs.len().saturating_sub(target.len());
+    flow.take_each(stay, |i, r| match target.get(i).copied().flatten() {
+        Some((t, row, cell)) => {
+            planned[t as usize].rows[row as usize][cell as usize]
+                .runs
+                .push(r);
+            None
+        }
+        None => Some(r),
+    });
+}
+
+/// The largest text size a caption search assumes for a table, in points.
+const MAX_CAPTION_SIZE: f32 = 36.0;
+
+/// Tables without tags one page may have; past them the text stays paragraphs, with a loss.
+const MAX_TABLES: usize = 5_000;
+
+/// The loss for a page that has more tables than it may.
+fn too_many_tables(page: u32) -> String {
+    format!(
+        "tables on page {page} past the first {MAX_TABLES} are not rebuilt: the page has more \
+         tables than it may; their text stays as paragraphs"
+    )
 }
 
 /// Grids and regions one page may have looked at between two looks at the clock.

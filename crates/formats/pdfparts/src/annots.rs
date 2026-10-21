@@ -210,7 +210,7 @@ impl Pdf {
 
     /// The rectangle of every form widget annotation, with its 1-based page, in page order:
     /// lower left x and y, upper right x and y, in default user space. A widget that several
-    /// pages share is listed once, on the first.
+    /// pages list is listed on each of them, once per page.
     pub fn widget_boxes(&self) -> Vec<(u32, [f32; 4])> {
         let doc = &self.doc;
         let mut issues = Vec::new();
@@ -219,7 +219,7 @@ impl Pdf {
         let mut budget = self.text_budget();
         self.each_annot("form widgets", &mut issues, |page, _, a| {
             if let Some(r) = reference(a)
-                && !seen.insert(r)
+                && !seen.insert((page, r))
             {
                 return Ok(());
             }

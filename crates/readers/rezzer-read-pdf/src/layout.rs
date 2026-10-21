@@ -379,6 +379,8 @@ pub(crate) struct Context<'a> {
     pub budget: &'a Budget,
     /// Tagged tables already read, shared by all pages of the file.
     pub tables: &'a Tables,
+    /// A limit cut the page's text, so cells without text may only be unread.
+    pub in_part: bool,
     /// The bytes the link targets in the model may take, shared by all pages of the file.
     pub links: &'a LinkRoom,
 }
@@ -407,6 +409,10 @@ struct LinkMark {
 /// What a copy of a link target costs besides its bytes.
 const LINK_COST: u64 = 64;
 
+/// What one table cell costs in the model besides its text, measured: the cell (56 bytes),
+/// one inline (80) and the allocation of its text and of the row (about 50).
+const CELL_COST: u64 = 192;
+
 impl LinkRoom {
     pub(crate) fn new(bytes: u64) -> LinkRoom {
         LinkRoom {
@@ -428,6 +434,22 @@ impl LinkRoom {
         let (first, _) = self.pages.get().unwrap_or((page, page));
         self.pages.set(Some((first, page)));
         false
+    }
+
+    /// Takes `bytes` for what the model keeps besides link targets (the cells of tables), from
+    /// the same room.
+    fn take_bytes(&self, bytes: u64) -> Result<(), LimitHit> {
+        let left = self.left.get();
+        if bytes > left {
+            return Err(LimitHit {
+                limit: "kept text",
+                value: bytes,
+                max: left,
+                unit: "bytes",
+            });
+        }
+        self.left.set(left - bytes);
+        Ok(())
     }
 
     /// The counts now, to go back to if the block they were taken for is dropped.
@@ -468,6 +490,9 @@ pub(crate) struct Laid {
     pub continued: Vec<(usize, Vec<Vec<Cell>>)>,
     /// For each table in `blocks`, in order: the tagged table it begins, if any.
     pub tagged: Vec<Option<usize>>,
+    /// Text for cells of tagged table rows begun on earlier pages: the table, the row's place
+    /// in it, the cell's place in the row and the inlines.
+    pub added: Vec<(usize, usize, usize, Vec<Inline>)>,
     /// What the table detectors left undecided or found broken: words, reason, severity.
     pub notes: Vec<(String, LossReason, Severity)>,
 }
@@ -483,6 +508,9 @@ pub(crate) enum Cut {
     Item { block: usize, item: usize },
     /// Row `row` (from 1) of the rows this page adds to a table, and all after it.
     Row { table: TableRef, row: usize },
+    /// The text this page adds to the cells of row `row` (from 0) of tagged table `table`,
+    /// begun on an earlier page, and all after it.
+    Added { table: usize, row: usize },
 }
 
 /// A table a cut names.
@@ -509,16 +537,45 @@ impl Flow {
         Flow { runs, slots, at }
     }
 
-    /// Takes out the runs `pick` chooses, in order, with their slots and places.
-    pub(crate) fn take(
+    /// Hands each run with its index to `take`, which keeps it (returns `None`) or gives it
+    /// back to stay in the flow. Nothing is copied on the way; `stay` is how many runs stay.
+    pub(crate) fn take_each(
         &mut self,
-        mut pick: impl FnMut(&Run, Slot) -> bool,
-    ) -> Vec<(Run, Slot, usize)> {
-        let mut taken = Vec::new();
-        let mut kept = Flow::default();
+        stay: usize,
+        mut take: impl FnMut(usize, Run) -> Option<Run>,
+    ) {
         let all = std::mem::take(self);
-        for ((r, s), a) in all.runs.into_iter().zip(all.slots).zip(all.at) {
-            if pick(&r, s) {
+        let mut kept = Flow {
+            runs: Vec::with_capacity(stay),
+            slots: Vec::with_capacity(stay),
+            at: Vec::with_capacity(stay),
+        };
+        for (i, ((r, s), a)) in all.runs.into_iter().zip(all.slots).zip(all.at).enumerate() {
+            if let Some(r) = take(i, r) {
+                kept.runs.push(r);
+                kept.slots.push(s);
+                kept.at.push(a);
+            }
+        }
+        *self = kept;
+    }
+
+    /// Takes out the runs `pick` chooses by index and slot, in order, with their slots and
+    /// places. Both parts are sized exactly.
+    pub(crate) fn take(&mut self, pick: impl Fn(usize, Slot) -> bool) -> Vec<(Run, Slot, usize)> {
+        let n = (0..self.runs.len())
+            .filter(|&i| pick(i, self.slots[i]))
+            .count();
+        let mut taken = Vec::with_capacity(n);
+        let all = std::mem::take(self);
+        let stay = all.runs.len() - n;
+        let mut kept = Flow {
+            runs: Vec::with_capacity(stay),
+            slots: Vec::with_capacity(stay),
+            at: Vec::with_capacity(stay),
+        };
+        for (i, ((r, s), a)) in all.runs.into_iter().zip(all.slots).zip(all.at).enumerate() {
+            if pick(i, s) {
                 taken.push((r, s, a));
             } else {
                 kept.runs.push(r);
@@ -576,7 +633,7 @@ pub(crate) fn page_blocks(
     // column titles a long table repeats at the top of each page are table text.
     let geometry = match cx.tree {
         Some(tree) => {
-            let (found, fallbacks) = tables::tagged(page, &mut flow, tree, cx.tables);
+            let (found, fallbacks) = tables::tagged(page, &mut flow, tree, cx.tables, cx.in_part);
             placed.extend(found.into_iter().map(Placed::Table));
             for what in cx.tables.take_issues() {
                 notes.push((what, LossReason::Damaged, Severity::Warning));
@@ -613,11 +670,7 @@ pub(crate) fn page_blocks(
         }
         bands
     };
-    let mut k = 0;
-    let edges = flow.take(|_, _| {
-        k += 1;
-        bands[k - 1].is_some()
-    });
+    let edges = flow.take(|i, _| bands[i].is_some());
     let mut headers: Vec<Run> = Vec::new();
     let mut footers: Vec<Run> = Vec::new();
     for ((r, _, _), b) in edges.into_iter().zip(bands.iter().flatten()) {
@@ -739,6 +792,8 @@ struct Built {
     continued: Vec<(usize, Vec<Vec<Cell>>)>,
     /// The tagged table each table block begins, if any.
     tagged: Vec<Option<usize>>,
+    /// Text for cells of rows begun on earlier pages.
+    added: Vec<(usize, usize, usize, Vec<Inline>)>,
     /// The link room before the block (or the table row) now being built, to go back to if
     /// it is dropped.
     mark: Option<LinkMark>,
@@ -756,6 +811,8 @@ enum Pending {
     Item,
     /// A row of a table.
     Row(TableRef, usize),
+    /// Text for a row of a tagged table begun on an earlier page.
+    Added(usize, usize),
 }
 
 impl Built {
@@ -800,6 +857,7 @@ impl Built {
             // Nothing of a table of this page is kept before its first row.
             Pending::Row(TableRef::Here(k), 1) => Cut::Table(k),
             Pending::Row(table, row) => Cut::Row { table, row },
+            Pending::Added(table, row) => Cut::Added { table, row },
         });
         self.stop = Some(hit);
     }
@@ -812,6 +870,7 @@ impl Built {
             cut: self.cut,
             continued: self.continued,
             tagged: self.tagged,
+            added: self.added,
             notes,
         }
     }
@@ -829,9 +888,10 @@ impl Built {
         self.push(Block::paragraph(vec![Inline::plain(text)]), cx);
     }
 
-    /// Builds a planned table: a new table on this page, or rows for a tagged table begun on an
-    /// earlier page. The table is one element, charged first; a stop inside it keeps the rows
-    /// built before.
+    /// Builds a planned table: a new table on this page, or rows and cell text for a tagged
+    /// table begun on an earlier page. The table, each row and each cell are charged as
+    /// elements, and each cell also by its fixed cost and its text against the room the model
+    /// may keep; a stop inside a table keeps the rows built before.
     fn table(&mut self, plan: Planned, cx: &Context<'_>) {
         if self.stop.is_some() {
             return;
@@ -853,20 +913,29 @@ impl Built {
                 TableRef::Here(here + 1)
             }
         };
+        if let Some(t) = earlier {
+            for add in plan.additions {
+                self.pending = Pending::Added(t, add.row);
+                self.mark = Some(cx.links.mark());
+                let Some(inlines) = self.cell_inlines(&add.runs, cx) else {
+                    return;
+                };
+                self.mark = None;
+                self.added.push((t, add.row, add.cell, inlines));
+            }
+        }
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(plan.rows.len());
         'rows: for (r, row) in plan.rows.into_iter().enumerate() {
             self.pending = Pending::Row(table, r + 1);
             self.mark = Some(cx.links.mark());
+            if let Err(hit) = cx.budget.add_elements(1) {
+                self.stop_at(hit, cx);
+                break;
+            }
             let mut cells = Vec::with_capacity(row.len());
             for c in row {
-                let inlines = if c.runs.is_empty() {
-                    Vec::new()
-                } else {
-                    let refs: Vec<&Run> = c.runs.iter().collect();
-                    match self.inlines(&refs, cx) {
-                        Some(i) => i,
-                        None => break 'rows,
-                    }
+                let Some(inlines) = self.cell_inlines(&c.runs, cx) else {
+                    break 'rows;
                 };
                 cells.push(Cell {
                     inlines,
@@ -876,6 +945,9 @@ impl Built {
                 });
             }
             self.mark = None;
+            if let (Some(t), Some(tr)) = (plan.tagged, plan.trs.get(r)) {
+                cx.tables.row_built(t, *tr);
+            }
             rows.push(cells);
         }
         self.mark = None;
@@ -898,6 +970,25 @@ impl Built {
         }
     }
 
+    /// The inlines of one table cell, charged as an element and by its fixed cost and its
+    /// text against the room the model may keep; `None` once a limit stopped the page.
+    fn cell_inlines(&mut self, runs: &[Run], cx: &Context<'_>) -> Option<Vec<Inline>> {
+        let bytes: usize = runs.iter().map(|r| r.text.len()).sum();
+        let cost = CELL_COST + u64::try_from(bytes).unwrap_or(u64::MAX);
+        let charged = time_over(cx.budget)
+            .and_then(|()| cx.budget.add_elements(1))
+            .and_then(|()| cx.links.take_bytes(cost));
+        if let Err(hit) = charged {
+            self.stop_at(hit, cx);
+            return None;
+        }
+        if runs.is_empty() {
+            return Some(Vec::new());
+        }
+        let refs: Vec<&Run> = runs.iter().collect();
+        self.inlines(&refs, cx)
+    }
+
     /// The inlines of `runs`, or `None` once a limit stopped the page. Each stretch of runs
     /// under one link becomes one link with its own copy of the target, charged to the link
     /// room.
@@ -914,7 +1005,11 @@ impl Built {
             return None;
         }
         match inlines(runs, cx.links, cx.budget) {
-            Ok(built) => Some(built),
+            Ok(mut built) => {
+                // Most blocks hold one or two inlines: the list keeps no spare room.
+                built.shrink_to_fit();
+                Some(built)
+            }
             Err(hit) => {
                 self.stop_at(hit, cx);
                 None
@@ -1628,6 +1723,7 @@ mod tests {
             roles: &|_| None,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &room,
         };
         let mut built = Built::default();
@@ -1654,6 +1750,7 @@ mod tests {
             roles: &|_| None,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &room,
         };
         // The first cell, as the cell before a stop is built: its cut is counted.
@@ -1720,6 +1817,7 @@ mod tests {
             roles: &|_| None,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
@@ -1832,6 +1930,7 @@ mod tests {
                 roles: &roles,
                 budget: &budget,
                 tables: &tables,
+                in_part: false,
                 links: &links,
             };
             laid.push(page_blocks(
@@ -1904,6 +2003,7 @@ mod tests {
                 roles: &roles,
                 budget: &budget,
                 tables: &tables,
+                in_part: false,
                 links: &links,
             };
             let laid = page_blocks(k as u32 + 1, Some(842.0), runs.clone(), &NOTHING_DRAWN, &cx);
@@ -1937,6 +2037,7 @@ mod tests {
             roles: &roles,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(
@@ -1962,6 +2063,47 @@ mod tests {
     }
 
     #[test]
+    fn a_cell_listed_twice_in_one_row_is_kept_once_and_said() {
+        let (mut tree, cells) = table_tree(&[&["TD", "TD"]]);
+        let first = cells[0][0];
+        let tr = tree.elems[first].parent.expect("a row");
+        tree.elems[tr].children.push(first);
+        let style = Style::default();
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let owners = [first, cells[0][1]];
+        let roles = |m: u32| owners.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &Tables::default(),
+            in_part: false,
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks(
+            1,
+            Some(842.0),
+            tagged_runs(&["one", "two"], 700.0),
+            &NOTHING_DRAWN,
+            &cx,
+        );
+        match laid.blocks.as_slice() {
+            [Block::Table { rows, .. }] => assert_eq!(cell_texts(rows), [["one", "two"]]),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            laid.notes
+                .iter()
+                .any(|(w, why, _)| *why == LossReason::Damaged
+                    && w == "1 cell of a tagged table on page 1 listed twice in the same row of \
+                         the tag tree; it is kept once"),
+            "{:?}",
+            laid.notes
+        );
+    }
+
+    #[test]
     fn a_tagged_table_mostly_without_text_is_left_as_text() {
         let (mut tree, cells) = table_tree(&[&["TD", "TD"], &["TD", "TD"]]);
         // All four cells have marked content on page 1, but only one has text there.
@@ -1981,6 +2123,7 @@ mod tests {
             roles: &roles,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(
@@ -2025,6 +2168,7 @@ mod tests {
             roles: &|_| None,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
@@ -2052,6 +2196,7 @@ mod tests {
             roles: &roles,
             budget: &budget,
             tables: &Tables::default(),
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(
@@ -2134,6 +2279,7 @@ mod tests {
             roles: &roles,
             budget: &budget,
             tables: &tables,
+            in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
         let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
@@ -2226,6 +2372,7 @@ mod tests {
                 roles: &roles,
                 budget: &budget,
                 tables: &tables,
+                in_part: false,
                 links: &LinkRoom::new(u64::MAX),
             };
             let laid = page_blocks(page as u32 + 1, None, runs, &NOTHING_DRAWN, &cx);

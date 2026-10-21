@@ -18,6 +18,21 @@ struct Piece {
     end: usize,
 }
 
+/// How many pieces `pieces_of` finds in a line, without building them.
+fn piece_count(flow: &Flow, l: &FlowLine) -> usize {
+    let mut n = 0;
+    let mut end = f32::MIN;
+    for r in &flow.runs[l.start..l.end] {
+        if n == 0 || r.x - end > CELL_GAP * r.size.max(1.0) {
+            n += 1;
+            end = r.x + r.w;
+        } else {
+            end = end.max(r.x + r.w);
+        }
+    }
+    n
+}
+
 fn pieces_of(flow: &Flow, l: &FlowLine) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
     for i in l.start..l.end {
@@ -64,7 +79,8 @@ pub(super) fn borderless(
 ) {
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
-    let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(flow, l)).collect();
+    // The number of pieces of each line; the pieces themselves are built for a region only.
+    let counts: Vec<usize> = lines.iter().map(|l| piece_count(flow, l)).collect();
     let off: Vec<bool> = lines
         .iter()
         .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis))
@@ -74,7 +90,7 @@ pub(super) fn borderless(
     let mut regions: Vec<(usize, usize)> = Vec::new();
     let mut i = 0;
     while i < lines.len() {
-        if off[i] || pieces[i].len() < 2 {
+        if off[i] || counts[i] < 2 {
             i += 1;
             continue;
         }
@@ -86,7 +102,7 @@ pub(super) fn borderless(
             if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) {
                 break;
             }
-            if pieces[end].len() >= 2 {
+            if counts[end] >= 2 {
                 last_multi = end;
             } else if end - last_multi > 2 {
                 break;
@@ -96,7 +112,9 @@ pub(super) fn borderless(
         regions.push((i, last_multi + 1));
         i = last_multi + 1;
     }
-    let mut claim: Vec<(usize, usize, Planned, Grid)> = Vec::new();
+    // Accepted regions, and for each run the table, row and cell it goes to.
+    let mut claim: Vec<Planned> = Vec::new();
+    let mut target: Vec<Target> = vec![None; flow.runs.len()];
     for (g, (a, z)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -105,15 +123,20 @@ pub(super) fn borderless(
             ));
             break;
         }
-        let multi = (a..z).filter(|&k| pieces[k].len() >= 2).count();
+        if found.tables.len() + claim.len() >= MAX_TABLES {
+            found.skipped.push(too_many_tables(page));
+            break;
+        }
+        let multi = (a..z).filter(|&k| counts[k] >= 2).count();
         if multi < 2 {
             continue;
         }
+        let pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         let x0 = (a..z)
-            .flat_map(|k| pieces[k].iter().map(|p| p.x0))
+            .flat_map(|k| pieces[k - a].iter().map(|p| p.x0))
             .fold(f32::MAX, f32::min);
         let x1 = (a..z)
-            .flat_map(|k| pieces[k].iter().map(|p| p.x1))
+            .flat_map(|k| pieces[k - a].iter().map(|p| p.x1))
             .fold(f32::MIN, f32::max);
         let b = [
             x0,
@@ -122,28 +145,24 @@ pub(super) fn borderless(
             lines[a].y + lines[a].size,
         ];
         let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
-        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &in_region);
+        let line_sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
+        let (table_caption, figure_caption) =
+            captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
         let rows_needed = if table_caption { 2 } else { 3 };
-        let verdict = grid_of(
-            flow,
-            &lines[a..z],
-            &pieces[a..z],
-            rows_needed,
-            table_caption,
-        )
-        .and_then(|grid| {
-            if figure_caption {
-                return Err("a figure caption stands next to it");
-            }
-            let sizes: Vec<f32> = flow.runs[lines[a].start..lines[z - 1].end]
-                .iter()
-                .map(|r| r.size)
-                .collect();
-            match area.refuses(b, &sizes) {
-                Some(why) => Err(why),
-                None => Ok(grid),
-            }
-        });
+        let verdict =
+            grid_of(flow, &lines[a..z], &pieces, rows_needed, table_caption).and_then(|grid| {
+                if figure_caption {
+                    return Err("a figure caption stands next to it");
+                }
+                let sizes: Vec<f32> = flow.runs[lines[a].start..lines[z - 1].end]
+                    .iter()
+                    .map(|r| r.size)
+                    .collect();
+                match area.refuses(b, &sizes) {
+                    Some(why) => Err(why),
+                    None => Ok(grid),
+                }
+            });
         match verdict {
             Ok(grid) => {
                 let planned = Planned {
@@ -164,10 +183,22 @@ pub(super) fn borderless(
                         })
                         .collect(),
                     header_rows: 0,
+                    trs: Vec::new(),
+                    additions: Vec::new(),
                     tagged: None,
                     continues: false,
                 };
-                claim.push((a, z, planned, grid));
+                let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
+                for (r, cells) in grid.rows.iter().enumerate() {
+                    for (c, g) in cells.iter().enumerate() {
+                        for &(s, e) in &g.ranges {
+                            for slot in &mut target[s..e] {
+                                *slot = Some((t, r as u32, c as u32));
+                            }
+                        }
+                    }
+                }
+                claim.push(planned);
             }
             Err(why) => {
                 // A grid of rules over the same text may have said so already.
@@ -187,27 +218,8 @@ pub(super) fn borderless(
         return;
     }
     // The runs of all accepted regions leave the flow at once; each goes to its cell.
-    let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
-    for (t, (_, _, _, grid)) in claim.iter().enumerate() {
-        for (r, cells) in grid.rows.iter().enumerate() {
-            for (c, g) in cells.iter().enumerate() {
-                for &(s, e) in &g.ranges {
-                    for slot in &mut target[s..e] {
-                        *slot = Some((t, r, c));
-                    }
-                }
-            }
-        }
-    }
-    let mut k = 0;
-    let taken = flow.take(|_, _| {
-        k += 1;
-        target[k - 1].is_some()
-    });
-    let mut planned: Vec<Planned> = claim.into_iter().map(|c| c.2).collect();
-    for ((r, _, _), (t, row, cell)) in taken.into_iter().zip(target.into_iter().flatten()) {
-        planned[t].rows[row][cell].runs.push(r);
-    }
+    let mut planned = claim;
+    fill(&mut planned, flow, &target);
     for mut p in planned {
         p.header_rows = header_of(&p.rows);
         found.tables.push(p);

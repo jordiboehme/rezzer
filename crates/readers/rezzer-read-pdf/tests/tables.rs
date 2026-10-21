@@ -326,6 +326,48 @@ fn ruled_table_grid() {
 }
 
 #[test]
+fn missing_inner_rules_join_ruled_cells() {
+    // A 3 x 3 grid: no rule between the first two cells of row 1, so they are one cell over
+    // two columns; no rule below the first cell of row 2, so it goes down over row 3.
+    let mut c = String::from("0.5 w ");
+    for (y, x0) in [(700, 72), (670, 72), (640, 192), (610, 72)] {
+        c += &format!("{x0} {y} m 432 {y} l S ");
+    }
+    for (x, y1) in [(72, 700), (192, 670), (312, 700), (432, 700)] {
+        c += &format!("{x} 610 m {x} {y1} l S ");
+    }
+    for (x, y, text) in [
+        (78.0, 680.0, "Region"),
+        (318.0, 680.0, "Total"),
+        (78.0, 650.0, "North"),
+        (198.0, 650.0, "3"),
+        (318.0, 650.0, "1.20"),
+        (198.0, 620.0, "12"),
+        (318.0, 620.0, "0.80"),
+    ] {
+        c += &show("F1", 10.0, x, y, text);
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let rows = page(&out, 1)
+        .iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no table: {:?}", out.document.losses));
+    assert_eq!(
+        texts(&rows),
+        [
+            vec!["Region", "Total"],
+            vec!["North", "3", "1.20"],
+            vec!["12", "0.80"]
+        ]
+    );
+    assert_eq!((rows[0][0].col_span, rows[0][0].row_span), (2, 1));
+    assert_eq!((rows[1][0].col_span, rows[1][0].row_span), (1, 2));
+}
+
+#[test]
 fn form_boxes_are_not_a_table() {
     // The tax form's only table is the tagged one.
     let irs = read_corpus("irs-f1040-2025.pdf");
@@ -397,6 +439,11 @@ fn rotated_margin_text_is_not_a_table() {
     // Prose in the body, and three lines of margin text turned a quarter, each with two
     // parts far apart along it, as a stamp or a running link down the margin. Read in its
     // own frame, the turned text would line up in two columns.
+    //
+    // This cannot isolate the guard that keeps turned runs out of a table: the reading order
+    // gives turned text lines of their own after the page's text, and all runs of one
+    // turned line start at the same x on the page, so their pieces never stand side by
+    // side. The test holds the result either way.
     let mut c = String::new();
     for k in 0..6 {
         c += &show(
@@ -509,4 +556,16 @@ fn a_stop_inside_a_tagged_table_keeps_its_rows_before() {
         cut[0].ends_with("page 1 from row 11 of table p1:t1 on is not read"),
         "{cut:?}"
     );
+}
+
+#[test]
+fn a_row_split_by_a_page_break_is_one_row() {
+    // One tagged row whose first cell stands on page 1 and second cell on page 2.
+    let out = read(&common::wide_row(2));
+    assert_eq!(
+        tables(page(&out, 1)),
+        [(0, vec![vec!["w0".to_string(), "w1".to_string()]])]
+    );
+    assert!(tables(page(&out, 2)).is_empty());
+    assert_eq!(out.completeness, Completeness::Complete);
 }

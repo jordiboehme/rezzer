@@ -317,6 +317,41 @@ fn widget_boxes_are_listed_by_page() {
 }
 
 #[test]
+fn a_widget_two_pages_list_is_listed_on_both() {
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let widget = doc.add_object(dictionary! {
+        "Type" => "Annot",
+        "Subtype" => "Widget",
+        "Rect" => vec![10.into(), 20.into(), 30.into(), 40.into()],
+    });
+    let mut kids = Vec::new();
+    for _ in 0..2 {
+        // Each page has its own `/Annots` array naming the same widget.
+        let page = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => vec![widget.into(), widget.into()],
+        });
+        kids.push(page.into());
+    }
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 2 }),
+    );
+    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    let pdf = open_bytes(&out);
+    assert_eq!(
+        pdf.widget_boxes(),
+        [(1, [10.0, 20.0, 30.0, 40.0]), (2, [10.0, 20.0, 30.0, 40.0])]
+    );
+}
+
+#[test]
 fn colours_from_gray_and_cmyk() {
     let pdf = with_annots(|_, _| {
         let c = |c: Vec<Object>| Object::Dictionary(note("x", dictionary! { "C" => c }));

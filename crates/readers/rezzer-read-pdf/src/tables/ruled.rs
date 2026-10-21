@@ -168,7 +168,7 @@ pub(super) fn ruled(
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
     let mut tables: Vec<Planned> = Vec::new();
-    for (g, (gh, gv)) in grids.into_iter().enumerate() {
+    'grids: for (g, (gh, gv)) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "ruled tables on page {page} are looked for only in part: the time limit was \
@@ -218,26 +218,70 @@ pub(super) fn ruled(
         if within.is_empty() {
             continue;
         }
+        if tables.len() >= MAX_TABLES {
+            found.skipped.push(too_many_tables(page));
+            break;
+        }
         let at = flow.at[within[0]];
-        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &|i| {
+        let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
+        let (table_caption, figure_caption) = captions_near(flow, &lines, &by_y, b, &sizes, &|i| {
             let (_, cy) = middle(&flow.runs[i]);
             inside(i) && cy > b[1] && cy < b[3]
         });
-        let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
-        // Whether a boundary is drawn over at least half of a cell's side.
-        let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32| {
-            let mut len = 0.0;
-            for s in segs.iter().filter(|s| (s.at - at).abs() <= SNAP) {
-                len += (s.to.min(hi) - s.from.max(lo)).max(0.0);
+        // A grid of many columns is refused before its cells are worked out.
+        if cols > MAX_COLUMNS {
+            if table_caption {
+                found.unsure.push(Unsure {
+                    at,
+                    top: b[3],
+                    reason: "it has more than 15 columns".into(),
+                });
             }
+            continue;
+        }
+        // The segments on each boundary of the grid, found once.
+        let nearest = |edges: &[f32], at: f32| -> Option<usize> {
+            let k = edges.partition_point(|e| *e < at);
+            [k.checked_sub(1), Some(k)]
+                .into_iter()
+                .flatten()
+                .filter(|&i| i < edges.len() && (edges[i] - at).abs() <= SNAP)
+                .min_by(|&a, &b| (edges[a] - at).abs().total_cmp(&(edges[b] - at).abs()))
+        };
+        let mut on_x: Vec<Vec<Seg>> = vec![Vec::new(); xs.len()];
+        for s in &v {
+            if let Some(k) = nearest(&xs, s.at) {
+                on_x[k].push(*s);
+            }
+        }
+        let ys_up: Vec<f32> = ys.iter().rev().copied().collect();
+        let mut on_y: Vec<Vec<Seg>> = vec![Vec::new(); ys.len()];
+        for s in &h {
+            if let Some(k) = nearest(&ys_up, s.at) {
+                on_y[ys.len() - 1 - k].push(*s);
+            }
+        }
+        // Whether a boundary is drawn over at least half of a cell's side.
+        let covered = |segs: &[Seg], lo: f32, hi: f32| {
+            let len: f32 = segs
+                .iter()
+                .map(|s| (s.to.min(hi) - s.from.max(lo)).max(0.0))
+                .sum();
             len >= 0.5 * (hi - lo)
         };
         // The cell each grid square belongs to: a missing line between two squares joins
         // them, across first, then down where whole cells line up.
         let mut owner: Vec<Vec<(usize, usize)>> = vec![vec![(0, 0); cols]; rows];
         for (r, row) in owner.iter_mut().enumerate() {
+            if r % 1024 == 1023 && stop() {
+                found.skipped.push(format!(
+                    "ruled tables on page {page} are looked for only in part: the time limit \
+                     was reached"
+                ));
+                break 'grids;
+            }
             for c in 0..cols {
-                row[c] = if c > 0 && !covered(&v, xs[c], ys[r + 1], ys[r]) {
+                row[c] = if c > 0 && !covered(&on_x[c], ys[r + 1], ys[r]) {
                     row[c - 1]
                 } else {
                     (r, c)
@@ -253,7 +297,7 @@ pub(super) fn ruled(
                 let above = owner[r - 1][c];
                 let lined_up =
                     owner[r][c] == (r, c) && above.1 == c && span_of(&owner[r - 1], c) == span;
-                if lined_up && !(c..c + span).any(|k| covered(&h, ys[r], xs[k], xs[k + 1])) {
+                if lined_up && !(c..c + span).any(|k| covered(&on_y[r], xs[k], xs[k + 1])) {
                     owner[r][c..c + span].fill(above);
                 }
                 c += span;
@@ -302,9 +346,7 @@ pub(super) fn ruled(
         }
         let spanning = extent.values().filter(|(rs, cs)| rs * cs > 1).count();
         let empty = extent.len() - with_text.len();
-        let refused = if cols > MAX_COLUMNS {
-            Some("it has more than 15 columns")
-        } else if figure_caption || caption_inside {
+        let refused = if figure_caption || caption_inside {
             Some("a figure caption stands next to it")
         } else if empty as f32 > EMPTY_SHARE * extent.len() as f32 {
             Some("most of its cells are empty")
@@ -355,6 +397,8 @@ pub(super) fn ruled(
             top: b[3],
             rows: planned_rows,
             header_rows: 0,
+            trs: Vec::new(),
+            additions: Vec::new(),
             tagged: None,
             continues: false,
         });
@@ -363,14 +407,11 @@ pub(super) fn ruled(
         return;
     }
     // The runs of all grids leave the flow at once.
-    let mut k = 0;
-    let taken = flow.take(|_, _| {
-        k += 1;
-        claimed[k - 1].is_some()
-    });
-    for ((r, _, _), (t, row, cell)) in taken.into_iter().zip(claimed.into_iter().flatten()) {
-        tables[t].rows[row][cell].runs.push(r);
-    }
+    let target: Vec<Target> = claimed
+        .into_iter()
+        .map(|c| c.map(|(t, r, k)| (t as u32, r as u32, k as u32)))
+        .collect();
+    fill(&mut tables, flow, &target);
     for mut t in tables {
         t.header_rows = header_of(&t.rows);
         found.tables.push(t);

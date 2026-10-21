@@ -113,6 +113,7 @@ fn extract(
     let caps = Caps::new(
         open::limits(budget).max_items,
         budget.limits().max_memory_bytes,
+        pdf.object_bytes(),
     );
     text::pages(pdf, &wanted, caps, stop)
 }
@@ -202,6 +203,7 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                 roles: &roles,
                 budget,
                 tables: &tables,
+                in_part: items.in_part,
                 links: &links,
             };
             if items.links_cut {
@@ -238,13 +240,26 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
             }
             let section = out.doc.body.len();
             let first_table = blocks.len();
-            let nothing = laid.blocks.is_empty() && laid.continued.is_empty();
+            let nothing =
+                laid.blocks.is_empty() && laid.continued.is_empty() && laid.added.is_empty();
             for (table, rows) in laid.continued {
                 if let Some((s, b, _)) = placed.get(&table)
                     && let Some(Block::Section { blocks, .. }) = out.doc.body.get_mut(*s)
                     && let Some(Block::Table { rows: kept, .. }) = blocks.get_mut(*b)
                 {
                     kept.extend(rows);
+                }
+            }
+            for (table, row, cell, inlines) in laid.added {
+                if let Some((s, b, _)) = placed.get(&table)
+                    && let Some(Block::Section { blocks, .. }) = out.doc.body.get_mut(*s)
+                    && let Some(Block::Table { rows, .. }) = blocks.get_mut(*b)
+                    && let Some(kept) = rows.get_mut(row).and_then(|r| r.get_mut(cell))
+                {
+                    if !kept.inlines.is_empty() && !inlines.is_empty() {
+                        kept.inlines.push(Inline::plain(" "));
+                    }
+                    kept.inlines.extend(inlines);
                 }
             }
             let mut tagged = laid.tagged.into_iter();
@@ -263,6 +278,14 @@ fn lay_out(pdf: &Pdf, pages: &[PageInfo], extracted: Extracted, budget: &Budget,
                     Cut::Block(k) => format!("block {k} on"),
                     Cut::Table(k) => format!("table {k} on"),
                     Cut::Item { block, item } => format!("item {item} of list p{n}:b{block} on"),
+                    Cut::Added { table, row } => match placed.get(&table) {
+                        Some((_, _, anchor)) => {
+                            format!("the text it adds to row {} of table {anchor} on", row + 1)
+                        }
+                        None => {
+                            "the text it adds to a table begun on an earlier page on".to_string()
+                        }
+                    },
                     Cut::Row { table, row } => match table {
                         TableRef::Here(k) => format!("row {row} of table p{n}:t{k} on"),
                         TableRef::Earlier(t) => match placed.get(&t) {
