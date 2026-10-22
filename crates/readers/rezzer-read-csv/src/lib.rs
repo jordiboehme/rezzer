@@ -427,21 +427,21 @@ impl Reader for CsvReader {
             if let Some(header) = layout_header(&layout, guess_row)
                 && header != dialect.has_header
             {
-                let mut d = dialect.clone();
-                d.has_header = header;
-                let again = csvsniff::analyze_until(text, &d, MAX_TABLE_ROWS, &out_of_time);
-                if !again.truncated {
-                    analysis = again;
-                    for (j, &filled) in lead_extra.iter().enumerate() {
-                        if filled && let Some(n) = extra_filled.get_mut(j) {
-                            if header {
-                                *n = n.saturating_sub(1);
-                            } else {
-                                *n += 1;
+                match facts_with_header(text, &dialect, header, &out_of_time, &sheet_q) {
+                    Err(loss) => doc.losses.push(loss),
+                    Ok(again) => {
+                        analysis = again;
+                        for (j, &filled) in lead_extra.iter().enumerate() {
+                            if filled && let Some(n) = extra_filled.get_mut(j) {
+                                if header {
+                                    *n = n.saturating_sub(1);
+                                } else {
+                                    *n += 1;
+                                }
                             }
                         }
+                        data_shown = read.saturating_sub(lead + usize::from(header));
                     }
-                    data_shown = read.saturating_sub(lead + usize::from(header));
                 }
             }
             // The layout decides the header and so the data rows: the rows of every region
@@ -669,6 +669,37 @@ fn blank_line_after(text: &str, end: usize) -> bool {
     rest.starts_with(['\n', '\r'])
 }
 
+/// The column facts again, with the header the layout found. When this second analysis is
+/// cut by `stop`, the first one stays and the loss says that the facts follow csvsniff's
+/// header guess.
+fn facts_with_header(
+    text: &str,
+    dialect: &Dialect,
+    header: bool,
+    stop: &dyn Fn() -> bool,
+    sheet_q: &str,
+) -> Result<csvsniff::Analysis, Loss> {
+    let mut d = dialect.clone();
+    d.has_header = header;
+    let again = csvsniff::analyze_until(text, &d, MAX_TABLE_ROWS, stop);
+    if !again.truncated {
+        return Ok(again);
+    }
+    let guess = if dialect.has_header {
+        "with a header row"
+    } else {
+        "without a header row"
+    };
+    Err(Loss {
+        location: sheet_q.to_string(),
+        what: format!(
+            "time limit reached while the column facts were counted again for the header the layout found; the Columns table follows the first header guess ({guess})"
+        ),
+        why: LossReason::Uncertain,
+        severity: Severity::Info,
+    })
+}
+
 /// The header the layout found at the first table: `true` when it is the one row
 /// `guess_row` (the record csvsniff judged), `false` when the table has no header row, `None`
 /// for any other band or when there is no table.
@@ -815,5 +846,33 @@ fn kind_label(kind: &ColumnKind) -> String {
         ColumnKind::Bool => "bool".into(),
         ColumnKind::Text => "text".into(),
         ColumnKind::Empty => "empty".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cut_second_analysis_keeps_the_first_with_a_loss() {
+        let mut text = String::from("a,b\n");
+        for i in 0..5_000 {
+            text.push_str(&format!("{i},{i}\n"));
+        }
+        let dialect = csvsniff::sniff(&text).unwrap();
+        assert!(dialect.has_header);
+        let loss = facts_with_header(&text, &dialect, false, &|| true, "data").unwrap_err();
+        assert_eq!(loss.location, "data");
+        assert_eq!(loss.why, LossReason::Uncertain);
+        assert_eq!(loss.severity, Severity::Info);
+        assert!(
+            loss.what
+                .ends_with("the Columns table follows the first header guess (with a header row)"),
+            "{}",
+            loss.what
+        );
+        let again = facts_with_header(&text, &dialect, false, &|| false, "data").unwrap();
+        assert_eq!(again.rows, 5_001);
+        assert_eq!(again.columns[0].name, "Column 1");
     }
 }

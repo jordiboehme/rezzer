@@ -1084,3 +1084,59 @@ fn csv_records_use_column_numbers() {
     assert!(md.contains("| id | qty | price | Column 4 |"), "{md}");
     assert!(!md.contains("Column D"), "{md}");
 }
+
+/// The one reference an anchor holds, read by the formula parser.
+fn parse_ref(anchor: &str) -> formulakit::Ref {
+    let a = formulakit::analyze(
+        &format!("={anchor}"),
+        formulakit::Dialect::Excel,
+        formulakit::CellPos { row: 0, col: 0 },
+    )
+    .unwrap_or_else(|e| panic!("{anchor}: {}", e.message));
+    assert_eq!(a.refs.len(), 1, "{anchor}: {:?}", a.refs);
+    a.refs[0].clone()
+}
+
+#[test]
+fn quoted_key_and_records_anchor_parse_back() {
+    let stem = "it's a!b c";
+    let out = read_as(
+        &format!("{stem}.csv"),
+        FormatId::Csv,
+        b"id,qty\n1,2\n3,4\n5,6\n",
+    );
+    let (_, blocks) = tables(&out);
+    let key = &layout_of(data_tables(&blocks)[0]).key;
+    let sheet = Some(formulakit::SheetSpan {
+        first: stem.to_string(),
+        last: None,
+    });
+    match parse_ref(key) {
+        formulakit::Ref::Cell { sheet: s, pos, .. } => {
+            assert_eq!(s, sheet);
+            assert_eq!((pos.row, pos.col), (0, 0));
+        }
+        other => panic!("{key}: {other:?}"),
+    }
+    let md = markdown(&out, TableStyle::Records);
+    let line = md
+        .lines()
+        .find(|l| l.starts_with("- Row 2 ("))
+        .unwrap_or_else(|| panic!("{md}"));
+    let anchor = line
+        .strip_prefix("- Row 2 (")
+        .and_then(|r| r.strip_suffix(')'))
+        .unwrap_or_else(|| panic!("{line}"));
+    match parse_ref(anchor) {
+        formulakit::Ref::Range {
+            sheet: s,
+            start,
+            end,
+            ..
+        } => {
+            assert_eq!(s, sheet);
+            assert_eq!((start.row, start.col, end.row, end.col), (1, 0, 1, 1));
+        }
+        other => panic!("{anchor}: {other:?}"),
+    }
+}

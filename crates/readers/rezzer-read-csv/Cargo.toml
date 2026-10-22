@@ -17,4 +17,5 @@ rezzer-layout = { path = "../../rezzer-layout" }
 csv.workspace = true
 
 [dev-dependencies]
+formulakit = { path = "../../formats/formulakit" }
 rezzer-render = { path = "../../rezzer-render" }
