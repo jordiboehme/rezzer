@@ -343,7 +343,8 @@ impl Ctx<'_> {
 ///
 /// A region that holds no value is left out. Per region: a section heading (level 4) when the
 /// region has one; the region heading
-/// (level 3: its caption heading row, else a defined name caption, else `<Kind> <range>`,
+/// (level 3, one below the section heading when there is one: its caption heading row,
+/// else a defined name caption, else `<Kind> <range>`,
 /// left out for a sheet whose only region is a table without a caption); the other caption
 /// rows as `caption` paragraphs; the table; the note rows as `note` paragraphs.
 #[allow(clippy::too_many_arguments)]
@@ -601,6 +602,9 @@ fn map_region(
             break;
         }
     }
+    // The region heading sits one level below the section heading the region has, so a
+    // section piece's heading is never shallower than its section's.
+    let region_level = region.heading.map_or(3, |(_, depth)| (4 + depth).min(6));
     let heading_cell = by_line
         .iter()
         .find(|(l, _)| *l == Line::CaptionHeading)
@@ -619,14 +623,14 @@ fn map_region(
         (Some(k), _) => {
             let c = &ctx.cells[k];
             let block = Block::Heading {
-                level: 3,
+                level: region_level,
                 inlines: text_inlines(&c.text),
                 anchor: Some(ctx.anchor(c.row, c.col)),
             };
             ctx.out.blocks.push(block);
         }
         (None, Some(name)) => ctx.out.blocks.push(Block::Heading {
-            level: 3,
+            level: region_level,
             inlines: vec![Inline::plain(name.name.clone())],
             anchor: Some(Anchor(name.anchor.clone())),
         }),
@@ -634,7 +638,7 @@ fn map_region(
             let bare = only && region.kind == Kind::Table && region.captions.is_empty();
             if !bare {
                 ctx.out.blocks.push(Block::Heading {
-                    level: 3,
+                    level: region_level,
                     inlines: vec![Inline::plain(format!(
                         "{} {}",
                         kind_word(region.kind),

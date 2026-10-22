@@ -829,3 +829,44 @@ fn merge_anchored_above_the_table_is_clipped() {
     assert_eq!(caps.cells_left, rezzer_layout::MAX_CELLS - 5);
     assert_eq!(cells_of(&m), expected_cells(&s));
 }
+
+#[test]
+fn section_piece_heading_sits_below_its_section_heading() {
+    // Task 8 review m5: an R1 section heading (level 4) is followed by the heading of the
+    // region piece under it; that heading is one level deeper, never shallower.
+    let s = Sheet::new().styled().rows(
+        "A1",
+        &[
+            "*First",
+            "Name|Ann",
+            "City|Rome",
+            "*Second",
+            "Name|Bob",
+            "City|Oslo",
+        ],
+    );
+    let m = s.map();
+    assert_eq!(cells_of(&m), expected_cells(&s));
+    let mut sections = 0;
+    for pair in m.blocks.windows(2) {
+        if let [
+            Block::Heading { level: 4, .. },
+            Block::Heading { level, inlines, .. },
+        ] = pair
+        {
+            sections += 1;
+            assert_eq!(*level, 5, "{}", plain_text(inlines));
+        }
+    }
+    assert!(sections > 0, "{:?}", headings(&m));
+    // A region without a section heading keeps level 3.
+    let s = Sheet::new()
+        .styled()
+        .rows("A1", &["*Overview"])
+        .rows("A4", &["*Part one", "*a|*b", "1|2"]);
+    assert!(
+        headings(&s.map()).iter().all(|h| h.0 == 3),
+        "{:?}",
+        headings(&s.map())
+    );
+}
