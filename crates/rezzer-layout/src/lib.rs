@@ -11,7 +11,7 @@
 //! region a table cell with its `Sheet!A1` anchor. A cell under a merge that is not the
 //! merge's top-left cell is not shown and gets a loss.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rezzer_limits::Budget;
 use rezzer_model::{
@@ -473,12 +473,24 @@ fn covered_losses(ctx: &mut Ctx, covered_cells: &[usize], merges: &[Rect]) {
     }
 }
 
+/// The losses of the detector's issues, but those about a place inside a region left out.
+/// An issue is inside such a region when its rectangle is the region's, or when the smallest
+/// left-out region that holds its first cell covers it. Both lookups cost about the issues
+/// plus the regions, never the issues times the regions.
 fn issue_losses(ctx: &mut Ctx, layout: &Layout, skipped: &[Rect]) {
+    let same: HashSet<Rect> = skipped.iter().copied().collect();
+    let firsts: Vec<(u32, u32)> = layout
+        .issues
+        .iter()
+        .filter_map(|i| i.rect)
+        .map(|r| (r.top, r.left))
+        .collect();
+    let mut holders = locate(skipped, &firsts).into_iter();
     for issue in &layout.issues {
-        if issue
-            .rect
-            .is_some_and(|r| skipped.iter().any(|s| s.covers(&r)))
-        {
+        if issue.rect.is_some_and(|r| {
+            let holder = holders.next().flatten();
+            same.contains(&r) || holder.is_some_and(|k| skipped[k].covers(&r))
+        }) {
             continue;
         }
         let location = match issue.rect {

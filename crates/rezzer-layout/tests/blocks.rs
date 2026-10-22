@@ -918,3 +918,39 @@ fn section_piece_heading_sits_below_its_section_heading() {
         headings(&s.map())
     );
 }
+
+#[test]
+fn issues_inside_value_less_regions_are_dropped_and_others_kept() {
+    let s = Sheet::new().rows("A1", &["1|2"]).merge("A5:D8");
+    let layout = sheetlayout::Layout {
+        regions: vec![
+            hand_region("A1:B1", sheetlayout::Kind::Table, &[]),
+            hand_region("A5:D8", sheetlayout::Kind::Grid, &["x"]),
+        ],
+        issues: vec![
+            sheetlayout::Issue {
+                what: "inside".into(),
+                kind: sheetlayout::IssueKind::Coarse,
+                rect: Some(rect("B6:C7")),
+            },
+            sheetlayout::Issue {
+                what: "reaches out".into(),
+                kind: sheetlayout::IssueKind::Overlap,
+                rect: Some(rect("C7:E9")),
+            },
+            sheetlayout::Issue {
+                what: "no place".into(),
+                kind: sheetlayout::IssueKind::Stopped,
+                rect: None,
+            },
+            sheetlayout::Issue {
+                what: "on a region with values".into(),
+                kind: sheetlayout::IssueKind::Overlap,
+                rect: Some(rect("A1:B1")),
+            },
+        ],
+    };
+    let m = map_layout(&s, &layout);
+    let where_: Vec<&str> = m.losses.iter().map(|l| l.location.as_str()).collect();
+    assert_eq!(where_, ["S!C7:E9", "S", "S!A1:B1"], "{:?}", m.losses);
+}
