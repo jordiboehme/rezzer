@@ -441,7 +441,8 @@ fn tunnel_parameters_have_labels() {
     }
     // `Target Factor of Safety | 2 | -`: a dash is no unit.
     assert_eq!(unit(param(doc, "Structural_Lining!B13")), (None, None));
-    // `t (m)` heads the whole run E49:E72, `D (m)` the run E29:E38.
+    // `t (m)` heads the whole run E49:E72, `D (m)` the run E29:E38, each under the title of
+    // its table.
     for anchor in [
         "Structural_Lining!E49",
         "Structural_Lining!E52",
@@ -451,9 +452,9 @@ fn tunnel_parameters_have_labels() {
     ] {
         let t = param(doc, anchor);
         let label = if anchor.starts_with("Drainage") {
-            "D"
+            "STANDARD PIPE SIZE CHECK / D"
         } else {
-            "t"
+            "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t"
         };
         assert_eq!(t.label.as_deref(), Some(label), "{anchor}");
         assert_eq!(unit(t), (Some("m"), Some("header")), "{anchor}");

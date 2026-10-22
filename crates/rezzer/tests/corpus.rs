@@ -900,9 +900,13 @@ fn tunnel_design_parameters_and_units() {
         assert_eq!(p["unit"], unit, "{anchor}");
         assert_eq!(p["unit_source"], "unit-cell", "{anchor}");
     }
-    // The trial thickness column takes label and unit from its header `t (m)`.
+    // The trial thickness column takes label and unit from its header `t (m)`, under the
+    // title of its table.
     let t = at(&doc, "parameters", "Structural_Lining!E49");
-    assert_eq!(t["label"], "t");
+    assert_eq!(
+        t["label"],
+        "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t"
+    );
     assert_eq!(t["unit"], "m");
     assert_eq!(t["unit_source"], "header");
     // A dimensionless input gets no unit.

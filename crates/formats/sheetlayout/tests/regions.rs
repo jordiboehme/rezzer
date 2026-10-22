@@ -755,6 +755,53 @@ fn unsorted_and_repeated_cells_are_tolerated() {
 }
 
 #[test]
+fn title_right_on_top_of_a_side_table_attaches() {
+    // Tunnel shape: a block, an empty row, a merged title over A:C, and a table in E:F that
+    // starts in the next row. No empty row parts the title from the table below.
+    let layout = Sheet::styled()
+        .rows("A1", &["Area|0.35|m2", "Modulus|0.02|m3"])
+        .cell("A4", "*Thickness sensitivity")
+        .merge("A4:C4")
+        .rows("E5", &["*t (m)|*FOS", "0.15|0.06", "0.2|0.10"])
+        .segment();
+    assert_eq!(ranges(&layout), ["A1:C2", "A4:F7"]);
+    let r = &layout.regions[1];
+    assert_eq!(r.captions, [3]);
+    assert_eq!(r.data, Some(rect("E5:F7")));
+    assert!(
+        r.evidence
+            .iter()
+            .any(|e| matches!(e, Evidence::Rule { id: "T2", .. }))
+    );
+}
+
+#[test]
+fn title_nearer_the_block_above_does_not_name_the_block_below() {
+    // One empty row after the table above, then the title, then 2 empty rows before the next
+    // table: the title is not that table's title.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "1|2", "3|4"])
+        .cell("A5", "Source: test data")
+        .rows("A8", &["c|d", "5|6"])
+        .segment();
+    let below = layout
+        .regions
+        .iter()
+        .find(|r| r.rect.bottom == 8)
+        .expect("the table below");
+    assert!(below.captions.is_empty(), "{:?}", ranges(&layout));
+    assert_eq!(below.rect, rect("A8:B9"));
+    // Equal gaps: the title names the block below.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "1|2", "3|4"])
+        .cell("A5", "Second table")
+        .rows("A7", &["c|d", "5|6"])
+        .segment();
+    let below = layout.regions.iter().find(|r| r.rect.bottom == 7).unwrap();
+    assert_eq!(below.captions, [4], "{:?}", ranges(&layout));
+}
+
+#[test]
 fn title_three_rows_away_does_not_attach() {
     let layout = Sheet::new()
         .cell("A1", "Sales")

@@ -2085,10 +2085,12 @@ source: crates/rezzer/tests/corpus.rs
           "type": "heading"
         },
         {
-          "anchor": "Structural_Lining!A47:C47",
-          "header_rows": 0,
+          "anchor": "Structural_Lining!A47:F72",
+          "caption": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
+          "header_rows": 1,
           "layout": {
             "certainty": "rule",
+            "data": "E49:F72",
             "found_by": [
               {
                 "detail": "empty-row and empty-column gaps",
@@ -2096,24 +2098,327 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "caption row 47",
-                "id": "T",
+                "detail": "title in row 47",
+                "id": "T2",
                 "kind": "rule"
               },
               {
-                "detail": "title rows only",
-                "id": "T2",
+                "detail": "header row 48 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "bold header row 48",
+                "id": "H2",
                 "kind": "rule"
               }
             ],
+            "header_paths": [
+              "t (m)",
+              "FOS"
+            ],
+            "header_rows": [
+              48
+            ],
             "key": "Structural_Lining!A47",
-            "kind": "title",
+            "kind": "table",
             "label_cols": 0,
-            "range": "A47:C47"
+            "range": "A47:F72"
           },
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!E48",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "t (m)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F48",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "FOS",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E49",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.15",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F49",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.06",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E50",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F50",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E51",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F51",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.16",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E52",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F52",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.23",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E53",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.35",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F53",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E54",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F54",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.39",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E55",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.45",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F55",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.49",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E56",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F56",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.60",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E57",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.55",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F57",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.72",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E58",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F58",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.84",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!E59",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.65",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!F59",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.98",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<13 more items>"
+          ],
           "type": "table"
         },
-        "<4 more items>"
+        "<2 more items>"
       ],
       "kind": "sheet",
       "title": "Structural_Lining",
@@ -4117,46 +4422,8 @@ source: crates/rezzer/tests/corpus.rs
           "type": "heading"
         },
         {
-          "anchor": "Drainage!A27:C27",
-          "header_rows": 0,
-          "layout": {
-            "certainty": "rule",
-            "found_by": [
-              {
-                "detail": "empty-row and empty-column gaps",
-                "id": "G",
-                "kind": "rule"
-              },
-              {
-                "detail": "caption row 27",
-                "id": "T",
-                "kind": "rule"
-              },
-              {
-                "detail": "title rows only",
-                "id": "T2",
-                "kind": "rule"
-              }
-            ],
-            "key": "Drainage!A27",
-            "kind": "title",
-            "label_cols": 0,
-            "range": "A27:C27"
-          },
-          "type": "table"
-        },
-        {
-          "inlines": [
-            {
-              "text": "Table E28:F38",
-              "type": "text"
-            }
-          ],
-          "level": 3,
-          "type": "heading"
-        },
-        {
-          "anchor": "Drainage!E28:F38",
+          "anchor": "Drainage!A27:F38",
+          "caption": "STANDARD PIPE SIZE CHECK",
           "header_rows": 1,
           "layout": {
             "certainty": "rule",
@@ -4165,6 +4432,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "detail": "empty-row and empty-column gaps",
                 "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "title in row 27",
+                "id": "T2",
                 "kind": "rule"
               },
               {
@@ -4185,10 +4457,10 @@ source: crates/rezzer/tests/corpus.rs
             "header_rows": [
               28
             ],
-            "key": "Drainage!E28",
+            "key": "Drainage!A27",
             "kind": "table",
             "label_cols": 0,
-            "range": "E28:F38"
+            "range": "A27:F38"
           },
           "rows": [
             [
@@ -4458,7 +4730,89 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "table"
         },
-        "<4 more items>"
+        {
+          "inlines": [
+            {
+              "text": "Table A40:C40",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A40:C40",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A40:C40",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Drainage!A40",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A40:C40"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Drainage!A40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Minimum standard pipe size required",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        "<2 more items>"
       ],
       "kind": "sheet",
       "title": "Drainage",
@@ -4929,8 +5283,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!E49",
-        "label": "t",
+        "label": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t",
         "path": [
+          "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
           "t"
         ],
         "read_by": 2,
@@ -4943,8 +5298,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!E50",
-        "label": "t",
+        "label": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t",
         "path": [
+          "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
           "t"
         ],
         "read_by": 2,
@@ -4957,8 +5313,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!E51",
-        "label": "t",
+        "label": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t",
         "path": [
+          "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
           "t"
         ],
         "read_by": 2,
@@ -4971,8 +5328,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!E52",
-        "label": "t",
+        "label": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t",
         "path": [
+          "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
           "t"
         ],
         "read_by": 2,
@@ -5026,7 +5384,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "Structural_Lining",
         "role": "result",
-        "size": "24 rows x 2 columns, 8 regions"
+        "size": "24 rows x 2 columns, 7 regions"
       },
       {
         "id": "Ventilation",
@@ -5040,7 +5398,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "Drainage",
         "role": "result",
-        "size": "10 rows x 2 columns, 8 regions"
+        "size": "10 rows x 2 columns, 7 regions"
       }
     ]
   },

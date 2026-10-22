@@ -420,8 +420,10 @@ fn tunnel_report_sections() {
 #[test]
 fn tunnel_side_table() {
     let out = corpus("tunnel_design_calculations.xlsx");
-    let r = region(&out.document, "Structural_Lining", "E48:F72");
+    // The merged title in A47:C47 stands right on top of the side table: it is its title.
+    let r = region(&out.document, "Structural_Lining", "A47:F72");
     assert_eq!(r.layout.kind, LayoutKind::Table);
+    assert_eq!(r.layout.data.as_deref(), Some("E49:F72"));
     assert_eq!(r.layout.header_rows, [48]);
     assert_eq!(r.layout.header_paths, ["t (m)", "FOS"]);
 }

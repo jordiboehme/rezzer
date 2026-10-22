@@ -28,9 +28,9 @@ modified: "2026-08-24T17:24:13Z"
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
 | Design\_Basis | sheet | 5 regions |  |  |
-| Structural\_Lining | sheet | 24 rows x 2 columns, 8 regions | result |  |
+| Structural\_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
 | Ventilation | sheet | 3 rows x 3 columns, 6 regions | result |  |
-| Drainage | sheet | 10 rows x 2 columns, 8 regions | result |  |
+| Drainage | sheet | 10 rows x 2 columns, 7 regions | result |  |
 
 - Sheets: 4
 - Formulas: 86
@@ -159,9 +159,7 @@ Label and value pairs A36:C45:
 
 ### LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)
 
-### Table E48:F72
-
-Table E48:F72 (data E49:F72), header row 48, found by rules: empty-row and empty-column gaps, header by type change, bold header.
+Table A47:F72 (data E49:F72), header row 48, found by rules: empty-row and empty-column gaps, title in row 47, header by type change, bold header.
 
 | t (m) | FOS |
 | --- | --- |
@@ -298,9 +296,7 @@ Label and value pairs A22:C25:
 
 ### STANDARD PIPE SIZE CHECK
 
-### Table E28:F38
-
-Table E28:F38 (data E29:F38), header row 28, found by rules: empty-row and empty-column gaps, header by type change, bold header.
+Table A27:F38 (data E29:F38), header row 28, found by rules: empty-row and empty-column gaps, title in row 27, header by type change, bold header.
 
 | D (m) | Capacity (l/s) |
 | --- | --- |
@@ -351,6 +347,8 @@ Parameters in INPUTS:
 | B10 |  | Cohesion, c | 20 | kPa | cell beside | 1 |
 | B11 |  | Concrete grade, fck | 30 | MPa | cell beside | 1 |
 | B13 |  | Target Factor of Safety | 2 |  |  | 2 |
+
+Parameters in LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety):
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -489,6 +487,8 @@ Parameters in INPUTS:
 | B12 |  | Trial pipe diameter | 0.3 | m | cell beside | 2 |
 | B13 |  | Sump retention time | 10 | min | cell beside | 1 |
 | B14 |  | Pump duty factor | 1.25 |  |  | 1 |
+
+Parameters in STANDARD PIPE SIZE CHECK:
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |

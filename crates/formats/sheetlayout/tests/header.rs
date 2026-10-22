@@ -1037,7 +1037,8 @@ fn random_sheets_detect_every_cell_once() {
                 assert!(r.body.is_none(), "case {case}");
             }
             if r.kind == Kind::Table && !r.header_rows.is_empty() {
-                let cols = r.data.map_or(r.rect.width(), |d| d.width());
+                // A title beside the table (rule T2) makes the region wider than its body.
+                let cols = r.data.or(r.body).map_or(r.rect.width(), |d| d.width());
                 assert_eq!(r.header_paths.len() as u64, cols, "case {case}");
                 let band_end = *r.header_rows.last().unwrap();
                 assert!(r.data.is_none_or(|d| d.top > band_end), "case {case}");

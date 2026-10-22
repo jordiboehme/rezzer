@@ -144,19 +144,53 @@ fn covered_below(prep: &Prep, merges: &[u32], cell: &CellIn, row: u32, r: Rect) 
     stop
 }
 
+/// The empty rows between the caption region `i` (rectangle `c`) and the nearest live region
+/// that ends at most [`TITLE_GAP`] empty rows above it and shares a column with it.
+fn gap_above(works: &[Work], by_bottom: &[(u32, u32, usize)], i: usize, c: Rect) -> Option<u32> {
+    (0..=TITLE_GAP).find(|&gap| {
+        let Some(bottom) = c.top.checked_sub(gap + 1) else {
+            return false;
+        };
+        // Regions that share a bottom row do not share a column, so the one that starts
+        // nearest left of the title's right edge is the only one that can reach it.
+        let k = by_bottom.partition_point(|&(b, l, _)| (b, l) <= (bottom, c.right));
+        by_bottom[..k].last().is_some_and(|&(b, _, j)| {
+            let r = works[j].region.rect;
+            b == bottom && j != i && !works[j].dead && r.right >= c.left
+        })
+    })
+}
+
 fn caption_only(w: &Work) -> bool {
     !w.dead && w.origin == Origin::Rule && !w.region.captions.is_empty() && w.region.data.is_none()
 }
 
 /// Rule T2: a region of caption rows only, at most 2 empty rows above another region and
 /// starting inside its columns, becomes that region's caption when it has none of its own.
-/// When that region has captions, or the joined rectangle would reach another region, the
-/// caption rows stay a region of kind `Title`. A caption region with no region in reach is
-/// left to the later rules.
+/// A title right on top of a region (no empty row between) that starts at most one empty
+/// column right of it is in reach too: a title over a side table.
+///
+/// A title in reach of a region above it as well (that region ends at most 2 empty rows
+/// above the title and shares a column with it) names the region below only when no empty
+/// row parts it from that one, or when its gap below is not larger than its gap above.
+/// Otherwise it is left to the later rules, which make it a note of the region above.
+///
+/// When the region below has captions, or the joined rectangle would reach another region,
+/// the caption rows stay a region of kind `Title`. A caption region with no region in reach
+/// is left to the later rules.
 pub(crate) fn attach_titles(works: &mut [Work]) {
     let mut order: Vec<usize> = (0..works.len()).filter(|&i| !works[i].dead).collect();
     order.sort_by_key(|&i| (works[i].region.rect.top, works[i].region.rect.left));
     let tops: Vec<u32> = order.iter().map(|&i| works[i].region.rect.top).collect();
+    // The regions by bottom row and left column, to find the region right above a title.
+    let mut by_bottom: Vec<(u32, u32, usize)> = order
+        .iter()
+        .map(|&i| {
+            let r = works[i].region.rect;
+            (r.bottom, r.left, i)
+        })
+        .collect();
+    by_bottom.sort_unstable();
     for oi in 0..order.len() {
         let i = order[oi];
         if !caption_only(&works[i]) {
@@ -171,16 +205,21 @@ pub(crate) fn attach_titles(works: &mut [Work]) {
         let to = tops.partition_point(|&t| t <= reach);
         let target = order[from..to].iter().copied().find(|&j| {
             let w = &works[j];
-            !w.dead
-                && j != i
-                && w.origin != Origin::Rest
-                && w.region.rect.top > c.bottom
-                && w.region.rect.left <= c.left
-                && c.left <= w.region.rect.right
+            let r = w.region.rect;
+            let inside = r.left <= c.left && c.left <= r.right;
+            let beside = r.top == c.bottom + 1 && r.left > c.right && r.left - c.right <= 2;
+            !w.dead && j != i && w.origin != Origin::Rest && r.top > c.bottom && (inside || beside)
         });
         let Some(t) = target else {
             continue;
         };
+        let below = works[t].region.rect.top - c.bottom - 1;
+        if below > 0
+            && let Some(above) = gap_above(works, &by_bottom, i, c)
+            && below > above
+        {
+            continue;
+        }
         let joined = c.union(&works[t].region.rect);
         let free = works[t].region.captions.is_empty()
             && !works
