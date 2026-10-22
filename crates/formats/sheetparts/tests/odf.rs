@@ -891,6 +891,10 @@ fn frozen_pane_from_settings() {
 
 #[test]
 fn repeated_spanned_cells_do_not_expand() {
+    if !cfg!(unix) {
+        eprintln!("skipped: this platform has no thread CPU clock here");
+        return;
+    }
     let start = thread_cpu();
     let parts = one_sheet(
         "",
@@ -940,4 +944,151 @@ fn layout_lists_count_against_the_item_limit() {
     let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
     assert!(sheet(&parts, "S").merges.len() <= 20_000);
     assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
+
+#[test]
+fn long_style_chain_resolves_in_linear_time() {
+    if !cfg!(unix) {
+        eprintln!("skipped: this platform has no thread CPU clock here");
+        return;
+    }
+    let n = 50_000;
+    let mut styles = String::from(
+        "<style:style style:name=\"s0\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+    );
+    let mut cells = String::new();
+    for i in 1..n {
+        styles.push_str(&format!(
+            "<style:style style:name=\"s{i}\" style:family=\"table-cell\" style:parent-style-name=\"s{}\"/>",
+            i - 1
+        ));
+    }
+    for i in 0..n {
+        cells.push_str(&format!(
+            "<table:table-cell table:style-name=\"s{i}\" office:value-type=\"float\"/>"
+        ));
+    }
+    let xml = content(
+        &styles,
+        &format!(
+            "<table:table table:name=\"S\"><table:table-row>{cells}</table:table-row></table:table>"
+        ),
+    );
+    let bytes = package(&[("content.xml", &xml)]);
+    let start = thread_cpu();
+    let parts = read_bytes(&bytes, &Limits::default());
+    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    let s = sheet(&parts, "S");
+    // Styles within the cap inherit; the chain past it is said, once.
+    assert!(s.looks.iter().any(|(p, l)| p.col == 10 && l.bold));
+    assert!(!s.looks.iter().any(|(p, _)| p.col == 40_000));
+    let deep: Vec<_> = parts
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("64 parent"))
+        .collect();
+    assert_eq!(deep.len(), 1, "{:?}", parts.issues);
+}
+
+#[test]
+fn looks_running_out_keep_merges_ranges_and_later_sheets() {
+    let limits = Limits {
+        max_items: 20_000,
+        ..Limits::default()
+    };
+    let xml = content(
+        "<style:style style:name=\"b\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+        "<table:table table:name=\"A\"><table:table-row table:number-rows-repeated=\"10\">\
+         <table:table-cell table:style-name=\"b\" table:number-columns-repeated=\"16000\"/></table:table-row></table:table>\
+         <table:table table:name=\"B\"><table:table-row>\
+         <table:table-cell table:number-columns-spanned=\"2\" office:value-type=\"float\"/></table:table-row></table:table>\
+         <table:database-ranges><table:database-range table:name=\"d\" table:target-range-address=\"B.A1:B.B2\"/></table:database-ranges>\
+         <table:data-pilots><table:data-pilot-table table:name=\"p\" table:target-range-address=\"B.D1:B.E2\"/></table:data-pilots>",
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    assert_eq!(sheet(&parts, "B").merges, vec![(pos(0, 0), pos(0, 1))]);
+    assert_eq!(parts.database_ranges.len(), 1);
+    assert_eq!(parts.data_pilots.len(), 1);
+    let limit_issues: Vec<_> = parts
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Limit)
+        .collect();
+    assert_eq!(limit_issues.len(), 1, "{limit_issues:?}");
+    assert!(limit_issues[0].what.contains("look"), "{limit_issues:?}");
+    assert!(!limit_issues[0].what.contains("merge"));
+}
+
+#[test]
+fn thresholds_of_bold_and_rules() {
+    let style = |name: &str, weight: &str, border: &str| {
+        format!(
+            "<style:style style:name=\"{name}\" style:family=\"table-cell\">\
+             <style:text-properties fo:font-weight=\"{weight}\"/>\
+             <style:table-cell-properties fo:border-bottom=\"{border}\"/></style:style>"
+        )
+    };
+    let styles = [
+        style("a", "599", "0.49pt solid #000000"),
+        style("b", "600", "0.5pt solid #000000"),
+        style("c", "normal", "0.0069in solid #000000"),
+        style("d", "normal", "0.0070in double #000000"),
+        style("e", "normal", "1pt dotted #000000"),
+    ]
+    .concat();
+    let cells: String = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|n| {
+            format!("<table:table-cell table:style-name=\"{n}\" office:value-type=\"float\"/>")
+        })
+        .collect();
+    let parts = one_sheet(
+        &styles,
+        &format!("<table:table-row>{cells}</table:table-row>"),
+    );
+    let got: Vec<(u32, bool, bool)> = sheet(&parts, "S")
+        .looks
+        .iter()
+        .map(|(p, l)| (p.col, l.bold, l.rule_below))
+        .collect();
+    // a and c are plain and not listed; e is no solid or double line.
+    assert_eq!(got, vec![(1, true, true), (3, false, true)]);
+}
+
+#[test]
+fn first_view_that_names_a_sheet_decides() {
+    let settings = SETTINGS.replace(
+        "<config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry>",
+        "<config:config-item-map-indexed config:name=\"Views\">\
+         <config:config-item-map-entry><config:config-item-map-named config:name=\"Tables\">\
+         <config:config-item-map-entry config:name=\"S\">\
+         <config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">0</config:config-item>\
+         </config:config-item-map-entry></config:config-item-map-named></config:config-item-map-entry>\
+         <config:config-item-map-entry>",
+    );
+    let parts = with_parts(
+        &[("settings.xml", &settings)],
+        "",
+        "<table:table table:name=\"S\"/>",
+    );
+    assert_eq!(sheet(&parts, "S").frozen, None);
+}
+
+#[test]
+fn range_across_two_sheets_is_damaged() {
+    let parts = with_parts(
+        &[],
+        "",
+        "<table:table table:name=\"S\"/><table:database-ranges>\
+         <table:database-range table:name=\"x\" table:target-range-address=\"S.A1:T.B2\"/></table:database-ranges>",
+    );
+    assert!(parts.database_ranges.is_empty());
+    assert_eq!(
+        parts
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::Damaged)
+            .count(),
+        1
+    );
 }

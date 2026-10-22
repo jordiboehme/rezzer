@@ -27,13 +27,20 @@ struct Split {
 /// Collects the frozen panes by sheet name. The first view that names a sheet decides.
 #[derive(Default)]
 pub(super) struct Settings {
-    pub frozen: HashMap<String, Frozen>,
+    views: HashMap<String, Frozen>,
     tables_depth: Option<usize>,
     sheet: Option<(String, Split)>,
     item: Option<(String, String)>,
 }
 
 impl Settings {
+    /// The sheets with a frozen pane.
+    pub fn frozen(self) -> HashMap<String, Frozen> {
+        let mut views = self.views;
+        views.retain(|_, f| f.rows > 0 || f.cols > 0);
+        views
+    }
+
     pub fn event(&mut self, ev: &Ev<'_>, depth: usize) {
         match ev {
             Ev::Start(e) | Ev::Empty(e) => {
@@ -81,9 +88,8 @@ impl Settings {
                         let cols = if split.h_mode == 2 { split.h_pos } else { 0 };
                         let rows = rows.clamp(0, i64::from(MAX_ROWS)) as u32;
                         let cols = cols.clamp(0, i64::from(MAX_COLS)) as u32;
-                        if rows > 0 || cols > 0 {
-                            self.frozen.entry(name).or_insert(Frozen { rows, cols });
-                        }
+                        // The first view that names a sheet decides, even without a freeze.
+                        self.views.entry(name).or_insert(Frozen { rows, cols });
                     }
                 } else if depth == t {
                     self.tables_depth = None;

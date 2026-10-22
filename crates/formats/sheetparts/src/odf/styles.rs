@@ -60,6 +60,19 @@ struct CellStyle {
     margin: Option<f64>,
 }
 
+/// The most parent styles followed for a look.
+const MAX_CHAIN: usize = 64;
+
+/// The look properties of a style after inheritance.
+#[derive(Debug, Clone, Copy, Default)]
+struct Props {
+    bold: Option<bool>,
+    filled: Option<bool>,
+    rule_above: Option<bool>,
+    rule_below: Option<bool>,
+    margin: Option<f64>,
+}
+
 const DATA_STYLES: [&str; 7] = [
     "number-style",
     "percentage-style",
@@ -79,6 +92,8 @@ pub(super) struct StyleBook {
     table_hidden: HashMap<String, bool>,
     cell_cache: HashMap<String, Option<String>>,
     look_cache: HashMap<String, Look>,
+    props_cache: HashMap<String, Props>,
+    deep_chain: bool,
     code_cache: HashMap<String, Option<String>>,
     // Parser state.
     table_style: Option<String>,
@@ -109,32 +124,60 @@ impl StyleBook {
         if let Some(hit) = self.look_cache.get(style) {
             return *hit;
         }
+        let p = self.resolve(style);
         let look = Look {
-            bold: self.inherited(style, |c| c.bold).unwrap_or(false),
-            filled: self.inherited(style, |c| c.filled).unwrap_or(false),
-            rule_above: self.inherited(style, |c| c.rule_above).unwrap_or(false),
-            rule_below: self.inherited(style, |c| c.rule_below).unwrap_or(false),
-            indent: self.inherited(style, |c| c.margin).map_or(0, indent_level),
+            bold: p.bold.unwrap_or(false),
+            filled: p.filled.unwrap_or(false),
+            rule_above: p.rule_above.unwrap_or(false),
+            rule_below: p.rule_below.unwrap_or(false),
+            indent: p.margin.map_or(0, indent_level),
             center_across: false,
         };
         self.look_cache.insert(style.to_string(), look);
         look
     }
 
-    fn inherited<T>(&self, style: &str, pick: impl Fn(&CellStyle) -> Option<T>) -> Option<T> {
+    /// Whether a style had more than [`MAX_CHAIN`] parents: the ones past the cap are not
+    /// inherited from.
+    pub fn chain_too_long(&self) -> bool {
+        self.deep_chain
+    }
+
+    /// The properties of a style after inheritance. Every style on the way is resolved once and
+    /// kept, so a long chain of styles costs a linear number of steps in all.
+    fn resolve(&mut self, style: &str) -> Props {
+        let mut path: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
-        let mut name = Some(style);
-        while let Some(n) = name {
-            if !seen.insert(n) {
+        let mut name = Some(style.to_string());
+        let mut base = Props::default();
+        while let Some(n) = name.take() {
+            if let Some(hit) = self.props_cache.get(&n) {
+                base = *hit;
                 break;
             }
-            let c = self.cells.get(n)?;
-            if let Some(v) = pick(c) {
-                return Some(v);
+            if !seen.insert(n.clone()) || !self.cells.contains_key(&n) {
+                break;
             }
-            name = c.parent.as_deref();
+            if path.len() >= MAX_CHAIN {
+                self.deep_chain = true;
+                break;
+            }
+            name = self.cells.get(&n).and_then(|c| c.parent.clone());
+            path.push(n);
         }
-        None
+        for n in path.iter().rev() {
+            if let Some(c) = self.cells.get(n) {
+                base = Props {
+                    bold: c.bold.or(base.bold),
+                    filled: c.filled.or(base.filled),
+                    rule_above: c.rule_above.or(base.rule_above),
+                    rule_below: c.rule_below.or(base.rule_below),
+                    margin: c.margin.or(base.margin),
+                };
+            }
+            self.props_cache.insert(n.clone(), base);
+        }
+        base
     }
 
     /// Feeds one XML event. Elements that are no style are ignored.
@@ -181,6 +224,7 @@ impl StyleBook {
                             self.cell_now = Some(name.to_string());
                         }
                         self.look_cache.clear();
+                        self.props_cache.clear();
                         self.cells.insert(
                             name.to_string(),
                             CellStyle {
@@ -294,6 +338,10 @@ impl StyleBook {
         let mut data = None;
         while let Some(n) = name {
             if !seen.insert(n.clone()) {
+                break;
+            }
+            if seen.len() > MAX_CHAIN {
+                self.deep_chain = true;
                 break;
             }
             let Some(style) = self.cells.get(&n) else {

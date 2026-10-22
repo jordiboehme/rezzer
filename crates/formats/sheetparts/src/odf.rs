@@ -141,7 +141,7 @@ pub fn read(zip: &mut Archive<'_>, limits: &Limits, stop: &dyn Fn() -> bool) -> 
     ctx.scan(SETTINGS, false, &mut |ev, depth| settings.event(&ev, depth));
 
     let mut content = Content::new(book, limits.max_items as u64);
-    content.frozen = settings.frozen;
+    content.frozen = settings.frozen();
     ctx.scan(CONTENT, true, &mut |ev, depth| content.event(&ev, depth));
     let props = read_meta(&mut ctx);
     let mut issues = ctx.issues;
@@ -237,9 +237,7 @@ struct Content {
     cur: Option<SheetState>,
     /// Tables below the top level (inside a cell) and tables of a wrong shape are not read.
     skip_tables: usize,
-    used: u64,
-    limit: u64,
-    exhausted: bool,
+    shares: [Share; 6],
     bad_counts: u64,
     first_bad: String,
     vals: Vec<ValDef>,
@@ -248,6 +246,65 @@ struct Content {
     msg: Option<Msg>,
     msg_para: Option<String>,
     unknown_vals: BTreeMap<String, u64>,
+}
+
+/// The lists that are bounded one by one, so that running out of one never drops another.
+#[derive(Clone, Copy)]
+enum List {
+    /// Cells with content that get a number format, and notes.
+    Cells,
+    Merges,
+    Looks,
+    Outline,
+    Ranges,
+    Pilots,
+}
+
+impl List {
+    const ALL: [List; 6] = [
+        List::Cells,
+        List::Merges,
+        List::Looks,
+        List::Outline,
+        List::Ranges,
+        List::Pilots,
+    ];
+
+    fn what(self) -> &'static str {
+        match self {
+            List::Cells => {
+                "cells with content (number formats and notes) in repeated rows or columns"
+            }
+            List::Merges => "merged ranges",
+            List::Looks => "cells with a look",
+            List::Outline => "row group spans",
+            List::Ranges => "database ranges",
+            List::Pilots => "pivot tables",
+        }
+    }
+}
+
+/// Most database ranges, or pivot tables, in one file.
+const MAX_STRUCTURES: u64 = 10_000;
+
+struct Share {
+    used: u64,
+    limit: u64,
+    exhausted: bool,
+}
+
+impl Share {
+    fn new(list: List, items: u64) -> Share {
+        let limit = match list {
+            List::Ranges | List::Pilots => items.min(MAX_STRUCTURES),
+            _ => items,
+        };
+        Share {
+            used: 0,
+            limit,
+            exhausted: false,
+        }
+    }
 }
 
 fn hidden(e: &Elem) -> bool {
@@ -273,9 +330,7 @@ impl Content {
             issues: Vec::new(),
             cur: None,
             skip_tables: 0,
-            used: 0,
-            limit,
-            exhausted: false,
+            shares: List::ALL.map(|l| Share::new(l, limit)),
             bad_counts: 0,
             first_bad: String::new(),
             vals: Vec::new(),
@@ -289,6 +344,13 @@ impl Content {
 
     /// Problems that can repeat a million times are said once with a count.
     fn summary(&self, issues: &mut Vec<Issue>) {
+        if self.book.chain_too_long() {
+            issues.push(Issue::new(
+                CONTENT,
+                IssueKind::Damaged,
+                "a cell style has more than 64 parent styles: what the styles past the 64th say about looks is not inherited",
+            ));
+        }
         if self.bad_counts > 0 {
             issues.push(Issue::new(
                 CONTENT,
@@ -342,19 +404,18 @@ impl Content {
         }
     }
 
-    fn charge(&mut self, n: u64) -> bool {
-        if self.exhausted {
+    fn charge(&mut self, list: List, n: u64) -> bool {
+        let share = &mut self.shares[list as usize];
+        if share.exhausted {
             return false;
         }
-        self.used = self.used.saturating_add(n);
-        if self.used > self.limit {
-            self.exhausted = true;
+        share.used = share.used.saturating_add(n);
+        if share.used > share.limit {
+            share.exhausted = true;
+            let limit = share.limit;
             self.issue(
                 IssueKind::Limit,
-                format!(
-                    "more than {} listed cells (content, looks, merges) in repeated rows or columns: the rest is not listed",
-                    self.limit
-                ),
+                format!("more than {limit} {}: the rest is not listed", list.what()),
             );
             return false;
         }
@@ -739,7 +800,7 @@ impl Content {
             );
         }
         if pushed
-            && !self.charge(1)
+            && !self.charge(List::Outline, 1)
             && let Some(s) = &mut self.cur
         {
             s.sheet.outline.pop();
@@ -808,13 +869,13 @@ impl Content {
         let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
         let cols = self.repeat(e, "number-columns-spanned");
         let rows = self.repeat(e, "number-rows-spanned");
-        if (cols > 1 || rows > 1) && self.charge(cells) {
+        if (cols > 1 || rows > 1) && self.charge(List::Merges, cells) {
             self.list_merges(rect, rows, cols);
         }
         let content = e.attr("value-type").is_some() || e.attr("formula").is_some();
         if content || e.attr("style-name").is_some() {
             let runs = self.style_runs(e, rect);
-            if content && self.charge(cells) {
+            if content && self.charge(List::Cells, cells) {
                 self.list_formats(&runs, rect);
             }
             self.list_looks(&runs, rect);
@@ -877,7 +938,7 @@ impl Content {
                 continue;
             }
             let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(c1 - c0 + 1);
-            if !self.charge(cells) {
+            if !self.charge(List::Looks, cells) {
                 return;
             }
             let Some(s) = &mut self.cur else { return };
@@ -896,7 +957,7 @@ impl Content {
                 continue;
             };
             let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(c1 - c0 + 1);
-            if !self.charge(cells.saturating_mul(code.len() as u64 / 32)) {
+            if !self.charge(List::Cells, cells.saturating_mul(code.len() as u64 / 32)) {
                 return;
             }
             let Some(s) = &mut self.cur else { return };
@@ -919,7 +980,10 @@ impl Content {
             );
             return;
         };
-        if !self.charge(1 + (name.len() + sheet.len() + range.len()) as u64 / 16) {
+        if !self.charge(
+            List::Ranges,
+            1 + (name.len() + sheet.len() + range.len()) as u64 / 16,
+        ) {
             return;
         }
         self.database_ranges.push(DatabaseRange {
@@ -941,7 +1005,10 @@ impl Content {
             );
             return;
         };
-        if !self.charge(1 + (name.len() + sheet.len() + range.len()) as u64 / 16) {
+        if !self.charge(
+            List::Pilots,
+            1 + (name.len() + sheet.len() + range.len()) as u64 / 16,
+        ) {
             return;
         }
         self.data_pilots.push(DataPilot { name, sheet, range });
@@ -1009,7 +1076,10 @@ impl Content {
                 let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
                 let text = ann.paras.join("\n");
                 // Every copy of the text counts, so a long note on a wide repeat hits the limit.
-                if !self.charge(cells.saturating_mul(1 + text.len() as u64 / 16)) {
+                if !self.charge(
+                    List::Cells,
+                    cells.saturating_mul(1 + text.len() as u64 / 16),
+                ) {
                     return;
                 }
                 let trimmed = |v: String| {
@@ -1042,6 +1112,13 @@ fn target(address: &str) -> Option<(String, String)> {
         return None;
     }
     let (sheet, first) = sheet_and_cell(ends[0])?;
+    if let Some(end) = ends.get(1) {
+        // A range across two sheets is no rectangle on one sheet.
+        let (sheet2, _) = sheet_and_cell(end)?;
+        if !sheet2.is_empty() && sheet2 != sheet {
+            return None;
+        }
+    }
     let clean = |c: &str| c.replace('$', "");
     let first = clean(first);
     let last = match ends.get(1) {
