@@ -3957,15 +3957,16 @@ fn multi_row_header_renders_paths() {
         l,
     )]);
     assert!(
-        md.contains(
-            "| Region | Sales / 2024 | Sales / 2025 |\n| --- | --- | --- |\n| North | 1 | 2 |\n"
+        md.ends_with(
+            "| Region | Sales / 2024 | Sales / 2025 |\n| --- | --- | --- |\n| North | 1 | 2 |"
         ),
         "{md}"
     );
     // The band rows are the header, not body rows; there is no Parent column.
     assert!(!md.contains("| 2024 |"), "{md}");
     assert!(!md.contains("Parent"), "{md}");
-    assert!(md.contains("Ranges: A1:A2, B1:C1"), "{md}");
+    // Its merges lie only in the header band, which the paths already spread: no note.
+    assert!(!md.contains("Merged cells"), "{md}");
 }
 
 #[test]
@@ -4543,13 +4544,13 @@ fn generated_heading_drops_the_same_lead_line() {
     // the lead line.
     let text = |range: &str, data: Option<&str>| {
         ltable(
-            vec![vec![at("x", "F3")]],
+            vec![vec![at("x", "F3")], vec![at("y", "F4")]],
             0,
             lay(LayoutKind::Text, range, data),
         )
     };
-    let md = sheet_md(vec![heading(3, "Text F3", None), text("F3", None)]);
-    assert_eq!(md, "### Text F3\n\n- x (F3)");
+    let md = sheet_md(vec![heading(3, "Text F3:F4", None), text("F3:F4", None)]);
+    assert_eq!(md, "### Text F3:F4\n\n- x (F3)\n- y (F4)");
     let kv = |range: &str, data: Option<&str>| {
         ltable(
             vec![
@@ -4569,11 +4570,14 @@ fn generated_heading_drops_the_same_lead_line() {
         "### Label and value pairs K3:L4\n\n- gg: 0.75 (L3)\n- zcor: 2 (L4)"
     );
     // An author heading with the same text keeps the lead.
-    let md = sheet_md(vec![heading(3, "Text F3", Some("S!F3")), text("F3", None)]);
-    assert!(md.contains("\n\nText F3:\n\n- x (F3)"), "{md}");
+    let md = sheet_md(vec![
+        heading(3, "Text F3:F4", Some("S!F3")),
+        text("F3:F4", None),
+    ]);
+    assert!(md.contains("\n\nText F3:F4:\n\n- x (F3)"), "{md}");
     // A generated heading with another range keeps it.
-    let md = sheet_md(vec![heading(3, "Text F4", None), text("F3", None)]);
-    assert!(md.contains("\n\nText F3:\n\n"), "{md}");
+    let md = sheet_md(vec![heading(3, "Text F3:F5", None), text("F3:F4", None)]);
+    assert!(md.contains("\n\nText F3:F4:\n\n"), "{md}");
     // The lead names the data range, the heading the region: they differ, the lead stays.
     let md = sheet_md(vec![
         heading(3, "Label and value pairs K2:L4", None),
@@ -4606,4 +4610,101 @@ fn generated_heading_drops_the_same_lead_line() {
         ltable(vec![vec![at("a", "A1"), at("b", "B1")]], 0, g),
     ]);
     assert!(md.contains("\n\nGrid A1:B1, header unsure"), "{md}");
+}
+
+#[test]
+fn layout_line_details_do_not_repeat_the_line() {
+    // P4-AU: header rows and row labels stand once; a detail keeps what it adds.
+    let mut l = lay(LayoutKind::Table, "A3:C5", Some("A5:C5"));
+    l.header_rows = vec![3, 4];
+    l.header_paths = vec!["a".into(), "b".into(), "c".into()];
+    l.label_cols = 1;
+    l.found_by = vec![
+        rule("G", "empty-row gaps"),
+        rule("H1", "header rows 3 to 4 by type change"),
+        rule("H2", "bold header rows 3 to 4"),
+        rule("H3", "header row 9 by type change"),
+        rule("L", "label column A"),
+    ];
+    let rows = || {
+        vec![
+            vec![at("a", "A3"), at("b", "B3"), at("c", "C3")],
+            vec![at("", "A4"), at("", "B4"), at("", "C4")],
+            vec![at("x", "A5"), at("1", "B5"), at("2", "C5")],
+        ]
+    };
+    let md = sheet_md(vec![ltable(rows(), 2, l.clone())]);
+    assert!(
+        md.starts_with(
+            "Table A3:C5 (data A5:C5), header rows 3 to 4, row labels in A, found by rules: \
+             empty-row gaps, header by type change, bold header, header row 9 by type change.\n"
+        ),
+        "{md}"
+    );
+    // Several label columns; a label detail that says other columns stays.
+    l.label_cols = 3;
+    l.found_by = vec![
+        rule("L", "label columns A to C"),
+        rule("L", "label column B"),
+    ];
+    let md = sheet_md(vec![ltable(rows(), 2, l)]);
+    assert!(
+        md.starts_with(
+            "Table A3:C5 (data A5:C5), header rows 3 to 4, row labels in A to C, \
+             found by rules: label column B.\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn merge_note_only_for_merges_in_the_body() {
+    // A header merge B1:C1 and a body merge A3:A4: only the body merge is named.
+    let mut l = lay(LayoutKind::Table, "A1:C4", Some("A3:C4"));
+    l.header_rows = vec![1, 2];
+    l.header_paths = vec![
+        "Region".into(),
+        "Sales / 2024".into(),
+        "Sales / 2025".into(),
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Region", "A1"), spans(at("Sales", "B1"), 1, 2)],
+            vec![at("", "A2"), at("2024", "B2"), at("2025", "C2")],
+            vec![spans(at("North", "A3"), 2, 1), at("1", "B3"), at("2", "C3")],
+            vec![at("3", "B4"), at("4", "C4")],
+        ],
+        2,
+        l,
+    )]);
+    assert!(
+        md.ends_with(
+            "| \u{3003} | 3 | 4 |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: A3:A4"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn one_cell_text_region_is_a_plain_line() {
+    // Spec 7.4: one cell of text is its own line, under any heading.
+    let one = |a1: &str| {
+        ltable(
+            vec![vec![at("Method: Terzaghi", a1)]],
+            0,
+            lay(LayoutKind::Text, "A1:A2", Some("A2")),
+        )
+    };
+    let md = sheet_md(vec![heading(3, "STABILITY CHECK", Some("S!A1")), one("A2")]);
+    assert_eq!(md, "### STABILITY CHECK\n\nMethod: Terzaghi (A2)");
+    let md = sheet_md(vec![heading(3, "Text A2", None), one("A2")]);
+    assert_eq!(md, "### Text A2\n\nMethod: Terzaghi (A2)");
+    // A leading dash stays text.
+    let md = sheet_md(vec![ltable(
+        vec![vec![at("- IS 4880", "A19")], vec![at("", "A20")]],
+        0,
+        lay(LayoutKind::Text, "A19:A20", None),
+    )]);
+    assert_eq!(md, "\\- IS 4880 (A19)");
 }

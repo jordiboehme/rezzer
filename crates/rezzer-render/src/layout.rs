@@ -196,17 +196,26 @@ pub(crate) fn layout_table(
                 level,
             )
         }
-        LayoutKind::Text => listed(
-            lead.then(|| lead_line(layout)).flatten(),
-            rows.iter()
-                .flatten()
-                .filter(|c| !is_empty(c))
-                .map(|c| item(c.inlines.clone(), address(c.anchor.as_ref())))
-                .collect(),
-            ctx,
-            depth,
-            level,
-        ),
+        LayoutKind::Text => {
+            let cells: Vec<&Cell> = rows.iter().flatten().filter(|c| !is_empty(c)).collect();
+            // One cell of text is a plain line of its own (spec 7.4).
+            if let [cell] = cells.as_slice() {
+                return with_address(
+                    paragraph(trimmed(&cell.inlines)),
+                    address(cell.anchor.as_ref()),
+                );
+            }
+            listed(
+                lead.then(|| lead_line(layout)).flatten(),
+                cells
+                    .iter()
+                    .map(|c| item(c.inlines.clone(), address(c.anchor.as_ref())))
+                    .collect(),
+                ctx,
+                depth,
+                level,
+            )
+        }
         LayoutKind::Grid => grid(layout, rows, aligns),
         LayoutKind::Table => table(layout, header_rows, rows, aligns),
     }
@@ -387,6 +396,35 @@ fn layout_line(layout: &TableLayout, left: u32) -> String {
             _ => None,
         })
         .collect();
+    // What the line says itself, in the words the rules use: the header rows and the label
+    // columns. A rule detail never repeats it.
+    let header_words = match layout.header_rows.as_slice() {
+        [] => None,
+        [one] => Some(format!("header row {one}")),
+        [first, .., last] => Some(format!("header rows {first} to {last}")),
+    };
+    let label_words = match layout.label_cols {
+        0 => None,
+        1 => Some(format!("label column {}", letter(left, 0))),
+        n => Some(format!(
+            "label columns {} to {}",
+            letter(left, 0),
+            letter(left, n as usize - 1)
+        )),
+    };
+    let detail_words = |detail: &str| -> Option<String> {
+        if label_words.as_deref() == Some(detail) {
+            return None;
+        }
+        if let Some(words) = &header_words
+            && let Some(at) = detail.find(words.as_str())
+            && !detail[at + words.len()..].starts_with(|c: char| c.is_ascii_digit())
+        {
+            let rest = format!("{}header{}", &detail[..at], &detail[at + words.len()..]);
+            return Some(rest);
+        }
+        Some(detail.to_string())
+    };
     if grid {
         line.push_str(", header unsure");
         let reasons: Vec<String> = layout
@@ -439,7 +477,11 @@ fn layout_line(layout: &TableLayout, left: u32) -> String {
         }
     }
     let facts: Vec<String> = layout.found_by.iter().filter_map(fact_words).collect();
-    let rules: Vec<String> = rules.into_iter().map(line_text).collect();
+    let rules: Vec<String> = rules
+        .into_iter()
+        .filter_map(detail_words)
+        .map(|d| line_text(&d))
+        .collect();
     match (facts.is_empty(), rules.is_empty()) {
         (false, false) => line.push_str(&format!(
             ", found by: {}; rules: {}",
@@ -532,9 +574,10 @@ fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &
     if rows.is_empty() {
         return line;
     }
-    let ranges = grid.ranges();
-    // The band rows are the header paths; only the marks of the body are shown.
+    // The band rows are the header paths, which spread the band's merges already: only the
+    // marks and merges of the body are named.
     let head = header_rows.min(grid.spots.len());
+    let ranges = grid.ranges_from(head);
     let legend = grid.marked(head) || !ranges.is_empty();
     let width = grid
         .width

@@ -67,7 +67,7 @@ Table D1:F2, found by rules: empty-row and empty-column gaps, no header found.
 
 ### Table A4:B8
 
-Table A4:B8 (data A5:B8), header row 4, found by rules: empty-row and empty-column gaps, header row 4 by type change.
+Table A4:B8 (data A5:B8), header row 4, found by rules: empty-row and empty-column gaps, header by type change.
 
 | Temps | Fahrenheit |
 | --- | --- |

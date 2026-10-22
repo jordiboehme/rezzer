@@ -52,9 +52,7 @@ modified: "2025-02-28T05:19:13Z"
 
 ### Упражнения по работе с макросами Unifloc VBA
 
-Text A2:
-
-- Проверка расчета z фактора с использоваием унифлок VBA (A2)
+Проверка расчета z фактора с использоваием унифлок VBA (A2)
 
 ### Grid F1:G1
 
@@ -81,7 +79,7 @@ Table O2:Q4, found by rules: empty-row and empty-column gaps, no header found.
 
 ### Table E35:AK36
 
-Table E35:AK36, row labels in E, found by rules: empty-row gaps, apart from a block it touches only at a corner, no header found, label column E.
+Table E35:AK36, row labels in E, found by rules: empty-row gaps, apart from a block it touches only at a corner, no header found.
 
 | E | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U | V | W | X | Y | Z | AA | AB | AC | AD | AE | AF | AG | AH | AI | AJ | AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -90,7 +88,7 @@ Table E35:AK36, row labels in E, found by rules: empty-row gaps, apart from a bl
 
 ### Table C37:AK58
 
-Table C37:AK58 (data C38:AK58), header row 37, 33 columns without a header: E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, found by rules: empty-row gaps, apart from a block it touches only at a corner, header row 37 by type change.
+Table C37:AK58 (data C38:AK58), header row 37, 33 columns without a header: E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, found by rules: empty-row gaps, apart from a block it touches only at a corner, header by type change.
 
 | T | T\_K | Column E | Column F | Column G | Column H | Column I | Column J | Column K | Column L | Column M | Column N | Column O | Column P | Column Q | Column R | Column S | Column T | Column U | Column V | Column W | Column X | Column Y | Column Z | Column AA | Column AB | Column AC | Column AD | Column AE | Column AF | Column AG | Column AH | Column AI | Column AJ | Column AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -118,7 +116,7 @@ Table C37:AK58 (data C38:AK58), header row 37, 33 columns without a header: E, F
 
 ### Table E62:AK82
 
-Table E62:AK82, row labels in E, found by rules: empty-row gaps, no header found, label column E.
+Table E62:AK82, row labels in E, found by rules: empty-row gaps, no header found.
 
 | E | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U | V | W | X | Y | Z | AA | AB | AC | AD | AE | AF | AG | AH | AI | AJ | AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -146,7 +144,7 @@ Table E62:AK82, row labels in E, found by rules: empty-row gaps, no header found
 
 ### Table E85:AK105
 
-Table E85:AK105, row labels in E, found by rules: empty-row gaps, no header found, label column E.
+Table E85:AK105, row labels in E, found by rules: empty-row gaps, no header found.
 
 | E | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U | V | W | X | Y | Z | AA | AB | AC | AD | AE | AF | AG | AH | AI | AJ | AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

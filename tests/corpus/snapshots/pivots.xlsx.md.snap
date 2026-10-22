@@ -73,7 +73,7 @@ Total row: 5 (pivot total row).
 
 ### Text F3
 
-- &lt;------------ calculated field (F3)
+&lt;------------ calculated field (F3)
 
 **Pivot tables**
 
@@ -140,7 +140,7 @@ Total row: 7 (pivot total row).
 
 ### Text C3
 
-- &lt;--------  grouped field as value (C3)
+&lt;--------  grouped field as value (C3)
 
 **Pivot tables**
 
@@ -183,7 +183,7 @@ Total row: 9 (pivot total row).
 
 ## DataSheet
 
-Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header row 1 by type change.
+Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header by type change.
 
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -200,7 +200,7 @@ Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header row 1 
 
 ## DataSheet2
 
-Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header row 1 by type change.
+Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header by type change.
 
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

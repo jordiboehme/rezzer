@@ -47,7 +47,7 @@ modified: "2013-11-01T13:48:39Z"
 
 ### Table A1:C2
 
-Table A1:C2 (data A2:C2), header row 1, found by rules: empty-row gaps, header row 1 by type change.
+Table A1:C2 (data A2:C2), header row 1, found by rules: empty-row gaps, header by type change.
 
 | A | B | =A\*B |
 | --- | --- | --- |

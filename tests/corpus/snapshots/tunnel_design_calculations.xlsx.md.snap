@@ -52,9 +52,7 @@ modified: "2026-08-24T17:24:13Z"
 
 ### UNDERGROUND TUNNEL STRUCTURAL ANALYSIS
 
-Text A2:
-
-- Conceptual design calculations - structural stability, drainage, ventilation \& safety (A2)
+Conceptual design calculations - structural stability, drainage, ventilation \& safety (A2)
 
 ### PROJECT DESCRIPTION
 
@@ -102,9 +100,7 @@ Text A28:A32:
 
 ### STRUCTURAL STABILITY - TUNNEL LINING CHECK
 
-Text A2:
-
-- Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check (A2)
+Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check (A2)
 
 ### INPUTS
 
@@ -122,7 +118,7 @@ Label and value pairs A5:C13:
 
 ### TERZAGHI LOOSENING PRESSURE
 
-Table A15:C23 (data A16:C23), row labels in A, found by rules: empty-row gaps, caption row 15, column C is not a unit column, no header found, label column A.
+Table A15:C23 (data A16:C23), row labels in A, found by rules: empty-row gaps, caption row 15, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -167,7 +163,7 @@ Label and value pairs A36:C45:
 
 ### Table E48:F72
 
-Table E48:F72 (data E49:F72), header row 48, found by rules: empty-row and empty-column gaps, header row 48 by type change, bold header row 48.
+Table E48:F72 (data E49:F72), header row 48, found by rules: empty-row and empty-column gaps, header by type change, bold header.
 
 | t (m) | FOS |
 | --- | --- |
@@ -198,7 +194,7 @@ Table E48:F72 (data E49:F72), header row 48, found by rules: empty-row and empty
 
 ### Table A74:C74
 
-Table A74:C74, row labels in A, found by rules: empty-row gaps, no header found, label column A.
+Table A74:C74, row labels in A, found by rules: empty-row gaps, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -208,9 +204,7 @@ Table A74:C74, row labels in A, found by rules: empty-row gaps, no header found,
 
 ### LONGITUDINAL VENTILATION DESIGN CHECK
 
-Text A2:
-
-- Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control (A2)
+Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control (A2)
 
 ### INPUTS
 
@@ -232,7 +226,7 @@ Label and value pairs A5:C17:
 
 ### GEOMETRY
 
-Table A19:C21 (data A20:C21), row labels in A, found by rules: empty-row gaps, caption row 19, column C is not a unit column, no header found, label column A.
+Table A19:C21 (data A20:C21), row labels in A, found by rules: empty-row gaps, caption row 19, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -241,7 +235,7 @@ Table A19:C21 (data A20:C21), row labels in A, found by rules: empty-row gaps, c
 
 ### CO DILUTION - FRESH AIR DEMAND
 
-Table A23:C29 (data A24:C29), row labels in A, found by rules: empty-row gaps, caption row 23, column C is not a unit column, no header found, label column A.
+Table A23:C29 (data A24:C29), row labels in A, found by rules: empty-row gaps, caption row 23, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -254,7 +248,7 @@ Table A23:C29 (data A24:C29), row labels in A, found by rules: empty-row gaps, c
 
 ### CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)
 
-Table A31:C34 (data A32:C34), row labels in A, found by rules: empty-row gaps, caption row 31, column C is not a unit column, no header found, label column A.
+Table A31:C34 (data A32:C34), row labels in A, found by rules: empty-row gaps, caption row 31, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -264,7 +258,7 @@ Table A31:C34 (data A32:C34), row labels in A, found by rules: empty-row gaps, c
 
 ### JET FAN COUNT
 
-Table A36:C39 (data A37:C39), row labels in A, found by rules: empty-row gaps, caption row 36, column C is not a unit column, no header found, label column A.
+Table A36:C39 (data A37:C39), row labels in A, found by rules: empty-row gaps, caption row 36, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -276,9 +270,7 @@ Table A36:C39 (data A37:C39), row labels in A, found by rules: empty-row gaps, c
 
 ### DRAINAGE SYSTEM SIZING
 
-Text A2:
-
-- Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check (A2)
+Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check (A2)
 
 ### INPUTS
 
@@ -297,7 +289,7 @@ Label and value pairs A5:C14:
 
 ### INFLOW ESTIMATES
 
-Table A16:C19 (data A17:C19), row labels in A, found by rules: empty-row gaps, caption row 16, column C is not a unit column, no header found, label column A.
+Table A16:C19 (data A17:C19), row labels in A, found by rules: empty-row gaps, caption row 16, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -307,7 +299,7 @@ Table A16:C19 (data A17:C19), row labels in A, found by rules: empty-row gaps, c
 
 ### INVERT DRAIN PIPE SIZING (Manning's, full-bore)
 
-Table A21:C27 (data A22:C25), row labels in A, found by rules: empty-row gaps, caption row 21, column C is not a unit column, no header found, label column A, notes in row 27.
+Table A21:C27 (data A22:C25), row labels in A, found by rules: empty-row gaps, caption row 21, column C is not a unit column, no header found, notes in row 27.
 
 | A | B | C |
 | --- | --- | --- |
@@ -320,7 +312,7 @@ STANDARD PIPE SIZE CHECK (A27)
 
 ### Table E28:F38
 
-Table E28:F38 (data E29:F38), header row 28, found by rules: empty-row and empty-column gaps, header row 28 by type change, bold header row 28.
+Table E28:F38 (data E29:F38), header row 28, found by rules: empty-row and empty-column gaps, header by type change, bold header.
 
 | D (m) | Capacity (l/s) |
 | --- | --- |
@@ -337,7 +329,7 @@ Table E28:F38 (data E29:F38), header row 28, found by rules: empty-row and empty
 
 ### Table A40:C40
 
-Table A40:C40, row labels in A, found by rules: empty-row gaps, no header found, label column A.
+Table A40:C40, row labels in A, found by rules: empty-row gaps, no header found.
 
 | A | B | C |
 | --- | --- | --- |
@@ -345,7 +337,7 @@ Table A40:C40, row labels in A, found by rules: empty-row gaps, no header found,
 
 ### SUMP \& PUMP SIZING
 
-Table A42:C45 (data A43:C45), row labels in A, found by rules: empty-row gaps, caption row 42, column C is not a unit column, no header found, label column A.
+Table A42:C45 (data A43:C45), row labels in A, found by rules: empty-row gaps, caption row 42, column C is not a unit column, no header found.
 
 | A | B | C |
 | --- | --- | --- |

@@ -47,7 +47,7 @@ modified: "2017-03-10T14:58:49Z"
 
 ### Table A1:E17
 
-Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a header: C, D, E, found by rules: empty-row gaps, header row 1 by type change, label column A.
+Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a header: C, D, E, found by rules: empty-row gaps, header by type change.
 
 | String | This is a string | Column C | Column D | Column E |
 | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a h
 
 ### Text C21
 
-- text test (C21)
+text test (C21)
 
 ### the
 
@@ -78,11 +78,11 @@ Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a h
 
 ### Text D33
 
-- quick (D33)
+quick (D33)
 
 ### Text B35
 
-- comment6 (B35)
+comment6 (B35)
 
 ## Logic
 

@@ -1775,13 +1775,18 @@ impl Grid {
     /// named, a range into hidden rows ends at the last one, and a merged cell without a
     /// sheet anchor is not named. Other tables name none.
     pub(crate) fn ranges(&self) -> Vec<String> {
+        self.ranges_from(0)
+    }
+
+    /// [`Grid::ranges`] of the merged cells that reach shown row `from` or a row after it.
+    pub(crate) fn ranges_from(&self, from: usize) -> Vec<String> {
         if !self.sheet {
             return Vec::new();
         }
         let shown = self.spots.len();
         self.merged
             .iter()
-            .filter(|m| m.r < shown)
+            .filter(|m| m.r < shown && m.r + m.rs > from)
             .filter_map(|m| {
                 let (row, col) = m.at?;
                 let (row, col) = (row as usize, col as usize);

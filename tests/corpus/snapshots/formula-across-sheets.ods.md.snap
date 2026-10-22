@@ -72,7 +72,7 @@ Table A1:A2, found by rules: no gaps, no header found.
 
 ### Table A1:E7
 
-Table A1:E7 (data A4:E7), header rows 1 to 3, row labels in A, found by rules: empty-row and empty-column gaps, header rows 1 to 3 by type change, label column A.
+Table A1:E7 (data A4:E7), header rows 1 to 3, row labels in A, found by rules: empty-row and empty-column gaps, header by type change.
 
 | Semi // | Colonne a / bas (1) / L | Colonne a / haut (n) / L | Colonne b / bas (1) / L | Colonne b / haut (n) / L |
 | --- | --- | --- | --- | --- |
@@ -80,8 +80,6 @@ Table A1:E7 (data A4:E7), header rows 1 to 3, row labels in A, found by rules: e
 | titre | 20.49% | 6.51% | 6.51% | 3.98% |
 | rapport | 25.78% | 6.96% | 6.96% | 4.14% |
 | débit | 12 | 10 |  | 1.00E+01 |
-
-Merged cells: 〃 same as above, ← same as left. Ranges: B1:C1, D1:E1
 
 ### Table G1:G2
 
@@ -94,7 +92,7 @@ Table G1:G2, found by rules: empty-row and empty-column gaps, no header found.
 
 ### Table A9:B9
 
-Table A9:B9, row labels in A, found by rules: empty-row and empty-column gaps, no header found, label column A.
+Table A9:B9, row labels in A, found by rules: empty-row and empty-column gaps, no header found.
 
 | A | B |
 | --- | --- |
