@@ -735,3 +735,42 @@ fn unsure_loss_has_words_without_reasons() {
         .expect("an uncertain loss");
     assert_eq!(loss.what, "region unsure");
 }
+
+#[test]
+fn stray_cell_beside_a_tall_region_follows_reading_order() {
+    // A tall region C1:D6, a region C9:D9 below it, stray cells at A1 (row 1, left of the
+    // tall region's first cell), F4 (beside it) and A9 (left of the lower region's row).
+    let s = Sheet::new()
+        .rows("C1", &["1|2", "3|4", "5|6", "7|8", "9|10", "11|12"])
+        .rows("C9", &["13|14"])
+        .rows("A1", &["left"])
+        .rows("F4", &["beside"])
+        .rows("A9", &["below"]);
+    let layout = sheetlayout::Layout {
+        regions: vec![
+            hand_region("C1:D6", sheetlayout::Kind::Table, &[]),
+            hand_region("C9:D9", sheetlayout::Kind::Table, &[]),
+        ],
+        issues: Vec::new(),
+    };
+    let m = map_layout(&s, &layout);
+    let order: Vec<String> = m
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                layout: Some(l), ..
+            } => Some(l.range.clone()),
+            Block::Paragraph {
+                role: Some(r),
+                inlines,
+                ..
+            } if r == "cell" => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect();
+    // Row, then column: A1 comes before the region that starts at C1; F4 is on row 4, after
+    // the tall region's first row and before the region on row 9; A9 comes before C9.
+    assert_eq!(order, ["left", "C1:D6", "beside", "below", "C9:D9"]);
+    assert_eq!(cells_of(&m), expected_cells(&s));
+}

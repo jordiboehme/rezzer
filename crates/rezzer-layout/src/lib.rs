@@ -400,7 +400,9 @@ pub fn blocks(
     // result) has nothing to show and is left out: no cell is lost by it.
     let only = held.iter().filter(|h| !h.is_empty()).count() == 1;
     // Cells outside every region go in reading order among the regions (rare: the detector
-    // places every cell).
+    // places every cell). Reading order is row, then column: a cell comes before a region
+    // when its (row, column) comes before the region's first row and left column, so a cell
+    // beside a tall region, below its first row, follows that region.
     let mut loose = loose.into_iter().peekable();
     for (i, region) in layout.regions.iter().enumerate() {
         let at = (region.rect.top, region.rect.left);
