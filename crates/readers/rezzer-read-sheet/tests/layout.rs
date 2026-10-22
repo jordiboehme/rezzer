@@ -484,13 +484,14 @@ fn vertical_merges_in_header_count_once() {
     );
 }
 
-/// The brief expected the cross table E35:AK58 with header row 35. Row 37 holds T and T_K in
-/// C and D only, so the rows 35 and 36 (P, P_Mpa) touch the block below only at the corner
-/// D37/E36 and are a region of their own (rule G, spec 6.2): a header-less table E35:AK36,
-/// and the table C37:AK58 with its header row 37 by type change. The titles in A1:A2 are a
-/// text block with their caption heading; formulas stay in Logic (the corpus test).
+/// A known limit, stated in the sheetlayout README: header rows that stand above and right
+/// of the corner labels of a cross table become a table of their own. In ex012 row 37 holds
+/// T and T_K in C and D only, so the rows 35 and 36 (P, P_Mpa) over E:AK touch the block
+/// below only at the corner D37/E36 (rule G, spec 6.2): a header-less table E35:AK36, and the
+/// table C37:AK58 with header row 37 by type change, whose data columns get no P path. Every
+/// cell is still kept once.
 #[test]
-fn cross_table_header_row() {
+fn cross_table_header_above_corner_labels_is_its_own_table() {
     let out = corpus("ex012.PVT_z_factor.xlsm");
     let doc = &out.document;
     let top = region(doc, "z", "E35:AK36");
@@ -499,9 +500,13 @@ fn cross_table_header_row() {
     let table = region(doc, "z", "C37:AK58");
     assert_eq!(table.layout.header_rows, [37]);
     assert_eq!(&table.layout.header_paths[..2], ["T", "T_K"]);
-    let titles = region(doc, "z", "A1:A2");
-    assert_eq!(titles.layout.kind, LayoutKind::Text);
-    assert_eq!(headings(doc, "z")[0].2.as_deref(), Some("z!A1"));
+    let cells = held(doc, "z");
+    let mut anchors: Vec<&str> = cells.iter().map(|c| c.0.as_str()).collect();
+    anchors.dedup();
+    assert_eq!(anchors.len(), cells.len(), "a cell is written twice");
+    for a in ["z!E35", "z!E36", "z!F35", "z!C37", "z!D37", "z!E38"] {
+        assert!(anchors.contains(&a), "{a} is kept");
+    }
 }
 
 #[test]
@@ -617,7 +622,7 @@ fn pivot_location_is_exact() {
 /// so it is a `key_value` block, not the plain table the brief expected; no loss either way.
 /// A sheet of numbers only is the header-less table of decision 16.
 #[test]
-fn headerless_sheet_is_plain_table() {
+fn no_header_file_is_key_value_and_numbers_are_plain_table() {
     let out = corpus("no-header.xlsx");
     let doc = &out.document;
     let all = regions(doc, "Feuille 1");

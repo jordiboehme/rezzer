@@ -33,6 +33,9 @@ This rule has limits:
 - It cannot separate two tables that touch with no empty row or column between them.
 - It cannot join one table that has an empty row inside it. A defined name over both parts
   joins them.
+- It cuts a cross table whose corner labels stand one row below the column headers. The
+  header rows then touch the table only at a corner. They become a table of their own, and
+  the columns below get no header path from them.
 - It cuts at most 64 levels deep. A piece that needs a deeper cut stays one grid region,
   and an issue says so.
 - It gives at most 10,000 regions per sheet. Past that limit the rest of the sheet is one
