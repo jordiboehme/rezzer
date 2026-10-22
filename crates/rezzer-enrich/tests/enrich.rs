@@ -1125,7 +1125,7 @@ fn sheet_size_counts_regions() {
 }
 
 #[test]
-fn not_read_counts_losses_from_warning_on() {
+fn not_read_counts_every_loss_but_uncertain_ones() {
     let mut d = doc();
     d.body.push(sheet("Data", 3, 2));
     let loss = |why, severity| Loss {
@@ -1134,11 +1134,14 @@ fn not_read_counts_losses_from_warning_on() {
         why,
         severity,
     };
-    // An unsure region is read, only not sure: listed, not counted as not read.
+    // An unsure region is read, only not sure: listed, not counted as not read. A feature a
+    // reader does not read counts at any severity.
     d.losses.push(loss(LossReason::Uncertain, Severity::Info));
+    d.losses
+        .push(loss(LossReason::Uncertain, Severity::Warning));
+    d.losses.push(loss(LossReason::Unsupported, Severity::Info));
     d.losses.push(loss(LossReason::Damaged, Severity::Info));
     d.losses.push(loss(LossReason::Limit, Severity::Warning));
-    d.losses.push(loss(LossReason::Damaged, Severity::Error));
     enrich(&mut d, &only(&[]));
     let o = d.overview.expect("overview");
     let not_read = o
@@ -1146,8 +1149,8 @@ fn not_read_counts_losses_from_warning_on() {
         .iter()
         .find(|(k, _)| k == "Not read")
         .map(|(_, v)| v.as_str());
-    assert_eq!(not_read, Some("2"));
-    assert_eq!(d.losses.len(), 4, "every loss stays listed");
+    assert_eq!(not_read, Some("3"));
+    assert_eq!(d.losses.len(), 5, "every loss stays listed");
 
     let mut d = doc();
     d.body.push(sheet("Data", 3, 2));
@@ -1183,6 +1186,21 @@ fn generated_sheet_headings_are_not_sampled_for_the_language() {
         title: Some("S".into()),
         anchor: Some(a("S")),
         blocks: blocks.clone(),
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language, None);
+    // A sheet section inside another section: its generated headings are left out too.
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Part,
+        title: Some("P".into()),
+        anchor: None,
+        blocks: vec![Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("S".into()),
+            anchor: Some(a("S")),
+            blocks: blocks.clone(),
+        }],
     });
     enrich(&mut d, &only(&[]));
     assert_eq!(d.properties.language, None);

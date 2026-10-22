@@ -59,20 +59,24 @@ impl Pass for Language {
 fn body_text(body: &[Block]) -> String {
     // The region headings a reader generates in a sheet (`Table B3:D5`) are the only headings
     // there without an anchor; caption rows and defined-name captions carry one.
-    let generated: HashSet<*const Block> = body
-        .iter()
-        .filter_map(|b| match b {
-            Block::Section {
-                kind: SectionKind::Sheet,
-                blocks,
-                ..
-            } => Some(blocks),
-            _ => None,
-        })
-        .flatten()
-        .filter(|b| matches!(b, Block::Heading { anchor: None, .. }))
-        .map(|b| b as *const Block)
-        .collect();
+    // Sheet sections at any depth.
+    let mut generated: HashSet<*const Block> = HashSet::new();
+    walk::blocks(body, |b| {
+        if let Block::Section {
+            kind: SectionKind::Sheet,
+            blocks,
+            ..
+        } = b
+        {
+            generated.extend(
+                blocks
+                    .iter()
+                    .filter(|x| matches!(x, Block::Heading { anchor: None, .. }))
+                    .map(|x| x as *const Block),
+            );
+        }
+        true
+    });
     let mut text = String::new();
     walk::blocks(body, |b| {
         // A table with a role (a summary a reader generated) is not the author's text.
