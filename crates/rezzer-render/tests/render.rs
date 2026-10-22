@@ -1737,6 +1737,36 @@ fn merge_note_names_only_shown_rows() {
 }
 
 #[test]
+fn anchored_merge_note_names_only_shown_rows() {
+    // The anchored twin: a sheet cell merged over 300 rows, of which 200 are shown, is named
+    // up to the last shown row.
+    let row = |n: usize| -> Vec<Cell> {
+        (0..n)
+            .map(|i| Cell::new(vec![txt(&i.to_string())]))
+            .collect()
+    };
+    let mut rows: Vec<Vec<Cell>> = (0..300).map(|_| row(1000)).collect();
+    rows[0][0].row_span = 300;
+    rows[0][0].anchor = Some(Anchor("Sheet1!C5".into()));
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }]);
+    assert!(
+        md.contains(
+            "Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: C5:C204\n"
+        ),
+        "{}",
+        &md[md.len() - 200..]
+    );
+}
+
+#[test]
 fn scheme_check_sees_references_and_ampersands() {
     let link = |target: &str| Inline::Link {
         target: target.into(),
@@ -3316,13 +3346,35 @@ fn sheet_blocks_take_no_inline_notes() {
         kind: SectionKind::Chapter,
         title: Some("Inputs".into()),
         anchor: None,
-        blocks: vec![caption],
+        blocks: vec![caption.clone()],
     }];
     let md = render(&d, Completeness::Complete, &opts());
     assert!(
         md.contains("Sales by region\n\n> [!NOTE] Comment by Ann"),
         "{md}"
     );
+    // A chapter after a sheet in the same document takes its notes again: leaving the
+    // sheet ends the skip.
+    let sheet = Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Inputs".into()),
+        anchor: Some(Anchor("Inputs".into())),
+        blocks: vec![caption.clone()],
+    };
+    let chapter = Block::Section {
+        kind: SectionKind::Chapter,
+        title: Some("Notes".into()),
+        anchor: None,
+        blocks: vec![Block::Paragraph {
+            inlines: vec![txt("Read me")],
+            role: None,
+            anchor: Some(Anchor("Inputs!C9".into())),
+        }],
+    };
+    d.body = vec![sheet, chapter];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("Read me\n\n> [!NOTE] Comment by Ann"), "{md}");
+    assert_eq!(md.matches("[!NOTE]").count(), 1, "{md}");
 }
 
 #[test]
