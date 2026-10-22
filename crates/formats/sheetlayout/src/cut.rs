@@ -27,6 +27,8 @@ pub(crate) struct Leaf {
     pub cols_cut: bool,
     /// Split from a piece it touched only at a corner.
     pub corner: bool,
+    /// Cut apart from a piece that reached around a fact range.
+    pub beside: bool,
 }
 
 pub(crate) struct Cut {
@@ -48,6 +50,7 @@ enum Next {
 enum How {
     Rows,
     Cols,
+    Fact,
     Corner,
 }
 
@@ -58,6 +61,7 @@ struct Piece {
     rows_cut: bool,
     cols_cut: bool,
     corner: bool,
+    beside: bool,
 }
 
 /// Splits the items at every run of empty rows (or columns), in order, or gives `None` when
@@ -100,6 +104,7 @@ fn split(prep: &Prep, ids: &mut [u32], rows: bool) -> Option<Vec<Vec<u32>>> {
 pub(crate) fn cut(
     prep: &Prep,
     free: Vec<u32>,
+    facts: &[Rect],
     limits: &Limits,
     room: usize,
     stop: &dyn Fn() -> bool,
@@ -114,6 +119,7 @@ pub(crate) fn cut(
             rows_cut: false,
             cols_cut: false,
             corner: false,
+            beside: false,
         });
     }
     let rest = |p: Piece, stack: Vec<Piece>, why: Trip| {
@@ -139,6 +145,13 @@ pub(crate) fn cut(
             parts = split(prep, &mut p.ids, false);
             how = How::Cols;
         }
+        if parts.is_none()
+            && let Some(f) =
+                bounds(prep, &p.ids).and_then(|b| facts.iter().find(|f| f.intersects(&b)))
+        {
+            parts = Some(around(prep, &p.ids, f));
+            how = How::Fact;
+        }
         if parts.is_none() && p.next != Next::Leaf {
             parts = corners(prep, &p.ids);
             how = How::Corner;
@@ -158,11 +171,13 @@ pub(crate) fn cut(
                         next: match how {
                             How::Rows => Next::Cols,
                             How::Cols => Next::Rows,
+                            How::Fact => Next::Both,
                             How::Corner => Next::Leaf,
                         },
                         rows_cut: p.rows_cut || how == How::Rows,
                         cols_cut: p.cols_cut || how == How::Cols,
                         corner: p.corner || how == How::Corner,
+                        beside: p.beside || how == How::Fact,
                     });
                 }
             }
@@ -183,11 +198,38 @@ pub(crate) fn cut(
                     rows_cut: p.rows_cut,
                     cols_cut: p.cols_cut,
                     corner: p.corner,
+                    beside: p.beside,
                 });
             }
         }
     }
     Cut { leaves, rest: None }
+}
+
+/// Cuts a piece whose bounds reach a fact range into the items above it, left of it, right
+/// of it and below it. A merge that crosses one of these lines is no longer counted as
+/// occupied; its anchor cell stays. The parts never reach the fact range, so a rule region
+/// never holds a fact's cells.
+fn around(prep: &Prep, ids: &[u32], f: &Rect) -> Vec<Vec<u32>> {
+    let mut groups: [Vec<u32>; 4] = Default::default();
+    for &id in ids {
+        let r = prep.item_rect(id);
+        let g = if r.bottom < f.top {
+            0
+        } else if r.top > f.bottom {
+            3
+        } else if r.top < f.top || r.bottom > f.bottom {
+            continue;
+        } else if r.right < f.left {
+            1
+        } else if r.left > f.right {
+            2
+        } else {
+            continue;
+        };
+        groups[g].push(id);
+    }
+    groups.into_iter().filter(|g| !g.is_empty()).collect()
 }
 
 /// The largest grid of elementary cells the corner split builds, and its size per item: a

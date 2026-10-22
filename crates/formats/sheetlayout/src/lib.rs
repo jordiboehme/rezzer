@@ -227,11 +227,14 @@ fn gap_words(leaf: &cut::Leaf) -> String {
         (false, true) => "empty-column gaps",
         (false, false) => "no gaps",
     };
-    if leaf.corner {
-        format!("{gaps}, apart from a block it touches only at a corner")
-    } else {
-        gaps.to_string()
+    let mut words = gaps.to_string();
+    if leaf.beside {
+        words.push_str(", cut around a table range");
     }
+    if leaf.corner {
+        words.push_str(", apart from a block it touches only at a corner");
+    }
+    words
 }
 
 /// The items not placed become one grid region. Every region its rectangle reaches is folded
@@ -327,7 +330,8 @@ pub(crate) fn segment_work<'a>(
         (!free.is_empty()).then_some((Trip::Stopped, free))
     } else {
         let room = max.saturating_sub(works.len()).max(1);
-        let cut = cut::cut(&prep, free, limits, room, stop);
+        let fact_rects: Vec<Rect> = kept.iter().map(|k| k.rect).collect();
+        let cut = cut::cut(&prep, free, &fact_rects, limits, room, stop);
         for leaf in cut.leaves {
             let rect = cut::leaf_rect(&prep, &leaf);
             works.push(Work {

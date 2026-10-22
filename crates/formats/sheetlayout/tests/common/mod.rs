@@ -196,6 +196,7 @@ impl Sheet {
         let input = self.input();
         let layout = segment(&input, &Limits::default(), &never);
         every_cell_once(&input, &layout);
+        no_overlap(&layout);
         layout
     }
 }
@@ -255,6 +256,18 @@ pub fn every_cell_once(input: &Input, layout: &Layout) {
             "cell at row {} col {} is in {n} regions",
             p.row, p.col
         );
+    }
+}
+
+/// No two regions share a position.
+pub fn no_overlap(layout: &Layout) {
+    let mut rects: Vec<Rect> = layout.regions.iter().map(|r| r.rect).collect();
+    rects.sort_by_key(|r| r.top);
+    for (i, a) in rects.iter().enumerate() {
+        for b in rects[i + 1..].iter().take_while(|b| b.top <= a.bottom) {
+            let apart = b.right < a.left || a.right < b.left;
+            assert!(apart, "regions {} and {} overlap", a.a1(), b.a1());
+        }
     }
 }
 

@@ -8,7 +8,7 @@ mod common;
 
 use std::cell::Cell;
 
-use common::{Sheet, every_cell_once, list_object, pos, ranges, rect, thread_cpu};
+use common::{Sheet, every_cell_once, list_object, no_overlap, pos, ranges, rect, thread_cpu};
 use sheetlayout::{
     Certainty, Evidence, FactKind, IssueKind, Kind, Limits, NameIn, Pos, Rect, segment,
 };
@@ -170,6 +170,40 @@ fn fact_region_wins_and_rest_is_recut() {
     );
     assert_eq!(layout.regions[0].kind, Kind::Grid);
     assert_eq!(layout.regions[2].kind, Kind::Grid);
+}
+
+#[test]
+fn rule_region_never_reaches_around_a_fact() {
+    // A merged title over A1:E1 and a notes column E2:E10 around an Excel table A2:D10: the
+    // free cells form an L that no empty row or column cuts.
+    let mut sheet = Sheet::new().cell("A1", "Wide title").merge("A1:E1");
+    for row in 2..=10 {
+        sheet = sheet
+            .rows(&format!("A{row}"), &["a|b|c|d"])
+            .cell(&format!("E{row}"), &format!("note {row}"));
+    }
+    let layout = sheet.fact("A2:D10", list_object("T")).segment();
+    assert_eq!(ranges(&layout), ["A1:E1", "A2:D10", "E2:E10"]);
+    assert!(layout.regions[2].evidence.iter().any(
+        |e| matches!(e, Evidence::Rule { id: "G", detail } if detail.contains("table range"))
+    ));
+}
+
+#[test]
+fn ring_around_a_fact_is_cut_around_it() {
+    // A U shape: columns A and E and row 6 around a table in B2:D5.
+    let mut sheet = Sheet::new();
+    for row in 1..=6 {
+        sheet = sheet
+            .cell(&format!("A{row}"), "l")
+            .cell(&format!("E{row}"), "r");
+    }
+    sheet = sheet
+        .rows("B6", &["x|y|z"])
+        .rows("B2", &["h|i|j", "1|2|3", "4|5|6", "7|8|9"]);
+    let layout = sheet.fact("B2:D5", list_object("Inner")).segment();
+    assert!(ranges(&layout).contains(&"B2:D5".to_string()));
+    assert_eq!(layout.regions.len(), 6, "{:?}", ranges(&layout));
 }
 
 #[test]
@@ -481,6 +515,7 @@ fn checkerboard_hits_region_limit() {
     assert_eq!(rest[0].kind, Kind::Grid);
     assert_eq!(limits[0].rect, Some(rest[0].rect));
     every_cell_once(&input, &layout);
+    no_overlap(&layout);
 }
 
 #[test]
@@ -527,6 +562,7 @@ fn stop_callback_ends_early() {
     };
     let layout = segment(&input, &Limits::default(), &stop);
     every_cell_once(&input, &layout);
+    no_overlap(&layout);
     assert!(calls.get() < 50, "{} calls", calls.get());
     assert!(layout.regions.len() > 1 && layout.regions.len() < 100);
     let stopped: Vec<_> = layout
