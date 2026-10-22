@@ -294,12 +294,13 @@ struct Share {
 }
 
 impl Share {
-    /// The lists draw from the one total (`max_items`) in fixed shares that add up to at most
-    /// all of it: cells with content 40 %, looks 30 %, merges 20 %, row group spans 5 %,
-    /// database ranges 2.5 % and pivot tables 2.5 % (those two also at most 10,000 each).
+    /// The layout lists draw from the one total (`max_items`) in fixed shares: looks 30 %,
+    /// merges 20 %, row group spans 5 %, database ranges 2.5 % and pivot tables 2.5 % (those
+    /// two also at most 10,000 each). Cells with content (and copied text) get the whole total
+    /// less what the layout lists have charged, so a sheet without layout signals keeps all of it.
     fn new(list: List, items: u64) -> Share {
         let limit = match list {
-            List::Cells => items / 10 * 4,
+            List::Cells => items,
             List::Looks => items / 10 * 3,
             List::Merges => items / 10 * 2,
             List::Outline => items / 20,
@@ -411,21 +412,37 @@ impl Content {
     }
 
     fn charge(&mut self, list: List, n: u64) -> bool {
+        // Cells with content get the whole total less what the layout lists have charged.
+        let layout: u64 = match list {
+            List::Cells => self
+                .shares
+                .iter()
+                .skip(1)
+                .fold(0, |a, s| a.saturating_add(s.used)),
+            _ => 0,
+        };
         let share = &mut self.shares[list as usize];
         if share.exhausted {
             return false;
         }
-        share.used = share.used.saturating_add(n);
-        if share.used > share.limit {
+        let limit = share.limit.saturating_sub(layout);
+        if share.used.saturating_add(n) > limit {
+            // What did not fit is not charged: it was not listed.
             share.exhausted = true;
-            let limit = share.limit;
             self.issue(
                 IssueKind::Limit,
                 format!("more than {limit} {}: the rest is not listed", list.what()),
             );
             return false;
         }
+        share.used += n;
         true
+    }
+
+    /// Copied text counts against the budget of the other copied strings (the notes).
+    fn charge_text(&mut self, parts: &[&str]) -> bool {
+        let bytes: usize = parts.iter().map(|p| p.len()).sum();
+        self.charge(List::Cells, bytes as u64 / 16)
     }
 
     fn event(&mut self, ev: &Ev<'_>, depth: usize) {
@@ -986,7 +1003,7 @@ impl Content {
             );
             return;
         };
-        if !self.charge(List::Ranges, 1) {
+        if !self.charge(List::Ranges, 1) || !self.charge_text(&[&name, &sheet, &range]) {
             return;
         }
         self.database_ranges.push(DatabaseRange {
@@ -1008,7 +1025,7 @@ impl Content {
             );
             return;
         };
-        if !self.charge(List::Pilots, 1) {
+        if !self.charge(List::Pilots, 1) || !self.charge_text(&[&name, &sheet, &range]) {
             return;
         }
         self.data_pilots.push(DataPilot { name, sheet, range });

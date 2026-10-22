@@ -1163,3 +1163,42 @@ fn database_ranges_and_pivots_are_capped_at_ten_thousand() {
     assert_eq!(said("database ranges"), 1, "{:?}", parts.issues);
     assert_eq!(said("pivot tables"), 1, "{:?}", parts.issues);
 }
+
+#[test]
+fn cells_without_layout_signals_keep_the_whole_total() {
+    // 1.6 million counted cells: past 40 % of the total, under all of it.
+    let parts = one_sheet(
+        "",
+        "<table:table-row table:number-rows-repeated=\"100\">\
+         <table:table-cell table:number-columns-repeated=\"16384\" office:value-type=\"float\"/></table:table-row>",
+    );
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+}
+
+#[test]
+fn long_range_names_are_bounded_by_bytes() {
+    let limits = Limits {
+        max_items: 20_000,
+        ..Limits::default()
+    };
+    let name = "n".repeat(2000);
+    let ranges: String = (0..100)
+        .map(|i| {
+            format!("<table:database-range table:name=\"{name}{i}\" table:target-range-address=\"S.A1:S.B2\"/>")
+        })
+        .collect();
+    let xml = content(
+        "",
+        &format!(
+            "<table:table table:name=\"S\"/><table:database-ranges>{ranges}</table:database-ranges>"
+        ),
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    // 20,000 / 16 bytes per unit: about 160 bytes of name per unit, so far fewer than 100 fit.
+    assert!(
+        parts.database_ranges.len() < 20,
+        "{}",
+        parts.database_ranges.len()
+    );
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
