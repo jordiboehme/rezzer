@@ -232,11 +232,13 @@ fn hierarchy(
 struct Sum {
     row: u32,
     col: u32,
-    /// SUBTOTAL or AGGREGATE: always a subtotal.
+    /// AGGREGATE: always a subtotal.
     sub: bool,
     /// Its reads cover the rows from the first data row (itself or through the totals it
     /// reads).
     first: bool,
+    /// The last row its same-column reads reach.
+    bottom: Option<u32>,
     why: String,
 }
 
@@ -303,8 +305,9 @@ fn sums_of<'c>(
                 Sum {
                     row,
                     col,
-                    sub: true,
+                    sub: name == "AGGREGATE",
                     first,
+                    bottom: own.iter().map(|r| r.bottom).max(),
                     why: format!("{name} formula in {at}"),
                 },
                 reads,
@@ -338,6 +341,7 @@ fn sums_of<'c>(
                 col,
                 sub: false,
                 first,
+                bottom: own.iter().map(|r| r.bottom).max(),
                 why: format!("SUM over {} in {at}", words.join(", ")),
             },
             reads,
@@ -346,10 +350,11 @@ fn sums_of<'c>(
     Some(out)
 }
 
-/// Spec 8.6 by formulas over the data lines (not group rows, not stated totals rows):
-/// SUBTOTAL and AGGREGATE give `Subtotal`. A SUM over the rows above in its own column is a
-/// `Subtotal` when a later SUM or SUBTOTAL of the column reads it, else a `Total` when it
-/// covers from the first data row, else a `Subtotal`. In one row `Total` wins.
+/// Spec 8.6 by formulas over the data lines (not group rows, not stated totals rows). A SUM
+/// over the rows above in its own column, or a SUBTOTAL, is a `Subtotal` when a later SUM or
+/// SUBTOTAL of the column reads it. Else it is the `Total` when it covers the table: from
+/// the first data row (directly or through the totals it reads) and past the last group row.
+/// Else it is a `Subtotal`. AGGREGATE is always a `Subtotal`. In one row `Total` wins.
 fn formula_kinds(
     lines: &Lines,
     range: std::ops::Range<usize>,
@@ -426,7 +431,11 @@ fn formula_kinds(
         let spans = read.get(&sum.col).map_or(&[][..], |v| v.as_slice());
         let k = spans.partition_point(|s| s.1 < sum.row);
         let is_read = spans.get(k).is_some_and(|s| s.0 <= sum.row);
-        let kind = if !sum.sub && !is_read && sum.first {
+        // The total covers the table: from the first data row, past the last group row.
+        let all_groups = groups
+            .last()
+            .is_none_or(|&g| sum.bottom.is_some_and(|b| b > g));
+        let kind = if !sum.sub && !is_read && sum.first && all_groups {
             RowKind::Total
         } else {
             RowKind::Subtotal

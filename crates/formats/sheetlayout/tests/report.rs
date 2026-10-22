@@ -1167,7 +1167,8 @@ fn headerless_table_gets_row_rules() {
     let r = only(&layout);
     assert_eq!(r.kind, Kind::Table);
     assert!(has_rule(r, "H0"));
-    assert_eq!(rows_of(r, RowKind::Subtotal), [3]);
+    // The SUBTOTAL covers from the first data row and nothing reads it: the grand total.
+    assert_eq!(rows_of(r, RowKind::Total), [3]);
     assert_eq!(ones(&r.notes), [4]);
     assert_eq!(r.data, Some(rect("A1:C3")));
 }
@@ -1311,6 +1312,70 @@ fn headerless_wide_table_gets_row_rules() {
     let r = only(&layout);
     assert_eq!(rule_detail(r, "H0"), "no header found");
     assert!(!has_rule(r, "K"));
-    assert_eq!(rows_of(r, RowKind::Subtotal), [3]);
+    assert_eq!(rows_of(r, RowKind::Total), [3]);
     assert_eq!(ones(&r.notes), [4]);
+}
+
+// Fix round 2.
+
+#[test]
+fn group_totals_are_subtotals_when_no_sum_covers_all_groups() {
+    // Net income as a subtraction: no SUM covers both groups, so neither group total is the
+    // total, and the net income row is not marked.
+    let layout = statement()
+        .formula("B11", &[], &["B6", "B10"])
+        .formula("C11", &[], &["C6", "C10"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [6, 10]);
+    assert!(rows_of(r, RowKind::Total).is_empty(), "{:?}", r.rows);
+    assert!(note(r, 11).is_none_or(|n| n.kind == RowKind::Data));
+    // Mixed columns: a SUM in B11 over both group totals, a subtraction in C11. C6 is read
+    // by nothing but covers only the first group: row 6 stays a subtotal.
+    let layout = statement().formula("C11", &[], &["C6", "C10"]).detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [6, 10]);
+    assert_eq!(rows_of(r, RowKind::Total), [11]);
+    // A SUM that ends on the last group row does not reach past it: no total.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "Fruit", "a|1", "b|2", "Nuts", "S|=3"])
+        .formula("B6", &["SUM"], &["B3:B5"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Group), [2, 5]);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [6]);
+}
+
+#[test]
+fn subtotal_grand_total_is_the_total() {
+    // The layout of Excel's Data > Subtotal: group subtotals, then a grand total, all with
+    // SUBTOTAL(9, ...).
+    let layout = Sheet::new()
+        .rows(
+            "A1",
+            &[
+                "Item|V",
+                "Apple|1",
+                "Apple|2",
+                "Apple Total|=3",
+                "Pear|4",
+                "Pear|5",
+                "Pear Total|=9",
+                "Grand Total|=12",
+            ],
+        )
+        .formula("B4", &["SUBTOTAL"], &["B2:B3"])
+        .formula("B7", &["SUBTOTAL"], &["B5:B6"])
+        .formula("B8", &["SUBTOTAL"], &["B2:B7"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [4, 7]);
+    assert_eq!(rows_of(r, RowKind::Total), [8]);
+    assert_eq!(note(r, 8).unwrap().why, "SUBTOTAL formula in B8");
+    // A SUBTOTAL that starts below the first data row stays a subtotal.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "a|1", "b|2", "c|3", "S|=5"])
+        .formula("B5", &["SUBTOTAL"], &["B3:B4"])
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Subtotal), [5]);
 }
