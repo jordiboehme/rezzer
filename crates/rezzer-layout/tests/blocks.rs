@@ -4,7 +4,9 @@
 
 //! The mapping of detected regions into model blocks, on small sheets built in memory.
 
-use rezzer_layout::{Caps, CellText, ColumnNames, Mapped, blocks, clean_merges, covered};
+use rezzer_layout::{
+    Caps, CellText, ColumnNames, Mapped, NameCaption, blocks, clean_merges, covered,
+};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Block, Certainty, Evidence, LayoutKind, LossReason, RowKind, Severity, TableLayout, plain_text,
@@ -141,7 +143,7 @@ impl Sheet {
         }
     }
 
-    fn map_with(&self, names: ColumnNames, caps: &mut Caps, shown: &[String]) -> Mapped {
+    fn map_with(&self, names: ColumnNames, caps: &mut Caps, shown: &[NameCaption]) -> Mapped {
         let layout = detect(&self.input(), &sheetlayout::Limits::default(), &|| false);
         let budget = Budget::new(Limits::default());
         blocks(
@@ -449,7 +451,10 @@ fn name_caption_only_when_shown() {
     });
     let layout = detect(&input, &sheetlayout::Limits::default(), &|| false);
     let budget = Budget::new(Limits::default());
-    let shown = ["Prices".to_string()];
+    let shown = [NameCaption {
+        name: "Prices".into(),
+        anchor: "name:Prices".into(),
+    }];
     let m = blocks(
         "S",
         &layout,
@@ -461,7 +466,16 @@ fn name_caption_only_when_shown() {
         &budget,
     );
     let h = headings(&m);
-    assert!(h.contains(&(3, "Prices".into(), None)), "{h:?}");
+    // Author text, anchored at the name, so it never reads as a generated heading.
+    assert!(
+        h.contains(&(3, "Prices".into(), Some("name:Prices".into()))),
+        "{h:?}"
+    );
+    // Generated region headings are the only headings without an anchor.
+    assert!(
+        h.iter().any(|x| x.1 == "Table A1:B2" && x.2.is_none()),
+        "{h:?}"
+    );
     let m = blocks(
         "S",
         &layout,
@@ -607,4 +621,117 @@ fn region_without_a_value_is_left_out() {
     let m = only_merges.map();
     assert!(m.blocks.is_empty());
     assert!(m.losses.is_empty(), "{:?}", m.losses);
+}
+
+/// A region built by hand, for layouts `detect` does not give.
+fn hand_region(a1: &str, kind: sheetlayout::Kind, unsure: &[&str]) -> sheetlayout::Region {
+    let r = rect(a1);
+    sheetlayout::Region {
+        kind,
+        rect: r,
+        data: Some(r),
+        captions: Vec::new(),
+        caption_heading: None,
+        notes: Vec::new(),
+        heading: None,
+        above_header: Vec::new(),
+        header_rows: Vec::new(),
+        body: None,
+        header_paths: Vec::new(),
+        label_cols: 0,
+        certainty: if unsure.is_empty() {
+            sheetlayout::Certainty::Rule
+        } else {
+            sheetlayout::Certainty::Unsure
+        },
+        evidence: Vec::new(),
+        unsure: unsure.iter().map(|u| u.to_string()).collect(),
+        rows: Vec::new(),
+        hidden_header: false,
+        rest: false,
+    }
+}
+
+fn map_layout(s: &Sheet, layout: &sheetlayout::Layout) -> Mapped {
+    blocks(
+        "S",
+        layout,
+        &s.texts(),
+        &s.merges,
+        ColumnNames::Letters,
+        &[],
+        &mut Caps::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+#[test]
+fn cells_outside_every_region_keep_reading_order() {
+    // A3 lies in no region: it is written between the region above and the one below.
+    let s = Sheet::new().rows("A1", &["1|2", "", "stray", "", "3|4"]);
+    let layout = sheetlayout::Layout {
+        regions: vec![
+            hand_region("A1:B1", sheetlayout::Kind::Table, &[]),
+            hand_region("A5:B5", sheetlayout::Kind::Table, &[]),
+        ],
+        issues: Vec::new(),
+    };
+    let m = map_layout(&s, &layout);
+    let order: Vec<&str> = m
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                layout: Some(l), ..
+            } => Some(l.range.as_str()),
+            Block::Paragraph { role: Some(r), .. } if r == "cell" => Some("stray"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["A1:B1", "stray", "A5:B5"]);
+    assert_eq!(cells_of(&m), expected_cells(&s));
+}
+
+#[test]
+fn issues_of_value_less_regions_are_dropped() {
+    let s = Sheet::new().rows("A1", &["1|2"]).merge("A5:C6");
+    let layout = sheetlayout::Layout {
+        regions: vec![
+            hand_region("A1:B1", sheetlayout::Kind::Table, &[]),
+            hand_region("A5:C6", sheetlayout::Kind::Grid, &["x"]),
+        ],
+        issues: vec![
+            sheetlayout::Issue {
+                what: "inside a value-less region".into(),
+                kind: sheetlayout::IssueKind::Coarse,
+                rect: Some(rect("A5:C6")),
+            },
+            sheetlayout::Issue {
+                what: "kept".into(),
+                kind: sheetlayout::IssueKind::Overlap,
+                rect: Some(rect("A1:B1")),
+            },
+        ],
+    };
+    let m = map_layout(&s, &layout);
+    let where_: Vec<&str> = m.losses.iter().map(|l| l.location.as_str()).collect();
+    assert_eq!(where_, ["S!A1:B1"], "{:?}", m.losses);
+}
+
+#[test]
+fn unsure_loss_has_words_without_reasons() {
+    let s = Sheet::new().rows("A1", &["a|b"]);
+    let layout = sheetlayout::Layout {
+        regions: vec![hand_region("A1:B1", sheetlayout::Kind::Grid, &[])],
+        issues: Vec::new(),
+    };
+    let mut layout = layout;
+    layout.regions[0].certainty = sheetlayout::Certainty::Unsure;
+    let m = map_layout(&s, &layout);
+    let loss = m
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Uncertain)
+        .expect("an uncertain loss");
+    assert_eq!(loss.what, "region unsure");
 }

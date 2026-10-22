@@ -65,6 +65,16 @@ pub struct CellText {
     pub text: String,
 }
 
+/// A defined name that may stand as a region's caption: not hidden and not written by the
+/// application for itself. `anchor` is the name's anchor (`name:Prices`, or
+/// `name:Sheet1!Prices` for a name scoped to a sheet), so its heading is anchored like any
+/// author text. Only the region headings Rezzer generates (`Table B3:D5`) have no anchor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameCaption {
+    pub name: String,
+    pub anchor: String,
+}
+
 /// The blocks of a sheet's regions and what they could not show.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mapped {
@@ -343,7 +353,7 @@ pub fn blocks(
     cells: &[CellText],
     merges: &[Rect],
     names: ColumnNames,
-    caption_names: &[String],
+    caption_names: &[NameCaption],
     caps: &mut Caps,
     budget: &Budget,
 ) -> Mapped {
@@ -389,7 +399,14 @@ pub fn blocks(
     // A region that holds no value (merged areas without a value, formulas without a
     // result) has nothing to show and is left out: no cell is lost by it.
     let only = held.iter().filter(|h| !h.is_empty()).count() == 1;
+    // Cells outside every region go in reading order among the regions (rare: the detector
+    // places every cell).
+    let mut loose = loose.into_iter().peekable();
     for (i, region) in layout.regions.iter().enumerate() {
+        let at = (region.rect.top, region.rect.left);
+        while let Some(k) = loose.next_if(|&k| (cells[k].row, cells[k].col) < at) {
+            ctx.paragraph(k, "cell");
+        }
         if held[i].is_empty() {
             continue;
         }
@@ -416,11 +433,19 @@ pub fn blocks(
             only,
         );
     }
-    for &k in &loose {
+    for k in loose {
         ctx.paragraph(k, "cell");
     }
     covered_losses(&mut ctx, &covered_cells, merges);
-    issue_losses(&mut ctx, layout);
+    // Issues about a region left out for holding no value are not said.
+    let skipped: Vec<Rect> = layout
+        .regions
+        .iter()
+        .zip(&held)
+        .filter(|(_, h)| h.is_empty())
+        .map(|(r, _)| r.rect)
+        .collect();
+    issue_losses(&mut ctx, layout, &skipped);
     ctx.out
 }
 
@@ -456,8 +481,14 @@ fn covered_losses(ctx: &mut Ctx, covered_cells: &[usize], merges: &[Rect]) {
     }
 }
 
-fn issue_losses(ctx: &mut Ctx, layout: &Layout) {
+fn issue_losses(ctx: &mut Ctx, layout: &Layout, skipped: &[Rect]) {
     for issue in &layout.issues {
+        if issue
+            .rect
+            .is_some_and(|r| skipped.iter().any(|s| s.covers(&r)))
+        {
+            continue;
+        }
         let location = match issue.rect {
             Some(r) => format!("{}!{}", ctx.sheet_q, r.a1()),
             None => ctx.sheet_q.to_string(),
@@ -522,7 +553,7 @@ fn map_region(
     held: &[usize],
     merges: &[Rect],
     names: ColumnNames,
-    caption_names: &[String],
+    caption_names: &[NameCaption],
     only: bool,
 ) {
     let sheet_q = ctx.sheet_q;
@@ -574,8 +605,8 @@ fn map_region(
         .map(|&(_, k)| k);
     let name_caption = if region.captions.is_empty() {
         region.evidence.iter().find_map(|e| match e {
-            sheetlayout::Evidence::DefinedName { name } if caption_names.contains(name) => {
-                Some(name.clone())
+            sheetlayout::Evidence::DefinedName { name } => {
+                caption_names.iter().find(|c| &c.name == name).cloned()
             }
             _ => None,
         })
@@ -594,8 +625,8 @@ fn map_region(
         }
         (None, Some(name)) => ctx.out.blocks.push(Block::Heading {
             level: 3,
-            inlines: vec![Inline::plain(name.clone())],
-            anchor: None,
+            inlines: vec![Inline::plain(name.name.clone())],
+            anchor: Some(Anchor(name.anchor.clone())),
         }),
         (None, None) => {
             let bare = only && region.kind == Kind::Table && region.captions.is_empty();
@@ -635,7 +666,7 @@ fn map_region(
     if caption_text.is_empty()
         && let Some(n) = &name_caption
     {
-        caption_text.push(n);
+        caption_text.push(&n.name);
     }
     let caption =
         (!caption_text.is_empty() && region.kind != Kind::Title).then(|| caption_text.join(" "));
@@ -651,7 +682,11 @@ fn map_region(
         }
     }
     if region.certainty == sheetlayout::Certainty::Unsure && !region.rest {
-        let what = region.unsure.join("; ");
+        let what = if region.unsure.is_empty() {
+            "region unsure".to_string()
+        } else {
+            region.unsure.join("; ")
+        };
         ctx.loss(
             format!("{sheet_q}!{}", region.rect.a1()),
             what,

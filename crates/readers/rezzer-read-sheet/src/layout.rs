@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use rezzer_layout::{Caps, CellText, ColumnNames, Mapped};
+use rezzer_layout::{Caps, CellText, ColumnNames, Mapped, NameCaption};
 use rezzer_limits::Budget;
 use sheetlayout::{CellIn, Class, Fact, FactKind, FormulaIn, Input, NameIn, Pos, Rect, Style};
 use sheetparts::{DefinedName, Look};
@@ -72,7 +72,7 @@ pub(crate) fn map_sheet(
     merges: &[Rect],
     mut formulas: HashMap<(u32, u32), FormulaIn>,
     signals: Signals,
-    caption_names: &[String],
+    caption_names: &[NameCaption],
     budget: &Budget,
 ) -> SheetLayout {
     let (merges, merges_ignored) = rezzer_layout::clean_merges(merges);
@@ -203,7 +203,9 @@ pub(crate) fn name_rect(refers_to: &str, sheet: &str) -> Option<Rect> {
 
 /// The defined names that are one area on `sheet`, and the ones among them that may stand
 /// as a caption (not hidden, not written by the application for itself).
-pub(crate) fn sheet_names(names: &[DefinedName], sheet: &str) -> (Vec<NameIn>, Vec<String>) {
+/// A caption name carries the anchor the names facet gives it (`name:Prices`,
+/// `name:'My sheet'!Local`).
+pub(crate) fn sheet_names(names: &[DefinedName], sheet: &str) -> (Vec<NameIn>, Vec<NameCaption>) {
     let mut list = Vec::new();
     let mut captions = Vec::new();
     for n in names {
@@ -215,7 +217,14 @@ pub(crate) fn sheet_names(names: &[DefinedName], sheet: &str) -> (Vec<NameIn>, V
             .get(..6)
             .is_some_and(|p| p.eq_ignore_ascii_case("_xlnm."));
         if !n.hidden && !builtin {
-            captions.push(n.name.clone());
+            let anchor = match &n.scope {
+                Some(s) => format!("name:{}!{}", formulakit::quote_sheet(s), n.name),
+                None => format!("name:{}", n.name),
+            };
+            captions.push(NameCaption {
+                name: n.name.clone(),
+                anchor,
+            });
         }
         list.push(NameIn {
             name: n.name.clone(),
@@ -284,6 +293,41 @@ mod tests {
         assert_eq!(
             name_rect("'it''s'!B2:C3", "it's").map(|x| x.a1()),
             Some("B2:C3".into())
+        );
+    }
+
+    #[test]
+    fn caption_names_are_anchored_like_the_names_facet() {
+        let name = |name: &str, scope: Option<&str>, refers_to: &str, hidden: bool| DefinedName {
+            name: name.into(),
+            scope: scope.map(str::to_string),
+            refers_to: refers_to.into(),
+            hidden,
+            comment: None,
+        };
+        let names = [
+            name("Prices", None, "'My sheet'!$A$1:$B$4", false),
+            name("Local", Some("My sheet"), "'My sheet'!$C$1:$D$4", false),
+            name("Secret", None, "'My sheet'!$E$1:$F$4", true),
+            name(
+                "_xlnm._FilterDatabase",
+                Some("My sheet"),
+                "'My sheet'!$A$1:$B$4",
+                true,
+            ),
+        ];
+        let (list, captions) = sheet_names(&names, "My sheet");
+        assert_eq!(list.len(), 4);
+        let shown: Vec<(&str, &str)> = captions
+            .iter()
+            .map(|c| (c.name.as_str(), c.anchor.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("Prices", "name:Prices"),
+                ("Local", "name:'My sheet'!Local")
+            ]
         );
     }
 
