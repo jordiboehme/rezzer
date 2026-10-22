@@ -45,7 +45,7 @@ encoding_rs = "=0.8.42"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
 csv = "=1.4.0"
 whatlang = "=0.18.0"
-tokio = "=1.54.0"
+tokio = "=1.54.1"
 schemars = "=1.2.3"
 toml = "=1.1.8"
 saphyr-parser = "=0.2.2"
