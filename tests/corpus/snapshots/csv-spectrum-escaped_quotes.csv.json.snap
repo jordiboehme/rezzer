@@ -4,10 +4,10 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-escaped_quotes",
+      "anchor": "'csv-spectrum-escaped_quotes'",
       "blocks": [
         {
-          "anchor": "csv-spectrum-escaped_quotes!A1:B3",
+          "anchor": "'csv-spectrum-escaped_quotes'!A1:B3",
           "header_rows": 1,
           "layout": {
             "certainty": "rule",
@@ -31,7 +31,7 @@ source: crates/rezzer/tests/corpus.rs
             "header_rows": [
               1
             ],
-            "key": "csv-spectrum-escaped_quotes!A1",
+            "key": "'csv-spectrum-escaped_quotes'!A1",
             "kind": "table",
             "label_cols": 0,
             "range": "A1:B3"
@@ -39,7 +39,7 @@ source: crates/rezzer/tests/corpus.rs
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-escaped_quotes!A1",
+                "anchor": "'csv-spectrum-escaped_quotes'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -50,7 +50,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-escaped_quotes!B1",
+                "anchor": "'csv-spectrum-escaped_quotes'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -63,7 +63,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-escaped_quotes!A2",
+                "anchor": "'csv-spectrum-escaped_quotes'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -74,7 +74,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-escaped_quotes!B2",
+                "anchor": "'csv-spectrum-escaped_quotes'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -87,7 +87,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-escaped_quotes!A3",
+                "anchor": "'csv-spectrum-escaped_quotes'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -98,7 +98,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-escaped_quotes!B3",
+                "anchor": "'csv-spectrum-escaped_quotes'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -317,7 +317,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-spectrum-escaped_quotes",
+        "id": "'csv-spectrum-escaped_quotes'",
         "kind": "sheet",
         "name": "csv-spectrum-escaped_quotes",
         "size": "2 rows x 2 columns"

@@ -4,10 +4,10 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-pandas-fdic-banklist",
+      "anchor": "'csv-pandas-fdic-banklist'",
       "blocks": [
         {
-          "anchor": "csv-pandas-fdic-banklist!A1:G507",
+          "anchor": "'csv-pandas-fdic-banklist'!A1:G507",
           "header_rows": 1,
           "layout": {
             "certainty": "rule",
@@ -41,7 +41,7 @@ source: crates/rezzer/tests/corpus.rs
             "header_rows": [
               1
             ],
-            "key": "csv-pandas-fdic-banklist!A1",
+            "key": "'csv-pandas-fdic-banklist'!A1",
             "kind": "table",
             "label_cols": 3,
             "range": "A1:G507"
@@ -49,7 +49,7 @@ source: crates/rezzer/tests/corpus.rs
           "rows": [
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A1",
+                "anchor": "'csv-pandas-fdic-banklist'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -60,7 +60,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B1",
+                "anchor": "'csv-pandas-fdic-banklist'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -71,7 +71,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C1",
+                "anchor": "'csv-pandas-fdic-banklist'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -82,7 +82,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D1",
+                "anchor": "'csv-pandas-fdic-banklist'!D1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -93,7 +93,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E1",
+                "anchor": "'csv-pandas-fdic-banklist'!E1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -104,7 +104,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F1",
+                "anchor": "'csv-pandas-fdic-banklist'!F1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -115,7 +115,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G1",
+                "anchor": "'csv-pandas-fdic-banklist'!G1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -128,7 +128,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A2",
+                "anchor": "'csv-pandas-fdic-banklist'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -139,7 +139,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B2",
+                "anchor": "'csv-pandas-fdic-banklist'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -150,7 +150,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C2",
+                "anchor": "'csv-pandas-fdic-banklist'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -161,7 +161,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D2",
+                "anchor": "'csv-pandas-fdic-banklist'!D2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -172,7 +172,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E2",
+                "anchor": "'csv-pandas-fdic-banklist'!E2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -183,7 +183,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F2",
+                "anchor": "'csv-pandas-fdic-banklist'!F2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -194,7 +194,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G2",
+                "anchor": "'csv-pandas-fdic-banklist'!G2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -207,7 +207,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A3",
+                "anchor": "'csv-pandas-fdic-banklist'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -218,7 +218,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B3",
+                "anchor": "'csv-pandas-fdic-banklist'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -229,7 +229,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C3",
+                "anchor": "'csv-pandas-fdic-banklist'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -240,7 +240,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D3",
+                "anchor": "'csv-pandas-fdic-banklist'!D3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -251,7 +251,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E3",
+                "anchor": "'csv-pandas-fdic-banklist'!E3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -262,7 +262,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F3",
+                "anchor": "'csv-pandas-fdic-banklist'!F3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -273,7 +273,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G3",
+                "anchor": "'csv-pandas-fdic-banklist'!G3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -286,7 +286,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A4",
+                "anchor": "'csv-pandas-fdic-banklist'!A4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -297,7 +297,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B4",
+                "anchor": "'csv-pandas-fdic-banklist'!B4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -308,7 +308,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C4",
+                "anchor": "'csv-pandas-fdic-banklist'!C4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -319,7 +319,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D4",
+                "anchor": "'csv-pandas-fdic-banklist'!D4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -330,7 +330,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E4",
+                "anchor": "'csv-pandas-fdic-banklist'!E4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -341,7 +341,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F4",
+                "anchor": "'csv-pandas-fdic-banklist'!F4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -352,7 +352,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G4",
+                "anchor": "'csv-pandas-fdic-banklist'!G4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -365,7 +365,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A5",
+                "anchor": "'csv-pandas-fdic-banklist'!A5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -376,7 +376,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B5",
+                "anchor": "'csv-pandas-fdic-banklist'!B5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -387,7 +387,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C5",
+                "anchor": "'csv-pandas-fdic-banklist'!C5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -398,7 +398,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D5",
+                "anchor": "'csv-pandas-fdic-banklist'!D5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -409,7 +409,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E5",
+                "anchor": "'csv-pandas-fdic-banklist'!E5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -420,7 +420,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F5",
+                "anchor": "'csv-pandas-fdic-banklist'!F5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -431,7 +431,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G5",
+                "anchor": "'csv-pandas-fdic-banklist'!G5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -444,7 +444,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A6",
+                "anchor": "'csv-pandas-fdic-banklist'!A6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -455,7 +455,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B6",
+                "anchor": "'csv-pandas-fdic-banklist'!B6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -466,7 +466,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C6",
+                "anchor": "'csv-pandas-fdic-banklist'!C6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -477,7 +477,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D6",
+                "anchor": "'csv-pandas-fdic-banklist'!D6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -488,7 +488,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E6",
+                "anchor": "'csv-pandas-fdic-banklist'!E6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -499,7 +499,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F6",
+                "anchor": "'csv-pandas-fdic-banklist'!F6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -510,7 +510,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G6",
+                "anchor": "'csv-pandas-fdic-banklist'!G6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -523,7 +523,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A7",
+                "anchor": "'csv-pandas-fdic-banklist'!A7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -534,7 +534,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B7",
+                "anchor": "'csv-pandas-fdic-banklist'!B7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -545,7 +545,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C7",
+                "anchor": "'csv-pandas-fdic-banklist'!C7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -556,7 +556,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D7",
+                "anchor": "'csv-pandas-fdic-banklist'!D7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -567,7 +567,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E7",
+                "anchor": "'csv-pandas-fdic-banklist'!E7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -578,7 +578,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F7",
+                "anchor": "'csv-pandas-fdic-banklist'!F7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -589,7 +589,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G7",
+                "anchor": "'csv-pandas-fdic-banklist'!G7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -602,7 +602,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A8",
+                "anchor": "'csv-pandas-fdic-banklist'!A8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -613,7 +613,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B8",
+                "anchor": "'csv-pandas-fdic-banklist'!B8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -624,7 +624,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C8",
+                "anchor": "'csv-pandas-fdic-banklist'!C8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -635,7 +635,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D8",
+                "anchor": "'csv-pandas-fdic-banklist'!D8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -646,7 +646,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E8",
+                "anchor": "'csv-pandas-fdic-banklist'!E8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -657,7 +657,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F8",
+                "anchor": "'csv-pandas-fdic-banklist'!F8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -668,7 +668,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G8",
+                "anchor": "'csv-pandas-fdic-banklist'!G8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -681,7 +681,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A9",
+                "anchor": "'csv-pandas-fdic-banklist'!A9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -692,7 +692,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B9",
+                "anchor": "'csv-pandas-fdic-banklist'!B9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -703,7 +703,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C9",
+                "anchor": "'csv-pandas-fdic-banklist'!C9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -714,7 +714,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D9",
+                "anchor": "'csv-pandas-fdic-banklist'!D9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -725,7 +725,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E9",
+                "anchor": "'csv-pandas-fdic-banklist'!E9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -736,7 +736,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F9",
+                "anchor": "'csv-pandas-fdic-banklist'!F9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -747,7 +747,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G9",
+                "anchor": "'csv-pandas-fdic-banklist'!G9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -760,7 +760,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A10",
+                "anchor": "'csv-pandas-fdic-banklist'!A10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -771,7 +771,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B10",
+                "anchor": "'csv-pandas-fdic-banklist'!B10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -782,7 +782,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C10",
+                "anchor": "'csv-pandas-fdic-banklist'!C10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -793,7 +793,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D10",
+                "anchor": "'csv-pandas-fdic-banklist'!D10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -804,7 +804,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E10",
+                "anchor": "'csv-pandas-fdic-banklist'!E10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -815,7 +815,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F10",
+                "anchor": "'csv-pandas-fdic-banklist'!F10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -826,7 +826,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G10",
+                "anchor": "'csv-pandas-fdic-banklist'!G10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -839,7 +839,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A11",
+                "anchor": "'csv-pandas-fdic-banklist'!A11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -850,7 +850,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B11",
+                "anchor": "'csv-pandas-fdic-banklist'!B11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -861,7 +861,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C11",
+                "anchor": "'csv-pandas-fdic-banklist'!C11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -872,7 +872,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D11",
+                "anchor": "'csv-pandas-fdic-banklist'!D11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -883,7 +883,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E11",
+                "anchor": "'csv-pandas-fdic-banklist'!E11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -894,7 +894,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F11",
+                "anchor": "'csv-pandas-fdic-banklist'!F11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -905,7 +905,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G11",
+                "anchor": "'csv-pandas-fdic-banklist'!G11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -918,7 +918,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-pandas-fdic-banklist!A12",
+                "anchor": "'csv-pandas-fdic-banklist'!A12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -929,7 +929,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!B12",
+                "anchor": "'csv-pandas-fdic-banklist'!B12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -940,7 +940,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!C12",
+                "anchor": "'csv-pandas-fdic-banklist'!C12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -951,7 +951,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!D12",
+                "anchor": "'csv-pandas-fdic-banklist'!D12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -962,7 +962,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!E12",
+                "anchor": "'csv-pandas-fdic-banklist'!E12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -973,7 +973,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!F12",
+                "anchor": "'csv-pandas-fdic-banklist'!F12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -984,7 +984,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-pandas-fdic-banklist!G12",
+                "anchor": "'csv-pandas-fdic-banklist'!G12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -1514,7 +1514,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-pandas-fdic-banklist",
+        "id": "'csv-pandas-fdic-banklist'",
         "kind": "sheet",
         "name": "csv-pandas-fdic-banklist",
         "size": "506 rows x 7 columns"

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Block, Bytes, Cell, Certainty, Completeness, Confidence, Detection, Evidence, FormatId, Inline,
-    LayoutKind, LossReason, ReadOptions, ReadOutcome, Reader, Role, SectionKind, Severity, Source,
-    TableLayout, Value,
+    LayoutKind, LossReason, ReadOptions, ReadOutcome, Reader, Role, RowKind, SectionKind, Severity,
+    Source, TableLayout, Value,
 };
 use rezzer_read_csv::CsvReader;
 use rezzer_render::{OutputSection, RenderOptions, TableStyle};
@@ -245,12 +245,12 @@ fn ragged_table_is_rectangular() {
     let w = widths(blocks[0]);
     assert!(w.iter().all(|&x| x == 4), "{w:?}");
     let rows = rows_of(blocks[0]);
-    // The header cell past the header record is empty; its column is named by number.
+    // The header cell past the header record is empty, and so is its header path, as for
+    // sheets; the renderer names the column.
     assert_eq!(rows[0], ["id", "qty", "price", ""]);
-    assert_eq!(
-        layout_of(blocks[0]).header_paths,
-        ["id", "qty", "price", "Column 4"]
-    );
+    let paths = &layout_of(blocks[0]).header_paths;
+    assert_eq!(paths[..3], ["id", "qty", "price"]);
+    assert!(paths.iter().skip(3).all(String::is_empty), "{paths:?}");
     assert_eq!(rows[3], ["3", "4", "", ""]);
     assert_eq!(rows[4][3], "9");
     assert_eq!(out.completeness, Completeness::Partial);
@@ -719,6 +719,84 @@ fn layout_header_sets_the_properties() {
     assert_eq!(layout_of(data_tables(&blocks)[0]).header_rows, [1]);
     assert_eq!(property(&out, "has_header"), Value::Bool { value: true });
     assert_eq!(property(&out, "rows"), Value::number(1.0, None));
+    // The column facts follow the layout's header, not csvsniff's guess.
+    let facts = rows_of(blocks.last().unwrap());
+    assert_eq!(facts[1][..4], ["key", "integer", "", "0"]);
+    assert_eq!(facts[2][0], "val");
+}
+
+#[test]
+fn header_found_by_csvsniff_but_not_by_the_layout_is_data_in_the_facts() {
+    // All text and nothing repeats, so H3 needs the guess; csvsniff gives none here, but
+    // with a guess the layout must agree before the facts take a header.
+    let out = read(b"Ann,Berlin\nBob,Bonn\nCid,Koeln\n");
+    let (_, blocks) = tables(&out);
+    let facts = rows_of(blocks.last().unwrap());
+    assert_eq!(facts[1][0], "Column 1");
+    assert_eq!(facts[1][3], "0");
+}
+
+#[test]
+fn group_rows_are_not_ragged() {
+    let mut csv = String::from("Report\nid,qty,price\n");
+    for line in [
+        "North", "1,2,3", "2,4,6", "3,6,9", "South", "4,8,12", "5,10,15", "6,12,18",
+    ] {
+        csv.push_str(line);
+        csv.push('\n');
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    let l = layout_of(data_tables(&blocks)[0]);
+    let groups: Vec<u32> = l
+        .rows
+        .iter()
+        .filter(|n| n.kind == RowKind::Group)
+        .map(|n| n.row)
+        .collect();
+    assert_eq!(groups, [3, 7], "{:?}", l.rows);
+    assert!(ragged_losses(&out).is_empty(), "{:?}", ragged_losses(&out));
+    assert_eq!(out.completeness, Completeness::Complete);
+    // A short data row in the same file is still ragged.
+    let csv = csv.replace("2,4,6\n", "2,4\n");
+    let out = read(csv.as_bytes());
+    assert_eq!(
+        ragged_losses(&out),
+        ["record 5 (line 5): row has 2 fields, expected 3"]
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn short_header_record_is_not_ragged() {
+    let mut csv = String::from("id,qty\n");
+    for i in 1..=12 {
+        csv.push_str(&format!("{i},{},{}\n", i * 2, i * 3));
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    assert_eq!(layout_of(data_tables(&blocks)[0]).header_rows, [1]);
+    assert!(ragged_losses(&out).is_empty(), "{:?}", ragged_losses(&out));
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn csv_key_and_records_anchor_quote_the_stem() {
+    let out = read_as("it's a!b-c.csv", FormatId::Csv, b"id,qty\n1,2\n3,4\n5,6\n");
+    let [Block::Section { anchor, title, .. }] = out.document.body.as_slice() else {
+        panic!()
+    };
+    assert_eq!(title.as_deref(), Some("it's a!b-c"));
+    assert_eq!(anchor.as_ref().unwrap().0, "'it''s a!b-c'");
+    let (_, blocks) = tables(&out);
+    let table = data_tables(&blocks)[0];
+    assert_eq!(layout_of(table).key, "'it''s a!b-c'!A1");
+    let Block::Table { rows, .. } = table else {
+        panic!()
+    };
+    assert_eq!(rows[1][1].anchor.as_ref().unwrap().0, "'it''s a!b-c'!B2");
+    let md = markdown(&out, TableStyle::Records);
+    assert!(md.contains("- Row 2 ('it''s a!b-c'!A2:B2)"), "{md}");
 }
 
 #[test]
@@ -850,7 +928,12 @@ fn plain_csv_keeps_its_header() {
             for (j, f) in rec.iter().enumerate() {
                 if !f.trim().is_empty() {
                     want.push((
-                        format!("{sheet}!{}{}", rezzer_model::column_letter(j), i + 1),
+                        format!(
+                            "{}!{}{}",
+                            sheetparts::quote_sheet(&sheet),
+                            rezzer_model::column_letter(j),
+                            i + 1
+                        ),
                         f.split_whitespace().collect::<Vec<_>>().join(" "),
                     ));
                 }
@@ -914,6 +997,7 @@ fn multi_line_field_is_no_gap() {
         &b"a,b\n1,\"x\n\ny\"\n3,4\n5,6\n"[..],
         &b"a,b\r\n1,\"x\r\n\r\ny\"\r\n3,4\r\n5,6\r\n"[..],
         &b"a,b\r\n1,2\r\n3,4\r\n5,6\r\n"[..],
+        &b"a,b\r1,2\r3,4\r5,6\r"[..],
     ] {
         let out = read(bytes);
         let (_, blocks) = tables(&out);
@@ -929,6 +1013,14 @@ fn multi_line_field_is_no_gap() {
     }
     // A blank line between CRLF records is a gap: the second block starts one row lower.
     let out = read(b"a,b\r\n1,2\r\n3,4\r\n5,6\r\n\r\nc,d\r\n7,8\r\n9,10\r\n11,12\r\n");
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<&str> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.as_str())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "A6:B9"]);
+    // The same with CR-only line ends and two blank lines: one gap row.
+    let out = read(b"a,b\r1,2\r3,4\r5,6\r\r\rc,d\r7,8\r9,10\r11,12\r");
     let (_, blocks) = tables(&out);
     let ranges: Vec<&str> = data_tables(&blocks)
         .iter()
@@ -979,7 +1071,11 @@ fn csv_records_use_column_numbers() {
     let out = read(ragged_input().as_bytes());
     let (_, blocks) = tables(&out);
     let l = layout_of(data_tables(&blocks)[0]);
-    assert_eq!(l.header_paths, ["id", "qty", "price", "Column 4"]);
+    assert!(
+        !l.header_paths.iter().any(|p| p.contains("Column ")),
+        "{:?}",
+        l.header_paths
+    );
     let md = markdown(&out, TableStyle::Records);
     assert!(md.contains("- Row 5 (data!A5:D5)"), "{md}");
     assert!(md.contains("  - Column 4: 9"), "{md}");

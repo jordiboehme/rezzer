@@ -252,6 +252,13 @@ fn judge(rows: &[Vec<String>], quoted: &[Vec<bool>]) -> Option<(f32, usize, f32)
     Some((share, count, numeric))
 }
 
+/// Whether the records after title lines show a table beyond a consistent field count, so
+/// short prose or a list with commas under a title stays text: at least three fields, a
+/// header over a column of numbers or dates, or at least [`MIN_RAGGED_RECORDS`] records.
+fn table_evidence(rows: &[Vec<String>], (_, count, numeric): (f32, usize, f32)) -> bool {
+    count >= 3 || rows.len() >= MIN_RAGGED_RECORDS || (numeric > 0.0 && detect_header(rows))
+}
+
 /// The number of leading records with fewer fields than the modal count, when there are
 /// 1 to [`MAX_LEAD_RECORDS`] of them.
 fn lead_records(rows: &[Vec<String>]) -> Option<usize> {
@@ -297,7 +304,9 @@ fn head(text: &str, max: usize) -> &str {
 /// records exist (a ragged or broken file; `consistent_rows` keeps the real
 /// share). When the records fail these checks only because of 1 to 10 short
 /// records at the start (title lines above the table), the checks run on the
-/// records after them and [`Dialect::lead_records`] counts them. The header
+/// records after them and [`Dialect::lead_records`] counts them. Those records
+/// must then also have at least three fields, a header over a column of numbers
+/// or dates, or be at least ten. The header
 /// flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = head(strip_bom(text), SNIFF_MAX_BYTES);
@@ -325,9 +334,10 @@ pub fn sniff(text: &str) -> Option<Dialect> {
         // The records as they are; else without title lines above the table.
         let (lead, (share, count, numeric)) = match judge(&rows, &quoted) {
             Some(found) => (0, found),
-            None => match lead_records(&rows)
-                .and_then(|lead| Some((lead, judge(&rows[lead..], &quoted[lead..])?)))
-            {
+            None => match lead_records(&rows).and_then(|lead| {
+                let found = judge(&rows[lead..], &quoted[lead..])?;
+                table_evidence(&rows[lead..], found).then_some((lead, found))
+            }) {
                 Some(found) => found,
                 None => continue,
             },

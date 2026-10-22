@@ -51,6 +51,9 @@ pub(crate) struct Ctx<'a> {
     pub in_sheet: std::cell::Cell<usize>,
     /// How the rows of a sheet table are written.
     pub table_style: crate::TableStyle,
+    /// A table column without a header is named by its number (`Column 4`, CSV and TSV),
+    /// else by its sheet column letter (`Column D`).
+    pub column_numbers: bool,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content

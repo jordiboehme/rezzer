@@ -12,6 +12,7 @@ rezzer-limits = { path = "../../rezzer-limits" }
 textenc = { path = "../../formats/textenc" }
 csvsniff = { path = "../../formats/csvsniff" }
 sheetlayout = { path = "../../formats/sheetlayout" }
+sheetparts = { path = "../../formats/sheetparts" }
 rezzer-layout = { path = "../../rezzer-layout" }
 csv.workspace = true
 

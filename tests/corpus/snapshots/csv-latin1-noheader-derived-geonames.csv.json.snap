@@ -4,10 +4,10 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-latin1-noheader-derived-geonames",
+      "anchor": "'csv-latin1-noheader-derived-geonames'",
       "blocks": [
         {
-          "anchor": "csv-latin1-noheader-derived-geonames!A1:D83",
+          "anchor": "'csv-latin1-noheader-derived-geonames'!A1:D83",
           "header_rows": 0,
           "layout": {
             "certainty": "rule",
@@ -35,7 +35,7 @@ source: crates/rezzer/tests/corpus.rs
               "3",
               "4"
             ],
-            "key": "csv-latin1-noheader-derived-geonames!A1",
+            "key": "'csv-latin1-noheader-derived-geonames'!A1",
             "kind": "table",
             "label_cols": 3,
             "range": "A1:D83"
@@ -43,7 +43,7 @@ source: crates/rezzer/tests/corpus.rs
           "rows": [
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A1",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -54,7 +54,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B1",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -65,7 +65,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C1",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -76,7 +76,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D1",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -89,7 +89,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A2",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -100,7 +100,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B2",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -111,7 +111,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C2",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -122,7 +122,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D2",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -135,7 +135,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A3",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -146,7 +146,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B3",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -157,7 +157,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C3",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -168,7 +168,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D3",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -181,7 +181,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A4",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -192,7 +192,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B4",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -203,7 +203,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C4",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -214,7 +214,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D4",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -227,7 +227,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A5",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -238,7 +238,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B5",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -249,7 +249,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C5",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -260,7 +260,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D5",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -273,7 +273,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A6",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -284,7 +284,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B6",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -295,7 +295,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C6",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -306,7 +306,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D6",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -319,7 +319,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A7",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -330,7 +330,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B7",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -341,7 +341,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C7",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -352,7 +352,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D7",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -365,7 +365,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A8",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -376,7 +376,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B8",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -387,7 +387,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C8",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -398,7 +398,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D8",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -411,7 +411,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A9",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -422,7 +422,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B9",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -433,7 +433,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C9",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -444,7 +444,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D9",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -457,7 +457,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A10",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -468,7 +468,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B10",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -479,7 +479,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C10",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -490,7 +490,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D10",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -503,7 +503,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A11",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -514,7 +514,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B11",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -525,7 +525,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C11",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -536,7 +536,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D11",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -549,7 +549,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!A12",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!A12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -560,7 +560,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!B12",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!B12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -571,7 +571,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!C12",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!C12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -582,7 +582,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-latin1-noheader-derived-geonames!D12",
+                "anchor": "'csv-latin1-noheader-derived-geonames'!D12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -926,7 +926,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-latin1-noheader-derived-geonames",
+        "id": "'csv-latin1-noheader-derived-geonames'",
         "kind": "sheet",
         "name": "csv-latin1-noheader-derived-geonames",
         "size": "83 rows x 4 columns"

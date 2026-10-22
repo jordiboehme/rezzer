@@ -338,4 +338,4 @@ Found in the data, not written as formulas in the file.
 
 | Cells | Formula | Reads | Role | Value | Note |
 | --- | --- | --- | --- | --- | --- |
-| csv-datahub-co2-fossil-global!B:B | `Total = Gas Fuel + Liquid Fuel + Solid Fuel + Cement + Gas Flaring` | csv-datahub-co2-fossil-global!C:C, csv-datahub-co2-fossil-global!D:D, csv-datahub-co2-fossil-global!E:E, csv-datahub-co2-fossil-global!F:F, csv-datahub-co2-fossil-global!G:G | result |  | holds 210 of 275 rows |
+| 'csv-datahub-co2-fossil-global'!B:B | `Total = Gas Fuel + Liquid Fuel + Solid Fuel + Cement + Gas Flaring` | 'csv-datahub-co2-fossil-global'!C:C, 'csv-datahub-co2-fossil-global'!D:D, 'csv-datahub-co2-fossil-global'!E:E, 'csv-datahub-co2-fossil-global'!F:F, 'csv-datahub-co2-fossil-global'!G:G | result |  | holds 210 of 275 rows |

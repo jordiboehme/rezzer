@@ -1230,6 +1230,7 @@ fn stale_callout(doc: &Document) -> Option<String> {
         notes: None,
         in_sheet: Default::default(),
         table_style: Default::default(),
+        column_numbers: false,
     };
     Some(blocks::blocks(&[callout], &ctx, 0, 3, false))
 }

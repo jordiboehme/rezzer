@@ -284,6 +284,15 @@ impl Default for RenderOptions {
     }
 }
 
+/// Whether the tables of a document name a column without a header by its number: CSV and
+/// TSV have no column letters of their own.
+fn column_numbers(doc: &Document) -> bool {
+    matches!(
+        doc.source.format,
+        rezzer_model::FormatId::Csv | rezzer_model::FormatId::Tsv
+    )
+}
+
 /// Renders a document as OKF Markdown.
 pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let want = |s: OutputSection| opts.sections.as_ref().is_none_or(|l| l.contains(&s));
@@ -327,6 +336,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         notes: None,
         in_sheet: Default::default(),
         table_style: opts.table_style,
+        column_numbers: column_numbers(doc),
     };
     if want(OutputSection::Annotations) {
         parts.extend(facets::annotations(doc, &ctx, &notes, selection));
@@ -475,6 +485,7 @@ fn content(
         notes: Some(notes),
         in_sheet: Default::default(),
         table_style,
+        column_numbers: column_numbers(doc),
     };
     let Some(selection) = selection else {
         return blocks::blocks(body, &ctx, 0, 2, false);

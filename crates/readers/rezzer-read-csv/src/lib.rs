@@ -17,7 +17,7 @@ use rezzer_model::{
     LossReason, ReadOptions, ReadOutcome, Reader, ReaderInfo, Role, SectionKind, Severity, Source,
     Value, column_letter, source_info,
 };
-use sheetlayout::{CellIn, Class, Input, Kind, Layout, Pos, Style};
+use sheetlayout::{CellIn, Class, Input, Kind, Layout, Pos, RowKind, Style};
 
 /// Data rows in the body table. Further rows are analyzed and counted but not shown.
 const MAX_TABLE_ROWS: usize = 10_000;
@@ -86,10 +86,13 @@ impl Reader for CsvReader {
             .filter(|s| !s.is_empty())
             .unwrap_or(&src.name)
             .to_string();
+        // The file stem as a reference writes a sheet name: cell anchors, table keys, record
+        // anchors and the sheet's own anchor use it, like a workbook sheet.
+        let sheet_q = sheetparts::quote_sheet(&sheet);
 
         if text.trim().is_empty() {
             doc.body
-                .push(sheet_of(&sheet, vec![note("The file is empty.")]));
+                .push(sheet_of(&sheet, &sheet_q, vec![note("The file is empty.")]));
             return finish(doc, partial);
         }
 
@@ -219,7 +222,7 @@ impl Reader for CsvReader {
             } else {
                 "The file is empty."
             };
-            doc.body.push(sheet_of(&sheet, vec![note(msg)]));
+            doc.body.push(sheet_of(&sheet, &sheet_q, vec![note(msg)]));
             return finish(doc, partial);
         }
 
@@ -247,6 +250,9 @@ impl Reader for CsvReader {
         let mut texts: Vec<CellText> = Vec::new();
         let mut input: Vec<CellIn> = Vec::new();
         let mut guess_row: Option<u32> = None;
+        // Which fields past the known columns the record at `lead` fills: it counts as data
+        // or as the header, as the layout decides.
+        let mut lead_extra: Vec<bool> = Vec::new();
         // Records read, the sheet row of the next one (0-based) and where the last one ended.
         let (mut read, mut row) = (0usize, 0u32);
         let mut after: Option<usize> = None;
@@ -280,9 +286,15 @@ impl Reader for CsvReader {
                 break;
             }
             // Stop before the record that would pass the element limit, so the layout can
-            // still place the records read.
-            if budget.elements().saturating_add(shown as u64) > max_elements
-                || budget.add_elements(shown as u64).is_err()
+            // still place the records read. Only fields with text count here: the layout
+            // charges the empty positions of its tables itself.
+            let filled = rec
+                .iter()
+                .take(MAX_TABLE_COLUMNS)
+                .filter(|v| !v.trim().is_empty())
+                .count() as u64;
+            if budget.elements().saturating_add(filled) > max_elements
+                || budget.add_elements(filled).is_err()
             {
                 stopped = Some((
                     u64::from(row) + 1,
@@ -304,6 +316,13 @@ impl Reader for CsvReader {
             }
             if read == lead {
                 guess_row = Some(row);
+                lead_extra = rec
+                    .iter()
+                    .enumerate()
+                    .take(MAX_FACT_ROWS)
+                    .skip(known)
+                    .map(|(_, v)| !value_empty(v))
+                    .collect();
             }
             if let Some(line) = rec.position().map(|p| p.line() as usize)
                 && ragged_lines.contains(&line)
@@ -327,7 +346,7 @@ impl Reader for CsvReader {
             read += 1;
             row = row.saturating_add(1);
         }
-        let data_shown = read.saturating_sub(skip);
+        let mut data_shown = read.saturating_sub(skip);
         if let Some((n, what)) = stopped {
             partial = true;
             doc.losses.push(Loss {
@@ -343,7 +362,7 @@ impl Reader for CsvReader {
                 format!("rows {} to {} not shown", data_shown + 1, analysis.rows)
             };
             doc.losses.push(Loss {
-                location: sheet.clone(),
+                location: sheet_q.clone(),
                 what,
                 why: LossReason::Limit,
                 severity: Severity::Info,
@@ -351,7 +370,7 @@ impl Reader for CsvReader {
         }
         if widest > MAX_TABLE_COLUMNS {
             doc.losses.push(Loss {
-                location: sheet.clone(),
+                location: sheet_q.clone(),
                 what: format!(
                     "{} columns after column {MAX_TABLE_COLUMNS} not shown",
                     widest - MAX_TABLE_COLUMNS
@@ -381,11 +400,10 @@ impl Reader for CsvReader {
                 is_unit_column: &|_| false,
             };
             let stop = || budget.check_time().is_err();
-            let mut layout = sheetlayout::detect(&input, &rezzer_layout::limits(budget), &stop);
+            let layout = sheetlayout::detect(&input, &rezzer_layout::limits(budget), &stop);
             drop(input);
-            name_empty_header_cells(&mut layout);
             let mapped = rezzer_layout::blocks(
-                &sheet,
+                &sheet_q,
                 &layout,
                 &texts,
                 &[],
@@ -404,6 +422,28 @@ impl Reader for CsvReader {
             partial |= mapped.partial || mapped.elements_out;
             doc.losses.extend(mapped.losses);
             blocks = mapped.blocks;
+            // The column facts follow the header the layout found (C8): when it differs from
+            // csvsniff's guess, the analysis runs again with it.
+            if let Some(header) = layout_header(&layout, guess_row)
+                && header != dialect.has_header
+            {
+                let mut d = dialect.clone();
+                d.has_header = header;
+                let again = csvsniff::analyze_until(text, &d, MAX_TABLE_ROWS, &out_of_time);
+                if !again.truncated {
+                    analysis = again;
+                    for (j, &filled) in lead_extra.iter().enumerate() {
+                        if filled && let Some(n) = extra_filled.get_mut(j) {
+                            if header {
+                                *n = n.saturating_sub(1);
+                            } else {
+                                *n += 1;
+                            }
+                        }
+                    }
+                    data_shown = read.saturating_sub(lead + usize::from(header));
+                }
+            }
             // The layout decides the header and so the data rows: the rows of every region
             // table without its header rows, plus the records not shown.
             let placed: usize = blocks
@@ -498,7 +538,7 @@ impl Reader for CsvReader {
         }
         if ncols_total > MAX_FACT_ROWS {
             doc.losses.push(Loss {
-                location: sheet.clone(),
+                location: sheet_q.clone(),
                 what: format!(
                     "columns {} to {ncols_total} not listed in the Columns table",
                     MAX_FACT_ROWS + 1
@@ -516,10 +556,10 @@ impl Reader for CsvReader {
             anchor: None,
             layout: None,
         });
-        doc.body.push(sheet_of(&sheet, blocks));
+        doc.body.push(sheet_of(&sheet, &sheet_q, blocks));
 
         // Observed sum relations.
-        let col_anchor = |j: usize| Anchor(format!("{sheet}!{0}:{0}", column_letter(j)));
+        let col_anchor = |j: usize| Anchor(format!("{sheet_q}!{0}:{0}", column_letter(j)));
         let name = |j: usize| analysis.columns[j].name.as_str();
         for d in &analysis.derived {
             let parts: Vec<&str> = d.parts.iter().map(|&j| name(j)).collect();
@@ -550,8 +590,7 @@ fn custom_columns(doc: &mut Document, columns: usize) {
         .insert("columns".into(), Value::number(columns as f64, None));
 }
 
-/// True when a field has no visible text: empty, or only whitespace with a line break (which
-/// [`cell_inlines`] turns into a lone line break).
+/// True when a field has no visible text: empty, or only whitespace with a line break.
 fn value_empty(value: &str) -> bool {
     value.is_empty() || (value.trim().is_empty() && value.contains(['\n', '\r']))
 }
@@ -630,41 +669,38 @@ fn blank_line_after(text: &str, end: usize) -> bool {
     rest.starts_with(['\n', '\r'])
 }
 
-/// Names the empty header paths of the tables with a header row by their column number,
-/// `Column 4`, as the column facts do (a header record shorter than the rows, an empty
-/// header field).
-fn name_empty_header_cells(layout: &mut Layout) {
-    for r in &mut layout.regions {
-        if r.kind != Kind::Table || r.header_rows.is_empty() {
-            continue;
-        }
-        let Some(cols) = r.body.or(r.data) else {
-            continue;
-        };
-        let width = usize::try_from(cols.width()).unwrap_or(usize::MAX);
-        if r.header_paths.len() < width {
-            r.header_paths.resize(width, String::new());
-        }
-        for (i, path) in r.header_paths.iter_mut().enumerate() {
-            if path.is_empty() {
-                *path = format!("Column {}", u64::from(cols.left) + i as u64 + 1);
-            }
-        }
+/// The header the layout found at the first table: `true` when it is the one row
+/// `guess_row` (the record csvsniff judged), `false` when the table has no header row, `None`
+/// for any other band or when there is no table.
+fn layout_header(layout: &Layout, guess_row: Option<u32>) -> Option<bool> {
+    let table = layout
+        .regions
+        .iter()
+        .find(|r| r.kind == Kind::Table && r.data.is_some())?;
+    match table.header_rows.as_slice() {
+        [] => Some(false),
+        [row] if Some(*row) == guess_row => Some(true),
+        _ => None,
     }
 }
 
-/// Whether sheet row `row` is a header or data row of a table or grid region, not a
-/// caption, heading or note line and not in a label and value, text or title region.
+/// Whether sheet row `row` is a data row of a table or grid region: inside its data rows
+/// and with no row kind or the kind `data`. Header rows, group rows, caption, heading and
+/// note lines and the rows of label and value, text or title regions are not.
 fn in_table_row(layout: &Layout, row: u32) -> bool {
     layout.regions.iter().any(|r| {
         matches!(r.kind, Kind::Table | Kind::Grid)
-            && r.rect.top <= row
-            && row <= r.rect.bottom
+            && r.data.is_some_and(|d| d.top <= row && row <= d.bottom)
             && !r.captions.contains(&row)
             && !r.notes.contains(&row)
             && !r.above_header.contains(&row)
+            && !r.header_rows.contains(&row)
             && r.caption_heading != Some(row)
             && r.heading.is_none_or(|(h, _)| h != row)
+            && r.rows
+                .iter()
+                .find(|n| n.row == row)
+                .is_none_or(|n| n.kind == RowKind::Data)
     })
 }
 
@@ -755,11 +791,11 @@ fn finish(document: Document, partial: bool) -> ReadOutcome {
     }
 }
 
-fn sheet_of(name: &str, blocks: Vec<Block>) -> Block {
+fn sheet_of(name: &str, quoted: &str, blocks: Vec<Block>) -> Block {
     Block::Section {
         kind: SectionKind::Sheet,
         title: Some(name.to_string()),
-        anchor: Some(Anchor(name.to_string())),
+        anchor: Some(Anchor(quoted.to_string())),
         blocks,
     }
 }

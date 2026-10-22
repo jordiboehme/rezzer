@@ -224,7 +224,7 @@ pub(crate) fn layout_table(
         {
             records(layout, header_rows, rows, ctx, depth, level)
         }
-        LayoutKind::Table => table(layout, header_rows, rows, aligns),
+        LayoutKind::Table => table(layout, header_rows, rows, aligns, ctx.column_numbers),
     }
 }
 
@@ -368,6 +368,16 @@ fn left_column(layout: &TableLayout, grid: &Grid) -> u32 {
 
 fn letter(left: u32, offset: usize) -> String {
     column_letter((left as usize).saturating_add(offset))
+}
+
+/// The name of a table column without a header: `Column D` by its sheet column letter, or
+/// `Column 4` by its number (`numbers`, for CSV and TSV).
+fn unnamed_column(left: u32, offset: usize, numbers: bool) -> String {
+    if numbers {
+        format!("Column {}", u64::from(left) + offset as u64 + 1)
+    } else {
+        format!("Column {}", letter(left, offset))
+    }
 }
 
 /// The words of a fact that found a region; `None` for a rule.
@@ -578,7 +588,13 @@ fn shifted(aligns: &[Align]) -> Vec<Align> {
 
 /// A `table` region: the header paths as the header, the rows after the header band as the
 /// body, a `Parent` column when a row has a parent (R5).
-fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
+fn table(
+    layout: &TableLayout,
+    header_rows: usize,
+    rows: &[Vec<Cell>],
+    aligns: &[Align],
+    numbers: bool,
+) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
     let line = layout_line(layout, left, false);
@@ -597,7 +613,7 @@ fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &
     let mut header: Vec<String> = (0..width)
         .map(|c| match header_path(layout, c) {
             Some(path) => cell_text(path),
-            None => format!("Column {}", letter(left, c)),
+            None => unnamed_column(left, c, numbers),
         })
         .collect();
     let parents: HashMap<u32, u32> = layout
@@ -776,7 +792,7 @@ fn records(
             }
             let path = header_path(layout, c)
                 .map(one_line)
-                .unwrap_or_else(|| format!("Column {}", letter(left, c)));
+                .unwrap_or_else(|| unnamed_column(left, c, ctx.column_numbers));
             let mut content = vec![Inline::plain(format!("{path}: "))];
             content.extend_from_slice(trimmed(&source.inlines));
             if let Some(range) = grid.merged_range(k) {

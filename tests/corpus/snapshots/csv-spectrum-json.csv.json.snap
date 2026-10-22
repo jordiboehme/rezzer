@@ -4,10 +4,10 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-json",
+      "anchor": "'csv-spectrum-json'",
       "blocks": [
         {
-          "anchor": "csv-spectrum-json!A1:B2",
+          "anchor": "'csv-spectrum-json'!A1:B2",
           "header_rows": 1,
           "layout": {
             "certainty": "rule",
@@ -31,7 +31,7 @@ source: crates/rezzer/tests/corpus.rs
             "header_rows": [
               1
             ],
-            "key": "csv-spectrum-json!A1",
+            "key": "'csv-spectrum-json'!A1",
             "kind": "table",
             "label_cols": 0,
             "range": "A1:B2"
@@ -39,7 +39,7 @@ source: crates/rezzer/tests/corpus.rs
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-json!A1",
+                "anchor": "'csv-spectrum-json'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -50,7 +50,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-json!B1",
+                "anchor": "'csv-spectrum-json'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -63,7 +63,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-json!A2",
+                "anchor": "'csv-spectrum-json'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -74,7 +74,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-json!B2",
+                "anchor": "'csv-spectrum-json'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -160,7 +160,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Column 1",
+                    "text": "key",
                     "type": "text"
                   }
                 ],
@@ -170,7 +170,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "text",
+                    "text": "integer",
                     "type": "text"
                   }
                 ],
@@ -210,7 +210,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "yes",
+                    "text": "no",
                     "type": "text"
                   }
                 ],
@@ -222,7 +222,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Column 2",
+                    "text": "val",
                     "type": "text"
                   }
                 ],
@@ -301,7 +301,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-spectrum-json",
+        "id": "'csv-spectrum-json'",
         "kind": "sheet",
         "name": "csv-spectrum-json",
         "size": "1 row x 2 columns"

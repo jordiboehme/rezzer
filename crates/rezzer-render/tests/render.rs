@@ -4096,6 +4096,53 @@ fn headerless_table_has_letter_header_and_no_row_numbers() {
 }
 
 #[test]
+fn unnamed_header_column_is_a_letter_in_sheets_and_a_number_in_csv() {
+    let mut l = lay(LayoutKind::Table, "A1:D2", Some("A2:D2"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["id".into(), "qty".into(), "price".into()];
+    let block = ltable(
+        vec![
+            vec![
+                at("id", "A1"),
+                at("qty", "B1"),
+                at("price", "C1"),
+                at("", "D1"),
+            ],
+            vec![at("1", "A2"), at("2", "B2"), at("3", "C2"), at("9", "D2")],
+        ],
+        1,
+        l,
+    );
+    let render_as = |format: FormatId, style: TableStyle| {
+        let mut d = doc();
+        d.source.format = format;
+        d.body = vec![Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("S".into()),
+            anchor: Some(Anchor("S".into())),
+            blocks: vec![block.clone()],
+        }];
+        render(
+            &d,
+            Completeness::Complete,
+            &RenderOptions {
+                table_style: style,
+                ..opts()
+            },
+        )
+    };
+    let md = render_as(FormatId::Xlsx, TableStyle::Table);
+    assert!(md.contains("| id | qty | price | Column D |"), "{md}");
+    let md = render_as(FormatId::Csv, TableStyle::Table);
+    assert!(md.contains("| id | qty | price | Column 4 |"), "{md}");
+    assert!(!md.contains("Column D"), "{md}");
+    let md = render_as(FormatId::Tsv, TableStyle::Records);
+    assert!(md.contains("  - Column 4: 9"), "{md}");
+    let md = render_as(FormatId::Xlsx, TableStyle::Records);
+    assert!(md.contains("  - Column D: 9"), "{md}");
+}
+
+#[test]
 fn layout_line_names_range_header_and_evidence() {
     let mut l = lay(LayoutKind::Table, "A1:F68", Some("A5:F62"));
     l.header_rows = vec![3, 4];

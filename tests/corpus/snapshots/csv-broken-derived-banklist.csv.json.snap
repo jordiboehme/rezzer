@@ -4,10 +4,10 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-broken-derived-banklist",
+      "anchor": "'csv-broken-derived-banklist'",
       "blocks": [
         {
-          "anchor": "csv-broken-derived-banklist!A1:I10",
+          "anchor": "'csv-broken-derived-banklist'!A1:I10",
           "header_rows": 1,
           "layout": {
             "certainty": "rule",
@@ -37,13 +37,13 @@ source: crates/rezzer/tests/corpus.rs
               "Acquiring Institution",
               "Closing Date",
               "Updated Date",
-              "Column 8",
-              "Column 9"
+              "",
+              ""
             ],
             "header_rows": [
               1
             ],
-            "key": "csv-broken-derived-banklist!A1",
+            "key": "'csv-broken-derived-banklist'!A1",
             "kind": "table",
             "label_cols": 3,
             "range": "A1:I10"
@@ -51,7 +51,7 @@ source: crates/rezzer/tests/corpus.rs
           "rows": [
             [
               {
-                "anchor": "csv-broken-derived-banklist!A1",
+                "anchor": "'csv-broken-derived-banklist'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -62,7 +62,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B1",
+                "anchor": "'csv-broken-derived-banklist'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -73,7 +73,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C1",
+                "anchor": "'csv-broken-derived-banklist'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -84,7 +84,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D1",
+                "anchor": "'csv-broken-derived-banklist'!D1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -95,7 +95,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E1",
+                "anchor": "'csv-broken-derived-banklist'!E1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -106,7 +106,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F1",
+                "anchor": "'csv-broken-derived-banklist'!F1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -117,7 +117,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G1",
+                "anchor": "'csv-broken-derived-banklist'!G1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -128,19 +128,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H1",
+                "anchor": "'csv-broken-derived-banklist'!H1",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I1",
+                "anchor": "'csv-broken-derived-banklist'!I1",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A2",
+                "anchor": "'csv-broken-derived-banklist'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -151,7 +151,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B2",
+                "anchor": "'csv-broken-derived-banklist'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -162,7 +162,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C2",
+                "anchor": "'csv-broken-derived-banklist'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -173,7 +173,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D2",
+                "anchor": "'csv-broken-derived-banklist'!D2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -184,7 +184,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E2",
+                "anchor": "'csv-broken-derived-banklist'!E2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -195,7 +195,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F2",
+                "anchor": "'csv-broken-derived-banklist'!F2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -206,7 +206,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G2",
+                "anchor": "'csv-broken-derived-banklist'!G2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -217,19 +217,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H2",
+                "anchor": "'csv-broken-derived-banklist'!H2",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I2",
+                "anchor": "'csv-broken-derived-banklist'!I2",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A3",
+                "anchor": "'csv-broken-derived-banklist'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -240,7 +240,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B3",
+                "anchor": "'csv-broken-derived-banklist'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -251,7 +251,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C3",
+                "anchor": "'csv-broken-derived-banklist'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -262,7 +262,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D3",
+                "anchor": "'csv-broken-derived-banklist'!D3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -273,7 +273,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E3",
+                "anchor": "'csv-broken-derived-banklist'!E3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -284,7 +284,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F3",
+                "anchor": "'csv-broken-derived-banklist'!F3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -295,7 +295,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G3",
+                "anchor": "'csv-broken-derived-banklist'!G3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -306,19 +306,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H3",
+                "anchor": "'csv-broken-derived-banklist'!H3",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I3",
+                "anchor": "'csv-broken-derived-banklist'!I3",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A4",
+                "anchor": "'csv-broken-derived-banklist'!A4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -329,7 +329,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B4",
+                "anchor": "'csv-broken-derived-banklist'!B4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -340,7 +340,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C4",
+                "anchor": "'csv-broken-derived-banklist'!C4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -351,7 +351,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D4",
+                "anchor": "'csv-broken-derived-banklist'!D4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -362,7 +362,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E4",
+                "anchor": "'csv-broken-derived-banklist'!E4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -373,7 +373,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F4",
+                "anchor": "'csv-broken-derived-banklist'!F4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -384,7 +384,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G4",
+                "anchor": "'csv-broken-derived-banklist'!G4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -395,7 +395,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H4",
+                "anchor": "'csv-broken-derived-banklist'!H4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -406,7 +406,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I4",
+                "anchor": "'csv-broken-derived-banklist'!I4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -419,7 +419,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A5",
+                "anchor": "'csv-broken-derived-banklist'!A5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -430,7 +430,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B5",
+                "anchor": "'csv-broken-derived-banklist'!B5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -441,7 +441,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C5",
+                "anchor": "'csv-broken-derived-banklist'!C5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -452,7 +452,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D5",
+                "anchor": "'csv-broken-derived-banklist'!D5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -463,7 +463,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E5",
+                "anchor": "'csv-broken-derived-banklist'!E5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -474,7 +474,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F5",
+                "anchor": "'csv-broken-derived-banklist'!F5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -485,7 +485,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G5",
+                "anchor": "'csv-broken-derived-banklist'!G5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -496,19 +496,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H5",
+                "anchor": "'csv-broken-derived-banklist'!H5",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I5",
+                "anchor": "'csv-broken-derived-banklist'!I5",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A6",
+                "anchor": "'csv-broken-derived-banklist'!A6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -519,7 +519,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B6",
+                "anchor": "'csv-broken-derived-banklist'!B6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -530,7 +530,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C6",
+                "anchor": "'csv-broken-derived-banklist'!C6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -541,39 +541,39 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D6",
+                "anchor": "'csv-broken-derived-banklist'!D6",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E6",
+                "anchor": "'csv-broken-derived-banklist'!E6",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F6",
+                "anchor": "'csv-broken-derived-banklist'!F6",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G6",
+                "anchor": "'csv-broken-derived-banklist'!G6",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H6",
+                "anchor": "'csv-broken-derived-banklist'!H6",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I6",
+                "anchor": "'csv-broken-derived-banklist'!I6",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A7",
+                "anchor": "'csv-broken-derived-banklist'!A7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -584,7 +584,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B7",
+                "anchor": "'csv-broken-derived-banklist'!B7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -595,7 +595,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C7",
+                "anchor": "'csv-broken-derived-banklist'!C7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -606,7 +606,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D7",
+                "anchor": "'csv-broken-derived-banklist'!D7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -617,7 +617,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E7",
+                "anchor": "'csv-broken-derived-banklist'!E7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -628,7 +628,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F7",
+                "anchor": "'csv-broken-derived-banklist'!F7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -639,7 +639,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G7",
+                "anchor": "'csv-broken-derived-banklist'!G7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -650,19 +650,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H7",
+                "anchor": "'csv-broken-derived-banklist'!H7",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I7",
+                "anchor": "'csv-broken-derived-banklist'!I7",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A8",
+                "anchor": "'csv-broken-derived-banklist'!A8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -673,7 +673,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B8",
+                "anchor": "'csv-broken-derived-banklist'!B8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -684,7 +684,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C8",
+                "anchor": "'csv-broken-derived-banklist'!C8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -695,7 +695,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D8",
+                "anchor": "'csv-broken-derived-banklist'!D8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -706,7 +706,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E8",
+                "anchor": "'csv-broken-derived-banklist'!E8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -717,7 +717,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F8",
+                "anchor": "'csv-broken-derived-banklist'!F8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -728,7 +728,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G8",
+                "anchor": "'csv-broken-derived-banklist'!G8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -739,19 +739,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H8",
+                "anchor": "'csv-broken-derived-banklist'!H8",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I8",
+                "anchor": "'csv-broken-derived-banklist'!I8",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A9",
+                "anchor": "'csv-broken-derived-banklist'!A9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -762,7 +762,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B9",
+                "anchor": "'csv-broken-derived-banklist'!B9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -787,7 +787,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C9",
+                "anchor": "'csv-broken-derived-banklist'!C9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -798,7 +798,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D9",
+                "anchor": "'csv-broken-derived-banklist'!D9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -809,7 +809,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E9",
+                "anchor": "'csv-broken-derived-banklist'!E9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -820,29 +820,29 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F9",
+                "anchor": "'csv-broken-derived-banklist'!F9",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G9",
+                "anchor": "'csv-broken-derived-banklist'!G9",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H9",
+                "anchor": "'csv-broken-derived-banklist'!H9",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I9",
+                "anchor": "'csv-broken-derived-banklist'!I9",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-broken-derived-banklist!A10",
+                "anchor": "'csv-broken-derived-banklist'!A10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -853,7 +853,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!B10",
+                "anchor": "'csv-broken-derived-banklist'!B10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -864,7 +864,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!C10",
+                "anchor": "'csv-broken-derived-banklist'!C10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -875,7 +875,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!D10",
+                "anchor": "'csv-broken-derived-banklist'!D10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -886,7 +886,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!E10",
+                "anchor": "'csv-broken-derived-banklist'!E10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -897,7 +897,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!F10",
+                "anchor": "'csv-broken-derived-banklist'!F10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -908,7 +908,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!G10",
+                "anchor": "'csv-broken-derived-banklist'!G10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -919,12 +919,12 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!H10",
+                "anchor": "'csv-broken-derived-banklist'!H10",
                 "col_span": 1,
                 "row_span": 1
               },
               {
-                "anchor": "csv-broken-derived-banklist!I10",
+                "anchor": "'csv-broken-derived-banklist'!I10",
                 "col_span": 1,
                 "row_span": 1
               }
@@ -1703,7 +1703,7 @@ source: crates/rezzer/tests/corpus.rs
     ],
     "parts": [
       {
-        "id": "csv-broken-derived-banklist",
+        "id": "'csv-broken-derived-banklist'",
         "kind": "sheet",
         "name": "csv-broken-derived-banklist",
         "size": "9 rows x 9 columns"

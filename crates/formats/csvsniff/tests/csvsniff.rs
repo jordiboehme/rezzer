@@ -662,3 +662,16 @@ fn plain_and_ragged_files_have_no_lead() {
     text.push_str("a,b,c\n1,2,3\n4,5,6\n");
     assert_eq!(sniff(&text), None);
 }
+
+#[test]
+fn prose_with_a_title_line_is_no_csv() {
+    let letter = "Dear Anna\nThank you for the letter, it was nice\nThe kids are fine, school is ok\nSee you soon, Jordi\n";
+    assert_eq!(sniff(letter), None);
+    let list = "Shopping list\nmilk, eggs\nbread, butter\njam, tea\n";
+    assert_eq!(sniff(list), None);
+    // Two columns under a title are a table when a header names a column of numbers.
+    let d =
+        sniff("Prices 2024\nSource: shop\nitem,price\nmilk,1.20\nbread,2.50\njam,3.10\n").unwrap();
+    assert_eq!(d.lead_records, 2);
+    assert!(d.has_header);
+}
