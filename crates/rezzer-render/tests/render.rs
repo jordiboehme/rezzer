@@ -3259,8 +3259,8 @@ fn page_annotation_at_end_of_page() {
 
 #[test]
 fn sheet_annotations_unchanged() {
-    // Cell anchors are never block anchors, and a sheet is not a page: a comment on a cell
-    // and one on the sheet stay in the list.
+    // Blocks inside a sheet take no inline notes, and a sheet is not a page: a comment on a
+    // cell and one on the sheet stay in the list.
     let mut d = workbook();
     d.facets.annotations = vec![
         note("comment", "Inputs!A1", None, "On a cell."),

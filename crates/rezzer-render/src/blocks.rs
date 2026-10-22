@@ -52,7 +52,8 @@ pub(crate) struct Ctx<'a> {
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
 /// showed. Each one is shown once: after the first block with its anchor that is rendered, or
-/// at the end of its page section. The ones not shown stay for `## Annotations`.
+/// at the end of its page section; never inside a sheet section. The ones not shown stay for
+/// `## Annotations`.
 pub(crate) struct Notes<'a> {
     list: &'a [Annotation],
     at: HashMap<&'a str, Vec<usize>>,
