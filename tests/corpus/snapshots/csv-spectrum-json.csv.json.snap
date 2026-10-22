@@ -271,12 +271,6 @@ source: crates/rezzer/tests/corpus.rs
   ],
   "model_version": 1,
   "overview": {
-    "facts": [
-      [
-        "Not read",
-        "1"
-      ]
-    ],
     "parts": [
       {
         "id": "csv-spectrum-json",

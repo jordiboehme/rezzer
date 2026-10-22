@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rezzer_model::{
     Block, Document, FormatId, FormulaKind, Inline, LayoutKind, Overview as Model, OverviewPart,
-    Role, SectionKind, Value,
+    Role, SectionKind, Severity, Value,
 };
 
 use crate::anchors::{collect, sheet_prefixes};
@@ -437,7 +437,16 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .filter(|e| e.kind != "script")
             .count(),
     );
-    count("Not read", doc.losses.len());
+    // Losses that say something was not read: from Warning on. Info losses (an unsure
+    // region, an overlap, a detail not read) stay listed with the losses, but the content
+    // was read.
+    count(
+        "Not read",
+        doc.losses
+            .iter()
+            .filter(|l| l.severity >= Severity::Warning)
+            .count(),
+    );
     // The codes stand right after the pictures they were read from.
     let mut codes: Vec<(String, String)> = Vec::new();
     if !kinds.is_empty() {

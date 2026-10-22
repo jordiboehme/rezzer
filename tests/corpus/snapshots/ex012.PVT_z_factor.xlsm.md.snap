@@ -16,6 +16,7 @@ reader: "sheet/0.1.0"
 completeness: complete
 losses: 1
 authors: ["Ринат Хабибуллин"]
+language: "en"
 created: "2020-04-28T06:34:49Z"
 modified: "2025-02-28T05:19:13Z"
 ---
@@ -36,7 +37,6 @@ modified: "2025-02-28T05:19:13Z"
 - Names: 2
 - External links: 2
 - Embedded: 10
-- Not read: 1
 - Last changed: 2025-02-28T05:19:13Z
 
 ## Properties

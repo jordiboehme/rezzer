@@ -26,8 +26,6 @@ losses: 1
 | --- | --- | --- | --- | --- |
 | csv-spectrum-json | sheet | 2 rows x 2 columns |  |  |
 
-- Not read: 1
-
 ## Properties
 
 | Key | Value |

@@ -4622,10 +4622,6 @@ source: crates/rezzer/tests/corpus.rs
         "20"
       ],
       [
-        "Not read",
-        "3"
-      ],
-      [
         "Last changed",
         "2025-11-24T17:58:07Z"
       ]

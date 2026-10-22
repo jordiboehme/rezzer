@@ -667,7 +667,7 @@ source: crates/rezzer/tests/corpus.rs
       ],
       [
         "Not read",
-        "2"
+        "1"
       ],
       [
         "Last changed",
