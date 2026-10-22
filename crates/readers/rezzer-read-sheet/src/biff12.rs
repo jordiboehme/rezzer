@@ -137,6 +137,8 @@ pub(crate) struct Book {
     pub names: Vec<(String, Vec<u8>)>,
     /// The defined names whose `fHidden` bit is set, lower case.
     pub hidden_names: HashSet<String>,
+    /// The defined names whose `fBuiltin` bit is set, lower case.
+    pub builtin_names: HashSet<String>,
     /// The most 3D reference entries (`BrtExternSheet`) one record lists; calamine copies a
     /// sheet name for each when it opens the workbook.
     pub extern_entries: u64,
@@ -202,9 +204,13 @@ pub(crate) fn read_book(bytes: &[u8]) -> Result<Book, String> {
                 let rgce = body
                     .get(13 + n..(13 + n).saturating_add(len))
                     .ok_or_else(bad)?;
-                // BrtName: the first bit of its flags is fHidden (MS-XLSB 2.4.718).
-                if u32_at(body, 0).is_some_and(|flags| flags & 1 == 1) {
+                // BrtName (MS-XLSB 2.4.718): bit A of its flags is fHidden, bit F fBuiltin.
+                let flags = u32_at(body, 0).unwrap_or(0);
+                if flags & 1 != 0 {
                     book.hidden_names.insert(name.to_lowercase());
+                }
+                if flags & (1 << 5) != 0 {
+                    book.builtin_names.insert(name.to_lowercase());
                 }
                 book.names.push((name, rgce.to_vec()));
             }
@@ -763,7 +769,7 @@ mod tests {
         sheet.extend(wide("S"));
         let mut bytes = rec(0x1C, &sheet); // BrtBundleSh, 0x009C
         bytes.extend(rec(0x10, &[])); // BrtEndBundleShs, 0x0090
-        for (name, flags) in [("Shown", 0u32), ("Secret", 1)] {
+        for (name, flags) in [("Shown", 0u32), ("Secret", 1), ("Print_Area", 1 << 5)] {
             let mut body = flags.to_le_bytes().to_vec();
             body.extend([0; 5]);
             body.extend(wide(name));
@@ -773,9 +779,12 @@ mod tests {
         }
         bytes.extend(rec(0x1D, &[0; 4])); // BrtCalcProp, 0x009D
         let book = read_book(&bytes).unwrap();
-        assert_eq!(book.names.len(), 2);
+        assert_eq!(book.names.len(), 3);
         assert!(book.hidden_names.contains("secret"));
         assert!(!book.hidden_names.contains("shown"));
+        assert!(!book.hidden_names.contains("print_area"));
+        assert!(book.builtin_names.contains("print_area"));
+        assert!(!book.builtin_names.contains("secret"));
     }
 
     #[test]

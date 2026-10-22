@@ -965,7 +965,10 @@ fn ods_database_range_is_exact() {
     assert!(has_db_range(r.layout, "__Anonymous_Sheet_DB__0"));
     assert_eq!(r.layout.header_rows, [1]);
     assert_eq!(r.layout.header_paths, ["Col1", "Col2", "Col3", "Col4"]);
+    // `display-filter-buttons`: the range is an autofilter too, shown as evidence.
+    assert!(r.layout.found_by.contains(&Evidence::Autofilter));
     let named = region(doc, "Sheet2", "A1:C7");
+    assert!(!named.layout.found_by.contains(&Evidence::Autofilter));
     assert_eq!(named.layout.key, "dbrange:database1");
     assert_eq!(named.layout.certainty, Certainty::Exact);
     assert_eq!(named.layout.header_rows, [1]);
@@ -1008,6 +1011,15 @@ fn ods_database_range_is_exact() {
     assert_eq!(r.layout.key, "Sheet1!B1");
     assert_eq!(r.layout.certainty, Certainty::Exact);
     assert_eq!(r.layout.header_paths, ["A", "B"]);
+    assert!(r.layout.found_by.contains(&Evidence::Autofilter));
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("overlaps")),
+        "{:#?}",
+        out.document.losses
+    );
 }
 
 #[test]

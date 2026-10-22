@@ -545,6 +545,14 @@ fn sheet_layout(
                     footer: d.footer,
                 },
             });
+            // A range with filter buttons is the sheet's autofilter (spec 5); the database
+            // range wins, so the filter is its evidence.
+            if d.filter_buttons {
+                facts.push(sheetlayout::Fact {
+                    rect: layout::rect_of(area),
+                    kind: sheetlayout::FactKind::AutoFilter,
+                });
+            }
         }
     }
     for p in pilots {

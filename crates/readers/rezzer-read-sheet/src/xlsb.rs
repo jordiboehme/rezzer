@@ -612,6 +612,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             &q,
             &entry.name,
             &names,
+            &book.builtin_names,
             &cells,
             &dates,
             &scan,
@@ -675,6 +676,7 @@ fn sheet_layout(
     q: &str,
     name: &str,
     names: &[DefinedName],
+    builtin: &HashSet<String>,
     cells: &SheetCells,
     dates: &HashMap<(u32, u32), u32>,
     scan: &SheetScan,
@@ -700,7 +702,12 @@ fn sheet_layout(
         }
     };
     let style = |_: u32, _: u32| sheetlayout::Style::default();
-    let (names, caption_names) = layout::sheet_names(names, name);
+    // A name the file marks as built in is never a caption, with or without `_xlnm.`.
+    let (mut names, mut caption_names) = layout::sheet_names(names, name);
+    for n in &mut names {
+        n.builtin |= builtin.contains(&n.name.to_lowercase());
+    }
+    caption_names.retain(|c| !builtin.contains(&c.name.to_lowercase()));
     let signals = layout::Signals {
         names,
         ..layout::Signals::default()
