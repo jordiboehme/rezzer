@@ -14,8 +14,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rezzer_model::{
-    Block, Document, FormatId, FormulaKind, Inline, Overview as Model, OverviewPart, Role,
-    SectionKind, Value,
+    Block, Document, FormatId, FormulaKind, Inline, LayoutKind, Overview as Model, OverviewPart,
+    Role, SectionKind, Value,
 };
 
 use crate::anchors::{collect, sheet_prefixes};
@@ -187,6 +187,9 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 
 /// For a sheet: `<n> rows x <m> columns`, data rows without header rows, from the first table
 /// without a role (a table a reader generated, such as a summary, is not the sheet's data).
+/// When a layout split the sheet into regions, the first region of kind table counts, and
+/// `, <k> regions` follows when there is more than one; a sheet without a table region is
+/// `<k> regions`.
 /// When the document has only this one sheet and the reader gave `rows` and `columns`
 /// properties, those are the size and the rows in the table are noted as shown when fewer.
 /// For any other part: the paragraph count.
@@ -195,15 +198,39 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
         return String::new();
     };
     if *kind == SectionKind::Sheet {
+        // The sheet's regions, when a layout found them (decision 10): the first region of
+        // kind table gives the size, and the count is added when there are more.
+        let regions = blocks
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Table {
+                        layout: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
         let table = blocks.iter().find_map(|b| match b {
             Block::Table {
                 rows,
                 header_rows,
                 role: None,
+                layout,
                 ..
-            } => Some((rows, *header_rows)),
+            } if regions == 0 || layout.as_ref().is_some_and(|l| l.kind == LayoutKind::Table) => {
+                Some((rows, *header_rows))
+            }
             _ => None,
         });
+        let more = match regions {
+            0 | 1 => String::new(),
+            n => format!(", {n} regions"),
+        };
+        if regions > 0 && table.is_none() && totals.is_none() {
+            return plural(regions, "region", "regions");
+        }
         let shown = table.map(|(rows, header)| {
             let columns = rows
                 .iter()
@@ -227,7 +254,7 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
             }
             (None, Some((rows, columns))) => {
                 return format!(
-                    "{} x {}",
+                    "{} x {}{more}",
                     plural(rows, "row", "rows"),
                     plural(columns, "column", "columns")
                 );

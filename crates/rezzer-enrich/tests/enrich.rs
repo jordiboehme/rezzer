@@ -1057,3 +1057,69 @@ fn references_to_fields_the_form_did_not_keep_are_said_once() {
         ]
     );
 }
+
+/// A sheet table with a layout of this kind.
+fn region(name: &str, kind: rezzer_model::LayoutKind, rows: usize, cols: usize) -> Block {
+    let Block::Section { mut blocks, .. } = sheet(name, rows, cols) else {
+        unreachable!()
+    };
+    let mut table = blocks.remove(0);
+    if let Block::Table { layout, .. } = &mut table {
+        *layout = Some(Box::new(rezzer_model::TableLayout {
+            kind,
+            key: format!("{name}!A1"),
+            range: "A1".into(),
+            data: None,
+            header_rows: Vec::new(),
+            header_paths: Vec::new(),
+            label_cols: 0,
+            certainty: rezzer_model::Certainty::Rule,
+            found_by: Vec::new(),
+            unsure: Vec::new(),
+            rows: Vec::new(),
+            hidden_header: false,
+        }));
+    }
+    table
+}
+
+#[test]
+fn sheet_size_counts_regions() {
+    use rezzer_model::LayoutKind;
+    let mut d = doc();
+    // A title, a list of pairs, then the first table: its data rows and columns, and the
+    // regions counted.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Report".into()),
+        anchor: Some(a("Report")),
+        blocks: vec![
+            region("Report", LayoutKind::Title, 0, 0),
+            region("Report", LayoutKind::KeyValue, 5, 2),
+            region("Report", LayoutKind::Table, 8, 3),
+            region("Report", LayoutKind::Table, 20, 9),
+        ],
+    });
+    // One table region only: the size as before, no region count.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Data".into()),
+        anchor: Some(a("Data")),
+        blocks: vec![region("Data", LayoutKind::Table, 4, 2)],
+    });
+    // No table region: the regions are counted.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Notes".into()),
+        anchor: Some(a("Notes")),
+        blocks: vec![
+            region("Notes", LayoutKind::Text, 3, 1),
+            region("Notes", LayoutKind::KeyValue, 2, 2),
+        ],
+    });
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    assert_eq!(o.parts[0].size, "7 rows x 3 columns, 4 regions");
+    assert_eq!(o.parts[1].size, "3 rows x 2 columns");
+    assert_eq!(o.parts[2].size, "2 regions");
+}
