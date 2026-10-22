@@ -523,3 +523,241 @@ fn every_corpus_workbook_reads_without_panic() {
     }
     assert!(seen >= 20, "{seen}");
 }
+
+fn styles_from(inner: &str) -> sheetparts::ooxml::Styles {
+    let bytes = package(
+        "",
+        &[("rId1", &office_rel("styles"), "styles.xml")],
+        &[(
+            "xl/styles.xml",
+            format!("<styleSheet xmlns=\"{NS}\">{inner}</styleSheet>"),
+        )],
+    );
+    read(&bytes).styles
+}
+
+fn xfs(list: &[&str]) -> String {
+    format!(
+        "<cellXfs count=\"{}\">{}</cellXfs>",
+        list.len(),
+        list.concat()
+    )
+}
+
+#[test]
+fn bold_from_named_style_counts() {
+    let styles = styles_from(&format!(
+        "<fonts count=\"3\"><font><sz val=\"11\"/></font><font><b/></font><font><b val=\"0\"/></font></fonts>\
+         <fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>\
+         <borders count=\"1\"><border><left/><right/><top/><bottom/></border></borders>\
+         <cellStyleXfs count=\"2\"><xf fontId=\"0\"/><xf fontId=\"1\"/></cellStyleXfs>{}",
+        xfs(&[
+            "<xf xfId=\"0\" fontId=\"0\"/>",
+            "<xf xfId=\"1\"/>",
+            "<xf xfId=\"1\" fontId=\"2\"/>",
+            "<xf/>",
+            "<xf fontId=\"1\"/>",
+            "<xf fontId=\"9\"/>",
+        ])
+    ));
+    assert!(styles.has_looks());
+    let bold: Vec<bool> = (0..6).map(|i| styles.look(i).unwrap().bold).collect();
+    // A named bold style counts; a cell font with b val=0 over a bold style is not bold.
+    assert_eq!(bold, vec![false, true, false, false, true, false]);
+    assert_eq!(styles.look(6), None);
+}
+
+#[test]
+fn bold_val_false_is_not_bold() {
+    let styles = styles_from(&format!(
+        "<fonts count=\"2\"><font><b val=\"false\"/></font><font><b val=\"1\"/></font></fonts>\
+         <fills count=\"0\"/><borders count=\"0\"/>{}",
+        xfs(&["<xf fontId=\"0\"/>", "<xf fontId=\"1\"/>"])
+    ));
+    assert!(!styles.look(0).unwrap().bold);
+    assert!(styles.look(1).unwrap().bold);
+}
+
+#[test]
+fn white_solid_and_gray125_are_not_filled() {
+    let fill = |p: &str, c: &str| {
+        format!("<fill><patternFill patternType=\"{p}\">{c}</patternFill></fill>")
+    };
+    let fills = [
+        "<fill><patternFill patternType=\"none\"/></fill>".to_string(),
+        "<fill><patternFill patternType=\"gray125\"/></fill>".to_string(),
+        fill("solid", "<fgColor rgb=\"FFFFFFFF\"/>"),
+        fill("solid", "<fgColor theme=\"0\"/>"),
+        fill("solid", "<fgColor indexed=\"64\"/>"),
+        fill("solid", "<fgColor auto=\"1\"/>"),
+        fill("solid", "<fgColor indexed=\"9\"/>"),
+        fill("solid", "<fgColor rgb=\"FFFFFF00\"/>"),
+        fill("lightGray", "<fgColor rgb=\"FFFFFF00\"/>"),
+        fill("solid", "<fgColor theme=\"4\"/>"),
+        fill("solid", ""),
+    ];
+    let list: Vec<String> = (0..fills.len())
+        .map(|i| format!("<xf fillId=\"{i}\"/>"))
+        .collect();
+    let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+    let styles = styles_from(&format!(
+        "<fonts count=\"1\"><font/></fonts><fills count=\"{}\">{}</fills><borders count=\"0\"/>{}",
+        fills.len(),
+        fills.concat(),
+        xfs(&refs)
+    ));
+    let filled: Vec<bool> = (0..fills.len() as u32)
+        .map(|i| styles.look(i).unwrap().filled)
+        .collect();
+    assert_eq!(
+        filled,
+        vec![
+            false, false, false, false, false, false, false, true, false, true, false
+        ]
+    );
+}
+
+#[test]
+fn hairline_is_no_rule() {
+    let border = |top: &str, bottom: &str| {
+        let side = |n: &str, s: &str| {
+            if s.is_empty() {
+                format!("<{n}/>")
+            } else {
+                format!("<{n} style=\"{s}\"><color auto=\"1\"/></{n}>")
+            }
+        };
+        format!(
+            "<border><left/><right/>{}{}</border>",
+            side("top", top),
+            side("bottom", bottom)
+        )
+    };
+    let borders = [
+        border("", ""),
+        border("hair", "dotted"),
+        border("dashed", "dashDot"),
+        border("thin", ""),
+        border("", "medium"),
+        border("thick", "double"),
+    ];
+    let list: Vec<String> = (0..borders.len())
+        .map(|i| format!("<xf borderId=\"{i}\"/>"))
+        .collect();
+    let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+    let styles = styles_from(&format!(
+        "<fonts count=\"1\"><font/></fonts><fills count=\"0\"/><borders count=\"{}\">{}</borders>{}",
+        borders.len(),
+        borders.concat(),
+        xfs(&refs)
+    ));
+    let rules: Vec<(bool, bool)> = (0..borders.len() as u32)
+        .map(|i| {
+            let l = styles.look(i).unwrap();
+            (l.rule_above, l.rule_below)
+        })
+        .collect();
+    assert_eq!(
+        rules,
+        vec![
+            (false, false),
+            (false, false),
+            (false, false),
+            (true, false),
+            (false, true),
+            (true, true)
+        ]
+    );
+}
+
+#[test]
+fn indent_and_center_across() {
+    let styles = styles_from(&format!(
+        "<fonts count=\"1\"><font/></fonts><fills count=\"0\"/><borders count=\"0\"/>{}",
+        xfs(&[
+            "<xf/>",
+            "<xf><alignment indent=\"2\"/></xf>",
+            "<xf><alignment horizontal=\"centerContinuous\"/></xf>",
+            "<xf><alignment horizontal=\"center\" indent=\"999\"/></xf>",
+        ])
+    ));
+    let l: Vec<_> = (0..4).map(|i| styles.look(i).unwrap()).collect();
+    assert_eq!((l[0].indent, l[0].center_across), (0, false));
+    assert_eq!((l[1].indent, l[1].center_across), (2, false));
+    assert_eq!((l[2].indent, l[2].center_across), (0, true));
+    // Plain centering is not center across selection; a huge indent is clamped.
+    assert_eq!((l[3].indent, l[3].center_across), (255, false));
+}
+
+#[test]
+fn missing_styles_part_has_no_looks() {
+    let none = read(&package("", &[], &[])).styles;
+    assert!(!none.has_looks());
+    assert_eq!(none.look(0), None);
+    // A part without fills is a missing signal too.
+    let partial = styles_from(&format!(
+        "<fonts count=\"1\"><font><b/></font></fonts><borders count=\"0\"/>{}",
+        xfs(&["<xf/>"])
+    ));
+    assert!(!partial.has_looks());
+    // A numFmt-only styles part keeps its number formats.
+    let only = styles_from(&xfs(&["<xf numFmtId=\"10\"/>"]));
+    assert!(!only.has_looks());
+    assert_eq!(only.number_format(0), Some("0.00%"));
+}
+
+#[test]
+fn print_title_rows_by_scope() {
+    use sheetparts::ooxml::print_title_rows;
+    use sheetparts::{DefinedName, RowSpan};
+    let name = |n: &str, scope: Option<&str>, to: &str| DefinedName {
+        name: n.to_string(),
+        scope: scope.map(str::to_string),
+        refers_to: to.to_string(),
+        hidden: false,
+        comment: None,
+    };
+    let names = vec![
+        name("_xlnm.Print_Titles", Some("A"), "A!$1:$2"),
+        name(
+            "_xlnm.Print_Titles",
+            Some("My Sheet!"),
+            "'My Sheet!'!$A:$B,'My Sheet!'!$3:$3",
+        ),
+        name("Print_Titles", Some("C"), "C!$5:$7"),
+        name("_xlnm.Print_Titles", Some("D"), "D!$A:$C"),
+        name("_xlnm.Print_Titles", None, "A!$9:$9"),
+        name("_xlnm.Print_Area", Some("E"), "E!$1:$2"),
+    ];
+    assert_eq!(
+        print_title_rows(&names, "A"),
+        Some(RowSpan { first: 0, last: 1 })
+    );
+    assert_eq!(
+        print_title_rows(&names, "My Sheet!"),
+        Some(RowSpan { first: 2, last: 2 })
+    );
+    assert_eq!(
+        print_title_rows(&names, "C"),
+        Some(RowSpan { first: 4, last: 6 })
+    );
+    // Columns only, a global name and another name give nothing.
+    assert_eq!(print_title_rows(&names, "D"), None);
+    assert_eq!(print_title_rows(&names, "E"), None);
+    assert_eq!(print_title_rows(&names, "Z"), None);
+
+    let bytes = package(
+        "<sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets>\
+         <definedNames><definedName name=\"_xlnm.Print_Titles\" localSheetId=\"0\">S!$1:$2</definedName></definedNames>",
+        &[("rId1", &office_rel("worksheet"), "worksheets/sheet1.xml")],
+        &[(
+            "xl/worksheets/sheet1.xml",
+            format!("<worksheet xmlns=\"{NS}\"/>"),
+        )],
+    );
+    let wb = read(&bytes);
+    assert_eq!(
+        print_title_rows(&wb.names, "S"),
+        Some(RowSpan { first: 0, last: 1 })
+    );
+}

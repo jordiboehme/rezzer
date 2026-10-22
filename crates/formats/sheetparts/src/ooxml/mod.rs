@@ -14,13 +14,13 @@ mod workbook;
 pub use crate::DefinedName;
 pub use props::{DocProps, read_doc_props};
 pub use sheet::{
-    AttrKind, Chart, CondFormat, FormulaAttr, Note, Pivot, SheetParts, TableInfo, Thread,
+    AttrKind, Chart, CondFormat, FormulaAttr, Frozen, Note, Pivot, SheetParts, TableInfo, Thread,
     Validation, read_sheet,
 };
 pub use styles::Styles;
 pub use workbook::{
     CalcMode, CalcSettings, ExternalLink, Person, SheetInfo, SheetState, WorkbookParts,
-    read_workbook,
+    print_title_rows, read_workbook,
 };
 
 use zipguard::{Archive, ZipError};
