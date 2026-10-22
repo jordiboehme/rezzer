@@ -82,7 +82,7 @@ A sheet is often more than one table. It has titles, notes, header rows over two
 - Group rows inside a table, like `Year 2024` over its months
 - Row levels from row outlines, indents and leading dots, shown as a `Parent` column
 - Subtotal and total rows
-- Report sheets: section headings, label and value blocks (`Label: value unit`) and text lists
+- Report sheets: section headings, label and value blocks (`Label: value unit`) and text lists. A third column of unit symbols like `m`, `kPa` or `kg/m3` is read as the unit
 
 ### How it decides
 
@@ -94,7 +94,7 @@ Totals come from facts and formulas only: a totals row of an Excel table, a gran
 
 ### How it shows up
 
-Each part gets a heading: its title when it has one, else its kind and range, like `### Table E48:F72`. A sheet with only one table and no title gets no extra heading. A layout line under the heading says where the table is and how it was found:
+Each part gets a heading: its title when it has one, else the name of its Excel table or of a defined name over it, else its kind and range, like `### Table A40:C40`. A title right on top of a side table is that table's title. A sheet with only one table and no title gets no extra heading. A layout line under the heading says where the table is and how it was found:
 
 ```markdown
 Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
@@ -111,7 +111,7 @@ With `--table-style records` (MCP `table_style: "records"`, or `table_style = "r
   - Generation at Utility Scale Facilities / Petroleum Liquids: 740
 ```
 
-Records repeat the header, so they cost about four times as much as a table line. In return each row stands on its own. Empty cells are left out. A raw grid stays a grid, and label and value blocks and text lists look the same in both styles.
+Records repeat the header, so they cost about four times as much as a table line. In return each row stands on its own. Empty cells are left out. A raw grid stays a grid. A table without a header row stays a table too, because there is no header to name the fields: its layout line says so. Label and value blocks and text lists look the same in both styles.
 
 `--sheet <name>` (MCP `sheets`) reads only some sheets, by name or by position like `#2`. Give it more than once for more sheets. Rezzer still reads the whole workbook, so formulas that read other sheets stay correct. The overview marks the other sheets as not selected.
 
