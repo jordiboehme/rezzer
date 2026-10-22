@@ -411,7 +411,7 @@ pub fn blocks(
         );
     }
     for &k in &loose {
-        ctx.paragraph(k, "note");
+        ctx.paragraph(k, "cell");
     }
     covered_losses(&mut ctx, &covered_cells, merges);
     issue_losses(&mut ctx, layout);
@@ -637,7 +637,7 @@ fn map_region(
     let table = build_table(ctx, region, span, &lines, &in_table, merges, names, caption);
     ctx.out.blocks.push(table);
     for &k in &rest {
-        ctx.paragraph(k, "note");
+        ctx.paragraph(k, "cell");
     }
     for &(line, k) in &by_line {
         if line == Line::Note {
@@ -874,7 +874,7 @@ fn table_cells(
     // Cells past the shown columns or rows, or under a merge clipped to the table, are said
     // by the cap losses; any other cell left is written as a line so none is lost.
     for k in leftover {
-        ctx.paragraph(k, "note");
+        ctx.paragraph(k, "cell");
     }
     rows
 }
