@@ -15,6 +15,12 @@
 //! reserves 64 KiB more each time) would be copied whole at every step, which is quadratic.
 //! Growth by doubling, as `Vec` does it, is moved; smaller growth and shrinking go to the
 //! system's realloc, which does them in place.
+//!
+//! The move is the same on every system, though the cause was seen on macOS only. On Linux,
+//! glibc can grow a large block in place by remapping its pages, and the move gives that up
+//! for one copy of each large doubling. It is kept there so the binary behaves the same on
+//! every system, and so the memory tests that CI runs on Linux measure the allocator that
+//! ships, not a variant of it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 
@@ -30,7 +36,7 @@ fn moved_by_hand(old: usize, new: usize) -> bool {
             .is_some_and(|half_more| new >= half_more)
 }
 
-/// The system allocator, with large blocks moved by hand when they grow or shrink.
+/// The system allocator, with large blocks moved by hand when they grow by half or more.
 pub struct Allocator;
 
 // SAFETY: every call goes to `System` with the layout it was given; `realloc` keeps the
