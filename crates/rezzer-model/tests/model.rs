@@ -917,6 +917,29 @@ fn locate_cells_finds_the_area_of_each_point() {
 }
 
 #[test]
+fn locate_cells_finds_the_holder_past_many_overlapping_areas() {
+    use rezzer_model::{CellArea, OVERLAP_SCAN, locate_cells};
+    // An outer area A1:CA10 and one-column areas in B, C, ... inside it, one more than the
+    // search looks at once it has a holder. A point right of all of them still goes to the
+    // outer area.
+    let mut areas = vec![CellArea {
+        top: 0,
+        left: 0,
+        bottom: 9,
+        right: 78,
+    }];
+    for col in 1..=(OVERLAP_SCAN as u32 + 1) {
+        areas.push(CellArea {
+            top: 0,
+            left: col,
+            bottom: 9,
+            right: col,
+        });
+    }
+    assert_eq!(locate_cells(&areas, &[(4, 70), (4, 3)]), [Some(0), Some(3)]);
+}
+
+#[test]
 fn locate_cells_gives_overlapping_areas_to_the_innermost() {
     use rezzer_model::{CellArea, locate_cells};
     let area = |top, left, bottom, right| CellArea {

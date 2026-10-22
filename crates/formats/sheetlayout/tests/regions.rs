@@ -368,6 +368,36 @@ fn overlapping_facts_lose_no_cell() {
 }
 
 #[test]
+fn many_overlapping_facts_lose_no_cell() {
+    // An outer fact and 65 one-column facts inside it, more than the search looks at once it
+    // has a holder: the cell right of them all still reaches the outer fact.
+    let mut sheet = Sheet::new()
+        .cell("A1", "Title")
+        .cell("A2", "Region")
+        .cell("BS6", "51")
+        .fact("A1:CA10", bare_list_object("Outer", 0));
+    for col in 1..=65u32 {
+        let letter = sheetlayout::column_letters(col);
+        sheet = sheet.fact(
+            &format!("{letter}1:{letter}10"),
+            bare_list_object(&format!("N{col}"), 0),
+        );
+    }
+    let input = sheet.input();
+    let layout = sheetlayout::detect(&input, &Limits::default(), &never);
+    let outer = layout
+        .regions
+        .iter()
+        .find(|r| {
+            r.evidence.contains(&Evidence::ListObject {
+                name: "Outer".to_string(),
+            })
+        })
+        .expect("the outer region");
+    assert_eq!(outer.data, Some(rect("A1:CA10")));
+}
+
+#[test]
 fn name_joins_regions_across_gap() {
     // Census shape: A1:F60 and A62:F68 with the name _NST01 over A4:F62.
     let layout = census(true).segment();

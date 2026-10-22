@@ -37,5 +37,5 @@ pub use layout::{
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
-pub use sheet::{CellArea, locate_cells, table_headings};
+pub use sheet::{CellArea, OVERLAP_SCAN, locate_cells, table_headings};
 pub use value::Value;

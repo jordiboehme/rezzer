@@ -236,8 +236,10 @@ impl<'p, 'a> Lines<'p, 'a> {
     }
 }
 
-/// How many open regions left of a cell the search looks at when facts overlap. Past this
-/// many the smallest region found so far takes the cell, so the cost stays bounded.
+/// How many open regions left of a cell the search looks at when facts overlap, once one of
+/// them holds the cell: past this many the smallest region found so far takes it. Until a
+/// region holds the cell the search goes on, over at most every open region (at most
+/// `Limits::max_regions`), and the stop callback is asked at each step.
 const OVERLAP_SCAN: usize = 64;
 
 /// Gives each region the cells it holds, by a sweep over the rows with the regions that are
@@ -277,7 +279,7 @@ fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option
                 best = Some(i);
             }
             looked += 1;
-            if !overlap || looked >= OVERLAP_SCAN {
+            if !overlap || (looked >= OVERLAP_SCAN && best.is_some()) {
                 break;
             }
             if tick.step() {

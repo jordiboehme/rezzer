@@ -18,9 +18,10 @@ pub struct CellArea {
     pub right: u32,
 }
 
-/// How many open areas left of a point the search looks at when areas overlap. A damaged
-/// file can stack many overlapping ranges; past this many the smallest area found so far
-/// holds the point, so the cost stays bounded.
+/// How many open areas left of a point the search looks at when areas overlap, once one of
+/// them holds the point: a damaged file can stack many overlapping ranges, and past this many
+/// the smallest area found so far holds the point. Until an area holds it the search goes on,
+/// over at most every open area (the sheet reader keeps at most 10,000 regions per sheet).
 pub const OVERLAP_SCAN: usize = 64;
 
 /// The index of the area that holds each `(row, column)` point, 0-based. One sweep by row
@@ -63,8 +64,9 @@ pub fn locate_cells(areas: &[CellArea], points: &[(u32, u32)]) -> Vec<Option<usi
             }
             looked += 1;
             // Without overlaps the nearest open area left of the point is the only one that
-            // can hold it.
-            if !overlap || looked >= OVERLAP_SCAN {
+            // can hold it. With overlaps the search stops at the cap only once an area holds
+            // the point, so a point never goes to no area while one holds it.
+            if !overlap || (looked >= OVERLAP_SCAN && best.is_some()) {
                 break;
             }
         }
