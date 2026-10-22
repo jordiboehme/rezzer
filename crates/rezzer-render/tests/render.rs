@@ -4099,7 +4099,7 @@ fn headerless_table_has_letter_header_and_no_row_numbers() {
 fn unnamed_header_column_is_a_letter_in_sheets_and_a_number_in_csv() {
     let mut l = lay(LayoutKind::Table, "A1:D2", Some("A2:D2"));
     l.header_rows = vec![1];
-    l.header_paths = vec!["id".into(), "qty".into(), "price".into()];
+    l.header_paths = vec!["id".into(), "qty".into(), "price".into(), String::new()];
     let block = ltable(
         vec![
             vec![
@@ -4131,15 +4131,27 @@ fn unnamed_header_column_is_a_letter_in_sheets_and_a_number_in_csv() {
             },
         )
     };
+    // The layout line names the column without a header as the header does; ranges stay
+    // in letters.
     let md = render_as(FormatId::Xlsx, TableStyle::Table);
     assert!(md.contains("| id | qty | price | Column D |"), "{md}");
+    assert!(
+        md.contains("Table A1:D2 (data A2:D2), header row 1, 1 column without a header: D,"),
+        "{md}"
+    );
     let md = render_as(FormatId::Csv, TableStyle::Table);
     assert!(md.contains("| id | qty | price | Column 4 |"), "{md}");
-    assert!(!md.contains("Column D"), "{md}");
+    assert!(
+        md.contains("Table A1:D2 (data A2:D2), header row 1, 1 column without a header: 4,"),
+        "{md}"
+    );
+    assert!(!md.contains("Column D") && !md.contains("header: D"), "{md}");
     let md = render_as(FormatId::Tsv, TableStyle::Records);
     assert!(md.contains("  - Column 4: 9"), "{md}");
+    assert!(md.contains("1 column without a header: 4,"), "{md}");
     let md = render_as(FormatId::Xlsx, TableStyle::Records);
     assert!(md.contains("  - Column D: 9"), "{md}");
+    assert!(md.contains("1 column without a header: D,"), "{md}");
 }
 
 #[test]

@@ -395,8 +395,9 @@ fn fact_words(e: &Evidence) -> Option<String> {
 }
 
 /// The line that says where a table or grid region is and how it was found (spec 7.2). For
-/// records it says that empty cells are left out of them.
-fn layout_line(layout: &TableLayout, left: u32, records: bool) -> String {
+/// records it says that empty cells are left out of them. `numbers` names the columns
+/// without a header by number, as their header does (CSV and TSV).
+fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) -> String {
     let grid = layout.kind == LayoutKind::Grid;
     let mut line = format!(
         "{} {}",
@@ -482,7 +483,13 @@ fn layout_line(layout: &TableLayout, left: u32, records: bool) -> String {
                 .take(MAX_COLUMNS)
                 .enumerate()
                 .filter(|(_, p)| p.trim().is_empty())
-                .map(|(c, _)| letter(left, c))
+                .map(|(c, _)| {
+                    if numbers {
+                        (u64::from(left) + c as u64 + 1).to_string()
+                    } else {
+                        letter(left, c)
+                    }
+                })
                 .collect();
             match bare.len() {
                 0 => {}
@@ -597,7 +604,7 @@ fn table(
 ) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, false);
+    let line = layout_line(layout, left, false, numbers);
     if rows.is_empty() {
         return line;
     }
@@ -660,7 +667,7 @@ fn table(
 fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, false);
+    let line = layout_line(layout, left, false, false);
     if rows.is_empty() {
         return line;
     }
@@ -727,7 +734,7 @@ fn records(
 ) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, true);
+    let line = layout_line(layout, left, true, ctx.column_numbers);
     if rows.is_empty() {
         return line;
     }
