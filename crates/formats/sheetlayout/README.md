@@ -96,22 +96,27 @@ region, and an issue says so.
 After the header, `detect` looks at the rows of each table.
 
 - A row with one text in the first column, or one merged area over at least 80 % of the
-  width, is a group row when data rows follow it.
-- Rows with one text at the end of a table are notes.
+  width, is a group row when a data row follows it. Several such rows in a row are nested
+  groups when a data row follows the last one.
+- Rows with one text at the end of a table are notes. A label alone in the first column is
+  a data row with empty values, not a note.
 - Rows can have levels: from the row outline first, then from the indent, then from the
   length of leading spaces or dots. The parent of a row is the nearest row above it with a
-  lower level. When no row gets a parent, no levels are given.
+  lower level. Group rows can be parents. When no row gets a parent, no levels are given.
 - A row is a subtotal or a total only by a fact or a formula: an Excel table totals row, a
   database range footer, a pivot total row, a formula with SUBTOTAL or AGGREGATE, or a SUM
-  over the rows above in its own column. A row with the word "Total" and no formula stays a
-  data row.
+  over the rows above in its own column. A SUM that a later total reads is a subtotal. A
+  SUM that no later total reads and that covers the table from its first data row is the
+  total. A SUM that also reads its own row, such as a running balance, marks nothing. A row
+  with the word "Total" and no formula stays a data row.
+- Header-less tables get the same row rules.
 
 ## Report sheets
 
 A region with no header goes through these rules, in this order:
 
 - Section headings: a row with one text in the first column, bold, filled or merged, cuts
-  the region when a row with more than one text follows it. Without styles only a merge
+  the region when a row follows it that is not a single line of text. Without styles only a merge
   counts. Each part is read again with all the rules.
 - Label and value pairs: 2 or 3 columns, at least 2 rows, a different label in the first
   column of every row and at least one value. A third column must hold units.
@@ -134,5 +139,11 @@ These rules have limits:
 - A note wider than its table is not joined to it.
 - An Excel table, database range or pivot table is never continued by another region.
 - Sections that would pass the region limit are not cut, and an issue says so.
+- When totals stand below their items, a subtotal row can become the parent of the items
+  of the next block.
+- A label alone in the first column with a data row after it reads as a group row, even
+  when it is a data row with empty values.
+- A line of text in the first column right under a table, with no empty row between, is a
+  data row of that table, not a note. A merged line is a note.
 
 License: MPL-2.0

@@ -121,13 +121,55 @@ fn notes_below_attach() {
 #[test]
 fn trailing_rows_of_one_text_are_notes() {
     let layout = small_table()
-        .rows("A4", &["Note 1", "Note 2"])
+        .rows("A4", &["|Note 1", "Note 2"])
         .merge("A5:C5")
         .detect();
     let r = only(&layout);
     assert_eq!(ones(&r.notes), [4, 5]);
     assert_eq!(r.data, Some(rect("A2:C3")));
     assert!(r.rows.iter().all(|n| n.kind != RowKind::Group));
+    // A label alone in the first column, with no data row after it, is a data row with
+    // empty values, not a note.
+    let layout = small_table()
+        .rows("A4", &["Note 1", "Note 2"])
+        .merge("A5:C5")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(ones(&r.notes), [5]);
+    assert_eq!(r.data, Some(rect("A2:C4")));
+}
+
+#[test]
+fn label_only_rows_stay_data() {
+    // Sparse data: "b" is followed by a data row and reads as a group row; "d" at the end
+    // is a data row with empty values, not a note.
+    let layout = Sheet::new()
+        .rows("A1", &["Name|Q1|Q2", "a|1|2", "b||", "c|3|4", "d||"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Group), [3]);
+    assert!(r.notes.is_empty());
+    assert_eq!(r.data, Some(rect("A2:C5")));
+}
+
+#[test]
+fn group_rows_need_data_rows_after_them() {
+    // Group rows in a row are nested groups: both are followed by data rows.
+    let layout = Sheet::new()
+        .rows(
+            "A1",
+            &["Item|Value", "Annual Totals", "Year 2024", "a|1", "b|2"],
+        )
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Group), [2, 3]);
+    // A label followed by a unit row is no group row: no data row follows it.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V|W", "a|1|2", "Fruit||", "|kg|", "b|3|4"])
+        .merge("A3:B3")
+        .detect();
+    let r = only(&layout);
+    assert!(rows_of(r, RowKind::Group).is_empty(), "{:?}", r.rows);
+    assert!(r.notes.is_empty());
 }
 
 #[test]
@@ -308,15 +350,17 @@ fn group_rows_inside_table() {
     let r = only(&layout);
     assert_eq!(rows_of(r, RowKind::Group), [2]);
     assert_eq!(note(r, 2).unwrap().why, "one text in the first column");
-    // A merge over 80 % of the width is across the table; over 60 % it is not, and a text
-    // that is not in the first column is no group row then.
-    let base = Sheet::new().rows(
-        "A1",
-        &["Item|A|B|C|D", "a|1|2|3|4", "|Fruit|||", "b|5|6|7|8"],
-    );
-    let r = base.clone().merge("B3:E3").detect().regions.remove(0);
+    // A merge over 80 % of the width is across the table; over 75 % it is not, and a text
+    // that is not in the first column is no group row then. The text is in the merge.
+    let head: Vec<String> = (0..20).map(|k| format!("h{k}")).collect();
+    let one: Vec<String> = (0..20).map(|k| k.to_string()).collect();
+    let (head, one) = (head.join("|"), one.join("|"));
+    let base = Sheet::new()
+        .rows("A1", &[&head, &one, "", &one])
+        .cell("E3", "Fruit");
+    let r = base.clone().merge("E3:T3").detect().regions.remove(0);
     assert_eq!(rows_of(&r, RowKind::Group), [3]);
-    let r = base.merge("C3:E3").detect().regions.remove(0);
+    let r = base.merge("E3:S3").detect().regions.remove(0);
     assert!(rows_of(&r, RowKind::Group).is_empty(), "{:?}", r.rows);
 }
 
@@ -348,6 +392,7 @@ fn hierarchy_by_outline_indent_then_text() {
     let r = only(&layout);
     assert_eq!(r.label_cols, 1);
     assert_eq!(note(r, 2).unwrap().level, Some(0));
+    assert_eq!(note(r, 2).unwrap().why, "outline level 0");
     let a = note(r, 3).unwrap();
     assert_eq!((a.level, a.parent), (Some(1), Some(1)));
     assert_eq!(a.why, "outline level 1");
@@ -561,6 +606,7 @@ fn fact_totals_rows_are_totals() {
     // Fact regions go through step 6c too: group rows and trailing notes.
     let layout = Sheet::new()
         .rows("A1", &["Item|Value", "a|1", "Fruit|", "b|2", "Note|"])
+        .merge("A5:B5")
         .fact("A1:B5", list_object("T"))
         .detect();
     let r = only(&layout);
@@ -694,6 +740,12 @@ fn sections_respect_depth_and_region_limits() {
     let layout = detect(&input, &limits, &never);
     every_cell_once(&input, &layout);
     assert!(layout.regions.iter().all(|r| r.heading.is_none()));
+    let limits = Limits {
+        max_section_depth: 1,
+        ..Limits::default()
+    };
+    let layout = detect(&input, &limits, &never);
+    assert!(layout.regions.iter().any(|r| r.heading.is_some()));
     let limits = Limits {
         max_regions: 1,
         ..Limits::default()
@@ -1011,4 +1063,242 @@ fn every_cell_in_exactly_one_region() {
             }
         }
     }
+}
+
+// Fix round 1.
+
+/// A two-group statement: group rows, indented items, SUM totals per group and a SUM over
+/// the two group totals.
+fn statement() -> Sheet {
+    Sheet::styled()
+        .rows(
+            "A1",
+            &[
+                "*Statement",
+                "*Item|*2024|*2025",
+                "Revenue",
+                "~Sales|10|11",
+                "~Fees|2|3",
+                "Total revenue|=12|=14",
+                "Expenses",
+                "~Wages|5|6",
+                "~Rent|1|1",
+                "Total expenses|=6|=7",
+                "Net income|=6|=7",
+            ],
+        )
+        .formula("B6", &["SUM"], &["B4:B5"])
+        .formula("C6", &["SUM"], &["C4:C5"])
+        .formula("B10", &["SUM"], &["B8:B9"])
+        .formula("C10", &["SUM"], &["C8:C9"])
+        .formula("B11", &["SUM"], &["B6", "B10"])
+        .formula("C11", &["SUM"], &["C6", "C10"])
+}
+
+#[test]
+fn group_rows_are_parents() {
+    let layout = statement().detect();
+    let r = only(&layout);
+    assert_eq!(ones(&r.header_rows), [2]);
+    assert_eq!(rows_of(r, RowKind::Group), [3, 7]);
+    for (row, parent) in [(4, 3), (5, 3), (8, 7), (9, 7)] {
+        assert_eq!(note(r, row).unwrap().parent, Some(parent - 1), "row {row}");
+    }
+    // Group rows get no level of their own.
+    assert_eq!(note(r, 3).unwrap().level, None);
+    assert_eq!(note(r, 6).unwrap().parent, None);
+}
+
+#[test]
+fn totals_across_groups() {
+    let layout = statement().detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [6, 10]);
+    assert_eq!(rows_of(r, RowKind::Total), [11]);
+    // SUBTOTAL in one column and a total SUM in another: the row is a total.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V|W", "a|1|2", "b|3|4", "S|=4|=6"])
+        .formula("B4", &["SUBTOTAL"], &["B2:B3"])
+        .formula("C4", &["SUM"], &["C2:C3"])
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Total), [4]);
+}
+
+#[test]
+fn running_balance_is_not_a_total() {
+    let layout = Sheet::new()
+        .rows(
+            "A1",
+            &["Item|In|Balance", "a|5|5", "b|3|=8", "c|2|=10", "d|1|=11"],
+        )
+        .formula("C3", &["SUM"], &["C2", "B3"])
+        .formula("C4", &["SUM"], &["C3", "B4"])
+        .formula("C5", &["SUM"], &["C4:C4", "B5:B5"])
+        .detect();
+    let r = only(&layout);
+    assert!(r.rows.is_empty(), "{:?}", r.rows);
+    // A SUM over one cell in the middle of a block is no total either.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "a|1", "b|2", "c|=2"])
+        .formula("B4", &["SUM"], &["B3"])
+        .detect();
+    assert!(only(&layout).rows.is_empty());
+}
+
+#[test]
+fn headerless_table_gets_row_rules() {
+    let layout = Sheet::new()
+        .rows("A1", &["a|1|2", "b|3|4", "S|=4|=6", "Source: x"])
+        .formula("B3", &["SUBTOTAL"], &["B1:B2"])
+        .merge("A4:C4")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.kind, Kind::Table);
+    assert!(has_rule(r, "H0"));
+    assert_eq!(rows_of(r, RowKind::Subtotal), [3]);
+    assert_eq!(ones(&r.notes), [4]);
+    assert_eq!(r.data, Some(rect("A1:C3")));
+}
+
+fn typed(sheet: Sheet, class: sheetlayout::Class, text: &str, cells: &[&str]) -> Sheet {
+    let mut sheet = sheet;
+    for at in cells {
+        sheet.cells.push(sheetlayout::CellIn {
+            pos: common::pos(at),
+            class,
+            text: text.to_string(),
+            number: None,
+            style: sheetlayout::Style::default(),
+            formula: None,
+        });
+    }
+    sheet
+}
+
+#[test]
+fn values_without_header_are_tables() {
+    // One column of numbers: a table, not a text block.
+    let layout = Sheet::new().rows("A1", &["1", "2", "3"]).detect();
+    let r = only(&layout);
+    assert_eq!(r.kind, Kind::Table);
+    assert!(has_rule(r, "H0"));
+    // Dates only and bools only.
+    let layout = typed(
+        Sheet::new(),
+        sheetlayout::Class::Date,
+        "2024-01-01",
+        &["A1", "B1", "A2", "B2"],
+    )
+    .detect();
+    assert!(has_rule(only(&layout), "H0"));
+    let layout = Sheet::new()
+        .rows("A1", &["TRUE|FALSE", "FALSE|TRUE"])
+        .detect();
+    assert!(has_rule(only(&layout), "H0"));
+}
+
+#[test]
+fn two_stated_totals_rows() {
+    let layout = Sheet::new()
+        .rows("A1", &["Item|Value", "a|1", "b|2", "Sum|3", "Max|2"])
+        .fact(
+            "A1:B5",
+            FactKind::ListObject {
+                name: "T".into(),
+                header_rows: 1,
+                totals_rows: 2,
+                columns: Vec::new(),
+            },
+        )
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Total), [4, 5]);
+}
+
+#[test]
+fn regions_below_that_are_not_joined() {
+    // A lower part with a caption of its own is not a continuation.
+    let layout = small_table().rows("A5", &["Part two", "c|5|6"]).detect();
+    assert_eq!(ranges(&layout), ["A1:C3", "A5:C6"]);
+    // A label and value block one row below is no note.
+    let layout = small_table()
+        .rows("A5", &["Unit|kg", "Source|survey"])
+        .detect();
+    assert_eq!(ranges(&layout), ["A1:C3", "A5:B6"]);
+    assert_eq!(layout.regions[1].kind, Kind::KeyValue);
+    assert!(layout.regions[0].notes.is_empty());
+    // Notes as wide as the table, one row below, are joined by rule C, and they are said
+    // to be notes, not a continuation.
+    let layout = small_table()
+        .cell("A5", "Source: x")
+        .merge("A5:C5")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(ones(&r.notes), [5]);
+    assert!(!has_rule(r, "C"));
+    assert_eq!(rule_detail(r, "N"), "notes in row 5");
+    assert!(r.rows.is_empty(), "{:?}", r.rows);
+}
+
+#[test]
+fn section_heading_width_inside_the_merge() {
+    // The heading text sits inside the merge, not in the first column: the merge must cover
+    // 80 % of the width.
+    let rows = ["a|b|c|d|e", "|Inputs|||", "f|g|h|i|j", "k|l|m|n|o"];
+    let layout = Sheet::new().rows("A1", &rows).merge("A2:D2").detect();
+    assert!(layout.regions.iter().any(|r| r.heading == Some((1, 1))));
+    let layout = Sheet::new().rows("A1", &rows).merge("A2:C2").detect();
+    assert!(layout.regions.iter().all(|r| r.heading.is_none()));
+}
+
+#[test]
+fn sum_kinds_by_reach() {
+    // A SUM that no later total reads but that does not start at the first data row is a
+    // subtotal.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "a|1", "b|2", "c|3", "d|4", "S|=7"])
+        .formula("B6", &["SUM"], &["B4:B5"])
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Subtotal), [6]);
+    // A SUM over the one item after a group row closes that block.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "a|1", "Fruit|", "b|2", "S|=2"])
+        .formula("B5", &["SUM"], &["B4"])
+        .detect();
+    assert_eq!(rows_of(only(&layout), RowKind::Subtotal), [5]);
+    // A SUM over two one-cell totals reaches the first data row through the first of them.
+    let layout = Sheet::new()
+        .rows(
+            "A1",
+            &[
+                "Item|V", "a|1", "b|2", "S|=3", "c|4", "d|5", "T|=9", "All|=12",
+            ],
+        )
+        .formula("B4", &["SUM"], &["B2:B3"])
+        .formula("B7", &["SUM"], &["B5:B6"])
+        .formula("B8", &["SUM"], &["B7", "B4"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rows_of(r, RowKind::Subtotal), [4, 7]);
+    assert_eq!(rows_of(r, RowKind::Total), [8]);
+    // One-cell reads in the middle of a block mark nothing.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|V", "a|1", "b|2", "c|4", "T|=6"])
+        .formula("B5", &["SUM"], &["B3", "B4"])
+        .detect();
+    assert!(only(&layout).rows.is_empty());
+}
+
+#[test]
+fn headerless_wide_table_gets_row_rules() {
+    // Four columns: no label and value block, so step 6g decides.
+    let layout = Sheet::new()
+        .rows("A1", &["a|1|2|3", "b|3|4|5", "S|=4|=6|=8", "Source: x"])
+        .formula("B3", &["SUBTOTAL"], &["B1:B2"])
+        .merge("A4:D4")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(rule_detail(r, "H0"), "no header found");
+    assert!(!has_rule(r, "K"));
+    assert_eq!(rows_of(r, RowKind::Subtotal), [3]);
+    assert_eq!(ones(&r.notes), [4]);
 }

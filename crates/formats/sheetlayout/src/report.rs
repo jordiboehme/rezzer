@@ -113,7 +113,8 @@ pub(crate) fn no_band(
                 id: "H0",
                 detail: "no header found".to_string(),
             });
-            retain_panes(input, lines.rect, region);
+            headerless_rows(lines, w, t, ctx)?;
+            retain_panes(input, lines.rect, &mut w.region);
             return Ok(Vec::new());
         }
         Pairs::No => {}
@@ -142,12 +143,27 @@ pub(crate) fn no_band(
     }
     if values {
         decided(region, Kind::Table, t, "H0", "no header found");
+        headerless_rows(lines, w, t, ctx)?;
     } else {
         // 6h.
         grid(region);
     }
-    retain_panes(input, lines.rect, region);
+    retain_panes(input, lines.rect, &mut w.region);
     Ok(Vec::new())
+}
+
+/// Step 6c on a header-less table, read in its own columns `t`, so its rows get kinds and
+/// notes whether or not a part joins it later.
+fn headerless_rows(lines: &Lines, w: &mut Work, t: Rect, ctx: &mut Ctx) -> Result<(), Halt> {
+    let cells = lines.cells_in(t.top, t.bottom);
+    let Some(own) = Lines::new(lines.prep, t, cells, &w.merges, ctx.tick) else {
+        return Err(Halt::Stopped);
+    };
+    if rows::table_rows(&own, &mut w.region, None, false, ctx.outline, ctx.tick) {
+        Ok(())
+    } else {
+        Err(Halt::Stopped)
+    }
 }
 
 fn grid(region: &mut Region) {
@@ -372,6 +388,13 @@ fn sections(
     ctx.room -= extra;
 
     let mut out = Vec::new();
+    // The region's merges by top row (indices into the sorted merge list are in top order),
+    // walked once: each piece takes those that start in its rows or still reach into them.
+    let mut by_top = w.merges.clone();
+    by_top.sort_unstable();
+    by_top.dedup();
+    let mut next = 0usize;
+    let mut open: Vec<u32> = Vec::new();
     for (k, &i) in heads.iter().enumerate() {
         let head = lines.lines[i].row;
         let end = heads.get(k + 1).copied().unwrap_or(range.end);
@@ -382,12 +405,25 @@ fn sections(
             bottom: last,
             right: data.right,
         };
-        let merges: Vec<u32> = w
-            .merges
-            .iter()
-            .copied()
-            .filter(|&m| prep.merges[m as usize].intersects(&rect))
-            .collect();
+        open.retain(|&m| prep.merges[m as usize].bottom >= rect.top);
+        while next < by_top.len() && prep.merges[by_top[next] as usize].top <= rect.bottom {
+            if tick.step() {
+                return Err(Halt::Stopped);
+            }
+            if prep.merges[by_top[next] as usize].bottom >= rect.top {
+                open.push(by_top[next]);
+            }
+            next += 1;
+        }
+        let mut merges: Vec<u32> = Vec::with_capacity(open.len());
+        for &m in &open {
+            if tick.step() {
+                return Err(Halt::Stopped);
+            }
+            if prep.merges[m as usize].intersects(&rect) {
+                merges.push(m);
+            }
+        }
         let mut piece = Work {
             region: piece_region(&w.region, rect, head, depth),
             merges,
@@ -655,10 +691,24 @@ fn join(
         }
     }
     let first = lowers.first().map_or(bottom, |&j| works[j].region.rect.top);
-    region.evidence.push(Evidence::Rule {
-        id: "C",
-        detail: format!("continued in {}", header::row_words(first, bottom)),
-    });
+    if region.data.is_some_and(|d| d.bottom >= first) {
+        region.evidence.push(Evidence::Rule {
+            id: "C",
+            detail: format!("continued in {}", header::row_words(first, bottom)),
+        });
+    } else {
+        // The parts below added no data row, only notes.
+        let added: Vec<u32> = region
+            .notes
+            .iter()
+            .copied()
+            .filter(|&r| r >= first)
+            .collect();
+        region.evidence.push(Evidence::Rule {
+            id: "N",
+            detail: format!("notes in {}", row_words(&added)),
+        });
+    }
     let coarse = lowers.iter().any(|&j| works[j].coarse);
     let upper = &mut works[i];
     upper.region = region;

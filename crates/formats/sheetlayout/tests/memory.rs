@@ -444,3 +444,50 @@ fn hostile_outline_is_bounded() {
     assert!(used < std::time::Duration::from_secs(2), "{used:?}");
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
+
+#[test]
+fn sections_with_many_merges_are_bounded() {
+    // 8,000 merged section rows without styles, each with a data row that holds 40 merges.
+    let mut sheet = Sheet::new();
+    for k in 0..8_000u32 {
+        let row = 2 * k;
+        sheet.put(Pos { row, col: 0 }, "Section");
+        sheet.merges.push(Rect {
+            top: row,
+            left: 0,
+            bottom: row,
+            right: 41,
+        });
+        sheet.put(
+            Pos {
+                row: row + 1,
+                col: 0,
+            },
+            "Length",
+        );
+        sheet.put(
+            Pos {
+                row: row + 1,
+                col: 1,
+            },
+            "5",
+        );
+        for j in 0..40u32 {
+            sheet.merges.push(Rect {
+                top: row + 1,
+                left: 2 + j,
+                bottom: row + 1,
+                right: 2 + j,
+            });
+        }
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("sections with many merges: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert!(layout.regions.len() >= 7_999);
+    assert!(used < std::time::Duration::from_secs(1), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}
