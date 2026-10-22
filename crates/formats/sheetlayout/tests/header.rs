@@ -1489,3 +1489,51 @@ fn stopped_pivot_keeps_every_cell_once() {
     assert!(r.above_header.is_empty());
     assert_eq!(r.data, Some(rect("A1:C3")));
 }
+
+// Fix round 2: what stops a caption line that a merge carries down (ruling P4-AQ).
+
+/// The region that holds A1.
+fn region_at_a1(layout: &Layout) -> &Region {
+    layout
+        .regions
+        .iter()
+        .find(|r| r.rect.top == 0 && r.rect.left == 0)
+        .unwrap_or_else(|| panic!("no region at A1: {:?}", common::ranges(layout)))
+}
+
+#[test]
+fn formula_beside_the_caption_merge_stops_the_caption_line() {
+    // C2 holds only a formula with an empty result, inside the rows of the caption merge
+    // A1:B3: row 2 is not part of the caption line.
+    let layout = Sheet::new()
+        .cell("A1", "Sales")
+        .merge("A1:B3")
+        .cell("C2", "=")
+        .rows("A4", &["Region|Q1|Q2", "North|1|2", "South|3|4"])
+        .detect();
+    let r = region_at_a1(&layout);
+    assert_eq!(r.captions, [0], "{r:?}");
+    // The rows after the caption line start at row 2 (the body when a header is found,
+    // else the data).
+    assert_eq!(r.body.or(r.data).map(|b| b.top), Some(1), "{r:?}");
+}
+
+#[test]
+fn second_merge_inside_the_caption_rows_stops_the_caption_line() {
+    // D2:E3 starts in row 2, inside the rows of the caption merge A1:C3: the caption line
+    // ends at row 1.
+    let layout = Sheet::new()
+        .cell("A1", "Sales")
+        .merge("A1:C3")
+        .merge("D2:E3")
+        .rows(
+            "A4",
+            &["Region|Q1|Q2|Q3|Q4", "North|1|2|3|4", "South|5|6|7|8"],
+        )
+        .detect();
+    let r = region_at_a1(&layout);
+    assert_eq!(r.captions, [0], "{r:?}");
+    // The rows after the caption line start at row 2 (the body when a header is found,
+    // else the data).
+    assert_eq!(r.body.or(r.data).map(|b| b.top), Some(1), "{r:?}");
+}
