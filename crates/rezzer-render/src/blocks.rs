@@ -622,8 +622,17 @@ fn inline_math(latex: &str, mode: Mode, out: &mut String) {
     }
 }
 
-/// True for a target with no scheme (a relative path or `#anchor`) or with http, https,
-/// mailto, ftp or file. Tabs and newlines are ignored and leading spaces and controls
+/// The schemes a link from a document may have: addresses come from the file and are not
+/// trusted, so `file:`, `ftp:`, `data:` and script schemes stay text.
+const LINK_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+
+/// Whether `scheme` is one of [`LINK_SCHEMES`], in any case.
+fn link_scheme(scheme: &str) -> bool {
+    LINK_SCHEMES.iter().any(|s| scheme.eq_ignore_ascii_case(s))
+}
+
+/// True for a target with no scheme (a relative path or `#anchor`) or with one of
+/// [`LINK_SCHEMES`]. Tabs and newlines are ignored and leading spaces and controls
 /// trimmed first, as browsers do.
 fn safe_target(target: &str) -> bool {
     let decoded = decode_references(target);
@@ -658,10 +667,7 @@ fn safe_target(target: &str) -> bool {
     if !is_scheme {
         return true;
     }
-    matches!(
-        scheme.to_ascii_lowercase().as_str(),
-        "http" | "https" | "mailto" | "ftp" | "file"
-    )
+    link_scheme(scheme)
 }
 
 /// A numeric reference after `&#`: decimal or `x` hex digits of any length, with or
@@ -1458,12 +1464,18 @@ fn code_lines(c: &Barcode) -> String {
     paragraph(&parts)
 }
 
-/// Whether `t` is an `http` or `https` address without spaces, control or format
+/// Whether the payload `t` is an address with one of [`LINK_SCHEMES`] (the rule for links
+/// from a document), with something after the scheme and no spaces, control or format
 /// characters: only those become links.
 fn web_address(t: &str) -> bool {
-    let lower = t.to_ascii_lowercase();
-    (lower.starts_with("https://") || lower.starts_with("http://"))
-        && t.len() > 8
+    let Some((scheme, rest)) = t.split_once(':') else {
+        return false;
+    };
+    let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+    let after = if web { rest.strip_prefix("//") } else { Some(rest) };
+    link_scheme(scheme)
+        && after.is_some_and(|a| !a.is_empty())
+        && safe_target(t)
         && !t.chars().any(|c| {
             c.is_whitespace() || c.is_control() || format_char(c) || matches!(c, '<' | '>')
         })

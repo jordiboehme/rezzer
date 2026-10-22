@@ -3505,13 +3505,16 @@ fn coded(texts: &[&str], places: usize) -> String {
 }
 
 #[test]
-fn only_web_addresses_become_links() {
+fn only_web_and_mail_addresses_become_links() {
+    // One rule for addresses from a file, in links and in code payloads alike.
     let md = coded(
         &[
             "file:///etc/passwd",
             "data:text/html,x",
             "ftp://example.org/a",
             "https://example.org/b",
+            "mailto:desk@example.org",
+            "mailto:",
         ],
         1,
     );
@@ -3520,6 +3523,48 @@ fn only_web_addresses_become_links() {
     assert!(!md.contains("](data:"), "{md}");
     assert!(!md.contains("](ftp:"), "{md}");
     assert!(md.contains("](https://example.org/b)"), "{md}");
+    assert!(
+        md.contains("[mailto:desk@example.org](mailto:desk@example.org)"),
+        "{md}"
+    );
+    assert!(md.contains("QR Code: mailto:\n"), "{md}");
+}
+
+#[test]
+fn file_ftp_and_data_targets_stay_text() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: false,
+        wiki: false,
+        inlines: vec![txt("go")],
+    };
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![
+            link("file:///etc/passwd"),
+            txt(" "),
+            link("FTP://example.org/a"),
+            txt(" "),
+            link("data:text/html,x"),
+            txt(" "),
+            Inline::Image {
+                target: "file:///tmp/a.png".into(),
+                alt: "pic".into(),
+                title: None,
+            },
+            txt(" "),
+            link("http://example.org/"),
+        ],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "go `file:///etc/passwd` go `FTP://example.org/a` go `data:text/html,x` \
+pic `file:///tmp/a.png` [go](http://example.org/)\n"
+        ),
+        "{md}"
+    );
 }
 
 #[test]
