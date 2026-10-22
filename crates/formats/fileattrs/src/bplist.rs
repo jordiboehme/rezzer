@@ -6,6 +6,8 @@
 //! top. Every number in the file is checked against the bytes before it is used, so a
 //! hostile file gives an error, never a panic or a large allocation.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 
 /// The most strings [`string_array`] returns.
@@ -103,21 +105,40 @@ pub fn string_array(bytes: &[u8]) -> Result<Vec<String>, BplistError> {
         visits: 1,
     };
     let mut out = Vec::with_capacity(refs.count);
+    // Each string object is decoded once, however often the array refers to it.
+    let mut decoded: HashMap<usize, Option<StringObject>> = HashMap::new();
     let mut text = 0usize;
     for i in 0..refs.count {
         let index = plist.reference(refs, i)?;
-        let at = plist.object(index)?;
-        if let Some(string) = plist.string(at)? {
-            text = text.saturating_add(string.len());
-            if text > MAX_TEXT_BYTES {
-                return Err(BplistError::TooMuchText);
+        let object = match decoded.entry(index) {
+            Entry::Occupied(found) => found.into_mut(),
+            Entry::Vacant(slot) => {
+                let at = plist.object(index)?;
+                slot.insert(plist.string(at)?)
             }
-            out.push(string);
-        } else {
+        };
+        let Some(object) = object else {
             walk.check(&plist, index)?;
+            continue;
+        };
+        // Every reference counts: valid text by its UTF-8 length, invalid text by its bytes.
+        let cost = object.text.as_ref().map_or(object.raw_len, String::len);
+        text = text.saturating_add(cost);
+        if text > MAX_TEXT_BYTES {
+            return Err(BplistError::TooMuchText);
+        }
+        if let Some(string) = &object.text {
+            out.push(string.clone());
         }
     }
     Ok(out)
+}
+
+/// A string object: its text, `None` when the bytes are not valid text, and the length
+/// of its bytes.
+struct StringObject {
+    text: Option<String>,
+    raw_len: usize,
 }
 
 /// The checked trailer values and the bytes they describe.
@@ -263,17 +284,17 @@ impl<'a> Plist<'a> {
         Ok((value.ok_or(BplistError::BadLength)?, end))
     }
 
-    /// The text of a string object, `Ok(None)` when the object is no string or its bytes
-    /// are not valid text.
-    fn string(&self, at: usize) -> Result<Option<String>, BplistError> {
-        match self.bytes[at] >> 4 {
+    /// A string object at `at`, `Ok(None)` when the object is no string.
+    fn string(&self, at: usize) -> Result<Option<StringObject>, BplistError> {
+        let (text, raw_len) = match self.bytes[at] >> 4 {
             0x5 => {
                 let (_, start, len) = self.body(at, 1)?;
                 let raw = &self.bytes[start..start + len];
                 // ASCII is valid UTF-8, so the conversion keeps every byte.
-                Ok(raw
+                let text = raw
                     .is_ascii()
-                    .then(|| String::from_utf8_lossy(raw).into_owned()))
+                    .then(|| String::from_utf8_lossy(raw).into_owned());
+                (text, len)
             }
             0x6 => {
                 let (_, start, units) = self.body(at, 2)?;
@@ -283,18 +304,21 @@ impl<'a> Plist<'a> {
                     .0
                     .iter()
                     .map(|p| u16::from_be_bytes(*p));
-                Ok(char::decode_utf16(units)
+                let text = char::decode_utf16(units)
                     .collect::<Result<String, _>>()
-                    .ok())
+                    .ok();
+                (text, raw.len())
             }
             0x7 => {
                 let (_, start, len) = self.body(at, 1)?;
-                Ok(std::str::from_utf8(&self.bytes[start..start + len])
+                let text = std::str::from_utf8(&self.bytes[start..start + len])
                     .ok()
-                    .map(str::to_owned))
+                    .map(str::to_owned);
+                (text, len)
             }
-            _ => Ok(None),
-        }
+            _ => return Ok(None),
+        };
+        Ok(Some(StringObject { text, raw_len }))
     }
 
     /// The type nibble and references of an array, set or dictionary at `at`, or `None`

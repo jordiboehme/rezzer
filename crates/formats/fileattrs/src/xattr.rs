@@ -7,6 +7,7 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::fd::AsRawFd;
 
 /// How often a read is tried again when the attribute grew between the size query and the
@@ -39,6 +40,8 @@ pub fn read_xattr(file: &File, name: &str, max: usize) -> io::Result<Option<Vec<
                 buf.truncate(read);
                 return Ok(Some(buf));
             }
+            // An empty buffer makes the read another size query: the attribute grew.
+            Ok(Some(_)) if size == 0 => continue,
             Ok(_) => return Ok(None),
             Err(e) if e.raw_os_error() == Some(libc::ERANGE) => continue,
             Err(e) => return Err(e),

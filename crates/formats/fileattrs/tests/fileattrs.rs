@@ -87,6 +87,11 @@ fn plist(objects: &[Vec<u8>], top: u64, offset_size: u8, ref_size: u8) -> Vec<u8
     out
 }
 
+/// The error `string_array` gives for bytes that must be rejected.
+fn error(bytes: &[u8]) -> BplistError {
+    string_array(bytes).expect_err("hostile bytes were accepted")
+}
+
 fn fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/data/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
@@ -200,7 +205,7 @@ fn sixteen_byte_length_integer_is_read() {
     let mut huge = vec![0x5F, 0x14, 1];
     huge.extend_from_slice(&[0; 15]);
     let bytes = plist(&[array(&[1]), huge], 0, 1, 1);
-    assert!(string_array(&bytes).is_err());
+    assert_eq!(error(&bytes), BplistError::BadLength);
 }
 
 #[test]
@@ -217,29 +222,29 @@ fn bplist_rejects_cycles_and_bad_offsets() {
     let mut past = plist(&[array(&[1]), ascii("a")], 0, 1, 1);
     let table = past.len() - 32 - 2;
     past[table + 1] = 0xF0;
-    assert!(string_array(&past).is_err());
+    assert_eq!(error(&past), BplistError::BadOffset);
 
     // An object reference size of 0.
     let mut zero_ref = plist(&[array(&[1]), ascii("a")], 0, 1, 1);
     let at = zero_ref.len() - 25;
     zero_ref[at] = 0;
-    assert!(string_array(&zero_ref).is_err());
+    assert_eq!(error(&zero_ref), BplistError::BadTrailer);
 
     // An offset int size of 0 and one above 8.
     for size in [0, 9] {
         let mut bad = plist(&[array(&[1]), ascii("a")], 0, 1, 1);
         let at = bad.len() - 26;
         bad[at] = size;
-        assert!(string_array(&bad).is_err(), "offset size {size}");
+        assert_eq!(error(&bad), BplistError::BadTrailer, "offset size {size}");
     }
 
     // A reference to an object that does not exist.
     let dangling = plist(&[array(&[5]), ascii("a")], 0, 1, 1);
-    assert!(string_array(&dangling).is_err());
+    assert_eq!(error(&dangling), BplistError::BadReference);
 
     // A string longer than the object area.
     let long = plist(&[array(&[1]), vec![0x5E, b'a']], 0, 1, 1);
-    assert!(string_array(&long).is_err());
+    assert_eq!(error(&long), BplistError::BadLength);
 
     // An array that claims more references than there are bytes.
     let wide = plist(
@@ -250,35 +255,36 @@ fn bplist_rejects_cycles_and_bad_offsets() {
         1,
         1,
     );
-    assert!(string_array(&wide).is_err());
+    assert_eq!(error(&wide), BplistError::BadLength);
 
     // A negative length.
     let negative = plist(&[vec![0xAF, 0x13, 0xFF, 0, 0, 0, 0, 0, 0, 0]], 0, 1, 1);
-    assert!(string_array(&negative).is_err());
+    assert_eq!(error(&negative), BplistError::BadLength);
 
     // A length that is not an integer object.
     let not_int = plist(&[vec![0xAF, 0x51, b'a']], 0, 1, 1);
-    assert!(string_array(&not_int).is_err());
+    assert_eq!(error(&not_int), BplistError::BadLength);
 
     // A top index outside the object table.
     let top = plist(&[array(&[])], 1, 1, 1);
-    assert!(string_array(&top).is_err());
+    assert_eq!(error(&top), BplistError::BadTrailer);
 
     // Object count larger than the data.
     let mut count = plist(&[array(&[])], 0, 1, 1);
     let at = count.len() - 24;
     count[at..at + 8].copy_from_slice(&u64::MAX.to_be_bytes());
-    assert!(string_array(&count).is_err());
+    assert_eq!(error(&count), BplistError::BadTrailer);
 
     // Offset table start past the trailer.
     let mut start = plist(&[array(&[])], 0, 1, 1);
     let at = start.len() - 8;
     start[at..].copy_from_slice(&u64::MAX.to_be_bytes());
-    assert!(string_array(&start).is_err());
+    assert_eq!(error(&start), BplistError::BadTrailer);
 
     // Too short, wrong header, other version.
-    assert!(string_array(b"").is_err());
-    assert!(string_array(&[0; 39]).is_err());
+    assert_eq!(error(b""), BplistError::TooShort);
+    assert_eq!(error(&[0; 39]), BplistError::TooShort);
+    assert_eq!(error(&[0; 40]), BplistError::NotBplist00);
     let mut other = plist(&[array(&[])], 0, 1, 1);
     other[7] = b'1';
     assert!(matches!(
@@ -354,6 +360,30 @@ fn bplist_text_cap() {
         string_array(&bytes),
         Err(BplistError::TooMuchText)
     ));
+}
+
+#[test]
+fn skipped_invalid_text_counts_toward_the_text_cap() {
+    // One string of 64 KiB whose last byte is not ASCII, referenced 1,024 times: each
+    // reference is charged, so the reader stops at 1 MiB instead of scanning 64 MiB.
+    let mut bad = "x".repeat(64 * 1024 - 1).into_bytes();
+    bad.push(0xC3);
+    let mut object = marker(0x5, bad.len());
+    object.extend_from_slice(&bad);
+    let mut top = marker(0xA, fileattrs::MAX_ITEMS);
+    top.extend((0..fileattrs::MAX_ITEMS).flat_map(|_| 1u16.to_be_bytes()));
+    let bytes = plist(&[top, object], 0, 4, 2);
+    assert_eq!(error(&bytes), BplistError::TooMuchText);
+
+    // Under the cap the invalid string is skipped as before.
+    let bytes = plist(&[array(&[1, 1, 2]), vec![0x51, 0xC3], ascii("ok")], 0, 1, 1);
+    assert_eq!(string_array(&bytes).unwrap(), ["ok"]);
+}
+
+#[test]
+fn a_shared_string_is_returned_per_reference() {
+    let bytes = plist(&[array(&[1, 2, 1]), utf16("Größe"), ascii("b")], 0, 1, 1);
+    assert_eq!(string_array(&bytes).unwrap(), ["Größe", "b", "Größe"]);
 }
 
 #[test]
