@@ -226,3 +226,41 @@ fn many_group_rows_are_linear() {
     assert_eq!((ranges[0].first, ranges[0].last), (2, n + 1));
     assert!(used < Duration::from_secs(2), "{used:?}");
 }
+
+#[test]
+fn locate_cells_is_bounded_with_many_overlapping_areas() {
+    use rezzer_model::{CellArea, locate_cells};
+    // A damaged file: 10,000 one-column ranges over a million rows, one of them overlapped
+    // by another range, and a million cells right of them all that no range holds, plus a
+    // few that one does. A search that walks the open ranges left of each cell would take
+    // 10 billion steps.
+    let rows = 1_000_000u32;
+    let mut areas: Vec<CellArea> = (0..10_000u32)
+        .map(|col| CellArea {
+            top: 0,
+            left: col,
+            bottom: rows - 1,
+            right: col,
+        })
+        .collect();
+    areas.push(CellArea {
+        top: 0,
+        left: 0,
+        bottom: 9,
+        right: 1,
+    });
+    let mut points: Vec<(u32, u32)> = (0..rows).map(|row| (row, 20_000)).collect();
+    points.extend([(5, 0), (5, 1), (500, 7_000)]);
+    let start = thread_cpu();
+    let (found, peak) = peak_heap(|| locate_cells(&areas, &points));
+    let used = thread_cpu() - start;
+    eprintln!("locate_cells: {used:?} CPU, peak heap {} MB", peak >> 20);
+    #[cfg(unix)]
+    assert!(used < Duration::from_secs(2), "took {used:?} CPU");
+    assert!(peak < 256 << 20, "peak heap {peak} bytes");
+    let n = rows as usize;
+    assert!(found[..n].iter().all(Option::is_none));
+    // The small range A1:B10 is inside the one-column ranges A and B and holds their cells
+    // there; elsewhere the one-column range holds them.
+    assert_eq!(found[n..], [Some(10_000), Some(10_000), Some(7_000)]);
+}
