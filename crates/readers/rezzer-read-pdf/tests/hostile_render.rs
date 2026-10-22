@@ -20,6 +20,11 @@ use rezzer_model::{
 };
 use rezzer_read_pdf::PdfReader;
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 /// The brief's hostile setting: 512 MiB of memory.
 fn hostile() -> Limits {
     Limits {
@@ -2162,3 +2167,129 @@ fn a_shared_code_is_written_once_whatever_its_places() {
     assert_rss_under_256_mib();
 }
 
+/// `n` A4 pages, each a text-like scan at 300 dpi of its own (each page its own picture
+/// object, as a scanner writes it): lines of made-up glyphs, 28 rows in every 50.
+fn scanned_pages(n: usize) -> Vec<u8> {
+    let (w, h) = (2481u32, 3507u32);
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let mut kids = String::new();
+    for p in 0..n {
+        let mut state = 7u32 + p as u32;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        };
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let white = vec![245u8; w as usize];
+        let mut ink = white.clone();
+        for y in 0..h {
+            if y % 50 == 0 {
+                // A line of made-up glyphs: columns of 3 pixels of ink, some left out.
+                for (x, v) in ink.iter_mut().enumerate() {
+                    let glyph = x > 200 && x < w as usize - 200 && x % 5 < 3;
+                    *v = if glyph && next() % 3 != 0 { 30 } else { 245 };
+                }
+            }
+            let line = y % 50 < 28 && y > 200 && y < h - 200;
+            z.write_all(if line { &ink } else { &white })
+                .expect("deflate");
+        }
+        let image = b.stream(
+            &format!(
+                "/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8 /Filter /FlateDecode"
+            ),
+            &z.finish().expect("deflate"),
+        );
+        let cs = b.stream("", b"q 595 0 0 842 0 0 cm /Im1 Do Q\n");
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /XObject << /Im1 {image} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {n} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+fn scans_at_256_mib(pages: usize, extract: bool) -> (ReadOutcome, Duration, u64) {
+    let file = scanned_pages(pages);
+    let limits = Limits {
+        max_memory_bytes: 256 << 20,
+        ..Limits::default()
+    };
+    let start = Instant::now();
+    let out = read_with_limits(&file, extract, limits);
+    let took = start.elapsed();
+    (out, took, common::max_rss_bytes())
+}
+
+/// Each page scanned or named; every page keeps its need of vision.
+fn assert_scanned_or_named(out: &ReadOutcome, pages: usize) {
+    assert_eq!(
+        out.document
+            .assets
+            .iter()
+            .filter(|a| a.needs_vision)
+            .count(),
+        pages
+    );
+    for l in &out.document.losses {
+        assert_eq!(l.severity, Severity::Info, "{l:?}");
+    }
+}
+
+#[test]
+fn sixty_scanned_pages_without_files_stay_under_the_memory_limit() {
+    let (out, took, rss) = scans_at_256_mib(60, false);
+    eprintln!(
+        "60 pages without -o: {took:?}, max RSS {} MiB, losses {:?}",
+        rss >> 20,
+        out.document.losses
+    );
+    assert_scanned_or_named(&out, 60);
+    assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
+}
+
+#[test]
+fn scan_memory_does_not_grow_with_the_pages() {
+    // 30 pages, then 60 in the same process: the peak barely moves.
+    let (out, _, after_30) = scans_at_256_mib(30, false);
+    assert_scanned_or_named(&out, 30);
+    let (out, _, after_60) = scans_at_256_mib(60, false);
+    assert_scanned_or_named(&out, 60);
+    eprintln!(
+        "max RSS after 30 pages {} MiB, after 60 more {} MiB",
+        after_30 >> 20,
+        after_60 >> 20
+    );
+    assert!(
+        after_60 < after_30 + (32 << 20),
+        "{} {}",
+        after_30 >> 20,
+        after_60 >> 20
+    );
+}
+
+#[test]
+fn one_scanned_page_without_files() {
+    let (out, took, rss) = scans_at_256_mib(1, false);
+    eprintln!("1 page without -o: {took:?}, max RSS {} MiB", rss >> 20);
+    assert_scanned_or_named(&out, 1);
+}
+
+#[test]
+fn sixty_scanned_pages_with_files_stay_under_the_memory_limit() {
+    let (out, took, rss) = scans_at_256_mib(60, true);
+    eprintln!("60 pages with -o: {took:?}, max RSS {} MiB", rss >> 20);
+    assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
+    let _ = out;
+}

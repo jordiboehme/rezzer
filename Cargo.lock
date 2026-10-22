@@ -1712,6 +1712,7 @@ dependencies = [
  "libc",
  "predicates",
  "rezzer-cli",
+ "rezzer-limits",
  "rezzer-model",
  "rezzer-pipeline",
  "rezzer-read-csv",

@@ -4,6 +4,9 @@
 
 //! Size, depth, element and time limits that every reader enforces, plus panic containment.
 
+mod alloc;
+pub use alloc::Allocator;
+
 use std::fmt;
 use std::panic::{AssertUnwindSafe, UnwindSafe, catch_unwind};
 use std::sync::Arc;

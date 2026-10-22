@@ -21,6 +21,7 @@ fmt-ods = ["dep:rezzer-read-sheet", "rezzer-read-sheet/ods"]
 fmt-pdf = ["dep:rezzer-read-pdf"]
 
 [dependencies]
+rezzer-limits = { path = "../rezzer-limits" }
 rezzer-cli = { path = "../rezzer-cli" }
 rezzer-model = { path = "../rezzer-model" }
 rezzer-read-text = { path = "../readers/rezzer-read-text", optional = true }
