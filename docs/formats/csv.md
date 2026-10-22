@@ -11,6 +11,7 @@ Built on (versions as tested on 2026-10-19):
 - [csv](https://crates.io/crates/csv) 1.4.0 to read the records (quoting, line breaks in fields, CRLF)
 - The same encoding detection as for [plain text](text.md): [encoding_rs](https://crates.io/crates/encoding_rs) 0.8.42 and [chardetng](https://crates.io/crates/chardetng) 1.0.0
 - Rezzer's own reader for the delimiter, the header row, column types and the relation check
+- Rezzer's own sheetlayout crate, the same one as for spreadsheets, to find titles and tables in the file
 
 ## What Rezzer reads
 
@@ -18,6 +19,8 @@ Built on (versions as tested on 2026-10-19):
 
 - The table, with the detected delimiter (comma, semicolon, tab and others)
 - Header row detection. When there is no header, the output says "header assumed" or "no header" with the reason
+- Title lines above the table, like `Station report 2024`. They become a heading and a caption, not a broken first row
+- Several tables in one file, split by empty lines. Each one gets its own header
 - Broken rows: a count of rows by number of fields, and fields with line breaks inside
 
 ### Metadata
@@ -35,9 +38,18 @@ Built on (versions as tested on 2026-10-19):
 
 ## How it shows up in the output
 
-The table, then a `Columns` table (column, type, unit, missing, unique, key) and a Logic section with the relations that were checked, marked as found in the data and not written in the file.
+The table with a layout line that says where it is and how it was found, then a `Columns` table (column, type, unit, missing, unique, key) and a Logic section with the relations that were checked, marked as found in the data and not written in the file.
 
-## Example
+## Tables, titles and records
+
+Rezzer finds the tables in a CSV file the same way as in a spreadsheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). Lines of text above the table become its title. Empty lines split the file into several tables. A column without a header is named by its number, like `Column 4`, in the table and in the layout line:
+
+```markdown
+Table A1:H276 (data A2:H276), header row 1, found by rules: no gaps, header by type change.
+```
+
+`--table-style records` (MCP `table_style: "records"`) writes every row as one list item with the header of each value. A CSV file has only one sheet, so `--sheet` is not needed.
+
 
 Real output of `rezzer read` for `csv-datahub-co2-fossil-global.csv` from the test corpus. The overview and the Logic section; the Properties section, the table of 275 rows and the Columns table between them are cut:
 
@@ -62,6 +74,9 @@ Found in the data, not written as formulas in the file.
 ## Known limitations
 
 - Header detection on files without a header is a guess. The output says so
+- A CSV file has values only: no bold, no merged cells, no formulas. Rezzer finds titles and headers from the values and their types alone
+- Labels, values and units in three columns, like `Air density | 1.2 | kg/m3`, stay a table in CSV. In a spreadsheet they become a list of label and value pairs
+- The limits of table finding are the same as for [XLSX](xlsx.md#limits)
 - An unterminated quote makes the csv crate read the rest of the file as one field, without an error. Rezzer reports the field count per row so this case is visible
 - Encoding detection has no confidence score in chardetng 1.0.0. Short Latin-1 files with few special characters are a weak spot. The output says how the encoding was found
 - Relations are only checked on files with at least 10 counted rows. Small files get no relation claims

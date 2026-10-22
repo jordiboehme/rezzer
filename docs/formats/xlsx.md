@@ -1,6 +1,6 @@
 # XLSX, XLSM and XLSB
 
-Rezzer turns each sheet into a table of values and shows the calculation behind it: every formula with the cells it reads, inputs, results and the dependencies between them.
+Rezzer finds the tables, titles and notes inside each sheet and shows the calculation behind them: every formula with the cells it reads, inputs, results and the dependencies between them.
 
 Status: available in the development version (no release yet).
 
@@ -16,7 +16,9 @@ Built on (versions as used in the development version):
 
 ### Structure
 
-- Each sheet as a value table, with merged cells
+- The tables inside each sheet with their header rows, titles and notes (see [Tables inside a sheet](#tables-inside-a-sheet))
+- Label and value blocks and text lists of report sheets
+- Merged cells
 - Excel tables with their range and column names
 - Hidden and very hidden sheets, hidden rows and columns (marked, not dropped)
 - Number formats, so 0.09 shows as 9 %
@@ -49,7 +51,11 @@ Built on (versions as used in the development version):
 
 ### Labels
 
-A parameter takes its label from the text left of it or from the column header above it. A text on the left that repeats in its column, like a category `blue` in a data table, is a value of the row and not a label. The same is true for any text in a column with at least four texts where at least half of them repeat. Then the column header is the label. A label with a unit in brackets, like `Load [kN]`, always stays the label, with its unit. A bare unit like `kg` or a size like `DN 50 mm` can still be a value of the row. In a list like `Diameter | 10 | m` the name on the left stays the label.
+Every parameter gets a path: the parts that name it, from wide to narrow. For a value in a table these are the title of the table, the section headings above it, the header of its column and, when the table has label columns, the label of its row. In a label and value block they are the title, the section headings and the label. A cell outside any table takes its label from the text left of it or from the column header above it, as before.
+
+In the Logic section the parameters of one table stand together. What their paths share is written once as a title above them, like `Parameters in INPUTS:`. Each row then shows the shortest end of its path that is unique in that group, like `2021 / United States`. Where a label stands without its title (in a reference from another sheet and in the JSON model) Rezzer writes the full path. When a page of the output starts inside a sheet's Logic part, the page repeats the heading and the title, marked `(continued)`.
+
+Which text counts as a label does not change. A text on the left that repeats in its column, like a category `blue` in a data table, is a value of the row and not a label. The same is true for any text in a column with at least four texts where at least half of them repeat. A label with a unit in brackets, like `Load [kN]`, always stays the label, with its unit. A bare unit like `kg` or a size like `DN 50 mm` can still be a value of the row. In a list like `Diameter | 10 | m` the name on the left stays the label. A header cell whose own text holds ` / ` gives two parts of the path.
 
 ### Units
 
@@ -63,9 +69,62 @@ A parameter gets a unit only when the file says so. The output names the source 
 
 Only units from a fixed list count. One-letter units in round brackets count only for m, g, s, l and L, because `(V)` or `(N)` is more often a variable name. Codes like `N/A` are no units. When two sources disagree, the parameter gets no unit and a note says why.
 
+## Tables inside a sheet
+
+A sheet is often more than one table. It has titles, notes, header rows over two or three lines, side tables, group rows and totals. Rezzer finds these parts and writes each one as what it is.
+
+### What Rezzer finds
+
+- Several tables on one sheet, side by side or one below the other
+- Header rows, also over several lines with merged cells. A column gets its full header path, like `Population Estimate (as of July 1) / 2021`
+- Titles above a table and notes below it
+- Label columns on the left of a table
+- Group rows inside a table, like `Year 2024` over its months
+- Row levels from row outlines, indents and leading dots, shown as a `Parent` column
+- Subtotal and total rows
+- Report sheets: section headings, label and value blocks (`Label: value unit`) and text lists
+
+### How it decides
+
+Facts from the file come first. Excel tables, pivot tables and filters give the exact range and header rows. Print titles give the header rows. Frozen panes and defined names over a range help. Only where the file says nothing, Rezzer uses its own rules: empty rows and columns between blocks, a change of type between the header and the data, bold or filled header cells, merged titles. Each table says how it was found.
+
+When the rules do not agree on a header, Rezzer does not pick one. The table is shown as a raw grid with the column letters as header, and "Not read" lists it as unsure.
+
+Totals come from facts and formulas only: a totals row of an Excel table, a grand total of a pivot table or a row with `SUBTOTAL`, `AGGREGATE` or a `SUM` over the rows above it. A word like "Total" or "Summe" is not enough, so a pasted total row without a formula is not marked.
+
+### How it shows up
+
+Each part gets a heading: its title when it has one, else its kind and range, like `### Table E48:F72`. A sheet with only one table and no title gets no extra heading. A layout line under the heading says where the table is and how it was found:
+
+```markdown
+Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
+```
+
+A merged cell keeps its text once. `〃` marks a cell merged from above and `←` a cell merged from the left, with a note that lists the merged ranges. Group, subtotal and total rows are named in a line under the table. No cell text is changed.
+
+With `--table-style records` (MCP `table_style: "records"`, or `table_style = "records"` under `[read]` in the config file) every table row becomes one list item, with the header path of each value:
+
+```markdown
+- Row 18 (Table\_1\_01!A18:P18), group: Year 2024
+  - Period: February
+  - Generation at Utility Scale Facilities / Coal: 44,137
+  - Generation at Utility Scale Facilities / Petroleum Liquids: 740
+```
+
+Records repeat the header, so they cost about four times as much as a table line. In return each row stands on its own. Empty cells are left out. A raw grid stays a grid, and label and value blocks and text lists look the same in both styles.
+
+`--sheet <name>` (MCP `sheets`) reads only some sheets, by name or by position like `#2`. Give it more than once for more sheets. Rezzer still reads the whole workbook, so formulas that read other sheets stay correct. The overview marks the other sheets as not selected.
+
+### Limits
+
+- Two tables that touch with no empty row or column between them are one table. One table with an empty row inside it can become two (a defined name over the whole range joins them)
+- A cross table whose header rows sit above and to the right of its corner labels becomes two tables. Every cell is kept
+- A total row without a formula is not marked as a total
+- For XLSB Rezzer reads values only, no styles, Excel tables or filters. It finds the tables from the values and says so under "Not read"
+
 ## How it shows up in the output
 
-Each sheet becomes a value table. Then a Logic section follows with one part per sheet: parameters, formulas grouped by pattern, results, rules. After that come the defined names, a Mermaid dependency graph and the hidden logic (user functions, add-ins, other workbooks, data tables, spill ranges, VBA modules, calculation settings). Formulas can also be shown as LaTeX math (`--no-math` turns that off). In the graph a copied formula is one box, not one box per cell.
+Each sheet becomes its tables and blocks as above. Then a Logic section follows with one part per sheet: parameters, formulas grouped by pattern, results, rules. After that come the defined names, a Mermaid dependency graph and the hidden logic (user functions, add-ins, other workbooks, data tables, spill ranges, VBA modules, calculation settings). Formulas can also be shown as LaTeX math (`--no-math` turns that off). In the graph a copied formula is one box, not one box per cell.
 
 ## Example
 
@@ -75,6 +134,8 @@ Real output of `rezzer read` for `tunnel_design_calculations.xlsx` from the test
 ### Ventilation
 
 #### Parameters
+
+Parameters in INPUTS:
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -93,7 +154,7 @@ Real output of `rezzer read` for `tunnel_design_calculations.xlsx` from the test
 ## Known limitations
 
 - Rezzer does not calculate. It shows the cached results stored in the file. When a value is missing, the output says "not calculated in file"
-- XLSB is a binary format, so Rezzer's XML readers don't apply to it. For XLSB Rezzer gets values, cached results, formulas, defined names, document properties and VBA module names. It does not read validation, conditional formats, notes and threads, names with scope, calculation settings, data tables, number formats beyond dates, merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links. The output lists this under "Not read"
+- XLSB is a binary format, so Rezzer's XML readers don't apply to it. For XLSB Rezzer gets values, cached results, formulas, defined names, document properties and VBA module names. It does not read validation, conditional formats, notes and threads, names with scope, calculation settings, data tables, number formats beyond dates, styles, hidden rows and columns, Excel tables, pivot tables, charts and external links. The output lists this under "Not read"
 - User functions from VBA or add-ins can't be evaluated. The output names them and says where they come from
 - Copies of a formula fold only when they have the same form relative to their cell. A copied formula that reads a fixed cell without `$` gets one row per cell
 - A formula that fails to parse is shown as text, with a note
@@ -118,7 +179,10 @@ The corpus has 24 XLSX, 3 XLSM and 2 XLSB public test files from Apache POI, Apa
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - A sheet of 64 MB of spaces, packed far over 100 times: refused before it is unpacked, peak heap under 512 MB
-- Two cells, A1 and XFD1048576, 17 billion cells apart: peak heap under 64 MB, the far formula is still listed
+- Two cells, A1 and XFD1048576, 17 billion cells apart: peak heap under 64 MB, two tables, the far formula is still listed
+- One merge over the whole sheet, A1:XFD1048576: under 2 seconds of CPU time and 64 MB of heap. The value under the merge is listed as not shown
+- 50,000 merges and no values: under 2 seconds of CPU time and 512 MB of heap
+- 40,000 single cells in a checkerboard: past 10,000 blocks the rest of the sheet stays one raw grid, and the output says so
 - 100,000 nested XML elements after the cells: the read stops at 256 levels and keeps the cells before
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
