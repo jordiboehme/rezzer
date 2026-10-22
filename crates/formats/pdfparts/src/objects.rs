@@ -40,7 +40,16 @@ fn pdfdoc_char(b: u8) -> Option<char> {
 
 /// Decodes a PDF text string: UTF-16BE with a byte order mark, UTF-8 with a byte order mark,
 /// else PDFDocEncoding. Language escapes inside UTF-16 are dropped, and so are NUL bytes.
+/// See [`text_string_checked`] for an escape that does not close.
 pub fn text_string(bytes: &[u8]) -> String {
+    text_string_checked(bytes).0
+}
+
+/// [`text_string`], and whether a language escape inside UTF-16 does not close. ISO 32000
+/// 7.9.2.2: an escape holds a language code and an optional country code of 2 bytes each, so
+/// the closing U+001B comes after 1 or 2 code units. When it does not, the opening U+001B is
+/// dropped and the units after it are kept as text.
+pub fn text_string_checked(bytes: &[u8]) -> (String, bool) {
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         return utf16(rest, u16::from_be_bytes);
     }
@@ -49,11 +58,11 @@ pub fn text_string(bytes: &[u8]) -> String {
         return utf16(rest, u16::from_le_bytes);
     }
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
-        return String::from_utf8_lossy(rest).replace('\0', "");
+        return (String::from_utf8_lossy(rest).replace('\0', ""), false);
     }
     let mut out = String::with_capacity(bytes.len());
     out.extend(bytes.iter().filter_map(|&b| pdfdoc_char(b)));
-    out
+    (out, false)
 }
 
 /// [`text_string`] of bytes the caller gives up: plain ASCII text (tabs and line ends allowed)
@@ -68,23 +77,38 @@ pub fn text_string_owned(bytes: Vec<u8>) -> (String, bool) {
     (text_string(&bytes), true)
 }
 
-fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
-    let mut units = Vec::with_capacity(bytes.len() / 2);
-    let mut in_escape = false;
-    for pair in bytes.as_chunks::<2>().0 {
-        let u = unit(*pair);
+/// Code units of a language escape between its two U+001B: a language code and an optional
+/// country code.
+const ESCAPE_UNITS: usize = 2;
+
+fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> (String, bool) {
+    let pairs = bytes.as_chunks::<2>().0;
+    let mut units = Vec::with_capacity(pairs.len());
+    let mut unclosed = false;
+    let mut i = 0;
+    while i < pairs.len() {
+        let u = unit(pairs[i]);
         // ISO 32000-2 7.9.2.2: a language code sits between two U+001B.
         if u == 0x1B {
-            in_escape = !in_escape;
+            let end = pairs.len().min(i + 2 + ESCAPE_UNITS);
+            match pairs[i + 1..end].iter().position(|&p| unit(p) == 0x1B) {
+                Some(k) => i += k + 2,
+                None => {
+                    unclosed = true;
+                    i += 1;
+                }
+            }
             continue;
         }
-        if !in_escape && u != 0 {
+        if u != 0 {
             units.push(u);
         }
+        i += 1;
     }
-    char::decode_utf16(units)
+    let text = char::decode_utf16(units)
         .map(|c| c.unwrap_or('\u{FFFD}'))
-        .collect()
+        .collect();
+    (text, unclosed)
 }
 
 /// Turns a PDF date (`D:YYYYMMDDHHmmSSOHH'mm'`) into ISO 8601. Missing parts get the defaults
@@ -268,6 +292,8 @@ pub(crate) struct Shared {
     /// Texts asked for since the last [`Shared::take_broken`] whose reference chain is broken
     /// or ends at something that is not text.
     broken: usize,
+    /// Texts read since the last [`Shared::take_broken`] whose language escape does not close.
+    unclosed: usize,
 }
 
 /// How the bytes of a string become text.
@@ -303,7 +329,11 @@ impl Shared {
         }
         let text: Option<Arc<str>> = match doc.dereference(obj) {
             Ok((_, Object::String(s, _))) => Some(match decode {
-                Decode::Text => text_string(s).into(),
+                Decode::Text => {
+                    let (text, unclosed) = text_string_checked(s);
+                    self.unclosed += usize::from(unclosed);
+                    text.into()
+                }
                 Decode::Lossy => String::from_utf8_lossy(s).into(),
             }),
             Ok((_, Object::Name(n))) => Some(String::from_utf8_lossy(n).into()),
@@ -345,6 +375,11 @@ impl Shared {
         std::mem::take(&mut self.broken)
     }
 
+    /// How many texts read since the last call hold a language escape that does not close.
+    pub(crate) fn take_unclosed(&mut self) -> usize {
+        std::mem::take(&mut self.unclosed)
+    }
+
     /// The text of `key` in `d`, as [`Shared::text`].
     pub(crate) fn text_at(
         &mut self,
@@ -367,33 +402,67 @@ impl Shared {
 pub(crate) struct BrokenTexts {
     count: usize,
     first: Option<String>,
+    /// Texts whose language escape does not close, and the first item that holds one.
+    unclosed: usize,
+    first_unclosed: Option<String>,
 }
 
 impl BrokenTexts {
     /// Takes what `shared` counted while `item` was read; `item` names it.
     pub(crate) fn after(&mut self, shared: &mut Shared, item: impl FnOnce() -> String) {
         let n = shared.take_broken();
+        let u = shared.take_unclosed();
+        if n == 0 && u == 0 {
+            return;
+        }
+        let item = item();
         if n > 0 {
             self.count += n;
-            self.first.get_or_insert_with(item);
+            self.first.get_or_insert_with(|| item.clone());
+        }
+        if u > 0 {
+            self.unclosed += u;
+            self.first_unclosed.get_or_insert(item);
         }
     }
 
-    /// The one issue, if a text could not be read.
-    pub(crate) fn issue(&self, location: &str) -> Option<Issue> {
-        let first = self.first.as_ref()?;
-        let (n, texts, they) = match self.count {
-            1 => (1, "text", "it is"),
-            n => (n, "texts", "they are"),
-        };
-        Some(Issue::new(
-            location,
-            IssueKind::Damaged,
-            format!(
-                "{n} {texts} could not be read, the first in {first}: a reference loops, runs past 128 references or ends at something that is not text; {they} left out"
-            ),
-        ))
+    /// The issues: one if a text could not be read, one if a language escape does not close.
+    pub(crate) fn issue(&self, location: &str) -> Vec<Issue> {
+        let mut out = Vec::new();
+        if let Some(first) = &self.first {
+            let (n, texts, they) = match self.count {
+                1 => (1, "text", "it is"),
+                n => (n, "texts", "they are"),
+            };
+            out.push(Issue::new(
+                location,
+                IssueKind::Damaged,
+                format!(
+                    "{n} {texts} could not be read, the first in {first}: a reference loops, runs past 128 references or ends at something that is not text; {they} left out"
+                ),
+            ));
+        }
+        if let Some(first) = &self.first_unclosed {
+            out.push(unclosed_issue(location, self.unclosed, first));
+        }
+        out
     }
+}
+
+/// The issue for `n` texts whose language escape does not close, the first in `first`.
+pub(crate) fn unclosed_issue(location: &str, n: usize, first: &str) -> Issue {
+    let (texts, hold) = if n == 1 {
+        ("text", "holds")
+    } else {
+        ("texts", "hold")
+    };
+    Issue::new(
+        location,
+        IssueKind::Damaged,
+        format!(
+            "{n} {texts} {hold} a language escape that does not close, the first in {first}; the text after the escape is kept"
+        ),
+    )
 }
 
 /// The object a chain of references from `obj` ends at, `None` when `obj` is direct (or the
@@ -439,9 +508,18 @@ pub(crate) fn get_name<'a>(doc: &'a Document, d: &'a Dictionary, key: &[u8]) -> 
 }
 
 pub(crate) fn get_text(doc: &Document, d: &Dictionary, key: &[u8]) -> Option<String> {
+    get_text_checked(doc, d, key).map(|(t, _)| t)
+}
+
+/// [`get_text`], and whether a language escape in it does not close.
+pub(crate) fn get_text_checked(
+    doc: &Document,
+    d: &Dictionary,
+    key: &[u8],
+) -> Option<(String, bool)> {
     match get(doc, d, key)? {
-        Object::String(s, _) => Some(text_string(s)),
-        Object::Name(n) => Some(String::from_utf8_lossy(n).into_owned()),
+        Object::String(s, _) => Some(text_string_checked(s)),
+        Object::Name(n) => Some((String::from_utf8_lossy(n).into_owned(), false)),
         _ => None,
     }
 }

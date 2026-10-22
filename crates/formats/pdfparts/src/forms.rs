@@ -12,7 +12,8 @@ use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::actions::{Chains, event_word};
 use crate::objects::{
-    Decode, TextBudget, Work, dict, final_id, get, get_dict, get_text, quote, resolve, type_name,
+    Decode, TextBudget, Work, dict, final_id, get, get_dict, get_text_checked, quote, resolve,
+    type_name, unclosed_issue,
 };
 use crate::{Issue, IssueKind, Pdf};
 
@@ -193,6 +194,9 @@ struct Build<'a> {
     data: FormData,
     fields: Vec<Field>,
     issues: Vec<Issue>,
+    /// Field names whose language escape does not close, and the first such field.
+    unclosed: usize,
+    first_unclosed: Option<String>,
 }
 
 impl Pdf {
@@ -233,6 +237,8 @@ impl Pdf {
             data: FormData::default(),
             fields: Vec::new(),
             issues: Vec::new(),
+            unclosed: 0,
+            first_unclosed: None,
         };
         let co: &[Object] = match get(doc, acro, b"CO") {
             Some(Object::Array(co)) => co,
@@ -369,6 +375,13 @@ impl<'a> Build<'a> {
                 ),
             ));
         }
+        if let Some(first) = &self.first_unclosed {
+            self.issues.push(unclosed_issue(
+                FORM,
+                self.unclosed,
+                &format!("field {}", quote(first)),
+            ));
+        }
         self.chains.finish(&mut self.issues);
     }
 
@@ -402,11 +415,17 @@ impl<'a> Build<'a> {
         let Some(d) = dict(doc, obj) else {
             return Ok(());
         };
-        let full_name = match get_text(doc, d, b"T") {
-            Some(t) if parent.is_empty() => t,
-            Some(t) => format!("{parent}.{t}"),
+        let name = get_text_checked(doc, d, b"T");
+        let open = name.as_ref().is_some_and(|(_, open)| *open);
+        let full_name = match name {
+            Some((t, _)) if parent.is_empty() => t,
+            Some((t, _)) => format!("{parent}.{t}"),
             None => parent.to_string(),
         };
+        if open {
+            self.unclosed += 1;
+            self.first_unclosed.get_or_insert_with(|| full_name.clone());
+        }
         self.charge(full_name.len())?;
         if let Some(id) = id
             && self.co.contains(&id)

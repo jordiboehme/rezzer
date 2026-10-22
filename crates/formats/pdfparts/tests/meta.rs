@@ -91,6 +91,93 @@ fn pdfdoc_title_decodes() {
     );
 }
 
+/// UTF-16BE bytes with a byte order mark for `s`.
+fn utf16(s: &str) -> Vec<u8> {
+    let mut out = vec![0xFE, 0xFF];
+    for u in s.encode_utf16() {
+        out.extend(u.to_be_bytes());
+    }
+    out
+}
+
+#[test]
+fn a_language_escape_ends_after_two_code_units() {
+    use pdfparts::objects::text_string_checked;
+    // ISO 32000 7.9.2.2: a language code of one unit, or a language and a country code.
+    assert_eq!(
+        text_string_checked(&utf16("\u{1b}\u{656e}\u{1b}A")),
+        ("A".to_string(), false)
+    );
+    assert_eq!(
+        text_string_checked(&utf16("\u{1b}\u{656e}\u{5553}\u{1b}A")),
+        ("A".to_string(), false)
+    );
+    // An escape that does not close keeps the text after it.
+    assert_eq!(
+        text_string_checked(&utf16("\u{1b}x")),
+        ("x".to_string(), true)
+    );
+    assert_eq!(
+        text_string_checked(&utf16("\u{0}\u{1b}[31mred\u{85}nel")),
+        ("[31mred\u{85}nel".to_string(), true)
+    );
+    // A third unit before the closing escape is too many: the escape does not close there.
+    assert_eq!(
+        text_string_checked(&utf16("\u{1b}abc\u{1b}def")),
+        ("abcdef".to_string(), true)
+    );
+    assert_eq!(text_string(&utf16("\u{1b}x")), "x");
+}
+
+/// A one-page document whose Info dictionary has `subject` as its raw subject string.
+fn with_subject(subject: Vec<u8>) -> Pdf {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    let info = doc.add_object(dictionary! {
+        "Subject" => Object::String(subject, lopdf::StringFormat::Hexadecimal),
+    });
+    doc.trailer.set("Root", catalog_id);
+    doc.trailer.set("Info", info);
+    let mut out = Vec::new();
+    doc.save_to(&mut out).unwrap();
+    Pdf::open(&out, None, &Limits::default(), &never).unwrap()
+}
+
+#[test]
+fn an_unclosed_language_escape_keeps_the_text_and_says_so() {
+    for (subject, kept) in [
+        ("\u{1b}x", "x"),
+        ("\u{0}\u{1b}[31mred\u{85}nel", "[31mred\u{85}nel"),
+    ] {
+        let pdf = with_subject(utf16(subject));
+        assert_eq!(pdf.info().subject.as_deref(), Some(kept));
+        let issues = pdf.issues();
+        assert!(
+            issues.iter().any(|i| i.kind == IssueKind::Damaged
+                && i.location == "metadata"
+                && i.what.contains("language escape")),
+            "{issues:?}"
+        );
+    }
+    let fine = with_subject(utf16("\u{1b}\u{656e}\u{1b}plain"));
+    assert_eq!(fine.info().subject.as_deref(), Some("plain"));
+    assert!(fine.issues().is_empty(), "{:?}", fine.issues());
+}
+
 #[test]
 fn pdf_dates_keep_offset() {
     let cases = [

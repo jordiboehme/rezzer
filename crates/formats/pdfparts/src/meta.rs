@@ -9,7 +9,9 @@ use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 
-use crate::objects::{get, get_date, get_dict, get_name, get_text, quote, reference};
+use crate::objects::{
+    get, get_date, get_dict, get_name, get_text, get_text_checked, quote, reference, unclosed_issue,
+};
 use crate::{Issue, IssueKind, Pdf};
 
 /// A date as written in the file and, when it parses, in ISO 8601.
@@ -67,9 +69,18 @@ impl Pdf {
         let Some(info) = get_dict(doc, &doc.trailer, b"Info") else {
             return Info::default();
         };
-        let text = |k: &[u8]| get_text(doc, info, k);
+        let unclosed = std::cell::RefCell::new(Vec::new());
+        let text = |k: &[u8]| {
+            let (t, open) = get_text_checked(doc, info, k)?;
+            if open {
+                unclosed
+                    .borrow_mut()
+                    .push(String::from_utf8_lossy(k).into_owned());
+            }
+            Some(t)
+        };
         let date = |k: &[u8]| get_date(doc, info, k);
-        Info {
+        let out = Info {
             title: text(b"Title"),
             author: text(b"Author"),
             subject: text(b"Subject"),
@@ -78,7 +89,16 @@ impl Pdf {
             producer: text(b"Producer"),
             created: date(b"CreationDate"),
             modified: date(b"ModDate"),
+        };
+        let unclosed = unclosed.into_inner();
+        if let Some(first) = unclosed.first() {
+            self.note(vec![unclosed_issue(
+                "metadata",
+                unclosed.len(),
+                &format!("the {first} of the document information"),
+            )]);
         }
+        out
     }
 
     /// The natural language of the document (`/Lang` of the catalog), for example `en-US`.

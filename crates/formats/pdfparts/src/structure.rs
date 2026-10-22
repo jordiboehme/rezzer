@@ -10,8 +10,8 @@ use std::collections::{HashMap, HashSet};
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::objects::{
-    TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, reference,
-    resolve, text_string, walk_tree,
+    TextBudget, Tree, TreeKey, dict, get, get_dict, get_int, get_name, get_text, get_text_checked,
+    reference, resolve, text_string, unclosed_issue, walk_tree,
 };
 use crate::{Issue, IssueKind, Pdf};
 
@@ -74,6 +74,10 @@ struct Walk<'a> {
     index: HashMap<ObjectId, usize>,
     elems: Vec<StructElem>,
     issues: Vec<Issue>,
+    /// Alternate and actual texts whose language escape does not close, and the first
+    /// element that holds one.
+    unclosed: usize,
+    first_unclosed: Option<usize>,
     /// What the tree may still copy out of the document.
     budget: TextBudget<'a>,
     /// `/K` entries and attribute entries visited so far, bounded by `max_items`.
@@ -135,6 +139,8 @@ impl Pdf {
             index: HashMap::new(),
             elems: Vec::new(),
             issues: Vec::new(),
+            unclosed: 0,
+            first_unclosed: None,
             budget: self.text_budget(),
             work: 0,
             k_arrays: HashSet::new(),
@@ -178,6 +184,11 @@ impl Pdf {
                     id.1
                 ),
             ));
+        }
+        if let Some(k) = walk.first_unclosed {
+            let first = format!("element {} of the tree", k + 1);
+            walk.issues
+                .push(unclosed_issue(WHERE, walk.unclosed, &first));
         }
         let Walk { elems, issues, .. } = walk;
         self.note(issues);
@@ -245,11 +256,22 @@ impl Walk<'_> {
             .and_then(reference)
             .and_then(|p| pdf.page_number(p))
             .or(page);
+        let mut open = false;
+        let mut text = |key: &[u8]| {
+            let (t, o) = get_text_checked(doc, d, key)?;
+            open |= o;
+            Some(t)
+        };
+        let (alt, actual_text) = (text(b"Alt"), text(b"ActualText"));
+        if open {
+            self.unclosed += 1;
+            self.first_unclosed.get_or_insert(self.elems.len());
+        }
         let mut elem = StructElem {
             role: self.role(s),
             page,
-            alt: get_text(doc, d, b"Alt"),
-            actual_text: get_text(doc, d, b"ActualText"),
+            alt,
+            actual_text,
             lang: get_text(doc, d, b"Lang"),
             id: match get(doc, d, b"ID") {
                 Some(Object::String(s, _)) => Some(text_string(s)),

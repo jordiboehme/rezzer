@@ -527,3 +527,26 @@ fn a_long_subtype_name_is_cut() {
     let annots = pdf.annotations();
     assert_eq!(annots[0].subtype, "S".repeat(64));
 }
+
+#[test]
+fn an_unclosed_language_escape_in_a_note_keeps_its_text() {
+    // UTF-16BE: ESC, then "hi" and no closing ESC.
+    let raw = vec![0xFE, 0xFF, 0, 0x1B, 0, b'h', 0, b'i'];
+    let pdf = with_annots(|doc, _| {
+        let mut d = note("x", Dictionary::new());
+        d.set(
+            "Contents",
+            Object::String(raw, lopdf::StringFormat::Hexadecimal),
+        );
+        vec![doc.add_object(d).into()].into()
+    });
+    let annots = pdf.annotations();
+    assert_eq!(annots[0].contents.as_deref(), Some("hi"));
+    assert!(
+        pdf.issues()
+            .iter()
+            .any(|i| i.kind == IssueKind::Damaged && i.what.contains("language escape")),
+        "{:?}",
+        pdf.issues()
+    );
+}

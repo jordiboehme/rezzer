@@ -671,3 +671,27 @@ fn a_field_reached_through_hops_is_listed_once() {
         pdf.issues()
     );
 }
+
+#[test]
+fn an_unclosed_language_escape_in_a_field_name_keeps_its_text() {
+    // UTF-16BE: ESC, then "Name" and no closing ESC.
+    let mut raw = vec![0xFE, 0xFF, 0, 0x1B];
+    for b in b"Name" {
+        raw.extend([0, *b]);
+    }
+    let pdf = with_form(|doc, _| {
+        let f = doc.add_object(dictionary! {
+            "FT" => "Tx",
+            "T" => Object::String(raw, lopdf::StringFormat::Hexadecimal),
+        });
+        dictionary! { "Fields" => vec![f.into()] }
+    });
+    assert_eq!(field(&pdf, "Name").kind, FieldKind::Text);
+    assert!(
+        pdf.issues().iter().any(|i| i.kind == IssueKind::Damaged
+            && i.location == "form"
+            && i.what.contains("language escape")),
+        "{:?}",
+        pdf.issues()
+    );
+}
