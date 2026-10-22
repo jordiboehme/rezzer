@@ -4887,7 +4887,11 @@ source: crates/rezzer/tests/corpus.rs
     "parameters": [
       {
         "anchor": "Structural_Lining!B5",
-        "label": "Excavated diameter, D",
+        "label": "INPUTS / Excavated diameter, D",
+        "path": [
+          "INPUTS",
+          "Excavated diameter, D"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "unit-cell",
@@ -4898,7 +4902,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B6",
-        "label": "Trial lining thickness, t",
+        "label": "INPUTS / Trial lining thickness, t",
+        "path": [
+          "INPUTS",
+          "Trial lining thickness, t"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "unit-cell",
@@ -4909,7 +4917,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B7",
-        "label": "Overburden depth, H",
+        "label": "INPUTS / Overburden depth, H",
+        "path": [
+          "INPUTS",
+          "Overburden depth, H"
+        ],
         "read_by": 1,
         "unit": "m",
         "unit_source": "unit-cell",
@@ -4920,7 +4932,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B8",
-        "label": "Unit weight of ground, gamma",
+        "label": "INPUTS / Unit weight of ground, gamma",
+        "path": [
+          "INPUTS",
+          "Unit weight of ground, gamma"
+        ],
         "read_by": 2,
         "unit": "kN/m3",
         "unit_source": "unit-cell",
@@ -4931,7 +4947,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B9",
-        "label": "Friction angle, phi",
+        "label": "INPUTS / Friction angle, phi",
+        "path": [
+          "INPUTS",
+          "Friction angle, phi"
+        ],
         "read_by": 3,
         "unit": "deg",
         "unit_source": "unit-cell",
@@ -4942,7 +4962,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B10",
-        "label": "Cohesion, c",
+        "label": "INPUTS / Cohesion, c",
+        "path": [
+          "INPUTS",
+          "Cohesion, c"
+        ],
         "read_by": 1,
         "unit": "kPa",
         "unit_source": "unit-cell",
@@ -4953,7 +4977,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B11",
-        "label": "Concrete grade, fck",
+        "label": "INPUTS / Concrete grade, fck",
+        "path": [
+          "INPUTS",
+          "Concrete grade, fck"
+        ],
         "read_by": 1,
         "unit": "MPa",
         "unit_source": "unit-cell",
@@ -4964,7 +4992,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Structural_Lining!B13",
-        "label": "Target Factor of Safety",
+        "label": "INPUTS / Target Factor of Safety",
+        "path": [
+          "INPUTS",
+          "Target Factor of Safety"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",
@@ -4974,6 +5006,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Structural_Lining!E49",
         "label": "t",
+        "path": [
+          "t"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "header",
@@ -4985,6 +5020,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Structural_Lining!E50",
         "label": "t",
+        "path": [
+          "t"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "header",
@@ -4996,6 +5034,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Structural_Lining!E51",
         "label": "t",
+        "path": [
+          "t"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "header",
@@ -5007,6 +5048,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Structural_Lining!E52",
         "label": "t",
+        "path": [
+          "t"
+        ],
         "read_by": 2,
         "unit": "m",
         "unit_source": "header",

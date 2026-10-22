@@ -656,6 +656,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Sheet1!D1",
         "label": "<= on cell",
+        "path": [
+          "<= on cell"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -680,6 +683,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Sheet1!A5",
+        "label": "Temps",
+        "path": [
+          "Temps"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -688,6 +695,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Sheet1!A6",
+        "label": "Temps",
+        "path": [
+          "Temps"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -696,6 +707,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Sheet1!A7",
+        "label": "Temps",
+        "path": [
+          "Temps"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -704,6 +719,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "Sheet1!A8",
+        "label": "Temps",
+        "path": [
+          "Temps"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",

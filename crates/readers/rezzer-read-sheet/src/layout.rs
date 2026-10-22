@@ -10,7 +10,10 @@ use std::collections::HashMap;
 
 use rezzer_layout::{Caps, CellText, ColumnNames, Mapped, NameCaption};
 use rezzer_limits::Budget;
-use sheetlayout::{CellIn, Class, Fact, FactKind, FormulaIn, Input, NameIn, Pos, Rect, Style};
+use rezzer_model::{Block, Inline};
+use sheetlayout::{
+    CellIn, Class, Fact, FactKind, FormulaIn, Input, Kind, NameIn, Pos, Rect, Style,
+};
 use sheetparts::{DefinedName, Look};
 
 use crate::grid::{self, RawCell, Val};
@@ -39,11 +42,195 @@ pub(crate) struct Shown {
     pub number: Option<f64>,
 }
 
-/// The layout of one sheet, mapped into blocks, and the number of merged areas ignored
-/// because they overlap one before them.
+/// The layout of one sheet, mapped into blocks, the number of merged areas ignored because
+/// they overlap one before them, and what names the cells of its regions.
 pub(crate) struct SheetLayout {
     pub mapped: Mapped,
     pub merges_ignored: u64,
+    pub paths: SheetPaths,
+}
+
+/// What names the data cells of one region (spec 8.7): the author's heading texts above
+/// them, the header path of their column and the label of their row.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PathRegion {
+    /// The data cells: the rows of the data area in the table's columns.
+    pub area: Rect,
+    /// The author headings the region's table stands under, wide to narrow: caption
+    /// headings, defined names standing as captions, section headings. Never a generated
+    /// heading.
+    pub base: Vec<String>,
+    /// The header path of each column from `area.left`, parts joined with " / ".
+    pub header: Vec<String>,
+    /// The left columns of `area` that name the rows.
+    pub label_cols: u32,
+    /// The texts of the label columns in the data rows, by row, then column.
+    pub labels: Vec<(u32, u32, String)>,
+}
+
+/// The regions of one sheet that can name a parameter.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct SheetPaths {
+    pub regions: Vec<PathRegion>,
+}
+
+impl SheetPaths {
+    /// The paths of the regions of `layout`, mapped into `blocks`; `texts` are the sheet's
+    /// shown texts, sorted. A region's base is what its Markdown stands under: the author
+    /// headings (caption headings, defined names standing as captions, section headings)
+    /// open above its table. A generated heading closes the deeper ones and adds no part.
+    pub fn of(layout: &sheetlayout::Layout, texts: &[CellText], blocks: &[Block]) -> Self {
+        let mut out = Vec::new();
+        let mut by_range: HashMap<String, usize> = HashMap::new();
+        for r in &layout.regions {
+            let Some(data) = r.data else {
+                continue;
+            };
+            let (left, right, label_cols, header) = match r.kind {
+                Kind::KeyValue => (data.left, data.right, 1, Vec::new()),
+                Kind::Table => {
+                    let cols = r.body.unwrap_or(data);
+                    (cols.left, cols.right, r.label_cols, r.header_paths.clone())
+                }
+                Kind::Grid | Kind::Text => (data.left, data.right, 0, Vec::new()),
+                Kind::Title => continue,
+            };
+            by_range.insert(r.rect.a1(), out.len());
+            out.push(PathRegion {
+                area: Rect {
+                    top: data.top,
+                    left,
+                    bottom: data.bottom,
+                    right,
+                },
+                base: Vec::new(),
+                header,
+                label_cols,
+                labels: Vec::new(),
+            });
+        }
+        // The headings open at each table, by level; `None` for a generated one.
+        let mut open: Vec<(u8, Option<String>)> = Vec::new();
+        for b in blocks {
+            match b {
+                Block::Heading {
+                    level,
+                    inlines,
+                    anchor,
+                } => {
+                    open.retain(|(l, _)| l < level);
+                    let text = anchor.as_ref().map(|_| plain_text(inlines));
+                    open.push((*level, text.filter(|t| logic::is_label(t))));
+                }
+                Block::Table {
+                    layout: Some(l), ..
+                } => {
+                    if let Some(&k) = by_range.get(&l.range) {
+                        out[k].base = open.iter().filter_map(|(_, t)| t.clone()).collect();
+                    }
+                }
+                _ => {}
+            }
+        }
+        // The label texts, each cell located once.
+        let points: Vec<(u32, u32)> = texts.iter().map(|t| (t.row, t.col)).collect();
+        let mut paths = SheetPaths { regions: out };
+        for (t, at) in texts.iter().zip(paths.locate(&points)) {
+            let Some(k) = at else {
+                continue;
+            };
+            let region = &mut paths.regions[k];
+            if t.col < region.area.left.saturating_add(region.label_cols) {
+                region.labels.push((t.row, t.col, t.text.clone()));
+            }
+        }
+        paths
+    }
+
+    /// The region whose data area holds each point. Areas never overlap; one sweep by row
+    /// with the areas that have begun, by left column.
+    pub fn locate(&self, points: &[(u32, u32)]) -> Vec<Option<usize>> {
+        let mut order: Vec<usize> = (0..points.len()).collect();
+        order.sort_unstable_by_key(|&i| points[i]);
+        let mut by_top: Vec<usize> = (0..self.regions.len()).collect();
+        by_top.sort_unstable_by_key(|&k| (self.regions[k].area.top, self.regions[k].area.left));
+        let mut next = 0;
+        let mut open: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+        let mut out = vec![None; points.len()];
+        for i in order {
+            let (row, col) = points[i];
+            while let Some(&k) = by_top.get(next)
+                && self.regions[k].area.top <= row
+            {
+                open.insert(self.regions[k].area.left, k);
+                next += 1;
+            }
+            // An area that ended above is closed; an open area left of the point that does
+            // not reach it means no area holds it, as areas never overlap.
+            while let Some((&left, &k)) = open.range(..=col).next_back() {
+                let a = self.regions[k].area;
+                if a.bottom < row {
+                    open.remove(&left);
+                    continue;
+                }
+                if a.right >= col {
+                    out[i] = Some(k);
+                }
+                break;
+            }
+        }
+        out
+    }
+
+    /// The narrow end of the path of the data cell at `row`, `col` of region `k`, without
+    /// the region's base: the parts of its column's header path, each a label without its
+    /// unit (the label rule of the parameters), and the texts its row has in the label
+    /// columns left of it, as they stand. Both empty when neither names it.
+    pub fn narrow_parts(&self, k: usize, row: u32, col: u32) -> (Vec<String>, Vec<&str>) {
+        let r = &self.regions[k];
+        let mut header = Vec::new();
+        let i = (col - r.area.left) as usize;
+        if let Some(path) = r.header.get(i).filter(|p| !p.is_empty()) {
+            header.extend(path.split(" / ").filter_map(label_part));
+        }
+        let end = col.min(r.area.left.saturating_add(r.label_cols));
+        let from = r.labels.partition_point(|l| l.0 < row);
+        let labels = r.labels[from..]
+            .iter()
+            .take_while(|l| l.0 == row)
+            .filter(|l| l.1 < end)
+            .map(|l| l.2.trim())
+            .filter(|t| logic::is_label(t))
+            .collect();
+        (header, labels)
+    }
+
+    /// Whether `col` is one of the label columns of region `k`.
+    pub fn in_label_cols(&self, k: usize, col: u32) -> bool {
+        let r = &self.regions[k];
+        col < r.area.left.saturating_add(r.label_cols)
+    }
+}
+
+/// The text of a heading's inlines, a line break as a space, trimmed.
+fn plain_text(inlines: &[Inline]) -> String {
+    let mut text = String::new();
+    for i in inlines {
+        match i {
+            Inline::Text { text: t, .. } => text.push_str(t),
+            Inline::LineBreak => text.push(' '),
+            _ => {}
+        }
+    }
+    text.trim().to_string()
+}
+
+/// A text as one path part: a label (the label rule) without the unit it names. A text that
+/// is only a unit gives no part.
+fn label_part(text: &str) -> Option<String> {
+    logic::is_label(text)
+        .then(|| crate::units::split_label(text).0)
+        .flatten()
 }
 
 /// The style flags of a look; every flag is known.
@@ -155,9 +342,11 @@ pub(crate) fn map_sheet(
         &mut caps,
         budget,
     );
+    let paths = SheetPaths::of(&layout, &texts, &mapped.blocks);
     SheetLayout {
         mapped,
         merges_ignored,
+        paths,
     }
 }
 

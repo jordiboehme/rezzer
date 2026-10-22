@@ -4470,6 +4470,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D2",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4479,6 +4482,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E2",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4488,6 +4494,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D3",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4497,6 +4506,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E3",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4506,6 +4518,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D4",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4515,6 +4530,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E4",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4524,6 +4542,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D5",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4533,6 +4554,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E5",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4542,6 +4566,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D6",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4551,6 +4578,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E6",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4560,6 +4590,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D7",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4569,6 +4602,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E7",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",

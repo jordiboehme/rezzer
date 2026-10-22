@@ -97,7 +97,10 @@ A row with a cell range stands for values next to each other that play one part.
 | D1 |  | &lt;= on cell | 7 |  |  | 1 |
 | E1 |  |  | 6 |  |  | 1 |
 | F1 |  |  | Because it's in the Impossible that you find reality |  |  | 1 |
-| A5:A8 |  |  | 0, 100, 50, -10 (4 values) |  |  | 1 each |
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A5:A8 |  | Temps | 0, 100, 50, -10 (4 values) |  |  | 1 each |
 
 #### Formulas
 

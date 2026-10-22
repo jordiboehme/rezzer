@@ -10,7 +10,12 @@
 //! never before a `---` line (it would look like frontmatter), and a heading stays with the
 //! block after it. A table stays with what comes before it and its notes with it; a sheet
 //! region's layout line stays with what comes before it and with the table or list after
-//! it. Joining the pages gives the input back unchanged.
+//! it.
+//!
+//! A page that starts inside a `##` or `###` section at a blank line begins with that
+//! section's heading line, and inside a parameter group of `## Logic` with the group's title
+//! line, each followed by ` (continued)` (spec 8.7). Joining the pages without these lines
+//! gives the input back unchanged.
 
 /// The token estimate: characters divided by four.
 pub(crate) fn tokens(text: &str) -> usize {
@@ -68,12 +73,30 @@ fn layout_line(text: &str) -> bool {
     })
 }
 
-/// The border before each line, and each line's start offset.
-fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
+/// The words that start the title line of a parameter group in `## Logic`.
+const GROUP_TITLE: &str = "Parameters in ";
+
+/// What a line opens or stands in: the line of the `##` or `###` section it lies in (the
+/// innermost), and of the parameter group title it lies under, as line numbers.
+#[derive(Debug, Clone, Copy, Default)]
+struct Context {
+    section: Option<usize>,
+    group: Option<usize>,
+}
+
+/// The border before each line, each line's start offset and its context.
+fn borders(md: &str) -> (Vec<usize>, Vec<Border>, Vec<Context>) {
     let lines: Vec<&str> = md.split_inclusive('\n').collect();
     let mut starts = Vec::with_capacity(lines.len());
     let mut kinds = Vec::with_capacity(lines.len());
+    let mut contexts = Vec::with_capacity(lines.len());
     let mut offset = 0;
+    // The open `##` and `###` heading lines, whether the `##` is `## Logic`, and the open
+    // group title.
+    let mut h2: Option<usize> = None;
+    let mut h3: Option<usize> = None;
+    let mut logic = false;
+    let mut group: Option<usize> = None;
 
     // Frontmatter and the title heading right after it are never split.
     let mut protected_until = 0;
@@ -123,6 +146,22 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             Border::None
         };
         kinds.push(kind);
+        if n >= protected_until && fence.is_none() {
+            if kind == Border::H2 {
+                (h2, h3, group) = (Some(n), None, None);
+                logic = text == "## Logic";
+            } else if kind == Border::H3 {
+                (h3, group) = (Some(n), None);
+            } else if text.starts_with('#') {
+                group = None;
+            } else if logic && prev_blank && text.starts_with(GROUP_TITLE) && text.ends_with(':') {
+                group = Some(n);
+            }
+        }
+        contexts.push(Context {
+            section: h3.or(h2),
+            group,
+        });
         if n >= protected_until {
             match fence {
                 None => {
@@ -147,7 +186,7 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             after_heading = fence.is_none() && (text.starts_with('#') || layout_line(text));
         }
     }
-    (starts, kinds)
+    (starts, kinds, contexts)
 }
 
 /// Splits `range` before every line whose border is in `at`.
@@ -173,11 +212,42 @@ fn split(
     out
 }
 
+/// The lines a page starting at `start` begins with: when it starts at a blank-line border
+/// inside a section, the section's heading line, then the title of the group it starts
+/// inside (none when it starts at the title), each marked continued.
+fn continued(
+    md: &str,
+    start: usize,
+    starts: &[usize],
+    kinds: &[Border],
+    contexts: &[Context],
+) -> String {
+    let Ok(n) = starts.binary_search(&start) else {
+        return String::new();
+    };
+    if kinds[n] != Border::Blank {
+        return String::new();
+    }
+    let line = |i: usize| {
+        let end = starts.get(i + 1).copied().unwrap_or(md.len());
+        md[starts[i]..end].trim_end_matches(['\n', '\r'])
+    };
+    let mut out = String::new();
+    let context = contexts[n];
+    if let Some(h) = context.section {
+        out.push_str(&format!("{} (continued)\n\n", line(h)));
+        if let Some(g) = context.group.filter(|&g| g != n) {
+            out.push_str(&format!("{} (continued)\n\n", line(g)));
+        }
+    }
+    out
+}
+
 pub(crate) fn paginate(md: &str, page_tokens: usize) -> Vec<String> {
     if page_tokens == 0 || tokens(md) <= page_tokens {
         return vec![md.to_string()];
     }
-    let (starts, kinds) = borders(md);
+    let (starts, kinds, contexts) = borders(md);
     let fits = |r: &(usize, usize)| tokens(&md[r.0..r.1]) <= page_tokens;
 
     // Atomic pieces: whole sections where they fit, else their `###` parts, else blank-line
@@ -197,25 +267,28 @@ pub(crate) fn paginate(md: &str, page_tokens: usize) -> Vec<String> {
         }
     }
 
-    // Greedy packing on character counts, so each piece is counted once.
+    // Greedy packing on character counts, so each piece is counted once. A page after the
+    // first counts the lines it begins with.
     let limit_chars = page_tokens.saturating_mul(4).saturating_add(3);
     let mut pages = Vec::new();
-    let mut current: Option<(usize, usize, usize)> = None;
+    let mut current: Option<(usize, usize, usize, String)> = None;
     for piece in pieces {
         let chars = md[piece.0..piece.1].chars().count();
         current = match current {
-            None => Some((piece.0, piece.1, chars)),
-            Some((from, _, have)) if have + chars <= limit_chars => {
-                Some((from, piece.1, have + chars))
+            None => Some((piece.0, piece.1, chars, String::new())),
+            Some((from, _, have, lead)) if have + chars <= limit_chars => {
+                Some((from, piece.1, have + chars, lead))
             }
-            Some((from, to, _)) => {
-                pages.push(md[from..to].to_string());
-                Some((piece.0, piece.1, chars))
+            Some((from, to, _, lead)) => {
+                pages.push(format!("{lead}{}", &md[from..to]));
+                let lead = continued(md, piece.0, &starts, &kinds, &contexts);
+                let have = lead.chars().count() + chars;
+                Some((piece.0, piece.1, have, lead))
             }
         };
     }
-    if let Some((from, to, _)) = current {
-        pages.push(md[from..to].to_string());
+    if let Some((from, to, _, lead)) = current {
+        pages.push(format!("{lead}{}", &md[from..to]));
     }
     pages
 }

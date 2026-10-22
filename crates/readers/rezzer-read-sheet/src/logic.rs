@@ -22,6 +22,7 @@ use sheetparts::ooxml::{CalcMode, CalcSettings};
 
 use crate::Out;
 use crate::grid::{RawCell, Val};
+use crate::layout::SheetPaths;
 use crate::units;
 
 /// Excel's own maximum length of a formula, in characters. Longer texts are refused.
@@ -934,6 +935,8 @@ pub(crate) struct SheetFacts {
     /// The format key of each cell that has one (an OOXML style index, or an index into the
     /// reader's own format list); [`ReadState::formats`] gives its code.
     pub styles: HashMap<(u32, u32), u32>,
+    /// What names the cells of the sheet's regions.
+    pub paths: SheetPaths,
 }
 
 impl SheetFacts {
@@ -941,6 +944,7 @@ impl SheetFacts {
         name: &str,
         mut cells: Vec<RawCell>,
         styles: HashMap<(u32, u32), u32>,
+        paths: SheetPaths,
     ) -> SheetFacts {
         // Only whether a cell holds a formula matters here; the texts are in the facet.
         for c in &mut cells {
@@ -952,6 +956,7 @@ impl SheetFacts {
             name: name.to_string(),
             cells,
             styles,
+            paths,
         }
     }
 }
@@ -1091,13 +1096,26 @@ pub(crate) fn workbook_logic(
         );
     }
 
+    let mut path_text = TextMeter::new(budget.limits().max_text_bytes);
     let (mut params, unit_notes) = cell_parameters(
         &logic.parameters,
         &sheets,
         state.formats,
         &convert_units,
         &named_cells,
+        &mut path_text,
     );
+    if path_text.is_full() {
+        out.loss(
+            "document",
+            format!(
+                "text limit of {} bytes reached: later parameters keep their one label, not their path of headings",
+                path_text.max()
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
+    }
     for (anchor, what) in unit_notes {
         out.loss(anchor, what, LossReason::Uncertain, Severity::Info);
     }
@@ -1432,14 +1450,16 @@ pub(crate) fn cell_value(val: &Val, code: Option<&str>) -> Option<Value> {
     }
 }
 
-/// Parameters for the constant cells formulas read, with label, value, name and unit, plus
-/// a note (anchor, text) for each value whose unit sources disagree.
+/// Parameters for the constant cells formulas read, with label, path, value, name and unit,
+/// plus a note (anchor, text) for each value whose unit sources disagree. The path texts of
+/// all parameters together are bounded by `paths`; past it a parameter keeps its one label.
 fn cell_parameters<'f>(
     found: &[ParamCell],
     sheets: &[SheetFacts],
     formats: &dyn Fn(u32) -> Option<&'f str>,
     convert_units: &HashMap<(String, u32, u32), String>,
     named_cells: &HashMap<(String, u32, u32), String>,
+    paths: &mut TextMeter,
 ) -> (Vec<Parameter>, Vec<(String, String)>) {
     let mut out = Vec::with_capacity(found.len());
     let mut notes = Vec::new();
@@ -1461,8 +1481,12 @@ fn cell_parameters<'f>(
         let labels = facts
             .map(|f| labels_of(&f.cells, &wanted))
             .unwrap_or_default();
+        let empty = SheetPaths::default();
+        let regions = facts.map_or(&empty, |f| &f.paths);
+        let points: Vec<(u32, u32)> = group.iter().map(|p| (p.at.row, p.at.col)).collect();
+        let located = regions.locate(&points);
         let q = quote_sheet(sheet);
-        for p in group {
+        for (p, region) in group.iter().zip(located) {
             let (row, col) = (p.at.row, p.at.col);
             let anchor = format!("{q}!{}", crate::grid::a1(row, col));
             let cell = facts.and_then(|f| {
@@ -1529,18 +1553,81 @@ fn cell_parameters<'f>(
                     (None, None)
                 }
             };
+            let label = left_label.clone().or(head_label);
+            let mut path = match region {
+                Some(k) => region_path(regions, k, (row, col), &around, &left_label, &label),
+                None => Vec::new(),
+            };
+            if path.is_empty() {
+                path.extend(label.clone());
+            }
+            let bytes: usize = path.iter().map(|t| t.len() + 3).sum();
+            if path.len() > 1 && !paths.take(bytes) {
+                path = label.into_iter().collect();
+            }
             out.push(Parameter {
                 anchor: Anchor(anchor),
                 name: named_cells.get(&key).cloned(),
-                label: left_label.or(head_label),
+                label: (!path.is_empty()).then(|| path.join(" / ")),
                 value,
                 unit,
                 unit_source,
                 read_by: p.read_by,
+                path,
             });
         }
     }
     (out, notes)
+}
+
+/// The path of a parameter at `at` in region `k` (spec 8.7): the region's base, the parts
+/// of its column's header path and the label of its row. A row label the label rule took as
+/// this value's label (`left_label`) is written as that label, without its unit; a text it
+/// took as a value of the row (a category, a size) stands as it is. Outside the label
+/// columns, a row without a label there is named by the label on the left. When neither
+/// names the cell, `label` (the one found beside or above) does; empty when there is none.
+fn region_path(
+    regions: &SheetPaths,
+    k: usize,
+    at: (u32, u32),
+    around: &Around,
+    left_label: &Option<String>,
+    label: &Option<String>,
+) -> Vec<String> {
+    let (row, col) = at;
+    let (mut narrow, row_labels) = regions.narrow_parts(k, row, col);
+    let left_text = around.left.map(str::trim);
+    if row_labels.is_empty() && !regions.in_label_cols(k, col) {
+        narrow.extend(left_label.clone());
+    }
+    for t in row_labels {
+        if Some(t) == left_text {
+            narrow.extend(left_label.clone());
+        } else {
+            narrow.push(t.to_string());
+        }
+    }
+    if narrow.is_empty() {
+        narrow.extend(label.clone());
+    }
+    if narrow.is_empty() {
+        return Vec::new();
+    }
+    // The text of the label found beside or above is not repeated when it is a heading the
+    // region stands under (`t (m)` as a caption over its values).
+    let source = if left_label.is_some() {
+        around.left
+    } else {
+        around.header
+    };
+    let mut path: Vec<String> = regions.regions[k]
+        .base
+        .iter()
+        .filter(|b| source.map(str::trim) != Some(b.as_str()))
+        .cloned()
+        .collect();
+    path.append(&mut narrow);
+    path
 }
 
 /// Parameters for defined names whose whole text is a number; read by the cell formulas
@@ -1576,6 +1663,7 @@ fn name_parameters(facet: &[Formula], literal: Vec<(String, String, Value)>) -> 
             unit: None,
             unit_source: None,
             read_by: counts.get(&anchor.to_uppercase()).copied().unwrap_or(0),
+            path: Vec::new(),
         })
         .collect()
 }

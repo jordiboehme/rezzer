@@ -896,6 +896,10 @@ source: crates/rezzer/tests/corpus.rs
     "parameters": [
       {
         "anchor": "mySheet1!C13",
+        "label": "formula",
+        "path": [
+          "formula"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",

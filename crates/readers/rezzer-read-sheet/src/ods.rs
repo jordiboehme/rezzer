@@ -446,7 +446,12 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         }
         rules(&mut out, &q, &sheet.validations, &[], budget);
         annotations(&mut out, &q, sheet, budget);
-        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles));
+        facts.push(SheetFacts::new(
+            &sheet.name,
+            cells.cells,
+            styles,
+            laid.paths,
+        ));
         out.doc.body.push(section(&sheet.name, &q, blocks));
     }
 

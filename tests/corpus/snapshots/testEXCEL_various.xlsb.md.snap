@@ -92,7 +92,7 @@ comment6 (B35)
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
-| C13 |  |  | 2 |  |  | 2 |
+| C13 |  | formula | 2 |  |  | 2 |
 
 #### Formulas
 

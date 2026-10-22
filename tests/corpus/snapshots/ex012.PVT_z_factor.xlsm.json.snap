@@ -2698,6 +2698,9 @@ source: crates/rezzer/tests/corpus.rs
         "anchor": "z!L3",
         "label": "gg",
         "name": "gg",
+        "path": [
+          "gg"
+        ],
         "read_by": 2016,
         "value": {
           "type": "number",
@@ -2708,6 +2711,9 @@ source: crates/rezzer/tests/corpus.rs
         "anchor": "z!L4",
         "label": "zcor",
         "name": "zcor",
+        "path": [
+          "zcor"
+        ],
         "read_by": 2016,
         "value": {
           "type": "number",
@@ -2717,6 +2723,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "z!F35",
         "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2725,6 +2734,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!G35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2733,6 +2746,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!H35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2741,6 +2758,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!I35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2749,6 +2770,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!J35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2757,6 +2782,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!K35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2765,6 +2794,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!L35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2773,6 +2806,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!M35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2781,6 +2818,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!N35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -2789,6 +2830,10 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "z!O35",
+        "label": "P",
+        "path": [
+          "P"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",

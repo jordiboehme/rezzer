@@ -353,6 +353,8 @@ Table A42:C45 (data A43:C45), row labels in A, found by rules: empty-row gaps, c
 
 A row with a cell range stands for values next to each other that play one part.
 
+Parameters in INPUTS:
+
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
 | B5 |  | Excavated diameter, D | 10 | m | cell beside | 2 |
@@ -363,6 +365,9 @@ A row with a cell range stands for values next to each other that play one part.
 | B10 |  | Cohesion, c | 20 | kPa | cell beside | 1 |
 | B11 |  | Concrete grade, fck | 30 | MPa | cell beside | 1 |
 | B13 |  | Target Factor of Safety | 2 |  |  | 2 |
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
 | E49:E72 |  | t | 0.15, 0.2, 0.25 ..., 1.3 (24 values) | m | column header | 2 each |
 
 #### Formulas
@@ -434,6 +439,8 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 #### Parameters
 
+Parameters in INPUTS:
+
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
 | B5 |  | Tunnel length, L | 800 | m | cell beside | 2 |
@@ -482,6 +489,8 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 A row with a cell range stands for values next to each other that play one part.
 
+Parameters in INPUTS:
+
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
 | B5 |  | Tunnel length, L | 800 | m | cell beside | 1 |
@@ -494,6 +503,9 @@ A row with a cell range stands for values next to each other that play one part.
 | B12 |  | Trial pipe diameter | 0.3 | m | cell beside | 2 |
 | B13 |  | Sump retention time | 10 | min | cell beside | 1 |
 | B14 |  | Pump duty factor | 1.25 |  |  | 1 |
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
 | E29:E38 |  | D | 0.15, 0.2, 0.25 ..., 0.9 (10 values) | m | column header | 2 each |
 
 #### Formulas

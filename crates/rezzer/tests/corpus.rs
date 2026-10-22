@@ -706,9 +706,17 @@ fn cells_and_logic_unchanged_on_corpus() {
                 .unwrap_or(Value::Array(Vec::new()));
             // The baseline went through one more print and parse; serde_json's float parse
             // is not exact, so the facet takes the same way before the comparison.
-            let now: Value = serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
-            if now != base[facet] {
-                let (a, b) = (now.as_array().unwrap(), base[facet].as_array().unwrap());
+            let mut now: Value =
+                serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
+            let mut base_facet = base[facet].clone();
+            // Parameter labels are written as paths since spec 8.7 (D2); the rest is equal.
+            if facet == "parameters" {
+                now = without_label_and_path(&now);
+                base_facet = without_label_and_path(&base_facet);
+            }
+            let base = &base_facet;
+            if now != *base {
+                let (a, b) = (now.as_array().unwrap(), base.as_array().unwrap());
                 let first = a.iter().zip(b).find(|(x, y)| x != y);
                 failures.push(format!(
                     "{name}: {facet} differ ({} now, {} before); first {first:?}",
@@ -724,6 +732,55 @@ fn cells_and_logic_unchanged_on_corpus() {
     }
     eprintln!("{checked} files checked, {covered_total} covered cells stated as losses");
     assert!(checked >= 48, "only {checked} files checked");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Parameters as model JSON without their `label` and `path`.
+fn without_label_and_path(list: &Value) -> Value {
+    let mut list = list.clone();
+    for p in list.as_array_mut().unwrap() {
+        let p = p.as_object_mut().unwrap();
+        p.remove("label");
+        p.remove("path");
+    }
+    list
+}
+
+/// For every corpus workbook the parameters equal the baseline of Task 1 in anchor, name,
+/// value, unit, unit source and read count, in the same order: only `label` and `path`
+/// may differ (spec 8.7, D2). A label is the path joined with " / ", and a parameter in no
+/// region keeps the label it had.
+#[test]
+fn parameter_values_and_cells_unchanged() {
+    let pipeline = pipeline();
+    let mut failures = Vec::new();
+    let mut total = 0;
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let base = baseline(&name);
+        let json = run(&pipeline, &file).json;
+        let now = json
+            .pointer("/facets/parameters")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new()));
+        let now: Value = serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
+        total += now.as_array().unwrap().len();
+        if without_label_and_path(&now) != without_label_and_path(&base["parameters"]) {
+            failures.push(format!("{name}: parameters differ beyond label and path"));
+        }
+        for p in now.as_array().unwrap() {
+            let path: Vec<&str> = list(p, "/path").iter().filter_map(Value::as_str).collect();
+            let joined = (!path.is_empty()).then(|| path.join(" / "));
+            if p["label"].as_str() != joined.as_deref() {
+                failures.push(format!("{name}: label is not the joined path: {p}"));
+            }
+            if path.iter().any(|part| part.trim().is_empty()) {
+                failures.push(format!("{name}: empty path part: {p}"));
+            }
+        }
+    }
+    eprintln!("{total} parameters checked");
+    assert!(total >= 1_000, "only {total} parameters checked");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -803,24 +860,35 @@ fn tunnel_design_parameters_and_units() {
             .iter()
             .any(|f| f["anchor"].as_str().unwrap().starts_with("Design_Basis!"))
     );
-    // Inputs with their label and the unit in the cell beside them.
+    // Inputs with their label under the region's caption `INPUTS` and the unit in the cell
+    // beside them.
     for (anchor, label, value, unit) in [
-        ("Structural_Lining!B5", "Excavated diameter, D", 10.0, "m"),
+        (
+            "Structural_Lining!B5",
+            "INPUTS / Excavated diameter, D",
+            10.0,
+            "m",
+        ),
         (
             "Structural_Lining!B6",
-            "Trial lining thickness, t",
+            "INPUTS / Trial lining thickness, t",
             0.35,
             "m",
         ),
-        ("Structural_Lining!B7", "Overburden depth, H", 25.0, "m"),
+        (
+            "Structural_Lining!B7",
+            "INPUTS / Overburden depth, H",
+            25.0,
+            "m",
+        ),
         (
             "Structural_Lining!B8",
-            "Unit weight of ground, gamma",
+            "INPUTS / Unit weight of ground, gamma",
             22.0,
             "kN/m3",
         ),
-        ("Ventilation!B5", "Tunnel length, L", 800.0, "m"),
-        ("Drainage!B12", "Trial pipe diameter", 0.3, "m"),
+        ("Ventilation!B5", "INPUTS / Tunnel length, L", 800.0, "m"),
+        ("Drainage!B12", "INPUTS / Trial pipe diameter", 0.3, "m"),
     ] {
         let p = at(&doc, "parameters", anchor);
         assert_eq!(p["label"], label, "{anchor}");
@@ -835,7 +903,7 @@ fn tunnel_design_parameters_and_units() {
     assert_eq!(t["unit_source"], "header");
     // A dimensionless input gets no unit.
     let fos = at(&doc, "parameters", "Structural_Lining!B13");
-    assert_eq!(fos["label"], "Target Factor of Safety");
+    assert_eq!(fos["label"], "INPUTS / Target Factor of Safety");
     assert!(fos.get("unit").is_none());
     // The safety check is a result, with the cached verdict.
     let status = at(&doc, "formulas", "Structural_Lining!B44");
@@ -966,6 +1034,7 @@ fn convert_units_found() {
     let c = at(&doc, "formulas", "Weight!C3");
     assert_eq!(c["expression"], "=CONVERT(1,B3,$B$2)");
     assert_eq!(refs(c), ["Weight!B3", "Weight!B2"]);
+    // The label is the column header, then the unit name on the left that names the row.
     for (anchor, label, code) in [
         ("Weight!B2", "Gram", "g"),
         ("Weight!B4", "Pound mass (avoirdupois)", "lbm"),
@@ -973,7 +1042,11 @@ fn convert_units_found() {
         ("distance!B6", "Foot", "ft"),
     ] {
         let p = at(&doc, "parameters", anchor);
-        assert_eq!(p["label"], label, "{anchor}");
+        assert_eq!(
+            p["label"],
+            format!("From_unit or to_unit / {label}"),
+            "{anchor}"
+        );
         assert_eq!(p["value"]["value"], code, "{anchor}");
     }
     assert!(at(&doc, "parameters", "Weight!B2")["read_by"].as_u64() > Some(1));

@@ -632,7 +632,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         if laid.mapped.elements_out {
             halted = Some("element limit reached");
         }
-        facts.push(SheetFacts::new(&entry.name, cells.cells, dates));
+        facts.push(SheetFacts::new(&entry.name, cells.cells, dates, laid.paths));
         out.doc.body.push(section(&entry.name, &q, blocks));
     }
     if caveat {

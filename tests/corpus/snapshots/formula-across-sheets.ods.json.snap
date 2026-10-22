@@ -1264,6 +1264,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Calculation!G1",
         "label": "Colonne b",
+        "path": [
+          "Colonne b"
+        ],
         "read_by": 3,
         "value": {
           "type": "number",
@@ -1273,6 +1276,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Calculation!G2",
         "label": "haut (n)",
+        "path": [
+          "haut (n)"
+        ],
         "read_by": 3,
         "value": {
           "type": "number",
@@ -1298,6 +1304,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "Data!D1",
         "label": "(b)",
+        "path": [
+          "(b)"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",

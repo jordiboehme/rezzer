@@ -190,8 +190,13 @@ A row with a cell range stands for values next to each other that play one part.
 | --- | --- | --- | --- | --- | --- | --- |
 | L3 | gg | gg | 0.75 |  |  | 2016 |
 | L4 | zcor | zcor | 2 |  |  | 2016 |
-| F35 |  | P | 1 |  |  | 1 |
-| G35:AK35 |  |  | 10, 19, 28 ..., 280 (31 values) |  |  | 1 each |
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| F35:AK35 |  | P | 1, 10, 19 ..., 280 (32 values) |  |  | 1 each |
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
 | C38:C58 |  | T | 0, 10, 20 ..., 200 (21 values) |  |  | 2 each |
 
 #### Formulas
@@ -231,10 +236,10 @@ For formulas copied over several cells the first cell is shown.
 
 ### Names
 
-| Name | Scope | Kind | Refers to | Value | Read by | Note |
-| --- | --- | --- | --- | --- | --- | --- |
-| gg | workbook | name | `z!$L$3` |  |  |  |
-| zcor | workbook | name | `z!$L$4` |  |  |  |
+| Name | Scope | Kind | Refers to | Label | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| gg | workbook | name | `z!$L$3` | gg |  |  |  |
+| zcor | workbook | name | `z!$L$4` | zcor |  |  |  |
 
 ### Dependencies
 

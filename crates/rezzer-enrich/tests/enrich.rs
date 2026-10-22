@@ -736,6 +736,7 @@ fn parameter_rule_and_formula_range_anchors_are_checked() {
         unit: None,
         unit_source: None,
         read_by: 1,
+        path: Vec::new(),
     };
     let rule = |anchor: &str| Rule {
         kind: "validation".into(),
@@ -834,6 +835,7 @@ fn workbook_overview_counts() {
         unit: None,
         unit_source: None,
         read_by: 1,
+        path: Vec::new(),
     }];
     d.facets.annotations = vec![Annotation {
         kind: "comment".into(),

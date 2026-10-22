@@ -271,7 +271,7 @@ fn full_document() -> Document {
     doc.facets.parameters.push(Parameter {
         anchor: Anchor("Costs!B2".into()),
         name: Some("rate".into()),
-        label: Some("Rate (EUR/h)".into()),
+        label: Some("Costs / Rate (EUR/h)".into()),
         value: Some(Value::Number {
             value: 80.0,
             unit: Some("EUR/h".into()),
@@ -279,6 +279,7 @@ fn full_document() -> Document {
         unit: Some("EUR/h".into()),
         unit_source: Some("label".into()),
         read_by: 3,
+        path: vec!["Costs".into(), "Rate (EUR/h)".into()],
     });
     doc.facets.rules.push(Rule {
         kind: "validation".into(),
@@ -833,6 +834,35 @@ fn shared_helpers() {
         Inline::FootnoteRef { id: "1".into() },
     ];
     assert_eq!(plain_text(&list), "a bc");
+}
+
+#[test]
+fn parameter_path_roundtrips() {
+    let with_path = Parameter {
+        anchor: Anchor("Lining!C7".into()),
+        name: None,
+        label: Some("Lining / Loads / Dead".into()),
+        value: None,
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+        path: vec!["Lining".into(), "Loads".into(), "Dead".into()],
+    };
+    let json = serde_json::to_value(&with_path).unwrap();
+    assert_eq!(json["path"], serde_json::json!(["Lining", "Loads", "Dead"]));
+    let back: Parameter = serde_json::from_value(json).unwrap();
+    assert_eq!(back, with_path);
+    // An empty path is left out, and JSON without one still reads.
+    let bare = Parameter {
+        path: Vec::new(),
+        ..with_path
+    };
+    let json = serde_json::to_string(&bare).unwrap();
+    assert!(!json.contains("path"), "{json}");
+    let old: Parameter =
+        serde_json::from_str(r#"{"anchor":"S!B2","label":"Span","read_by":2}"#).unwrap();
+    assert!(old.path.is_empty());
+    assert_eq!(old.label.as_deref(), Some("Span"));
 }
 
 #[test]

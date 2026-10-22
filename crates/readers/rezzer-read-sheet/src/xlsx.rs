@@ -295,7 +295,12 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         }
         format_losses(&mut out, &q, &fmt);
         drop(fmt);
-        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles));
+        facts.push(SheetFacts::new(
+            &sheet.name,
+            cells.cells,
+            styles,
+            laid.paths,
+        ));
         if !parts.hidden_rows.is_empty() {
             blocks.push(note(format!(
                 "Hidden rows: {}.",

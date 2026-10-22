@@ -8,6 +8,9 @@
 //!
 //! Inside a sheet's part, cells of that sheet are written without the sheet name; cells of
 //! other sheets keep it. Anchors that belong to no sheet of the body go to `### Other`.
+//! Parameters are grouped by sheet region; a group's shared path start is its title, and
+//! each label is the shortest unique end of its path (spec 8.7). Where a label stands
+//! without that title (a read from another sheet, `### Names`) the full path is written.
 //! Every pass over the formulas is linear, so a workbook with millions of formulas renders
 //! in one sweep.
 //!
@@ -96,22 +99,25 @@ fn unquote(sheet: &str) -> String {
     }
 }
 
-/// The sheets of the body in order, as (title, anchor), and a map from anchor to index.
+/// The sheets of the body in order, as (title, anchor), a map from anchor to index, and the
+/// region ranges of each sheet in reading order.
 struct Sheets<'a> {
     list: Vec<(String, &'a str)>,
     index: HashMap<&'a str, usize>,
+    regions: Vec<Vec<Area>>,
 }
 
 impl<'a> Sheets<'a> {
     fn of(body: &'a [Block]) -> Sheets<'a> {
         let mut list = Vec::new();
         let mut index = HashMap::new();
+        let mut regions = Vec::new();
         for b in body {
             if let Block::Section {
                 kind: SectionKind::Sheet,
                 title,
                 anchor: Some(anchor),
-                ..
+                blocks,
             } = b
             {
                 if index.contains_key(anchor.0.as_str()) {
@@ -124,9 +130,14 @@ impl<'a> Sheets<'a> {
                     .map_or_else(|| unquote(&anchor.0), str::to_string);
                 index.insert(anchor.0.as_str(), list.len());
                 list.push((title, anchor.0.as_str()));
+                regions.push(region_areas(blocks));
             }
         }
-        Sheets { list, index }
+        Sheets {
+            list,
+            index,
+            regions,
+        }
     }
 
     /// The index of the sheet an anchor lies on.
@@ -148,6 +159,92 @@ fn local<'b>(anchor: &'b str, sheet: Option<&str>) -> &'b str {
     match (split_sheet(anchor), sheet) {
         (Some((s, rest)), Some(own)) if s == own => rest,
         _ => anchor,
+    }
+}
+
+/// A rectangle of cells, 0-based: (first column, first row), (last column, last row).
+type Area = ((u32, u32), (u32, u32));
+
+/// The ranges of the sheet regions among a sheet's blocks, in reading order.
+fn region_areas(blocks: &[Block]) -> Vec<Area> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                layout: Some(l), ..
+            } => corners(&l.range),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The index of the area that holds each (column, row) point. The areas of one sheet never
+/// overlap; one sweep by row with the areas that have begun, by left column.
+fn locate(areas: &[Area], points: &[Option<(u32, u32)>]) -> Vec<Option<usize>> {
+    let mut order: Vec<usize> = (0..points.len()).filter(|&i| points[i].is_some()).collect();
+    order.sort_unstable_by_key(|&i| points[i].map(|(c, r)| (r, c)));
+    let mut by_top: Vec<usize> = (0..areas.len()).collect();
+    by_top.sort_unstable_by_key(|&k| (areas[k].0.1, areas[k].0.0));
+    let mut next = 0;
+    let mut open: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+    let mut out = vec![None; points.len()];
+    for i in order {
+        let Some((col, row)) = points[i] else {
+            continue;
+        };
+        while let Some(&k) = by_top.get(next)
+            && areas[k].0.1 <= row
+        {
+            open.insert(areas[k].0.0, k);
+            next += 1;
+        }
+        // An area that ended above is closed; an open area left of the point that does not
+        // reach it means no area holds it, as areas never overlap.
+        while let Some((&left, &k)) = open.range(..=col).next_back() {
+            let ((_, _), (right, bottom)) = areas[k];
+            if bottom < row {
+                open.remove(&left);
+                continue;
+            }
+            if right >= col {
+                out[i] = Some(k);
+            }
+            break;
+        }
+    }
+    out
+}
+
+/// The full label of every labelled cell parameter, by its anchor in upper case: what a
+/// read from another sheet and a defined name show.
+struct Labels {
+    by_cell: HashMap<String, String>,
+}
+
+impl Labels {
+    fn of(params: &[Parameter]) -> Labels {
+        let by_cell = params
+            .iter()
+            .filter(|p| !p.anchor.0.starts_with("name:"))
+            .filter_map(|p| {
+                let parts = parts_of(p);
+                (!parts.is_empty()).then(|| (p.anchor.0.to_uppercase(), parts.join(" / ")))
+            })
+            .collect();
+        Labels { by_cell }
+    }
+
+    fn get(&self, anchor: &str) -> Option<&str> {
+        self.by_cell.get(&anchor.to_uppercase()).map(String::as_str)
+    }
+}
+
+/// The parts that name a parameter: its path, else its label as one part.
+fn parts_of(p: &Parameter) -> Vec<&str> {
+    if p.path.is_empty() {
+        p.label.as_deref().into_iter().collect()
+    } else {
+        p.path.iter().map(String::as_str).collect()
     }
 }
 
@@ -362,12 +459,20 @@ fn cached(f: &Formula) -> String {
     }
 }
 
-fn reads(f: &Formula, sheet: Option<&str>) -> String {
+/// The `Reads` cell. A read of a labelled parameter on another sheet names its full label,
+/// as the short label under its group title stands only in that sheet's part.
+fn reads(f: &Formula, sheet: Option<&str>, labels: &Labels) -> String {
     let mut list: Vec<String> = f
         .references
         .iter()
         .take(MAX_READS)
-        .map(|r| cell_text(local(&r.0, sheet)))
+        .map(|r| {
+            let shown = local(&r.0, sheet);
+            match labels.get(&r.0).filter(|_| shown == r.0) {
+                Some(label) => format!("{} ({})", cell_text(shown), cell_text(label)),
+                None => cell_text(shown),
+            }
+        })
         .collect();
     if f.references.len() > MAX_READS {
         list.push(format!("and {} more", f.references.len() - MAX_READS));
@@ -400,6 +505,7 @@ fn formulas_table(
     sheet: Option<&str>,
     groups: &HashMap<&str, &str>,
     with_math: bool,
+    labels: &Labels,
 ) -> String {
     let with_note = list.iter().any(|e| e.first().note.is_some());
     let with_math = with_math
@@ -424,7 +530,7 @@ fn formulas_table(
                 area_text(e, groups, sheet),
                 e.members.len().to_string(),
                 code(&f.expression),
-                reads(f, sheet),
+                reads(f, sheet, labels),
                 roles(e),
                 cached(f),
             ];
@@ -589,21 +695,91 @@ fn same_kind(a: Option<&Value>, b: Option<&Value>) -> bool {
 /// A run of parameters folds into one row from this many cells on.
 const MIN_RUN: usize = 3;
 
-/// `#### Parameters`. Runs of unnamed values (a row of inputs, a column of test values) are
-/// one row each, with the first three values and the last.
-fn parameters_table(list: &[&Parameter], sheet: Option<&str>) -> String {
+/// `#### Parameters`: one group per sheet region in reading order, the parameters outside
+/// every region last, each group one table (spec 8.7). The start the paths of a group share
+/// is written once as its title (`Parameters in <start>:`); the Label column holds the
+/// shortest end of each path that is unique in the group, the full path when two are equal.
+/// Runs of unnamed values (a row of inputs, a column of test values) are one row each, with
+/// the first three values and the last.
+fn parameters_table(list: &[&Parameter], sheet: Option<&str>, areas: &[Area]) -> String {
+    let points: Vec<Option<(u32, u32)>> = list
+        .iter()
+        .map(|p| sheet.and_then(|s| cell_of(&p.anchor.0, s)))
+        .collect();
+    let mut groups: std::collections::BTreeMap<usize, Vec<&Parameter>> =
+        std::collections::BTreeMap::new();
+    for (p, at) in list.iter().zip(locate(areas, &points)) {
+        groups.entry(at.unwrap_or(usize::MAX)).or_default().push(p);
+    }
+    let mut folded = false;
+    let mut parts: Vec<String> = Vec::new();
+    for group in groups.values() {
+        let runs = parameter_runs(group);
+        folded |= runs.len() < group.len();
+        let (title, labels) = short_labels(&runs);
+        if let Some(title) = title {
+            parts.push(format!("Parameters in {}:", line_text(&title)));
+        }
+        parts.push(group_table(&runs, &labels, sheet));
+    }
+    let mut out = String::from("#### Parameters\n\n");
+    if folded {
+        out.push_str(
+            "A row with a cell range stands for values next to each other that play one part.\n\n",
+        );
+    }
+    out.push_str(&parts.join("\n\n"));
+    out
+}
+
+/// The title of a group and the label of each row: the longest start the paths share, as
+/// long as every path keeps at least one part after it; then per row the shortest end (whole
+/// parts) no other row's path ends with, else the full path. A row without a label stays
+/// without one.
+fn short_labels(runs: &[&[&Parameter]]) -> (Option<String>, Vec<String>) {
+    let paths: Vec<Vec<&str>> = runs.iter().map(|r| parts_of(r[0])).collect();
+    // A parameter without a label has no say in the title.
+    let named: Vec<&Vec<&str>> = paths.iter().filter(|p| !p.is_empty()).collect();
+    let shortest = named.iter().map(|p| p.len()).min().unwrap_or(0);
+    let mut shared = 0;
+    while shared + 1 < shortest && named.iter().all(|p| p[shared] == named[0][shared]) {
+        shared += 1;
+    }
+    let title = (shared > 0).then(|| named[0][..shared].join(" / "));
+    // How many paths end with each end of each length.
+    let mut ends: HashMap<(usize, Vec<&str>), usize> = HashMap::new();
+    for p in &paths {
+        for k in 1..=p.len() {
+            *ends.entry((k, p[p.len() - k..].to_vec())).or_default() += 1;
+        }
+    }
+    let labels = paths
+        .iter()
+        .map(|p| {
+            let k = (1..=p.len())
+                .find(|&k| ends.get(&(k, p[p.len() - k..].to_vec())) == Some(&1))
+                .unwrap_or(p.len());
+            p[p.len() - k..].join(" / ")
+        })
+        .collect();
+    (title, labels)
+}
+
+/// One group's table: a row per run, with the run's label.
+fn group_table(runs: &[&[&Parameter]], labels: &[String], sheet: Option<&str>) -> String {
     let opt = |v: &Option<String>| v.as_deref().map(cell_text).unwrap_or_default();
     let value = |p: &Parameter| p.value.as_ref().map(value_text).unwrap_or_default();
-    let rows: Vec<Vec<String>> = parameter_runs(list)
-        .into_iter()
-        .map(|run| {
+    let rows: Vec<Vec<String>> = runs
+        .iter()
+        .zip(labels)
+        .map(|(run, label)| {
             let p = run[0];
             let last = run[run.len() - 1];
             if run.len() == 1 {
                 return vec![
                     cell_text(local(&p.anchor.0, sheet)),
                     opt(&p.name),
-                    opt(&p.label),
+                    cell_text(label),
                     cell_text(&value(p)),
                     opt(&p.unit),
                     p.unit_source
@@ -638,7 +814,7 @@ fn parameters_table(list: &[&Parameter], sheet: Option<&str>) -> String {
             vec![
                 cell_text(&cells),
                 String::new(),
-                opt(&p.label),
+                cell_text(label),
                 cell_text(&values),
                 opt(&p.unit),
                 p.unit_source
@@ -649,13 +825,7 @@ fn parameters_table(list: &[&Parameter], sheet: Option<&str>) -> String {
             ]
         })
         .collect();
-    let mut out = String::from("#### Parameters\n\n");
-    if rows.len() < list.len() {
-        out.push_str(
-            "A row with a cell range stands for values next to each other that play one part.\n\n",
-        );
-    }
-    out.push_str(&pipe_table(
+    pipe_table(
         &header(&[
             "Cell",
             "Name",
@@ -667,8 +837,7 @@ fn parameters_table(list: &[&Parameter], sheet: Option<&str>) -> String {
         ]),
         &[],
         &rows,
-    ));
-    out
+    )
 }
 
 /// `#### Rules`: validation and conditional formats.
@@ -713,20 +882,28 @@ impl Part<'_> {
     }
 }
 
-fn part(
-    title: &str,
-    p: &Part<'_>,
-    sheet: Option<&str>,
-    groups: &HashMap<&str, &str>,
+/// What every part of the Logic section looks things up in.
+struct Lookup<'a> {
+    groups: HashMap<&'a str, &'a str>,
+    labels: Labels,
     with_math: bool,
-) -> String {
+}
+
+fn part(title: &str, p: &Part<'_>, sheet: Option<&str>, areas: &[Area], look: &Lookup) -> String {
+    let groups = &look.groups;
     let mut out = vec![heading_line(3, &line_text(title))];
     if !p.parameters.is_empty() {
-        out.push(parameters_table(&p.parameters, sheet));
+        out.push(parameters_table(&p.parameters, sheet, areas));
     }
     if !p.formulas.is_empty() {
         let list = entries(&p.formulas);
-        out.push(formulas_table(&list, sheet, groups, with_math));
+        out.push(formulas_table(
+            &list,
+            sheet,
+            groups,
+            look.with_math,
+            &look.labels,
+        ));
         out.extend(results_table(&list, sheet, groups));
     }
     if !p.rules.is_empty() {
@@ -736,8 +913,19 @@ fn part(
 }
 
 /// `### Names`: defined names and LAMBDA names, with the value and read count of names that
-/// hold a plain value.
-fn names_table(names: &[&Formula], params: &HashMap<&str, &Parameter>, sheets: &Sheets) -> String {
+/// hold a plain value. A name that stands for one labelled parameter cell names its full
+/// label in a `Label` column, which is there only when some name has one.
+fn names_table(
+    names: &[&Formula],
+    params: &HashMap<&str, &Parameter>,
+    sheets: &Sheets,
+    labels: &Labels,
+) -> String {
+    let label_of = |f: &Formula| match f.references.as_slice() {
+        [one] => labels.get(&one.0),
+        _ => None,
+    };
+    let with_label = names.iter().any(|f| label_of(f).is_some());
     let rows: Vec<Vec<String>> = names
         .iter()
         .map(|f| {
@@ -752,35 +940,31 @@ fn names_table(names: &[&Formula], params: &HashMap<&str, &Parameter>, sheets: &
                 "name"
             };
             let p = params.get(f.anchor.0.as_str());
-            vec![
+            let mut row = vec![
                 cell_text(name),
                 cell_text(&scope),
                 kind.to_string(),
                 code(&f.expression),
+            ];
+            if with_label {
+                row.push(label_of(f).map(cell_text).unwrap_or_default());
+            }
+            row.extend([
                 p.and_then(|p| p.value.as_ref())
                     .map(|v| cell_text(&value_text(v)))
                     .unwrap_or_default(),
                 p.map(|p| p.read_by.to_string()).unwrap_or_default(),
                 f.note.as_deref().map(cell_text).unwrap_or_default(),
-            ]
+            ]);
+            row
         })
         .collect();
-    format!(
-        "### Names\n\n{}",
-        pipe_table(
-            &header(&[
-                "Name",
-                "Scope",
-                "Kind",
-                "Refers to",
-                "Value",
-                "Read by",
-                "Note"
-            ]),
-            &[],
-            &rows
-        )
-    )
+    let mut cols = vec!["Name", "Scope", "Kind", "Refers to"];
+    if with_label {
+        cols.push("Label");
+    }
+    cols.extend(["Value", "Read by", "Note"]);
+    format!("### Names\n\n{}", pipe_table(&header(&cols), &[], &rows))
 }
 
 /// Calls `found` with the name of every function called in `expr` (the text right before a
@@ -1295,6 +1479,11 @@ pub(crate) fn logic(
                 .collect()
         })
         .unwrap_or_default();
+    let look = Lookup {
+        groups,
+        labels: Labels::of(&doc.facets.parameters),
+        with_math,
+    };
 
     let hidden = hidden_logic(doc, &cells);
     // The headings of the parts after the sheets; a sheet with one of these names gets
@@ -1328,13 +1517,13 @@ pub(crate) fn logic(
         } else {
             title.clone()
         };
-        out.push(part(&heading, p, Some(anchor), &groups, with_math));
+        out.push(part(&heading, p, Some(anchor), &sheets.regions[i], &look));
     }
     if !other.is_empty() {
-        out.push(part("Other", &other, None, &groups, with_math));
+        out.push(part("Other", &other, None, &[], &look));
     }
     if !names.is_empty() {
-        out.push(names_table(&names, &name_params, &sheets));
+        out.push(names_table(&names, &name_params, &sheets, &look.labels));
     }
     if let Some(g) = selected.as_ref().or(dependency)
         && !g.nodes.is_empty()

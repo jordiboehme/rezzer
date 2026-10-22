@@ -707,6 +707,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "'One-Var'!A2",
         "label": "A",
+        "path": [
+          "A"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",
@@ -716,6 +719,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "'One-Var'!B2",
         "label": "B",
+        "path": [
+          "B"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",

@@ -1005,6 +1005,27 @@ fn snapshot_rich_document() {
     insta::assert_snapshot!(md);
 }
 
+/// A page without the lines a continued page begins with (`... (continued)` and a blank).
+fn without_lead(page: &str) -> &str {
+    let mut rest = page;
+    while let Some((line, after)) = rest.split_once("\n\n") {
+        if line.contains('\n') || !line.ends_with(" (continued)") {
+            break;
+        }
+        rest = after;
+    }
+    rest
+}
+
+/// The pages joined without the lines a continued page begins with: the input again.
+fn unpaged(pages: &[String]) -> String {
+    pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| if i == 0 { p.as_str() } else { without_lead(p) })
+        .collect()
+}
+
 #[test]
 fn paginate_splits_before_h2_not_in_fence() {
     let filler = "word ".repeat(40); // 200 chars, 50 tokens
@@ -1012,7 +1033,7 @@ fn paginate_splits_before_h2_not_in_fence() {
         "---\ntype: document\n---\n\n# T\n\n{filler}\n\n## A\n\n{filler}\n\n```text\n## not a heading\n{filler}\n```\n\n## B\n\n{filler}\n"
     );
     let pages = paginate(&md, 150);
-    assert_eq!(pages.concat(), md);
+    assert_eq!(unpaged(&pages), md);
     assert!(pages.len() >= 3, "{pages:#?}");
     for page in &pages[1..] {
         assert!(
@@ -1034,7 +1055,7 @@ fn paginate_keeps_frontmatter_on_page_1() {
     let md =
         format!("---\ntype: document\ntitle: \"{long}\"\n---\n\n# T\n\nshort\n\n## A\n\nmore\n");
     let pages = paginate(&md, 10);
-    assert_eq!(pages.concat(), md);
+    assert_eq!(unpaged(&pages), md);
     assert!(pages[0].starts_with("---\ntype: document\n"));
     // The title keeps its first block with it.
     assert!(
@@ -1052,14 +1073,14 @@ fn paginate_splits_large_section_at_h3_then_blank_line() {
         "# T\n\n## A\n\n{filler}\n\n### A1\n\n{filler}\n\n{filler}\n\n    indented\n\n---\n\nend\n"
     );
     let pages = paginate(&md, 60);
-    assert_eq!(pages.concat(), md);
+    assert_eq!(unpaged(&pages), md);
     assert!(
         pages.iter().any(|p| p.starts_with("### A1\n")),
         "{pages:#?}"
     );
     for page in &pages {
-        assert!(!page.starts_with("    "), "{pages:#?}");
-        assert!(!page.starts_with("---"), "{pages:#?}");
+        assert!(!without_lead(page).starts_with("    "), "{pages:#?}");
+        assert!(!without_lead(page).starts_with("---"), "{pages:#?}");
     }
     assert!(pages.len() >= 3, "{pages:#?}");
 }
@@ -1178,10 +1199,10 @@ fn paginate_keeps_caption_table_and_merge_note_together() {
         "# T\n\n## A\n\n{filler}\n\n**Costs**\n\n| a |\n| --- |\n| x |\n\nMerged cells: A1:A2\n\n{filler}\n"
     );
     let pages = paginate(&md, 30);
-    assert_eq!(pages.concat(), md);
+    assert_eq!(unpaged(&pages), md);
     for page in &pages {
-        assert!(!page.starts_with('|'), "{pages:#?}");
-        assert!(!page.starts_with("Merged"), "{pages:#?}");
+        assert!(!without_lead(page).starts_with('|'), "{pages:#?}");
+        assert!(!without_lead(page).starts_with("Merged"), "{pages:#?}");
     }
 }
 
@@ -2109,6 +2130,7 @@ fn parameter(anchor: &str, label: Option<&str>, value: f64, read_by: u32) -> Par
         unit: None,
         unit_source: None,
         read_by,
+        path: Vec::new(),
     }
 }
 
@@ -2176,18 +2198,19 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 | Cells | Count | Formula | Reads | Role | Value |\n\
 | --- | --- | --- | --- | --- | --- |\n\
 | C1 | 1 | `=SUM(C2:C4)` | C2:C4 | result | 6 |\n\
-| C2:C4 | 3 | `=Inputs!B1*B2` | Inputs!B1, B2 | intermediate | 2 |\n\
+| C2:C4 | 3 | `=Inputs!B1*B2` | Inputs!B1 (Rate), B2 | intermediate | 2 |\n\
 \n\
 #### Results\n\n\
 | Cell | Formula | Value |\n\
 | --- | --- | --- |\n\
 | C1 | `=SUM(C2:C4)` | 6 |\n";
     assert!(logic.contains(expected), "{logic}");
+    // A read of another sheet's parameter and a name for it name its label.
     let expected_names = "### Names\n\n\
-| Name | Scope | Kind | Refers to | Value | Read by | Note |\n\
-| --- | --- | --- | --- | --- | --- | --- |\n\
-| rate | workbook | name | `Inputs!$B$1` |  |  |  |\n\
-| Twice | Calc | LAMBDA | `LAMBDA(x, 2*x)` |  |  | parameters: x |\n";
+| Name | Scope | Kind | Refers to | Label | Value | Read by | Note |\n\
+| --- | --- | --- | --- | --- | --- | --- | --- |\n\
+| rate | workbook | name | `Inputs!$B$1` | Rate |  |  |  |\n\
+| Twice | Calc | LAMBDA | `LAMBDA(x, 2*x)` |  |  |  | parameters: x |\n";
     assert!(logic.contains(expected_names), "{logic}");
     // The formulas of a copied group are one row, not one row per cell.
     assert_eq!(logic.matches("`=Inputs!B1*").count(), 1, "{logic}");
@@ -4452,7 +4475,7 @@ fn layout_line_kept_with_table() {
     for size in [10, 30, 60, 120] {
         let pages = paginate(&md, size);
         assert!(pages.len() > 1, "{size}");
-        assert_eq!(pages.concat(), md);
+        assert_eq!(unpaged(&pages), md);
         for page in &pages[1..] {
             for start in [
                 "|",
@@ -4466,7 +4489,7 @@ fn layout_line_kept_with_table() {
                 "Text ",
                 "- ",
             ] {
-                assert!(!page.starts_with(start), "{size}: {page:?}");
+                assert!(!without_lead(page).starts_with(start), "{size}: {page:?}");
             }
         }
     }
@@ -5162,9 +5185,9 @@ fn records_blocks_of_fifty() {
     );
     let pages = paginate(&whole, 400);
     assert!(pages.len() > 2, "{}", pages.len());
-    assert_eq!(pages.concat(), whole);
+    assert_eq!(unpaged(&pages), whole);
     for page in &pages[1..] {
-        let first = page.trim_start_matches('\n');
+        let first = without_lead(page).trim_start_matches('\n');
         assert!(
             !first.starts_with("  ") && !first.starts_with("- N:"),
             "a page starts inside a record: {page}"
@@ -5409,12 +5432,13 @@ fn selection_filters_content_logic_and_overview() {
     assert!(md.contains("## Calc\n\ncalc values"), "{md}");
     assert!(!md.contains("## Inputs"), "{md}");
     assert!(!md.contains("input values"), "{md}");
-    // Logic: only Calc, its read of the other sheet as written.
+    // Logic: only Calc, its read of the other sheet as written, with the label of the
+    // parameter it reads.
     let logic = md.split("## Logic").nth(1).expect("logic");
     assert!(logic.contains("### Calc"), "{md}");
     assert!(!logic.contains("### Inputs"), "{md}");
     assert!(logic.contains("`=Inputs!A1*2`"), "{md}");
-    assert!(logic.contains("| Inputs!A1 |"), "{md}");
+    assert!(logic.contains("| Inputs!A1 (Rate) |"), "{md}");
     // The graph keeps the edges that touch Calc.
     assert!(logic.contains("Calc!B1"), "{md}");
     assert!(!logic.contains("Inputs!A2"), "{md}");
@@ -5571,4 +5595,264 @@ fn empty_sheet_list_writes_every_sheet() {
         },
     );
     assert_eq!(empty, none);
+}
+
+/// A parameter with a path; its label is the path joined.
+fn path_param(anchor: &str, path: &[&str], value: f64) -> Parameter {
+    Parameter {
+        path: path.iter().map(|p| (*p).to_string()).collect(),
+        ..parameter(anchor, Some(&path.join(" / ")), value, 1)
+    }
+}
+
+/// The Markdown of the `#### Parameters` part of a sheet's Logic, up to the next `####`.
+fn parameters_part(logic: &str, sheet: &str) -> String {
+    let head = format!("### {sheet}\n\n#### Parameters\n");
+    let start = logic
+        .find(&head)
+        .unwrap_or_else(|| panic!("no parameters of {sheet}: {logic}"))
+        + head.len();
+    let rest = &logic[start..];
+    let end = rest.find("\n#").map_or(rest.len(), |e| e + 1);
+    rest[..end].to_string()
+}
+
+/// The Label column of every row of the pipe tables in `md`, in order.
+fn label_cells(md: &str) -> Vec<String> {
+    md.lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| Cell") && !l.starts_with("| ---"))
+        .map(|l| l.split(" | ").nth(2).unwrap_or("").to_string())
+        .collect()
+}
+
+#[test]
+fn param_label_is_shortest_unique_suffix() {
+    let mut d = workbook();
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["Lining", "Loads", "Dead"], 1.0),
+        path_param("Inputs!B6", &["Lining", "Loads", "Live"], 2.0),
+        path_param("Inputs!B7", &["Lining", "Geometry", "Dead"], 3.0),
+    ];
+    let logic = logic_of(&d, false);
+    let part = parameters_part(&logic, "Inputs");
+    assert_eq!(part.matches("Parameters in Lining:").count(), 1, "{part}");
+    assert_eq!(
+        label_cells(&part),
+        ["Loads / Dead", "Live", "Geometry / Dead"],
+        "{part}"
+    );
+    // The model keeps the full path.
+    assert_eq!(
+        d.facets.parameters[0].label.as_deref(),
+        Some("Lining / Loads / Dead")
+    );
+}
+
+#[test]
+fn parameter_title_leaves_every_label_a_part() {
+    // One member: the title is its start, the label its last part.
+    let mut d = workbook();
+    d.facets.parameters = vec![path_param("Inputs!B5", &["INPUTS", "Span"], 1.0)];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in INPUTS:"), "{part}");
+    assert_eq!(label_cells(&part), ["Span"], "{part}");
+    // A one-part path has no title.
+    d.facets.parameters = vec![path_param("Inputs!B5", &["Span"], 1.0)];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(!part.contains("Parameters in"), "{part}");
+    assert_eq!(label_cells(&part), ["Span"], "{part}");
+    // A path that is the start of another: the title stops before the shorter one's end.
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["A", "B"], 1.0),
+        path_param("Inputs!B7", &["A", "B", "C"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in A:"), "{part}");
+    assert_eq!(label_cells(&part), ["B", "C"], "{part}");
+    // Equal paths keep the full path; their cells tell them apart.
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["INPUTS", "t"], 1.0),
+        path_param("Inputs!B9", &["INPUTS", "t"], 2.0),
+        path_param("Inputs!B11", &["INPUTS", "Span"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in INPUTS:"), "{part}");
+    assert_eq!(
+        label_cells(&part),
+        ["INPUTS / t", "INPUTS / t", "Span"],
+        "{part}"
+    );
+}
+
+#[test]
+fn parameter_without_label_keeps_the_group_title() {
+    let mut d = workbook();
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["INPUTS", "Span"], 1.0),
+        parameter("Inputs!B6", None, 2.0, 1),
+        path_param("Inputs!B7", &["INPUTS", "Rise"], 3.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in INPUTS:"), "{part}");
+    assert_eq!(label_cells(&part), ["Span", "", "Rise"], "{part}");
+}
+
+#[test]
+fn equal_paths_of_a_run_fold_and_take_one_label() {
+    // A run of cells with one path is one row: its label is the path's end, not the full path.
+    let mut d = workbook();
+    let mut list: Vec<Parameter> = (0..4)
+        .map(|i| path_param(&format!("Inputs!E{}", 49 + i), &["Sensitivity", "t"], 0.1))
+        .collect();
+    list.push(path_param("Inputs!F49", &["Sensitivity", "FoS"], 1.5));
+    d.facets.parameters = list;
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in Sensitivity:"), "{part}");
+    assert_eq!(label_cells(&part), ["t", "FoS"], "{part}");
+    assert!(part.contains("| E49:E52 |"), "{part}");
+}
+
+#[test]
+fn parameters_group_by_region_in_reading_order() {
+    let mut d = workbook();
+    d.body = vec![
+        Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("Inputs".into()),
+            anchor: Some(Anchor("Inputs".into())),
+            blocks: vec![
+                ltable(
+                    Vec::new(),
+                    0,
+                    lay(LayoutKind::KeyValue, "A1:B3", Some("A2:B3")),
+                ),
+                ltable(
+                    Vec::new(),
+                    1,
+                    lay(LayoutKind::Table, "D1:E3", Some("D2:E3")),
+                ),
+            ],
+        },
+        sheet("Calc", "Calc"),
+    ];
+    // Row-major order mixes the regions; the groups follow the regions.
+    d.facets.parameters = vec![
+        path_param("Inputs!B2", &["INPUTS", "Span"], 1.0),
+        path_param("Inputs!E2", &["Loads", "Dead"], 2.0),
+        path_param("Inputs!B3", &["INPUTS", "Rise"], 3.0),
+        path_param("Inputs!E3", &["Loads", "Live"], 4.0),
+        path_param("Inputs!H9", &["Other"], 5.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    let first = part.find("Parameters in INPUTS:").expect("first group");
+    let second = part.find("Parameters in Loads:").expect("second group");
+    assert!(first < second, "{part}");
+    assert_eq!(
+        label_cells(&part),
+        ["Span", "Rise", "Dead", "Live", "Other"],
+        "{part}"
+    );
+    // Each group is its own table, the cell outside every region last.
+    assert_eq!(part.matches("| Cell |").count(), 3, "{part}");
+    assert!(part.find("| H9 |").unwrap() > second, "{part}");
+}
+
+#[test]
+fn group_title_text_is_escaped() {
+    let mut d = workbook();
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["*Loads* [kN]", "Dead"], 1.0),
+        path_param("Inputs!B6", &["*Loads* [kN]", "Live"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(
+        part.contains("Parameters in \\*Loads\\* \\[kN\\]:"),
+        "{part}"
+    );
+}
+
+#[test]
+fn cross_sheet_reference_uses_full_path() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        cell_formula("Calc!C1", "=Inputs!B5*2", &["Inputs!B5"], Role::Result, 2.0),
+        cell_formula(
+            "Inputs!C5",
+            "=B5+B6",
+            &["Inputs!B5", "Inputs!B6"],
+            Role::Result,
+            3.0,
+        ),
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:dead", "Inputs!$B$5", &["Inputs!B5"], None)
+        },
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:span", "Inputs!$B$9", &["Inputs!B9"], None)
+        },
+    ];
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["Lining", "Loads", "Dead"], 1.0),
+        path_param("Inputs!B6", &["Lining", "Loads", "Live"], 2.0),
+    ];
+    let logic = logic_of(&d, false);
+    // The read from another sheet names the full path; the read on its own sheet does not.
+    assert!(
+        logic.contains("| C1 | 1 | `=Inputs!B5*2` | Inputs!B5 (Lining / Loads / Dead) |"),
+        "{logic}"
+    );
+    assert!(logic.contains("| C5 | 1 | `=B5+B6` | B5, B6 |"), "{logic}");
+    // `### Names` names the full path of the cell a name stands for.
+    let names = &logic[logic.find("### Names").unwrap()..];
+    assert!(
+        names.contains("| Name | Scope | Kind | Refers to | Label | Value | Read by | Note |"),
+        "{names}"
+    );
+    assert!(
+        names.contains("| dead | workbook | name | `Inputs!$B$5` | Lining / Loads / Dead |"),
+        "{names}"
+    );
+    assert!(
+        names.contains("| span | workbook | name | `Inputs!$B$9` |  |"),
+        "{names}"
+    );
+    // In the sheet's own part the label is short, under its title.
+    let part = parameters_part(&logic, "Inputs");
+    assert!(part.contains("Parameters in Lining / Loads:"), "{part}");
+    assert_eq!(label_cells(&part), ["Dead", "Live"], "{part}");
+
+    // A selected sheet that reads a parameter of a sheet not selected keeps the full path.
+    let md = render(
+        &d,
+        Completeness::Complete,
+        &RenderOptions {
+            sheets: Some(sel(&["Calc"])),
+            sections: Some(vec![OutputSection::Logic]),
+            ..opts()
+        },
+    );
+    assert!(!md.contains("### Inputs"), "{md}");
+    assert!(md.contains("Inputs!B5 (Lining / Loads / Dead)"), "{md}");
+    assert!(
+        md.contains("| dead | workbook | name | `Inputs!$B$5` | Lining / Loads / Dead |"),
+        "{md}"
+    );
+}
+
+#[test]
+fn names_table_without_labelled_cells_keeps_its_columns() {
+    let mut d = workbook();
+    d.facets.formulas = vec![Formula {
+        role: None,
+        kind: Some(FormulaKind::Name),
+        ..formula("name:rate", "Inputs!$B$1", &["Inputs!B1"], None)
+    }];
+    let logic = logic_of(&d, false);
+    assert!(
+        logic.contains("| Name | Scope | Kind | Refers to | Value | Read by | Note |"),
+        "{logic}"
+    );
 }

@@ -8,7 +8,7 @@
 mod common;
 
 use common::*;
-use rezzer_model::{Graph, Parameter, Role, Severity};
+use rezzer_model::{Graph, Inline, Parameter, Role, Severity};
 
 /// A text cell.
 fn text(at: &str, s: &str) -> String {
@@ -414,9 +414,11 @@ fn unread_formula_leaves_results_open() {
 fn tunnel_parameters_have_labels() {
     let out = corpus("tunnel_design_calculations.xlsx");
     let doc = &out.document;
-    // `Excavated diameter, D | 10 | m`: the unit right after the value.
+    // `Excavated diameter, D | 10 | m`: the unit right after the value. The label is the
+    // path under the region's caption `INPUTS`.
     let d = param(doc, "Structural_Lining!B5");
-    assert_eq!(d.label.as_deref(), Some("Excavated diameter, D"));
+    assert_eq!(d.label.as_deref(), Some("INPUTS / Excavated diameter, D"));
+    assert_eq!(d.path, ["INPUTS", "Excavated diameter, D"]);
     assert_eq!(d.value, number(10.0));
     assert_eq!(unit(d), (Some("m"), Some("unit-cell")));
     let gamma = param(doc, "Structural_Lining!B8");
@@ -550,7 +552,8 @@ fn headed_table(header: [&str; 3], left: &[&str], units: &[&str]) -> ReadOutcome
 
 #[test]
 fn a_parameter_table_keeps_the_label_on_the_left() {
-    // `Parameter | Value | Unit`: each name on the left is the label, the header is not.
+    // `Parameter | Value | Unit`: each name on the left is the label of its row; the path
+    // (spec 8.7) puts the column header before it.
     let out = headed_table(
         ["Parameter", "Value", "Unit"],
         &["Diameter", "Length", "Load"],
@@ -558,9 +561,9 @@ fn a_parameter_table_keeps_the_label_on_the_left() {
     );
     let doc = &out.document;
     for (anchor, label, u) in [
-        ("S!B2", "Diameter", "m"),
-        ("S!B3", "Length", "m"),
-        ("S!B4", "Load", "kN"),
+        ("S!B2", "Value / Diameter", "m"),
+        ("S!B3", "Value / Length", "m"),
+        ("S!B4", "Value / Load", "kN"),
     ] {
         let p = param(doc, anchor);
         assert_eq!(p.label.as_deref(), Some(label), "{anchor}");
@@ -571,7 +574,8 @@ fn a_parameter_table_keeps_the_label_on_the_left() {
 #[test]
 fn a_repeated_label_with_a_unit_keeps_label_and_unit() {
     // `Item | Value | Unit` with `Load [kN]` twice: a text that carries a unit names a
-    // quantity, so it stays the label even when it repeats, and its unit is kept.
+    // quantity, so it stays the label even when it repeats, and its unit is kept. The path
+    // writes it without the unit.
     let out = headed_table(
         ["Item", "Value", "Unit"],
         &["Load [kN]", "Load [kN]", "Span"],
@@ -580,16 +584,16 @@ fn a_repeated_label_with_a_unit_keeps_label_and_unit() {
     let doc = &out.document;
     for anchor in ["S!B2", "S!B3"] {
         let p = param(doc, anchor);
-        assert_eq!(p.label.as_deref(), Some("Load"), "{anchor}");
+        assert_eq!(p.label.as_deref(), Some("Value / Load"), "{anchor}");
         assert_eq!(unit(p), (Some("kN"), Some("label")), "{anchor}");
     }
-    assert_eq!(param(doc, "S!B4").label.as_deref(), Some("Span"));
+    assert_eq!(param(doc, "S!B4").label.as_deref(), Some("Value / Span"));
 }
 
 #[test]
 fn a_repeated_size_on_the_left_is_a_row_value() {
     // `Pipe | Pressure [bar]`: `DN 50 mm` is a number with a unit, a value of the row. The
-    // header gives the label and its unit.
+    // header gives the label and its unit; the row's value stands whole after it.
     let out = headed_table(
         ["Pipe", "Pressure [bar]", "Note"],
         &["DN 50 mm", "DN 50 mm", "DN 80 mm"],
@@ -598,7 +602,7 @@ fn a_repeated_size_on_the_left_is_a_row_value() {
     let doc = &out.document;
     for anchor in ["S!B2", "S!B3"] {
         let p = param(doc, anchor);
-        assert_eq!(p.label.as_deref(), Some("Pressure"), "{anchor}");
+        assert_eq!(p.label.as_deref(), Some("Pressure / DN 50 mm"), "{anchor}");
         assert_eq!(unit(p), (Some("bar"), Some("header")), "{anchor}");
     }
 }
@@ -613,9 +617,16 @@ fn a_column_of_bare_units_gives_no_unit() {
         &["", "", "", "", ""],
     );
     let doc = &out.document;
-    for anchor in ["S!B2", "S!B3", "S!B4", "S!B5", "S!B6"] {
+    for (anchor, row) in [
+        ("S!B2", "kg"),
+        ("S!B3", "kg"),
+        ("S!B4", "m"),
+        ("S!B5", "kg"),
+        ("S!B6", "kg"),
+    ] {
         let p = param(doc, anchor);
-        assert_eq!(p.label.as_deref(), Some("Value"), "{anchor}");
+        let label = format!("Value / {row}");
+        assert_eq!(p.label.as_deref(), Some(label.as_str()), "{anchor}");
         assert_eq!(unit(p), (None, None), "{anchor}");
     }
 }
@@ -623,17 +634,25 @@ fn a_column_of_bare_units_gives_no_unit() {
 #[test]
 fn a_category_on_the_left_is_no_label() {
     // `Color | Value`: a text that repeats in its column is a value of the row, and so is
-    // `yellow`, once in a column of categories.
+    // `yellow`, once in a column of categories. The header is the label; the path adds the
+    // row's value after it.
     let out = headed_table(
         ["Color", "Value", "Note"],
         &["blue", "blue", "yellow", "blue", "blue"],
         &["", "", "", "", ""],
     );
     let doc = &out.document;
-    for anchor in ["S!B2", "S!B3", "S!B4", "S!B5", "S!B6"] {
+    for (anchor, row) in [
+        ("S!B2", "blue"),
+        ("S!B3", "blue"),
+        ("S!B4", "yellow"),
+        ("S!B5", "blue"),
+        ("S!B6", "blue"),
+    ] {
+        let label = format!("Value / {row}");
         assert_eq!(
             param(doc, anchor).label.as_deref(),
-            Some("Value"),
+            Some(label.as_str()),
             "{anchor}"
         );
     }
@@ -871,5 +890,211 @@ fn stale_results_reach_the_rendered_logic_as_a_callout() {
             "## Logic\n\n> [!WARNING] Stored results may be old\n> Calculation is set to manual. Rezzer does not calculate"
         ),
         "{md}"
+    );
+}
+
+/// Styles: 0 plain, 1 bold.
+const BOLD: &str = "<fonts count=\"2\"><font/><font><b/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border/></borders><cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" applyFont=\"1\"/></cellXfs>";
+
+/// A bold text cell.
+fn bold(at: &str, s: &str) -> String {
+    format!("<c r=\"{at}\" s=\"1\" t=\"inlineStr\"><is><t>{s}</t></is></c>")
+}
+
+/// A sheet `Calc` whose one formula reads every cell of `cells` on sheet `S`.
+fn reader_of(cells: &[&str]) -> String {
+    let refs: Vec<String> = cells.iter().map(|c| format!("S!{c}")).collect();
+    ws(
+        "",
+        &row(1, &[formula_cell("A1", &refs.join("+"), Some(1.0))]),
+        "",
+    )
+}
+
+fn path_of<'a>(doc: &'a Document, anchor: &str) -> Vec<&'a str> {
+    param(doc, anchor).path.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn parameter_path_from_caption_header_and_row_label() {
+    let rows = [
+        row(1, &[bold("A1", "Lining")]),
+        row(
+            2,
+            &[
+                bold("A2", "Case"),
+                bold("B2", "Dead [kN]"),
+                bold("C2", "Live [kN]"),
+            ],
+        ),
+        row(
+            3,
+            &[
+                text("A3", "Wall"),
+                num("B3", 5.0, None),
+                num("C3", 3.0, None),
+            ],
+        ),
+        row(
+            4,
+            &[
+                text("A4", "Roof"),
+                num("B4", 2.0, None),
+                num("C4", 1.0, None),
+            ],
+        ),
+        // A second region without a caption: its generated heading adds no part.
+        row(7, &[bold("E7", "t (m)"), bold("F7", "FoS")]),
+        row(8, &[num("E8", 0.2, None), num("F8", 1.5, None)]),
+        row(9, &[num("E9", 0.3, None), num("F9", 1.8, None)]),
+    ];
+    let out = read(
+        &Book::default()
+            .styles(BOLD)
+            .sheet("S", &ws("", &rows.concat(), ""))
+            .sheet("Calc", &reader_of(&["B3", "C4", "E8", "B2"])),
+    );
+    let doc = &out.document;
+    assert_eq!(path_of(doc, "S!B3"), ["Lining", "Dead", "Wall"]);
+    let live = param(doc, "S!C4");
+    assert_eq!(path_of(doc, "S!C4"), ["Lining", "Live", "Roof"]);
+    assert_eq!(live.label.as_deref(), Some("Lining / Live / Roof"));
+    // The unit rule is unchanged: the unit still comes from the header.
+    assert_eq!(unit(live), (Some("kN"), Some("header")));
+    assert_eq!(live.value, number(1.0));
+    // No generated `Table E7:F9` part, no row label (the table has no label column).
+    assert_eq!(path_of(doc, "S!E8"), ["t"]);
+    assert_eq!(param(doc, "S!E8").label.as_deref(), Some("t"));
+    // A header cell is no data cell: it keeps the label found beside it, as one part.
+    let header = param(doc, "S!B2");
+    assert_eq!(header.path.len(), header.label.iter().count());
+    assert_eq!(header.label, header.path.first().cloned());
+}
+
+#[test]
+fn key_value_path_is_caption_and_label() {
+    let rows = [
+        row(1, &[bold("A1", "INPUTS")]),
+        row(
+            2,
+            &[
+                text("A2", "Unit weight of ground, gamma"),
+                num("B2", 22.0, None),
+                text("C2", "kN/m3"),
+            ],
+        ),
+        row(
+            3,
+            &[
+                text("A3", "Cohesion, c"),
+                num("B3", 20.0, None),
+                text("C3", "kPa"),
+            ],
+        ),
+    ];
+    let out = read(
+        &Book::default()
+            .styles(BOLD)
+            .sheet("S", &ws("", &rows.concat(), ""))
+            .sheet("Calc", &reader_of(&["B2", "B3"])),
+    );
+    let doc = &out.document;
+    assert_eq!(
+        path_of(doc, "S!B2"),
+        ["INPUTS", "Unit weight of ground, gamma"]
+    );
+    let c = param(doc, "S!B3");
+    assert_eq!(c.label.as_deref(), Some("INPUTS / Cohesion, c"));
+    assert_eq!(unit(c), (Some("kPa"), Some("unit-cell")));
+}
+
+/// Section pieces stand under the caption heading of the region they were cut from, then
+/// under their own section heading, as their Markdown does (`###`, then `####`).
+#[test]
+fn section_pieces_keep_the_headings_above_them() {
+    let rows = [
+        row(1, &[bold("A1", "Lining")]),
+        row(2, &[text("A2", "Thickness"), num("B2", 0.3, None)]),
+        row(3, &[bold("A3", "Loads")]),
+        row(4, &[text("A4", "Factor"), num("B4", 1.35, None)]),
+        row(5, &[bold("A5", "Dead")]),
+        row(6, &[text("A6", "Wall"), num("B6", 5.0, None)]),
+        row(7, &[text("A7", "Roof"), num("B7", 2.0, None)]),
+        row(8, &[bold("A8", "Live")]),
+        row(9, &[text("A9", "Snow"), num("B9", 1.0, None)]),
+        row(10, &[text("A10", "Wind"), num("B10", 0.5, None)]),
+    ];
+    let out = read(
+        &Book::default()
+            .styles(BOLD)
+            .sheet("S", &ws("", &rows.concat(), ""))
+            .sheet("Calc", &reader_of(&["B2", "B4", "B7", "B10"])),
+    );
+    let doc = &out.document;
+    let level_of = |text: &str| {
+        section(doc, "S").iter().find_map(|b| match b {
+            Block::Heading {
+                level,
+                inlines,
+                anchor: Some(_),
+            } if inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Text { text: t, .. } if t == text)) =>
+            {
+                Some(*level)
+            }
+            _ => None,
+        })
+    };
+    // The fixture gives the R1 sections it is meant to.
+    assert_eq!(level_of("Lining"), Some(3));
+    assert_eq!(level_of("Dead"), Some(4));
+    assert_eq!(path_of(doc, "S!B2"), ["Lining", "Thickness"]);
+    assert_eq!(path_of(doc, "S!B4"), ["Lining", "Loads", "Factor"]);
+    assert_eq!(path_of(doc, "S!B7"), ["Lining", "Dead", "Roof"]);
+    assert_eq!(path_of(doc, "S!B10"), ["Lining", "Live", "Wind"]);
+}
+
+#[test]
+fn path_text_is_bounded_by_the_text_limit() {
+    // The path texts of all parameters count against the text limit: past it a parameter
+    // keeps its one label, and a loss says so.
+    let rows = [
+        row(1, &[bold("A1", "INPUTS")]),
+        row(2, &[text("A2", "Span"), num("B2", 12.0, None)]),
+        row(3, &[text("A3", "Rise"), num("B3", 4.0, None)]),
+        row(4, &[text("A4", "Width"), num("B4", 3.0, None)]),
+    ];
+    let book = Book::default()
+        .styles(BOLD)
+        .sheet("S", &ws("", &rows.concat(), ""))
+        .sheet("Calc", &reader_of(&["B2", "B3", "B4"]));
+    let limits = Limits {
+        max_text_bytes: 40,
+        ..Limits::default()
+    };
+    let out = read_with(book.bytes(), limits);
+    let doc = &out.document;
+    assert_eq!(path_of(doc, "S!B2"), ["INPUTS", "Span"]);
+    assert_eq!(path_of(doc, "S!B3"), ["INPUTS", "Rise"]);
+    // A path costs its parts and 3 bytes each: 16, 16, then 17 passes 40.
+    assert_eq!(path_of(doc, "S!B4"), ["Width"]);
+    assert_eq!(param(doc, "S!B4").label.as_deref(), Some("Width"));
+    assert!(
+        doc.losses.iter().any(|l| l.location == "document"
+            && l.what.starts_with(
+                "text limit of 40 bytes reached: later parameters keep their one label"
+            )),
+        "{:#?}",
+        doc.losses
+    );
+    // Without the limit every path is whole and no such loss is written.
+    let out = read(&book);
+    assert_eq!(path_of(&out.document, "S!B4"), ["INPUTS", "Width"]);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("later parameters keep"))
     );
 }
