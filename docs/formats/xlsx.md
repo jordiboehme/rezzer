@@ -82,7 +82,7 @@ A sheet is often more than one table. It has titles, notes, header rows over two
 - Group rows inside a table, like `Year 2024` over its months
 - Row levels from row outlines, indents and leading dots, shown as a `Parent` column
 - Subtotal and total rows
-- Report sheets: section headings, label and value blocks (`Label: value unit`) and text lists. A third column of unit symbols like `m`, `kPa` or `kg/m3` is read as the unit
+- Report sheets: section headings, label and value blocks (`Label: value unit`) and text lists. A third column of unit symbols like `m`, `kPa` or `kg/m3` is read as the unit. A count word like `nos` or `pcs` counts too when a real unit stands in the same column. One-letter codes like `A` or `N` alone and codes like `N/A` stay values
 
 ### How it decides
 
