@@ -241,6 +241,7 @@ fn holds(r: &Region, p: Pos) -> bool {
         return false;
     }
     r.captions.contains(&p.row)
+        || r.above_header.contains(&p.row)
         || r.header_rows.contains(&p.row)
         || r.notes.contains(&p.row)
         || r.heading.map(|h| h.0) == Some(p.row)

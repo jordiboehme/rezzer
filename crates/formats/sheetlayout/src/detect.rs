@@ -279,7 +279,9 @@ fn undecided(w: &mut Work, body: Rect) {
     let r = &mut w.region;
     r.kind = Kind::Grid;
     r.certainty = Certainty::Unsure;
+    r.above_header.clear();
     r.header_rows.clear();
+    r.body = None;
     r.header_paths.clear();
     r.label_cols = 0;
     r.hidden_header = false;
@@ -289,9 +291,11 @@ fn undecided(w: &mut Work, body: Rect) {
     r.unsure = vec!["time limit reached before the header was found".to_string()];
 }
 
-/// Whether a region was decided or the stop callback ended the work on it.
+/// Whether a region was decided, its paths passed the path budget, or the stop callback
+/// ended the work on it.
 enum Outcome {
     Done,
+    Over,
     Stopped,
 }
 
@@ -336,8 +340,13 @@ pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout
         }
         let mine = std::mem::take(&mut all[i]);
         let saved = w.region.clone();
-        match decide(&prep, w, body, mine, &mut budget, &mut issues, &tick) {
+        match decide(&prep, w, body, mine, &mut budget, &tick) {
             Outcome::Done => {}
+            Outcome::Over => {
+                // The grid shows none of the band or its evidence.
+                w.region = saved;
+                over_budget(w, body, &mut issues);
+            }
             Outcome::Stopped => {
                 // A stop part way leaves the region as segmenting left it.
                 w.region = saved;
@@ -356,14 +365,12 @@ pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout
 }
 
 /// Step 6a to 6c (header part) for one region.
-#[allow(clippy::too_many_arguments)]
 fn decide(
     prep: &Prep,
     w: &mut Work,
     body: Rect,
     cells: Vec<u32>,
     budget: &mut usize,
-    issues: &mut Vec<Issue>,
     tick: &Tick,
 ) -> Outcome {
     let Some(lines) = Lines::new(prep, body, cells, &w.merges, tick) else {
@@ -441,12 +448,12 @@ fn decide(
         Ok(Vec::new())
     };
     match built {
-        Ok(p) => region.header_paths = p,
-        Err(PathStop::Stopped) => return Outcome::Stopped,
-        Err(PathStop::Over) => {
-            over_budget(w, body, before, issues);
-            return Outcome::Done;
+        Ok(p) => {
+            region.header_paths = p;
+            region.body = Some(body);
         }
+        Err(PathStop::Stopped) => return Outcome::Stopped,
+        Err(PathStop::Over) => return Outcome::Over,
     }
     let pivot = fact
         && region
@@ -500,7 +507,7 @@ fn retain_panes(input: &Input, body: Rect, region: &mut Region) {
 }
 
 /// A region whose paths would pass the path budget: a rest grid with a `Limit` issue.
-fn over_budget(w: &mut Work, body: Rect, before: Option<Rect>, issues: &mut Vec<Issue>) {
+fn over_budget(w: &mut Work, body: Rect, issues: &mut Vec<Issue>) {
     let r = &mut w.region;
     let what = "header path limit reached".to_string();
     issues.push(Issue {
@@ -510,11 +517,13 @@ fn over_budget(w: &mut Work, body: Rect, before: Option<Rect>, issues: &mut Vec<
     });
     r.kind = Kind::Grid;
     r.certainty = Certainty::Unsure;
-    r.data = if w.origin == Origin::Fact {
-        Some(body)
-    } else {
-        before
-    };
+    if w.origin == Origin::Fact {
+        r.data = Some(body);
+    }
+    r.evidence
+        .retain(|e| !matches!(e, Evidence::PrintTitles | Evidence::FrozenPanes));
+    r.above_header.clear();
+    r.body = None;
     r.header_rows.clear();
     r.header_paths.clear();
     r.label_cols = 0;

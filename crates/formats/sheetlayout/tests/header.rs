@@ -51,15 +51,16 @@ fn no_header(r: &Region) {
     assert_eq!(r.unsure, ["no header found"]);
 }
 
-/// The EIA table 1.1 shape: captions in rows 1 and 2, a band in rows 3 and 4, a group row 5
-/// and numbers from row 6.
+/// The EIA table 1.1 shape: captions in rows 1 and 2, a band in rows 3 and 4 (A3 empty,
+/// `Period` in A4), a group row 5 merged over the width (filled, as in the real file) and
+/// numbers from row 6.
 fn eia(styled: bool) -> Sheet {
     let mark = if styled { "*^" } else { "" };
     let rows: Vec<String> = [
         "Table 1.1. Net Generation by Energy Source",
         "(Thousand Megawatthours)",
-        "Period|Generation at Utility Scale Facilities|||Total",
-        "|Coal|Natural Gas|Nuclear|",
+        "|Generation at Utility Scale Facilities|||Total",
+        "Period|Coal|Natural Gas|Nuclear|",
     ]
     .iter()
     .map(|line| {
@@ -76,8 +77,13 @@ fn eia(styled: bool) -> Sheet {
     })
     .collect();
     let mut all: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let group = if styled {
+        "^Annual Totals"
+    } else {
+        "Annual Totals"
+    };
+    all.push(group);
     all.extend([
-        "Annual Totals",
         "2013|1581115|1124836|789016|4065964",
         "2014|1581710|1126609|797166|4093564",
         "2015|1352398|1333482|797178|4077601",
@@ -88,9 +94,9 @@ fn eia(styled: bool) -> Sheet {
         Sheet::new()
     };
     base.rows("A1", &all)
-        .merge("A3:A4")
         .merge("B3:D3")
         .merge("E3:E4")
+        .merge("A5:E5")
 }
 
 #[test]
@@ -672,11 +678,9 @@ fn fact_headers_give_paths() {
         )
         .detect();
     let r = only(&layout);
-    assert_eq!(header(r), [1, 2]);
-    assert_eq!(
-        r.header_paths,
-        ["Sum of Sales / Rows", "Columns / East", "Columns / West"]
-    );
+    assert_eq!(header(r), [2]);
+    assert_eq!(r.above_header, [0]);
+    assert_eq!(r.header_paths, ["Rows", "East", "West"]);
     assert_eq!(r.label_cols, 1);
     // An autofilter: the first row.
     let layout = Sheet::new()
@@ -688,9 +692,10 @@ fn fact_headers_give_paths() {
 
 #[test]
 fn path_text_is_bounded() {
-    let sheet = Sheet::new()
+    let mut sheet = Sheet::new()
         .rows("A1", &["Head|||||||Tail", "1|2|3|4|5|6|7|8"])
         .merge("A1:G1");
+    sheet.frozen = Some((1, 0));
     let input = sheet.input();
     let limits = Limits {
         max_path_bytes: 100,
@@ -706,6 +711,14 @@ fn path_text_is_bounded() {
     assert_eq!(layout.issues[0].kind, IssueKind::Limit);
     assert_eq!(layout.issues[0].rect, Some(r.rect));
     assert!(layout.issues[0].what.contains("header path limit"));
+    // A grid shows no header evidence.
+    assert!(
+        !r.evidence.contains(&Evidence::FrozenPanes),
+        "{:?}",
+        r.evidence
+    );
+    assert!(!has_rule(r, "H1"));
+    assert!(r.body.is_none());
     // Enough room: the paths are there.
     let limits = Limits {
         max_path_bytes: 1_000,
@@ -1011,4 +1024,336 @@ fn random_sheets_detect_every_cell_once() {
             }
         }
     }
+}
+
+// Fix round 1.
+
+#[test]
+fn tall_title_merge_leaves_the_header() {
+    // A title merged over A1:D2: row 2 holds no cell, the header is row 3.
+    let rows = ["Region|Q1|Q2|Q3", "North|1|2|3", "South|4|5|6"];
+    for styled in [false, true] {
+        let base = if styled {
+            Sheet::styled().cell("A1", "*Sales")
+        } else {
+            Sheet::new().cell("A1", "Sales")
+        };
+        let header_row = if styled {
+            "*Region|*Q1|*Q2|*Q3"
+        } else {
+            rows[0]
+        };
+        let layout = base
+            .merge("A1:D2")
+            .rows("A3", &[header_row, rows[1], rows[2]])
+            .detect();
+        let r = only(&layout);
+        assert_eq!(r.captions, [0], "styled {styled}");
+        assert_eq!(r.kind, Kind::Table, "styled {styled}");
+        assert_eq!(header(r), [3], "styled {styled}");
+        assert_eq!(r.header_paths, ["Region", "Q1", "Q2", "Q3"]);
+        assert_eq!(r.data, Some(rect("A4:D5")));
+        assert_eq!(r.body, Some(rect("A2:D5")));
+    }
+    // Print titles on row 3 set the band.
+    let mut sheet = Sheet::new()
+        .cell("A1", "Sales")
+        .merge("A1:D2")
+        .rows("A3", &rows);
+    sheet.print_titles = Some((2, 2));
+    let layout = sheet.detect();
+    let r = only(&layout);
+    assert_eq!(r.certainty, Certainty::Exact);
+    assert_eq!(header(r), [3]);
+}
+
+#[test]
+fn band_row_covered_by_a_merge_from_above() {
+    // Row 2 holds nothing but the merge from row 1: it belongs to the band, and row 3 goes on.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "", "c|d", "1|2"])
+        .merge("A1:A2")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(header(r), [1, 2, 3]);
+    assert_eq!(r.header_paths, ["a / c", "b / d"]);
+    // A truly empty row (here inside a region joined by a name) ends the band, so row 3 is a
+    // text row after the band: no band.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "", "c|d", "1|2"])
+        .name("All", "A1:B4")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.rect, rect("A1:B4"));
+    no_header(r);
+}
+
+/// Pivot cells, the location triple, the rows above the band, the band (1-based) and the
+/// paths.
+type PivotCase = (
+    &'static [&'static str],
+    (u32, u32, u32),
+    Vec<u32>,
+    Vec<u32>,
+    Vec<&'static str>,
+);
+
+#[test]
+fn pivot_bands_from_the_location() {
+    // The corpus triples (first header row, first data row, first data column).
+    let cases: [PivotCase; 5] = [
+        // pivots.xlsx pT1
+        (
+            &["Row Labels|Sum of Size", "a|1", "b|2"],
+            (0, 1, 1),
+            vec![],
+            vec![1],
+            vec!["Row Labels", "Sum of Size"],
+        ),
+        // pivots.xlsx pT2 and ExcelPivotTableSample pT1
+        (
+            &[
+                "Sum of Size|Column Labels||",
+                "Row Labels|blue|yellow|Grand Total",
+                "a|1|2|3",
+            ],
+            (1, 2, 1),
+            vec![0],
+            vec![2],
+            vec!["Row Labels", "blue", "yellow", "Grand Total"],
+        ),
+        (
+            &[
+                "Summe von Field2|Spaltenbeschriftungen||",
+                "Zeilenbeschriftungen|44562|44564|Gesamtergebnis",
+                "a|1|2|3",
+            ],
+            (1, 2, 1),
+            vec![0],
+            vec![2],
+            vec!["Zeilenbeschriftungen", "44562", "44564", "Gesamtergebnis"],
+        ),
+        // pivots.xlsx pT3, pT4, pT5 and ExcelPivotTableSample pT2
+        (
+            &["Row Labels|Count of Value2", "a|1", "b|2"],
+            (1, 1, 1),
+            vec![],
+            vec![1],
+            vec!["Row Labels", "Count of Value2"],
+        ),
+        (
+            &["Zeilenbeschriftungen|Summe von Field2", "a|1"],
+            (1, 1, 1),
+            vec![],
+            vec![1],
+            vec!["Zeilenbeschriftungen", "Summe von Field2"],
+        ),
+    ];
+    for (rows, (h, d, c), above, band, paths) in cases {
+        let width = rows[0].split('|').count() as u32;
+        let range = Rect {
+            top: 0,
+            left: 0,
+            bottom: rows.len() as u32 - 1,
+            right: width - 1,
+        };
+        let layout = Sheet::new()
+            .rows("A1", rows)
+            .fact(
+                &range.a1(),
+                FactKind::Pivot {
+                    name: "P".into(),
+                    first_header_row: h,
+                    first_data_row: d,
+                    first_data_col: c,
+                    total_row: false,
+                    total_col: false,
+                },
+            )
+            .detect();
+        let r = only(&layout);
+        assert_eq!(r.above_header, above, "{rows:?}");
+        assert_eq!(header(r), band, "{rows:?}");
+        assert_eq!(r.header_paths, paths, "{rows:?}");
+        assert_eq!(r.label_cols, c);
+    }
+    // First data row 0: no band.
+    let layout = Sheet::new()
+        .rows("A1", &["a|1", "b|2"])
+        .fact(
+            "A1:B2",
+            FactKind::Pivot {
+                name: "P".into(),
+                first_header_row: 0,
+                first_data_row: 0,
+                first_data_col: 1,
+                total_row: false,
+                total_col: false,
+            },
+        )
+        .detect();
+    let r = only(&layout);
+    assert!(r.header_rows.is_empty());
+    assert!(r.above_header.is_empty());
+    assert_eq!(r.data, Some(rect("A1:B2")));
+}
+
+#[test]
+fn year_formulas_count_as_years() {
+    let layout = Sheet::new()
+        .rows(
+            "A1",
+            &["Area|Population||", "|2020|=2021|=2022", "US|1|2|3"],
+        )
+        .detect();
+    let r = only(&layout);
+    assert_eq!(header(r), [1, 2]);
+    assert_eq!(
+        r.header_paths,
+        ["Area", "Population / 2020", "2021", "2022"]
+    );
+    // A text formula column in the data keeps the header.
+    let layout = Sheet::new()
+        .rows("A1", &["Name|Label", "x|=X", "z|=Z"])
+        .detect();
+    assert_eq!(header(only(&layout)), [1]);
+    // A row of only empty results is an empty row: it ends the band like one.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "=|=", "c|d", "1|2"])
+        .detect();
+    no_header(only(&layout));
+    // A formula with an empty result in a band row counts as empty.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b|e", "c|=|d", "1|2|3"])
+        .detect();
+    assert_eq!(header(only(&layout)), [1, 2]);
+}
+
+#[test]
+fn body_names_the_path_columns() {
+    // A title merged over B1:H1 above an Excel table B3:D3 with only its header row.
+    let layout = Sheet::new()
+        .cell("B1", "Sales by region")
+        .merge("B1:H1")
+        .rows("B3", &["Name|Age|City"])
+        .fact("B3:D3", list_object("T"))
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.rect, rect("B1:H3"));
+    assert_eq!(r.data, None);
+    assert_eq!(r.body, Some(rect("B3:D3")));
+    assert_eq!(r.header_paths, ["Name", "Age", "City"]);
+    // No band: no body.
+    let layout = Sheet::new().rows("A1", &["a|b", "c|d"]).detect();
+    assert_eq!(only(&layout).body, None);
+}
+
+#[test]
+fn covered_cell_text_gives_way_to_the_merge() {
+    // C1 is covered by the merge B1:D1 and still holds a stale text.
+    let layout = Sheet::new()
+        .rows("A1", &["Item|Group|stale|", "|x|y|z", "1|2|3|4"])
+        .merge("B1:D1")
+        .detect();
+    assert_eq!(
+        only(&layout).header_paths,
+        ["Item", "Group / x", "Group / y", "Group / z"]
+    );
+}
+
+#[test]
+fn overlapping_spreads_take_the_widest() {
+    // A damaged file: A1:E1 and B1:C1 are both merged.
+    let layout = Sheet::new()
+        .rows("A1", &["Wide|Mid|||", "a|b|c|d|e", "1|2|3|4|5"])
+        .merge("A1:E1")
+        .merge("B1:C1")
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.header_paths[3], "Wide / d");
+    assert_eq!(r.header_paths[4], "Wide / e");
+}
+
+#[test]
+fn failed_paths_charge_nothing() {
+    // The first region's paths pass the limit; the second still fits.
+    let sheet = Sheet::new()
+        .rows("A1", &["Head|||||||Tail", "1|2|3|4|5|6|7|8"])
+        .merge("A1:G1")
+        .rows("A4", &["x|y", "1|2"]);
+    let input = sheet.input();
+    let limits = Limits {
+        max_path_bytes: 200,
+        ..Limits::default()
+    };
+    let layout = detect(&input, &limits, &never);
+    assert!(layout.regions[0].rest);
+    assert_eq!(layout.regions[1].header_paths, ["x", "y"]);
+}
+
+#[test]
+fn surviving_mutants_of_the_review() {
+    // M2: 4 marked rows are an H2 band.
+    let r = Sheet::styled()
+        .rows("A1", &["*a|*b", "*c|*d", "*e|*f", "*g|*h", "1|2"])
+        .detect()
+        .regions
+        .remove(0);
+    assert_eq!(header(&r), [1, 2, 3, 4]);
+    assert!(has_rule(&r, "H2"));
+    // M4: a row of text and an error after the band ends H1.
+    let mut sheet = Sheet::new().rows("A1", &["a|b", "x|#N/A", "1|2"]);
+    for c in &mut sheet.cells {
+        if c.text == "#N/A" {
+            c.class = sheetlayout::Class::Error;
+        }
+    }
+    no_header(only(&sheet.detect()));
+    // M6: H3 needs a row below.
+    let mut sheet = Sheet::new().rows("A1", &["Name|City"]);
+    sheet.header_guess = Some((0, true));
+    no_header(only(&sheet.detect()));
+    // M11: 75 % text is no label column.
+    let r = Sheet::new()
+        .rows("A1", &["Name|V", "a|1", "b|2", "c|3", "4|4"])
+        .detect()
+        .regions
+        .remove(0);
+    assert_eq!(header(&r), [1]);
+    assert_eq!(r.label_cols, 0);
+    // M12: an extended band row that holds data gives no band.
+    let layout = Sheet::new()
+        .rows("A1", &["a|b", "|2", "3|4"])
+        .merge("A1:A2")
+        .detect();
+    no_header(only(&layout));
+    // M18: a header guess for another row is no signal for the first.
+    let mut sheet = Sheet::new().rows("A1", &["Name|City", "Ann|Rome", "Bob|Oslo"]);
+    sheet.header_guess = Some((1, true));
+    no_header(only(&sheet.detect()));
+    // The guess names a sheet row: a list from row 3 needs the guess for row 3.
+    let mut sheet = Sheet::new().rows("A3", &["Name|City", "Ann|Rome", "Bob|Oslo"]);
+    sheet.header_guess = Some((2, true));
+    assert_eq!(header(only(&sheet.detect())), [3]);
+    // M20: rule L does not run on a pivot.
+    let layout = Sheet::new()
+        .rows("A1", &["R|S|V", "a|1|5"])
+        .fact(
+            "A1:C2",
+            FactKind::Pivot {
+                name: "P".into(),
+                first_header_row: 0,
+                first_data_row: 1,
+                first_data_col: 2,
+                total_row: false,
+                total_col: false,
+            },
+        )
+        .detect();
+    assert_eq!(only(&layout).label_cols, 2);
+    // M23: the H2 detail says when the print titles win.
+    let mut sheet = Sheet::styled().rows("A1", &["*a|*b", "c|d", "1|2", "3|4"]);
+    sheet.print_titles = Some((0, 1));
+    let r = sheet.detect().regions.remove(0);
+    assert!(rule_detail(&r, "H2").contains("win"), "{:?}", r.evidence);
 }

@@ -75,6 +75,19 @@ column only. A column with no header text gets an empty path.
 Up to 3 left columns whose data rows hold text in at least 80 % of the rows are label
 columns.
 
+The header rules have limits:
+
+- A row under the header with only one text, such as a single unit `cm`, ends the header. The
+  unit is then not part of the path.
+- A bold header row over a plain second header row makes the rules disagree. The region
+  stays a grid.
+- Numbers as column titles are not found as a header, except years.
+- A group label row with only one text above the header is taken as a title row.
+- A first data row with only text, such as `Ann | n/a`, is taken as part of the header.
+- Two columns of labels and numbers, such as `Age: | 31`, read as a table whose header is
+  the first row.
+- A text formula counts as data, never as a header cell.
+
 Path text is limited per sheet. A region whose paths would pass the limit stays one grid
 region, and an issue says so.
 

@@ -237,26 +237,40 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
     let width = r.width().min(u64::from(u32::MAX)) as u32;
     let mut label_cols = 0u32;
     let mut hidden_header = false;
-    let band = match &input.facts[kept.fact].kind {
+    // The band as (rows above it, band rows), counted from the range's top row.
+    let (skip, band) = match &input.facts[kept.fact].kind {
         FactKind::ListObject { header_rows, .. } => {
             hidden_header = *header_rows == 0;
-            *header_rows
+            (0, *header_rows)
         }
-        FactKind::DatabaseRange { header, .. } => u32::from(*header),
+        FactKind::DatabaseRange { header, .. } => (0, u32::from(*header)),
         FactKind::Pivot {
+            first_header_row,
             first_data_row,
             first_data_col,
             ..
         } => {
             label_cols = (*first_data_col).min(width);
-            *first_data_row
+            // The band ends above the first data row and starts at the first header row, or
+            // at the row above the data when that is lower (a pivot with one row field and
+            // one value has its header in the first row). Rows above it, such as the data
+            // caption row, are kept apart.
+            let end = (*first_data_row).min(height);
+            if end == 0 {
+                (0, 0)
+            } else {
+                let start = (*first_header_row).min(end - 1).min(FACT_BAND_MAX);
+                (start, end - start)
+            }
         }
-        FactKind::AutoFilter => 1,
+        FactKind::AutoFilter => (0, 1),
     };
-    let band = band.min(FACT_BAND_MAX).min(height);
-    let header_rows: Vec<u32> = (0..band).map(|k| r.top + k).collect();
-    let data = (band < height).then(|| Rect {
-        top: r.top + band,
+    let band = band.min(FACT_BAND_MAX).min(height - skip);
+    let above_header: Vec<u32> = (0..skip).map(|k| r.top + k).collect();
+    let header_rows: Vec<u32> = (skip..skip + band).map(|k| r.top + k).collect();
+    let used = skip + band;
+    let data = (used < height).then(|| Rect {
+        top: r.top + used,
         ..r
     });
     Region {
@@ -267,7 +281,9 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
         caption_heading: None,
         notes: Vec::new(),
         heading: None,
+        above_header,
         header_rows,
+        body: None,
         header_paths: Vec::new(),
         label_cols,
         certainty: Certainty::Exact,

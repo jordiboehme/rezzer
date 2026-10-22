@@ -48,6 +48,9 @@ struct RowParts<'a> {
     /// Texts spread over columns: horizontal merges anchored in this row and center across
     /// selection runs. By first column.
     spread: Vec<(u32, u32, &'a str)>,
+    /// Per spread, the one with the widest right edge among it and those before it, so
+    /// overlapping spreads (a damaged file) give the outer one.
+    widest: Vec<(u32, &'a str)>,
 }
 
 impl<'a> RowParts<'a> {
@@ -59,7 +62,7 @@ impl<'a> RowParts<'a> {
             return Some(t);
         }
         let k = self.spread.partition_point(|&(l, _, _)| l <= col);
-        let &(_, right, t) = self.spread[..k].last()?;
+        let &(right, t) = self.widest[..k].last()?;
         (col <= right).then_some(t)
     }
 }
@@ -68,9 +71,40 @@ fn row_parts<'a>(lines: &Lines<'_, 'a>, row: u32, tick: &Tick) -> Result<RowPart
     let rect = lines.rect;
     let mut own = Vec::new();
     let mut spread = Vec::new();
+    // The merges that cover this row, by left column with the widest right edge so far, and
+    // the columns of the merges anchored in it. A cell covered by a merge anchored elsewhere
+    // holds a stale text: the merge's spread wins there.
+    let hi = lines
+        .merges
+        .partition_point(|&m| lines.prep.merges[m as usize].top <= row);
+    let mut covers: Vec<(u32, u32)> = Vec::new();
+    let mut anchors: Vec<u32> = Vec::new();
+    for &m in &lines.merges[..hi] {
+        if tick.step() {
+            return Err(PathStop::Stopped);
+        }
+        let r = lines.prep.merges[m as usize];
+        if r.bottom >= row {
+            covers.push((r.left, r.right));
+            if r.top == row {
+                anchors.push(r.left);
+            }
+        }
+    }
+    covers.sort_unstable();
+    let mut reach = 0u32;
+    for c in covers.iter_mut() {
+        reach = reach.max(c.1);
+        c.1 = reach;
+    }
+    anchors.sort_unstable();
+    let stale = |col: u32| {
+        let k = covers.partition_point(|&(l, _)| l <= col);
+        k > 0 && covers[k - 1].1 >= col && anchors.binary_search(&col).is_err()
+    };
     if let Some(line) = lines.at(row) {
         for c in lines.cells_of(line) {
-            if c.text.is_empty() {
+            if c.text.is_empty() || stale(c.pos.col) {
                 continue;
             }
             own.push((c.pos.col, c.text.as_str()));
@@ -127,7 +161,18 @@ fn row_parts<'a>(lines: &Lines<'_, 'a>, row: u32, tick: &Tick) -> Result<RowPart
         ));
     }
     spread.sort_by_key(|&(l, r, _)| (l, r));
-    Ok(RowParts { own, spread })
+    let mut widest: Vec<(u32, &str)> = Vec::with_capacity(spread.len());
+    for &(_, r, t) in &spread {
+        match widest.last() {
+            Some(&(w, wt)) if w >= r => widest.push((w, wt)),
+            _ => widest.push((r, t)),
+        }
+    }
+    Ok(RowParts {
+        own,
+        spread,
+        widest,
+    })
 }
 
 /// The parts of one column, top to bottom, equal neighbours once.
@@ -154,7 +199,9 @@ pub(crate) fn build(
 ) -> Result<Vec<String>, PathStop> {
     let rect = lines.rect;
     let width = rect.width();
-    charge(budget, width.saturating_mul(STRING))?;
+    if width.saturating_mul(STRING) > *budget as u64 {
+        return Err(PathStop::Over);
+    }
     let mut rows = Vec::new();
     for row in first..=end {
         rows.push(row_parts(lines, row, tick)?);
@@ -171,7 +218,8 @@ pub(crate) fn build(
         text += parts.iter().map(|p| p.len() as u64).sum::<u64>()
             + 3 * (parts.len().saturating_sub(1) as u64);
     }
-    charge(budget, text)?;
+    // Width and text are charged together, so a build that fails charges nothing.
+    charge(budget, width.saturating_mul(STRING).saturating_add(text))?;
     let mut out = Vec::with_capacity(width as usize);
     for col in rect.left..=rect.right {
         if tick.step() {

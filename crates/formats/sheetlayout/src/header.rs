@@ -41,6 +41,8 @@ enum Sort {
     Data,
     /// Neither: text with an error value, for example.
     Other,
+    /// Only formulas with an empty result.
+    Empty,
 }
 
 /// An integer from 1900 to 2100 (the year rule of H1).
@@ -60,12 +62,21 @@ fn sort(lines: &Lines, line: &Line) -> Sort {
     let mut data = false;
     let mut any = false;
     for c in lines.cells_of(line) {
-        any = true;
         if c.formula.is_some() {
-            header = false;
-            data = true;
+            if c.text.is_empty() {
+                // A formula with an empty result counts as an empty cell.
+                continue;
+            }
+            any = true;
+            if !is_year(c) {
+                // A formula with a text or other result is a data signal (spec 6.5); one
+                // whose cached value is a year counts as a year.
+                header = false;
+                data = true;
+            }
             continue;
         }
+        any = true;
         match c.class {
             Class::Text => {}
             Class::Number if is_year(c) => {}
@@ -77,7 +88,7 @@ fn sort(lines: &Lines, line: &Line) -> Sort {
         }
     }
     if !any {
-        Sort::Other
+        Sort::Empty
     } else if header {
         Sort::Header
     } else if data {
@@ -113,15 +124,30 @@ fn lines_from<'l>(lines: &'l Lines, row: u32, bottom: u32) -> impl Iterator<Item
 /// single-text rows) a row with a number, date, bool or formula. A vertical merge that starts
 /// in the band extends it to its last row; a band past 4 rows is none.
 fn h1(lines: &Lines, top: u32, bottom: u32, tick: &Tick) -> Option<H1> {
+    // The leading run of header rows. A row without a cell belongs to the run only when a
+    // merge from a band row above covers it.
     let mut end = None;
-    for (expect, l) in (u64::from(top)..).zip(lines_from(lines, top, bottom)) {
-        if u64::from(l.row) != expect || sort(lines, l) != Sort::Header {
+    let mut row = top;
+    loop {
+        if u64::from(row) > u64::from(bottom) {
             break;
         }
-        end = Some(l.row);
-        if u64::from(l.row) - u64::from(top) + 1 > RULE_BAND_MAX {
+        match lines.at(row) {
+            Some(l) => match sort(lines, l) {
+                Sort::Header => end = Some(row),
+                Sort::Empty if covered(lines, top, row) => {}
+                _ => break,
+            },
+            None if covered(lines, top, row) => {}
+            None => break,
+        }
+        if u64::from(row) - u64::from(top) + 1 > RULE_BAND_MAX {
             return None;
         }
+        if row == u32::MAX {
+            break;
+        }
+        row += 1;
     }
     let mut end = end?;
     let tops: Vec<u32> = lines
@@ -156,7 +182,7 @@ fn h1(lines: &Lines, top: u32, bottom: u32, tick: &Tick) -> Option<H1> {
             return None;
         }
         match sort(lines, l) {
-            Sort::Single => continue,
+            Sort::Single | Sort::Empty => continue,
             Sort::Data => {
                 return Some(H1 { end, change: l.row });
             }
@@ -197,6 +223,17 @@ fn mark(lines: &Lines, line: &Line) -> Option<Mark> {
     }
 }
 
+/// Whether a merge that starts in the rows `top` to `row - 1` covers `row`.
+fn covered(lines: &Lines, top: u32, row: u32) -> bool {
+    let merges = &lines.merges;
+    let lo = merges.partition_point(|&m| lines.prep.merges[m as usize].top < top);
+    merges[lo..]
+        .iter()
+        .map(|&m| &lines.prep.merges[m as usize])
+        .take_while(|m| m.top < row)
+        .any(|m| m.bottom >= row)
+}
+
 /// Rule H2's answer.
 enum H2 {
     /// Styles are not read.
@@ -226,7 +263,7 @@ fn h2(lines: &Lines, top: u32, bottom: u32, tick: &Tick) -> H2 {
         if tick.step() {
             return H2::NoAnswer;
         }
-        if sort(lines, l) == Sort::Single {
+        if matches!(sort(lines, l), Sort::Single | Sort::Empty) {
             continue;
         }
         match mark(lines, l) {
@@ -304,7 +341,14 @@ fn print_band(lines: &Lines, top: u32, bottom: u32) -> Option<u32> {
 /// Step 6a: the header band of a rule region's data area (the rows after its captions).
 /// `had_print` says the print titles lie in the region.
 pub(crate) fn band(lines: &Lines, data: Rect, had_print: bool, tick: &Tick) -> Band {
-    let (top, bottom) = (data.top, data.bottom);
+    // The header starts at the first row with a cell: rows above it in the data area hold
+    // none (a caption merged over two rows covers them, for example).
+    let bottom = data.bottom;
+    let top = match lines.lines.get(lines.first_at(data.top)) {
+        Some(l) if l.row <= bottom => l.row,
+        _ => return Band::None,
+    };
+    let data = Rect { top, ..data };
     let one = h1(lines, top, bottom, tick);
     let two = h2(lines, top, bottom, tick);
     let h1_words = |h: &H1| format!("header {} by type change", row_words(top, h.end));

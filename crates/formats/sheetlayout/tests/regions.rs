@@ -262,7 +262,9 @@ fn fact_headers_follow_the_fact() {
         .segment();
     let r = &layout.regions;
     assert_eq!(ranges(&layout), ["A1:B3", "E1:F2", "H1:I2"]);
-    assert_eq!(r[0].header_rows, [0, 1]);
+    // The pivot's band starts at its first header row; the row above it stays apart.
+    assert_eq!(r[0].above_header, [0]);
+    assert_eq!(r[0].header_rows, [1]);
     assert_eq!(r[0].data, Some(rect("A3:B3")));
     assert_eq!(r[0].label_cols, 1);
     assert!(r[1].header_rows.is_empty());

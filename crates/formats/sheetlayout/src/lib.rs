@@ -150,8 +150,18 @@ pub struct Region {
     pub notes: Vec<u32>,
     /// A section heading row and its depth.
     pub heading: Option<(u32, u8)>,
+    /// Rows of a fact above its header band, such as a pivot's data caption row. Each is
+    /// written as one line with its cells joined.
+    pub above_header: Vec<u32>,
     pub header_rows: Vec<u32>,
+    /// The table body: a fact's own range, or the data area of a rule region (the rows after
+    /// its captions, in the table's own columns). Set for every region with header paths. A
+    /// title attached above can make `rect` wider than the body.
+    pub body: Option<Rect>,
+    /// One path per column of `body`: `header_paths[i]` is column `body.left + i`. An empty
+    /// path means no band cell names the column; the caller writes the column letter.
     pub header_paths: Vec<String>,
+    /// The left columns of `body` that name the rows, counted from `body.left`.
     pub label_cols: u32,
     pub certainty: Certainty,
     pub evidence: Vec<Evidence>,
@@ -226,7 +236,9 @@ fn rule_region(rect: Rect, detail: &str) -> Region {
         caption_heading: None,
         notes: Vec::new(),
         heading: None,
+        above_header: Vec::new(),
         header_rows: Vec::new(),
+        body: None,
         header_paths: Vec::new(),
         label_cols: 0,
         certainty: Certainty::Unsure,
