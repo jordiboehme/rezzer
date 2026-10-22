@@ -4469,3 +4469,70 @@ fn layout_line_kept_with_table() {
         }
     }
 }
+
+#[test]
+fn key_value_parts_follow_sheet_columns() {
+    // B5:B6 is merged: row 6 has no value cell of its own, so its unit is not a value.
+    let kv = ltable(
+        vec![
+            vec![
+                at("Diameter", "A5"),
+                spans(at("10", "B5"), 2, 1),
+                at("m", "C5"),
+            ],
+            vec![at("Radius", "A6"), at("m", "C6")],
+        ],
+        0,
+        lay(LayoutKind::KeyValue, "A5:C6", None),
+    );
+    let md = sheet_md(vec![kv]);
+    assert!(
+        md.ends_with("- Diameter: 10 m (B5)\n- Radius m (A6)"),
+        "{md}"
+    );
+}
+
+#[test]
+fn name_caption_heading_shows_no_address() {
+    // A defined name's anchor names no cell: a long name caption is cut, with no address.
+    let long = format!("{}end", "n".repeat(130));
+    let md = sheet_md(vec![heading(3, &long, Some("name:'My sheet'!Local"))]);
+    assert!(
+        md.starts_with(&format!("### {}...\n\n", "n".repeat(120))),
+        "{md}"
+    );
+    assert!(md.ends_with(&format!("\n\n{long}")), "{md}");
+    assert!(!md.contains('('), "{md}");
+}
+
+#[test]
+fn notes_range_renders_without_a_table() {
+    // Task 7: when the notes do not fit with the table, split_rows gives them a range of
+    // their own with table None; it renders as the lead and the notes, no header band.
+    let mut l = lay(LayoutKind::Table, "A1:B9", Some("A2:B3"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["a".into(), "b".into()];
+    let table = ltable(
+        vec![
+            vec![at("a", "A1"), at("b", "B1")],
+            vec![at("1", "A2"), at("2", "B2")],
+            vec![at("3", "A3"), at("4", "B3")],
+        ],
+        1,
+        l,
+    );
+    let lead = [heading(3, "Sales", Some("S!A1"))];
+    let tail = [role_para("note", &"word ".repeat(400), "S!A9")];
+    let ranges = rezzer_model::split_rows(&lead, &table, &tail, 100);
+    assert_eq!(ranges.len(), 2);
+    let notes = ranges.last().unwrap();
+    assert_eq!(notes.table, None);
+    let md = sheet_md(notes.blocks.clone());
+    assert!(md.starts_with("### Sales\n\nword word"), "{md}");
+    assert!(md.ends_with(" (A9)"), "{md}");
+    assert!(
+        !md.lines()
+            .any(|l| l.starts_with('|') || l.starts_with("Table ")),
+        "{md}"
+    );
+}

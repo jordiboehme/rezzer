@@ -35,11 +35,17 @@ use crate::blocks::{
 const MAX_HEADING_CHARS: usize = 120;
 
 /// The local address of a `Sheet!A1` anchor (`A1`); the sheet name may hold a `!` itself.
+/// `None` for an anchor that names no cell, such as a defined name's `name:'Sheet'!Local`.
 fn address(anchor: Option<&rezzer_model::Anchor>) -> Option<&str> {
     anchor
         .and_then(|a| a.0.rsplit_once('!'))
         .map(|(_, at)| at)
-        .filter(|at| !at.is_empty())
+        .filter(|at| a1_position(at).is_some())
+}
+
+/// The 0-based sheet column of a cell, from its anchor.
+fn column_of(cell: &Cell) -> Option<u32> {
+    a1_position(address(cell.anchor.as_ref())?).map(|(_, col)| col)
 }
 
 /// `text` with ` (<address>)` after it; empty text stays empty.
@@ -169,14 +175,19 @@ pub(crate) fn layout_table(
 ) -> String {
     match layout.kind {
         LayoutKind::Title => String::new(),
-        LayoutKind::KeyValue => listed(
-            "Label and value pairs",
-            layout,
-            rows.iter().filter_map(|row| pair(row)).collect(),
-            ctx,
-            depth,
-            level,
-        ),
+        LayoutKind::KeyValue => {
+            // The label, value and unit columns by sheet column: a position covered by a
+            // merge from above has no cell, so a row's cells may start further right.
+            let left = rows.iter().flatten().filter_map(column_of).min();
+            listed(
+                "Label and value pairs",
+                layout,
+                rows.iter().filter_map(|row| pair(row, left)).collect(),
+                ctx,
+                depth,
+                level,
+            )
+        }
         LayoutKind::Text => listed(
             "Text",
             layout,
@@ -221,21 +232,26 @@ fn item(mut content: Vec<Inline>, at: Option<&str>) -> Vec<Block> {
 }
 
 /// `<label>: <value> <unit> (<cell of the value>)` for a row of a label and value region.
-/// Empty cells are left out; a row without a value names its label's cell. `None` for an
-/// empty row.
-fn pair(row: &[Cell]) -> Option<Vec<Block>> {
+/// A cell's part comes from its sheet column counted from `left` (the region's first
+/// column), else from its place in the row. Empty cells are left out; a row without a value
+/// names its label's cell. `None` for an empty row.
+fn pair(row: &[Cell], left: Option<u32>) -> Option<Vec<Block>> {
     let mut content: Vec<Inline> = Vec::new();
     let mut at: Option<&str> = None;
     for (i, cell) in row.iter().enumerate() {
         if is_empty(cell) {
             continue;
         }
+        let part = match (left, column_of(cell)) {
+            (Some(left), Some(col)) => col.saturating_sub(left) as usize,
+            _ => i,
+        };
         if !content.is_empty() {
-            content.push(Inline::plain(if i == 1 { ": " } else { " " }));
+            content.push(Inline::plain(if part == 1 { ": " } else { " " }));
         }
         content.extend_from_slice(trimmed(&cell.inlines));
         // The value's cell is the pair's address; the label's when there is no value.
-        if i == 1 || at.is_none() {
+        if part == 1 || at.is_none() {
             at = address(cell.anchor.as_ref()).or(at);
         }
     }
