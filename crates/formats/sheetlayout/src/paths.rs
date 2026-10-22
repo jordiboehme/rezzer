@@ -84,7 +84,9 @@ fn row_parts<'a>(lines: &Lines<'_, 'a>, row: u32, tick: &Tick) -> Result<RowPart
             return Err(PathStop::Stopped);
         }
         let r = lines.prep.merges[m as usize];
-        if r.bottom >= row {
+        // Only a merge anchored in the body spreads text, so only such a merge makes a
+        // covered cell stale.
+        if r.bottom >= row && lines.cell_at(r.top, r.left).is_some() {
             covers.push((r.left, r.right));
             if r.top == row {
                 anchors.push(r.left);

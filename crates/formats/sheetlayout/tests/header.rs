@@ -960,7 +960,15 @@ fn random_sheets_detect_every_cell_once() {
                         totals_rows: 0,
                         columns: vec!["n".into()],
                     },
-                ][g.next(3) as usize]
+                    FactKind::Pivot {
+                        name: "P".into(),
+                        first_header_row: g.next(3),
+                        first_data_row: g.next(4),
+                        first_data_col: g.next(3),
+                        total_row: false,
+                        total_col: false,
+                    },
+                ][g.next(4) as usize]
                     .clone(),
             });
         }
@@ -1001,6 +1009,13 @@ fn random_sheets_detect_every_cell_once() {
             });
             assert_eq!(r.rest, ranged, "case {case}: {:?}", r);
             assert!(r.header_rows.len() <= 10, "case {case}");
+            if let Some(body) = r.body {
+                assert_eq!(r.header_paths.len() as u64, body.width(), "case {case}");
+            }
+            if r.kind != Kind::Table {
+                assert!(r.above_header.is_empty(), "case {case}");
+                assert!(r.body.is_none(), "case {case}");
+            }
             if r.kind == Kind::Table && !r.header_rows.is_empty() {
                 let cols = r.data.map_or(r.rect.width(), |d| d.width());
                 assert_eq!(r.header_paths.len() as u64, cols, "case {case}");
@@ -1010,7 +1025,19 @@ fn random_sheets_detect_every_cell_once() {
             if r.certainty == Certainty::Rule && r.kind == Kind::Table {
                 assert!(r.header_rows.len() <= 4, "case {case}");
             }
-            assert!(u64::from(r.label_cols) < r.rect.width().max(1) || r.label_cols == 0);
+            // Rule L leaves at least one column; a pivot's own first data column may not.
+            let pivot = r
+                .evidence
+                .iter()
+                .any(|e| matches!(e, Evidence::Pivot { .. }));
+            if pivot {
+                assert!(u64::from(r.label_cols) <= r.rect.width(), "case {case}");
+            } else {
+                assert!(
+                    u64::from(r.label_cols) < r.rect.width().max(1) || r.label_cols == 0,
+                    "case {case}"
+                );
+            }
         }
         for i in &layout.issues {
             if matches!(i.kind, IssueKind::Limit | IssueKind::Stopped)
@@ -1272,6 +1299,11 @@ fn overlapping_spreads_take_the_widest() {
     let r = only(&layout);
     assert_eq!(r.header_paths[3], "Wide / d");
     assert_eq!(r.header_paths[4], "Wide / e");
+    // B1 anchors its own merge: it keeps its text although A1:E1 covers it. C takes the
+    // outer spread.
+    assert_eq!(r.header_paths[0], "Wide / a");
+    assert_eq!(r.header_paths[1], "Mid / b");
+    assert_eq!(r.header_paths[2], "Wide / c");
 }
 
 #[test]
@@ -1356,4 +1388,82 @@ fn surviving_mutants_of_the_review() {
     sheet.print_titles = Some((0, 1));
     let r = sheet.detect().regions.remove(0);
     assert!(rule_detail(&r, "H2").contains("win"), "{:?}", r.evidence);
+}
+
+// Fix round 2.
+
+#[test]
+fn merge_anchored_outside_a_fact_keeps_its_header() {
+    // A1 is merged over A1:A5 and reaches into the Excel table A3:C5.
+    let layout = Sheet::new()
+        .cell("A1", "t")
+        .merge("A1:A5")
+        .rows("A3", &["Name|Age|City", "Ann|31|Rome", "Bob|42|Oslo"])
+        .fact("A3:C5", list_object("T"))
+        .detect();
+    let table = layout
+        .regions
+        .iter()
+        .find(|r| r.kind == Kind::Table)
+        .expect("table");
+    assert_eq!(table.header_paths, ["Name", "Age", "City"]);
+}
+
+#[test]
+fn caption_merge_does_not_cover_a_band_row() {
+    // The caption A1 is merged over A1:A4; rows 2 and 4 hold header texts, row 3 nothing. A
+    // row only the caption merge covers ends the run, so row 4 is a text row after it.
+    let layout = Sheet::new()
+        .cell("A1", "Caption")
+        .merge("A1:A4")
+        .rows("B2", &["a|b"])
+        .rows("B4", &["c|d", "1|2"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.captions, [0]);
+    no_header(r);
+}
+
+#[test]
+fn h2_skips_rows_of_empty_results() {
+    let layout = Sheet::styled()
+        .rows("A1", &["*a|*b", "=|=", "1|2"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(r.certainty, Certainty::Rule);
+    assert_eq!(header(r), [1]);
+    assert!(has_rule(r, "H2"));
+}
+
+#[test]
+fn stopped_pivot_keeps_every_cell_once() {
+    let sheet = Sheet::new()
+        .rows(
+            "A1",
+            &["Sum of Size|Column Labels|", "Row Labels|blue|red", "a|1|2"],
+        )
+        .fact(
+            "A1:C3",
+            FactKind::Pivot {
+                name: "P".into(),
+                first_header_row: 1,
+                first_data_row: 2,
+                first_data_col: 1,
+                total_row: false,
+                total_col: false,
+            },
+        );
+    let input = sheet.input();
+    let quiet = segment_calls(&input);
+    let calls = Cell::new(0u32);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() > quiet
+    };
+    let layout = detect(&input, &Limits::default(), &stop);
+    every_cell_once(&input, &layout);
+    let r = only(&layout);
+    assert_eq!(r.kind, Kind::Grid);
+    assert!(r.above_header.is_empty());
+    assert_eq!(r.data, Some(rect("A1:C3")));
 }

@@ -449,8 +449,11 @@ fn decide(
     };
     match built {
         Ok(p) => {
+            // A table without header rows has no paths and so no body.
+            if !p.is_empty() {
+                region.body = Some(body);
+            }
             region.header_paths = p;
-            region.body = Some(body);
         }
         Err(PathStop::Stopped) => return Outcome::Stopped,
         Err(PathStop::Over) => return Outcome::Over,
