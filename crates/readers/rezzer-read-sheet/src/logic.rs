@@ -1484,9 +1484,10 @@ fn cell_parameters<'f>(
         let empty = SheetPaths::default();
         let regions = facts.map_or(&empty, |f| &f.paths);
         let points: Vec<(u32, u32)> = group.iter().map(|p| (p.at.row, p.at.col)).collect();
-        let located = regions.locate(&points);
+        let in_data = regions.locate(&points, false);
+        let in_region = regions.locate(&points, true);
         let q = quote_sheet(sheet);
-        for (p, region) in group.iter().zip(located) {
+        for ((p, data), whole) in group.iter().zip(in_data).zip(in_region) {
             let (row, col) = (p.at.row, p.at.col);
             let anchor = format!("{q}!{}", crate::grid::a1(row, col));
             let cell = facts.and_then(|f| {
@@ -1554,9 +1555,12 @@ fn cell_parameters<'f>(
                 }
             };
             let label = left_label.clone().or(head_label);
-            let mut path = match region {
-                Some(k) => region_path(regions, k, (row, col), &around, &left_label, &label),
-                None => Vec::new(),
+            // A cell of a caption, header or note row stands under the region's headings
+            // with the label found beside or above it.
+            let mut path = match (data, whole) {
+                (Some(k), _) => region_path(regions, k, (row, col), &around, &left_label, &label),
+                (None, Some(k)) => with_base(regions, k, &around, &left_label, label.clone()),
+                (None, None) => Vec::new(),
             };
             if path.is_empty() {
                 path.extend(label.clone());
@@ -1610,11 +1614,23 @@ fn region_path(
     if narrow.is_empty() {
         narrow.extend(label.clone());
     }
-    if narrow.is_empty() {
+    with_base(regions, k, around, left_label, narrow)
+}
+
+/// `narrow` under the base of region `k`; empty when `narrow` is. The text of the label
+/// found beside or above is not repeated when it is a heading the region stands under
+/// (`t (m)` as a caption over its values).
+fn with_base(
+    regions: &SheetPaths,
+    k: usize,
+    around: &Around,
+    left_label: &Option<String>,
+    narrow: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut narrow = narrow.into_iter().peekable();
+    if narrow.peek().is_none() {
         return Vec::new();
     }
-    // The text of the label found beside or above is not repeated when it is a heading the
-    // region stands under (`t (m)` as a caption over its values).
     let source = if left_label.is_some() {
         around.left
     } else {
@@ -1626,7 +1642,7 @@ fn region_path(
         .filter(|b| source.map(str::trim) != Some(b.as_str()))
         .cloned()
         .collect();
-    path.append(&mut narrow);
+    path.extend(narrow);
     path
 }
 

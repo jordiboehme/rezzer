@@ -965,10 +965,9 @@ fn parameter_path_from_caption_header_and_row_label() {
     // No generated `Table E7:F9` part, no row label (the table has no label column).
     assert_eq!(path_of(doc, "S!E8"), ["t"]);
     assert_eq!(param(doc, "S!E8").label.as_deref(), Some("t"));
-    // A header cell is no data cell: it keeps the label found beside it, as one part.
-    let header = param(doc, "S!B2");
-    assert_eq!(header.path.len(), header.label.iter().count());
-    assert_eq!(header.label, header.path.first().cloned());
+    // A header cell is no data cell: it keeps the label found beside it (`Case` on its
+    // left), under the region's caption.
+    assert_eq!(path_of(doc, "S!B2"), ["Lining", "Case"]);
 }
 
 #[test]

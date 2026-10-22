@@ -54,6 +54,8 @@ pub(crate) struct SheetLayout {
 /// them, the header path of their column and the label of their row.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PathRegion {
+    /// The whole region, with its caption, header and note rows.
+    pub rect: Rect,
     /// The data cells: the rows of the data area in the table's columns.
     pub area: Rect,
     /// The author headings the region's table stands under, wide to narrow: caption
@@ -97,6 +99,7 @@ impl SheetPaths {
             };
             by_range.insert(r.rect.a1(), out.len());
             out.push(PathRegion {
+                rect: r.rect,
                 area: Rect {
                     top: data.top,
                     left,
@@ -135,7 +138,7 @@ impl SheetPaths {
         // The label texts, each cell located once.
         let points: Vec<(u32, u32)> = texts.iter().map(|t| (t.row, t.col)).collect();
         let mut paths = SheetPaths { regions: out };
-        for (t, at) in texts.iter().zip(paths.locate(&points)) {
+        for (t, at) in texts.iter().zip(paths.locate(&points, false)) {
             let Some(k) = at else {
                 continue;
             };
@@ -147,28 +150,35 @@ impl SheetPaths {
         paths
     }
 
-    /// The region whose data area holds each point. Areas never overlap; one sweep by row
-    /// with the areas that have begun, by left column.
-    pub fn locate(&self, points: &[(u32, u32)]) -> Vec<Option<usize>> {
+    /// The region whose data area (`whole`: whole rectangle) holds each point. Regions never
+    /// overlap; one sweep by row with the rectangles that have begun, by left column.
+    pub fn locate(&self, points: &[(u32, u32)], whole: bool) -> Vec<Option<usize>> {
+        let rect = |k: usize| {
+            if whole {
+                self.regions[k].rect
+            } else {
+                self.regions[k].area
+            }
+        };
         let mut order: Vec<usize> = (0..points.len()).collect();
         order.sort_unstable_by_key(|&i| points[i]);
         let mut by_top: Vec<usize> = (0..self.regions.len()).collect();
-        by_top.sort_unstable_by_key(|&k| (self.regions[k].area.top, self.regions[k].area.left));
+        by_top.sort_unstable_by_key(|&k| (rect(k).top, rect(k).left));
         let mut next = 0;
         let mut open: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
         let mut out = vec![None; points.len()];
         for i in order {
             let (row, col) = points[i];
             while let Some(&k) = by_top.get(next)
-                && self.regions[k].area.top <= row
+                && rect(k).top <= row
             {
-                open.insert(self.regions[k].area.left, k);
+                open.insert(rect(k).left, k);
                 next += 1;
             }
             // An area that ended above is closed; an open area left of the point that does
             // not reach it means no area holds it, as areas never overlap.
             while let Some((&left, &k)) = open.range(..=col).next_back() {
-                let a = self.regions[k].area;
+                let a = rect(k);
                 if a.bottom < row {
                     open.remove(&left);
                     continue;
