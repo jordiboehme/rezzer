@@ -3,8 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! ODS: calamine reads values and formula texts; sheetparts reads hidden sheets, rows and
-//! columns, annotations, validations, number formats, named ranges with their scope and the
-//! document properties. Formulas are OpenFormula, shown in A1 form with the stored text kept.
+//! columns, annotations, validations, number formats, named ranges with their scope, the
+//! document properties and the layout signals (merges, looks, database ranges, pivot target
+//! ranges, row groups, frozen panes, header rows). Formulas are OpenFormula, shown in A1 form with the stored text kept.
 //!
 //! calamine builds every sheet as a dense range when it opens the file, so `content.xml` is
 //! checked and measured first (see [`crate::odscan`]): a file whose ranges would pass the
@@ -22,19 +23,20 @@ use rezzer_limits::{Budget, contain};
 use rezzer_model::{
     Anchor, Annotation, Embedded, FormulaKind, LossReason, ReadOutcome, Severity, StatusColor,
 };
-use sheetparts::IssueKind;
-use sheetparts::numfmt::{self, DateSystem};
-use sheetparts::odf::{self, OdsSheet};
+use sheetparts::numfmt::{self, DateSystem, NumKind};
+use sheetparts::odf::{self, DataPilot, OdsParts, OdsSheet};
+use sheetparts::{IssueKind, Look};
 use zipguard::Archive;
 
 use crate::Out;
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
+use crate::layout;
 use crate::logic::{Formulas, ReadState, SheetFacts};
 use crate::odscan::{self, NotCanonical};
 use crate::package::{self, Package, zip_reason};
 use crate::xlsx::{
     Vba, add_annotations, cell_losses, comment_body, defined_names, embedded, issues_to_losses,
-    problem_losses, properties, refuse, rules, section, status, table_losses,
+    merge_loss, problem_losses, properties, refuse, rules, section, status,
 };
 
 const MIMETYPE: &str = "mimetype";
@@ -43,7 +45,7 @@ const CONTENT: &str = "content.xml";
 const SPREADSHEET: &str = "application/vnd.oasis.opendocument.spreadsheet";
 
 /// What is not read from an ODS workbook, said once per file.
-const NOT_READ: &str = "not read for ODS: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings";
+const NOT_READ: &str = "not read for ODS: conditional formats, charts and calculation settings";
 
 /// Cells read between two checks of the time limit.
 const CHECK_EVERY: u64 = 1_024;
@@ -378,13 +380,56 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             Val::Text(s) | Val::Error(s) | Val::Iso(s) => s.clone(),
             Val::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
         };
-        let (table, notes) = grid::value_table(&q, &cells.cells, &[], budget, &shown);
-        match table {
-            Some(t) => blocks.push(t),
-            None => blocks.push(note("The sheet is empty.")),
+        // The regions of the sheet: tables, headers and report blocks. A number is a date
+        // when its format shows a date or a time.
+        let shown_layout = |c: &RawCell| {
+            let (class, number) = match &c.val {
+                Val::Num(v) => {
+                    let code = code_of(c).unwrap_or("General");
+                    let kind = numfmt::format_with(code, *v, DateSystem::Date1900).kind;
+                    let class = if matches!(kind, NumKind::Date | NumKind::Time) {
+                        sheetlayout::Class::Date
+                    } else {
+                        sheetlayout::Class::Number
+                    };
+                    (class, Some(*v))
+                }
+                Val::Iso(_) => (sheetlayout::Class::Date, None),
+                Val::Bool(_) => (sheetlayout::Class::Bool, None),
+                Val::Error(_) => (sheetlayout::Class::Error, None),
+                Val::Text(_) | Val::Empty => (sheetlayout::Class::Text, None),
+            };
+            layout::Shown {
+                text: shown(c),
+                class,
+                number,
+            }
+        };
+        let pilots: Vec<&DataPilot> = parts
+            .data_pilots
+            .iter()
+            .filter(|p| p.sheet == sheet.name)
+            .collect();
+        missing_signals(&mut out, &q, sheet, &pilots);
+        let laid = sheet_layout(
+            &q,
+            sheet,
+            &parts,
+            &pilots,
+            &cells,
+            &shown_layout,
+            formulas.layout_facts(&sheet.name),
+            budget,
+        );
+        if laid.mapped.blocks.is_empty() {
+            blocks.push(note("The sheet is empty."));
         }
-        table_losses(&mut out, &q, &notes);
-        if notes.element_stop.is_some() {
+        blocks.extend(laid.mapped.blocks);
+        for l in laid.mapped.losses {
+            out.loss(l.location, l.what, l.why, l.severity);
+        }
+        merge_loss(&mut out, &q, laid.merges_ignored);
+        if laid.mapped.elements_out {
             halted = Some("element limit reached");
         }
         if !sheet.hidden_rows.is_empty() {
@@ -425,6 +470,130 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
     crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
+}
+
+/// The layout signals an ODS sheet lacks, in one loss: the looks when the file has no cell
+/// styles, and the header rows, label columns and grand totals of its pivot tables, of which
+/// only the target range is read. Center across selection does not exist in ODS.
+fn missing_signals(out: &mut Out, q: &str, sheet: &OdsSheet, pilots: &[&DataPilot]) {
+    let mut missing = Vec::new();
+    if !sheet.has_looks {
+        missing.push(
+            "the file has no cell styles, so bold, fill, borders and indent are unknown"
+                .to_string(),
+        );
+    }
+    if !pilots.is_empty() {
+        let list: Vec<&str> = pilots.iter().map(|p| p.name.as_str()).collect();
+        missing.push(format!(
+            "the header rows, label columns and grand totals of the pivot tables {} are not read for ODS, only their target range",
+            list.join(", ")
+        ));
+    }
+    if !missing.is_empty() {
+        out.loss(
+            q,
+            format!("layout signals missing: {}", missing.join("; ")),
+            LossReason::Unsupported,
+            Severity::Info,
+        );
+    }
+}
+
+/// The layout of an ODS sheet: its cells with their classes and looks, its merges, database
+/// ranges, pivot target ranges, names, row groups, frozen panes and header rows for print.
+#[allow(clippy::too_many_arguments)]
+fn sheet_layout(
+    q: &str,
+    sheet: &OdsSheet,
+    parts: &OdsParts,
+    pilots: &[&DataPilot],
+    cells: &SheetCells,
+    shown: &dyn Fn(&RawCell) -> layout::Shown,
+    formulas: HashMap<(u32, u32), sheetlayout::FormulaIn>,
+    budget: &Budget,
+) -> layout::SheetLayout {
+    // A cell the looks do not list is plain, when the file has cell styles at all. ODS has
+    // no center across selection: that flag stays unknown.
+    let looks: HashMap<(u32, u32), Look> = sheet
+        .looks
+        .iter()
+        .map(|(p, l)| ((p.row, p.col), *l))
+        .collect();
+    let style = |row: u32, col: u32| {
+        if !sheet.has_looks {
+            return sheetlayout::Style::default();
+        }
+        let look = looks.get(&(row, col)).copied().unwrap_or_default();
+        sheetlayout::Style {
+            center_across: None,
+            ..layout::style_of(look)
+        }
+    };
+    let mut facts = Vec::new();
+    for d in parts
+        .database_ranges
+        .iter()
+        .filter(|d| d.sheet == sheet.name)
+    {
+        if let Some(area) = grid::parse_area(&d.range) {
+            facts.push(sheetlayout::Fact {
+                rect: layout::rect_of(area),
+                kind: sheetlayout::FactKind::DatabaseRange {
+                    name: d.name.clone(),
+                    header: d.header,
+                    footer: d.footer,
+                },
+            });
+        }
+    }
+    for p in pilots {
+        if let Some(area) = grid::parse_area(&p.range) {
+            // Only the target range is read: no header band, no label columns, and no total
+            // row or column (never from words like "Total Result").
+            facts.push(sheetlayout::Fact {
+                rect: layout::rect_of(area),
+                kind: sheetlayout::FactKind::Pivot {
+                    name: p.name.clone(),
+                    first_header_row: 0,
+                    first_data_row: 0,
+                    first_data_col: 0,
+                    total_row: false,
+                    total_col: false,
+                },
+            });
+        }
+    }
+    let (names, caption_names) = layout::sheet_names(&parts.names, &sheet.name);
+    let signals = layout::Signals {
+        facts,
+        names,
+        outline: sheet
+            .outline
+            .iter()
+            .map(|(span, level)| (span.first, span.last, *level))
+            .collect(),
+        frozen: sheet.frozen.as_ref().map(|f| (f.rows, f.cols)),
+        print_titles: sheet.header_rows.map(|s| (s.first, s.last)),
+        styles_read: sheet.has_looks,
+    };
+    let merges: Vec<sheetlayout::Rect> = sheet
+        .merges
+        .iter()
+        .map(|(a, b)| layout::rect_of(((a.row, a.col), (b.row, b.col))).normalized())
+        .collect();
+    layout::map_sheet(
+        q,
+        &cells.cells,
+        &shown,
+        &style,
+        &[],
+        &merges,
+        formulas,
+        signals,
+        &caption_names,
+        budget,
+    )
 }
 
 /// The formula text of each formula cell (None when the formula text limit was reached).

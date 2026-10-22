@@ -579,57 +579,6 @@ pub(crate) fn cell_losses(out: &mut Out, q: &str, cells: &SheetCells) {
     }
 }
 
-pub(crate) fn table_losses(out: &mut Out, q: &str, notes: &grid::TableNotes) {
-    if let Some((first, last)) = notes.rows_cut {
-        let rows = if first == last {
-            format!("row {first}")
-        } else {
-            format!("rows {first} to {last}")
-        };
-        out.loss(
-            q,
-            format!("{rows} not shown in the value table (at most {} cells); their formulas are still listed", grid::MAX_TABLE_CELLS),
-            LossReason::Limit,
-            Severity::Info,
-        );
-    }
-    if let Some((first, last)) = notes.cols_cut {
-        out.loss(
-            q,
-            format!(
-                "columns {} to {} not shown in the value table (at most {} columns); their formulas are still listed",
-                rezzer_model::column_letter(first as usize),
-                rezzer_model::column_letter(last as usize),
-                grid::MAX_TABLE_COLUMNS
-            ),
-            LossReason::Limit,
-            Severity::Info,
-        );
-    }
-    if let Some(row) = notes.element_stop {
-        out.loss(
-            q,
-            format!(
-                "element limit reached, value table rows from row {} on not shown",
-                row + 1
-            ),
-            LossReason::Limit,
-            Severity::Warning,
-        );
-    }
-    if notes.merges_ignored > 0 {
-        out.loss(
-            q,
-            format!(
-                "{} merged areas overlap another one or are too large; shown as single cells",
-                notes.merges_ignored
-            ),
-            LossReason::Damaged,
-            Severity::Info,
-        );
-    }
-}
-
 pub(crate) fn problem_loss(out: &mut Out, p: FormulaProblem) {
     let why = if p.unreadable {
         LossReason::Unsupported

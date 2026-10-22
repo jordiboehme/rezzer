@@ -911,3 +911,291 @@ fn merges_without_values_leave_the_sheet_empty() {
     assert_eq!(paragraphs(section(doc, "S")), ["The sheet is empty."]);
     assert!(doc.losses.is_empty(), "{:?}", doc.losses);
 }
+
+// ---------------------------------------------------------------------------------------
+// ODS
+// ---------------------------------------------------------------------------------------
+
+/// One ODS row: `a` text, `1` number, `x@b` the cell with the automatic style `b`, an empty
+/// part an empty cell.
+fn ods_row(parts: &[&str]) -> String {
+    let mut out = String::from("<table:table-row>");
+    for part in parts {
+        let (value, style) = match part.rsplit_once('@') {
+            Some((v, s)) => (v, format!(" table:style-name=\"{s}\"")),
+            None => (*part, String::new()),
+        };
+        if value.is_empty() {
+            out.push_str(&format!("<table:table-cell{style}/>"));
+        } else if value.parse::<f64>().is_ok() {
+            out.push_str(&format!(
+                "<table:table-cell{style} office:value-type=\"float\" office:value=\"{value}\"><text:p>{value}</text:p></table:table-cell>"
+            ));
+        } else {
+            out.push_str(&format!(
+                "<table:table-cell{style} office:value-type=\"string\"><text:p>{value}</text:p></table:table-cell>"
+            ));
+        }
+    }
+    out.push_str("</table:table-row>");
+    out
+}
+
+/// A bold automatic cell style named `b`.
+const ODS_BOLD: &str = "<style:style style:name=\"b\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>";
+
+fn ods_sheet(name: &str, rows: &str) -> String {
+    format!("<table:table table:name=\"{name}\">{rows}</table:table>")
+}
+
+fn has_db_range(l: &TableLayout, name: &str) -> bool {
+    l.found_by
+        .iter()
+        .any(|e| matches!(e, Evidence::DatabaseRange { name: n } if n == name))
+}
+
+#[test]
+fn ods_database_range_is_exact() {
+    let out = corpus("database.ods");
+    let doc = &out.document;
+    // The anonymous sheet range has no name of its own: the range key, no caption.
+    let r = region(doc, "Sheet1", "A1:D6");
+    assert_eq!(r.layout.key, "Sheet1!A1");
+    assert_eq!(r.layout.certainty, Certainty::Exact);
+    assert!(has_db_range(r.layout, "__Anonymous_Sheet_DB__0"));
+    assert_eq!(r.layout.header_rows, [1]);
+    assert_eq!(r.layout.header_paths, ["Col1", "Col2", "Col3", "Col4"]);
+    let named = region(doc, "Sheet2", "A1:C7");
+    assert_eq!(named.layout.key, "dbrange:database1");
+    assert_eq!(named.layout.certainty, Certainty::Exact);
+    assert_eq!(named.layout.header_rows, [1]);
+    for sheet in ["Sheet1", "Sheet2"] {
+        assert!(
+            !headings(doc, sheet)
+                .iter()
+                .any(|h| h.1.contains("__Anonymous")),
+            "{:?}",
+            headings(doc, sheet)
+        );
+    }
+
+    let out = corpus("cool15769_minimal_DB_ranges.ods");
+    let doc = &out.document;
+    let key_of = |range: &str| region(doc, "Sheet1", range).layout.key.clone();
+    assert_eq!(key_of("C4"), "dbrange:singleheader");
+    assert_eq!(key_of("A4"), "dbrange:singlenoheader");
+    assert_eq!(key_of("E4:E5"), "dbrange:twowheader");
+    assert_eq!(key_of("G4:G5"), "dbrange:twowheadertotals");
+    assert_eq!(region(doc, "Sheet1", "C4").layout.header_rows, [4]);
+    // `table:contains-header="false"`: no header row, the column letter names the column.
+    let no_header = region(doc, "Sheet1", "A4");
+    assert!(no_header.layout.header_rows.is_empty());
+    assert_eq!(no_header.layout.header_paths, ["A"]);
+    assert_eq!(region(doc, "Sheet1", "E4:E5").layout.header_rows, [4]);
+    // `calcext:contains-footer="true"`: the last row is the total row.
+    let totals = region(doc, "Sheet1", "G4:G5");
+    assert_eq!(totals.layout.header_rows, [4]);
+    assert_eq!(rows_of(&totals, RowKind::Total), [5]);
+    for range in ["C4", "A4", "E4:E5", "G4:G5"] {
+        assert_eq!(
+            region(doc, "Sheet1", range).layout.certainty,
+            Certainty::Exact
+        );
+    }
+
+    let out = corpus("autofilter-colbutton.ods");
+    let r = region(&out.document, "Sheet1", "B1:C4");
+    assert_eq!(r.layout.key, "Sheet1!B1");
+    assert_eq!(r.layout.certainty, Certainty::Exact);
+    assert_eq!(r.layout.header_paths, ["A", "B"]);
+}
+
+#[test]
+fn ods_merges_are_read() {
+    // A2:A3 is merged; A3 is an empty covered cell.
+    let out = corpus("merged_cells.ods");
+    let doc = &out.document;
+    let r = &regions(doc, "Sheet1")[0];
+    let a2 = r
+        .rows
+        .iter()
+        .flatten()
+        .find(|c| c.anchor.as_ref().is_some_and(|a| a.0 == "Sheet1!A2"))
+        .unwrap_or_else(|| panic!("{:?}", r.rows));
+    assert_eq!((a2.row_span, a2.col_span), (2, 1));
+    assert!(
+        !r.rows
+            .iter()
+            .flatten()
+            .any(|c| c.anchor.as_ref().is_some_and(|a| a.0 == "Sheet1!A3"))
+    );
+
+    // The covered cell A3 holds "a3": it is not shown and a loss says so.
+    let out = corpus("covered.ods");
+    let doc = &out.document;
+    let loss = doc
+        .losses
+        .iter()
+        .find(|l| l.location == "sheet1!A3")
+        .unwrap_or_else(|| panic!("{:#?}", doc.losses));
+    assert_eq!(loss.why, LossReason::Unsupported);
+    assert!(
+        loss.what.contains("a3") && loss.what.contains("A2:A3"),
+        "{}",
+        loss.what
+    );
+    assert!(!held(doc, "sheet1").iter().any(|c| c.1 == "a3"));
+    assert!(held(doc, "sheet1").iter().any(|c| c.1 == "a2"));
+
+    // Large merges: the merged texts are kept once, each at its top-left cell.
+    let out = corpus("merged.ods");
+    let doc = &out.document;
+    let mut all = held(doc, "Sheet1");
+    all.extend(held(doc, "Sheet2"));
+    all.sort();
+    assert_eq!(
+        all,
+        [
+            ("Sheet1!A1".to_string(), "merged".to_string()),
+            ("Sheet1!D16".into(), "yet another merged".into()),
+            ("Sheet1!H3".into(), "another merged".into()),
+            ("Sheet2!E4".into(), "merged on another sheet".into()),
+        ]
+    );
+    // Each merged text heads the region its merge covers (A1 spans 6 columns and 12 rows).
+    assert_eq!(ranges(doc, "Sheet1"), ["A1:F12", "H3:J13", "D16:H24"]);
+    assert_eq!(ranges(doc, "Sheet2"), ["E4:G16"]);
+    assert_eq!(
+        headings(doc, "Sheet1")
+            .iter()
+            .map(|h| h.2.clone().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["Sheet1!A1", "Sheet1!H3", "Sheet1!D16"]
+    );
+    let not_read = doc
+        .losses
+        .iter()
+        .find(|l| l.what.contains("not read for ODS"))
+        .unwrap();
+    assert!(!not_read.what.contains("merged"), "{}", not_read.what);
+}
+
+#[test]
+fn ods_pivot_location_is_exact() {
+    let out = corpus("pivot-table-basic.ods");
+    let doc = &out.document;
+    let r = region(doc, "Pivot", "A1:E10");
+    assert_eq!(r.layout.key, "pivot:Pivot!DataPilot1");
+    assert_eq!(r.layout.certainty, Certainty::Exact);
+    // ODS gives the target range only: no header band, no label columns and no total row
+    // from words like "Total Result".
+    assert!(r.layout.header_rows.is_empty());
+    assert_eq!(r.layout.label_cols, 0);
+    assert!(rows_of(&r, RowKind::Total).is_empty());
+    let loss = doc
+        .losses
+        .iter()
+        .find(|l| l.location == "Pivot" && l.what.contains("DataPilot1"))
+        .unwrap_or_else(|| panic!("{:#?}", doc.losses));
+    assert_eq!(loss.why, LossReason::Unsupported);
+    assert_eq!(loss.severity, Severity::Info);
+    let not_read = doc
+        .losses
+        .iter()
+        .find(|l| l.what.contains("not read for ODS"))
+        .unwrap();
+    assert!(!not_read.what.contains("pivot"), "{}", not_read.what);
+    assert!(!not_read.what.contains("database"), "{}", not_read.what);
+}
+
+/// outline.ods has one cell beside its row groups, so no row can have a parent there: the
+/// parents are shown on a fixture with a label column inside a table (as for GroupTest.xlsx).
+#[test]
+fn ods_outline_levels_give_parents() {
+    let out = corpus("outline.ods");
+    assert_eq!(
+        held(&out.document, "OutlineSheet"),
+        [("OutlineSheet!A2".to_string(), "1".to_string())]
+    );
+
+    let body = ods_sheet(
+        "S",
+        &[
+            ods_row(&["Item@b", "Qty@b"]),
+            ods_row(&["Fruit", "5"]),
+            format!(
+                "<table:table-row-group>{}{}</table:table-row-group>",
+                ods_row(&["Apple", "2"]),
+                ods_row(&["Pear", "3"])
+            ),
+            ods_row(&["Nuts", "1"]),
+        ]
+        .concat(),
+    );
+    let out = read_ods(ods(&content_styled(ODS_BOLD, &body)));
+    let r = &regions(&out.document, "S")[0];
+    let parent = |n: u32| {
+        r.layout
+            .rows
+            .iter()
+            .find(|x| x.row == n)
+            .and_then(|x| x.parent)
+    };
+    assert_eq!(parent(3), Some(2), "{:?}", r.layout.rows);
+    assert_eq!(parent(4), Some(2));
+    assert_eq!(parent(5), None);
+}
+
+/// print-range.ods has header rows on empty sheets: they stay empty. The header rows set
+/// the band on a fixture.
+#[test]
+fn ods_print_rows_are_header() {
+    let out = corpus("print-range.ods");
+    for sheet in ["Sheet1", "Sheet2"] {
+        assert!(regions(&out.document, sheet).is_empty());
+        assert!(paragraphs(section(&out.document, sheet)).contains(&"The sheet is empty.".into()));
+    }
+
+    let body = ods_sheet(
+        "S",
+        &[
+            format!(
+                "<table:table-header-rows>{}{}</table:table-header-rows>",
+                ods_row(&["Region", "Sales", "Sales"]),
+                ods_row(&["", "2024", "2025"])
+            ),
+            ods_row(&["North", "1", "2"]),
+            ods_row(&["South", "3", "4"]),
+        ]
+        .concat(),
+    );
+    let out = read_ods(ods(&content_styled(ODS_BOLD, &body)));
+    let r = &regions(&out.document, "S")[0];
+    assert_eq!(r.layout.header_rows, [1, 2]);
+    assert!(
+        r.layout.found_by.contains(&Evidence::PrintTitles),
+        "{:?}",
+        r.layout.found_by
+    );
+    assert_eq!(r.layout.header_paths[1], "Sales / 2024");
+}
+
+/// A file with cell styles: a cell without a look of its own is plain, so the bold first
+/// row is the header (rule H2). Without any cell style the looks are unknown.
+#[test]
+fn ods_looks_mark_the_header() {
+    let body = ods_sheet(
+        "S",
+        &[
+            ods_row(&["Name@b", "City@b"]),
+            ods_row(&["Ann", "Rome"]),
+            ods_row(&["Bob", "Oslo"]),
+        ]
+        .concat(),
+    );
+    let out = read_ods(ods(&content_styled(ODS_BOLD, &body)));
+    let r = &regions(&out.document, "S")[0];
+    assert_eq!(r.layout.kind, LayoutKind::Table);
+    assert_eq!(r.layout.header_rows, [1]);
+    assert_eq!(r.layout.header_paths, ["Name", "City"]);
+}

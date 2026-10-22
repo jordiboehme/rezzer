@@ -609,20 +609,22 @@ fn layout_baseline_covers_the_spreadsheets() {
     }
 }
 
-/// The layout keeps every cell, value and piece of logic: for every XLSX and XLSM file with a
-/// baseline, the cells the blocks hold are the baseline's cells, and the formulas,
-/// parameters and rules facets are equal. No cell is written as a stray line outside its
-/// region.
+/// The layout keeps every cell, value and piece of logic: for every spreadsheet with a
+/// baseline (XLSX, XLSM, XLSB, ODS), the cells the blocks hold are the baseline's cells, and
+/// the formulas, parameters and rules facets are equal. No cell is written as a stray line
+/// outside its region.
+///
+/// One change is allowed: a cell under a merged area that is not the area's top-left cell
+/// (calamine gives the values of ODS covered cells) is not shown. It must be stated as a
+/// loss: at its own anchor for the first ones of a sheet, then in the sheet's count loss.
 #[test]
 fn cells_and_logic_unchanged_on_corpus() {
     let pipeline = pipeline();
     let mut failures = Vec::new();
     let mut checked = 0;
+    let mut covered_total = 0;
     for file in office_spreadsheets() {
         let name = file.file_name().unwrap().to_string_lossy().to_string();
-        if !(name.ends_with(".xlsx") || name.ends_with(".xlsm")) {
-            continue;
-        }
         checked += 1;
         let base = baseline(&name);
         let json = run(&pipeline, &file).json;
@@ -639,21 +641,53 @@ fn cells_and_logic_unchanged_on_corpus() {
                 )
             })
             .collect();
-        if now != before {
-            let missing: Vec<_> = before
+        let now_set: std::collections::HashSet<&(String, String)> = now.iter().collect();
+        let before_set: std::collections::HashSet<&(String, String)> = before.iter().collect();
+        let extra: Vec<_> = now.iter().filter(|c| !before_set.contains(c)).collect();
+        let missing: Vec<&(String, String)> =
+            before.iter().filter(|c| !now_set.contains(c)).collect();
+        // Missing cells stated as covered: by anchor, else by the count loss of their sheet.
+        let covered_at = |anchor: &str| {
+            doc.losses
                 .iter()
-                .filter(|c| !now.contains(c))
-                .take(10)
-                .collect();
-            let extra: Vec<_> = now
+                .any(|l| l.location == anchor && l.what.contains("under the merged area"))
+        };
+        let mut unstated: Vec<&(String, String)> = Vec::new();
+        let mut counted: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for c in &missing {
+            if covered_at(&c.0) {
+                covered_total += 1;
+                continue;
+            }
+            let sheet = c.0.rsplit_once('!').map(|(s, _)| s).unwrap_or("");
+            *counted.entry(sheet.to_string()).or_default() += 1;
+            unstated.push(c);
+        }
+        for (sheet, n) in counted {
+            let stated: u64 = doc
+                .losses
                 .iter()
-                .filter(|c| !before.contains(c))
-                .take(10)
-                .collect();
+                .filter(|l| l.location == sheet)
+                .filter_map(|l| {
+                    l.what
+                        .strip_suffix(
+                            " more cells under merged areas hold a value that is not shown",
+                        )
+                        .and_then(|k| k.parse::<u64>().ok())
+                })
+                .sum();
+            if stated >= n {
+                covered_total += n;
+                unstated.retain(|c| !c.0.starts_with(&format!("{sheet}!")));
+            }
+        }
+        if !extra.is_empty() || !unstated.is_empty() {
             failures.push(format!(
-                "{name}: cells differ ({} now, {} before); missing {missing:?}; extra {extra:?}",
+                "{name}: cells differ ({} now, {} before); missing {:?}; extra {:?}",
                 now.len(),
-                before.len()
+                before.len(),
+                unstated.iter().take(10).collect::<Vec<_>>(),
+                extra.iter().take(10).collect::<Vec<_>>()
             ));
         }
         for facet in ["formulas", "parameters", "rules"] {
@@ -679,7 +713,8 @@ fn cells_and_logic_unchanged_on_corpus() {
             failures.push(format!("{name}: {stray} cells written as stray lines"));
         }
     }
-    assert!(checked >= 30, "only {checked} files checked");
+    eprintln!("{checked} files checked, {covered_total} covered cells stated as losses");
+    assert!(checked >= 48, "only {checked} files checked");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

@@ -7,7 +7,53 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "mySheet1",
       "blocks": [
         {
-          "header_rows": 0,
+          "inlines": [
+            {
+              "text": "Table A1:E17",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!A1:E17",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:E17",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "String",
+              "This is a string",
+              "",
+              "",
+              ""
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "mySheet1!A1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A1:E17"
+          },
           "rows": [
             [
               {
@@ -477,7 +523,237 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               }
             ],
-            "<23 more items>"
+            "<5 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text C21",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!C21",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "C21",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "mySheet1!C21",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "C21"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "mySheet1!C21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "text test",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "mySheet1!B30",
+          "inlines": [
+            {
+              "text": "the",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!B30",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 30",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "title rows only",
+                "id": "T2",
+                "kind": "rule"
+              }
+            ],
+            "key": "mySheet1!B30",
+            "kind": "title",
+            "label_cols": 0,
+            "range": "B30"
+          },
+          "type": "table"
+        },
+        {
+          "anchor": "mySheet1!B33",
+          "inlines": [
+            {
+              "text": "the",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!B33",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 33",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "title rows only",
+                "id": "T2",
+                "kind": "rule"
+              }
+            ],
+            "key": "mySheet1!B33",
+            "kind": "title",
+            "label_cols": 0,
+            "range": "B33"
+          },
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text D33",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!D33",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "D33",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "mySheet1!D33",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "D33"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "mySheet1!D33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "quick",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text B35",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "mySheet1!B35",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "B35",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "mySheet1!B35",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "B35"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "mySheet1!B35",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "comment6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
           ],
           "type": "table"
         }
@@ -632,7 +908,13 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "document",
       "severity": "info",
-      "what": "not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links",
+      "what": "not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also hidden rows and columns, Excel tables, pivot tables, charts and external links",
+      "why": "unsupported"
+    },
+    {
+      "location": "mySheet1",
+      "severity": "info",
+      "what": "layout from values only: styles, tables and filters are not read for XLSB",
       "why": "unsupported"
     },
     {
@@ -667,7 +949,7 @@ source: crates/rezzer/tests/corpus.rs
       ],
       [
         "Not read",
-        "1"
+        "2"
       ],
       [
         "Last changed",
@@ -680,7 +962,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "mySheet1",
         "role": "result",
-        "size": "35 rows x 5 columns"
+        "size": "16 rows x 5 columns, 6 regions"
       }
     ]
   },

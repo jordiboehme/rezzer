@@ -27,7 +27,7 @@ modified: "2014-01-25T21:08:47.223500176"
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
 | indiceOrga | sheet | 2 rows x 1 column |  |  |
-| Calculation | sheet | 9 rows x 7 columns | result | Data |
+| Calculation | sheet | 4 rows x 5 columns, 4 regions | result | Data |
 | Data | sheet | 4 rows x 4 columns | result | Calculation |
 
 - Sheets: 3
@@ -68,17 +68,35 @@ flowchart LR
 
 ## Calculation
 
-|  |  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- | --- |
-| Semi // | Colonne a |  | Colonne b |  |  | 1.4965 |
-|  | bas (1) | haut (n) | bas (1) | haut (n) |  | -0.1459 |
-|  | L | L | L | L |  |  |
-| Indice | 1.4666 | 1.4870 |  | 1.4907 |  |  |
-| titre | 20.49% | 6.51% | 6.51% | 3.98% |  |  |
-| rapport | 25.78% | 6.96% | 6.96% | 4.14% |  |  |
-| débit | 12 | 10 |  | 1.00E+01 |  |  |
-|  |  |  |  |  |  |  |
-| Aexp | 10 |  | 10 |  |  |  |
+### Table A1:E7
+
+| Semi // | Colonne a bas (1) L | Colonne a haut (n) L | Colonne b bas (1) L | Colonne b haut (n) L |
+| --- | --- | --- | --- | --- |
+| Indice | 1.4666 | 1.4870 |  | 1.4907 |
+| titre | 20.49% | 6.51% | 6.51% | 3.98% |
+| rapport | 25.78% | 6.96% | 6.96% | 4.14% |
+| débit | 12 | 10 |  | 1.00E+01 |
+
+Merged cells: 〃 same as above, ← same as left. Ranges: B1:C1, D1:E1
+
+### Table G1:G2
+
+|  |
+| --- |
+| 1.4965 |
+| -0.1459 |
+
+### Table A9:B9
+
+|  |  |
+| --- | --- |
+| Aexp | 10 |
+
+### Table D9
+
+|  |
+| --- |
+| 10 |
 
 ## Data
 
@@ -243,4 +261,4 @@ flowchart LR
 
 | Where | What | Why | Severity |
 | --- | --- | --- | --- |
-| document | not read for ODS: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings | unsupported | info |
+| document | not read for ODS: conditional formats, charts and calculation settings | unsupported | info |

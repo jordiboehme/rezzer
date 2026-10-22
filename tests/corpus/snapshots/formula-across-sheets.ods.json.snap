@@ -7,7 +7,31 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "indiceOrga",
       "blocks": [
         {
+          "anchor": "indiceOrga!A1:A2",
           "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A1:A2",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A"
+            ],
+            "key": "indiceOrga!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:A2"
+          },
           "rows": [
             [
               {
@@ -47,7 +71,55 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Calculation",
       "blocks": [
         {
-          "header_rows": 0,
+          "inlines": [
+            {
+              "text": "Table A1:E7",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Calculation!A1:E7",
+          "header_rows": 3,
+          "layout": {
+            "certainty": "rule",
+            "data": "A4:E7",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header rows 1 to 3 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Semi //",
+              "Colonne a / bas (1) / L",
+              "Colonne a / haut (n) / L",
+              "Colonne b / bas (1) / L",
+              "Colonne b / haut (n) / L"
+            ],
+            "header_rows": [
+              1,
+              2,
+              3
+            ],
+            "key": "Calculation!A1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A1:E7"
+          },
           "rows": [
             [
               {
@@ -63,7 +135,7 @@ source: crates/rezzer/tests/corpus.rs
               },
               {
                 "anchor": "Calculation!B1",
-                "col_span": 1,
+                "col_span": 2,
                 "inlines": [
                   {
                     "text": "Colonne a",
@@ -73,37 +145,11 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "Calculation!C1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
                 "anchor": "Calculation!D1",
-                "col_span": 1,
+                "col_span": 2,
                 "inlines": [
                   {
                     "text": "Colonne b",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!E1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "1.4965",
                     "type": "text"
                   }
                 ],
@@ -159,22 +205,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G2",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "-0.1459",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -226,16 +256,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G3",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -286,16 +306,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F4",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G4",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -354,16 +364,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G5",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -421,16 +421,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G6",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -482,55 +472,120 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table G1:G2",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Calculation!G1:G2",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "G1:G2",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Calculation!F7",
-                "col_span": 1,
-                "row_span": 1
-              },
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "G"
+            ],
+            "key": "Calculation!G1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "G1:G2"
+          },
+          "rows": [
+            [
               {
-                "anchor": "Calculation!G7",
+                "anchor": "Calculation!G1",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.4965",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "Calculation!A8",
+                "anchor": "Calculation!G2",
                 "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!B8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!C8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!D8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!E8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G8",
-                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-0.1459",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A9:B9",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Calculation!A9:B9",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A9:B9",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
             ],
+            "header_paths": [
+              "A",
+              "B"
+            ],
+            "key": "Calculation!A9",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A9:B9"
+          },
+          "rows": [
             [
               {
                 "anchor": "Calculation!A9",
@@ -553,12 +608,49 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table D9",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Calculation!D9",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "D9",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Calculation!C9",
-                "col_span": 1,
-                "row_span": 1
-              },
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "D"
+            ],
+            "key": "Calculation!D9",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "D9"
+          },
+          "rows": [
+            [
               {
                 "anchor": "Calculation!D9",
                 "col_span": 1,
@@ -568,21 +660,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!E9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!F9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Calculation!G9",
-                "col_span": 1,
                 "row_span": 1
               }
             ]
@@ -598,7 +675,34 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Data",
       "blocks": [
         {
+          "anchor": "Data!A1:D4",
           "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A1:D4",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "key": "Data!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:D4"
+          },
           "rows": [
             [
               {
@@ -1214,7 +1318,7 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "document",
       "severity": "info",
-      "what": "not read for ODS: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings",
+      "what": "not read for ODS: conditional formats, charts and calculation settings",
       "why": "unsupported"
     }
   ],
@@ -1269,7 +1373,7 @@ source: crates/rezzer/tests/corpus.rs
           "Data"
         ],
         "role": "result",
-        "size": "9 rows x 7 columns"
+        "size": "4 rows x 5 columns, 4 regions"
       },
       {
         "id": "Data",
