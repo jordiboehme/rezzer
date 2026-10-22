@@ -44,7 +44,7 @@ fn fence_run(line: &str) -> Option<(char, usize, &str)> {
 }
 
 /// The starts of the row kind line under a sheet table.
-const ROW_KINDS: [&str; 3] = ["Subtotal row", "Total row", "Group row"];
+const ROW_KINDS: [&str; 4] = ["Subtotal row", "Total row", "Group row", "Total column"];
 
 /// The words that start a sheet region's layout line or lead line, before its range.
 const REGION_WORDS: [&str; 4] = ["Table ", "Grid ", "Label and value pairs ", "Text "];

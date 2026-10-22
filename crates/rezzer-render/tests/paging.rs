@@ -77,6 +77,7 @@ fn region(range: &str) -> Block {
             header_rows: Vec::new(),
             header_paths: Vec::new(),
             label_cols: 0,
+            total_columns: Vec::new(),
             certainty: Certainty::Rule,
             found_by: Vec::new(),
             unsure: Vec::new(),

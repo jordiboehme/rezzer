@@ -578,6 +578,9 @@ source: crates/rezzer/tests/corpus.rs
                 "row": 11,
                 "why": "pivot total row; base level"
               }
+            ],
+            "total_columns": [
+              4
             ]
           },
           "rows": [

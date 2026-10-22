@@ -110,6 +110,7 @@ fn layout(header_rows: Vec<u32>, first: u32, last: u32, rows: Vec<RowNote>) -> T
         header_rows,
         header_paths: vec!["Name".into(), "Value".into()],
         label_cols: 1,
+        total_columns: Vec::new(),
         certainty: Certainty::Rule,
         found_by: vec![Evidence::Rule {
             id: "H1".into(),

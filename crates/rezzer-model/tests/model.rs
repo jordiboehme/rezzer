@@ -153,6 +153,7 @@ fn full_document() -> Document {
                 header_rows: vec![3, 4],
                 header_paths: vec!["Region".into(), "Population / 2021".into()],
                 label_cols: 1,
+                total_columns: vec![6],
                 certainty: Certainty::Unsure,
                 found_by: vec![
                     Evidence::ListObject {
@@ -408,6 +409,7 @@ fn document_roundtrips_through_json() {
         r#""layout":{"kind":"table","key":"table:Sales","range":"A1:F68","data":"A5:F62""#,
         r#""header_rows":[3,4]"#,
         r#""label_cols":1"#,
+        r#""total_columns":[6]"#,
         r#""certainty":"unsure""#,
         r#"{"kind":"list_object","name":"Sales"}"#,
         r#"{"kind":"database_range","name":"db"}"#,
@@ -459,12 +461,14 @@ fn minimal_layout_json_reads_and_skips_empty_fields() {
     assert_eq!(layout.data, None);
     assert!(layout.header_rows.is_empty() && layout.found_by.is_empty() && layout.rows.is_empty());
     assert_eq!(layout.label_cols, 0);
+    assert!(layout.total_columns.is_empty());
     assert!(!layout.hidden_header);
     let back = serde_json::to_string(&layout).unwrap();
     for key in [
         "data",
         "header_rows",
         "header_paths",
+        "total_columns",
         "found_by",
         "unsure",
         "\"rows\"",
@@ -980,6 +984,7 @@ fn table_headings_follow_the_heading_nesting() {
             header_rows: Vec::new(),
             header_paths: Vec::new(),
             label_cols: 0,
+            total_columns: Vec::new(),
             certainty: Certainty::Rule,
             found_by: Vec::new(),
             unsure: Vec::new(),

@@ -3800,6 +3800,7 @@ fn lay(kind: LayoutKind, range: &str, data: Option<&str>) -> TableLayout {
         header_rows: Vec::new(),
         header_paths: Vec::new(),
         label_cols: 0,
+        total_columns: Vec::new(),
         certainty: Certainty::Rule,
         found_by: vec![rule("G", "empty-row gaps")],
         unsure: Vec::new(),
@@ -6008,4 +6009,116 @@ fn names_label_that_repeats_the_name_is_left_out() {
         logic.contains("| span | workbook | name | `Inputs!$B$2` | Lining / Span |"),
         "{logic}"
     );
+}
+
+/// PivotSheet2 of pivots.xlsx in small: column D is the pivot's grand total column, row 5
+/// its grand total row.
+fn pivot_with_total_column() -> Block {
+    let mut l = lay(LayoutKind::Table, "A1:D5", Some("A2:D5"));
+    l.header_rows = vec![1];
+    l.header_paths = vec![
+        "Row Labels".into(),
+        "blue".into(),
+        "yellow".into(),
+        "Grand Total".into(),
+    ];
+    l.label_cols = 1;
+    l.total_columns = vec![4];
+    l.found_by = vec![Evidence::Pivot { name: "P".into() }];
+    l.certainty = Certainty::Exact;
+    l.rows = vec![row_note(5, RowKind::Total, None, "pivot total row")];
+    ltable(
+        vec![
+            vec![
+                at("Row Labels", "A1"),
+                at("blue", "B1"),
+                at("yellow", "C1"),
+                at("Grand Total", "D1"),
+            ],
+            vec![at("a", "A2"), at("1", "B2"), at("2", "C2"), at("3", "D2")],
+            vec![at("b", "A3"), at("4", "B3"), at("", "C3"), at("4", "D3")],
+            vec![at("c", "A4"), at("", "B4"), at("5", "C4"), at("5", "D4")],
+            vec![
+                at("Grand Total", "A5"),
+                at("5", "B5"),
+                at("7", "C5"),
+                at("12", "D5"),
+            ],
+        ],
+        1,
+        l,
+    )
+}
+
+#[test]
+fn pivot_total_column_is_named_under_the_table() {
+    let md = sheet_md(vec![pivot_with_total_column()]);
+    assert!(
+        md.ends_with(
+            "| Grand Total | 5 | 7 | 12 |\n\n\
+             Total row: 5 (pivot total row). Total column: D (pivot table grand total)."
+        ),
+        "{md}"
+    );
+    // A pivot without a total row: the line starts with the column.
+    let Block::Table {
+        layout: Some(mut l),
+        rows,
+        ..
+    } = pivot_with_total_column()
+    else {
+        panic!()
+    };
+    l.rows.clear();
+    l.total_columns = vec![3, 4];
+    let md = sheet_md(vec![ltable(rows, 1, *l)]);
+    assert!(
+        md.ends_with("\n\nTotal columns: C, D (pivot table grand total)."),
+        "{md}"
+    );
+}
+
+#[test]
+fn records_mark_the_total_column() {
+    let md = sheet_md_as(vec![pivot_with_total_column()], &records());
+    assert!(
+        md.contains(
+            "- Row 2 (S!A2:D2)\n  - Row Labels: a\n  - blue: 1\n  - yellow: 2\n  \
+             - Grand Total: 3 (total)\n"
+        ),
+        "{md}"
+    );
+    assert!(
+        md.ends_with(
+            "- Row 5 (S!A5:D5), kind: total\n  - Row Labels: Grand Total\n  - blue: 5\n  \
+             - yellow: 7\n  - Grand Total: 12 (total)"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Total column"), "{md}");
+}
+
+#[test]
+fn total_column_line_stays_with_its_table_on_a_page() {
+    let Block::Table {
+        layout: Some(mut l),
+        rows,
+        ..
+    } = pivot_with_total_column()
+    else {
+        panic!()
+    };
+    l.rows.clear();
+    let mut blocks = Vec::new();
+    for _ in 0..40 {
+        blocks.push(ltable(rows.clone(), 1, (*l).clone()));
+    }
+    let md = sheet_doc(blocks);
+    for size in [10, 30, 60, 120] {
+        let pages = paginate(&md, size);
+        assert!(pages.len() > 1, "{size}");
+        for page in &pages[1..] {
+            assert!(!page.starts_with("Total column"), "{size}: {page:?}");
+        }
+    }
 }

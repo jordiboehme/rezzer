@@ -1507,3 +1507,23 @@ fn overlapping_tables_keep_every_value() {
         .sum();
     assert_eq!(written, 1);
 }
+
+/// pivots.xlsx: PivotTable2 has a column field and `rowGrandTotals` on, so column D is its
+/// grand total column. PivotTable1 has only the values pseudo field on its column axis: it
+/// draws no grand total column, and its last column E is a value field.
+#[test]
+fn pivot_grand_total_column_comes_from_the_pivot() {
+    let out = corpus("pivots.xlsx");
+    let doc = &out.document;
+    let total = |sheet: &str, key: &str| {
+        regions(doc, sheet)
+            .into_iter()
+            .find(|r| r.layout.key == key)
+            .unwrap_or_else(|| panic!("{sheet} {key}: {:?}", ranges(doc, sheet)))
+            .layout
+            .total_columns
+            .clone()
+    };
+    assert_eq!(total("PivotSheet2", "pivot:PivotSheet2!PivotTable2"), [4]);
+    assert!(total("PivotSheet1", "pivot:PivotSheet1!PivotTable1").is_empty());
+}

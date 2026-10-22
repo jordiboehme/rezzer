@@ -120,8 +120,8 @@ pub struct Pivot {
     /// at the bottom edge of the table (each column gets a total). Defaults to true.
     pub col_grand_totals: bool,
     /// The number of fields on the row axis and on the column axis (the `field` children of
-    /// `rowFields` and `colFields`, 0 when absent; the `count` attribute is not trusted). A column axis may include the values
-    /// pseudo field.
+    /// `rowFields` and `colFields`, 0 when absent; the `count` attribute is not trusted). The
+    /// values pseudo field (`x="-2"`) is not counted.
     pub row_fields: u32,
     pub col_fields: u32,
 }

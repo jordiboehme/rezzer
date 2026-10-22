@@ -543,10 +543,12 @@ fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) ->
     line
 }
 
-/// One line of the subtotal, total and group rows, for example `Subtotal rows: 12 (SUBTOTAL
-/// formula in B12), 18 (SUBTOTAL formula in B18). Group rows: 5, 16 (one text in the first
-/// column).` Rows with the same reason share it. `None` when there are none.
-fn kinds_line(notes: &[RowNote]) -> Option<String> {
+/// One line of the subtotal, total and group rows and the total columns, for example
+/// `Subtotal rows: 12 (SUBTOTAL formula in B12), 18 (SUBTOTAL formula in B18). Group rows: 5,
+/// 16 (one text in the first column). Total column: D (pivot table grand total).` Rows with
+/// the same reason share it. `None` when there are none.
+fn kinds_line(layout: &TableLayout) -> Option<String> {
+    let notes = &layout.rows;
     let mut parts: Vec<String> = Vec::new();
     for (kind, one, many) in [
         (RowKind::Subtotal, "Subtotal row", "Subtotal rows"),
@@ -585,6 +587,22 @@ fn kinds_line(notes: &[RowNote]) -> Option<String> {
             "{}: {}.",
             if count == 1 { one } else { many },
             words.join(", ")
+        ));
+    }
+    if !layout.total_columns.is_empty() {
+        let letters: Vec<String> = layout
+            .total_columns
+            .iter()
+            .map(|&c| column_letter(c.saturating_sub(1) as usize))
+            .collect();
+        parts.push(format!(
+            "{}: {} (pivot table grand total).",
+            if letters.len() == 1 {
+                "Total column"
+            } else {
+                "Total columns"
+            },
+            letters.join(", ")
         ));
     }
     (!parts.is_empty()).then(|| parts.join(" "))
@@ -681,7 +699,7 @@ fn table(
     };
     let mut notes: Vec<String> = Vec::new();
     notes.extend(grid.merge_note(legend, &ranges));
-    notes.extend(kinds_line(&layout.rows));
+    notes.extend(kinds_line(layout));
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &aligns, &body), notes)
 }
@@ -828,6 +846,13 @@ fn records(
             content.extend_from_slice(trimmed(&source.inlines));
             if let Some(range) = grid.merged_range(k) {
                 content.push(Inline::plain(format!(" (merged {range})")));
+            }
+            // A pivot's grand total column: the 1-based sheet column of the field.
+            let column = u32::try_from(c)
+                .ok()
+                .and_then(|c| left.checked_add(c)?.checked_add(1));
+            if column.is_some_and(|n| layout.total_columns.contains(&n)) {
+                content.push(Inline::plain(" (total)"));
             }
             fields.push(vec![Block::paragraph(content)]);
         }

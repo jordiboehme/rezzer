@@ -236,6 +236,7 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
     let height = r.height().min(u64::from(u32::MAX)) as u32;
     let width = r.width().min(u64::from(u32::MAX)) as u32;
     let mut label_cols = 0u32;
+    let mut total_cols = Vec::new();
     let mut hidden_header = false;
     // The band as (rows above it, band rows), counted from the range's top row.
     let (skip, band) = match &input.facts[kept.fact].kind {
@@ -248,9 +249,14 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
             first_header_row,
             first_data_row,
             first_data_col,
+            total_col,
             ..
         } => {
             label_cols = (*first_data_col).min(width);
+            // The grand total column stands at the right edge, right of the label columns.
+            if *total_col && label_cols < width {
+                total_cols.push(r.right);
+            }
             // The band ends above the first data row and starts at the first header row, or
             // at the row above the data when that is lower (a pivot with one row field and
             // one value has its header in the first row). Rows above it, such as the data
@@ -286,6 +292,7 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
         body: None,
         header_paths: Vec::new(),
         label_cols,
+        total_cols,
         certainty: Certainty::Exact,
         evidence: kept.evidence.clone(),
         unsure: Vec::new(),

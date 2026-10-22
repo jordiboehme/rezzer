@@ -1570,3 +1570,52 @@ fn header_rule_details_name_their_rows_in_fixed_words() {
         rule_detail(r, "H3")
     );
 }
+
+// Final review fixes.
+
+#[test]
+fn pivot_grand_total_column_is_marked() {
+    // PivotSheet2 of pivots.xlsx in small: a caption row, the column field row, the band row,
+    // data rows and the grand total row; column D is the grand total column.
+    let rows = &[
+        "Sum of Size|Column Labels||",
+        "Row Labels|blue|yellow|Grand Total",
+        "a|1|2|3",
+        "b|4|5|9",
+        "Grand Total|5|7|12",
+    ];
+    let pivot = |total_col: bool| FactKind::Pivot {
+        name: "P".into(),
+        first_header_row: 1,
+        first_data_row: 2,
+        first_data_col: 1,
+        total_row: true,
+        total_col,
+    };
+    let layout = Sheet::new()
+        .rows("A3", rows)
+        .fact("A3:D7", pivot(true))
+        .detect();
+    assert_eq!(only(&layout).total_cols, [3]);
+    let layout = Sheet::new()
+        .rows("A3", rows)
+        .fact("A3:D7", pivot(false))
+        .detect();
+    assert!(only(&layout).total_cols.is_empty());
+    // A pivot of label columns only has no total column.
+    let layout = Sheet::new()
+        .rows("A1", &["R|S", "a|b"])
+        .fact(
+            "A1:B2",
+            FactKind::Pivot {
+                name: "P".into(),
+                first_header_row: 0,
+                first_data_row: 1,
+                first_data_col: 2,
+                total_row: false,
+                total_col: true,
+            },
+        )
+        .detect();
+    assert!(only(&layout).total_cols.is_empty());
+}

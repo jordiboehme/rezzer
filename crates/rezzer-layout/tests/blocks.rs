@@ -686,6 +686,7 @@ fn hand_region(a1: &str, kind: sheetlayout::Kind, unsure: &[&str]) -> sheetlayou
         body: None,
         header_paths: Vec::new(),
         label_cols: 0,
+        total_cols: Vec::new(),
         certainty: if unsure.is_empty() {
             sheetlayout::Certainty::Rule
         } else {

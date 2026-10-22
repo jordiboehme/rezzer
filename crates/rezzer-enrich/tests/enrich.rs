@@ -1075,6 +1075,7 @@ fn region(name: &str, kind: rezzer_model::LayoutKind, rows: usize, cols: usize) 
             header_rows: Vec::new(),
             header_paths: Vec::new(),
             label_cols: 0,
+            total_columns: Vec::new(),
             certainty: rezzer_model::Certainty::Rule,
             found_by: Vec::new(),
             unsure: Vec::new(),

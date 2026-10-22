@@ -107,7 +107,7 @@ Table A3:D11 (data A5:D11), header row 4, row labels in A, found by: pivot table
 | Group1 | 20 | 3.064 |  | 3.064 |
 |  | Grand Total | 11.067 | 7.29762 | 18.36462 |
 
-Total row: 11 (pivot total row; base level).
+Total row: 11 (pivot total row; base level). Total column: D (pivot table grand total).
 
 **Pivot tables**
 

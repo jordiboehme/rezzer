@@ -174,6 +174,8 @@ pub struct Region {
     pub header_paths: Vec<String>,
     /// The left columns of `body` that name the rows, counted from `body.left`.
     pub label_cols: u32,
+    /// Sheet columns (0-based) of a pivot's grand total column, as the fact states it.
+    pub total_cols: Vec<u32>,
     pub certainty: Certainty,
     pub evidence: Vec<Evidence>,
     /// Why the region is unsure, in words.
@@ -255,6 +257,7 @@ pub(crate) fn rule_region(rect: Rect, detail: &str) -> Region {
         body: None,
         header_paths: Vec::new(),
         label_cols: 0,
+        total_cols: Vec::new(),
         certainty: Certainty::Unsure,
         evidence: vec![Evidence::Rule {
             id: "G",

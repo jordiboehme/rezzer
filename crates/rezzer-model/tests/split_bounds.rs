@@ -92,6 +92,7 @@ fn layout(band: Vec<u32>, paths: Vec<String>, rows: Vec<RowNote>) -> TableLayout
         header_rows: band,
         header_paths: paths,
         label_cols: 0,
+        total_columns: Vec::new(),
         certainty: Certainty::Rule,
         found_by: Vec::new(),
         unsure: Vec::new(),

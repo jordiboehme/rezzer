@@ -203,7 +203,9 @@ pub(super) fn read_pivot(
                 }
                 "rowFields" if matches!(ev, Ev::Start(_)) => axis = 1,
                 "colFields" if matches!(ev, Ev::Start(_)) => axis = 2,
-                "field" if axis != 0 => {
+                // `x="-2"` is the values pseudo field, no field of the data: a pivot with
+                // only it on an axis has no grand total band on that axis.
+                "field" if axis != 0 && e.attr("x") != Some("-2") => {
                     if let Some(p) = found.as_mut() {
                         let n = if axis == 1 {
                             &mut p.row_fields

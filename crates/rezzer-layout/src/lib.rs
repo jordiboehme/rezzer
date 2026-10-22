@@ -812,6 +812,13 @@ fn build_table(
         header_rows,
         header_paths,
         label_cols: region.label_cols,
+        // Only total columns the table shows.
+        total_columns: region
+            .total_cols
+            .iter()
+            .filter(|&&c| span.is_some_and(|s| s.left <= c && c < s.left + shown_cols))
+            .map(|c| c + 1)
+            .collect(),
         certainty: certainty_of(region.certainty),
         found_by,
         unsure: region.unsure.clone(),

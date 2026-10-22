@@ -33,6 +33,9 @@ pub struct TableLayout {
     pub header_paths: Vec<String>,
     #[serde(default)]
     pub label_cols: u32,
+    /// The sheet columns, 1-based, of a pivot table's grand total column.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub total_columns: Vec<u32>,
     pub certainty: Certainty,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub found_by: Vec<Evidence>,

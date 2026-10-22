@@ -754,7 +754,8 @@ fn pivot_location_attributes() {
     );
     assert!(p.row_grand_totals);
     assert!(!p.col_grand_totals);
-    assert_eq!((p.row_fields, p.col_fields), (2, 1));
+    // The values pseudo field alone on the column axis is no column field.
+    assert_eq!((p.row_fields, p.col_fields), (2, 0));
 
     // A count that lies or is missing does not matter: the field children are counted.
     let s = pivot_with(
@@ -762,7 +763,7 @@ fn pivot_location_attributes() {
         "<rowFields count=\"9\"><field x=\"0\"/></rowFields>\
          <colFields><field x=\"1\"/><field x=\"-2\"/></colFields>",
     );
-    assert_eq!((s.pivots[0].row_fields, s.pivots[0].col_fields), (1, 2));
+    assert_eq!((s.pivots[0].row_fields, s.pivots[0].col_fields), (1, 1));
     let s = pivot_with("", "<rowFields count=\"3\"/>");
     assert_eq!(s.pivots[0].row_fields, 0);
 
