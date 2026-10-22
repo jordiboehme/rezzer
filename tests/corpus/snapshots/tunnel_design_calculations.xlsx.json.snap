@@ -3490,29 +3490,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Ventilation!A36",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A36:C39"
           },
           "rows": [
@@ -5391,7 +5376,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "Ventilation",
         "role": "result",
-        "size": "3 rows x 3 columns, 6 regions"
+        "size": "6 regions"
       },
       {
         "id": "Drainage",

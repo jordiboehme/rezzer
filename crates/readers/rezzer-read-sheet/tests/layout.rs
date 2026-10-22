@@ -428,6 +428,29 @@ fn tunnel_side_table() {
     assert_eq!(r.layout.header_paths, ["t (m)", "FOS"]);
 }
 
+#[test]
+fn tunnel_jet_fan_block_reads_count_units() {
+    // `Pa`, `N` and `nos`: a count word beside real unit symbols makes a unit column, so the
+    // block is a label and value list.
+    let out = corpus("tunnel_design_calculations.xlsx");
+    let doc = &out.document;
+    let kv = region(doc, "Ventilation", "A36:C39");
+    assert_eq!(kv.layout.kind, LayoutKind::KeyValue);
+    assert_eq!(kv.layout.data.as_deref(), Some("A37:C39"));
+    let md = rezzer_render::render(
+        doc,
+        out.completeness,
+        &rezzer_render::RenderOptions {
+            sections: Some(vec![rezzer_render::OutputSection::Content]),
+            ..rezzer_render::RenderOptions::default()
+        },
+    );
+    assert!(
+        md.contains("- No. of jet fans required: 1 nos (B39)\n"),
+        "{md}"
+    );
+}
+
 /// The brief expected the regions A1:F3, A5:F15, D17:F17 and A18:F36. Row 2 holds cells in A
 /// to C only, so D3:F3 touches A1:F2 only at a corner and is a region of its own (rule G,
 /// spec 6.2). The same holds for D27, which touches the block of rows 18 to 26 (cells in A to C

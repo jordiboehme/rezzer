@@ -29,7 +29,7 @@ modified: "2026-08-24T17:24:13Z"
 | --- | --- | --- | --- | --- |
 | Design\_Basis | sheet | 5 regions |  |  |
 | Structural\_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
-| Ventilation | sheet | 3 rows x 3 columns, 6 regions | result |  |
+| Ventilation | sheet | 6 regions | result |  |
 | Drainage | sheet | 10 rows x 2 columns, 7 regions | result |  |
 
 - Sheets: 4
@@ -248,13 +248,11 @@ Label and value pairs A32:C34:
 
 ### JET FAN COUNT
 
-Table A36:C39 (data A37:C39), row labels in A, found by rules: empty-row gaps, caption row 36, column C is not a unit column, no header found.
+Label and value pairs A37:C39:
 
-| A | B | C |
-| --- | --- | --- |
-| Friction pressure loss, dP | 4.58 | Pa |
-| Total thrust required | 359.85 | N |
-| No. of jet fans required | 1 | nos |
+- Friction pressure loss, dP: 4.58 Pa (B37)
+- Total thrust required: 359.85 N (B38)
+- No. of jet fans required: 1 nos (B39)
 
 ## Drainage
 

@@ -1421,12 +1421,20 @@ const UNIT_SYMBOLS: &[&str] = &[
     "rad", "ha", "ppm",
 ];
 
+/// Words that count things (`nos` for numbers, `pcs` for pieces). They read as a unit only
+/// in a column that also holds a real unit symbol: a column of `no` alone is a yes/no
+/// column.
+const COUNT_WORDS: &[&str] = &["nos", "no", "pcs", "ea"];
+
 /// Whether `t` is one of [`UNIT_SYMBOLS`] or a quotient of two of them, like `m/s` or
-/// `kN/m3`.
+/// `kN/m3`. A quotient of two upper case letters is a code (`N/A`, `A/C`), never a unit.
 fn is_unit_symbol(t: &str) -> bool {
     let known = |p: &str| UNIT_SYMBOLS.contains(&p);
     match t.split_once('/') {
-        Some((a, b)) => known(a) && known(b),
+        Some((a, b)) => {
+            let code = |p: &str| p.len() == 1 && p.chars().all(|c| c.is_ascii_uppercase());
+            known(a) && known(b) && !(code(a) && code(b))
+        }
         None => known(t),
     }
 }
@@ -1440,9 +1448,18 @@ fn unit_column_of(texts: Vec<&str>) -> UnitColumn {
         return UnitColumn::Declared;
     }
     let counted: Vec<&str> = texts.into_iter().filter(|t| *t != "-").collect();
-    // Every text is a unit symbol: units, also when none is marked by a digit or a sign.
-    if counted.len() >= 2 && counted.iter().all(|t| is_unit_symbol(t)) {
-        return UnitColumn::Likely;
+    // Every text is a unit symbol or a count word: units, also when none is marked by a
+    // digit or a sign. One-letter symbols alone (`A`, `N`, `m` and `d`) are as often classes,
+    // flags or codes, so the column needs a symbol of two or more characters, or a count
+    // word beside a real symbol.
+    let count = |t: &str| COUNT_WORDS.contains(&t);
+    if counted.len() >= 2 && counted.iter().all(|t| is_unit_symbol(t) || count(t)) {
+        let real = || counted.iter().filter(|t| !count(t));
+        let long = real().any(|t| t.chars().count() >= 2);
+        let counts = counted.iter().any(|t| count(t)) && real().next().is_some();
+        if long || counts {
+            return UnitColumn::Likely;
+        }
     }
     let known: Vec<&str> = counted
         .iter()
@@ -1787,15 +1804,30 @@ mod tests {
         // Plain symbols without a digit or a sign.
         assert!(is_unit_column_texts(&["m", "m", "-", "kPa", "kPa"]));
         assert!(is_unit_column_texts(&["m2", "m"]));
+        assert!(is_unit_column_texts(&["l/s", "l/s", "l/s"]));
+        assert!(is_unit_column_texts(&["m/s", "m/s"]));
         // Quotients of symbols, beside a text that is not a unit.
         assert!(is_unit_column_texts(&[
             "veh/hr", "veh/hr", "g/s", "g/m3", "m3/s", "m/s"
         ]));
+        // Count words beside a real symbol (the tunnel jet fan block).
+        assert!(is_unit_column_texts(&["Pa", "N", "nos"]));
+        assert!(is_unit_column_texts(&["kg", "pcs"]));
+        assert!(is_unit_column_texts(&["m", "ea"]));
         // Words, codes and a single symbol are not a unit column.
         assert!(!is_unit_column_texts(&["m"]));
         assert!(!is_unit_column_texts(&["OK", "N/A", "yes"]));
+        assert!(!is_unit_column_texts(&["N/A", "N/A"]));
+        assert!(!is_unit_column_texts(&["A/C", "S/N"]));
         assert!(!is_unit_column_texts(&["A", "B", "C"]));
         assert!(!is_unit_column_texts(&["red", "blue", "green"]));
+        // A class column, a Y/N column, a gender column (m and d) and a yes/no column are
+        // data, not units.
+        assert!(!is_unit_column_texts(&["A", "A", "A"]));
+        assert!(!is_unit_column_texts(&["N", "N", "N"]));
+        assert!(!is_unit_column_texts(&["m", "d", "m", "d"]));
+        assert!(!is_unit_column_texts(&["no", "no"]));
+        assert!(!is_unit_column_texts(&["yes", "no", "no"]));
     }
 
     use rezzer_limits::Limits;
