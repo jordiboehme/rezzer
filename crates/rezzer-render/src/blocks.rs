@@ -1126,6 +1126,7 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                 *header_rows,
                 rows,
                 alignments,
+                true,
                 ctx,
                 depth,
                 level,

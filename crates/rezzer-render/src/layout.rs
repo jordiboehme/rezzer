@@ -92,8 +92,9 @@ fn cell_line(b: &Block) -> Option<(&[Inline], &str)> {
 
 /// The blocks of a sheet section. Caption, note and cell lines end with their cell's
 /// address; the captions of one sheet row (a pivot's rows above its header) are one line
-/// joined by ` | `; a heading over 120 characters is cut, and its full text follows as a
-/// line with its address. Everything else renders as in any section.
+/// joined by ` | `; a generated heading that says what a list's lead line says stands for
+/// it; a heading over 120 characters is cut, and its full text follows as a line with its
+/// address. Everything else renders as in any section.
 pub(crate) fn sheet_blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8) -> String {
     if depth > MAX_DEPTH {
         return blocks::blocks(list, ctx, depth, level, false);
@@ -115,6 +116,11 @@ pub(crate) fn sheet_blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8) -
             }
             lines.retain(|l| !l.is_empty());
             Some((lines.join(" | "), next))
+        } else if let Some(text) = list
+            .get(i..i + 2)
+            .and_then(|pair| heading_with_list(pair, ctx, depth, level))
+        {
+            Some((text, i + 2))
         } else {
             long_heading(&list[i], ctx).map(|text| (text, i + 1))
         };
@@ -164,11 +170,14 @@ fn long_heading(b: &Block, ctx: &Ctx) -> Option<String> {
 // Regions
 
 /// A table with a sheet layout, by its kind.
+/// `lead` is false where a generated heading above stands for the lead line (P4-AS).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_table(
     layout: &TableLayout,
     header_rows: usize,
     rows: &[Vec<Cell>],
     aligns: &[Align],
+    lead: bool,
     ctx: &Ctx,
     depth: usize,
     level: u8,
@@ -180,8 +189,7 @@ pub(crate) fn layout_table(
             // merge from above has no cell, so a row's cells may start further right.
             let left = rows.iter().flatten().filter_map(column_of).min();
             listed(
-                "Label and value pairs",
-                layout,
+                lead.then(|| lead_line(layout)).flatten(),
                 rows.iter().filter_map(|row| pair(row, left)).collect(),
                 ctx,
                 depth,
@@ -189,8 +197,7 @@ pub(crate) fn layout_table(
             )
         }
         LayoutKind::Text => listed(
-            "Text",
-            layout,
+            lead.then(|| lead_line(layout)).flatten(),
             rows.iter()
                 .flatten()
                 .filter(|c| !is_empty(c))
@@ -260,22 +267,76 @@ fn pair(row: &[Cell], left: Option<u32>) -> Option<Vec<Block>> {
 
 /// The lead line `<word> <range>:` and the items as a list under it.
 fn listed(
-    word: &str,
-    layout: &TableLayout,
+    lead: Option<String>,
     items: Vec<Vec<Block>>,
     ctx: &Ctx,
     depth: usize,
     level: u8,
 ) -> String {
-    let range = layout.data.as_deref().unwrap_or(&layout.range);
-    let lead = format!("{word} {}:", line_text(range));
-    if items.is_empty() {
-        return lead;
-    }
-    format!(
-        "{lead}\n\n{}",
+    let list = if items.is_empty() {
+        String::new()
+    } else {
         list_block(false, &items, false, ctx, depth, level)
-    )
+    };
+    match lead {
+        Some(lead) if list.is_empty() => format!("{}:", line_text(&lead)),
+        Some(lead) => format!("{}:\n\n{list}", line_text(&lead)),
+        None => list,
+    }
+}
+
+/// The words of a label and value or text region's lead line before its colon, for example
+/// `Text A19:A25`: the kind and the data range, else the range. `None` for other kinds.
+fn lead_line(layout: &TableLayout) -> Option<String> {
+    let word = match layout.kind {
+        LayoutKind::KeyValue => "Label and value pairs",
+        LayoutKind::Text => "Text",
+        _ => return None,
+    };
+    let range = layout.data.as_deref().unwrap_or(&layout.range);
+    Some(format!("{word} {range}"))
+}
+
+/// A generated heading (it has no anchor) right above a label and value or text region that
+/// says what its lead line says: the heading stands for the lead (P4-AS). Returns the
+/// heading and the region without its lead.
+fn heading_with_list(pair: &[Block], ctx: &Ctx, depth: usize, level: u8) -> Option<String> {
+    let [
+        heading @ Block::Heading {
+            inlines: content,
+            anchor: None,
+            ..
+        },
+        Block::Table {
+            header_rows,
+            rows,
+            alignments,
+            layout: Some(layout),
+            ..
+        },
+    ] = pair
+    else {
+        return None;
+    };
+    if Some(plain_text(content).trim()) != lead_line(layout).as_deref() {
+        return None;
+    }
+    let head = blocks::blocks(std::slice::from_ref(heading), ctx, depth, level, false);
+    let list = layout_table(
+        layout,
+        *header_rows,
+        rows,
+        alignments,
+        false,
+        ctx,
+        depth,
+        level,
+    );
+    Some(if list.is_empty() {
+        head
+    } else {
+        format!("{head}\n\n{list}")
+    })
 }
 
 /// The 0-based sheet column of a region's first table column: from the cells' anchors, else

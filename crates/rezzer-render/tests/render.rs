@@ -4536,3 +4536,74 @@ fn notes_range_renders_without_a_table() {
         "{md}"
     );
 }
+
+#[test]
+fn generated_heading_drops_the_same_lead_line() {
+    // P4-AS: a generated heading (no anchor) that says the lead's kind and range stands for
+    // the lead line.
+    let text = |range: &str, data: Option<&str>| {
+        ltable(
+            vec![vec![at("x", "F3")]],
+            0,
+            lay(LayoutKind::Text, range, data),
+        )
+    };
+    let md = sheet_md(vec![heading(3, "Text F3", None), text("F3", None)]);
+    assert_eq!(md, "### Text F3\n\n- x (F3)");
+    let kv = |range: &str, data: Option<&str>| {
+        ltable(
+            vec![
+                vec![at("gg", "K3"), at("0.75", "L3")],
+                vec![at("zcor", "K4"), at("2", "L4")],
+            ],
+            0,
+            lay(LayoutKind::KeyValue, range, data),
+        )
+    };
+    let md = sheet_md(vec![
+        heading(3, "Label and value pairs K3:L4", None),
+        kv("K3:L4", None),
+    ]);
+    assert_eq!(
+        md,
+        "### Label and value pairs K3:L4\n\n- gg: 0.75 (L3)\n- zcor: 2 (L4)"
+    );
+    // An author heading with the same text keeps the lead.
+    let md = sheet_md(vec![heading(3, "Text F3", Some("S!F3")), text("F3", None)]);
+    assert!(md.contains("\n\nText F3:\n\n- x (F3)"), "{md}");
+    // A generated heading with another range keeps it.
+    let md = sheet_md(vec![heading(3, "Text F4", None), text("F3", None)]);
+    assert!(md.contains("\n\nText F3:\n\n"), "{md}");
+    // The lead names the data range, the heading the region: they differ, the lead stays.
+    let md = sheet_md(vec![
+        heading(3, "Label and value pairs K2:L4", None),
+        kv("K2:L4", Some("K3:L4")),
+    ]);
+    assert!(md.contains("\n\nLabel and value pairs K3:L4:\n\n"), "{md}");
+    // Table and grid layout lines always stay.
+    let mut t = lay(LayoutKind::Table, "A1:B2", Some("A2:B2"));
+    t.header_rows = vec![1];
+    t.header_paths = vec!["a".into(), "b".into()];
+    let md = sheet_md(vec![
+        heading(3, "Table A1:B2", None),
+        ltable(
+            vec![
+                vec![at("a", "A1"), at("b", "B1")],
+                vec![at("1", "A2"), at("2", "B2")],
+            ],
+            1,
+            t,
+        ),
+    ]);
+    assert!(
+        md.contains("\n\nTable A1:B2 (data A2:B2), header row 1"),
+        "{md}"
+    );
+    let mut g = lay(LayoutKind::Grid, "A1:B1", None);
+    g.certainty = Certainty::Unsure;
+    let md = sheet_md(vec![
+        heading(3, "Grid A1:B1", None),
+        ltable(vec![vec![at("a", "A1"), at("b", "B1")]], 0, g),
+    ]);
+    assert!(md.contains("\n\nGrid A1:B1, header unsure"), "{md}");
+}

@@ -73,8 +73,6 @@ Total row: 5 (pivot total row).
 
 ### Text F3
 
-Text F3:
-
 - &lt;------------ calculated field (F3)
 
 **Pivot tables**
@@ -141,8 +139,6 @@ Table A3:B7 (data A4:B7), header row 3, row labels in A, found by: pivot table P
 Total row: 7 (pivot total row).
 
 ### Text C3
-
-Text C3:
 
 - &lt;--------  grouped field as value (C3)
 
