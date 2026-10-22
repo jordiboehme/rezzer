@@ -414,8 +414,8 @@ fn kept_as_table(line: String) -> String {
 }
 
 /// The line that says where a table or grid region is and how it was found (spec 7.2). For
-/// records it says that empty cells are left out of them. `numbers` names the columns
-/// without a header by number, as their header does (CSV and TSV).
+/// records it says that empty cells are left out of them. `numbers` names the label columns
+/// and the columns without a header by number, as their header does (CSV and TSV).
 fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) -> String {
     let grid = layout.kind == LayoutKind::Grid;
     let mut line = format!(
@@ -486,14 +486,22 @@ fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) ->
         if layout.hidden_header {
             line.push_str(", header row hidden in the file");
         }
-        if layout.label_cols > 0 {
-            line.push_str(&format!(", row labels in {}", letter(left, 0)));
-            if layout.label_cols > 1 {
-                line.push_str(&format!(
-                    " to {}",
-                    letter(left, layout.label_cols as usize - 1)
-                ));
-            }
+        let last = layout.label_cols.saturating_sub(1) as usize;
+        let number = |offset: usize| u64::from(left) + offset as u64 + 1;
+        match (layout.label_cols, numbers) {
+            (0, _) => {}
+            (1, false) => line.push_str(&format!(", row labels in {}", letter(left, 0))),
+            (_, false) => line.push_str(&format!(
+                ", row labels in {} to {}",
+                letter(left, 0),
+                letter(left, last)
+            )),
+            (1, true) => line.push_str(&format!(", row labels in column {}", number(0))),
+            (_, true) => line.push_str(&format!(
+                ", row labels in columns {} to {}",
+                number(0),
+                number(last)
+            )),
         }
         if !layout.header_rows.is_empty() {
             let bare: Vec<String> = layout

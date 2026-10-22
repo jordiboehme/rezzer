@@ -38,7 +38,7 @@ language: "en"
 
 ## csv-pandas-fdic-banklist
 
-Table A1:G507 (data A2:G507), header row 1, row labels in A to C, found by rules: no gaps, header by type change.
+Table A1:G507 (data A2:G507), header row 1, row labels in columns 1 to 3, found by rules: no gaps, header by type change.
 
 | Bank Name | City | ST | CERT | Acquiring Institution | Closing Date | Updated Date |
 | --- | --- | --- | --- | --- | --- | --- |

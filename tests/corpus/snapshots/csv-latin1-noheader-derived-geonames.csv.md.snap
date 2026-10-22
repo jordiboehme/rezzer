@@ -37,7 +37,7 @@ losses: 0
 
 ## csv-latin1-noheader-derived-geonames
 
-Table A1:D83, row labels in A to C, found by rules: no gaps, no header found.
+Table A1:D83, row labels in columns 1 to 3, found by rules: no gaps, no header found.
 
 | 1 | 2 | 3 | 4 |
 | --- | --- | --- | --- |

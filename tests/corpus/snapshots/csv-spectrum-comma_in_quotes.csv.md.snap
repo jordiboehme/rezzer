@@ -37,7 +37,7 @@ losses: 0
 
 ## csv-spectrum-comma\_in\_quotes
 
-Table A1:E2 (data A2:E2), header row 1, row labels in A to C, found by rules: no gaps, header by type change.
+Table A1:E2 (data A2:E2), header row 1, row labels in columns 1 to 3, found by rules: no gaps, header by type change.
 
 | first | last | address | city | zip |
 | --- | --- | --- | --- | --- |

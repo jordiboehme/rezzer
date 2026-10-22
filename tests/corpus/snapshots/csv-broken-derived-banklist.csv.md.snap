@@ -40,7 +40,7 @@ language: "en"
 
 ## csv-broken-derived-banklist
 
-Table A1:I10 (data A2:I10), header row 1, row labels in A to C, 2 columns without a header: 8, 9, found by rules: no gaps, header by type change.
+Table A1:I10 (data A2:I10), header row 1, row labels in columns 1 to 3, 2 columns without a header: 8, 9, found by rules: no gaps, header by type change.
 
 | Bank Name | City | ST | CERT | Acquiring Institution | Closing Date | Updated Date | Column 8 | Column 9 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

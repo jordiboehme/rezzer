@@ -6122,3 +6122,44 @@ fn total_column_line_stays_with_its_table_on_a_page() {
         }
     }
 }
+
+#[test]
+fn csv_layout_line_names_label_columns_by_number() {
+    let mut l = lay(LayoutKind::Table, "A1:C2", None);
+    l.label_cols = 2;
+    l.found_by = vec![rule("L", "label columns A to B")];
+    let table = ltable(
+        vec![
+            vec![at("a", "A1"), at("x", "B1"), at("1", "C1")],
+            vec![at("b", "A2"), at("y", "B2"), at("2", "C2")],
+        ],
+        0,
+        l.clone(),
+    );
+    let mut d = doc();
+    d.source.format = FormatId::Csv;
+    d.source.name = "data.csv".into();
+    d.body = vec![Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("S".into()),
+        anchor: Some(Anchor("S".into())),
+        blocks: vec![table],
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Table A1:C2, no header found, row labels in columns 1 to 2.\n"),
+        "{md}"
+    );
+    // One label column; sheets keep the letters.
+    l.label_cols = 1;
+    l.found_by = vec![rule("L", "label column A")];
+    let rows = vec![vec![at("a", "A1"), at("1", "B1")]];
+    let Block::Section { blocks, .. } = &mut d.body[0] else {
+        panic!()
+    };
+    *blocks = vec![ltable(rows.clone(), 0, l.clone())];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains(", row labels in column 1.\n"), "{md}");
+    let md = sheet_md(vec![ltable(rows, 0, l)]);
+    assert!(md.contains(", row labels in A.\n"), "{md}");
+}
