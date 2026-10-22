@@ -224,7 +224,13 @@ fn cells_of(m: &Mapped) -> Vec<(String, String)> {
                 inlines,
                 anchor: Some(a),
                 ..
-            } => out.push((a.0.clone(), plain_text(inlines))),
+            } => {
+                // A heading anchored at a defined name or an Excel table names a range; it is
+                // no cell of the sheet.
+                if !a.0.starts_with("name:") && !a.0.starts_with("table:") {
+                    out.push((a.0.clone(), plain_text(inlines)));
+                }
+            }
             Block::Table { rows, .. } => {
                 for c in rows.iter().flatten() {
                     let t = plain_text(&c.inlines);
@@ -416,6 +422,47 @@ fn excel_table_key_and_exact_certainty() {
     assert!(matches!(&t[0].2.found_by[0], Evidence::ListObject { name } if name == "Sales_Alice"));
     assert_eq!(t[1].2.key, "S!A6");
     assert_eq!(cells_of(&m), expected_cells(&s));
+    // The Excel table's name is its heading, anchored at the table; the other region keeps
+    // its generated heading.
+    let headings: Vec<(String, Option<String>)> = m
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Heading {
+                inlines, anchor, ..
+            } => Some((plain_text(inlines), anchor.as_ref().map(|a| a.0.clone()))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            (
+                "Sales_Alice".to_string(),
+                Some("table:Sales_Alice".to_string())
+            ),
+            ("Table A6:B7".to_string(), None)
+        ]
+    );
+}
+
+#[test]
+fn only_excel_table_of_a_sheet_gets_no_heading() {
+    let s = Sheet::new().rows("A1", &["Name|Sales", "Ann|1"]).fact(
+        "A1:B2",
+        FactKind::ListObject {
+            name: "Solo".into(),
+            header_rows: 1,
+            totals_rows: 0,
+            columns: vec!["Name".into(), "Sales".into()],
+        },
+    );
+    let m = s.map();
+    assert!(
+        !m.blocks.iter().any(|b| matches!(b, Block::Heading { .. })),
+        "{:?}",
+        m.blocks
+    );
 }
 
 #[test]

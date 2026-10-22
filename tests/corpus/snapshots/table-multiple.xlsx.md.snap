@@ -78,7 +78,7 @@ Table A1:B5 (data A2:B5), header row 1, found by: Excel table Pricing.
 
 ## Sheet3
 
-### Table A1:B5
+### Sales\_Alice
 
 Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales\_Alice.
 
@@ -89,7 +89,7 @@ Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales\_Alice.
 | 3 | 200 |
 | 4 | 50 |
 
-### Table A7:B11
+### Sales\_Bob
 
 Table A7:B11 (data A8:B11), header row 7, found by: Excel table Sales\_Bob.
 

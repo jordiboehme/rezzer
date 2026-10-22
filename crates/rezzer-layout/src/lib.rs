@@ -598,12 +598,29 @@ fn map_region(
         .iter()
         .find(|(l, _)| *l == Line::CaptionHeading)
         .map(|&(_, k)| k);
+    // A sheet's only table without caption rows gets no heading of its own (R8).
+    let bare = only && region.kind == Kind::Table && region.captions.is_empty();
+    // Without caption rows, a defined name stands as the region's heading, and the name of
+    // an Excel table instead of a generated `Table <range>`: the file names the range. Its
+    // anchor is the name's.
     let name_caption = if region.captions.is_empty() {
-        region.evidence.iter().find_map(|e| match e {
+        let defined = region.evidence.iter().find_map(|e| match e {
             sheetlayout::Evidence::DefinedName { name } => {
                 caption_names.iter().find(|c| &c.name == name).cloned()
             }
             _ => None,
+        });
+        defined.or_else(|| {
+            if bare {
+                return None;
+            }
+            region.evidence.iter().find_map(|e| match e {
+                sheetlayout::Evidence::ListObject { name } => Some(NameCaption {
+                    name: name.clone(),
+                    anchor: format!("table:{name}"),
+                }),
+                _ => None,
+            })
         })
     } else {
         None
@@ -624,7 +641,6 @@ fn map_region(
             anchor: Some(Anchor(name.anchor.clone())),
         }),
         (None, None) => {
-            let bare = only && region.kind == Kind::Table && region.captions.is_empty();
             if !bare {
                 ctx.out.blocks.push(Block::Heading {
                     level: region_level,

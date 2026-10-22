@@ -55,7 +55,7 @@ Table A1:C4 (data A2:C4), header row 1, row labels in A, found by: defined name 
 | Bertha | 33 | 3 |
 | Cäsar | 21 | 2 |
 
-### Table G1:I4
+### TableName
 
 Table G1:I4 (data G2:I4), header row 1, row labels in G, found by: Excel table TableName.
 
@@ -92,6 +92,8 @@ Parameters in NonTable:
 | B3 |  | Bertha | 33 |  |  | 1 |
 | A4 |  | Name | Cäsar |  |  | 0 |
 | B4 |  | Cäsar | 21 |  |  | 1 |
+
+Parameters in TableName:
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |

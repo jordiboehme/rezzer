@@ -203,9 +203,10 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
+          "anchor": "table:TableName",
           "inlines": [
             {
-              "text": "Table G1:I4",
+              "text": "TableName",
               "type": "text"
             }
           ],
@@ -214,6 +215,7 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "ExcelTable!G1:I4",
+          "caption": "TableName",
           "header_rows": 1,
           "layout": {
             "certainty": "exact",
@@ -662,8 +664,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "ExcelTable!G1",
-        "label": "AgeGroup",
+        "label": "TableName / AgeGroup",
         "path": [
+          "TableName",
           "AgeGroup"
         ],
         "read_by": 0,
@@ -674,8 +677,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "ExcelTable!H1",
-        "label": "Name",
+        "label": "TableName / Name",
         "path": [
+          "TableName",
           "Name"
         ],
         "read_by": 0,
@@ -686,8 +690,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "ExcelTable!I1",
-        "label": "Age",
+        "label": "TableName / Age",
         "path": [
+          "TableName",
           "Age"
         ],
         "read_by": 0,
@@ -725,8 +730,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "ExcelTable!G2",
-        "label": "Name",
+        "label": "TableName / Name",
         "path": [
+          "TableName",
           "Name"
         ],
         "read_by": 0,
@@ -737,8 +743,9 @@ source: crates/rezzer/tests/corpus.rs
       },
       {
         "anchor": "ExcelTable!H2",
-        "label": "Age / Anton",
+        "label": "TableName / Age / Anton",
         "path": [
+          "TableName",
           "Age",
           "Anton"
         ],

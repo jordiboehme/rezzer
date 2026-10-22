@@ -523,9 +523,10 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Sheet3",
       "blocks": [
         {
+          "anchor": "table:Sales_Alice",
           "inlines": [
             {
-              "text": "Table A1:B5",
+              "text": "Sales_Alice",
               "type": "text"
             }
           ],
@@ -534,6 +535,7 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "Sheet3!A1:B5",
+          "caption": "Sales_Alice",
           "header_rows": 1,
           "layout": {
             "certainty": "exact",
@@ -681,9 +683,10 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
+          "anchor": "table:Sales_Bob",
           "inlines": [
             {
-              "text": "Table A7:B11",
+              "text": "Sales_Bob",
               "type": "text"
             }
           ],
@@ -692,6 +695,7 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "Sheet3!A7:B11",
+          "caption": "Sales_Bob",
           "header_rows": 1,
           "layout": {
             "certainty": "exact",
