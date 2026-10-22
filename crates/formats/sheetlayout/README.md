@@ -112,7 +112,7 @@ A region with no header goes through these rules, in this order:
 
 - Section headings: a row with one text in the first column, bold, filled or merged, cuts
   the region when a row with more than one text follows it. Without styles only a merge
-  counts. Each part is read again, up to 8 levels deep.
+  counts. Each part is read again with all the rules.
 - Label and value pairs: 2 or 3 columns, at least 2 rows, a different label in the first
   column of every row and at least one value. A third column must hold units.
 - Text: one column of text, or rows of one merged text each.
