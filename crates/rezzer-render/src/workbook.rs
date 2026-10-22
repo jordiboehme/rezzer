@@ -10,6 +10,9 @@
 //! other sheets keep it. Anchors that belong to no sheet of the body go to `### Other`.
 //! Every pass over the formulas is linear, so a workbook with millions of formulas renders
 //! in one sweep.
+//!
+//! With a sheet selection only the parts of the chosen sheets are written, their reads of
+//! other sheets as written; the graph keeps what touches a chosen sheet, names stay all.
 
 use std::collections::HashMap;
 
@@ -18,6 +21,7 @@ use rezzer_model::{
     Role, Rule, SectionKind, Value, column_letter,
 };
 
+use crate::Selection;
 use crate::blocks::{self, Ctx, Mode, cell_text, code_span, heading_line, line_text, pipe_table};
 use crate::facets::{role_name, value_text};
 use crate::mermaid::{self, MAX_EDGES, MAX_NODES};
@@ -1037,6 +1041,7 @@ fn stale_callout(doc: &Document) -> Option<String> {
         heading_offset: 0,
         notes: None,
         in_sheet: Default::default(),
+        table_style: Default::default(),
     };
     Some(blocks::blocks(&[callout], &ctx, 0, 3, false))
 }
@@ -1194,8 +1199,51 @@ fn dependencies(graph: &Graph, doc: &Document, sheets: &Sheets) -> String {
     out
 }
 
-/// `## Logic` for a workbook. `None` when there is nothing to show.
-pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
+/// The dependency graph without the nodes and edges of sheets that are not selected: an
+/// edge stays when one of its ends lies on a chosen sheet, a node when it lies on a chosen
+/// sheet or an edge that stays names it.
+fn selected_graph(graph: &Graph, sheets: &Sheets, selection: &Selection) -> Graph {
+    let on_chosen = |n: &Node| {
+        let anchor = n.anchor.as_ref().map_or(n.label.as_str(), |a| a.0.as_str());
+        split_sheet(anchor)
+            .is_some_and(|(s, _)| sheets.index.contains_key(s) && selection.chosen(s))
+    };
+    let chosen: HashMap<&str, bool> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), on_chosen(n)))
+        .collect();
+    let is_chosen = |id: &str| chosen.get(id).copied().unwrap_or(false);
+    let edges: Vec<rezzer_model::Edge> = graph
+        .edges
+        .iter()
+        .filter(|e| is_chosen(&e.from) || is_chosen(&e.to))
+        .cloned()
+        .collect();
+    let named: std::collections::HashSet<&str> = edges
+        .iter()
+        .flat_map(|e| [e.from.as_str(), e.to.as_str()])
+        .collect();
+    Graph {
+        id: graph.id.clone(),
+        kind: graph.kind.clone(),
+        nodes: graph
+            .nodes
+            .iter()
+            .filter(|n| is_chosen(&n.id) || named.contains(n.id.as_str()))
+            .cloned()
+            .collect(),
+        edges,
+    }
+}
+
+/// `## Logic` for a workbook. `None` when there is nothing to show. With a selection, only
+/// the parts of the chosen sheets and the graph around them; names stay.
+pub(crate) fn logic(
+    doc: &Document,
+    with_math: bool,
+    selection: Option<&Selection>,
+) -> Option<String> {
     let sheets = Sheets::of(&doc.body);
     let mut parts: Vec<Part<'_>> = (0..sheets.list.len()).map(|_| Part::default()).collect();
     let mut other = Part::default();
@@ -1230,6 +1278,9 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
         }
     }
     let dependency = doc.facets.graphs.iter().find(|g| g.kind == "dependency");
+    let selected = dependency
+        .zip(selection)
+        .map(|(g, selection)| selected_graph(g, &sheets, selection));
     let groups: HashMap<&str, &str> = dependency
         .map(|g| {
             g.nodes
@@ -1269,6 +1320,9 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
             continue;
         }
         let (title, anchor) = &sheets.list[i];
+        if selection.is_some_and(|s| !s.chosen(anchor)) {
+            continue;
+        }
         let heading = if fixed.iter().any(|f| f.eq_ignore_ascii_case(title.trim())) {
             format!("Sheet: {title}")
         } else {
@@ -1282,7 +1336,9 @@ pub(crate) fn logic(doc: &Document, with_math: bool) -> Option<String> {
     if !names.is_empty() {
         out.push(names_table(&names, &name_params, &sheets));
     }
-    if let Some(g) = dependency {
+    if let Some(g) = selected.as_ref().or(dependency)
+        && !g.nodes.is_empty()
+    {
         out.push(dependencies(g, doc, &sheets));
     }
     out.extend(hidden);

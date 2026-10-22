@@ -12,7 +12,7 @@ use rezzer_model::{
     Asset, Blob, Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions,
     ReadOutcome, Reader, Registry, Source, source_info,
 };
-use rezzer_pipeline::{Config, OutputKind, OutputSection, Pipeline, Request};
+use rezzer_pipeline::{Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
 
 const AT: &str = "2026-10-19T08:30:00Z";
 
@@ -265,6 +265,16 @@ fn output_options_are_not_part_of_the_cache_key() {
     };
     let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &json);
     assert!(out.json.is_some());
+    let records = Request {
+        table_style: Some(TableStyle::Records),
+        ..request()
+    };
+    let out = pipeline.run_bytes("x.txt", b"hello\n".to_vec(), None, &records);
+    assert!(
+        out.markdown_pages
+            .concat()
+            .contains("table_style: \"records\"")
+    );
     // Markdown, JSON and section runs share one entry: the cache holds the document.
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(cache_files(dir.path()).len(), 1);
@@ -1088,4 +1098,173 @@ fn old_files_are_removed_but_links_and_folders_are_not_followed() {
     assert_eq!(names_in(&assets), ["page-1.png", "page-8.png", "sub"]);
     assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
     assert_eq!(std::fs::read(assets.join("sub/keep.png")).unwrap(), b"keep");
+}
+
+// ---------------------------------------------------------------------------------------
+// The table style and sheet selection
+
+fn office(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office")
+        .join(name)
+}
+
+fn sheet_pipeline(cfg: Config) -> Pipeline {
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    Pipeline::new(cfg, registry)
+}
+
+/// The `### <title>` part of the Logic section, up to the next `###` heading.
+fn logic_part<'a>(md: &'a str, title: &str) -> &'a str {
+    let logic = &md[md.find("## Logic").expect("a Logic section")..];
+    let head = format!("### {title}\n");
+    let start = logic.find(&head).expect("the part");
+    let rest = &logic[start + head.len()..];
+    &logic[start..start + head.len() + rest.find("\n### ").unwrap_or(rest.len())]
+}
+
+#[test]
+fn selection_keeps_cross_sheet_roles() {
+    // Calculation!B7 and C7 are read only by Data!A4:B4. With only Calculation selected
+    // they are still no results, and Calculation's reads of Data stay as written.
+    let pipeline = sheet_pipeline(config(None));
+    let path = office("formula-across-sheets.ods");
+    let json = Request {
+        output: OutputKind::Json,
+        ..request()
+    };
+    let all = pipeline.run_path(&path, &json);
+    let chosen = Request {
+        sheets: vec!["calculation".into()],
+        ..json.clone()
+    };
+    let one = pipeline.run_path(&path, &chosen);
+    assert_eq!(
+        one.completeness,
+        Completeness::Complete,
+        "{:?}",
+        one.message
+    );
+    // The model is the full read; only the Markdown changes.
+    assert_eq!(one.json, all.json);
+    let all_md = all.markdown_pages.concat();
+    let md = one.markdown_pages.concat();
+    assert_eq!(
+        logic_part(&md, "Calculation"),
+        logic_part(&all_md, "Calculation")
+    );
+    let part = logic_part(&md, "Calculation");
+    assert!(
+        part.contains("| B4, C4, E4 | 3 | `=Data!A3` | Data!A3 |"),
+        "{part}"
+    );
+    let results = &part[part.find("#### Results").expect("results")..];
+    assert!(
+        results.contains("| D6 |") && results.contains("| D9 |"),
+        "{part}"
+    );
+    assert!(
+        !results.contains("| B7 |") && !results.contains("| C7 |"),
+        "{part}"
+    );
+    assert!(!md.contains("### Data\n"), "{md}");
+    assert!(!md.contains("## Data\n"), "{md}");
+    assert!(md.contains("## Calculation\n"), "{md}");
+    assert!(md.contains("### Names\n"), "{md}");
+    assert!(
+        md.contains("| Data | sheet | 4 rows x 4 columns, not selected | result | Calculation |"),
+        "{md}"
+    );
+    assert!(md.contains("sheets_selected: [\"Calculation\"]\n"), "{md}");
+}
+
+#[test]
+fn unknown_sheet_fails_with_names() {
+    let pipeline = sheet_pipeline(config(None));
+    let req = Request {
+        sheets: vec!["Data".into(), "Nope".into()],
+        ..request()
+    };
+    let out = pipeline.run_path(&office("formula-across-sheets.ods"), &req);
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(out.document.is_none());
+    assert!(out.markdown_pages.is_empty());
+    assert_eq!(
+        out.message.as_deref(),
+        Some(
+            "unknown sheet \"Nope\"; the workbook has these sheets: \"indiceOrga\", \"Calculation\", \"Data\""
+        )
+    );
+    // A file without sheets.
+    let (registry, _) = counting(false);
+    let text = Pipeline::new(config(None), registry);
+    let out = text.run_bytes("x.txt", b"hello\n".to_vec(), None, &req);
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(out.document.is_none());
+    assert_eq!(
+        out.message.as_deref(),
+        Some("this file has no sheets to select")
+    );
+}
+
+#[test]
+fn config_read_table_style() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "cache = false\n\n[read]\ntable_style = \" Records \"\n",
+    )
+    .unwrap();
+    let cfg = Config::load_from(&path).unwrap();
+    assert_eq!(cfg.read.table_style, TableStyle::Records);
+    assert_eq!(Config::default().read.table_style, TableStyle::Table);
+    // The config is the default; a request says otherwise.
+    let pipeline = sheet_pipeline(cfg);
+    let file = office("table-multiple.xlsx");
+    let md = pipeline.run_path(&file, &request()).markdown_pages.concat();
+    assert!(md.contains("table_style: \"records\"\n"), "{md}");
+    assert!(md.contains("\n- Row "), "{md}");
+    let table = Request {
+        table_style: Some(TableStyle::Table),
+        ..request()
+    };
+    let md = pipeline.run_path(&file, &table).markdown_pages.concat();
+    assert!(!md.contains("table_style"), "{md}");
+    assert!(!md.contains("\n- Row "), "{md}");
+}
+
+#[test]
+fn config_bad_table_style_is_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[read]\ntable_style = \"rows\"\n").unwrap();
+    let err = Config::load_from(&path).unwrap_err();
+    assert!(
+        matches!(&err, rezzer_pipeline::ConfigError::Invalid { .. }),
+        "{err:?}"
+    );
+    let err = err.to_string();
+    assert!(err.contains(path.to_str().unwrap()), "{err}");
+    assert!(err.contains("read.table_style"), "{err}");
+    assert!(err.contains("rows"), "{err}");
+    std::fs::write(&path, "[read]\ntable_style = 1\n").unwrap();
+    let err = Config::load_from(&path).unwrap_err().to_string();
+    assert!(err.contains("table_style"), "{err}");
+}
+
+#[test]
+fn request_debug_shows_the_style_and_sheets() {
+    let req = Request {
+        table_style: Some(TableStyle::Records),
+        sheets: vec!["Data".into()],
+        ..Request::default()
+    };
+    let shown = format!("{req:?}");
+    assert!(shown.contains("table_style: Some(Records)"), "{shown}");
+    assert!(shown.contains("sheets: [\"Data\"]"), "{shown}");
+    let d = Request::default();
+    assert_eq!(d.table_style, None);
+    assert!(d.sheets.is_empty());
 }

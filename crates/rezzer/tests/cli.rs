@@ -786,3 +786,134 @@ fn password_never_in_logs() {
     assert_eq!(stderr, "", "the server writes nothing to stderr");
     assert_eq!(env.cache_entries(), 0);
 }
+
+// ---------------------------------------------------------------------------------------
+// The table style and sheet selection
+
+fn stdout_of(out: &std::process::Output) -> String {
+    String::from_utf8(out.stdout.clone()).unwrap()
+}
+
+#[test]
+fn sheet_selection_by_name_and_position() {
+    let env = Env::new();
+    let book = env.file("book.ods", &corpus("formula-across-sheets.ods"));
+    let out = env
+        .cmd()
+        .args(["read", "--sheet", "Data", "--sheet", "#1"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let md = stdout_of(&out);
+    assert!(md.contains("\n## indiceOrga\n"), "{md}");
+    assert!(md.contains("\n## Data\n"), "{md}");
+    assert!(!md.contains("\n## Calculation\n"), "{md}");
+    assert!(
+        md.contains("sheets_selected: [\"indiceOrga\", \"Data\"]\n"),
+        "{md}"
+    );
+    assert!(md.contains("| Calculation | sheet |"), "{md}");
+    assert!(md.contains(", not selected |"), "{md}");
+    // The JSON is the full model either way.
+    let all = env
+        .cmd()
+        .args(["read", "--json"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    let some = env
+        .cmd()
+        .args(["read", "--json", "--sheet", "Data"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert_eq!(some.status.code(), Some(0));
+    assert_eq!(stdout_of(&some), stdout_of(&all));
+}
+
+#[test]
+fn unknown_sheet_lists_names() {
+    let env = Env::new();
+    let book = env.file("book.ods", &corpus("formula-across-sheets.ods"));
+    env.cmd()
+        .args(["read", "--sheet", "Nope"])
+        .arg(&book)
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(
+            "rezzer: unknown sheet \"Nope\"; the workbook has these sheets: \"indiceOrga\", \"Calculation\", \"Data\"\n",
+        );
+    let text = env.file("a.md", MARKDOWN);
+    env.cmd()
+        .args(["read", "--sheet", "#1"])
+        .arg(&text)
+        .assert()
+        .code(1)
+        .stderr("rezzer: this file has no sheets to select\n");
+}
+
+#[test]
+fn table_style_records_flag() {
+    let env = Env::new();
+    let book = env.file("book.xlsx", &corpus("table-multiple.xlsx"));
+    let out = env
+        .cmd()
+        .args(["read", "--table-style", "records"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let md = stdout_of(&out);
+    assert!(md.contains("\n- Row "), "{md}");
+    assert!(md.contains("empty cells are left out of records"), "{md}");
+    let table = env
+        .cmd()
+        .args(["read", "--table-style", "TABLE"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    assert_eq!(table.status.code(), Some(0));
+    assert!(!stdout_of(&table).contains("\n- Row "));
+    env.cmd()
+        .args(["read", "--table-style", "rows"])
+        .arg(&book)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("table style"));
+}
+
+#[test]
+fn frontmatter_records_options() {
+    let env = Env::new();
+    let book = env.file("book.ods", &corpus("formula-across-sheets.ods"));
+    let out = env
+        .cmd()
+        .args(["read", "--table-style", "records", "--sheet", "Calculation"])
+        .arg(&book)
+        .output()
+        .unwrap();
+    let md = stdout_of(&out);
+    let front = &md[..md[4..].find("\n---\n").unwrap() + 4];
+    assert!(
+        front.contains(
+            "losses: 1\ntable_style: \"records\"\nsheets_selected: [\"Calculation\"]\nauthors: "
+        ),
+        "{front}"
+    );
+}
+
+#[test]
+fn default_output_has_no_new_keys() {
+    let env = Env::new();
+    let book = env.file("book.ods", &corpus("formula-across-sheets.ods"));
+    for args in [vec!["read"], vec!["read", "--table-style", "table"]] {
+        let out = env.cmd().args(&args).arg(&book).output().unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        let md = stdout_of(&out);
+        assert!(!md.contains("table_style"), "{args:?}: {md}");
+        assert!(!md.contains("sheets_selected"), "{args:?}: {md}");
+        assert!(!md.contains("not selected"), "{args:?}: {md}");
+    }
+}

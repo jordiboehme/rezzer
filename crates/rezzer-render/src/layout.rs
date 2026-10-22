@@ -7,7 +7,8 @@
 //!
 //! - A `table` region: the layout line, then a Markdown table whose header is the header
 //!   paths (`Column <letter>` for an empty one), with a `Parent` column when rows have a
-//!   parent; under it the merge note and one line of row kinds
+//!   parent; under it the merge note and one line of row kinds. In the records style a
+//!   table that is not unsure is one list item per row instead (see `records`)
 //! - A `grid` region: the layout line, then the raw cells with the sheet column letters as
 //!   the header and the sheet row numbers as the first column
 //! - `key_value` and `text` regions: a lead line with the range, then one list item per pair
@@ -22,12 +23,13 @@
 use std::collections::HashMap;
 
 use rezzer_model::{
-    Align, Block, Cell, Evidence, Inline, LayoutKind, RowKind, RowNote, TableLayout, a1_position,
-    column_letter, plain_text,
+    Align, Block, Cell, Certainty, Evidence, Inline, LayoutKind, RowKind, RowNote, TableLayout,
+    a1_position, column_letter, plain_text,
 };
 
+use crate::TableStyle;
 use crate::blocks::{
-    self, Ctx, Grid, MAX_COLUMNS, MAX_DEPTH, cell_text, heading_line, line_text, list_block,
+    self, Ctx, Grid, MAX_COLUMNS, MAX_DEPTH, Spot, cell_text, heading_line, line_text, list_block,
     paragraph, pipe_table,
 };
 
@@ -217,6 +219,11 @@ pub(crate) fn layout_table(
             )
         }
         LayoutKind::Grid => grid(layout, rows, aligns),
+        LayoutKind::Table
+            if ctx.table_style == TableStyle::Records && layout.certainty != Certainty::Unsure =>
+        {
+            records(layout, header_rows, rows, ctx, depth, level)
+        }
         LayoutKind::Table => table(layout, header_rows, rows, aligns),
     }
 }
@@ -377,8 +384,9 @@ fn fact_words(e: &Evidence) -> Option<String> {
     })
 }
 
-/// The line that says where a table or grid region is and how it was found (spec 7.2).
-fn layout_line(layout: &TableLayout, left: u32) -> String {
+/// The line that says where a table or grid region is and how it was found (spec 7.2). For
+/// records it says that empty cells are left out of them.
+fn layout_line(layout: &TableLayout, left: u32, records: bool) -> String {
     let grid = layout.kind == LayoutKind::Grid;
     let mut line = format!(
         "{} {}",
@@ -476,6 +484,9 @@ fn layout_line(layout: &TableLayout, left: u32) -> String {
             }
         }
     }
+    if records {
+        line.push_str(", empty cells are left out of records");
+    }
     let facts: Vec<String> = layout.found_by.iter().filter_map(fact_words).collect();
     let rules: Vec<String> = rules
         .into_iter()
@@ -570,7 +581,7 @@ fn shifted(aligns: &[Align]) -> Vec<Align> {
 fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left);
+    let line = layout_line(layout, left, false);
     if rows.is_empty() {
         return line;
     }
@@ -584,16 +595,9 @@ fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &
         .max(layout.header_paths.len())
         .clamp(1, MAX_COLUMNS);
     let mut header: Vec<String> = (0..width)
-        .map(|c| {
-            match layout
-                .header_paths
-                .get(c)
-                .map(|p| p.trim())
-                .filter(|p| !p.is_empty())
-            {
-                Some(path) => cell_text(path),
-                None => format!("Column {}", letter(left, c)),
-            }
+        .map(|c| match header_path(layout, c) {
+            Some(path) => cell_text(path),
+            None => format!("Column {}", letter(left, c)),
         })
         .collect();
     let parents: HashMap<u32, u32> = layout
@@ -640,7 +644,7 @@ fn table(layout: &TableLayout, header_rows: usize, rows: &[Vec<Cell>], aligns: &
 fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left);
+    let line = layout_line(layout, left, false);
     if rows.is_empty() {
         return line;
     }
@@ -661,4 +665,170 @@ fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
     notes.extend(grid.merge_note(legend, &ranges));
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &shifted(aligns), &body), notes)
+}
+
+/// The header path of column `c`, trimmed; `None` when it is empty (the column is then
+/// `Column <letter>`).
+fn header_path(layout: &TableLayout, c: usize) -> Option<&str> {
+    layout
+        .header_paths
+        .get(c)
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+}
+
+/// A table holds this many records per list; the lists are separated by a blank line, so a
+/// page may end between them.
+const RECORDS_PER_BLOCK: usize = 50;
+
+/// Text on one line: every line break becomes a space.
+fn one_line(text: &str) -> String {
+    text.split(['\n', '\r'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The plain text of a cell on one line, trimmed.
+fn cell_words(cell: &Cell) -> String {
+    one_line(plain_text(&cell.inlines).trim())
+}
+
+/// A `table` region as records (spec 9.2): the layout line, then one list item per data row,
+/// `Row <n> (<sheet>!<A>n:<Z>n)` with the group, parent and kind of the row when they apply,
+/// and under it one item per non-empty cell, `<header path>: <shown text>`, in column order.
+/// A merged cell is repeated in every row it covers, with its range. Group rows are no
+/// records: their text is the `group` of the rows under them (nested ones joined by ` / `),
+/// up to the next group row; a total row has none. Rows without a value are left out. The
+/// records stand in lists of at most 50, separated by a blank line.
+fn records(
+    layout: &TableLayout,
+    header_rows: usize,
+    rows: &[Vec<Cell>],
+    ctx: &Ctx,
+    depth: usize,
+    level: u8,
+) -> String {
+    let grid = Grid::new(rows);
+    let left = left_column(layout, &grid);
+    let line = layout_line(layout, left, true);
+    if rows.is_empty() {
+        return line;
+    }
+    let head = header_rows.min(grid.spots.len());
+    let width = grid
+        .width
+        .max(layout.header_paths.len())
+        .clamp(1, MAX_COLUMNS);
+    let sheet_q = rows
+        .iter()
+        .flatten()
+        .find_map(|c| Some(c.anchor.as_ref()?.0.rsplit_once('!')?.0));
+    let notes: HashMap<u32, &RowNote> = layout.rows.iter().map(|n| (n.row, n)).collect();
+    let cell = |k: usize| -> &Cell {
+        let (r, i) = grid.source(k);
+        &rows[r][i]
+    };
+    // The text of a row: its first cell with text.
+    let row_text = |r: usize| -> String {
+        grid.spots[r]
+            .iter()
+            .flatten()
+            .map(|spot| cell_words(cell(spot.cell())))
+            .find(|t| !t.is_empty())
+            .unwrap_or_default()
+    };
+    let shown_at: HashMap<u32, usize> = (0..grid.spots.len())
+        .filter_map(|r| Some((grid.sheet_row(r)?, r)))
+        .collect();
+    let mut items: Vec<Vec<Block>> = Vec::new();
+    let mut group: Vec<String> = Vec::new();
+    let mut in_group_rows = false;
+    for r in head..grid.spots.len() {
+        let sheet_row = grid.sheet_row(r);
+        let note = sheet_row.and_then(|n| notes.get(&n));
+        let kind = note.map_or(RowKind::Data, |n| n.kind);
+        if kind == RowKind::Group {
+            if !in_group_rows {
+                group.clear();
+            }
+            let text = row_text(r);
+            if !text.is_empty() {
+                group.push(text);
+            }
+            in_group_rows = true;
+            continue;
+        }
+        in_group_rows = false;
+        if kind == RowKind::Blank {
+            continue;
+        }
+        let mut fields: Vec<Vec<Block>> = Vec::new();
+        for (c, spot) in grid.spots[r].iter().enumerate() {
+            let k = match spot {
+                Some(Spot::Own(k) | Spot::Above(k)) => *k,
+                _ => continue,
+            };
+            let source = cell(k);
+            if is_empty(source) {
+                continue;
+            }
+            let path = header_path(layout, c)
+                .map(one_line)
+                .unwrap_or_else(|| format!("Column {}", letter(left, c)));
+            let mut content = vec![Inline::plain(format!("{path}: "))];
+            content.extend_from_slice(trimmed(&source.inlines));
+            if let Some(range) = grid.merged_range(k) {
+                content.push(Inline::plain(format!(" (merged {range})")));
+            }
+            fields.push(vec![Block::paragraph(content)]);
+        }
+        if fields.is_empty() {
+            continue;
+        }
+        let number = sheet_row.unwrap_or((r + 1) as u32);
+        let mut head_line = format!("Row {number}");
+        if let (Some(q), Some(n)) = (sheet_q, sheet_row) {
+            head_line.push_str(&format!(
+                " ({q}!{}{n}:{}{n})",
+                letter(left, 0),
+                letter(left, width - 1)
+            ));
+        }
+        if kind != RowKind::Total && !group.is_empty() {
+            head_line.push_str(&format!(", group: {}", group.join(" / ")));
+        }
+        if let Some(parent) = note
+            .and_then(|n| n.parent)
+            .and_then(|p| shown_at.get(&p))
+            .map(|&p| row_text(p))
+            .filter(|t| !t.is_empty())
+        {
+            head_line.push_str(&format!(", parent: {parent}"));
+        }
+        match kind {
+            RowKind::Subtotal => head_line.push_str(", kind: subtotal"),
+            RowKind::Total => head_line.push_str(", kind: total"),
+            _ => {}
+        }
+        items.push(vec![
+            Block::paragraph(vec![Inline::plain(head_line)]),
+            Block::List {
+                ordered: false,
+                items: fields,
+                anchor: None,
+            },
+        ]);
+    }
+    let mut parts = vec![line];
+    parts.extend(
+        items
+            .chunks(RECORDS_PER_BLOCK)
+            .map(|chunk| list_block(false, chunk, false, ctx, depth, level)),
+    );
+    let cut = grid.cut_notes();
+    if !cut.is_empty() {
+        parts.push(cut.join("\n"));
+    }
+    parts.join("\n\n")
 }

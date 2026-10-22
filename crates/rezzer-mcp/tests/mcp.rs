@@ -25,6 +25,7 @@ fn registry() -> Registry {
     registry.register(Box::new(rezzer_read_text::TextReader));
     registry.register(Box::new(rezzer_read_markdown::MarkdownReader));
     registry.register(Box::new(rezzer_read_csv::CsvReader));
+    registry.register(Box::new(rezzer_read_sheet::SheetReader));
     registry
 }
 
@@ -462,6 +463,8 @@ async fn wrong_types_are_failed_results_with_structured_content() {
         (json!({ "path": "a", "sections": "content" }), "sections"),
         (json!({ "path": "a", "sections": [1] }), "sections"),
         (json!({ "path": "a", "format": 5 }), "format"),
+        (json!({ "path": "a", "table_style": 5 }), "table_style"),
+        (json!({ "path": "a", "sheets": [1] }), "sheets"),
     ] {
         let result = call(&client, "rez", args.clone()).await;
         assert_eq!(result.is_error, Some(true), "{args}");
@@ -800,4 +803,116 @@ async fn rez_wrong_password_type_is_not_echoed() {
     assert!(message.contains("password"), "{message}");
     assert!(!message.contains("1234567"), "{message}");
     assert!(!text(&result).contains("1234567"));
+}
+
+fn office(name: &str) -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_table_style_and_sheets() {
+    let client = connect(config()).await;
+    let path = office("formula-across-sheets.ods");
+    let result = call(
+        &client,
+        "rez",
+        json!({ "path": path, "table_style": "records", "sheets": ["Calculation", "#3"] }),
+    )
+    .await;
+    let s = structured(&result);
+    assert_eq!(s["status"], "complete", "{s}");
+    let md = text(&result);
+    assert!(md.contains("table_style: \"records\"\n"), "{md}");
+    assert!(
+        md.contains("sheets_selected: [\"Calculation\", \"Data\"]\n"),
+        "{md}"
+    );
+    assert!(md.contains("\n- Row "), "{md}");
+    assert!(!md.contains("\n## indiceOrga\n"), "{md}");
+    // The default is the table style and every sheet.
+    let plain = call(
+        &client,
+        "rez",
+        json!({ "path": path, "table_style": "table" }),
+    )
+    .await;
+    assert!(!text(&plain).contains("table_style"), "{}", text(&plain));
+    assert!(!text(&plain).contains("\n- Row "), "{}", text(&plain));
+    // JSON is the full model.
+    let all = call(&client, "rez", json!({ "path": path, "format": "json" })).await;
+    let some = call(
+        &client,
+        "rez",
+        json!({ "path": path, "format": "json", "sheets": ["Data"] }),
+    )
+    .await;
+    assert_eq!(text(&all), text(&some));
+    // An unknown sheet is a failed result that names the sheets.
+    let unknown = call(&client, "rez", json!({ "path": path, "sheets": ["Nope"] })).await;
+    assert_eq!(unknown.is_error, Some(true));
+    let s = structured(&unknown);
+    assert_eq!(s["status"], "failed", "{s}");
+    assert_eq!(
+        s["message"],
+        "unknown sheet \"Nope\"; the workbook has these sheets: \"indiceOrga\", \"Calculation\", \"Data\""
+    );
+    // The schema.
+    let tools = client.list_all_tools().await.unwrap();
+    let rez = tools.iter().find(|t| t.name == "rez").unwrap();
+    let properties = rez.input_schema["properties"].as_object().unwrap();
+    let style = &properties["table_style"];
+    assert_eq!(style["type"], "string", "{style}");
+    assert_eq!(style["enum"], json!(["table", "records"]), "{style}");
+    assert_eq!(style["default"], "table", "{style}");
+    let sheets = &properties["sheets"];
+    assert_eq!(sheets["items"]["type"], "string", "{sheets}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_bad_table_style_is_failed() {
+    let client = connect(config()).await;
+    let path = office("formula-across-sheets.ods");
+    for style in [json!("rows"), json!(5), json!(["records"])] {
+        let result = call(
+            &client,
+            "rez",
+            json!({ "path": path, "table_style": style }),
+        )
+        .await;
+        assert_eq!(result.is_error, Some(true), "{style}");
+        let s = structured(&result);
+        assert_eq!(s["status"], "failed", "{style}: {s}");
+        let message = s["message"].as_str().unwrap();
+        assert!(message.starts_with("table_style"), "{style}: {message}");
+        assert!(!message.ends_with('.'), "{message}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_sheets_must_be_strings() {
+    let client = connect(config()).await;
+    let path = office("formula-across-sheets.ods");
+    for sheets in [json!([1]), json!("Data"), json!(["Data", null])] {
+        let result = call(&client, "rez", json!({ "path": path, "sheets": sheets })).await;
+        assert_eq!(result.is_error, Some(true), "{sheets}");
+        let s = structured(&result);
+        assert_eq!(s["status"], "failed", "{sheets}: {s}");
+        let message = s["message"].as_str().unwrap();
+        assert!(message.starts_with("sheets"), "{sheets}: {message}");
+        assert!(!message.ends_with('.'), "{message}");
+    }
+    let params = rezzer_mcp::tools::RezParams::from_arguments(
+        json!({ "path": "a", "table_style": "records", "sheets": ["Data"] })
+            .as_object()
+            .unwrap()
+            .clone(),
+    )
+    .unwrap();
+    let shown = format!("{params:?}");
+    assert!(shown.contains("table_style: Some(\"records\")"), "{shown}");
+    assert!(shown.contains("sheets: Some([\"Data\"])"), "{shown}");
 }

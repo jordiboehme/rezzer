@@ -20,6 +20,9 @@
 //!
 //! [enrich]
 //! disabled = ["language"]
+//!
+//! [read]
+//! table_style = "records"
 //! ```
 
 use std::ffi::OsStr;
@@ -27,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use rezzer_enrich::EnrichOptions;
 use rezzer_limits::Limits;
+use rezzer_render::TableStyle;
 use serde::Deserialize;
 
 /// Settings for every run of the pipeline.
@@ -42,6 +46,14 @@ pub struct Config {
     /// until the cache is under 90 % of it.
     pub cache_max_bytes: u64,
     pub enrich: EnrichOptions,
+    pub read: ReadDefaults,
+}
+
+/// Defaults for how a read is written, from the `[read]` table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReadDefaults {
+    /// How sheet tables are written when a request does not say.
+    pub table_style: TableStyle,
 }
 
 /// Default [`Config::cache_max_bytes`]: 512 MiB.
@@ -55,6 +67,7 @@ impl Default for Config {
             cache_dir: None,
             cache_max_bytes: DEFAULT_CACHE_MAX_BYTES,
             enrich: EnrichOptions::default(),
+            read: ReadDefaults::default(),
         }
     }
 }
@@ -76,6 +89,14 @@ struct ConfigFile {
     cache_dir: Option<PathBuf>,
     cache_max_bytes: Option<u64>,
     enrich: EnrichFile,
+    read: ReadFile,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ReadFile {
+    /// Any type, so that a wrong one gives a message that names the key.
+    table_style: Option<toml::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -139,6 +160,17 @@ impl Config {
                 known.join(", ")
             )));
         }
+        let table_style = match &file.read.table_style {
+            None => TableStyle::default(),
+            Some(toml::Value::String(text)) => text
+                .parse::<TableStyle>()
+                .map_err(|e| invalid(format!("read.table_style: {e}")))?,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "read.table_style: expected table or records, not {other}"
+                )));
+            }
+        };
         Ok(Config {
             limits: file.limits,
             cache: file.cache.unwrap_or(true),
@@ -147,6 +179,7 @@ impl Config {
             enrich: EnrichOptions {
                 disabled: file.enrich.disabled,
             },
+            read: ReadDefaults { table_style },
         })
     }
 }

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use rezzer_model::{Document, OverviewPart};
 
+use crate::Selection;
 use crate::blocks::{cell_text, line_text, pipe_table};
 use crate::facets::role_name;
 use crate::mermaid::{self, MAX_EDGES, MAX_NODES};
@@ -19,7 +20,9 @@ const MAX_PARTS: usize = MAX_NODES;
 /// A "Reads from" cell names at most this many parts, then how many more.
 const MAX_READS: usize = 20;
 
-pub(crate) fn render(doc: &Document) -> Option<String> {
+/// With a selection, the size of every part that is not a chosen sheet ends with
+/// `, not selected`.
+pub(crate) fn render(doc: &Document, selection: Option<&Selection>) -> Option<String> {
     let overview = doc.overview.as_ref()?;
     if overview.parts.is_empty() && overview.facts.is_empty() {
         return None;
@@ -39,7 +42,7 @@ pub(crate) fn render(doc: &Document) -> Option<String> {
         let rows: Vec<Vec<String>> = parts
             .iter()
             .take(MAX_PARTS)
-            .map(|p| row(p, &names))
+            .map(|p| row(p, &names, selection.is_some_and(|s| !s.chosen(&p.id))))
             .collect();
         let mut table = pipe_table(&header, &[], &rows);
         if parts.len() > MAX_PARTS {
@@ -64,7 +67,7 @@ pub(crate) fn render(doc: &Document) -> Option<String> {
     Some(blocks.join("\n\n"))
 }
 
-fn row(part: &OverviewPart, names: &HashMap<&str, &str>) -> Vec<String> {
+fn row(part: &OverviewPart, names: &HashMap<&str, &str>, unselected: bool) -> Vec<String> {
     let mut reads: Vec<String> = part
         .reads
         .iter()
@@ -77,7 +80,11 @@ fn row(part: &OverviewPart, names: &HashMap<&str, &str>) -> Vec<String> {
     vec![
         cell_text(&part.name),
         cell_text(&part.kind),
-        cell_text(&part.size),
+        if unselected {
+            cell_text(&format!("{}, not selected", part.size))
+        } else {
+            cell_text(&part.size)
+        },
         part.role.map(role_name).unwrap_or("").to_string(),
         reads.join(", "),
     ]

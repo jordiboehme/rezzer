@@ -29,9 +29,9 @@ use rezzer_model::{
 };
 use rezzer_render::RenderOptions;
 
-pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, config_path_from};
+pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, config_path_from};
 pub use rezzer_limits::CancelToken;
-pub use rezzer_render::OutputSection;
+pub use rezzer_render::{OutputSection, TableStyle};
 
 use crate::cache::Cache;
 use crate::config::one_line;
@@ -84,6 +84,12 @@ pub struct Request {
     /// Cancelling it stops the reader at its next budget check; the result is then partial
     /// with a limit loss and is not cached.
     pub cancel: CancelToken,
+    /// How sheet tables are written; `None` takes the config's `[read] table_style`. Only
+    /// changes rendering, so it is not part of the cache key.
+    pub table_style: Option<TableStyle>,
+    /// The sheets to write, by name or `#n` (1-based position); empty writes all. Only
+    /// changes rendering, so it is not part of the cache key.
+    pub sheets: Vec<String>,
 }
 
 impl Default for Request {
@@ -96,6 +102,8 @@ impl Default for Request {
             output_dir: None,
             generated_at: None,
             cancel: CancelToken::default(),
+            table_style: None,
+            sheets: Vec::new(),
         }
     }
 }
@@ -110,6 +118,8 @@ impl fmt::Debug for Request {
             .field("output_dir", &self.output_dir)
             .field("generated_at", &self.generated_at)
             .field("cancelled", &self.cancel.is_cancelled())
+            .field("table_style", &self.table_style)
+            .field("sheets", &self.sheets)
             .finish()
     }
 }
@@ -288,12 +298,25 @@ impl Pipeline {
             }
             None => self.document(src, req),
         };
+        // Sheet selection is a render option over the full read: the names come from it.
+        let sheets = if req.sheets.is_empty() {
+            None
+        } else {
+            match rezzer_render::resolve_sheets(&document, &req.sheets) {
+                Ok(titles) => Some(titles),
+                // A failed read keeps its own output and reason.
+                Err(_) if completeness == Completeness::Failed => None,
+                Err(e) => return RunResult::failed(e),
+            }
+        };
         let opts = RenderOptions {
             sections: req.sections.clone(),
             generated_at: generated_at(req),
             rezzer_version: VERSION.to_string(),
             archive_ref: None,
             math: req.math,
+            table_style: req.table_style.unwrap_or(self.config.read.table_style),
+            sheets,
         };
         let page_tokens = self.config.limits.page_tokens;
         let rendered = panics::contained(|| {

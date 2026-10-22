@@ -49,6 +49,8 @@ pub(crate) struct Ctx<'a> {
     /// notes: a cell's comment stays in `## Annotations` even where the cell is a caption,
     /// a heading or a one-cell region.
     pub in_sheet: std::cell::Cell<usize>,
+    /// How the rows of a sheet table are written.
+    pub table_style: crate::TableStyle,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
@@ -1646,6 +1648,11 @@ struct Place {
     r: usize,
     c: usize,
     at: Option<(u32, u32)>,
+    /// The cell in the model table: its row and its index in that row.
+    source: (usize, usize),
+    /// The rows and columns the cell covers as placed.
+    rs: usize,
+    cs: usize,
 }
 
 /// The 0-based sheet (row, column) of a cell's `Sheet!A1` anchor. The sheet name may hold a
@@ -1704,7 +1711,7 @@ impl Grid {
         let mut shown = rows.len();
         for (r, row) in rows.iter().enumerate() {
             let mut c = 0;
-            for cell in row {
+            for (i, cell) in row.iter().enumerate() {
                 while grid[r].get(c).is_some_and(Option::is_some) {
                     c += 1;
                 }
@@ -1728,7 +1735,14 @@ impl Grid {
                 let k = texts.len();
                 texts.push(inlines(&cell.inlines, Mode::Cell).trim().to_string());
                 let at = sheet_position(cell);
-                places.push(Place { r, c, at });
+                places.push(Place {
+                    r,
+                    c,
+                    at,
+                    source: (r, i),
+                    rs,
+                    cs,
+                });
                 for (dr, grid_row) in grid[r..r + fill_rows].iter_mut().enumerate() {
                     if grid_row.len() < c + fill_cols {
                         grid_row.resize(c + fill_cols, None);
@@ -1787,18 +1801,41 @@ impl Grid {
         self.merged
             .iter()
             .filter(|m| m.r < shown && m.r + m.rs > from)
-            .filter_map(|m| {
-                let (row, col) = m.at?;
-                let (row, col) = (row as usize, col as usize);
-                Some(format!(
-                    "{}{}:{}{}",
-                    column_letter(col),
-                    row + 1,
-                    column_letter(col + m.cs - 1),
-                    row + m.rs.min(shown - m.r)
-                ))
-            })
+            .filter_map(|m| self.range_text(m.at?, m.r, m.rs, m.cs))
             .collect()
+    }
+
+    /// The sheet range of a merged cell anchored at `at` (0-based sheet row and column) that
+    /// starts in shown row `r` and covers `rs` rows and `cs` columns; it ends at the last
+    /// shown row.
+    fn range_text(&self, at: (u32, u32), r: usize, rs: usize, cs: usize) -> Option<String> {
+        let shown = self.spots.len();
+        if r >= shown {
+            return None;
+        }
+        let (row, col) = (at.0 as usize, at.1 as usize);
+        Some(format!(
+            "{}{}:{}{}",
+            column_letter(col),
+            row + 1,
+            column_letter(col + cs - 1),
+            row + rs.min(shown - r)
+        ))
+    }
+
+    /// The cell `k` stands for in the model table: its row and its index in that row.
+    pub(crate) fn source(&self, k: usize) -> (usize, usize) {
+        self.places[k].source
+    }
+
+    /// The sheet range of cell `k` when it is merged and has a sheet anchor, as
+    /// [`Grid::ranges`] names it.
+    pub(crate) fn merged_range(&self, k: usize) -> Option<String> {
+        let p = self.places[k];
+        if !self.sheet || (p.rs < 2 && p.cs < 2) {
+            return None;
+        }
+        self.range_text(p.at?, p.r, p.rs, p.cs)
     }
 
     /// True when a shown row from `from` on holds a mark.
