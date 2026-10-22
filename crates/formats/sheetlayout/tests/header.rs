@@ -1100,7 +1100,9 @@ fn tall_title_merge_leaves_the_header() {
         assert_eq!(header(r), [3], "styled {styled}");
         assert_eq!(r.header_paths, ["Region", "Q1", "Q2", "Q3"]);
         assert_eq!(r.data, Some(rect("A4:D5")));
-        assert_eq!(r.body, Some(rect("A2:D5")));
+        // Row 2 holds only the caption's own merge: it belongs to the caption line (ruling
+        // P4-AQ), so the body starts at the header row.
+        assert_eq!(r.body, Some(rect("A3:D5")));
     }
     // Print titles on row 3 set the band.
     let mut sheet = Sheet::new()

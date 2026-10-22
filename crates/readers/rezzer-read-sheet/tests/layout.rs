@@ -1059,7 +1059,28 @@ fn ods_merges_are_read() {
     assert!(!held(doc, "sheet1").iter().any(|c| c.1 == "a3"));
     assert!(held(doc, "sheet1").iter().any(|c| c.1 == "a2"));
 
-    // Large merges: the merged texts are kept once, each at its top-left cell.
+    // A region whose only value is the merged text "a2" under A2:A3 is no empty table, and
+    // no "no header found" either.
+    assert!(
+        !doc.losses
+            .iter()
+            .any(|l| l.what.contains("no header found")),
+        "{:#?}",
+        doc.losses
+    );
+    for r in regions(doc, "sheet1") {
+        assert!(
+            r.rows
+                .iter()
+                .flatten()
+                .all(|c| !plain_text(&c.inlines).is_empty()),
+            "{:?}",
+            r.rows
+        );
+    }
+
+    // Large merges: each merged text is a title over its merge (ruling P4-AQ): no table rows,
+    // no unsure or limit loss, the heading anchored at the merge's top-left cell.
     let out = corpus("merged.ods");
     let doc = &out.document;
     let mut all = held(doc, "Sheet1");
@@ -1074,15 +1095,28 @@ fn ods_merges_are_read() {
             ("Sheet2!E4".into(), "merged on another sheet".into()),
         ]
     );
-    // Each merged text heads the region its merge covers (A1 spans 6 columns and 12 rows).
     assert_eq!(ranges(doc, "Sheet1"), ["A1:F12", "H3:J13", "D16:H24"]);
     assert_eq!(ranges(doc, "Sheet2"), ["E4:G16"]);
+    for sheet in ["Sheet1", "Sheet2"] {
+        for r in regions(doc, sheet) {
+            assert_eq!(r.layout.kind, LayoutKind::Title, "{}", r.layout.range);
+            assert!(r.rows.is_empty(), "{}: {:?}", r.layout.range, r.rows);
+            assert!(r.layout.unsure.is_empty());
+        }
+    }
     assert_eq!(
         headings(doc, "Sheet1")
             .iter()
             .map(|h| h.2.clone().unwrap_or_default())
             .collect::<Vec<_>>(),
         ["Sheet1!A1", "Sheet1!H3", "Sheet1!D16"]
+    );
+    assert!(
+        doc.losses
+            .iter()
+            .all(|l| l.why != LossReason::Uncertain && l.why != LossReason::Limit),
+        "{:#?}",
+        doc.losses
     );
     let not_read = doc
         .losses
@@ -1210,4 +1244,132 @@ fn ods_looks_mark_the_header() {
     assert_eq!(r.layout.kind, LayoutKind::Table);
     assert_eq!(r.layout.header_rows, [1]);
     assert_eq!(r.layout.header_paths, ["Name", "City"]);
+}
+
+/// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
+#[cfg(unix)]
+fn thread_cpu() -> std::time::Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+fn thread_cpu() -> std::time::Duration {
+    std::time::Duration::ZERO
+}
+
+/// A tall merged title (A1 over A1:Z10000) and a table of 6 rows starting `gap` empty rows
+/// below it: every row of the table is shown, nothing is cut at the cell cap, and the
+/// covered positions cost no cells and no elements (ruling P4-AQ).
+fn assert_tall_title(doc: &Document, sheet: &str, table_top: u32, near: bool) {
+    let q = sheet;
+    let held = held(doc, sheet);
+    for n in table_top..table_top + 6 {
+        for col in ["A", "B"] {
+            assert!(
+                held.iter().any(|c| c.0 == format!("{q}!{col}{n}")),
+                "{col}{n} missing: {held:?}"
+            );
+        }
+    }
+    assert!(
+        held.iter()
+            .any(|c| c.0 == format!("{q}!A1") && c.1 == "Sales report")
+    );
+    assert!(
+        doc.losses
+            .iter()
+            .all(|l| l.why != LossReason::Limit && l.why != LossReason::Uncertain),
+        "{:#?}",
+        doc.losses
+    );
+    let all = regions(doc, sheet);
+    let cells: usize = all.iter().map(|r| r.rows.iter().flatten().count()).sum();
+    assert!(cells <= 14, "{cells} table cells: {:?}", ranges(doc, sheet));
+    if near {
+        // Rule T2: the title names the table below it.
+        assert_eq!(all.len(), 1, "{:?}", ranges(doc, sheet));
+        assert_eq!(all[0].layout.kind, LayoutKind::Table);
+        assert_eq!(
+            headings(doc, sheet)[0].2.as_deref(),
+            Some(format!("{q}!A1").as_str())
+        );
+    } else {
+        assert_eq!(all.len(), 2, "{:?}", ranges(doc, sheet));
+        assert_eq!(all[0].layout.kind, LayoutKind::Title);
+        assert_eq!(all[0].layout.range, "A1:Z10000");
+        assert!(all[0].rows.is_empty());
+        assert_eq!(all[1].layout.kind, LayoutKind::Table);
+    }
+}
+
+const TALL_TABLE: [[&str; 2]; 6] = [
+    ["Name", "Score"],
+    ["Ann", "1"],
+    ["Bob", "2"],
+    ["Cid", "3"],
+    ["Dan", "4"],
+    ["Eve", "5"],
+];
+
+#[test]
+fn tall_merged_title_costs_no_cells_ods() {
+    for (gap, near) in [(1u32, true), (6, false)] {
+        let mut body = String::from(
+            "<table:table-row><table:table-cell office:value-type=\"string\" table:number-columns-spanned=\"26\" table:number-rows-spanned=\"10000\"><text:p>Sales report</text:p></table:table-cell><table:covered-table-cell table:number-columns-repeated=\"25\"/></table:table-row>\
+             <table:table-row table:number-rows-repeated=\"9999\"><table:covered-table-cell table:number-columns-repeated=\"26\"/></table:table-row>",
+        );
+        body.push_str(&format!(
+            "<table:table-row table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
+        ));
+        for r in TALL_TABLE {
+            body.push_str(&ods_row(&r));
+        }
+        let out = read_ods(ods(&content(&ods_sheet("S", &body))));
+        assert_eq!(
+            out.completeness,
+            Completeness::Complete,
+            "{:#?}",
+            out.document.losses
+        );
+        assert_tall_title(&out.document, "S", 10_001 + gap, near);
+    }
+}
+
+#[test]
+fn tall_merged_title_costs_no_cells_xlsx() {
+    for (gap, near) in [(1u32, true), (6, false)] {
+        let top = 10_001 + gap;
+        let mut xml = row(1, &["Sales report"]);
+        for (i, r) in TALL_TABLE.iter().enumerate() {
+            xml.push_str(&row(top + i as u32, r));
+        }
+        let s = ws(
+            "",
+            &xml,
+            "<mergeCells count=\"1\"><mergeCell ref=\"A1:Z10000\"/></mergeCells>",
+        );
+        // Few elements: the 259,974 covered positions must not be charged.
+        let limits = Limits {
+            max_elements: 2_000,
+            ..Limits::default()
+        };
+        let start = thread_cpu();
+        let out = read_with(Book::default().sheet("S", &s).bytes(), limits);
+        let used = thread_cpu() - start;
+        assert!(used.as_secs_f64() < 2.0, "{used:?}");
+        assert_eq!(
+            out.completeness,
+            Completeness::Complete,
+            "{:#?}",
+            out.document.losses
+        );
+        assert_tall_title(&out.document, "S", top, near);
+    }
 }

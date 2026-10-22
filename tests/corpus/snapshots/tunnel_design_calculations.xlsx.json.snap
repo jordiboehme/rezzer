@@ -2089,9 +2089,10 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
+          "anchor": "Structural_Lining!A47",
           "inlines": [
             {
-              "text": "Text A47:C47",
+              "text": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
               "type": "text"
             }
           ],
@@ -2103,7 +2104,6 @@ source: crates/rezzer/tests/corpus.rs
           "header_rows": 0,
           "layout": {
             "certainty": "rule",
-            "data": "A47",
             "found_by": [
               {
                 "detail": "empty-row and empty-column gaps",
@@ -2111,31 +2111,21 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "one column of text",
-                "id": "X",
+                "detail": "caption row 47",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "title rows only",
+                "id": "T2",
                 "kind": "rule"
               }
             ],
             "key": "Structural_Lining!A47",
-            "kind": "text",
+            "kind": "title",
             "label_cols": 0,
             "range": "A47:C47"
           },
-          "rows": [
-            [
-              {
-                "anchor": "Structural_Lining!A47",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              }
-            ]
-          ],
           "type": "table"
         },
         "<4 more items>"

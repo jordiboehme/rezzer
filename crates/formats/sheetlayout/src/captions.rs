@@ -69,6 +69,8 @@ pub(crate) fn caption_rows(prep: &Prep, w: &mut Work) {
     let mut heading = None;
     let mut prev: Option<u8> = None;
     let mut row = r.top;
+    // The last row of the caption lines so far.
+    let mut end = r.top;
     while rows.len() < MAX_CAPTIONS && row <= r.bottom {
         let Some(cell) = single_text(prep, &w.merges, row, r.left, r.right) else {
             break;
@@ -86,25 +88,60 @@ pub(crate) fn caption_rows(prep: &Prep, w: &mut Work) {
             heading = Some(row);
         }
         rows.push(row);
-        if row == u32::MAX {
+        // Rows below that only the caption's own merge covers belong to the caption line.
+        end = covered_below(prep, &w.merges, cell, row, r);
+        if end >= r.bottom {
             break;
         }
-        row += 1;
+        row = end + 1;
     }
     if rows.is_empty() {
         return;
     }
-    let n = rows.len() as u32;
     w.region.caption_heading = heading.or(Some(rows[0]));
-    w.region.data = (u64::from(n) < r.height()).then(|| Rect {
-        top: r.top + n,
-        ..r
-    });
+    w.region.data = end
+        .checked_add(1)
+        .filter(|&top| top <= r.bottom)
+        .map(|top| Rect { top, ..r });
     w.region.evidence.push(Evidence::Rule {
         id: "T",
         detail: format!("caption {}", row_words(&rows)),
     });
     w.region.captions = rows;
+}
+
+/// The last row of the caption line of `cell` in `row`: the rows below that the merge
+/// holding the cell covers and that hold no other value and no other merge inside the
+/// region's columns. Works on the cells and merges of those rows, never per covered row.
+fn covered_below(prep: &Prep, merges: &[u32], cell: &CellIn, row: u32, r: Rect) -> u32 {
+    let Some(own) = merges
+        .iter()
+        .map(|&m| &prep.merges[m as usize])
+        .find(|m| m.contains(cell.pos))
+    else {
+        return row;
+    };
+    let limit = own.bottom.min(r.bottom);
+    if limit <= row {
+        return row;
+    }
+    let mut stop = limit;
+    for k in prep.rows(row + 1, limit) {
+        let c = prep.cell(k);
+        // A formula cell counts even with an empty result; an empty styled cell does not.
+        let value = !c.text.is_empty() || c.formula.is_some();
+        if c.pos.col >= r.left && c.pos.col <= r.right && value {
+            stop = stop.min(c.pos.row - 1);
+            break;
+        }
+    }
+    for &m in merges {
+        let m = &prep.merges[m as usize];
+        if m != own && m.top > row && m.top <= stop && m.left <= r.right && r.left <= m.right {
+            stop = stop.min(m.top - 1);
+        }
+    }
+    stop
 }
 
 fn caption_only(w: &Work) -> bool {

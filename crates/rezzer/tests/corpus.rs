@@ -642,20 +642,29 @@ fn cells_and_logic_unchanged_on_corpus() {
             })
             .collect();
         let now_set: std::collections::HashSet<&(String, String)> = now.iter().collect();
+        // A cell written twice is never allowed (every cell in exactly one block).
+        if now_set.len() != now.len() {
+            let mut seen = std::collections::HashSet::new();
+            let twice: Vec<_> = now.iter().filter(|c| !seen.insert(*c)).take(10).collect();
+            failures.push(format!("{name}: cells written twice: {twice:?}"));
+        }
         let before_set: std::collections::HashSet<&(String, String)> = before.iter().collect();
         let extra: Vec<_> = now.iter().filter(|c| !before_set.contains(c)).collect();
         let missing: Vec<&(String, String)> =
             before.iter().filter(|c| !now_set.contains(c)).collect();
         // Missing cells stated as covered: by anchor, else by the count loss of their sheet.
-        let covered_at = |anchor: &str| {
-            doc.losses
-                .iter()
-                .any(|l| l.location == anchor && l.what.contains("under the merged area"))
+        let covered_at = |anchor: &str, text: &str| {
+            let value = format!("{text:?}");
+            doc.losses.iter().any(|l| {
+                l.location == anchor
+                    && l.what.contains("under the merged area")
+                    && l.what.contains(&value)
+            })
         };
         let mut unstated: Vec<&(String, String)> = Vec::new();
         let mut counted: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for c in &missing {
-            if covered_at(&c.0) {
+            if covered_at(&c.0, &c.1) {
                 covered_total += 1;
                 continue;
             }

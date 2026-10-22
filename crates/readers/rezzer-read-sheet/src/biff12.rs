@@ -408,8 +408,9 @@ pub(crate) struct SheetScan {
     pub merges_bad: u64,
     /// Merge records past the cap, not listed.
     pub merges_cut: u64,
-    /// The records after the sheet data could not be walked to the end: the merges from
-    /// there on are not read. The cells are not affected.
+    /// The records calamine does not read (cell records past its last row, and those after
+    /// the sheet data) could not be walked to the end: the merges from there on are not
+    /// read. The cells are not affected.
     pub merge_error: Option<String>,
 }
 

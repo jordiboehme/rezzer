@@ -55,6 +55,23 @@ fn trimmed(lines: &Lines, data: Rect, tick: &Tick) -> Result<Option<Rect>, Halt>
     Ok(out)
 }
 
+/// Whether a region of caption rows only has one caption row whose text lies in a merged
+/// area of more than one cell.
+fn one_merged_text(lines: &Lines, w: &Work) -> bool {
+    let [row] = w.region.captions[..] else {
+        return false;
+    };
+    let prep = lines.prep;
+    let r = w.region.rect;
+    let Some(cell) = crate::captions::single_text(prep, &w.merges, row, r.left, r.right) else {
+        return false;
+    };
+    w.merges.iter().any(|&m| {
+        let m = &prep.merges[m as usize];
+        m.contains(cell.pos) && (m.top != m.bottom || m.left != m.right)
+    })
+}
+
 /// Steps 6d to 6h for a rule region whose rows hold no header band.
 pub(crate) fn no_band(
     lines: &Lines,
@@ -64,6 +81,19 @@ pub(crate) fn no_band(
 ) -> Result<Vec<Work>, Halt> {
     let input = lines.prep.input;
     let tick = ctx.tick;
+    if w.region.data.is_none() && one_merged_text(lines, w) {
+        // Its only value is one merged text (ruling P4-AQ): a title, never lines of text or
+        // an empty grid.
+        let region = &mut w.region;
+        region.kind = Kind::Title;
+        region.certainty = Certainty::Rule;
+        region.unsure.clear();
+        region.evidence.push(Evidence::Rule {
+            id: "T2",
+            detail: "title rows only".to_string(),
+        });
+        return Ok(Vec::new());
+    }
     if w.region.data.is_none() {
         // A region of caption rows only that no table took: its rows are lines of text
         // (spec 6.3), not a title.

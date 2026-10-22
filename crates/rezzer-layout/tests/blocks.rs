@@ -774,3 +774,58 @@ fn stray_cell_beside_a_tall_region_follows_reading_order() {
     assert_eq!(order, ["left", "C1:D6", "beside", "below", "C9:D9"]);
     assert_eq!(cells_of(&m), expected_cells(&s));
 }
+
+/// Ruling P4-AQ: positions under a merged area cost no cells; a vertical merge shows one
+/// cell with spans and the rows below it show only their other columns.
+#[test]
+fn cells_left_counts_shown_positions_only() {
+    let s = Sheet::new()
+        .rows("A1", &["Region|Sales", "North|1", "|2", "|3", "South|4"])
+        .merge("A2:A4");
+    let mut caps = Caps {
+        cells_left: 100,
+        max_cols: 1_000,
+    };
+    let m = s.map_with(ColumnNames::Letters, &mut caps, &[]);
+    let (rows, _, _) = tables(&m)[0];
+    let lens: Vec<usize> = rows.iter().map(Vec::len).collect();
+    assert_eq!(lens, [2, 2, 1, 1, 2]);
+    assert_eq!(rows[1][0].row_span, 3);
+    assert_eq!(caps.cells_left, 100 - 8);
+    assert_eq!(cells_of(&m), expected_cells(&s));
+}
+
+/// A merged area anchored in a caption row above the table is clipped to the table rows:
+/// one empty cell with spans, never padding for every position it covers.
+#[test]
+fn merge_anchored_above_the_table_is_clipped() {
+    let s = Sheet::new()
+        .rows("A1", &["Title", "|1", "|2", "x|3"])
+        .merge("A1:A3");
+    let mut region = hand_region("A1:B4", sheetlayout::Kind::Table, &[]);
+    region.captions = vec![0];
+    region.caption_heading = Some(0);
+    region.data = Some(rect("A2:B4"));
+    let layout = sheetlayout::Layout {
+        regions: vec![region],
+        issues: Vec::new(),
+    };
+    let mut caps = Caps::default();
+    let m = blocks(
+        "S",
+        &layout,
+        &s.texts(),
+        &s.merges,
+        ColumnNames::Letters,
+        &[],
+        &mut caps,
+        &Budget::new(Limits::default()),
+    );
+    let (rows, _, _) = tables(&m)[0];
+    let lens: Vec<usize> = rows.iter().map(Vec::len).collect();
+    assert_eq!(lens, [2, 1, 2]);
+    assert_eq!((rows[0][0].row_span, rows[0][0].col_span), (2, 1));
+    assert_eq!(rows[0][0].anchor.as_ref().unwrap().0, "S!A2");
+    assert_eq!(caps.cells_left, rezzer_layout::MAX_CELLS - 5);
+    assert_eq!(cells_of(&m), expected_cells(&s));
+}

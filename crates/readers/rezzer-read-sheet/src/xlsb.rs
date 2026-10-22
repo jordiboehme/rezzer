@@ -427,7 +427,8 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         })
         .collect();
     let mut formulas = Formulas::new(&names, lim.max_text_bytes);
-    // Merged areas share the item total as for ODS: a fifth of it.
+    // Merged areas listed per sheet, at most a fifth of the item total (the share ODS
+    // gives them per file); the walk is also bounded by the bytes of the part.
     let max_merges = lim.max_elements / 10 * 2;
     let mut halted: Option<&'static str> = None;
     let mut facts: Vec<SheetFacts> = Vec::new();
@@ -759,7 +760,7 @@ fn merge_record_losses(out: &mut Out, q: &str, scan: &SheetScan, max_merges: u64
         out.loss(
             q,
             format!(
-                "merged cells not read past a damaged record after the cells: {e}; those areas are shown as single cells"
+                "merged cells not read past a damaged record: {e}; those areas are shown as single cells"
             ),
             LossReason::Damaged,
             Severity::Info,

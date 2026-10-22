@@ -729,20 +729,33 @@ fn build_table(
             );
         }
         // The sheet rows of the table: header rows, then the data rows, without the rows
-        // that are written as lines. Bounded by the cells left.
-        let max_rows = ctx.caps.cells_left / u64::from(shown_cols);
+        // that are written as lines. Bounded by the cells left: a row costs the positions it
+        // shows (at least 1); positions under a merged area other than its first cell in the
+        // table are not shown and cost nothing.
+        let shown = Rect {
+            right: s.left + (shown_cols - 1),
+            ..s
+        };
+        let clipped = clip_merges(merges, shown);
+        let mut sweep = Sweep::new(&clipped);
+        let mut spent = 0u64;
         let mut table_rows: Vec<u32> = Vec::new();
         let mut cut: Option<u32> = None;
         let mut row = s.top;
         loop {
+            sweep.advance(row);
             if !lines.contains_key(&row)
                 && (region.header_rows.contains(&row) || region.data.is_none_or(|d| d.top <= row))
             {
-                if table_rows.len() as u64 >= max_rows {
+                let cost = sweep.table_row(shown_cols).max(1);
+                if spent + cost > ctx.caps.cells_left {
                     cut = Some(row);
                     break;
                 }
+                spent += cost;
                 table_rows.push(row);
+            } else {
+                sweep.line_row();
             }
             if row >= s.bottom {
                 break;
@@ -760,11 +773,8 @@ fn build_table(
                 Severity::Warning,
             );
         }
-        ctx.caps.cells_left = ctx
-            .caps
-            .cells_left
-            .saturating_sub(table_rows.len() as u64 * u64::from(shown_cols));
-        rows = table_cells(ctx, s, shown_cols, &table_rows, in_table, merges, &what);
+        ctx.caps.cells_left = ctx.caps.cells_left.saturating_sub(spent);
+        rows = table_cells(ctx, shown, &table_rows, in_table, &clipped, &what);
     }
     let header_rows: Vec<u32> = region.header_rows.iter().map(|r| r + 1).collect();
     let band = region.header_rows.len();
@@ -820,70 +830,152 @@ fn build_table(
     }
 }
 
-/// The cells of the table rows `table_rows` over the first `width` columns of `s`: one cell
-/// per position, merged areas as spans, the positions they cover left out.
+/// The merged areas that reach `shown`, clipped to it and sorted by top row.
+fn clip_merges(merges: &[Rect], shown: Rect) -> Vec<Rect> {
+    let mut out: Vec<Rect> = merges
+        .iter()
+        .filter_map(|m| m.intersection(&shown))
+        .collect();
+    out.sort_by_key(|m| (m.top, m.left));
+    out
+}
+
+/// A sweep down the rows of a table over its clipped merged areas (none overlap). A merged
+/// area shows one cell, with spans, at the first table row it reaches after the start or
+/// after a row written as a line; the other positions it covers in the table are not shown.
+/// Works on the areas, never on the positions they cover.
+struct Sweep<'a> {
+    merges: &'a [Rect],
+    next: usize,
+    /// Active areas by (bottom row, index), with the table row count when each was added.
+    active: BTreeMap<(u32, usize), u64>,
+    width: u64,
+    /// Table rows seen so far, and their count at the last row written as a line.
+    rows: u64,
+    last_break: u64,
+    /// Active areas that already show their cell since the last break.
+    running: u64,
+}
+
+impl<'a> Sweep<'a> {
+    fn new(merges: &'a [Rect]) -> Sweep<'a> {
+        Sweep {
+            merges,
+            next: 0,
+            active: BTreeMap::new(),
+            width: 0,
+            rows: 0,
+            last_break: 0,
+            running: 0,
+        }
+    }
+
+    /// Takes in the areas that start at or above `row` and drops those that end above it.
+    fn advance(&mut self, row: u32) {
+        while let Some(m) = self.merges.get(self.next).filter(|m| m.top <= row) {
+            if m.bottom >= row {
+                self.active.insert((m.bottom, self.next), self.rows);
+                self.width += m.width();
+            }
+            self.next += 1;
+        }
+        while let Some((&(bottom, k), &added)) = self.active.first_key_value() {
+            if bottom >= row {
+                break;
+            }
+            self.active.pop_first();
+            self.width -= self.merges[k].width();
+            if self.rows > added.max(self.last_break) {
+                self.running -= 1;
+            }
+        }
+    }
+
+    /// The positions a table row shows: the columns no area covers, plus one cell per area
+    /// that starts showing here.
+    fn table_row(&mut self, cols: u32) -> u64 {
+        let starting = self.active.len() as u64 - self.running;
+        self.rows += 1;
+        self.running = self.active.len() as u64;
+        u64::from(cols) - self.width + starting
+    }
+
+    /// A row written as a line: the areas show a new cell at the next table row.
+    fn line_row(&mut self) {
+        self.last_break = self.rows;
+        self.running = 0;
+    }
+}
+
+/// The cells of the table rows `table_rows` over the columns of `shown`: one cell per
+/// position, each piece of a merged area that runs down consecutive table rows as one cell
+/// with spans (its first table row), the positions it covers left out. `merges` are
+/// clipped to `shown` and sorted by top row. Works per area and per row, never on a grid.
 fn table_cells(
     ctx: &mut Ctx,
-    s: Rect,
-    width: u32,
+    shown: Rect,
     table_rows: &[u32],
     in_table: &[usize],
     merges: &[Rect],
     what: &str,
 ) -> Vec<Vec<Cell>> {
-    let w = width as usize;
     let h = table_rows.len();
-    let right = s.left + (width - 1);
-    let index: HashMap<u32, usize> = table_rows
-        .iter()
-        .enumerate()
-        .map(|(i, &r)| (r, i))
-        .collect();
-    // 0 free, 1 covered, 2 the top left of a merge.
-    let mut grid = vec![0u8; w * h];
-    let mut spans: HashMap<(usize, usize), (u32, u32)> = HashMap::new();
-    for m in merges {
-        let (Some(&i), true) = (index.get(&m.top), s.left <= m.left && m.left <= right) else {
-            continue;
+    // The last index of the run of consecutive table rows each index is in.
+    let mut run_end = vec![0usize; h];
+    for i in (0..h).rev() {
+        run_end[i] = if i + 1 < h && table_rows[i + 1] == table_rows[i] + 1 {
+            run_end[i + 1]
+        } else {
+            i
         };
-        // The merge runs down the consecutive table rows it reaches.
-        let mut rs = 1usize;
-        while i + rs < h
-            && table_rows[i + rs] <= m.bottom
-            && table_rows[i + rs] == table_rows[i + rs - 1] + 1
-        {
-            rs += 1;
-        }
-        let c0 = (m.left - s.left) as usize;
-        let cs = (m.right.min(right) - m.left + 1) as usize;
-        if rs == 1 && cs == 1 {
-            continue;
-        }
-        for r in i..i + rs {
-            for c in c0..c0 + cs {
-                grid[r * w + c] = 1;
-            }
-        }
-        grid[i * w + c0] = 2;
-        spans.insert((i, c0), (rs as u32, cs as u32));
     }
+    // Pieces of the areas: (first index, last index, left column, width).
+    let mut pieces: Vec<(usize, usize, u32, u32)> = Vec::new();
+    for m in merges {
+        let mut i = table_rows.partition_point(|&r| r < m.top);
+        let below = table_rows.partition_point(|&r| r <= m.bottom);
+        let cs = u32::try_from(m.width()).unwrap_or(u32::MAX);
+        while i < below {
+            let last = run_end[i].min(below - 1);
+            if last > i || cs > 1 {
+                pieces.push((i, last, m.left, cs));
+            }
+            i = last + 1;
+        }
+    }
+    pieces.sort_unstable();
     let mut texts: HashMap<(u32, u32), usize> = HashMap::with_capacity(in_table.len());
     for &k in in_table {
         let c = &ctx.cells[k];
         texts.insert((c.row, c.col), k);
     }
     let mut rows = Vec::with_capacity(h);
-    let mut leftover: Vec<usize> = Vec::new();
+    // Pieces running through the current row below their first one, by left column:
+    // (width, last index).
+    let mut through: BTreeMap<u32, (u32, usize)> = BTreeMap::new();
+    let mut next = 0usize;
     for (i, &row) in table_rows.iter().enumerate() {
+        through.retain(|_, &mut (_, last)| last >= i);
+        while let Some(&(first, last, left, cs)) = pieces.get(next).filter(|p| p.0 < i) {
+            if last >= i && first < i {
+                through.insert(left, (cs, last));
+            }
+            next += 1;
+        }
+        let here: HashMap<u32, (u32, u32)> = pieces[next..]
+            .iter()
+            .take_while(|p| p.0 == i)
+            .map(|&(first, last, left, cs)| (left, ((last - first + 1) as u32, cs)))
+            .collect();
         let mut out = Vec::new();
         let mut padding = 0u64;
-        for c in 0..w {
-            let col = s.left + c as u32;
-            let found = texts.remove(&(row, col));
-            if grid[i * w + c] == 1 {
-                leftover.extend(found);
+        let mut col = shown.left;
+        while col <= shown.right {
+            if let Some(&(cs, _)) = through.get(&col) {
+                col = col.saturating_add(cs);
                 continue;
             }
+            let found = texts.remove(&(row, col));
             let inlines = match found {
                 Some(k) => text_inlines(&ctx.cells[k].text),
                 None => {
@@ -892,17 +984,25 @@ fn table_cells(
                 }
             };
             let mut cell = Cell::new(inlines);
-            if let Some(&(rs, cs)) = spans.get(&(i, c)) {
-                cell.row_span = rs;
-                cell.col_span = cs;
-            }
             cell.anchor = Some(ctx.anchor(row, col));
+            let step = match here.get(&col) {
+                Some(&(rs, cs)) => {
+                    cell.row_span = rs;
+                    cell.col_span = cs;
+                    cs
+                }
+                None => 1,
+            };
             out.push(cell);
+            if col == u32::MAX {
+                break;
+            }
+            col = col.saturating_add(step);
         }
         if ctx.budget.add_elements(padding).is_err() {
             ctx.out.elements_out = true;
             ctx.loss(
-                format!("{}!{}", ctx.sheet_q, s.a1()),
+                format!("{}!{}", ctx.sheet_q, shown.a1()),
                 format!(
                     "element limit reached, the rows of {what} from row {} on not shown",
                     u64::from(row) + 1
@@ -914,6 +1014,16 @@ fn table_cells(
         }
         rows.push(out);
     }
+    // Values left under a merged area inside the shown rows and columns.
+    let shown_rows: std::collections::HashSet<u32> = table_rows.iter().copied().collect();
+    let mut leftover: Vec<usize> = texts
+        .into_values()
+        .filter(|&k| {
+            let c = &ctx.cells[k];
+            shown_rows.contains(&c.row) && shown.left <= c.col && c.col <= shown.right
+        })
+        .collect();
+    leftover.sort_unstable();
     // Cells past the shown columns or rows, or under a merge clipped to the table, are said
     // by the cap losses; any other cell left is written as a line so none is lost.
     for k in leftover {
