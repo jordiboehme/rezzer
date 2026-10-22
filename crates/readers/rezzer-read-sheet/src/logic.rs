@@ -131,6 +131,9 @@ pub(crate) struct Formulas {
     /// The syntax cell formulas are stored in, and its name in the model.
     dialect: Dialect,
     dialect_name: &'static str,
+    /// What each formula cell calls and reads on its own sheet, for the layout detector: by
+    /// uppercase sheet name, then (row, column). Handed out by [`Formulas::layout_facts`].
+    layout: HashMap<String, HashMap<(u32, u32), sheetlayout::FormulaIn>>,
 }
 
 impl Formulas {
@@ -166,7 +169,29 @@ impl Formulas {
             unindexed_names: 0,
             dialect: Dialect::Excel,
             dialect_name: "excel",
+            layout: HashMap::new(),
         }
+    }
+
+    /// The layout facts of the formula cells of `sheet` (matched without case), handed out
+    /// once: the functions each one calls and the ranges it reads on its own sheet. A
+    /// formula that was not analyzed is listed with neither.
+    pub fn layout_facts(&mut self, sheet: &str) -> HashMap<(u32, u32), sheetlayout::FormulaIn> {
+        self.layout.remove(&sheet.to_uppercase()).unwrap_or_default()
+    }
+
+    /// Notes a formula cell for the layout detector, from its analysis when there is one.
+    fn note_layout(&mut self, sheet: &str, row: u32, col: u32, a: Option<&Analysis>) {
+        let fact = a.map_or_else(sheetlayout::FormulaIn::default, |a| {
+            sheetlayout::FormulaIn {
+                functions: a.functions.iter().map(|f| f.to_uppercase()).collect(),
+                reads: same_sheet_reads(sheet, &a.refs),
+            }
+        });
+        self.layout
+            .entry(sheet.to_uppercase())
+            .or_default()
+            .insert((row, col), fact);
     }
 
     /// Cell formulas stored as OpenFormula (`of:=[.A1]`), as in ODS files. Their stored text
@@ -385,6 +410,7 @@ impl Formulas {
         formula.cached = cached;
         let mut problem = None;
         if too_long(text) {
+            self.note_layout(sheet, row, col, None);
             self.unindexed_formulas += 1;
             notes.push(format!(
                 "longer than {MAX_FORMULA_CHARS} characters, Excel's maximum: not analyzed"
@@ -400,6 +426,7 @@ impl Formulas {
         } else {
             match formulakit::analyze(text, self.dialect, CellPos { row, col }) {
                 Ok(mut a) => {
+                    self.note_layout(sheet, row, col, Some(&a));
                     // `[@col]` inside a table names no table: it is the one holding the cell.
                     if let Some(t) = self.table_at(sheet, row, col).map(str::to_string) {
                         for r in &mut a.refs {
@@ -434,6 +461,7 @@ impl Formulas {
                     self.inputs.formula_ids.push((index, id));
                 }
                 Err(e) => {
+                    self.note_layout(sheet, row, col, None);
                     self.unindexed_formulas += 1;
                     notes.push(e.to_string());
                     problem = Some(FormulaProblem {
@@ -463,6 +491,7 @@ impl Formulas {
         cached: Option<Value>,
     ) -> (Formula, FormulaProblem) {
         let anchor = format!("{}!{}", quote_sheet(sheet), crate::grid::a1(row, col));
+        self.note_layout(sheet, row, col, None);
         self.unindexed_formulas += 1;
         let mut notes = Vec::new();
         if cached.is_none() {
@@ -558,6 +587,7 @@ impl Formulas {
         if cached.is_none() {
             notes.push("not calculated in file".to_string());
         }
+        self.note_layout(sheet, row, col, None);
         // The logic index sees the inputs the table reads.
         match formulakit::analyze(&expression, Dialect::Excel, CellPos { row, col }) {
             Ok(a) => {
@@ -701,6 +731,41 @@ impl Formulas {
 }
 
 /// More characters than Excel allows in a formula.
+/// The ranges `refs` read on `sheet` itself: references without a sheet, or naming this
+/// sheet (without case) and no other. References into other sheets, 3D references, other
+/// workbooks, names and table references are left out.
+fn same_sheet_reads(sheet: &str, refs: &[Ref]) -> Vec<sheetlayout::Rect> {
+    let here = |s: &Option<formulakit::SheetSpan>| match s {
+        None => true,
+        Some(span) => span.last.is_none() && span.first.eq_ignore_ascii_case(sheet),
+    };
+    refs.iter()
+        .filter_map(|r| match r {
+            Ref::Cell { sheet: s, pos, .. } if here(s) => Some(sheetlayout::Rect {
+                top: pos.row,
+                left: pos.col,
+                bottom: pos.row,
+                right: pos.col,
+            }),
+            Ref::Range {
+                sheet: s,
+                start,
+                end,
+                ..
+            } if here(s) => Some(
+                sheetlayout::Rect {
+                    top: start.row,
+                    left: start.col,
+                    bottom: end.row,
+                    right: end.col,
+                }
+                .normalized(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
 fn too_long(text: &str) -> bool {
     text.len() > MAX_FORMULA_CHARS && text.chars().count() > MAX_FORMULA_CHARS
 }
@@ -1147,7 +1212,7 @@ fn labels_of<'a>(
     cells: &'a [RawCell],
     wanted: &HashSet<(u32, u32)>,
 ) -> HashMap<(u32, u32), Around<'a>> {
-    let label = |t: &'a str| (t.len() <= MAX_LABEL && !t.trim().is_empty()).then_some(t);
+    let label = |t: &'a str| is_label(t).then_some(t);
     let mut columns: HashMap<u32, Column<'a>> = HashMap::new();
     let mut out = HashMap::new();
     // How often each text occurs in its column, and how many texts and distinct texts
@@ -1301,6 +1366,20 @@ fn text_run(cells: &[RawCell], i: usize) -> Vec<usize> {
     up
 }
 
+/// Whether a text reads as a label: not empty after trimming and at most [`MAX_LABEL`]
+/// bytes. The rule of [`labels_of`], also handed to the layout detector.
+pub(crate) fn is_label(text: &str) -> bool {
+    text.len() <= MAX_LABEL && !text.trim().is_empty()
+}
+
+/// Whether the texts of a column, top first, read as units: declared by its first text or
+/// likely (see [`UnitColumn`]). The rule of [`reads_as_unit_column`], also handed to the
+/// layout detector.
+pub(crate) fn is_unit_column_texts(texts: &[&str]) -> bool {
+    let texts: Vec<&str> = texts.iter().map(|t| t.trim()).collect();
+    unit_column_of(texts) != UnitColumn::No
+}
+
 /// How the text run `run` reads (see [`UnitColumn`]).
 fn reads_as_unit_column(cells: &[RawCell], run: &[usize]) -> UnitColumn {
     let texts: Vec<&str> = run
@@ -1308,6 +1387,11 @@ fn reads_as_unit_column(cells: &[RawCell], run: &[usize]) -> UnitColumn {
         .filter_map(|&j| text_of(&cells[j]))
         .map(str::trim)
         .collect();
+    unit_column_of(texts)
+}
+
+/// How trimmed texts of a column, top first, read (see [`UnitColumn`]).
+fn unit_column_of(texts: Vec<&str>) -> UnitColumn {
     if texts
         .first()
         .is_some_and(|t| UNIT_HEADERS.iter().any(|h| t.eq_ignore_ascii_case(h)))
@@ -1639,6 +1723,62 @@ mod tests {
             doc.losses
         );
         assert!(out.partial);
+    }
+
+    #[test]
+    fn label_callback_is_the_label_rule() {
+        assert!(is_label("Span"));
+        assert!(is_label("  Span  "));
+        assert!(!is_label("   "));
+        assert!(!is_label(""));
+        assert!(is_label(&"a".repeat(MAX_LABEL)));
+        assert!(!is_label(&"a".repeat(MAX_LABEL + 1)));
+    }
+
+    #[test]
+    fn unit_column_callback_reads_units() {
+        assert!(is_unit_column_texts(&["Unit", "whatever"]));
+        assert!(is_unit_column_texts(&[" kN/m3 ", "m2", "mm"]));
+        assert!(!is_unit_column_texts(&["Alice", "Bob", "Carol"]));
+        assert!(!is_unit_column_texts(&[]));
+    }
+
+    #[test]
+    fn layout_facts_name_functions_and_same_sheet_reads() {
+        let mut out = out();
+        let mut formulas = Formulas::new(&[], u64::MAX);
+        let texts = [
+            (4, "SUBTOTAL(9,B2:B4)"),
+            (5, "SUM(B2:B5)+Data!B2+'S'!C1"),
+            (6, "SUM(Data!B2:B5)"),
+            (7, "1+"),
+        ];
+        for (row, text) in texts {
+            let index = out.doc.facets.formulas.len();
+            let (f, _) = formulas.cell("S", row, 1, text, FormulaKind::Cell, None, None, index);
+            out.doc.facets.formulas.push(f);
+        }
+        let (f, _) = formulas.cell("Data", 0, 0, "SUM(A2:A3)", FormulaKind::Cell, None, None, 9);
+        out.doc.facets.formulas.push(f);
+        let rect = |top, left, bottom, right| sheetlayout::Rect {
+            top,
+            left,
+            bottom,
+            right,
+        };
+        let facts = formulas.layout_facts("S");
+        assert_eq!(facts.len(), 4, "{facts:?}");
+        assert_eq!(facts[&(4, 1)].functions, ["SUBTOTAL"]);
+        assert_eq!(facts[&(4, 1)].reads, [rect(1, 1, 3, 1)]);
+        assert_eq!(facts[&(5, 1)].functions, ["SUM"]);
+        assert_eq!(facts[&(5, 1)].reads, [rect(1, 1, 4, 1), rect(0, 2, 0, 2)]);
+        // A read on another sheet never marks a row of this one.
+        assert!(facts[&(6, 1)].reads.is_empty());
+        // A formula that does not parse still counts as a formula.
+        assert_eq!(facts[&(7, 1)], sheetlayout::FormulaIn::default());
+        // Handed out once per sheet.
+        assert!(formulas.layout_facts("S").is_empty());
+        assert_eq!(formulas.layout_facts("data").len(), 1);
     }
 
     #[test]
