@@ -11,7 +11,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use common::{Sheet, every_cell_once, ranges, thread_cpu};
-use sheetlayout::{Limits, Pos, Rect, segment};
+use sheetlayout::{Limits, Pos, Rect, detect, segment};
 
 thread_local! {
     static CURRENT: Cell<isize> = const { Cell::new(0) };
@@ -164,4 +164,108 @@ fn dense_block_heap_follows_the_cells() {
     eprintln!("dense block: peak heap {peak} bytes ({per_cell} per cell), {used:?} CPU");
     assert!(per_cell <= 64, "{per_cell} bytes per cell");
     assert_eq!(ranges(&layout), ["A1:ALL1000"]);
+}
+
+#[test]
+fn wide_merged_header_with_long_text_is_bounded() {
+    // A1:XFC1 merged with a text of 32,767 bytes, XFD1 a second header cell, numbers below:
+    // the paths would be 16,383 copies of the long text.
+    let long = "x".repeat(32_767);
+    let mut sheet = Sheet::new()
+        .cell("A1", &long)
+        .cell("XFD1", "Tail")
+        .rows("A2", &["1|2"]);
+    sheet.merges.push(Rect {
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 16_382,
+    });
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("wide merged header: peak heap {peak} bytes, {used:?} CPU");
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 16 * MB, "peak heap {peak}");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 1);
+    assert!(layout.regions[0].rest);
+    assert!(layout.issues[0].what.contains("header path limit"));
+    // A short text over the same width fits: 16,384 paths.
+    let mut sheet = Sheet::new()
+        .cell("A1", "Head")
+        .cell("XFD1", "Tail")
+        .rows("A2", &["1|2"]);
+    sheet.merges.push(Rect {
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 16_382,
+    });
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("wide short header: peak heap {peak} bytes, {used:?} CPU");
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 16 * MB, "peak heap {peak}");
+    let r = &layout.regions[0];
+    assert_eq!(r.header_paths.len(), 16_384);
+    assert_eq!(r.header_paths[16_382], "Head");
+    assert_eq!(r.header_paths[16_383], "Tail");
+}
+
+#[test]
+fn many_merged_single_text_rows_are_bounded() {
+    // A header row, 200,000 single-text rows merged over the width, then a number row: H1 and
+    // H2 walk past the single-text rows once each.
+    let n = 200_000u32;
+    let mut sheet = Sheet::styled().rows("A1", &["*a|*b|*c"]);
+    for k in 0..n {
+        let row = 1 + k;
+        sheet.put(Pos { row, col: 0 }, "t");
+        sheet.merges.push(Rect {
+            top: row,
+            left: 0,
+            bottom: row,
+            right: 2,
+        });
+    }
+    sheet.put(Pos { row: n + 1, col: 0 }, "1");
+    sheet.put(Pos { row: n + 1, col: 1 }, "2");
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("many single-text rows: peak heap {peak} bytes, {used:?} CPU");
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+    let r = &layout.regions[0];
+    assert_eq!(r.header_rows, [0]);
+    assert_eq!(r.header_paths, ["a", "b", "c"]);
+}
+
+#[test]
+fn dense_block_detect_heap_follows_the_cells() {
+    let mut sheet = Sheet::new();
+    sheet.put(Pos { row: 0, col: 0 }, "h");
+    for col in 1..1000u32 {
+        sheet.put(Pos { row: 0, col }, "h");
+    }
+    for row in 1..1000u32 {
+        for col in 0..1000u32 {
+            sheet.put(Pos { row, col }, "1");
+        }
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    let per_cell = peak / 1_000_000;
+    eprintln!("dense block detect: peak heap {peak} bytes ({per_cell} per cell), {used:?} CPU");
+    assert!(per_cell <= 64, "{per_cell} bytes per cell");
+    assert!(used < std::time::Duration::from_secs(4), "{used:?}");
+    assert_eq!(layout.regions[0].header_rows, [0]);
+    assert_eq!(layout.regions[0].header_paths.len(), 1000);
 }

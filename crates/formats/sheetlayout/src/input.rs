@@ -148,7 +148,9 @@ pub struct FormulaIn {
 }
 
 /// One cell with content. A formula cell with an empty result has an empty `text` and still
-/// counts as occupied; any other cell with an empty `text` counts as empty.
+/// counts as occupied; any other cell with an empty `text` counts as empty. An empty cell
+/// with center across selection is worth passing with an empty `text`: it tells how far the
+/// text to its left spreads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellIn {
     pub pos: Pos,
@@ -246,6 +248,9 @@ pub struct Limits {
     pub max_regions: usize,
     /// Depth of the section recursion of report sheets.
     pub max_section_depth: u32,
+    /// Bytes of header path text per sheet, each path counted with its `String`. A region
+    /// whose paths would pass it stays one grid region with a `Limit` issue.
+    pub max_path_bytes: usize,
 }
 
 impl Default for Limits {
@@ -254,6 +259,7 @@ impl Default for Limits {
             max_cut_depth: 64,
             max_regions: 10_000,
             max_section_depth: 8,
+            max_path_bytes: 32 * 1024 * 1024,
         }
     }
 }

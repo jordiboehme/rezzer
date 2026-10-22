@@ -5,7 +5,8 @@
 //! A small builder for inputs from a text grid, and the checks every test shares.
 //!
 //! A row is written as cells separated by `|`. A cell token may start with markers: `*` bold,
-//! `^` filled. Then `=` makes it a formula cell (the rest is its shown result, which may be
+//! `^` filled, `>` center across selection (a token of markers only is an empty styled cell).
+//! Then `=` makes it a formula cell (the rest is its shown result, which may be
 //! empty). A token that parses as a number is a number, `TRUE` and `FALSE` are bools, the
 //! rest is text. An empty token is no cell.
 
@@ -13,7 +14,7 @@
 
 use sheetlayout::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Layout, Limits, NameIn, Pos, Rect, Region,
-    Style, segment,
+    Style, detect, segment,
 };
 
 /// `B3` as a 0-based position.
@@ -63,6 +64,7 @@ pub struct Sheet {
     pub names: Vec<NameIn>,
     pub frozen: Option<(u32, u32)>,
     pub print_titles: Option<(u32, u32)>,
+    pub header_guess: Option<(u32, bool)>,
     pub styles_read: bool,
 }
 
@@ -107,12 +109,16 @@ impl Sheet {
         }
         let mut bold = false;
         let mut filled = false;
+        let mut across = false;
         loop {
             if let Some(rest) = t.strip_prefix('*') {
                 bold = true;
                 t = rest;
             } else if let Some(rest) = t.strip_prefix('^') {
                 filled = true;
+                t = rest;
+            } else if let Some(rest) = t.strip_prefix('>') {
+                across = true;
                 t = rest;
             } else {
                 break;
@@ -130,6 +136,7 @@ impl Sheet {
         let style = Style {
             bold: known(bold),
             filled: known(filled),
+            center_across: known(across),
             ..Style::default()
         };
         let (class, number) = if let Ok(n) = t.parse::<f64>() {
@@ -186,7 +193,7 @@ impl Sheet {
             outline: Vec::new(),
             frozen: self.frozen,
             print_titles: self.print_titles,
-            header_guess: None,
+            header_guess: self.header_guess,
             styles_read: self.styles_read,
             is_label: &any_label,
             is_unit_column: &no_unit,
@@ -197,6 +204,15 @@ impl Sheet {
     pub fn segment(&self) -> Layout {
         let input = self.input();
         let layout = segment(&input, &Limits::default(), &never);
+        every_cell_once(&input, &layout);
+        no_overlap(&layout);
+        layout
+    }
+
+    /// Detects with the default limits and no stop, with the same checks as `segment`.
+    pub fn detect(&self) -> Layout {
+        let input = self.input();
+        let layout = detect(&input, &Limits::default(), &never);
         every_cell_once(&input, &layout);
         no_overlap(&layout);
         layout

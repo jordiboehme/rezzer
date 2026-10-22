@@ -10,6 +10,9 @@
 //! range, how it was found and how sure that is. Facts decide first; rules decide only where
 //! no fact exists.
 //!
+//! [`segment`] finds the regions; [`detect`] also decides the header band, the header paths
+//! and the label columns of each region.
+//!
 //! The crate never builds a grid of the used area. It works on the sorted cells and on
 //! rectangles, so a merge over the whole sheet costs as much as one cell.
 //!
@@ -44,14 +47,19 @@
 
 mod captions;
 mod cut;
+mod detect;
 mod facts;
+mod header;
 mod input;
 mod occupancy;
+mod paths;
 
 pub use input::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Limits, NameIn, Pos, Rect, Style,
     column_letters,
 };
+
+pub use detect::detect;
 
 use cut::Trip;
 use occupancy::{Prep, bounds};
@@ -153,7 +161,8 @@ pub struct Region {
     /// The file states the table has no header row in the sheet.
     pub hidden_header: bool,
     /// The rest of the sheet after a limit or a stop: one grid of the cells not placed, which
-    /// no rule decides. An issue with the same rectangle says why.
+    /// no rule decides. A region whose header paths would pass the path limit is one too. An
+    /// issue with the same rectangle says why.
     pub rest: bool,
 }
 
@@ -204,6 +213,8 @@ pub(crate) struct Work {
     pub dead: bool,
     /// The corner split was skipped for this region (it may hold several blocks).
     pub coarse: bool,
+    /// For a fact region, its index into `Input::facts`.
+    pub fact: Option<usize>,
 }
 
 fn rule_region(rect: Rect, detail: &str) -> Region {
@@ -310,6 +321,7 @@ fn rest_region(
         origin: Origin::Rest,
         dead: false,
         coarse: false,
+        fact: None,
     })
 }
 
@@ -336,6 +348,7 @@ pub(crate) fn segment_work<'a>(
             origin: Origin::Fact,
             dead: false,
             coarse: false,
+            fact: Some(k.fact),
         })
         .collect();
 
@@ -377,6 +390,7 @@ pub(crate) fn segment_work<'a>(
                 origin,
                 dead: false,
                 coarse: leaf.coarse,
+                fact: None,
             });
         }
         cut.rest
@@ -438,7 +452,7 @@ pub(crate) fn segment_work<'a>(
 /// caption rows and title regions, and the print titles and panes that cover each region.
 ///
 /// Fact regions are tables with an exact header. Rule regions are grids with certainty
-/// `Unsure` until the header rules decide them. `stop` is asked between pieces of work; when
+/// `Unsure` and the reason `not decided`; [`detect`] decides them. `stop` is asked between pieces of work; when
 /// it says stop, the cells not yet placed become one grid region and a `Stopped` issue says
 /// so. Past the region limit the same happens with a `Limit` issue; a piece past the cut
 /// depth limit stays one grid region of its own with a `Limit` issue. Such rest regions have

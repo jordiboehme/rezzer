@@ -48,4 +48,34 @@ styles are known, the run ends at a row with fewer marks (bold, fill) than the r
 A region of caption rows only that stands at most 2 empty rows above another region becomes
 that region's title.
 
+## Headers
+
+`detect` finds the regions and then the header of each one. The header band is the top rows
+of a region after its caption rows.
+
+- Values change type: the band is the leading rows that hold only text and years (whole
+  numbers from 1900 to 2100), at most 4. The next row that is not a single text must hold a
+  number, a date, a bool or a formula. A vertical merge that starts in the band extends it.
+- Styles change: where styles are known, the band is the leading rows that are all bold or
+  all filled, at most 4, when the next row is not. Rows with a single text are skipped.
+- When both rules find a band and the bands differ, sheetlayout does not pick one. The
+  region stays a grid, and the reason says why.
+- A region of only text gets its first row as header only when a style or a header guess
+  says so, the cells fill every column, are all different and do not repeat below.
+- Print titles that start at the first row after the captions set the band, up to 10 rows.
+  Frozen panes only confirm a band or label columns.
+- Excel tables, database ranges, pivot tables and autofilters keep the header the file
+  states.
+
+Each column gets a header path: the band cells above it, top to bottom, joined with ` / `. A
+horizontal merge or a text centered across selection counts for every column it covers. A
+vertical merge counts once. A text above an empty cell that is not merged belongs to its own
+column only. A column with no header text gets an empty path.
+
+Up to 3 left columns whose data rows hold text in at least 80 % of the rows are label
+columns.
+
+Path text is limited per sheet. A region whose paths would pass the limit stays one grid
+region, and an issue says so.
+
 License: MPL-2.0

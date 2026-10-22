@@ -15,6 +15,8 @@ pub(crate) struct Prep<'a> {
     pub cells: Vec<u32>,
     /// The merges, with their corners in order, sorted by top and left, without repeats.
     pub merges: Vec<Rect>,
+    /// Positions of empty cells with center across selection, sorted, without repeats.
+    pub across: Vec<Pos>,
 }
 
 impl<'a> Prep<'a> {
@@ -34,10 +36,19 @@ impl<'a> Prep<'a> {
         let mut merges: Vec<Rect> = input.merges.iter().map(|m| m.normalized()).collect();
         merges.sort_unstable_by_key(|m| (m.top, m.left, m.bottom, m.right));
         merges.dedup();
+        let mut across: Vec<Pos> = input
+            .cells
+            .iter()
+            .filter(|c| !c.occupied() && c.style.center_across == Some(true))
+            .map(|c| c.pos)
+            .collect();
+        across.sort_unstable();
+        across.dedup();
         Self {
             input,
             cells,
             merges,
+            across,
         }
     }
 
