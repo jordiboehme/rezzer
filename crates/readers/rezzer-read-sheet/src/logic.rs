@@ -1410,6 +1410,27 @@ fn reads_as_unit_column(cells: &[RawCell], run: &[usize]) -> UnitColumn {
     unit_column_of(texts)
 }
 
+/// Unit symbols that read as units on their own, also without a digit or a sign: SI base
+/// and derived units with the usual prefixes and common engineering units. A column of
+/// these (`m`, `kPa`, `kN`) is a unit column even though no text in it looks like `kN/m3`.
+const UNIT_SYMBOLS: &[&str] = &[
+    "mm", "cm", "dm", "m", "km", "mm2", "cm2", "m2", "km2", "mm3", "cm3", "m3", "mg", "g", "kg",
+    "t", "ms", "s", "min", "h", "hr", "d", "N", "kN", "MN", "Nm", "kNm", "Pa", "kPa", "MPa", "GPa",
+    "bar", "mbar", "%", "deg", "°", "°C", "K", "mW", "W", "kW", "MW", "GW", "Wh", "kWh", "MWh",
+    "J", "kJ", "MJ", "ml", "mL", "l", "L", "mV", "V", "kV", "mA", "A", "kA", "Hz", "kHz", "MHz",
+    "rad", "ha", "ppm",
+];
+
+/// Whether `t` is one of [`UNIT_SYMBOLS`] or a quotient of two of them, like `m/s` or
+/// `kN/m3`.
+fn is_unit_symbol(t: &str) -> bool {
+    let known = |p: &str| UNIT_SYMBOLS.contains(&p);
+    match t.split_once('/') {
+        Some((a, b)) => known(a) && known(b),
+        None => known(t),
+    }
+}
+
 /// How trimmed texts of a column, top first, read (see [`UnitColumn`]).
 fn unit_column_of(texts: Vec<&str>) -> UnitColumn {
     if texts
@@ -1419,10 +1440,14 @@ fn unit_column_of(texts: Vec<&str>) -> UnitColumn {
         return UnitColumn::Declared;
     }
     let counted: Vec<&str> = texts.into_iter().filter(|t| *t != "-").collect();
+    // Every text is a unit symbol: units, also when none is marked by a digit or a sign.
+    if counted.len() >= 2 && counted.iter().all(|t| is_unit_symbol(t)) {
+        return UnitColumn::Likely;
+    }
     let known: Vec<&str> = counted
         .iter()
         .copied()
-        .filter(|t| units::is_unit(t, true))
+        .filter(|t| units::is_unit(t, true) || is_unit_symbol(t))
         .collect();
     let long = known.iter().filter(|t| t.chars().count() > 1).count();
     let marked = known.iter().any(|t| {
@@ -1757,6 +1782,22 @@ fn dependency_graph(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_symbols_make_a_unit_column() {
+        // Plain symbols without a digit or a sign.
+        assert!(is_unit_column_texts(&["m", "m", "-", "kPa", "kPa"]));
+        assert!(is_unit_column_texts(&["m2", "m"]));
+        // Quotients of symbols, beside a text that is not a unit.
+        assert!(is_unit_column_texts(&[
+            "veh/hr", "veh/hr", "g/s", "g/m3", "m3/s", "m/s"
+        ]));
+        // Words, codes and a single symbol are not a unit column.
+        assert!(!is_unit_column_texts(&["m"]));
+        assert!(!is_unit_column_texts(&["OK", "N/A", "yes"]));
+        assert!(!is_unit_column_texts(&["A", "B", "C"]));
+        assert!(!is_unit_column_texts(&["red", "blue", "green"]));
+    }
+
     use rezzer_limits::Limits;
     use rezzer_model::{Confidence, Detection, Document, FormatId, SourceInfo};
 

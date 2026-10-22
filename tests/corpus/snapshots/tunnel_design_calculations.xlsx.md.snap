@@ -28,9 +28,9 @@ modified: "2026-08-24T17:24:13Z"
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
 | Design\_Basis | sheet | 5 regions |  |  |
-| Structural\_Lining | sheet | 8 rows x 3 columns, 8 regions | result |  |
-| Ventilation | sheet | 2 rows x 3 columns, 6 regions | result |  |
-| Drainage | sheet | 3 rows x 3 columns, 7 regions | result |  |
+| Structural\_Lining | sheet | 24 rows x 2 columns, 8 regions | result |  |
+| Ventilation | sheet | 3 rows x 3 columns, 6 regions | result |  |
+| Drainage | sheet | 10 rows x 2 columns, 8 regions | result |  |
 
 - Sheets: 4
 - Formulas: 86
@@ -118,18 +118,16 @@ Label and value pairs A5:C13:
 
 ### TERZAGHI LOOSENING PRESSURE
 
-Table A15:C23 (data A16:C23), row labels in A, found by rules: empty-row gaps, caption row 15, column C is not a unit column, no header found.
+Label and value pairs A16:C23:
 
-| A | B | C |
-| --- | --- | --- |
-| Tunnel radius, R | 5.00 | m |
-| Loosening zone width, B1 | 7.89 | m |
-| At-rest coeff., K0 = 1-sin(phi) | 0.50 | - |
-| tan(phi) | 0.58 | - |
-| Terzaghi vertical pressure, Pv | 194.15 | kPa |
-| Lower-bound floor (0.3\*gamma\*D) | 66.00 | kPa |
-| Design vertical pressure, Pv | 194.15 | kPa |
-| Lateral pressure at springline, Ph = K0\*Pv | 97.08 | kPa |
+- Tunnel radius, R: 5.00 m (B16)
+- Loosening zone width, B1: 7.89 m (B17)
+- At-rest coeff., K0 = 1-sin(phi): 0.50 - (B18)
+- tan(phi): 0.58 - (B19)
+- Terzaghi vertical pressure, Pv: 194.15 kPa (B20)
+- Lower-bound floor (0.3\*gamma\*D): 66.00 kPa (B21)
+- Design vertical pressure, Pv: 194.15 kPa (B22)
+- Lateral pressure at springline, Ph = K0\*Pv: 97.08 kPa (B23)
 
 ### RING THRUST \& MOMENT (crown = 0deg, springline = 90deg)
 
@@ -226,35 +224,29 @@ Label and value pairs A5:C17:
 
 ### GEOMETRY
 
-Table A19:C21 (data A20:C21), row labels in A, found by rules: empty-row gaps, caption row 19, column C is not a unit column, no header found.
+Label and value pairs A20:C21:
 
-| A | B | C |
-| --- | --- | --- |
-| Cross-sectional area, A = pi.D^2/4 | 78.54 | m2 |
-| Hydraulic diameter (circular = D) | 10.00 | m |
+- Cross-sectional area, A = pi.D^2/4: 78.54 m2 (B20)
+- Hydraulic diameter (circular = D): 10.00 m (B21)
 
 ### CO DILUTION - FRESH AIR DEMAND
 
-Table A23:C29 (data A24:C29), row labels in A, found by rules: empty-row gaps, caption row 23, column C is not a unit column, no header found.
+Label and value pairs A24:C29:
 
-| A | B | C |
-| --- | --- | --- |
-| Heavy diesel vehicles | 120 | veh/hr |
-| Light vehicles | 1080 | veh/hr |
-| Total CO emission rate | 2.2400 | g/s |
-| Permissible CO, mass basis | 0.1145 | g/m3 |
-| Fresh air required, Q | 19.56 | m3/s |
-| Required velocity (CO dilution) | 0.25 | m/s |
+- Heavy diesel vehicles: 120 veh/hr (B24)
+- Light vehicles: 1080 veh/hr (B25)
+- Total CO emission rate: 2.2400 g/s (B26)
+- Permissible CO, mass basis: 0.1145 g/m3 (B27)
+- Fresh air required, Q: 19.56 m3/s (B28)
+- Required velocity (CO dilution): 0.25 m/s (B29)
 
 ### CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)
 
-Table A31:C34 (data A32:C34), row labels in A, found by rules: empty-row gaps, caption row 31, column C is not a unit column, no header found.
+Label and value pairs A32:C34:
 
-| A | B | C |
-| --- | --- | --- |
-| Critical velocity, Vc | 2.18 | m/s |
-| Governing design velocity | 2.18 | m/s |
-| Comfort/safety check (1-10 m/s) | OK |  |
+- Critical velocity, Vc: 2.18 m/s (B32)
+- Governing design velocity: 2.18 m/s (B33)
+- Comfort/safety check (1-10 m/s): OK (B34)
 
 ### JET FAN COUNT
 
@@ -289,26 +281,22 @@ Label and value pairs A5:C14:
 
 ### INFLOW ESTIMATES
 
-Table A16:C19 (data A17:C19), row labels in A, found by rules: empty-row gaps, caption row 16, column C is not a unit column, no header found.
+Label and value pairs A17:C19:
 
-| A | B | C |
-| --- | --- | --- |
-| Groundwater seepage inflow | 16.00 | l/s |
-| Portal rainfall runoff (Rational Method) | 106.25 | l/s |
-| Total design drain flow | 122.25 | l/s |
+- Groundwater seepage inflow: 16.00 l/s (B17)
+- Portal rainfall runoff (Rational Method): 106.25 l/s (B18)
+- Total design drain flow: 122.25 l/s (B19)
 
 ### INVERT DRAIN PIPE SIZING (Manning's, full-bore)
 
-Table A21:C27 (data A22:C25), row labels in A, found by rules: empty-row gaps, caption row 21, column C is not a unit column, no header found, notes in row 27.
+Label and value pairs A22:C25:
 
-| A | B | C |
-| --- | --- | --- |
-| Pipe area | 0.0707 | m2 |
-| Hydraulic radius, R = D/4 | 0.0750 | m |
-| Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2) | 68.38 | l/s |
-| Trial pipe status | UNDERSIZED - increase diameter |  |
+- Pipe area: 0.0707 m2 (B22)
+- Hydraulic radius, R = D/4: 0.0750 m (B23)
+- Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2): 68.38 l/s (B24)
+- Trial pipe status: UNDERSIZED - increase diameter (B25)
 
-STANDARD PIPE SIZE CHECK (A27)
+### STANDARD PIPE SIZE CHECK
 
 ### Table E28:F38
 
@@ -337,13 +325,11 @@ Table A40:C40, row labels in A, found by rules: empty-row gaps, no header found.
 
 ### SUMP \& PUMP SIZING
 
-Table A42:C45 (data A43:C45), row labels in A, found by rules: empty-row gaps, caption row 42, column C is not a unit column, no header found.
+Label and value pairs A43:C45:
 
-| A | B | C |
-| --- | --- | --- |
-| Peak design inflow to sump | 152.81 | l/s |
-| Required sump volume | 91.69 | m3 |
-| Required pump capacity | 152.81 | l/s |
+- Peak design inflow to sump: 152.81 l/s (B43)
+- Required sump volume: 91.69 m3 (B44)
+- Required pump capacity: 152.81 l/s (B45)
 
 ## Logic
 

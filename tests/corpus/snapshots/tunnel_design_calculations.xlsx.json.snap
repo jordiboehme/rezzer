@@ -1089,29 +1089,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Structural_Lining!A15",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A15:C23"
           },
           "rows": [
@@ -2689,29 +2674,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Ventilation!A19",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A19:C21"
           },
           "rows": [
@@ -2818,29 +2788,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Ventilation!A23",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A23:C29"
           },
           "rows": [
@@ -3087,29 +3042,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Ventilation!A31",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A31:C34"
           },
           "rows": [
@@ -3868,29 +3808,14 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Drainage!A16",
-            "kind": "table",
-            "label_cols": 1,
+            "kind": "key_value",
+            "label_cols": 0,
             "range": "A16:C19"
           },
           "rows": [
@@ -4014,7 +3939,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "heading"
         },
         {
-          "anchor": "Drainage!A21:C27",
+          "anchor": "Drainage!A21:C25",
           "caption": "INVERT DRAIN PIPE SIZING (Manning's, full-bore)",
           "header_rows": 0,
           "layout": {
@@ -4032,35 +3957,15 @@ source: crates/rezzer/tests/corpus.rs
                 "kind": "rule"
               },
               {
-                "detail": "column C is not a unit column",
+                "detail": "label, value and unit columns",
                 "id": "K",
-                "kind": "rule"
-              },
-              {
-                "detail": "no header found",
-                "id": "H0",
-                "kind": "rule"
-              },
-              {
-                "detail": "label column A",
-                "id": "L",
-                "kind": "rule"
-              },
-              {
-                "detail": "notes in row 27",
-                "id": "N",
                 "kind": "rule"
               }
             ],
-            "header_paths": [
-              "A",
-              "B",
-              "C"
-            ],
             "key": "Drainage!A21",
-            "kind": "table",
-            "label_cols": 1,
-            "range": "A21:C27"
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A21:C25"
           },
           "rows": [
             [
@@ -4208,8 +4113,37 @@ source: crates/rezzer/tests/corpus.rs
               "type": "text"
             }
           ],
-          "role": "note",
-          "type": "paragraph"
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A27:C27",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 27",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "title rows only",
+                "id": "T2",
+                "kind": "rule"
+              }
+            ],
+            "key": "Drainage!A27",
+            "kind": "title",
+            "label_cols": 0,
+            "range": "A27:C27"
+          },
+          "type": "table"
         },
         {
           "inlines": [
@@ -4524,17 +4458,7 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "table"
         },
-        {
-          "inlines": [
-            {
-              "text": "Table A40:C40",
-              "type": "text"
-            }
-          ],
-          "level": 3,
-          "type": "heading"
-        },
-        "<3 more items>"
+        "<4 more items>"
       ],
       "kind": "sheet",
       "title": "Drainage",
@@ -5102,21 +5026,21 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "Structural_Lining",
         "role": "result",
-        "size": "8 rows x 3 columns, 8 regions"
+        "size": "24 rows x 2 columns, 8 regions"
       },
       {
         "id": "Ventilation",
         "kind": "sheet",
         "name": "Ventilation",
         "role": "result",
-        "size": "2 rows x 3 columns, 6 regions"
+        "size": "3 rows x 3 columns, 6 regions"
       },
       {
         "id": "Drainage",
         "kind": "sheet",
         "name": "Drainage",
         "role": "result",
-        "size": "3 rows x 3 columns, 7 regions"
+        "size": "10 rows x 2 columns, 8 regions"
       }
     ]
   },
