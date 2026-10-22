@@ -29,8 +29,8 @@ use crate::layout;
 use crate::logic::{FormulaProblem, Formulas, ReadState, SheetFacts};
 use crate::package::{self, Package, Refusal, zip_reason};
 use crate::xlsx::{
-    Vba, cell_losses, embedded, issues_to_losses, merge_loss, problem_losses, properties, refuse,
-    section, status, vba_modules,
+    Vba, cell_losses, embedded, issues_to_losses, problem_losses, properties, refuse, section,
+    status, vba_modules,
 };
 
 /// The parts calamine reads by these fixed names.
@@ -621,18 +621,11 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             formulas.layout_facts(&entry.name),
             budget,
         );
-        if laid.mapped.blocks.is_empty() {
-            blocks.push(note("The sheet is empty."));
-        }
-        blocks.extend(laid.mapped.blocks);
-        for l in laid.mapped.losses {
-            out.loss(l.location, l.what, l.why, l.severity);
-        }
-        merge_loss(&mut out, &q, laid.merges_ignored);
-        if laid.mapped.elements_out {
+        let (paths, elements_out) = laid.place(&q, &mut blocks, &mut out);
+        if elements_out {
             halted = Some("element limit reached");
         }
-        facts.push(SheetFacts::new(&entry.name, cells.cells, dates, laid.paths));
+        facts.push(SheetFacts::new(&entry.name, cells.cells, dates, paths));
         out.doc.body.push(section(&entry.name, &q, blocks));
     }
     if caveat {

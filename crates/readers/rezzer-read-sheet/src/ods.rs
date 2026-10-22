@@ -36,7 +36,7 @@ use crate::odscan::{self, NotCanonical};
 use crate::package::{self, Package, zip_reason};
 use crate::xlsx::{
     Vba, add_annotations, cell_losses, comment_body, defined_names, embedded, issues_to_losses,
-    merge_loss, problem_losses, properties, refuse, rules, section, status,
+    problem_losses, properties, refuse, rules, section, status,
 };
 
 const MIMETYPE: &str = "mimetype";
@@ -421,15 +421,8 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             formulas.layout_facts(&sheet.name),
             budget,
         );
-        if laid.mapped.blocks.is_empty() {
-            blocks.push(note("The sheet is empty."));
-        }
-        blocks.extend(laid.mapped.blocks);
-        for l in laid.mapped.losses {
-            out.loss(l.location, l.what, l.why, l.severity);
-        }
-        merge_loss(&mut out, &q, laid.merges_ignored);
-        if laid.mapped.elements_out {
+        let (paths, elements_out) = laid.place(&q, &mut blocks, &mut out);
+        if elements_out {
             halted = Some("element limit reached");
         }
         if !sheet.hidden_rows.is_empty() {
@@ -446,12 +439,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         }
         rules(&mut out, &q, &sheet.validations, &[], budget);
         annotations(&mut out, &q, sheet, budget);
-        facts.push(SheetFacts::new(
-            &sheet.name,
-            cells.cells,
-            styles,
-            laid.paths,
-        ));
+        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles, paths));
         out.doc.body.push(section(&sheet.name, &q, blocks));
     }
 

@@ -181,6 +181,32 @@ pub fn a1_position(text: &str) -> Option<(u32, u32)> {
     Some((row - 1, col - 1))
 }
 
+/// One cell named by a `Sheet!A1` anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SheetCell<'a> {
+    /// The sheet as the anchor writes it, quoted where needed.
+    pub sheet: &'a str,
+    /// The local address, for example `B5`.
+    pub address: &'a str,
+    /// 0-based.
+    pub row: u32,
+    /// 0-based.
+    pub col: u32,
+}
+
+/// The cell a `Sheet!A1` anchor names; the sheet name may hold a `!` itself. `None` for an
+/// anchor that names no cell, such as a defined name's `name:'Sheet'!Local` or a range.
+pub fn sheet_cell(anchor: &str) -> Option<SheetCell<'_>> {
+    let (sheet, address) = anchor.rsplit_once('!')?;
+    let (row, col) = a1_position(address)?;
+    Some(SheetCell {
+        sheet,
+        address,
+        row,
+        col,
+    })
+}
+
 /// A table as one of its consecutive row ranges, or the notes under it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowRange {
@@ -428,11 +454,8 @@ fn data_range(layout: &TableLayout, first: u32, last: u32) -> String {
 
 /// The 1-based sheet row of a table row: the row of its first cell with a sheet anchor.
 fn anchor_row(row: &[Cell]) -> Option<u32> {
-    row.iter().find_map(|c| {
-        let anchor = c.anchor.as_ref()?;
-        let (_, at) = anchor.0.rsplit_once('!')?;
-        a1_position(at).map(|(r, _)| r + 1)
-    })
+    row.iter()
+        .find_map(|c| sheet_cell(&c.anchor.as_ref()?.0).map(|at| at.row + 1))
 }
 
 /// The 1-based sheet row of every data row: its anchor's row, else the row after the one

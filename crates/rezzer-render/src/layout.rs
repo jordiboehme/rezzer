@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 use rezzer_model::{
     Align, Block, Cell, Certainty, Evidence, Inline, LayoutKind, RowKind, RowNote, TableLayout,
-    a1_position, column_letter, plain_text,
+    a1_position, column_letter, plain_text, sheet_cell,
 };
 
 use crate::TableStyle;
@@ -39,15 +39,12 @@ const MAX_HEADING_CHARS: usize = 120;
 /// The local address of a `Sheet!A1` anchor (`A1`); the sheet name may hold a `!` itself.
 /// `None` for an anchor that names no cell, such as a defined name's `name:'Sheet'!Local`.
 fn address(anchor: Option<&rezzer_model::Anchor>) -> Option<&str> {
-    anchor
-        .and_then(|a| a.0.rsplit_once('!'))
-        .map(|(_, at)| at)
-        .filter(|at| a1_position(at).is_some())
+    sheet_cell(&anchor?.0).map(|at| at.address)
 }
 
 /// The 0-based sheet column of a cell, from its anchor.
 fn column_of(cell: &Cell) -> Option<u32> {
-    a1_position(address(cell.anchor.as_ref())?).map(|(_, col)| col)
+    sheet_cell(&cell.anchor.as_ref()?.0).map(|at| at.col)
 }
 
 /// `text` with ` (<address>)` after it, without the spaces the text ends with; empty text
@@ -71,11 +68,7 @@ fn caption_row(b: &Block) -> Option<(&str, u32)> {
             role: Some(role),
             anchor: Some(anchor),
             ..
-        } if role == "caption" => {
-            let (sheet, at) = anchor.0.rsplit_once('!')?;
-            let (row, _) = a1_position(at)?;
-            Some((sheet, row))
-        }
+        } if role == "caption" => sheet_cell(&anchor.0).map(|at| (at.sheet, at.row)),
         _ => None,
     }
 }

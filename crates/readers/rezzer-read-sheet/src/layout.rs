@@ -50,6 +50,38 @@ pub(crate) struct SheetLayout {
     pub paths: SheetPaths,
 }
 
+impl SheetLayout {
+    /// Puts the blocks of the sheet after `blocks` (a note when the sheet is empty) and its
+    /// losses into `out`, with one for merged areas that were ignored. Gives the parameter
+    /// paths and whether the element limit was reached while the tables were built.
+    pub(crate) fn place(
+        self,
+        q: &str,
+        blocks: &mut Vec<Block>,
+        out: &mut crate::Out,
+    ) -> (SheetPaths, bool) {
+        if self.mapped.blocks.is_empty() {
+            blocks.push(grid::note("The sheet is empty."));
+        }
+        blocks.extend(self.mapped.blocks);
+        for l in self.mapped.losses {
+            out.loss(l.location, l.what, l.why, l.severity);
+        }
+        if self.merges_ignored > 0 {
+            out.loss(
+                q,
+                format!(
+                    "{} merged areas overlap another one or are too large; shown as single cells",
+                    self.merges_ignored
+                ),
+                LossReason::Damaged,
+                Severity::Info,
+            );
+        }
+        (self.paths, self.mapped.elements_out)
+    }
+}
+
 /// What names the data cells of one region (spec 8.7): the author's heading texts above
 /// them, the header path of their column and the label of their row.
 #[derive(Debug, Clone, PartialEq)]

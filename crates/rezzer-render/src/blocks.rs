@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use rezzer_model::{
     Align, Annotation, Asset, Barcode, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
-    TaskState, a1_position, column_letter, plain_text,
+    TaskState, column_letter, plain_text, sheet_cell,
 };
 
 /// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
@@ -1661,10 +1661,7 @@ struct Place {
 /// The 0-based sheet (row, column) of a cell's `Sheet!A1` anchor. The sheet name may hold a
 /// `!` itself, so the address is what follows the last one.
 fn sheet_position(cell: &Cell) -> Option<(u32, u32)> {
-    cell.anchor
-        .as_ref()
-        .and_then(|a| a.0.rsplit_once('!'))
-        .and_then(|(_, at)| a1_position(at))
+    sheet_cell(&cell.anchor.as_ref()?.0).map(|at| (at.row, at.col))
 }
 
 /// A table's cells placed on a grid, the one grid every table is written from. A merged

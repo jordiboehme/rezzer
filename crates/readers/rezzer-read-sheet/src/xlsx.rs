@@ -282,25 +282,13 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             formulas.layout_facts(&sheet.name),
             budget,
         );
-        if laid.mapped.blocks.is_empty() {
-            blocks.push(note("The sheet is empty."));
-        }
-        blocks.extend(laid.mapped.blocks);
-        for l in laid.mapped.losses {
-            out.loss(l.location, l.what, l.why, l.severity);
-        }
-        merge_loss(&mut out, &q, laid.merges_ignored);
-        if laid.mapped.elements_out {
+        let (paths, elements_out) = laid.place(&q, &mut blocks, &mut out);
+        if elements_out {
             halted = Some("element limit reached");
         }
         format_losses(&mut out, &q, &fmt);
         drop(fmt);
-        facts.push(SheetFacts::new(
-            &sheet.name,
-            cells.cells,
-            styles,
-            laid.paths,
-        ));
+        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles, paths));
         if !parts.hidden_rows.is_empty() {
             blocks.push(note(format!(
                 "Hidden rows: {}.",
@@ -732,20 +720,6 @@ fn sheet_layout(
         &caption_names,
         budget,
     )
-}
-
-/// The loss for merged areas that overlap one before them.
-pub(crate) fn merge_loss(out: &mut Out, q: &str, ignored: u64) {
-    if ignored > 0 {
-        out.loss(
-            q,
-            format!(
-                "{ignored} merged areas overlap another one or are too large; shown as single cells"
-            ),
-            LossReason::Damaged,
-            Severity::Info,
-        );
-    }
 }
 
 /// Registers the Excel tables of a sheet with the logic index.

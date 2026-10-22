@@ -768,3 +768,19 @@ fn fixed_part_counts_at_most_half_the_part() {
     let ranges = split_rows(&[lead(12)], &t, &[], 40);
     assert_eq!(borders(&ranges), vec![(2, 4), (5, 7), (8, 10), (11, 11)]);
 }
+
+#[test]
+fn sheet_cell_splits_a_cell_anchor() {
+    let at = rezzer_model::sheet_cell("'My!sheet'!B5").unwrap();
+    assert_eq!(
+        (at.sheet, at.address, at.row, at.col),
+        ("'My!sheet'", "B5", 4, 1)
+    );
+    assert_eq!(
+        rezzer_model::sheet_cell("S!$C$2").map(|a| (a.row, a.col)),
+        Some((1, 2))
+    );
+    for anchor in ["name:'S'!Local", "S!A1:B2", "B5", "S!"] {
+        assert_eq!(rezzer_model::sheet_cell(anchor), None, "{anchor}");
+    }
+}

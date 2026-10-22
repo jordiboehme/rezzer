@@ -31,8 +31,8 @@ pub use facet::{
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
 pub use layout::{
-    Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, TableLayout, a1_position,
-    split_rows, table_key,
+    Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, SheetCell, TableLayout,
+    a1_position, sheet_cell, split_rows, table_key,
 };
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
