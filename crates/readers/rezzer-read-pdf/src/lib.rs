@@ -68,9 +68,17 @@ impl Reader for PdfReader {
     fn read(&self, src: &Source, opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
         // The text is read for three quarters of the time limit at most: the pages read must
         // still be laid out, or their text would be lost with the rest.
+        // A stop there is a time stop of the read, as one at the limit itself is.
         let text_time = budget.limits().max_time * 3 / 4;
         read_pdf(self, src, opts, budget, &|| {
-            budget.check_time().is_err() || budget.elapsed() > text_time
+            if budget.check_time().is_err() {
+                return true;
+            }
+            let near = budget.elapsed() > text_time;
+            if near {
+                budget.note_time_stop();
+            }
+            near
         })
     }
 }
@@ -1420,6 +1428,19 @@ impl Out {
         ) {
             self.partial = true;
         }
+        self.loss_info(location, what, why, severity);
+    }
+
+    /// Adds a loss that does not make the read partial, whatever its reason: what it names
+    /// stays marked in the document (a page that still needs vision), so nothing is hidden.
+    /// The reason stays the true one, such as `Limit` for a bound that stopped the work.
+    pub fn loss_info(
+        &mut self,
+        location: impl Into<String>,
+        what: impl Into<String>,
+        why: LossReason,
+        severity: Severity,
+    ) {
         self.doc.losses.push(Loss {
             location: location.into(),
             what: what.into(),

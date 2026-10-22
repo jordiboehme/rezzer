@@ -209,3 +209,31 @@ fn max_text_bytes_reads_from_config() {
     let l: Limits = serde_json::from_str(r#"{"max_text_bytes": 7}"#).unwrap();
     assert_eq!(l.max_text_bytes, 7);
 }
+
+#[test]
+fn a_time_stop_stays_noted() {
+    let b = Budget::new(Limits::default());
+    assert!(b.check_time().is_ok());
+    assert!(!b.time_stopped());
+    b.note_time_stop();
+    assert!(b.time_stopped());
+    assert!(b.check_time().is_ok());
+    assert!(b.time_stopped());
+}
+
+#[test]
+fn a_failed_time_check_is_a_time_stop() {
+    let over = Budget::new(Limits {
+        max_time: Duration::ZERO,
+        ..Limits::default()
+    });
+    std::thread::sleep(Duration::from_millis(2));
+    assert!(!over.time_stopped());
+    assert_eq!(over.check_time().unwrap_err().limit, "time");
+    assert!(over.time_stopped());
+    let cancelled = Budget::new(Limits::default());
+    cancelled.cancel();
+    assert!(!cancelled.time_stopped());
+    assert!(cancelled.check_time().is_err());
+    assert!(cancelled.time_stopped());
+}

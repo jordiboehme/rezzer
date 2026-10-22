@@ -123,6 +123,8 @@ pub struct Budget {
     depth: AtomicU32,
     elements: AtomicU64,
     cancelled: CancelToken,
+    /// Set once a time stop cut the work short. It stays set.
+    time_stopped: AtomicBool,
 }
 
 impl Budget {
@@ -140,6 +142,7 @@ impl Budget {
             depth: AtomicU32::new(0),
             elements: AtomicU64::new(0),
             cancelled: cancel,
+            time_stopped: AtomicBool::new(false),
         }
     }
 
@@ -152,8 +155,8 @@ impl Budget {
         self.start.elapsed()
     }
 
-    /// Fails when the time limit is over or the budget was cancelled.
-    /// Values in the error are milliseconds.
+    /// Fails when the time limit is over or the budget was cancelled. A failure counts as a
+    /// time stop (see [`Budget::time_stopped`]). Values in the error are milliseconds.
     pub fn check_time(&self) -> Result<(), LimitHit> {
         let elapsed = self.start.elapsed();
         let limit = if self.is_cancelled() {
@@ -163,12 +166,26 @@ impl Budget {
         } else {
             return Ok(());
         };
+        self.note_time_stop();
         Err(LimitHit {
             limit,
             value: millis(elapsed),
             max: millis(self.limits.max_time),
             unit: "ms",
         })
+    }
+
+    /// Records that a stop which depends on time cut the work short: a reader's own share of
+    /// the time limit, a timeout of one call, or the limit itself. Such a result depends on
+    /// the machine's load, so it must not be cached.
+    pub fn note_time_stop(&self) {
+        self.time_stopped.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a time stop cut the work short: a failed [`Budget::check_time`] or a
+    /// [`Budget::note_time_stop`]. It stays true once set.
+    pub fn time_stopped(&self) -> bool {
+        self.time_stopped.load(Ordering::Relaxed)
     }
 
     /// Adds `n` unpacked bytes to the running total and checks the limit.

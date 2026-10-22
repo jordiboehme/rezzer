@@ -251,3 +251,51 @@ fn sixty_scanned_pages_stay_under_the_memory_limit_in_the_binary() {
         );
     }
 }
+
+#[test]
+fn a_code_scan_cut_by_its_time_is_not_cached() {
+    // The code scan stops at its own quarter of the time limit, before the budget's own time
+    // is over. That cut depends on the machine's load, so the result is not cached. The read
+    // stays complete (R14e-C), and the loss names the bound that stopped the scan.
+    use rezzer_model::{Completeness, LossReason, Registry, Severity};
+    use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
+    let dir = tempfile::tempdir().expect("temp dir");
+    let file = dir.path().join("scans.pdf");
+    std::fs::write(&file, scans(30)).expect("write");
+    let cache = dir.path().join("cache");
+    let mut config = Config {
+        cache: true,
+        cache_dir: Some(cache.clone()),
+        ..Config::default()
+    };
+    config.limits.max_time = std::time::Duration::from_secs(1);
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    let p = Pipeline::new(config, registry);
+    let request = Request {
+        output: OutputKind::Markdown,
+        generated_at: Some("2026-01-01T00:00:00Z".to_string()),
+        ..Request::default()
+    };
+    let result = p.run_path(&file, &request);
+    let doc = result.document.as_ref().expect("document");
+    let stop = doc
+        .losses
+        .iter()
+        .find(|l| l.what.starts_with("barcode scan stopped: time limit"))
+        .unwrap_or_else(|| panic!("{:#?}", doc.losses));
+    assert_eq!(
+        (stop.why, stop.severity),
+        (LossReason::Limit, Severity::Info)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        doc.losses
+    );
+    let entries: Vec<_> = std::fs::read_dir(&cache)
+        .map(|d| d.map(|e| e.expect("entry").path()).collect())
+        .unwrap_or_default();
+    assert!(entries.is_empty(), "{entries:?}");
+}

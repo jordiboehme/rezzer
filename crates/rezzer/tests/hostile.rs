@@ -1375,6 +1375,48 @@ fn hundred_thousand_pages_stop_in_time() {
     assert_rss_bounded("hundred_thousand_pages_stop_in_time");
 }
 
+/// The files in the cache dir `dir`.
+fn cache_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir).map_or_else(
+        |_| Vec::new(),
+        |entries| entries.map(|e| e.unwrap().path()).collect(),
+    )
+}
+
+#[test]
+fn a_text_cut_near_the_time_limit_is_not_cached() {
+    // The PDF reader stops its text at three quarters of the time limit, before the budget's
+    // own time is over. That cut depends on the machine's load, so it is not cached.
+    const PAGES: usize = 20_000;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, false);
+    let cache = dir.path().join("cache");
+    let mut config = Config {
+        cache: true,
+        cache_dir: Some(cache.clone()),
+        ..Config::default()
+    };
+    config.limits.max_time = Duration::from_secs(1);
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    let p = Pipeline::new(config, registry);
+    let result = p.run_path(&path, &markdown_request());
+    let doc = result.document.as_ref().unwrap();
+    let cut = doc
+        .losses
+        .iter()
+        .find(|l| l.what.contains("the time limit was near"))
+        .unwrap_or_else(|| panic!("{:?}", losses(&result)));
+    assert_eq!(cut.why, LossReason::Limit);
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(
+        cache_entries(&cache).is_empty(),
+        "{:?}",
+        cache_entries(&cache)
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn pages_with_their_own_resources_are_read_under_the_memory_limit() {

@@ -440,6 +440,42 @@ fn a_time_cut_is_not_cached() {
     assert!(cache_files(dir.path()).is_empty());
 }
 
+/// A reader whose own time share ran out: it notes a time stop while the budget's time is
+/// not over, and gives a complete document.
+struct OwnTimeShare;
+
+impl Reader for OwnTimeShare {
+    fn id(&self) -> &'static str {
+        "own-time-share"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, _opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
+        budget.note_time_stop();
+        assert!(budget.check_time().is_ok());
+        ReadOutcome {
+            blobs: Vec::new(),
+            document: Document::new(source_info(src)),
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+#[test]
+fn a_time_stop_inside_the_limit_is_not_cached() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = Registry::new();
+    registry.register(Box::new(OwnTimeShare));
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let out = pipeline.run_bytes("a.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(out.completeness, Completeness::Complete);
+    assert!(cache_files(dir.path()).is_empty());
+}
+
 #[test]
 fn other_partial_results_are_cached() {
     let dir = tempfile::tempdir().unwrap();

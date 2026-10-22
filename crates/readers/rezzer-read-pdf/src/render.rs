@@ -930,7 +930,14 @@ pub(crate) fn render_pages(
     } else {
         Severity::Info
     };
-    let reason = |why: LossReason| if files { why } else { LossReason::Unsupported };
+    // A gap keeps its true reason; without files it does not make the read partial.
+    let note = move |out: &mut Out, location: String, what: String, why: LossReason| {
+        if files {
+            out.loss(location, what, why, severity);
+        } else {
+            out.loss_info(location, what, why, severity);
+        }
+    };
     // The renderer opens the file again and holds its own page list while it renders.
     let Some(_list) = crate::text::PageList::of(pdf) else {
         let why = format!(
@@ -940,11 +947,11 @@ pub(crate) fn render_pages(
             crate::text::page_list_bytes(pdf.page_count())
         );
         for need in needs {
-            out.loss(
+            note(
+                out,
                 format!("p{}", need.page),
                 format!("page {} {}: {why}", need.page, not_done(files)),
-                reason(LossReason::Limit),
-                severity,
+                LossReason::Limit,
             );
         }
         return scans;
@@ -965,11 +972,11 @@ pub(crate) fn render_pages(
                 Err(_) => "the renderer stopped with an internal error".to_string(),
             };
             for need in needs {
-                out.loss(
+                note(
+                    out,
                     format!("p{}", need.page),
                     format!("page {} {}: {why}", need.page, not_done(files)),
-                    reason(LossReason::Damaged),
-                    severity,
+                    LossReason::Damaged,
                 );
             }
             return scans;
@@ -1018,7 +1025,7 @@ pub(crate) fn render_pages(
                 continue;
             }
             if !scans.stopped() && scans.past() {
-                scans.halt(n, "barcode scan stopped: time limit".into(), false);
+                scans.halt_time(n, budget);
                 continue;
             }
             if scans.stopped() {
@@ -1027,11 +1034,11 @@ pub(crate) fn render_pages(
             }
         }
         let mut fail = |why: LossReason, what: String, out: &mut Out| {
-            out.loss(
+            note(
+                out,
                 format!("p{n}"),
                 format!("page {n} {}: {what}", not_done(files)),
-                reason(why),
-                severity,
+                why,
             );
             failed.insert(n, why);
         };
@@ -1141,11 +1148,11 @@ pub(crate) fn render_pages(
         }
     }
     if let Some(left) = left_out {
-        out.loss(
+        note(
+            out,
             format!("p{}", left.first),
             left.words(),
-            reason(LossReason::Limit),
-            severity,
+            LossReason::Limit,
         );
     }
     if let Some(&first) = heavy.first() {
@@ -1154,14 +1161,16 @@ pub(crate) fn render_pages(
         } else {
             format!("{} pages are", heavy.len())
         };
-        out.loss(
+        // A bound of the scan: those pages keep their need of vision, so the read stays
+        // complete.
+        out.loss_info(
             format!("p{first}"),
             format!(
                 "{what} not scanned for barcodes, from page {first} on: without an output \
                  directory a page is rendered only to look for codes, and these draw more than \
                  {SCAN_PICTURES} pictures"
             ),
-            LossReason::Unsupported,
+            LossReason::Limit,
             Severity::Info,
         );
     }
@@ -1861,6 +1870,13 @@ impl Scans {
         add_page(&mut self.skipped, n);
     }
 
+    /// Stops reading codes on page `n` because the time for it is over. That is a time stop
+    /// of the read: what it gives depends on the machine's load.
+    fn halt_time(&mut self, n: u32, budget: &Budget) {
+        budget.note_time_stop();
+        self.halt(n, "barcode scan stopped: time limit".into(), false);
+    }
+
     /// Page `n` is not read for codes: reading stopped.
     fn skip(&mut self, n: u32) {
         add_page(&mut self.skipped, n);
@@ -1901,7 +1917,7 @@ impl Scans {
         }
         let now = Instant::now();
         if now >= self.until || budget.check_time().is_err() {
-            self.halt(n, "barcode scan stopped: time limit".into(), false);
+            self.halt_time(n, budget);
             return None;
         }
         let limits = barcodes::Limits {
@@ -1929,7 +1945,8 @@ impl Scans {
                 s.codes
             }
             Err(barcodes::Stop::Time(s)) => {
-                self.halt(n, "barcode scan stopped: time limit".into(), false);
+                // A timeout of one picture depends on the load as much as the scan time.
+                self.halt_time(n, budget);
                 s.codes
             }
             Err(barcodes::Stop::TooLarge { .. }) => {
@@ -1987,20 +2004,18 @@ impl Scans {
     /// their need of vision, so the read stays complete.
     pub(crate) fn finish(&self, out: &mut Out) {
         if let Some((n, why)) = &self.stop {
-            let (reason, severity) = if self.stop_limit {
-                (LossReason::Limit, Severity::Warning)
-            } else {
-                (LossReason::Unsupported, Severity::Info)
-            };
-            out.loss(
-                format!("p{n}"),
-                format!(
-                    "{why}: codes are not read on {}; their pictures keep their need of vision",
-                    page_list(&self.skipped)
-                ),
-                reason,
-                severity,
+            let location = format!("p{n}");
+            let what = format!(
+                "{why}: codes are not read on {}; their pictures keep their need of vision",
+                page_list(&self.skipped)
             );
+            if self.stop_limit {
+                out.loss(location, what, LossReason::Limit, Severity::Warning);
+            } else {
+                // The time for reading codes ran out: a bound, but the pages keep their need
+                // of vision, so the read stays complete (R14e-C).
+                out.loss_info(location, what, LossReason::Limit, Severity::Info);
+            }
         }
         if let Some(first) = self.capped.first() {
             out.loss(
@@ -2058,6 +2073,10 @@ impl Scans {
             let Some(pages) = self.unrendered.get(&why).filter(|p| !p.is_empty()) else {
                 continue;
             };
+            let reason = match why {
+                Unrendered::Damaged => LossReason::Damaged,
+                Unrendered::Cap | Unrendered::Room | Unrendered::Time => LossReason::Limit,
+            };
             let words = match why {
                 Unrendered::Cap => {
                     format!("a file renders at most {MAX_REGIONS} parts of pages again")
@@ -2070,13 +2089,14 @@ impl Scans {
                 Unrendered::Damaged => "the renderer could not draw them".to_string(),
                 Unrendered::Time => "the time limit was reached".to_string(),
             };
-            out.loss(
+            // The page render was read for codes; only the finer look is missing.
+            out.loss_info(
                 format!("p{}", pages[0]),
                 format!(
                     "codes in parts of {} are not looked for at a finer scale: {words}",
                     page_list(pages)
                 ),
-                LossReason::Unsupported,
+                reason,
                 Severity::Info,
             );
         }

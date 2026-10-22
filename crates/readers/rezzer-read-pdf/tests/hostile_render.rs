@@ -1596,7 +1596,7 @@ fn five_thousand_finder_patterns_stop_at_the_time_limit() {
     // The page keeps its need of vision, so the read stays complete (R14e-C).
     assert_eq!(
         (loss.why, loss.severity),
-        (LossReason::Unsupported, Severity::Info)
+        (LossReason::Limit, Severity::Info)
     );
     assert_eq!(out.completeness, Completeness::Complete);
     // The scan stops waiting at 3 seconds a picture; the page still needs vision.
@@ -1655,10 +1655,7 @@ fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
                 || l.what.starts_with("page 1 is not scanned for barcodes")
         })
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
-    assert!(matches!(
-        loss.why,
-        LossReason::Limit | LossReason::Unsupported
-    ));
+    assert_eq!(loss.why, LossReason::Limit);
     assert_rss_under_256_mib();
 }
 
@@ -1907,7 +1904,7 @@ fn a_finer_look_that_does_not_fit_the_memory_is_named() {
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
     assert_eq!(
         (loss.why, loss.severity),
-        (LossReason::Unsupported, Severity::Info)
+        (LossReason::Limit, Severity::Info)
     );
     assert_eq!(out.completeness, Completeness::Complete);
 }
@@ -2100,7 +2097,7 @@ fn running_out_of_scan_time_keeps_the_read_complete() {
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
     assert_eq!(
         (loss.why, loss.severity),
-        (LossReason::Unsupported, Severity::Info)
+        (LossReason::Limit, Severity::Info)
     );
     assert!(out.document.assets.iter().all(|a| a.needs_vision));
 }

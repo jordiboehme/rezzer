@@ -380,8 +380,9 @@ impl Pipeline {
         (document, completeness, message)
     }
 
-    /// Reads `src`. The last value says whether the result may be cached: not when the time
-    /// limit cut the read short, because a time cut depends on the machine's load.
+    /// Reads `src`. The last value says whether the result may be cached: not when a time
+    /// stop cut the read short (the time limit, a reader's own share of it or a timeout of
+    /// one call), because a time cut depends on the machine's load.
     fn read(&self, src: &Source, req: &Request) -> ReadResult {
         if src.format == FormatId::Empty {
             let mut document = Document::new(source_info(src));
@@ -403,21 +404,13 @@ impl Pipeline {
             password: req.password.clone(),
         };
         match panics::contained(|| reader.read(src, &opts, &budget)) {
-            Ok(outcome) => {
-                let time_cut = budget.check_time().is_err()
-                    && outcome
-                        .document
-                        .losses
-                        .iter()
-                        .any(|l| l.why == LossReason::Limit);
-                (
-                    outcome.document,
-                    outcome.completeness,
-                    None,
-                    !time_cut,
-                    outcome.blobs,
-                )
-            }
+            Ok(outcome) => (
+                outcome.document,
+                outcome.completeness,
+                None,
+                !budget.time_stopped(),
+                outcome.blobs,
+            ),
             Err(panic) => {
                 let message = format!(
                     "the {} reader stopped with an internal error: {}",
