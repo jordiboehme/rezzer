@@ -1036,6 +1036,7 @@ fn stale_callout(doc: &Document) -> Option<String> {
         assets: &doc.assets,
         heading_offset: 0,
         notes: None,
+        in_sheet: Default::default(),
     };
     Some(blocks::blocks(&[callout], &ctx, 0, 3, false))
 }

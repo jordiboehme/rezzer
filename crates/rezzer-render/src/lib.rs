@@ -164,6 +164,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         assets: &doc.assets,
         heading_offset: 0,
         notes: None,
+        in_sheet: Default::default(),
     };
     if want(OutputSection::Annotations) {
         parts.extend(facets::annotations(doc, &ctx, &notes));
@@ -224,6 +225,7 @@ fn content(doc: &Document, title: &str, notes: &Notes) -> String {
         assets: &doc.assets,
         heading_offset: 2u8.saturating_sub(min),
         notes: Some(notes),
+        in_sheet: Default::default(),
     };
     blocks::blocks(body, &ctx, 0, 2, false)
 }

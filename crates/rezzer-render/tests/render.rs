@@ -490,6 +490,49 @@ fn sheet_tables_keep_a1_merge_notes() {
 }
 
 #[test]
+fn merge_note_uses_sheet_addresses() {
+    // A table that starts at B2: the ranges come from each merged cell's own anchor, not
+    // from its place in the table (P4-B).
+    let cell = |text: &str, at: &str| {
+        let mut c = Cell::new(vec![txt(text)]);
+        c.anchor = Some(Anchor(format!("'My!Sheet'!{at}")));
+        c
+    };
+    let mut wide = cell("wide", "B3");
+    wide.col_span = 2;
+    let mut tall = cell("tall", "D3");
+    tall.row_span = 2;
+    // A merged cell without a sheet anchor is not named: its place in the table is no sheet
+    // address.
+    let mut bare = Cell::new(vec![txt("bare")]);
+    bare.col_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![
+                cell("A", "B2"),
+                cell("B", "C2"),
+                cell("C", "D2"),
+                cell("D", "E2"),
+            ],
+            vec![wide, tall, cell("x", "E3")],
+            vec![bare, cell("y", "E4")],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }]);
+    assert!(
+        md.contains(
+            "Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B3:C3, D3:D4\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
 fn rule_is_never_frontmatter_or_setext() {
     let md = body_of(vec![
         para("above"),
@@ -3228,6 +3271,56 @@ fn sheet_annotations_unchanged() {
     let listed = md.split("## Annotations").nth(1).expect("the list");
     assert!(
         listed.contains("On a cell.") && listed.contains("On the sheet."),
+        "{md}"
+    );
+}
+
+#[test]
+fn sheet_blocks_take_no_inline_notes() {
+    // A caption paragraph and a one-cell table anchored at a commented cell stand inside a
+    // sheet: the comments stay in the list (P4-D). The same paragraph in a chapter takes
+    // its note, so the skip is the sheet's own.
+    let caption = Block::Paragraph {
+        inlines: vec![txt("Sales by region")],
+        role: Some("caption".into()),
+        anchor: Some(Anchor("Inputs!B3".into())),
+    };
+    let one_cell = Block::Table {
+        caption: None,
+        header_rows: 0,
+        role: None,
+        rows: vec![vec![Cell::new(vec![txt("42")])]],
+        alignments: Vec::new(),
+        anchor: Some(Anchor("Inputs!C9".into())),
+        layout: None,
+    };
+    let mut d = workbook();
+    d.body = vec![Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Inputs".into()),
+        anchor: Some(Anchor("Inputs".into())),
+        blocks: vec![caption.clone(), one_cell],
+    }];
+    d.facets.annotations = vec![
+        note("comment", "Inputs!B3", None, "On the caption cell."),
+        note("comment", "Inputs!C9", None, "On the one cell."),
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(!md.contains("[!NOTE]"), "{md}");
+    let listed = md.split("## Annotations").nth(1).expect("the list");
+    assert!(
+        listed.contains("On the caption cell.") && listed.contains("On the one cell."),
+        "{md}"
+    );
+    d.body = vec![Block::Section {
+        kind: SectionKind::Chapter,
+        title: Some("Inputs".into()),
+        anchor: None,
+        blocks: vec![caption],
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Sales by region\n\n> [!NOTE] Comment by Ann"),
         "{md}"
     );
 }

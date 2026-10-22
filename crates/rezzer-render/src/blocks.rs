@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use rezzer_model::{
     Align, Annotation, Asset, Barcode, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
-    TaskState, column_letter, plain_text,
+    TaskState, a1_position, column_letter, plain_text,
 };
 
 /// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
@@ -44,6 +44,10 @@ pub(crate) struct Ctx<'a> {
     /// The assets whose codes were written already: a code is written once, at the first
     /// place of its picture.
     pub codes_shown: RefCell<std::collections::HashSet<String>>,
+    /// How many sheet sections the renderer is inside. Blocks of a sheet take no inline
+    /// notes: a cell's comment stays in `## Annotations` even where the cell is a caption,
+    /// a heading or a one-cell region.
+    pub in_sheet: std::cell::Cell<usize>,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
@@ -114,6 +118,9 @@ fn with_notes(text: String, anchor: Option<&str>, ctx: &Ctx, depth: usize, level
     let (Some(notes), Some(anchor)) = (ctx.notes, anchor) else {
         return text;
     };
+    if ctx.in_sheet.get() > 0 {
+        return text;
+    }
     // A note needs a few levels of its own (callout, quote, reply lists); too deep a passage
     // leaves its notes to `## Annotations`, where they are shown whole.
     if depth + NOTE_DEPTH > MAX_DEPTH {
@@ -1065,6 +1072,10 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             blocks: inner,
         } => {
             let label = anchor.as_ref().and_then(|a| a.0.strip_prefix("fn:"));
+            let sheet = *kind == SectionKind::Sheet;
+            if sheet {
+                ctx.in_sheet.set(ctx.in_sheet.get() + 1);
+            }
             let text = match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
                 (None, Some(label)) => footnote(label, inner, ctx, depth),
                 (Some(title), _) => {
@@ -1074,6 +1085,9 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                 }
                 (None, None) => blocks(inner, ctx, depth + 1, level, false),
             };
+            if sheet {
+                ctx.in_sheet.set(ctx.in_sheet.get() - 1);
+            }
             // The annotations of a page that stand at no block close its section.
             let page = (*kind == SectionKind::Page)
                 .then(|| anchor.as_ref().map(|a| a.0.as_str()))
@@ -1596,6 +1610,15 @@ impl Spot {
     }
 }
 
+/// A merged cell of a rendered table: its table row, its spans as placed, and the 0-based
+/// sheet (row, column) of its anchor when it has a sheet anchor.
+struct Merged {
+    r: usize,
+    cs: usize,
+    rs: usize,
+    at: Option<(u32, u32)>,
+}
+
 fn model_table(
     caption: Option<&str>,
     header_rows: usize,
@@ -1628,8 +1651,7 @@ fn model_table(
     // row is always shown.
     let mut grid: Vec<Vec<Option<Spot>>> = vec![Vec::new(); rows.len()];
     let mut texts: Vec<String> = Vec::new();
-    // (row, column, column span, row span) of every merged cell.
-    let mut merged: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut merged: Vec<Merged> = Vec::new();
     let mut filled = 0usize;
     let mut width = 0usize;
     let mut wanted = 0usize;
@@ -1671,7 +1693,12 @@ fn model_table(
                 }
             }
             if rs > 1 || cs > 1 {
-                merged.push((r, c, cs, rs));
+                let at = cell
+                    .anchor
+                    .as_ref()
+                    .and_then(|a| a.0.rsplit_once('!'))
+                    .and_then(|(_, at)| a1_position(at));
+                merged.push(Merged { r, cs, rs, at });
             }
             c += cs;
             wanted = wanted.max(c);
@@ -1684,8 +1711,9 @@ fn model_table(
     }
     grid.truncate(shown);
     // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
-    // sheet does; only rows that are shown are named, and a range into hidden rows ends at
-    // the last one.
+    // sheet does, from each merged cell's own anchor and its spans; only rows that are shown
+    // are named, a range into hidden rows ends at the last one, and a merged cell without a
+    // sheet anchor is not named.
     let sheet = rows
         .iter()
         .flatten()
@@ -1693,15 +1721,17 @@ fn model_table(
     let ranges: Vec<String> = if sheet {
         merged
             .into_iter()
-            .filter(|(r, ..)| *r < shown)
-            .map(|(r, c, cs, rs)| {
-                format!(
+            .filter(|m| m.r < shown)
+            .filter_map(|Merged { r, cs, rs, at }| {
+                let (row, col) = at?;
+                let (row, col) = (row as usize, col as usize);
+                Some(format!(
                     "{}{}:{}{}",
-                    column_letter(c),
-                    r + 1,
-                    column_letter(c + cs - 1),
-                    (r + rs).min(shown)
-                )
+                    column_letter(col),
+                    row + 1,
+                    column_letter(col + cs - 1),
+                    row + rs.min(shown - r)
+                ))
             })
             .collect()
     } else {
