@@ -26,7 +26,7 @@ modified: "2026-04-29T12:02:54Z"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| Sheet1 | sheet | 8 rows x 7 columns | result |  |
+| Sheet1 | sheet | 2 rows x 2 columns, 4 regions | result |  |
 
 - Sheets: 1
 - Formulas: 8
@@ -47,16 +47,34 @@ modified: "2026-04-29T12:02:54Z"
 
 ## Sheet1
 
-|  |  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- | --- |
-| 6 | &lt;= on cell |  | 7 | 6 | Because it's in the Impossible that you find reality |  |
-| 5 | &lt;=more complex lambda |  |  |  | 9 |  |
-|  |  |  |  |  |  |  |
-| Temps | Fahrenheit |  |  |  | 42 | &lt;= this was the question all along! |
-| 0 | -17.77777778 |  |  |  |  |  |
-| 100 | 37.77777778 |  |  |  |  |  |
-| 50 | 10 |  |  |  |  |  |
-| -10 | -23.33333333 |  |  |  |  |  |
+### Table A1:B2
+
+|  |  |
+| --- | --- |
+| 6 | &lt;= on cell |
+| 5 | &lt;=more complex lambda |
+
+### Table D1:F2
+
+|  |  |  |
+| --- | --- | --- |
+| 7 | 6 | Because it's in the Impossible that you find reality |
+|  |  | 9 |
+
+### Table A4:B8
+
+| Temps | Fahrenheit |
+| --- | --- |
+| 0 | -17.77777778 |
+| 100 | 37.77777778 |
+| 50 | 10 |
+| -10 | -23.33333333 |
+
+### Table F4:G4
+
+|  |  |
+| --- | --- |
+| 42 | &lt;= this was the question all along! |
 
 ## Logic
 

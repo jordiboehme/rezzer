@@ -7,26 +7,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Design_Basis",
       "blocks": [
         {
+          "anchor": "Design_Basis!A1",
+          "inlines": [
+            {
+              "text": "UNDERGROUND TUNNEL STRUCTURAL ANALYSIS",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Design_Basis!A1:A2",
+          "caption": "UNDERGROUND TUNNEL STRUCTURAL ANALYSIS",
           "header_rows": 0,
-          "rows": [
-            [
+          "layout": {
+            "certainty": "rule",
+            "data": "A2",
+            "found_by": [
               {
-                "anchor": "Design_Basis!A1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "UNDERGROUND TUNNEL STRUCTURAL ANALYSIS",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Design_Basis!B1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 1",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
               }
             ],
+            "key": "Design_Basis!A1",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A1:A2"
+          },
+          "rows": [
             [
               {
                 "anchor": "Design_Basis!A2",
@@ -38,38 +58,52 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Design_Basis!A4",
+          "inlines": [
+            {
+              "text": "PROJECT DESCRIPTION",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Design_Basis!A4:C9",
+          "caption": "PROJECT DESCRIPTION",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A5:B9",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Design_Basis!B2",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "Design_Basis!A3",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 4",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Design_Basis!B3",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "label and value pairs",
+                "id": "K",
+                "kind": "rule"
               }
             ],
-            [
-              {
-                "anchor": "Design_Basis!A4",
-                "col_span": 2,
-                "inlines": [
-                  {
-                    "text": "PROJECT DESCRIPTION",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              }
-            ],
+            "key": "Design_Basis!A4",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A4:C9"
+          },
+          "rows": [
             [
               {
                 "anchor": "Design_Basis!A5",
@@ -189,32 +223,51 @@ source: crates/rezzer/tests/corpus.rs
                 ],
                 "row_span": 1
               }
-            ],
-            [
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Design_Basis!A11",
+          "inlines": [
+            {
+              "text": "KEY GEOMETRIC PARAMETERS (shared across sheets)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Design_Basis!A11:C16",
+          "caption": "KEY GEOMETRIC PARAMETERS (shared across sheets)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A12:B16",
+            "found_by": [
               {
-                "anchor": "Design_Basis!A10",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Design_Basis!B10",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
+                "detail": "caption row 11",
+                "id": "T",
+                "kind": "rule"
+              },
               {
-                "anchor": "Design_Basis!A11",
-                "col_span": 2,
-                "inlines": [
-                  {
-                    "text": "KEY GEOMETRIC PARAMETERS (shared across sheets)",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
+                "detail": "label and value pairs",
+                "id": "K",
+                "kind": "rule"
               }
             ],
+            "key": "Design_Basis!A11",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A11:C16"
+          },
+          "rows": [
             [
               {
                 "anchor": "Design_Basis!A12",
@@ -239,7 +292,346 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               }
             ],
-            "<20 more items>"
+            [
+              {
+                "anchor": "Design_Basis!A13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tunnel length",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "800 m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Overburden depth to crown",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "25 m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A15",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ground type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B15",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Weathered rock / dense soil (assumed)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Traffic",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Design_Basis!B16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Two-lane, design-hour volume 1200 veh/hr",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Design_Basis!A18",
+          "inlines": [
+            {
+              "text": "DESIGN CODES / REFERENCES USED (conceptual guidance)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Design_Basis!A18:C25",
+          "caption": "DESIGN CODES / REFERENCES USED (conceptual guidance)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A19:A25",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 18",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "Design_Basis!A18",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A18:C25"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Design_Basis!A19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire & life safety)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- PIARC Technical Committee Reports - Road Tunnel Operations (ventilation & smoke control)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Einstein, H.H. & Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Design_Basis!A27",
+          "inlines": [
+            {
+              "text": "HOW TO USE THIS WORKBOOK",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Design_Basis!A27:C32",
+          "caption": "HOW TO USE THIS WORKBOOK",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A28:A32",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 27",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "Design_Basis!A27",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A27:C32"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Design_Basis!A28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Sheet 'Structural_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress & FOS check.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Design_Basis!A32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "- These mirror the Python scripts in /python (same method & formulas) for cross-verification.",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
           ],
           "type": "table"
         }
@@ -252,46 +644,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Structural_Lining",
       "blocks": [
         {
+          "anchor": "Structural_Lining!A1",
+          "inlines": [
+            {
+              "text": "STRUCTURAL STABILITY - TUNNEL LINING CHECK",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A1:A2",
+          "caption": "STRUCTURAL STABILITY - TUNNEL LINING CHECK",
           "header_rows": 0,
-          "rows": [
-            [
+          "layout": {
+            "certainty": "rule",
+            "data": "A2",
+            "found_by": [
               {
-                "anchor": "Structural_Lining!A1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "STRUCTURAL STABILITY - TUNNEL LINING CHECK",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Structural_Lining!B1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 1",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Structural_Lining!C1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
               }
             ],
+            "key": "Structural_Lining!A1",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A1:A2"
+          },
+          "rows": [
             [
               {
                 "anchor": "Structural_Lining!A2",
@@ -303,93 +695,52 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Structural_Lining!A4",
+          "inlines": [
+            {
+              "text": "INPUTS",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A4:C13",
+          "caption": "INPUTS",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A5:C13",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Structural_Lining!B2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 4",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Structural_Lining!C2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "label, value and unit columns",
+                "id": "K",
+                "kind": "rule"
               }
             ],
-            [
-              {
-                "anchor": "Structural_Lining!A3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!B3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!C3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F3",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "Structural_Lining!A4",
-                "col_span": 3,
-                "inlines": [
-                  {
-                    "text": "INPUTS",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D4",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E4",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F4",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
+            "key": "Structural_Lining!A4",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A4:C13"
+          },
+          "rows": [
             [
               {
                 "anchor": "Structural_Lining!A5",
@@ -422,21 +773,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F5",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -473,21 +809,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F6",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -522,21 +843,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F7",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -573,21 +879,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F8",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -622,21 +913,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F9",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -673,21 +949,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F10",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -722,21 +983,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!D11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!E11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Structural_Lining!F11",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -773,27 +1019,1126 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ],
+            [
               {
-                "anchor": "Structural_Lining!D12",
+                "anchor": "Structural_Lining!A13",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Target Factor of Safety",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               },
               {
-                "anchor": "Structural_Lining!E12",
+                "anchor": "Structural_Lining!B13",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               },
               {
-                "anchor": "Structural_Lining!F12",
+                "anchor": "Structural_Lining!C13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Structural_Lining!A15",
+          "inlines": [
+            {
+              "text": "TERZAGHI LOOSENING PRESSURE",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A15:C23",
+          "caption": "TERZAGHI LOOSENING PRESSURE",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A16:C23",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 15",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Structural_Lining!A15",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A15:C23"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!A16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Tunnel radius, R",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5.00",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Loosening zone width, B1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7.89",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "At-rest coeff., K0 = 1-sin(phi)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "tan(phi)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.58",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Terzaghi vertical pressure, Pv",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "194.15",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lower-bound floor (0.3*gamma*D)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "66.00",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Design vertical pressure, Pv",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "194.15",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Lateral pressure at springline, Ph = K0*Pv",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "97.08",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Structural_Lining!A25",
+          "inlines": [
+            {
+              "text": "RING THRUST & MOMENT (crown = 0deg, springline = 90deg)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A25:C33",
+          "caption": "RING THRUST & MOMENT (crown = 0deg, springline = 90deg)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A26:C33",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 25",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "label, value and unit columns",
+                "id": "K",
+                "kind": "rule"
+              }
+            ],
+            "key": "Structural_Lining!A25",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A25:C33"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!A26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Mean pressure, p_mean",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "145.62",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Deviatoric pressure, p_dev",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "48.54",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Thrust at crown, N(0)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "485.38",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kN/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Thrust at springline, N(90)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "970.77",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kN/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Max ring thrust, N_max",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "970.77",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kN/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Moment at crown, M(0)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "606.73",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kNm/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Moment at springline, M(90)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "606.73",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kNm/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Max ring moment, M_max",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "606.73",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kNm/m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Structural_Lining!A35",
+          "inlines": [
+            {
+              "text": "RCC LINING SECTION CHECK (1 m wide strip)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A35:C45",
+          "caption": "RCC LINING SECTION CHECK (1 m wide strip)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A36:C45",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 35",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "label, value and unit columns",
+                "id": "K",
+                "kind": "rule"
+              }
+            ],
+            "key": "Structural_Lining!A35",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A35:C45"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!A36",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Section area, A = 1 x t",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B36",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.350",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C36",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Section modulus, Z = 1 x t^2/6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.020",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Axial stress = N_max/A /1000",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2.77",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bending stress = M_max/Z /1000",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "29.72",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Combined max compressive stress",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "32.49",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C40",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A41",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Combined stress, opposite fibre",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B41",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-26.94",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C41",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A42",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Permissible stress = 0.33 fck",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B42",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9.90",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C42",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "MPa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A43",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Factor of Safety (actual)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B43",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.30",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C43",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Structural_Lining!A44",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Status",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!B44",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "NOT SAFE - increase thickness",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Structural_Lining!C44",
                 "col_span": 1,
                 "row_span": 1
               }
             ],
-            "<62 more items>"
+            [
+              {
+                "anchor": "Structural_Lining!A45",
+                "col_span": 3,
+                "inlines": [
+                  {
+                    "text": "Note: net tension on inner fibre - provide crack-control reinforcement",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
           ],
           "type": "table"
-        }
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text A47:C47",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Structural_Lining!A47:C47",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A47",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "Structural_Lining!A47",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A47:C47"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Structural_Lining!A47",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        "<4 more items>"
       ],
       "kind": "sheet",
       "title": "Structural_Lining",
@@ -803,31 +2148,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Ventilation",
       "blocks": [
         {
+          "anchor": "Ventilation!A1",
+          "inlines": [
+            {
+              "text": "LONGITUDINAL VENTILATION DESIGN CHECK",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A1:A2",
+          "caption": "LONGITUDINAL VENTILATION DESIGN CHECK",
           "header_rows": 0,
-          "rows": [
-            [
+          "layout": {
+            "certainty": "rule",
+            "data": "A2",
+            "found_by": [
               {
-                "anchor": "Ventilation!A1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "LONGITUDINAL VENTILATION DESIGN CHECK",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Ventilation!B1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 1",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Ventilation!C1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
               }
             ],
+            "key": "Ventilation!A1",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A1:A2"
+          },
+          "rows": [
             [
               {
                 "anchor": "Ventilation!A2",
@@ -839,48 +2199,52 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Ventilation!A4",
+          "inlines": [
+            {
+              "text": "INPUTS",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A4:C17",
+          "caption": "INPUTS",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A5:C17",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Ventilation!B2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 4",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Ventilation!C2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "label, value and unit columns",
+                "id": "K",
+                "kind": "rule"
               }
             ],
-            [
-              {
-                "anchor": "Ventilation!A3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Ventilation!B3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Ventilation!C3",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "Ventilation!A4",
-                "col_span": 3,
-                "inlines": [
-                  {
-                    "text": "INPUTS",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              }
-            ],
+            "key": "Ventilation!A4",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A4:C17"
+          },
+          "rows": [
             [
               {
                 "anchor": "Ventilation!A5",
@@ -1161,7 +2525,867 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               }
             ],
-            "<27 more items>"
+            [
+              {
+                "anchor": "Ventilation!A13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Air density",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kg/m3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Specific heat of air",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.005",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "kJ/kg.K",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A15",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Ambient temperature",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B15",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "298",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C15",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "K",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Darcy friction factor",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.02",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C16",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<1 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Ventilation!A19",
+          "inlines": [
+            {
+              "text": "GEOMETRY",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A19:C21",
+          "caption": "GEOMETRY",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A20:C21",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 19",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Ventilation!A19",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A19:C21"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Ventilation!A20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Cross-sectional area, A = pi.D^2/4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78.54",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C20",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hydraulic diameter (circular = D)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10.00",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C21",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Ventilation!A23",
+          "inlines": [
+            {
+              "text": "CO DILUTION - FRESH AIR DEMAND",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A23:C29",
+          "caption": "CO DILUTION - FRESH AIR DEMAND",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A24:C29",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 23",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Ventilation!A23",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A23:C29"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Ventilation!A24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Heavy diesel vehicles",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "120",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "veh/hr",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Light vehicles",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1080",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "veh/hr",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Total CO emission rate",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2.2400",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C26",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "g/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Permissible CO, mass basis",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.1145",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C27",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "g/m3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Fresh air required, Q",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "19.56",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m3/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Required velocity (CO dilution)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Ventilation!A31",
+          "inlines": [
+            {
+              "text": "CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A31:C34",
+          "caption": "CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A32:C34",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 31",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Ventilation!A31",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A31:C34"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Ventilation!A32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Critical velocity, Vc",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2.18",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Governing design velocity",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2.18",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A34",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Comfort/safety check (1-10 m/s)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B34",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "OK",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C34",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Ventilation!A36",
+          "inlines": [
+            {
+              "text": "JET FAN COUNT",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Ventilation!A36:C39",
+          "caption": "JET FAN COUNT",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A37:C39",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 36",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Ventilation!A36",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A36:C39"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Ventilation!A37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Friction pressure loss, dP",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4.58",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pa",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Total thrust required",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "359.85",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "N",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Ventilation!A39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "No. of jet fans required",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!B39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Ventilation!C39",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "nos",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
           ],
           "type": "table"
         }
@@ -1174,46 +3398,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "Drainage",
       "blocks": [
         {
+          "anchor": "Drainage!A1",
+          "inlines": [
+            {
+              "text": "DRAINAGE SYSTEM SIZING",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A1:A2",
+          "caption": "DRAINAGE SYSTEM SIZING",
           "header_rows": 0,
-          "rows": [
-            [
+          "layout": {
+            "certainty": "rule",
+            "data": "A2",
+            "found_by": [
               {
-                "anchor": "Drainage!A1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "DRAINAGE SYSTEM SIZING",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Drainage!B1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 1",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Drainage!C1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F1",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
               }
             ],
+            "key": "Drainage!A1",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "A1:A2"
+          },
+          "rows": [
             [
               {
                 "anchor": "Drainage!A2",
@@ -1225,93 +3449,52 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Drainage!A4",
+          "inlines": [
+            {
+              "text": "INPUTS",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A4:C14",
+          "caption": "INPUTS",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A5:C14",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "Drainage!B2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "caption row 4",
+                "id": "T",
+                "kind": "rule"
               },
               {
-                "anchor": "Drainage!C2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "label, value and unit columns",
+                "id": "K",
+                "kind": "rule"
               }
             ],
-            [
-              {
-                "anchor": "Drainage!A3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!B3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!C3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F3",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "Drainage!A4",
-                "col_span": 3,
-                "inlines": [
-                  {
-                    "text": "INPUTS",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D4",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E4",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F4",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
+            "key": "Drainage!A4",
+            "kind": "key_value",
+            "label_cols": 0,
+            "range": "A4:C14"
+          },
+          "rows": [
             [
               {
                 "anchor": "Drainage!A5",
@@ -1344,21 +3527,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F5",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -1395,21 +3563,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F6",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -1444,21 +3597,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F7",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -1495,21 +3633,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F8",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -1544,21 +3667,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F9",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -1595,21 +3703,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F10",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -1644,21 +3737,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!D11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!E11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "Drainage!F11",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -1695,27 +3773,778 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ],
+            [
               {
-                "anchor": "Drainage!D12",
+                "anchor": "Drainage!A13",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sump retention time",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               },
               {
-                "anchor": "Drainage!E12",
+                "anchor": "Drainage!B13",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               },
               {
-                "anchor": "Drainage!F12",
+                "anchor": "Drainage!C13",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "min",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               }
             ],
-            "<33 more items>"
+            [
+              {
+                "anchor": "Drainage!A14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pump duty factor",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
           ],
           "type": "table"
-        }
+        },
+        {
+          "anchor": "Drainage!A16",
+          "inlines": [
+            {
+              "text": "INFLOW ESTIMATES",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A16:C19",
+          "caption": "INFLOW ESTIMATES",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A17:C19",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 16",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Drainage!A16",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A16:C19"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Drainage!A17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Groundwater seepage inflow",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16.00",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C17",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "l/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Portal rainfall runoff (Rational Method)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "106.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C18",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "l/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Total design drain flow",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "122.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C19",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "l/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Drainage!A21",
+          "inlines": [
+            {
+              "text": "INVERT DRAIN PIPE SIZING (Manning's, full-bore)",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!A21:C27",
+          "caption": "INVERT DRAIN PIPE SIZING (Manning's, full-bore)",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A22:C25",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption row 21",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "detail": "column C is not a unit column",
+                "id": "K",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              },
+              {
+                "detail": "notes in row 27",
+                "id": "N",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "C"
+            ],
+            "key": "Drainage!A21",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A21:C27"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Drainage!A22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pipe area",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.0707",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C22",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hydraulic radius, R = D/4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.0750",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C23",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "m",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68.38",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C24",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "l/s",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!A25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Trial pipe status",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!B25",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "UNDERSIZED - increase diameter",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!C25",
+                "col_span": 1,
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Drainage!A27",
+          "inlines": [
+            {
+              "text": "STANDARD PIPE SIZE CHECK",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table E28:F38",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Drainage!E28:F38",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "E29:F38",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 28 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "bold header row 28",
+                "id": "H2",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "D (m)",
+              "Capacity (l/s)"
+            ],
+            "header_rows": [
+              28
+            ],
+            "key": "Drainage!E28",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "E28:F38"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Drainage!E28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "D (m)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F28",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Capacity (l/s)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.15",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F29",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10.77",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F30",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "23.19",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.25",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F31",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "42.05",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F32",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68.38",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F33",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "147.26",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E34",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.45",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F34",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "201.60",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E35",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F35",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "267.00",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E36",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F36",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "434.17",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.75",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F37",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "787.21",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Drainage!E38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Drainage!F38",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1280.08",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A40:C40",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        "<3 more items>"
       ],
       "kind": "sheet",
       "title": "Drainage",
@@ -2232,28 +5061,28 @@ source: crates/rezzer/tests/corpus.rs
         "id": "Design_Basis",
         "kind": "sheet",
         "name": "Design_Basis",
-        "size": "32 rows x 2 columns"
+        "size": "5 regions"
       },
       {
         "id": "Structural_Lining",
         "kind": "sheet",
         "name": "Structural_Lining",
         "role": "result",
-        "size": "74 rows x 6 columns"
+        "size": "8 rows x 3 columns, 8 regions"
       },
       {
         "id": "Ventilation",
         "kind": "sheet",
         "name": "Ventilation",
         "role": "result",
-        "size": "39 rows x 3 columns"
+        "size": "2 rows x 3 columns, 6 regions"
       },
       {
         "id": "Drainage",
         "kind": "sheet",
         "name": "Drainage",
         "role": "result",
-        "size": "45 rows x 6 columns"
+        "size": "3 rows x 3 columns, 7 regions"
       }
     ]
   },

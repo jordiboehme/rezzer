@@ -55,6 +55,8 @@ pub struct Book {
     pub wb_rels_extra: String,
     /// More entries, written after the others.
     pub extra: Vec<(String, String)>,
+    /// The content of `xl/styles.xml` inside `styleSheet`, in place of [`STYLES`].
+    pub styles: Option<String>,
 }
 
 impl Book {
@@ -96,6 +98,12 @@ impl Book {
             .unwrap()
             .related
             .push((kind, part.into(), xml.into()));
+        self
+    }
+
+    /// Replaces the default `xl/styles.xml` content (inside `styleSheet`).
+    pub fn styles(mut self, xml: &str) -> Book {
+        self.styles = Some(xml.into());
         self
     }
 
@@ -178,7 +186,10 @@ impl Book {
         ));
         files.push((
             "xl/styles.xml".into(),
-            format!("<styleSheet xmlns=\"{MAIN}\">{STYLES}</styleSheet>"),
+            format!(
+                "<styleSheet xmlns=\"{MAIN}\">{}</styleSheet>",
+                self.styles.as_deref().unwrap_or(STYLES)
+            ),
         ));
         files.extend(self.extra.iter().cloned());
         let mut w = ZipWriter::new(Cursor::new(Vec::new()));

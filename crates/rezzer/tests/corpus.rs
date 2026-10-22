@@ -609,6 +609,80 @@ fn layout_baseline_covers_the_spreadsheets() {
     }
 }
 
+/// The layout keeps every cell, value and piece of logic: for every XLSX and XLSM file with a
+/// baseline, the cells the blocks hold are the baseline's cells, and the formulas,
+/// parameters and rules facets are equal. No cell is written as a stray line outside its
+/// region.
+#[test]
+fn cells_and_logic_unchanged_on_corpus() {
+    let pipeline = pipeline();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        if !(name.ends_with(".xlsx") || name.ends_with(".xlsm")) {
+            continue;
+        }
+        checked += 1;
+        let base = baseline(&name);
+        let json = run(&pipeline, &file).json;
+        let doc: Document = serde_json::from_value(json.clone()).unwrap();
+        let now: Vec<(String, String)> = collect_cells(&doc);
+        let before: Vec<(String, String)> = base["cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c[0].as_str().unwrap().to_string(),
+                    c[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        if now != before {
+            let missing: Vec<_> = before
+                .iter()
+                .filter(|c| !now.contains(c))
+                .take(10)
+                .collect();
+            let extra: Vec<_> = now
+                .iter()
+                .filter(|c| !before.contains(c))
+                .take(10)
+                .collect();
+            failures.push(format!(
+                "{name}: cells differ ({} now, {} before); missing {missing:?}; extra {extra:?}",
+                now.len(),
+                before.len()
+            ));
+        }
+        for facet in ["formulas", "parameters", "rules"] {
+            let now = json
+                .pointer(&format!("/facets/{facet}"))
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new()));
+            // The baseline went through one more print and parse; serde_json's float parse
+            // is not exact, so the facet takes the same way before the comparison.
+            let now: Value = serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
+            if now != base[facet] {
+                let (a, b) = (now.as_array().unwrap(), base[facet].as_array().unwrap());
+                let first = a.iter().zip(b).find(|(x, y)| x != y);
+                failures.push(format!(
+                    "{name}: {facet} differ ({} now, {} before); first {first:?}",
+                    a.len(),
+                    b.len()
+                ));
+            }
+        }
+        let stray = json.to_string().matches("\"role\":\"cell\"").count();
+        if stray > 0 {
+            failures.push(format!("{name}: {stray} cells written as stray lines"));
+        }
+    }
+    assert!(checked >= 30, "only {checked} files checked");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn list<'a>(doc: &'a Value, pointer: &str) -> &'a [Value] {
     doc.pointer(pointer)
         .and_then(Value::as_array)

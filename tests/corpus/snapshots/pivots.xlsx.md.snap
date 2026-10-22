@@ -14,7 +14,7 @@ format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"
 completeness: complete
-losses: 0
+losses: 3
 authors: ["joel gilmore"]
 language: "en"
 created: "2025-09-13T10:14:06Z"
@@ -27,18 +27,19 @@ modified: "2025-11-24T17:58:07Z"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| PivotSheet1 | sheet | 5 rows x 6 columns |  |  |
-| PivotSheet2 | sheet | 11 rows x 4 columns |  |  |
-| PivotSheet3 | sheet | 7 rows x 3 columns |  |  |
-| PivotSheet4 | sheet | 9 rows x 2 columns |  |  |
-| DataSheet | sheet | 11 rows x 10 columns | result |  |
-| DataSheet2 | sheet | 11 rows x 10 columns | result |  |
+| PivotSheet1 | sheet | 2 rows x 5 columns, 3 regions |  |  |
+| PivotSheet2 | sheet | 7 rows x 4 columns, 2 regions |  |  |
+| PivotSheet3 | sheet | 4 rows x 2 columns, 3 regions |  |  |
+| PivotSheet4 | sheet | 3 rows x 2 columns, 2 regions |  |  |
+| DataSheet | sheet | 10 rows x 10 columns | result |  |
+| DataSheet2 | sheet | 10 rows x 10 columns | result |  |
 
 - Sheets: 6
 - Formulas: 22
 - Patterns: 2
 - Parameters: 40
 - Results: 20
+- Not read: 3
 - Last changed: 2025-11-24T17:58:07Z
 
 ## Properties
@@ -52,13 +53,24 @@ modified: "2025-11-24T17:58:07Z"
 
 ## PivotSheet1
 
-|  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- |
-| Date | (Multiple Items) |  |  |  |  |
-|  |  |  |  |  |  |
-| Row Labels | Sum of Size | Average of Value | Count of Size | Sum of Value x 2 | &lt;------------ calculated field |
-| yellow | 6.25552 | 8.333333333 | 3 | 25.54830581 |  |
-| Grand Total | 6.25552 | 8.333333333 | 3 | 25.54830581 |  |
+### Grid A1:B1
+
+|  |  |
+| --- | --- |
+| Date | (Multiple Items) |
+
+### Table A3:E5
+
+| Row Labels | Sum of Size | Average of Value | Count of Size | Sum of Value x 2 |
+| --- | --- | --- | --- | --- |
+| yellow | 6.25552 | 8.333333333 | 3 | 25.54830581 |
+| Grand Total | 6.25552 | 8.333333333 | 3 | 25.54830581 |
+
+### Text F3
+
+|  |
+| --- |
+| &lt;------------ calculated field |
 
 **Pivot tables**
 
@@ -68,12 +80,20 @@ modified: "2025-11-24T17:58:07Z"
 
 ## PivotSheet2
 
-|  |  |  |  |
-| --- | --- | --- | --- |
-| Name | (All) |  |  |
-|  |  |  |  |
-| Sum of Size | Column Labels |  |  |
+### Grid A1:B1
+
+|  |  |
+| --- | --- |
+| Name | (All) |
+
+### Table A3:D11
+
+Sum of Size
+
+Column Labels
+
 | Row Labels | blue | yellow | Grand Total |
+| --- | --- | --- | --- |
 | 5 |  | 2.22452 | 2.22452 |
 | 5 |  | 2.22452 | 2.22452 |
 | Group1 | 11.067 | 5.0731 | 16.1401 |
@@ -90,15 +110,26 @@ modified: "2025-11-24T17:58:07Z"
 
 ## PivotSheet3
 
-|  |  |  |
-| --- | --- | --- |
-| Date | (Multiple Items) |  |
-|  |  |  |
-| Row Labels | Count of Value2 | &lt;--------  grouped field as value |
-| f | 1 |  |
-| h | 1 |  |
-| j | 1 |  |
-| Grand Total | 3 |  |
+### Grid A1:B1
+
+|  |  |
+| --- | --- |
+| Date | (Multiple Items) |
+
+### Table A3:B7
+
+| Row Labels | Count of Value2 |
+| --- | --- |
+| f | 1 |
+| h | 1 |
+| j | 1 |
+| Grand Total | 3 |
+
+### Text C3
+
+|  |
+| --- |
+| &lt;--------  grouped field as value |
 
 **Pivot tables**
 
@@ -108,14 +139,18 @@ modified: "2025-11-24T17:58:07Z"
 
 ## PivotSheet4
 
-|  |  |
-| --- | --- |
+### Table A1:B4
+
 | Row Labels | Sum of Value |
+| --- | --- |
 | blue | 75 |
 | yellow | 40 |
 | Grand Total | 115 |
-|  |  |
+
+### Table A6:B9
+
 | Row Labels | Sum of Value |
+| --- | --- |
 | blue | 75 |
 | yellow | 50 |
 | Grand Total | 125 |
@@ -129,9 +164,8 @@ modified: "2025-11-24T17:58:07Z"
 
 ## DataSheet
 
-|  |  |  |  |  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | a | blue | 10 | 1.78 | 11-01-24 | 5.617977528 | TRUE |  |  |
 | 2 | b | blue | 20 | 2.012 | 01-04-24 | 9.940357853 | TRUE |  | 2.012 |
 | 3 | c | blue | 15 | 3.121 | 01-31-24 | 4.806151874 | TRUE |  | 02-01-24 |
@@ -145,9 +179,8 @@ modified: "2025-11-24T17:58:07Z"
 
 ## DataSheet2
 
-|  |  |  |  |  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | a | blue | 20 | 1.78 | 11-01-24 | 11.23595506 | TRUE |  |  |
 | 2 | b | blue | 20 | 2.012 | 01-04-24 | 9.940357853 | TRUE |  | 2.012 |
 | 3 | c | blue | 20 | 3.121 | 01-31-24 | 6.408202499 | TRUE |  | 02-01-24 |
@@ -269,3 +302,11 @@ flowchart LR
 | What | Where | Detail |
 | --- | --- | --- |
 | calculation | workbook | automatic, iterative calculation off |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| PivotSheet1!A1:B1 | no header found | uncertain | info |
+| PivotSheet2!A1:B1 | no header found | uncertain | info |
+| PivotSheet3!A1:B1 | no header found | uncertain | info |

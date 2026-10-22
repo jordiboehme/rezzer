@@ -1899,6 +1899,7 @@ dependencies = [
  "cfb",
  "formulakit",
  "quick-xml",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-render",

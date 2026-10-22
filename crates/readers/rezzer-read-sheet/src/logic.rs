@@ -177,7 +177,9 @@ impl Formulas {
     /// once: the functions each one calls and the ranges it reads on its own sheet. A
     /// formula that was not analyzed is listed with neither.
     pub fn layout_facts(&mut self, sheet: &str) -> HashMap<(u32, u32), sheetlayout::FormulaIn> {
-        self.layout.remove(&sheet.to_uppercase()).unwrap_or_default()
+        self.layout
+            .remove(&sheet.to_uppercase())
+            .unwrap_or_default()
     }
 
     /// Notes a formula cell for the layout detector, from its analysis when there is one.

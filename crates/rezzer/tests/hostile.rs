@@ -651,14 +651,23 @@ fn sparse_far_cells_do_not_allocate_grid() {
         losses(&result)
     );
     let doc = result.document.as_ref().unwrap();
-    // The value table stops at its caps and says so; the far formula is still listed.
-    assert!(
-        doc.losses
-            .iter()
-            .any(|l| l.why == LossReason::Limit && l.what.contains("not shown")),
-        "{:?}",
-        losses(&result)
-    );
+    // Two regions, one per cell: the empty rows and columns between them part them, and no
+    // grid of the used area is built.
+    let ranges: Vec<&str> = doc
+        .body
+        .iter()
+        .flat_map(|b| match b {
+            rezzer_model::Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => &[],
+        })
+        .filter_map(|b| match b {
+            rezzer_model::Block::Table {
+                layout: Some(l), ..
+            } => Some(l.range.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ranges, ["A1", "XFD1048576"], "{:?}", losses(&result));
     let far = doc
         .facets
         .formulas
