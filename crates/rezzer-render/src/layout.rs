@@ -759,10 +759,11 @@ fn records(
             in_group_rows = true;
             continue;
         }
-        in_group_rows = false;
+        // A blank row between group rows does not end their nesting.
         if kind == RowKind::Blank {
             continue;
         }
+        in_group_rows = false;
         let mut fields: Vec<Vec<Block>> = Vec::new();
         for (c, spot) in grid.spots[r].iter().enumerate() {
             let k = match spot {

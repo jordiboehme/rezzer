@@ -1268,3 +1268,30 @@ fn request_debug_shows_the_style_and_sheets() {
     assert_eq!(d.table_style, None);
     assert!(d.sheets.is_empty());
 }
+
+#[test]
+fn selection_applies_to_a_cached_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = sheet_pipeline(config(Some(dir.path())));
+    let path = office("formula-across-sheets.ods");
+    let all = pipeline.run_path(&path, &request()).markdown_pages.concat();
+    assert!(all.contains("\n## Data\n"), "{all}");
+    let entries = cache_files(dir.path()).len();
+    assert_eq!(entries, 1);
+    let one = Request {
+        sheets: vec!["Data".into()],
+        ..request()
+    };
+    let md = pipeline.run_path(&path, &one).markdown_pages.concat();
+    assert_eq!(cache_files(dir.path()).len(), entries, "one cache entry");
+    assert!(md.contains("\n## Data\n"), "{md}");
+    assert!(!md.contains("\n## Calculation\n"), "{md}");
+    assert!(md.contains("sheets_selected: [\"Data\"]\n"), "{md}");
+    let unknown = Request {
+        sheets: vec!["Nope".into()],
+        ..request()
+    };
+    let out = pipeline.run_path(&path, &unknown);
+    assert_eq!(out.completeness, Completeness::Failed);
+    assert!(out.message.unwrap().starts_with("unknown sheet \"Nope\""));
+}

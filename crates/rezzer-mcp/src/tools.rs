@@ -320,12 +320,7 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
         None => None,
         Some(text) => match text.parse::<TableStyle>() {
             Ok(style) => Some(style),
-            Err(_) => {
-                return rez_failed(format!(
-                    "table_style must be table or records, not {:?}",
-                    text.trim()
-                ));
-            }
+            Err(e) => return rez_failed(format!("table_style: {e}")),
         },
     };
     let output_dir = match params.output_dir.take() {

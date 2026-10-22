@@ -149,8 +149,8 @@ impl std::str::FromStr for TableStyle {
             .find(|style| style.name() == wanted)
             .ok_or_else(|| {
                 format!(
-                    "unknown table style {:?}, expected table or records",
-                    s.trim()
+                    "unknown table style {}, expected table or records",
+                    frontmatter::quote(s.trim())
                 )
             })
     }
@@ -169,20 +169,16 @@ pub fn resolve_sheets(doc: &Document, selectors: &[String]) -> Result<Vec<String
     let titles: Vec<String> = doc
         .body
         .iter()
-        .filter_map(|b| match b {
-            Block::Section {
-                kind: rezzer_model::SectionKind::Sheet,
-                title,
-                anchor,
-                ..
-            } => Some(
-                title
-                    .clone()
-                    .or_else(|| anchor.as_ref().map(|a| a.0.clone()))
-                    .unwrap_or_default(),
-            ),
-            _ => None,
+        .filter(|b| {
+            matches!(
+                b,
+                Block::Section {
+                    kind: SectionKind::Sheet,
+                    ..
+                }
+            )
         })
+        .map(|b| section_title(b).unwrap_or_default().to_string())
         .collect();
     if titles.is_empty() {
         return Err("this file has no sheets to select".to_string());
@@ -269,7 +265,8 @@ pub struct RenderOptions {
     pub math: bool,
     /// How the rows of sheet tables are written. Default [`TableStyle::Table`].
     pub table_style: TableStyle,
-    /// The titles of the sheets to write (see [`resolve_sheets`]); `None` writes all.
+    /// The titles of the sheets to write (see [`resolve_sheets`]); `None` or an empty list
+    /// writes all.
     pub sheets: Option<Vec<String>>,
 }
 
@@ -305,10 +302,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     out.push_str(&blocks::heading_line(1, &title_line));
     out.push('\n');
 
-    let selection = opts
-        .sheets
-        .as_deref()
-        .map(|titles| Selection::of(doc, titles));
+    let selection = chosen_sheets(opts).map(|titles| Selection::of(doc, titles));
     let selection = selection.as_ref();
     let mut parts: Vec<String> = Vec::new();
     if want(OutputSection::Overview)
@@ -419,12 +413,23 @@ impl<'a> Selection<'a> {
         self.chosen.contains(sheet)
     }
 
+    /// True for the anchor of a sheet that is not chosen; false for a chosen sheet and for
+    /// anything that is no sheet's anchor (another part, a sheet without an anchor).
+    pub(crate) fn left_out(&self, sheet: &str) -> bool {
+        self.sheets.contains(sheet) && !self.chosen.contains(sheet)
+    }
+
     /// False for an anchor on a sheet that is not chosen (`Data!A1`, or the sheet's own
     /// anchor); true for anything else, an anchor on no sheet included.
     pub(crate) fn keeps_anchor(&self, anchor: &str) -> bool {
         let sheet = workbook::split_sheet(anchor).map_or(anchor, |(sheet, _)| sheet);
         !self.sheets.contains(sheet) || self.chosen.contains(sheet)
     }
+}
+
+/// The chosen sheet titles; `None` when every sheet is written (no list, or an empty one).
+pub(crate) fn chosen_sheets(opts: &RenderOptions) -> Option<&[String]> {
+    opts.sheets.as_deref().filter(|titles| !titles.is_empty())
 }
 
 /// A sheet section's title as the selection names it: its title, else its anchor.

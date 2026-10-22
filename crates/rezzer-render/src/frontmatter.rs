@@ -223,7 +223,7 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
             quote(opts.table_style.name())
         ));
     }
-    if let Some(sheets) = &opts.sheets {
+    if let Some(sheets) = crate::chosen_sheets(opts) {
         out.push_str(&format!("sheets_selected: {}\n", quoted_list(sheets)));
     }
     if !p.authors.is_empty() {

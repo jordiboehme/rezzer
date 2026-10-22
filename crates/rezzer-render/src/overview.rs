@@ -20,8 +20,8 @@ const MAX_PARTS: usize = MAX_NODES;
 /// A "Reads from" cell names at most this many parts, then how many more.
 const MAX_READS: usize = 20;
 
-/// With a selection, the size of every part that is not a chosen sheet ends with
-/// `, not selected`.
+/// With a selection, the size of every sheet part that is not chosen ends with
+/// `, not selected`; other parts are never marked.
 pub(crate) fn render(doc: &Document, selection: Option<&Selection>) -> Option<String> {
     let overview = doc.overview.as_ref()?;
     if overview.parts.is_empty() && overview.facts.is_empty() {
@@ -42,7 +42,7 @@ pub(crate) fn render(doc: &Document, selection: Option<&Selection>) -> Option<St
         let rows: Vec<Vec<String>> = parts
             .iter()
             .take(MAX_PARTS)
-            .map(|p| row(p, &names, selection.is_some_and(|s| !s.chosen(&p.id))))
+            .map(|p| row(p, &names, selection.is_some_and(|s| s.left_out(&p.id))))
             .collect();
         let mut table = pipe_table(&header, &[], &rows);
         if parts.len() > MAX_PARTS {

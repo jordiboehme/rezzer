@@ -876,6 +876,15 @@ async fn rez_table_style_and_sheets() {
 async fn rez_bad_table_style_is_failed() {
     let client = connect(config()).await;
     let path = office("formula-across-sheets.ods");
+    let result = call(
+        &client,
+        "rez",
+        json!({ "path": path, "table_style": "ข้อมูล" }),
+    )
+    .await;
+    let message = structured(&result)["message"].as_str().unwrap().to_string();
+    assert!(message.contains("\"ข้อมูล\""), "{message}");
+    assert!(message.starts_with("table_style"), "{message}");
     for style in [json!("rows"), json!(5), json!(["records"])] {
         let result = call(
             &client,

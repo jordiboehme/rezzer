@@ -5006,6 +5006,34 @@ fn records_mark_subtotals() {
         ),
         "{md}"
     );
+
+    // A blank row between group rows keeps the nesting.
+    let mut l = lay(LayoutKind::Table, "A1:B5", Some("A2:B5"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Region".into(), "Sales".into()];
+    l.rows = vec![
+        row_note(2, RowKind::Group, None, "one text in the first column"),
+        row_note(3, RowKind::Blank, None, ""),
+        row_note(4, RowKind::Group, None, "one text in the first column"),
+    ];
+    let md = sheet_md_as(
+        vec![ltable(
+            vec![
+                vec![at("Region", "A1"), at("Sales", "B1")],
+                vec![at("2024", "A2")],
+                vec![at("", "A3"), at("", "B3")],
+                vec![at("Q1", "A4")],
+                vec![at("Oslo", "A5"), at("5", "B5")],
+            ],
+            1,
+            l,
+        )],
+        &records(),
+    );
+    assert!(
+        md.ends_with("- Row 5 (S!A5:B5), group: 2024 / Q1\n  - Region: Oslo\n  - Sales: 5"),
+        "{md}"
+    );
 }
 
 #[test]
@@ -5439,6 +5467,10 @@ fn table_style_names() {
         "rows".parse::<TableStyle>(),
         Err("unknown table style \"rows\", expected table or records".to_string())
     );
+    assert_eq!(
+        "ข้อมูล".parse::<TableStyle>(),
+        Err("unknown table style \"ข้อมูล\", expected table or records".to_string())
+    );
 }
 
 #[test]
@@ -5480,4 +5512,63 @@ fn row_ranges_same_in_both_styles() {
         assert_ne!(as_table, as_records);
     }
     assert_eq!(next, 42);
+}
+
+#[test]
+fn overview_marks_only_sheets_that_are_not_chosen() {
+    let mut d = two_sheet_book();
+    d.body.push(Block::Section {
+        kind: SectionKind::Chapter,
+        title: Some("Notes".into()),
+        anchor: Some(Anchor("notes".into())),
+        blocks: vec![para("words")],
+    });
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Loose".into()),
+        anchor: None,
+        blocks: vec![para("loose")],
+    });
+    let mut notes = part("Notes", "1 paragraph", None, &[]);
+    notes.id = "notes".into();
+    notes.kind = "chapter".into();
+    let mut loose = part("Loose", "1 row x 1 column", None, &[]);
+    loose.id = "part:4".into();
+    if let Some(o) = d.overview.as_mut() {
+        o.parts.push(notes);
+        o.parts.push(loose);
+    }
+    let o = RenderOptions {
+        sheets: Some(sel(&["Calc"])),
+        ..opts()
+    };
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(
+        md.contains("| Inputs | sheet | 2 rows x 1 column, not selected |"),
+        "{md}"
+    );
+    assert!(
+        md.contains("| Notes | chapter | 1 paragraph |  |  |"),
+        "{md}"
+    );
+    assert!(
+        md.contains("| Loose | sheet | 1 row x 1 column |  |  |"),
+        "{md}"
+    );
+    assert_eq!(md.matches("not selected").count(), 1, "{md}");
+}
+
+#[test]
+fn empty_sheet_list_writes_every_sheet() {
+    let d = two_sheet_book();
+    let none = render(&d, Completeness::Complete, &opts());
+    let empty = render(
+        &d,
+        Completeness::Complete,
+        &RenderOptions {
+            sheets: Some(Vec::new()),
+            ..opts()
+        },
+    );
+    assert_eq!(empty, none);
 }
