@@ -2545,3 +2545,35 @@ fn page_furniture_does_not_move_figure_texts() {
 fn page_blocks(out: &ReadOutcome, n: u32) -> &[Block] {
     page(out, n)
 }
+
+#[test]
+fn vector_codes_in_any_color_are_read() {
+    // Orange, green and light grey modules, and white modules on a black square.
+    let m = modules(Symbology::QrCode, TICKET_URL);
+    let colored = |color: &str| {
+        vector_code(&m, 300.0, 400.0, 2.0).replacen("q 0 g", &format!("q {color}"), 1)
+    };
+    // An inverted code: its dark modules white on a black square with a black quiet zone.
+    let mut white = String::from("q 0 g 290 390 70 70 re f Q\n");
+    white += &vector_code(&m, 300.0, 400.0, 2.0).replacen("q 0 g", "q 1 g", 1);
+    for (name, content) in [
+        ("orange", colored("1 0.6 0 rg")),
+        ("green", colored("0.2 0.8 0.3 rg")),
+        ("light grey", colored("0.65 g")),
+        ("white on black", white),
+    ] {
+        let out = read(&drawing_page(&content));
+        let got: Vec<String> = out
+            .document
+            .assets
+            .iter()
+            .flat_map(|a| a.codes.iter().map(|c| c.text.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            got,
+            [TICKET_URL.to_string()],
+            "{name}: {:#?}",
+            out.document.assets
+        );
+    }
+}

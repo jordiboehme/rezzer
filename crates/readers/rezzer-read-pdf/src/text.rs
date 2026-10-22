@@ -3013,14 +3013,11 @@ impl<'a> Device<'a> for TextDevice<'_> {
             return;
         }
         let stroke = !matches!(mode, DrawMode::Fill(_));
-        // Modules and bars are dark: white or light fills (and patterns) are not looked at.
+        // Modules and bars are solid fills of any color (a code may be orange, or white
+        // modules on a dark field): the code pattern decides. Pattern fills and fills that
+        // are mostly see-through are not looked at.
         let dark = match &props.paint {
-            hayro_interpret::Paint::Color(c) => {
-                let [r, g, b, a] = c.to_rgba().to_rgba8();
-                let luma =
-                    (u32::from(r) * 2126 + u32::from(g) * 7152 + u32::from(b) * 722) / 10_000;
-                a > 127 && luma < 160
-            }
+            hayro_interpret::Paint::Color(c) => c.to_rgba().to_rgba8()[3] > 127,
             _ => false,
         };
         if !stroke && dark && !self.cells_cut {
