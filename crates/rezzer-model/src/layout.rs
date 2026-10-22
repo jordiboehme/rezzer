@@ -178,16 +178,20 @@ pub fn a1_position(text: &str) -> Option<(u32, u32)> {
     Some((row - 1, col - 1))
 }
 
-/// A table as one of its consecutive row ranges.
+/// A table as one of its consecutive row ranges, or the notes under it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowRange {
-    /// The first sheet row of the range's data part, 1-based.
+    /// The first sheet row the range holds, 1-based: of its data rows, or for the notes
+    /// range of its notes. 0 when the table stores no data row.
     pub first: u32,
-    /// The last sheet row of the range's data part, 1-based.
+    /// The last sheet row the range holds, 1-based, as `first`.
     pub last: u32,
-    /// The lead blocks, the table with the header band and the range's rows, and in the
-    /// last range the tail blocks.
+    /// The lead blocks, then the table with the header band and the range's rows, then in
+    /// the last range the tail blocks. The notes range holds the lead and the tail only.
     pub blocks: Vec<Block>,
+    /// The index of the table in `blocks`; `None` for the notes range (and for a block that
+    /// is no table).
+    pub table: Option<usize>,
 }
 
 /// The fixed part of a row's size in characters, and what each non-empty cell adds besides
@@ -199,35 +203,46 @@ const CELL_BASE: usize = 6;
 /// 9.3). `max_tokens` is the part size the caller chose; 0 means no limit.
 ///
 /// Every range repeats `lead` (heading and caption blocks) and the table's header band (its
-/// first `header_rows` rows); `tail` (notes) goes only into the last range, and is not
-/// counted. Rows are cut only at row borders, never between a [`RowKind::Group`] row and
-/// its next row that is no group or blank row, and never inside the rows a data cell's `row_span` covers. A unit
-/// larger than the limit is a range of its own. Each range's table names its own data rows
-/// in `layout.data` and keeps the row notes of those rows.
+/// first `header_rows` rows). Rows are cut only at row borders, never between a
+/// [`RowKind::Group`] row and its next row that is no group or blank row, and never inside
+/// the rows a data cell's `row_span` covers. A unit larger than the limit is a range of its
+/// own. Each range's table names its own data rows in `layout.data`. A range keeps the row
+/// notes from the row after the previous range's last row to its own last row; the first
+/// range also those before it, the last range also those after it.
+///
+/// `tail` (notes) is counted like the lead, but only once: it goes into the last range when
+/// that range still fits with it. Else the last range closes and a notes range follows with
+/// the lead and the tail, no table; it is never cut, and its `first` and `last` are the
+/// sheet rows of the tail's anchors, or the row after the last data row without anchors.
 ///
 /// The size of a row is estimated from the model, the same for every table style:
 /// `ceil((10 + sum over non-empty cells of (chars of its header path + chars of its text +
 /// 6)) / 4)` tokens. The fixed part is `ceil(chars / 4)` per lead block plus the header band
-/// rows by the same formula.
+/// rows by the same formula. When the fixed part alone is at or above `max_tokens`, the data
+/// rows get a budget of `max_tokens` of their own, so a range holds about the fixed part
+/// plus `max_tokens` and a wide band never gives one range per row.
 ///
-/// A table without layout, a block that is no table, or a table that fits gives one range
-/// with the blocks unchanged. Its `first` and `last` are the sheet rows of its data part;
-/// without layout they count the table's own rows, 1-based (0 and 0 for no data rows).
+/// A table without layout, a block that is no table, a table that stores no data row, or a
+/// table that fits with its notes gives one range with the blocks unchanged. Its `first` and
+/// `last` are the sheet rows of its data part; without layout they count the table's own
+/// rows, 1-based. With no data row they are 0 and 0, with or without layout.
 pub fn split_rows(
     lead: &[Block],
     table: &Block,
     tail: &[Block],
     max_tokens: usize,
 ) -> Vec<RowRange> {
-    let whole = |first: u32, last: u32| RowRange {
+    let is_table = matches!(table, Block::Table { .. });
+    let whole = |first: u32, last: u32, with_tail: bool| RowRange {
         first,
         last,
         blocks: lead
             .iter()
             .chain(std::iter::once(table))
-            .chain(tail)
+            .chain(tail.iter().filter(|_| with_tail))
             .cloned()
             .collect(),
+        table: is_table.then_some(lead.len()),
     };
     let Block::Table {
         rows,
@@ -236,21 +251,20 @@ pub fn split_rows(
         ..
     } = table
     else {
-        return vec![whole(0, 0)];
+        return vec![whole(0, 0, true)];
     };
     let head = (*header_rows).min(rows.len());
     let Some(layout) = layout else {
         return vec![if rows.len() > head {
-            whole(head as u32 + 1, rows.len() as u32)
+            whole(head as u32 + 1, rows.len() as u32, true)
         } else {
-            whole(0, 0)
+            whole(0, 0, true)
         }];
     };
     let data = &rows[head..];
     let numbers = sheet_rows(layout, data);
     let (Some(&first), Some(&last)) = (numbers.first(), numbers.last()) else {
-        let (first, last) = data_rows(layout).unwrap_or((0, 0));
-        return vec![whole(first, last)];
+        return vec![whole(0, 0, true)];
     };
     let columns = columns(rows, layout.header_paths.len());
     let tokens: Vec<usize> = rows
@@ -258,11 +272,19 @@ pub fn split_rows(
         .zip(&columns)
         .map(|(row, cols)| row_tokens(row, cols, &layout.header_paths))
         .collect();
-    let fixed: usize = lead
-        .iter()
-        .map(|b| block_chars(b).div_ceil(4))
-        .sum::<usize>()
-        + tokens[..head].iter().sum::<usize>();
+    let block_tokens = |list: &[Block]| -> usize {
+        list.iter()
+            .map(|b| block_chars(b).div_ceil(4))
+            .fold(0, usize::saturating_add)
+    };
+    let fixed = block_tokens(lead).saturating_add(tokens[..head].iter().sum::<usize>());
+    // A fixed part that alone fills the part leaves the data rows a part of their own.
+    let base = if max_tokens > 0 && fixed >= max_tokens {
+        0
+    } else {
+        fixed
+    };
+    let fits = |size: usize| max_tokens == 0 || base.saturating_add(size) <= max_tokens;
     let units = units(layout, data, &numbers);
     // Greedy: a range takes units while they fit; an empty range takes one unit always.
     let mut parts: Vec<(usize, usize)> = Vec::new();
@@ -270,10 +292,7 @@ pub fn split_rows(
     for (start, end) in units {
         let unit: usize = tokens[head + start..=head + end].iter().sum();
         match parts.last_mut() {
-            Some(part)
-                if max_tokens == 0
-                    || fixed.saturating_add(size).saturating_add(unit) <= max_tokens =>
-            {
+            Some(part) if fits(size.saturating_add(unit)) => {
                 part.1 = end;
                 size += unit;
             }
@@ -283,42 +302,86 @@ pub fn split_rows(
             }
         }
     }
+    let tail_fits = tail.is_empty() || fits(size.saturating_add(block_tokens(tail)));
+    let notes = (!tail_fits).then(|| {
+        let (first, last) = tail_rows(tail).unwrap_or((last + 1, last + 1));
+        RowRange {
+            first,
+            last,
+            blocks: lead.iter().chain(tail).cloned().collect(),
+            table: None,
+        }
+    });
     if parts.len() <= 1 {
-        return vec![whole(first, last)];
+        let mut out = vec![whole(first, last, tail_fits)];
+        out.extend(notes);
+        return out;
     }
     let n = parts.len();
-    parts
-        .into_iter()
-        .enumerate()
-        .map(|(i, (start, end))| {
-            let (first, last) = (numbers[start], numbers[end]);
-            let mut part = layout.as_ref().clone();
-            part.data = Some(data_range(layout, first, last));
-            part.rows.retain(|note| (first..=last).contains(&note.row));
-            let mut cut = table.clone();
-            if let Block::Table {
-                rows: r, layout: l, ..
-            } = &mut cut
-            {
-                *r = rows[..head]
-                    .iter()
-                    .chain(&data[start..=end])
-                    .cloned()
-                    .collect();
-                *l = Some(Box::new(part));
-            }
-            let mut blocks: Vec<Block> = lead.to_vec();
-            blocks.push(cut);
-            if i + 1 == n {
-                blocks.extend_from_slice(tail);
-            }
-            RowRange {
-                first,
-                last,
-                blocks,
-            }
-        })
-        .collect()
+    let mut out: Vec<RowRange> = Vec::with_capacity(n + 1);
+    let mut prev_last: Option<u32> = None;
+    for (i, (start, end)) in parts.into_iter().enumerate() {
+        let (first, last) = (numbers[start], numbers[end]);
+        let is_last = i + 1 == n;
+        let mut part = layout.as_ref().clone();
+        part.data = Some(data_range(layout, first, last));
+        part.rows
+            .retain(|note| prev_last.is_none_or(|p| note.row > p) && (is_last || note.row <= last));
+        prev_last = Some(last);
+        let mut cut = table.clone();
+        if let Block::Table {
+            rows: r, layout: l, ..
+        } = &mut cut
+        {
+            *r = rows[..head]
+                .iter()
+                .chain(&data[start..=end])
+                .cloned()
+                .collect();
+            *l = Some(Box::new(part));
+        }
+        let mut blocks: Vec<Block> = lead.to_vec();
+        blocks.push(cut);
+        if is_last && tail_fits {
+            blocks.extend_from_slice(tail);
+        }
+        out.push(RowRange {
+            first,
+            last,
+            blocks,
+            table: Some(lead.len()),
+        });
+    }
+    out.extend(notes);
+    out
+}
+
+/// The smallest and largest 1-based sheet row the anchors of `blocks` name (`Sheet!A5` or
+/// `Sheet!A5:F6`); `None` when none of them names one.
+fn tail_rows(blocks: &[Block]) -> Option<(u32, u32)> {
+    blocks
+        .iter()
+        .filter_map(block_anchor)
+        .filter_map(|a| area(a.rsplit_once('!')?.1))
+        .map(|((top, bottom), _)| (top + 1, bottom + 1))
+        .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+}
+
+fn block_anchor(b: &Block) -> Option<&str> {
+    match b {
+        Block::Section { anchor, .. }
+        | Block::Heading { anchor, .. }
+        | Block::Paragraph { anchor, .. }
+        | Block::List { anchor, .. }
+        | Block::Table { anchor, .. }
+        | Block::Code { anchor, .. }
+        | Block::Quote { anchor, .. }
+        | Block::Math { anchor, .. }
+        | Block::Media { anchor, .. }
+        | Block::Callout { anchor, .. }
+        | Block::Rule { anchor, .. }
+        | Block::Task { anchor, .. } => anchor.as_ref().map(|a| a.0.as_str()),
+    }
 }
 
 /// The rows (top, bottom) and columns (left, right) of an A1 area `A5:F62` or a cell `B3`,
@@ -467,7 +530,7 @@ fn units(layout: &TableLayout, data: &[Vec<Cell>], numbers: &[u32]) -> Vec<(usiz
             reach = reach.max(j.saturating_add(span - 1).min(end));
             if groups.contains(&numbers[j]) {
                 let mut k = j + 1;
-                while k < end && (groups.contains(&numbers[k]) || blanks.contains(&numbers[k])) {
+                while k < end && blanks.contains(&numbers[k]) {
                     k += 1;
                 }
                 reach = reach.max(k.min(end));

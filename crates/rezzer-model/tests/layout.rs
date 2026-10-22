@@ -157,11 +157,7 @@ fn borders(ranges: &[RowRange]) -> Vec<(u32, u32)> {
 }
 
 fn table_of(range: &RowRange) -> (&Vec<Vec<Cell>>, usize, &TableLayout) {
-    let t = range
-        .blocks
-        .iter()
-        .find(|b| matches!(b, Block::Table { .. }))
-        .expect("a table in every range");
+    let t = &range.blocks[range.table.expect("a range with a table")];
     let Block::Table {
         rows,
         header_rows,
@@ -515,4 +511,235 @@ fn row_ranges_keep_group_with_data_past_blank_rows() {
     // The next range holds 4 to 6 (18) and row 7 (9): 12 + 27 = 39.
     assert_eq!(b[..2], [(2, 3), (4, 7)], "{b:?}");
     assert!(b.iter().all(|(_, last)| !(4..=5).contains(last)), "{b:?}");
+}
+
+/// A note paragraph of `chars` characters (`chars / 4` tokens for a multiple of 4).
+fn note_of(chars: usize, at: Option<&str>) -> Block {
+    Block::Paragraph {
+        inlines: vec![txt(&"n".repeat(chars))],
+        role: Some("note".into()),
+        anchor: at.map(|a| Anchor(format!("S!{a}"))),
+    }
+}
+
+#[test]
+fn notes_count_toward_the_last_range() {
+    // Last range (11, 11): 12 + 9 = 21. A note of 18 tokens fits 39, one of 19 does not.
+    let t = table(11);
+    let fits = note_of(72, Some("A13"));
+    let ranges = split_rows(&[heading()], &t, std::slice::from_ref(&fits), 39);
+    assert_eq!(borders(&ranges), vec![(2, 4), (5, 7), (8, 10), (11, 11)]);
+    assert_eq!(ranges[3].blocks.last(), Some(&fits));
+    let spills = note_of(76, Some("A13"));
+    let ranges = split_rows(&[heading()], &t, std::slice::from_ref(&spills), 39);
+    assert_eq!(
+        borders(&ranges),
+        vec![(2, 4), (5, 7), (8, 10), (11, 11), (13, 13)]
+    );
+    assert!(!ranges[3].blocks.contains(&spills));
+    assert_eq!(ranges[3].table, Some(1));
+    assert_eq!(ranges[4].table, None);
+}
+
+#[test]
+fn notes_spill_into_a_range_of_their_own() {
+    let t = table(11);
+    let tail = vec![note_of(100, Some("A13")), note_of(40, Some("A15:B16"))];
+    let ranges = split_rows(&[heading()], &t, &tail, 39);
+    let notes = ranges.last().unwrap();
+    assert_eq!((notes.first, notes.last), (13, 16));
+    assert_eq!(notes.table, None);
+    assert_eq!(
+        notes.blocks,
+        vec![heading(), tail[0].clone(), tail[1].clone()]
+    );
+    assert!(
+        notes
+            .blocks
+            .iter()
+            .all(|b| !matches!(b, Block::Table { .. }))
+    );
+    // Without anchors the notes take the row after the last data row.
+    let ranges = split_rows(&[heading()], &t, &[note_of(100, None)], 39);
+    let notes = ranges.last().unwrap();
+    assert_eq!((notes.first, notes.last), (12, 12));
+}
+
+#[test]
+fn fitting_table_with_large_notes_gives_two_ranges() {
+    let t = table(3);
+    let tail = vec![note_of(10_000, Some("A5"))];
+    let ranges = split_rows(&[heading()], &t, &tail, 100);
+    assert_eq!(borders(&ranges), vec![(2, 3), (5, 5)]);
+    assert_eq!(ranges[0].blocks, vec![heading(), t.clone()]);
+    assert_eq!(ranges[0].table, Some(1));
+    assert_eq!(ranges[1].blocks, vec![heading(), tail[0].clone()]);
+    // With no limit, the notes stay with the table.
+    let ranges = split_rows(&[heading()], &t, &tail, 0);
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(ranges[0].blocks, vec![heading(), t, tail[0].clone()]);
+}
+
+#[test]
+fn oversized_notes_stay_one_range() {
+    // Two notes, each larger than the part on its own: one notes range, never cut.
+    let t = table(3);
+    let tail = vec![note_of(4_000, Some("A5")), note_of(4_000, Some("A6"))];
+    let ranges = split_rows(&[], &t, &tail, 100);
+    assert_eq!(ranges.len(), 2);
+    assert_eq!(ranges[1].blocks, tail);
+    assert_eq!((ranges[1].first, ranges[1].last), (5, 6));
+}
+
+#[test]
+fn row_ranges_follow_sheet_rows_across_gaps() {
+    // Sheet row 4 is blank and not stored: anchors 2, 3, 5, 6. Its blank note goes with the
+    // range that holds the next data row.
+    let mut rows = vec![vec![cell("Name", "A1"), cell("Value", "B1")]];
+    rows.extend([2, 3, 5, 6].map(data_row));
+    let notes = vec![RowNote {
+        row: 4,
+        kind: RowKind::Blank,
+        level: None,
+        parent: None,
+        why: String::new(),
+    }];
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(layout(vec![1], 2, 6, notes))),
+    };
+    // Fixed 12, two rows 18: 30.
+    let ranges = split_rows(&[heading()], &t, &[], 30);
+    assert_eq!(borders(&ranges), vec![(2, 3), (5, 6)]);
+    let (_, _, first) = table_of(&ranges[0]);
+    let (_, _, second) = table_of(&ranges[1]);
+    assert_eq!(first.data.as_deref(), Some("A2:B3"));
+    assert_eq!(second.data.as_deref(), Some("A5:B6"));
+    assert!(first.rows.is_empty());
+    assert_eq!(second.rows.len(), 1);
+    assert_eq!(second.rows[0].row, 4);
+}
+
+#[test]
+fn empty_cells_do_not_count() {
+    // Column A has a long path; row 3 has an empty cell there. Counted it would be
+    // ceil((10 + 40 + 6 + 8) / 4) = 16 tokens; it is ceil((10 + 8) / 4) = 5.
+    let rows = vec![
+        vec![cell("N", "A1"), cell("V", "B1")],
+        data_row(2),
+        vec![cell("", "A3"), cell("1", "B3")],
+        data_row(4),
+    ];
+    let mut l = layout(vec![1], 2, 4, Vec::new());
+    l.header_paths = vec!["x".repeat(40), "V".into()];
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(l)),
+    };
+    // Header 17, row 2 17, row 3 5: 39 holds rows 2 and 3.
+    let ranges = split_rows(&[], &t, &[], 39);
+    assert_eq!(borders(&ranges), vec![(2, 3), (4, 4)]);
+}
+
+#[test]
+fn data_columns_come_from_the_data_part() {
+    // The region is wider than its data: every range names the data columns B to C.
+    let Block::Table { rows, .. } = table(11) else {
+        unreachable!()
+    };
+    let mut l = layout(vec![1], 2, 11, Vec::new());
+    l.range = "A1:D20".into();
+    l.data = Some("B2:C11".into());
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(l)),
+    };
+    let ranges = split_rows(&[heading()], &t, &[], 39);
+    assert_eq!(ranges.len(), 4);
+    for r in &ranges {
+        let want = format!("B{}:C{}", r.first, r.last);
+        assert_eq!(table_of(r).2.data.as_deref(), Some(want.as_str()));
+    }
+}
+
+#[test]
+fn no_data_rows_are_zero_with_and_without_layout() {
+    let band = vec![vec![cell("Name", "A1"), cell("Value", "B1")]];
+    let with = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: band.clone(),
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(layout(vec![1], 2, 5, Vec::new()))),
+    };
+    let without = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: band,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    for t in [&with, &without] {
+        let ranges = split_rows(&[], t, &[note()], 1);
+        assert_eq!(borders(&ranges), vec![(0, 0)]);
+        assert_eq!(ranges[0].blocks, vec![t.clone(), note()]);
+        assert_eq!(ranges[0].table, Some(0));
+    }
+}
+
+#[test]
+fn wide_band_gives_the_data_rows_their_own_budget() {
+    // A band of 3 rows by 200 columns is 3 * 1,248 = 3,744 tokens, above the part size of
+    // 2,500: the data rows still fill 2,500 tokens per range, not one row each.
+    let cols = 200usize;
+    let paths: Vec<String> = (0..cols).map(|c| format!("Column {c}")).collect();
+    let band_row = |r: u32| -> Vec<Cell> {
+        (0..cols)
+            .map(|c| cell(&format!("Column {c}"), &format!("{}{r}", column(c))))
+            .collect()
+    };
+    let mut rows = vec![band_row(1), band_row(2), band_row(3)];
+    rows.extend((4..5004).map(|r| vec![cell("a", &format!("A{r}"))]));
+    let mut l = layout(vec![1, 2, 3], 4, 5003, Vec::new());
+    l.header_paths = paths;
+    let t = Block::Table {
+        caption: None,
+        header_rows: 3,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(l)),
+    };
+    // A data row `a` under `Column 0`: ceil((10 + 8 + 1 + 6) / 4) = 7 tokens; 357 per range.
+    let ranges = split_rows(&[], &t, &[], 2_500);
+    assert_eq!(ranges.len(), 5_000usize.div_ceil(357), "{}", ranges.len());
+    for r in &ranges {
+        // Each range holds the band and at most 2,500 tokens of data rows.
+        assert!(r.last - r.first < 357, "{:?}", (r.first, r.last));
+        assert_eq!(table_of(r).0.len(), 3 + (r.last - r.first + 1) as usize);
+    }
+}
+
+fn column(c: usize) -> String {
+    rezzer_model::column_letter(c)
 }
