@@ -43,12 +43,25 @@ fn rule_detail(r: &Region, id: &str) -> String {
         .unwrap_or_default()
 }
 
-fn no_header(r: &Region) {
-    assert_eq!(r.kind, Kind::Grid);
-    assert_eq!(r.certainty, Certainty::Unsure);
+/// No header band. Steps 6d to 6h of the report rules then decide the kind; `id` names the
+/// rule that did (`K`, `X`, `H0`), or is empty for the grid of step 6h.
+#[track_caller]
+fn no_header(r: &Region, kind: Kind, id: &str) {
+    assert_eq!(r.kind, kind);
     assert!(r.header_rows.is_empty());
     assert!(r.header_paths.is_empty());
-    assert_eq!(r.unsure, ["no header found"]);
+    assert!(r.body.is_none());
+    for band in ["H1", "H2", "H3"] {
+        assert!(!has_rule(r, band), "{band} gave no band");
+    }
+    if kind == Kind::Grid {
+        assert_eq!(r.certainty, Certainty::Unsure);
+        assert_eq!(r.unsure, ["no header found"]);
+    } else {
+        assert_eq!(r.certainty, Certainty::Rule);
+        assert!(r.unsure.is_empty());
+        assert!(has_rule(r, id), "{id}");
+    }
 }
 
 /// The EIA table 1.1 shape: captions in rows 1 and 2, a band in rows 3 and 4 (A3 empty,
@@ -127,7 +140,7 @@ fn no_data_row_after_the_band_is_no_band() {
     let layout = Sheet::new()
         .rows("A1", &["a|b", "c|d", "e|f", "g|h", "i|j", "1|2"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::Table, "H0");
     // A bool is a type change.
     let layout = Sheet::new().rows("A1", &["a|b", "c|TRUE", "1|2"]).detect();
     assert_eq!(header(only(&layout)), [1]);
@@ -241,7 +254,7 @@ fn vertical_merge_extends_band() {
         )
         .merge("A1:A5")
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::KeyValue, "K");
 }
 
 #[test]
@@ -330,35 +343,43 @@ fn all_text_region_header_rule() {
     assert_eq!(r.header_paths, ["Name", "City"]);
     assert!(has_rule(r, "H3"));
     // Without styles there is no positive signal: no band.
-    no_header(only(&Sheet::new().rows("A1", &rows).detect()));
+    no_header(
+        only(&Sheet::new().rows("A1", &rows).detect()),
+        Kind::KeyValue,
+        "K",
+    );
     // With styles but no mark: no band.
-    no_header(only(&Sheet::styled().rows("A1", &rows).detect()));
+    no_header(
+        only(&Sheet::styled().rows("A1", &rows).detect()),
+        Kind::KeyValue,
+        "K",
+    );
     // A header guess for the first row is a positive signal.
     let mut sheet = Sheet::new().rows("A1", &rows);
     sheet.header_guess = Some((0, true));
     assert_eq!(header(only(&sheet.detect())), [1]);
     sheet.header_guess = Some((0, false));
-    no_header(only(&sheet.detect()));
+    no_header(only(&sheet.detect()), Kind::KeyValue, "K");
     // A header text that repeats below in its column: no band.
     let layout = Sheet::styled()
         .rows("A1", &["*Name|*City", "Ann|Rome", "Bob|City"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::KeyValue, "K");
     // Two equal header texts: no band.
     let layout = Sheet::styled()
         .rows("A1", &["*Name|*Name", "Ann|Rome", "Bob|Oslo"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::KeyValue, "K");
     // An empty header cell: no band.
     let layout = Sheet::styled()
         .rows("A1", &["*Name||*City", "Ann|x|Rome", "Bob|y|Oslo"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::Table, "K");
     // H2 marks two rows: not exactly row 1, no band.
     let layout = Sheet::styled()
         .rows("A1", &["*Name|*City", "*Ann|*Rome", "Bob|Oslo"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::KeyValue, "K");
 }
 
 #[test]
@@ -505,8 +526,7 @@ fn print_titles_leave_data_and_hold_at_most_10_rows() {
     assert_eq!(r.header_rows.len(), 10);
     sheet.print_titles = Some((0, 10));
     let r = sheet.detect().regions.remove(0);
-    assert_eq!(r.kind, Kind::Grid);
-    assert_eq!(r.unsure, ["no header found"]);
+    no_header(&r, Kind::Table, "H0");
 }
 
 #[test]
@@ -1112,7 +1132,7 @@ fn band_row_covered_by_a_merge_from_above() {
         .detect();
     let r = only(&layout);
     assert_eq!(r.rect, rect("A1:B4"));
-    no_header(r);
+    no_header(r, Kind::Table, "H0");
 }
 
 /// Pivot cells, the location triple, the rows above the band, the band (1-based) and the
@@ -1248,7 +1268,7 @@ fn year_formulas_count_as_years() {
     let layout = Sheet::new()
         .rows("A1", &["a|b", "=|=", "c|d", "1|2"])
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::Table, "H0");
     // A formula with an empty result in a band row counts as empty.
     let layout = Sheet::new()
         .rows("A1", &["a|b|e", "c|=|d", "1|2|3"])
@@ -1340,11 +1360,11 @@ fn surviving_mutants_of_the_review() {
             c.class = sheetlayout::Class::Error;
         }
     }
-    no_header(only(&sheet.detect()));
+    no_header(only(&sheet.detect()), Kind::Table, "H0");
     // M6: H3 needs a row below.
     let mut sheet = Sheet::new().rows("A1", &["Name|City"]);
     sheet.header_guess = Some((0, true));
-    no_header(only(&sheet.detect()));
+    no_header(only(&sheet.detect()), Kind::Grid, "");
     // M11: 75 % text is no label column.
     let r = Sheet::new()
         .rows("A1", &["Name|V", "a|1", "b|2", "c|3", "4|4"])
@@ -1358,11 +1378,11 @@ fn surviving_mutants_of_the_review() {
         .rows("A1", &["a|b", "|2", "3|4"])
         .merge("A1:A2")
         .detect();
-    no_header(only(&layout));
+    no_header(only(&layout), Kind::Table, "H0");
     // M18: a header guess for another row is no signal for the first.
     let mut sheet = Sheet::new().rows("A1", &["Name|City", "Ann|Rome", "Bob|Oslo"]);
     sheet.header_guess = Some((1, true));
-    no_header(only(&sheet.detect()));
+    no_header(only(&sheet.detect()), Kind::KeyValue, "K");
     // The guess names a sheet row: a list from row 3 needs the guess for row 3.
     let mut sheet = Sheet::new().rows("A3", &["Name|City", "Ann|Rome", "Bob|Oslo"]);
     sheet.header_guess = Some((2, true));
@@ -1421,7 +1441,7 @@ fn caption_merge_does_not_cover_a_band_row() {
         .detect();
     let r = only(&layout);
     assert_eq!(r.captions, [0]);
-    no_header(r);
+    no_header(r, Kind::Table, "H0");
 }
 
 #[test]

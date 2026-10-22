@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The decision procedure per region (spec 6.7 step 6): header band, header paths and label
-//! columns. Each region is read through its own rows: the cells it holds, grouped by row, and
-//! for each row the number of its merges that reach the row. Nothing is per position of the
-//! used area.
+//! The decision procedure per region (spec 6.7 step 6): header band, header paths, the rows
+//! of a table (step 6c) and the report rules when no band is found (steps 6d to 6h), then
+//! the second passes of steps 7 and 8. Each region is read through its own rows: the cells it
+//! holds, grouped by row, and for each row the number of its merges that reach the row.
+//! Nothing is per position of the used area.
 
 use std::cell::Cell;
 use std::cmp::Reverse;
@@ -15,6 +16,8 @@ use crate::header::{self, Band};
 use crate::input::{CellIn, FactKind, Input, Limits, Rect};
 use crate::occupancy::Prep;
 use crate::paths::{self, PathStop};
+use crate::report;
+use crate::rows::{self, FactRows, Outline};
 use crate::{
     Certainty, Evidence, Issue, IssueKind, Kind, Layout, Origin, Region, Work, segment_work,
 };
@@ -93,7 +96,7 @@ pub(crate) struct Lines<'p, 'a> {
 impl<'p, 'a> Lines<'p, 'a> {
     /// Groups the cells inside `rect` by row and counts the merges per row by a sweep over
     /// their tops and bottoms. Gives `None` when the stop callback ends the work.
-    fn new(
+    pub fn new(
         prep: &'p Prep<'a>,
         rect: Rect,
         cells: Vec<u32>,
@@ -198,6 +201,29 @@ impl<'p, 'a> Lines<'p, 'a> {
         }
     }
 
+    /// The one merge that reaches a line, when exactly one does.
+    pub fn merge_of(&self, line: &Line) -> Option<&'p Rect> {
+        (line.merges == 1).then(|| &self.prep.merges[line.merge_sum as usize])
+    }
+
+    /// The cells, to keep them after the lines are no longer needed.
+    pub fn into_cells(self) -> Vec<u32> {
+        self.cells
+    }
+
+    /// The indices into `prep.cells` of the cells in the rows `top` to `bottom`.
+    pub fn cells_in(&self, top: u32, bottom: u32) -> Vec<u32> {
+        let lo = self.first_at(top);
+        let hi = self.lines.partition_point(|l| l.row <= bottom).max(lo);
+        match (
+            self.lines.get(lo),
+            hi.checked_sub(1).and_then(|k| self.lines.get(k)),
+        ) {
+            (Some(a), Some(b)) if lo < hi => self.cells[a.from as usize..b.to as usize].to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The occupied cell at a position of the region.
     pub fn cell_at(&self, row: u32, col: u32) -> Option<&'a CellIn> {
         let line = self.at(row)?;
@@ -246,16 +272,11 @@ fn distribute(prep: &Prep, rects: &[Rect], tick: &Tick) -> Option<Vec<Vec<u32>>>
 }
 
 /// Words for a stop during detection, added to the one `Stopped` issue.
-fn note_stop(issues: &mut Vec<Issue>, undecided: usize) {
-    let words = if undecided == 1 {
-        "1 region was not decided".to_string()
-    } else {
-        format!("{undecided} regions were not decided")
-    };
+pub(crate) fn note_stop(issues: &mut Vec<Issue>, words: &str) {
     match issues.iter_mut().find(|i| i.kind == IssueKind::Stopped) {
         Some(i) => {
             i.what.push_str("; ");
-            i.what.push_str(&words);
+            i.what.push_str(words);
         }
         None => issues.push(Issue {
             what: format!("time limit reached: {words}"),
@@ -291,72 +312,137 @@ fn undecided(w: &mut Work, body: Rect) {
     r.unsure = vec!["time limit reached before the header was found".to_string()];
 }
 
-/// Whether a region was decided, its paths passed the path budget, or the stop callback
-/// ended the work on it.
-enum Outcome {
-    Done,
+/// Why the decision of a region ended early.
+pub(crate) enum Halt {
+    /// The header paths would pass the path budget.
     Over,
     Stopped,
 }
 
-/// Finds the regions of one sheet and decides each one: steps 1 to 5 of spec 6.7 as
-/// [`segment`](crate::segment) does, then per region the header band (rules H1, H2 and H3,
-/// print titles and frozen panes), the header paths and the label columns (rule L).
+/// What the decision procedure carries from region to region.
+pub(crate) struct Ctx<'t> {
+    pub tick: &'t Tick<'t>,
+    pub outline: &'t Outline,
+    pub limits: &'t Limits,
+    /// Bytes of header path text left.
+    pub budget: usize,
+    /// Regions that section headings may still add.
+    pub room: usize,
+    /// Issues of the report rules.
+    pub issues: Vec<Issue>,
+}
+
+/// The cells of `cells` that lie in `rect`.
+pub(crate) fn keep(prep: &Prep, mut cells: Vec<u32>, rect: Rect) -> Vec<u32> {
+    cells.retain(|&k| rect.contains(prep.cell(k as usize).pos));
+    cells
+}
+
+/// Finds the regions of one sheet and decides each one, in the order of spec 6.7: steps 1 to
+/// 5 as [`segment`](crate::segment) does, then per region the header band (rules H1, H2 and
+/// H3, print titles and frozen panes) and the header paths.
 ///
-/// A region with a band is a `Table`; rules that disagree give a `Grid` with certainty
-/// `Unsure` and the reason in `unsure`; a region with no band stays a `Grid` with the reason
-/// `no header found`. Fact regions keep their exact header and get its paths. Rest regions
-/// are not decided.
+/// - A region with a band is a `Table`. Step 6c then finds its group rows (R2), trailing
+///   notes, label columns (L), row hierarchy (R3) and subtotal and total rows (from facts and
+///   formulas only). Fact regions keep their exact header and go to step 6c too.
+/// - Rules that disagree give a `Grid` with certainty `Unsure` and the reason in `unsure`.
+/// - A region with no band is cut at section heading rows (R1, up to
+///   `Limits::max_section_depth` deep), each piece decided again. Else it is a `KeyValue`
+///   block (K), a `Text` block (X), a header-less `Table` when it holds a number, date or
+///   bool (evidence `H0`, "no header found"), or else a `Grid` with the reason
+///   `no header found`.
+/// - Then a region with no band right below a table, in exactly its columns and at most one
+///   empty row down, joins that table (C), and text regions at most 2 empty rows below a
+///   table, inside its columns, become its notes (N). Text beside a table stays (S).
 ///
-/// A header path is empty when no band cell names its column; the caller writes the column
-/// letter. Path text counts against `Limits::max_path_bytes` per sheet: a region whose paths
-/// would pass it stays a rest grid with a `Limit` issue. When `stop` says stop, the regions
-/// not yet decided stay grids and the one `Stopped` issue says how many.
+/// Rest regions are not decided. A header path is empty when no band cell names its column;
+/// the caller writes the column letter. Path text counts against `Limits::max_path_bytes`
+/// per sheet: a region whose paths would pass it stays a rest grid with a `Limit` issue.
+/// Sections that would pass the region limit are not split, with a `Limit` issue without a
+/// range. When `stop` says stop, the regions not yet decided stay grids and the one `Stopped`
+/// issue says how many.
 pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout {
     let (prep, mut works, mut issues) = segment_work(input, limits, stop);
     let tick = Tick::new(stop);
-    let rects: Vec<Rect> = works.iter().map(|w| w.region.rect).collect();
-    let mut budget = limits.max_path_bytes;
-    let mut cells = if tick.ask() {
-        None
+    let outline = if input.outline.is_empty() || tick.ask() {
+        Outline::default()
     } else {
-        distribute(&prep, &rects, &tick)
+        Outline::new(input, &tick).unwrap_or_default()
     };
+    let rects: Vec<Rect> = works.iter().map(|w| w.region.rect).collect();
+    let mut handed = !tick.hit();
+    if handed {
+        match distribute(&prep, &rects, &tick) {
+            Some(all) => {
+                for (w, cells) in works.iter_mut().zip(all) {
+                    w.cells = cells;
+                }
+            }
+            None => handed = false,
+        }
+    }
+    let mut ctx = Ctx {
+        tick: &tick,
+        outline: &outline,
+        limits,
+        budget: limits.max_path_bytes,
+        room: limits.max_regions.max(1).saturating_sub(works.len()),
+        issues: Vec::new(),
+    };
+    let mut extra: Vec<Work> = Vec::new();
     let mut left = 0usize;
-    for (i, w) in works.iter_mut().enumerate() {
+    for w in works.iter_mut() {
         if w.origin == Origin::Rest || w.region.kind == Kind::Title {
             continue;
         }
         let body = body(input, w);
-        let Some(all) = cells.as_mut() else {
-            undecided(w, body);
-            left += 1;
-            continue;
-        };
-        if tick.ask() {
+        if !handed || tick.ask() {
             undecided(w, body);
             left += 1;
             continue;
         }
-        let mine = std::mem::take(&mut all[i]);
         let saved = w.region.clone();
-        match decide(&prep, w, body, mine, &mut budget, &tick) {
-            Outcome::Done => {}
-            Outcome::Over => {
-                // The grid shows none of the band or its evidence.
+        let room = ctx.room;
+        let said = ctx.issues.len();
+        match decide(&prep, w, body, &mut ctx) {
+            Ok(pieces) => extra.extend(pieces),
+            Err(halt) => {
+                // The region goes back to what segmenting left; its pieces are dropped.
                 w.region = saved;
-                over_budget(w, body, &mut issues);
-            }
-            Outcome::Stopped => {
-                // A stop part way leaves the region as segmenting left it.
-                w.region = saved;
-                undecided(w, body);
-                left += 1;
+                w.dead = false;
+                ctx.room = room;
+                ctx.issues.truncate(said);
+                match halt {
+                    Halt::Over => over_budget(w, body, &mut issues),
+                    Halt::Stopped => {
+                        undecided(w, body);
+                        left += 1;
+                    }
+                }
             }
         }
     }
+    issues.append(&mut ctx.issues);
+    works.extend(extra);
+    works.retain(|w| !w.dead);
+    works.sort_by_key(|w| (w.region.rect.top, w.region.rect.left));
     if left > 0 {
-        note_stop(&mut issues, left);
+        let words = if left == 1 {
+            "1 region was not decided".to_string()
+        } else {
+            format!("{left} regions were not decided")
+        };
+        note_stop(&mut issues, &words);
+    } else if !tick.hit() {
+        let done = report::continuation(&prep, &mut works, &mut ctx).is_ok()
+            && report::attach_notes(&prep, &mut works, &tick).is_ok();
+        if !done {
+            note_stop(
+                &mut issues,
+                "the continuation and note rules were not applied to every table",
+            );
+        }
+        works.retain(|w| !w.dead);
     }
     Layout {
         regions: works.into_iter().map(|w| w.region).collect(),
@@ -364,68 +450,84 @@ pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout
     }
 }
 
-/// Step 6a to 6c (header part) for one region.
-fn decide(
-    prep: &Prep,
-    w: &mut Work,
-    body: Rect,
-    cells: Vec<u32>,
-    budget: &mut usize,
-    tick: &Tick,
-) -> Outcome {
-    let Some(lines) = Lines::new(prep, body, cells, &w.merges, tick) else {
-        return Outcome::Stopped;
+/// Step 6 for one region: the fact path to step 6c, or the whole procedure for a rule region.
+/// Gives the new regions that section headings cut off.
+fn decide(prep: &Prep, w: &mut Work, body: Rect, ctx: &mut Ctx) -> Result<Vec<Work>, Halt> {
+    let cells = std::mem::take(&mut w.cells);
+    let Some(lines) = Lines::new(prep, body, cells, &w.merges, ctx.tick) else {
+        return Err(Halt::Stopped);
     };
-    let input = prep.input;
+    let out = if w.origin == Origin::Fact {
+        finish_table(&lines, w, ctx).map(|()| Vec::new())
+    } else {
+        rule(&lines, w, 1, ctx)
+    };
+    let rect = w.region.rect;
+    w.cells = keep(prep, lines.into_cells(), rect);
+    out
+}
+
+/// Steps 6a to 6h for a rule region (or a piece of one) read through `lines`, the rows of its
+/// data area. `depth` is the section depth of the region (1 at the top).
+pub(crate) fn rule(
+    lines: &Lines,
+    w: &mut Work,
+    depth: u32,
+    ctx: &mut Ctx,
+) -> Result<Vec<Work>, Halt> {
+    let input = lines.prep.input;
+    let tick = ctx.tick;
+    // Print titles stay evidence only when they set the band.
+    let had_print = w.region.evidence.contains(&Evidence::PrintTitles);
+    w.region.evidence.retain(|e| *e != Evidence::PrintTitles);
     let before = w.region.data;
-    let fact = w.origin == Origin::Fact;
-    if !fact {
-        // Print titles stay evidence only when they set the band.
-        let had_print = w.region.evidence.contains(&Evidence::PrintTitles);
-        w.region.evidence.retain(|e| *e != Evidence::PrintTitles);
-        let band = match before {
-            Some(data) => header::band(&lines, data, had_print, tick),
-            None => Band::None,
-        };
-        if tick.hit() {
-            return Outcome::Stopped;
+    let band = match before {
+        Some(data) => header::band(lines, data, had_print, tick),
+        None => Band::None,
+    };
+    if tick.hit() {
+        return Err(Halt::Stopped);
+    }
+    match band {
+        Band::None => report::no_band(lines, w, depth, ctx),
+        Band::Unsure(why, evidence) => {
+            let region = &mut w.region;
+            region.kind = Kind::Grid;
+            region.certainty = Certainty::Unsure;
+            region.unsure = vec![why];
+            region.evidence.extend(evidence);
+            retain_panes(input, lines.rect, region);
+            Ok(Vec::new())
         }
-        let region = &mut w.region;
-        match band {
-            Band::None => {
-                region.kind = Kind::Grid;
-                region.certainty = Certainty::Unsure;
-                region.unsure = vec!["no header found".to_string()];
-                retain_panes(input, body, region);
-                return Outcome::Done;
-            }
-            Band::Unsure(why, evidence) => {
-                region.kind = Kind::Grid;
-                region.certainty = Certainty::Unsure;
-                region.unsure = vec![why];
-                region.evidence.extend(evidence);
-                retain_panes(input, body, region);
-                return Outcome::Done;
-            }
-            Band::Rows {
-                first,
-                end,
-                certainty,
-                evidence,
-            } => {
-                let data = before.unwrap_or(region.rect);
-                region.kind = Kind::Table;
-                region.certainty = certainty;
-                region.header_rows = (first..=end).collect();
-                region.data = (end < data.bottom).then(|| Rect {
-                    top: end + 1,
-                    ..data
-                });
-                region.unsure.clear();
-                region.evidence.extend(evidence);
-            }
+        Band::Rows {
+            first,
+            end,
+            certainty,
+            evidence,
+        } => {
+            let region = &mut w.region;
+            let data = before.unwrap_or(region.rect);
+            region.kind = Kind::Table;
+            region.certainty = certainty;
+            region.header_rows = (first..=end).collect();
+            region.data = (end < data.bottom).then(|| Rect {
+                top: end + 1,
+                ..data
+            });
+            region.unsure.clear();
+            region.evidence.extend(evidence);
+            finish_table(lines, w, ctx)?;
+            Ok(Vec::new())
         }
     }
+}
+
+/// The rest of a table once its header rows are set: header paths, then step 6c.
+fn finish_table(lines: &Lines, w: &mut Work, ctx: &mut Ctx) -> Result<(), Halt> {
+    let input = lines.prep.input;
+    let body = lines.rect;
+    let tick = ctx.tick;
+    let fact = w.origin == Origin::Fact;
     let region = &mut w.region;
     if fact {
         // A fact states its own header; print titles stay evidence only when they name the
@@ -439,11 +541,11 @@ fn decide(
         }
     }
     let built = if region.hidden_header {
-        paths::from_names(hidden_names(input, w.fact), body, budget)
+        paths::from_names(hidden_names(input, w.fact), body, &mut ctx.budget)
     } else if let (Some(&first), Some(&end)) =
         (region.header_rows.first(), region.header_rows.last())
     {
-        paths::build(&lines, first, end, budget, tick)
+        paths::build(lines, first, end, &mut ctx.budget, tick)
     } else {
         Ok(Vec::new())
     };
@@ -455,29 +557,23 @@ fn decide(
             }
             region.header_paths = p;
         }
-        Err(PathStop::Stopped) => return Outcome::Stopped,
-        Err(PathStop::Over) => return Outcome::Over,
+        Err(PathStop::Stopped) => return Err(Halt::Stopped),
+        Err(PathStop::Over) => return Err(Halt::Over),
     }
     let pivot = fact
         && region
             .evidence
             .iter()
             .any(|e| matches!(e, Evidence::Pivot { .. }));
-    if !pivot && let Some(data) = region.data {
-        let (n, words) = header::label_cols(&lines, &region.header_rows, data, tick);
-        if tick.hit() {
-            return Outcome::Stopped;
-        }
-        region.label_cols = n;
-        if let Some(words) = words {
-            region.evidence.push(Evidence::Rule {
-                id: "L",
-                detail: words,
-            });
-        }
+    let facts = w.fact.map(|f| FactRows {
+        kind: &input.facts[f].kind,
+        rect: input.facts[f].rect.normalized(),
+    });
+    if !rows::table_rows(lines, region, facts, pivot, ctx.outline, tick) {
+        return Err(Halt::Stopped);
     }
     retain_panes(input, body, region);
-    Outcome::Done
+    Ok(())
 }
 
 /// The column names of an Excel table whose header row is hidden.
@@ -489,7 +585,7 @@ fn hidden_names<'a>(input: &'a Input, fact: Option<usize>) -> &'a [String] {
 }
 
 /// Frozen panes stay evidence only when they confirm the band or the label columns.
-fn retain_panes(input: &Input, body: Rect, region: &mut Region) {
+pub(crate) fn retain_panes(input: &Input, body: Rect, region: &mut Region) {
     let Some((rows, cols)) = input.frozen else {
         return;
     };

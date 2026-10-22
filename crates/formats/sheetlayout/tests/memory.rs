@@ -269,3 +269,178 @@ fn dense_block_detect_heap_follows_the_cells() {
     assert_eq!(layout.regions[0].header_rows, [0]);
     assert_eq!(layout.regions[0].header_paths.len(), 1000);
 }
+
+// Report rules (Task 6).
+
+#[test]
+fn many_sections_are_bounded() {
+    // One region of 3,000 sections: a bold heading row and two label and value rows each.
+    let build = |n: u32| {
+        let mut sheet = Sheet::styled();
+        for k in 0..n {
+            let row = 3 * k;
+            sheet.put(Pos { row, col: 0 }, "*Section");
+            sheet.put(
+                Pos {
+                    row: row + 1,
+                    col: 0,
+                },
+                "Length",
+            );
+            sheet.put(
+                Pos {
+                    row: row + 1,
+                    col: 1,
+                },
+                "5",
+            );
+            sheet.put(
+                Pos {
+                    row: row + 2,
+                    col: 0,
+                },
+                "Width",
+            );
+            sheet.put(
+                Pos {
+                    row: row + 2,
+                    col: 1,
+                },
+                "3",
+            );
+        }
+        sheet
+    };
+    let sheet = build(3_000);
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("3,000 sections: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 3_000);
+    // The first heading is the region's caption row; the others cut it.
+    assert_eq!(layout.regions[0].captions, [0]);
+    assert!(layout.regions[1..].iter().all(|r| r.heading.is_some()));
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+    // 20,000 sections pass the region limit: the region is not split, and an issue says so.
+    let sheet = build(20_000);
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("20,000 sections: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 1);
+    assert!(layout.issues.iter().any(|i| i.what.contains("not split")));
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}
+
+#[test]
+fn long_continuation_chain_is_bounded() {
+    // A header row and 9,000 one-row parts of 20 columns, each one empty row below the last
+    // (within the region limit): one table, read again once.
+    let mut sheet = Sheet::new();
+    for col in 0..20u32 {
+        sheet.put(Pos { row: 0, col }, "h");
+        sheet.put(Pos { row: 1, col }, "1");
+    }
+    for k in 1..=9_000u32 {
+        for col in 0..20u32 {
+            sheet.put(
+                Pos {
+                    row: 1 + 2 * k,
+                    col,
+                },
+                "2",
+            );
+        }
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("continuation chain: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 1);
+    let blanks = layout.regions[0]
+        .rows
+        .iter()
+        .filter(|n| n.kind == sheetlayout::RowKind::Blank)
+        .count();
+    assert_eq!(blanks, 9_000);
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}
+
+#[test]
+fn many_small_tables_with_continuations_and_notes_are_bounded() {
+    // 50 by 60 small tables: a header, a number row, an empty row, a continuation row and a
+    // note one row further down, each table 2 columns wide with one empty column between,
+    // and 3 empty rows before the next band (so no note is a title of the table below).
+    let mut sheet = Sheet::new();
+    for band in 0..50u32 {
+        for t in 0..60u32 {
+            let (row, col) = (band * 9, t * 3);
+            sheet.put(Pos { row, col }, "Name");
+            sheet.put(Pos { row, col: col + 1 }, "Size");
+            sheet.put(Pos { row: row + 1, col }, "a");
+            sheet.put(
+                Pos {
+                    row: row + 1,
+                    col: col + 1,
+                },
+                "1",
+            );
+            sheet.put(Pos { row: row + 3, col }, "b");
+            sheet.put(
+                Pos {
+                    row: row + 3,
+                    col: col + 1,
+                },
+                "2",
+            );
+            sheet.put(Pos { row: row + 5, col }, "note");
+        }
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("3,000 small tables: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 3_000);
+    assert!(
+        layout
+            .regions
+            .iter()
+            .all(|r| r.notes.len() == 1 && r.rows.len() == 1)
+    );
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}
+
+#[test]
+fn hostile_outline_is_bounded() {
+    // 200,000 outline groups, one over every row of the sheet, under a table of 1,000 rows.
+    let mut sheet = Sheet::new().rows("A1", &["Item|Value"]);
+    for row in 1..=1000u32 {
+        sheet.put(Pos { row, col: 0 }, "x");
+        sheet.put(Pos { row, col: 1 }, "1");
+    }
+    sheet.outline.push((0, u32::MAX, 1));
+    for k in 0..200_000u32 {
+        sheet.outline.push((k * 3, k * 3 + 1, (k % 7 + 2) as u8));
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!("hostile outline: peak heap {peak} bytes, {used:?} CPU");
+    every_cell_once(&input, &layout);
+    assert_eq!(layout.regions.len(), 1);
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}

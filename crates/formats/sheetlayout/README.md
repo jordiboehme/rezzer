@@ -91,4 +91,48 @@ The header rules have limits:
 Path text is limited per sheet. A region whose paths would pass the limit stays one grid
 region, and an issue says so.
 
+## Rows of a table
+
+After the header, `detect` looks at the rows of each table.
+
+- A row with one text in the first column, or one merged area over at least 80 % of the
+  width, is a group row when data rows follow it.
+- Rows with one text at the end of a table are notes.
+- Rows can have levels: from the row outline first, then from the indent, then from the
+  length of leading spaces or dots. The parent of a row is the nearest row above it with a
+  lower level. When no row gets a parent, no levels are given.
+- A row is a subtotal or a total only by a fact or a formula: an Excel table totals row, a
+  database range footer, a pivot total row, a formula with SUBTOTAL or AGGREGATE, or a SUM
+  over the rows above in its own column. A row with the word "Total" and no formula stays a
+  data row.
+
+## Report sheets
+
+A region with no header goes through these rules, in this order:
+
+- Section headings: a row with one text in the first column, bold, filled or merged, cuts
+  the region when a row with more than one text follows it. Without styles only a merge
+  counts. Each part is read again, up to 8 levels deep.
+- Label and value pairs: 2 or 3 columns, at least 2 rows, a different label in the first
+  column of every row and at least one value. A third column must hold units.
+- Text: one column of text, or rows of one merged text each.
+- A region with a number, a date or a bool is a table without a header.
+- Anything else stays a grid.
+
+Then two rules join regions. A region with no header right below a table, in the same
+columns and at most 1 empty row down, is part of that table. A text region at most 2 empty
+rows below a table and inside its columns is a note of that table. Text beside a table stays
+its own region.
+
+These rules have limits:
+
+- A label and value list with a number, such as `Age: | 31`, reads as a table, because the
+  header rules run first (see the header limits).
+- A units row such as `cm` under one header column stays a data row.
+- A note within 2 empty rows above another table becomes the title of that table, not a
+  note of the table above it.
+- A note wider than its table is not joined to it.
+- An Excel table, database range or pivot table is never continued by another region.
+- Sections that would pass the region limit are not cut, and an issue says so.
+
 License: MPL-2.0

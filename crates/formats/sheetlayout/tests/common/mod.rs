@@ -5,7 +5,8 @@
 //! A small builder for inputs from a text grid, and the checks every test shares.
 //!
 //! A row is written as cells separated by `|`. A cell token may start with markers: `*` bold,
-//! `^` filled, `>` center across selection (a token of markers only is an empty styled cell).
+//! `^` filled, `>` center across selection, `~` one step of indent (a token of markers only is
+//! an empty styled cell).
 //! Then `=` makes it a formula cell (the rest is its shown result, which may be
 //! empty). A token that parses as a number is a number, `TRUE` and `FALSE` are bools, the
 //! rest is text. An empty token is no cell.
@@ -66,6 +67,7 @@ pub struct Sheet {
     pub print_titles: Option<(u32, u32)>,
     pub header_guess: Option<(u32, bool)>,
     pub styles_read: bool,
+    pub outline: Vec<(u32, u32, u8)>,
 }
 
 impl Sheet {
@@ -110,6 +112,7 @@ impl Sheet {
         let mut bold = false;
         let mut filled = false;
         let mut across = false;
+        let mut indent = 0u8;
         loop {
             if let Some(rest) = t.strip_prefix('*') {
                 bold = true;
@@ -119,6 +122,9 @@ impl Sheet {
                 t = rest;
             } else if let Some(rest) = t.strip_prefix('>') {
                 across = true;
+                t = rest;
+            } else if let Some(rest) = t.strip_prefix('~') {
+                indent += 1;
                 t = rest;
             } else {
                 break;
@@ -137,6 +143,11 @@ impl Sheet {
             bold: known(bold),
             filled: known(filled),
             center_across: known(across),
+            indent: if indent > 0 || self.styles_read {
+                Some(indent)
+            } else {
+                None
+            },
             ..Style::default()
         };
         let (class, number) = if let Ok(n) = t.parse::<f64>() {
@@ -154,6 +165,28 @@ impl Sheet {
             style,
             formula,
         });
+    }
+
+    /// Gives the cell at `at` a formula that calls `functions` and reads the ranges `reads`.
+    pub fn formula(mut self, at: &str, functions: &[&str], reads: &[&str]) -> Self {
+        let p = pos(at);
+        let cell = self
+            .cells
+            .iter_mut()
+            .rev()
+            .find(|c| c.pos == p)
+            .expect("a cell at the formula position");
+        cell.formula = Some(FormulaIn {
+            functions: functions.iter().map(|f| f.to_string()).collect(),
+            reads: reads.iter().map(|r| rect(r)).collect(),
+        });
+        self
+    }
+
+    /// A row outline group from the first to the last sheet row (1-based) at `level`.
+    pub fn group(mut self, first: u32, last: u32, level: u8) -> Self {
+        self.outline.push((first - 1, last - 1, level));
+        self
     }
 
     pub fn merge(mut self, r: &str) -> Self {
@@ -190,7 +223,7 @@ impl Sheet {
             merges: self.merges.clone(),
             facts: self.facts.clone(),
             names: self.names.clone(),
-            outline: Vec::new(),
+            outline: self.outline.clone(),
             frozen: self.frozen,
             print_titles: self.print_titles,
             header_guess: self.header_guess,
@@ -212,6 +245,23 @@ impl Sheet {
     /// Detects with the default limits and no stop, with the same checks as `segment`.
     pub fn detect(&self) -> Layout {
         let input = self.input();
+        let layout = detect(&input, &Limits::default(), &never);
+        every_cell_once(&input, &layout);
+        no_overlap(&layout);
+        layout
+    }
+
+    /// Detects with other label and unit callbacks, with the same checks.
+    pub fn detect_with(
+        &self,
+        is_label: &dyn Fn(&str) -> bool,
+        is_unit_column: &dyn Fn(&[&str]) -> bool,
+    ) -> Layout {
+        let input = Input {
+            is_label,
+            is_unit_column,
+            ..self.input()
+        };
         let layout = detect(&input, &Limits::default(), &never);
         every_cell_once(&input, &layout);
         no_overlap(&layout);

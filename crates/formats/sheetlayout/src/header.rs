@@ -114,7 +114,11 @@ struct H1 {
 }
 
 /// The rows of `lines` from `row` on, down to `bottom`.
-fn lines_from<'l>(lines: &'l Lines, row: u32, bottom: u32) -> impl Iterator<Item = &'l Line> {
+pub(crate) fn lines_from<'l>(
+    lines: &'l Lines,
+    row: u32,
+    bottom: u32,
+) -> impl Iterator<Item = &'l Line> {
     lines.lines[lines.first_at(row)..]
         .iter()
         .take_while(move |l| l.row <= bottom)
@@ -426,12 +430,13 @@ pub(crate) fn band(lines: &Lines, data: Rect, had_print: bool, tick: &Tick) -> B
 }
 
 /// Rule L: the left columns, at most 3 and never every column, whose data rows hold text in
-/// at least 80 % of the rows and whose header cells are empty or text. Gives the count and the
-/// words.
+/// at least 80 % of the rows and whose header cells are empty or text. The rows in `skip`
+/// (group rows, sorted) are no data rows. Gives the count and the words.
 pub(crate) fn label_cols(
     lines: &Lines,
     header_rows: &[u32],
     data: Rect,
+    skip: &[u32],
     tick: &Tick,
 ) -> (u32, Option<String>) {
     let rect = lines.rect;
@@ -459,6 +464,9 @@ pub(crate) fn label_cols(
     for l in lines_from(lines, data.top, data.bottom) {
         if tick.step() {
             return (0, None);
+        }
+        if skip.binary_search(&l.row).is_ok() {
+            continue;
         }
         rows += 1;
         for c in lines

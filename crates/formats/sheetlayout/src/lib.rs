@@ -10,8 +10,10 @@
 //! range, how it was found and how sure that is. Facts decide first; rules decide only where
 //! no fact exists.
 //!
-//! [`segment`] finds the regions; [`detect`] also decides the header band, the header paths
-//! and the label columns of each region.
+//! [`segment`] finds the regions; [`detect`] also decides each region: its header band,
+//! header paths and label columns, the kinds of its rows (group, subtotal, total, blank) and
+//! their hierarchy, section headings, label and value blocks, text blocks and header-less
+//! tables, and it joins continuations and notes to the table above.
 //!
 //! The crate never builds a grid of the used area. It works on the sorted cells and on
 //! rectangles, so a merge over the whole sheet costs as much as one cell.
@@ -53,6 +55,8 @@ mod header;
 mod input;
 mod occupancy;
 mod paths;
+mod report;
+mod rows;
 
 pub use input::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Limits, NameIn, Pos, Rect, Style,
@@ -125,13 +129,17 @@ pub enum RowKind {
     Blank,
 }
 
-/// A row with a kind or a level.
+/// A row with a kind or a level. Only such rows are listed, in row order.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RowNote {
     pub row: u32,
     pub kind: RowKind,
+    /// The hierarchy level, given only when some row of the table has a parent.
     pub level: Option<u8>,
+    /// The nearest row above with a lower level.
     pub parent: Option<u32>,
+    /// What decided the kind or level, in words: `SUBTOTAL formula in D12`, `Excel table
+    /// totals row`, `indent 1`.
     pub why: String,
 }
 
@@ -147,8 +155,9 @@ pub struct Region {
     pub captions: Vec<u32>,
     /// The caption row written as the heading.
     pub caption_heading: Option<u32>,
+    /// Note rows: trailing rows of one text, and the rows of text regions joined below.
     pub notes: Vec<u32>,
-    /// A section heading row and its depth.
+    /// A section heading row and its depth (1 for the top level).
     pub heading: Option<(u32, u8)>,
     /// Rows of a fact above its header band, such as a pivot's data caption row. Each is
     /// written as one line with its cells joined.
@@ -225,9 +234,12 @@ pub(crate) struct Work {
     pub coarse: bool,
     /// For a fact region, its index into `Input::facts`.
     pub fact: Option<usize>,
+    /// Indices into `Prep::cells` of the cells of the region's table body, sorted, once
+    /// [`detect`] has handed them out.
+    pub cells: Vec<u32>,
 }
 
-fn rule_region(rect: Rect, detail: &str) -> Region {
+pub(crate) fn rule_region(rect: Rect, detail: &str) -> Region {
     Region {
         kind: Kind::Grid,
         rect,
@@ -334,6 +346,7 @@ fn rest_region(
         dead: false,
         coarse: false,
         fact: None,
+        cells: Vec::new(),
     })
 }
 
@@ -361,6 +374,7 @@ pub(crate) fn segment_work<'a>(
             dead: false,
             coarse: false,
             fact: Some(k.fact),
+            cells: Vec::new(),
         })
         .collect();
 
@@ -403,6 +417,7 @@ pub(crate) fn segment_work<'a>(
                 dead: false,
                 coarse: leaf.coarse,
                 fact: None,
+                cells: Vec::new(),
             });
         }
         cut.rest
