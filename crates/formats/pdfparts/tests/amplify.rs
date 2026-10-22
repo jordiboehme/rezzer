@@ -349,13 +349,16 @@ fn shared_form_images_are_bounded() {
     let bytes = c.finish("");
     eprintln!("file {} KB", bytes.len() / 1024);
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
+    // No time stop, so only the work bound can end the walk; its CPU time, not the wall
+    // clock, shows the bound, so a busy machine does not fail the test.
     let start = Instant::now();
-    let pages = pdf.pages(&deadline(Duration::from_secs(5)));
+    let (pages, cpu) = common::cpu_time(|| pdf.pages(&never));
     let took = start.elapsed();
-    eprintln!("pages() took {took:?}");
+    eprintln!("pages() took {cpu:?} CPU, {took:?} wall");
     assert_eq!(pages.len(), 2000);
     assert_eq!(pages[0].images.len(), 50_000);
-    assert!(took < Duration::from_secs(2), "{took:?}");
+    assert!(cpu < Duration::from_secs(2), "{cpu:?}");
+    assert!(took < Duration::from_secs(30), "{took:?}");
     assert!(
         pdf.issues()
             .iter()
@@ -552,14 +555,17 @@ fn object_stream_members_share_one_work_bound() {
     let members: Vec<(u32, u32, u32)> = (0..n).map(|i| (1000 + i, 10, i)).collect();
     let bytes = common::append_update(&bytes, &[], &members, 1, "");
     eprintln!("file {} KB", bytes.len() / 1024);
+    // No time stop, so only the shared work bound can end the open; its CPU time, not the
+    // wall clock, shows the bound, so a busy machine does not fail the test.
     let start = Instant::now();
-    let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
+    let (result, cpu) = common::cpu_time(|| Pdf::open(&bytes, None, &limits(), &never));
     let took = start.elapsed();
     eprintln!(
-        "open took {took:?}: {:?}",
+        "open took {cpu:?} CPU, {took:?} wall: {:?}",
         result.as_ref().map(|p| p.page_count())
     );
-    assert!(took < Duration::from_secs(2), "{took:?}");
+    assert!(cpu < Duration::from_secs(2), "{cpu:?}");
+    assert!(took < Duration::from_secs(30), "{took:?}");
     match result {
         Ok(pdf) => assert_eq!(pdf.page_count(), 0),
         Err(OpenError::Limit(why)) => assert!(why.contains("white space"), "{why}"),

@@ -58,6 +58,36 @@ pub fn max_rss_bytes() -> u64 {
     }
 }
 
+/// The CPU time the calling thread has used. pdfparts runs on the calling thread, so this
+/// counts its work and nothing of other tests or of a busy machine, unlike the wall clock.
+#[cfg(unix)]
+pub fn thread_cpu() -> std::time::Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+/// The CPU time `f` takes on the calling thread, with its result.
+#[cfg(unix)]
+pub fn cpu_time<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+    let start = thread_cpu();
+    let out = f();
+    (out, thread_cpu() - start)
+}
+
+/// Elsewhere the wall clock stands in.
+#[cfg(not(unix))]
+pub fn cpu_time<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+    let start = std::time::Instant::now();
+    let out = f();
+    (out, start.elapsed())
+}
+
 /// The bound every memory test checks.
 pub const RSS_BOUND: u64 = 512 * 1024 * 1024;
 

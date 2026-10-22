@@ -650,23 +650,30 @@ fn shared_value_option_and_attribute_arrays_are_bounded() {
 
 #[test]
 fn shared_byte_range_is_bounded() {
-    // 10,000 signature fields name one /ByteRange array of 100,000 numbers.
-    let (n, m) = (10_000, 100_000);
-    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
-    let big: String = (0..m).map(|_| "1 ").collect();
-    let mut objects = vec![(9, format!("[{big}]").into_bytes())];
-    for i in 0..n {
-        objects.push((
-            100 + i as u32,
-            format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>").into_bytes(),
-        ));
-    }
-    let bytes = form_file(&fields, objects);
-    let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    for took in time_form_readers(&pdf) {
-        assert!(took < Duration::from_millis(50), "{took:?}");
-    }
-    assert!(has_limit(&pdf, "signatures"), "{:?}", pdf.issues());
+    // 10,000 signature fields name one /ByteRange array of `m` numbers. With the shared bound
+    // the array is walked a bounded number of times, so 100,000 numbers cost about what two
+    // cost; without it each field would walk the array again. CPU time against that twin,
+    // not a wall-clock bound, so a busy machine does not fail the test.
+    let file = |m: usize| {
+        let n = 10_000;
+        let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+        let big: String = (0..m).map(|_| "1 ").collect();
+        let mut objects = vec![(9, format!("[{big}]").into_bytes())];
+        for i in 0..n {
+            objects.push((
+                100 + i as u32,
+                format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>")
+                    .into_bytes(),
+            ));
+        }
+        Pdf::open(&form_file(&fields, objects), None, &limits(), &never).unwrap()
+    };
+    let (small, big) = (file(2), file(100_000));
+    let (_, twin) = common::cpu_time(|| time_form_readers(&small));
+    let (_, cpu) = common::cpu_time(|| time_form_readers(&big));
+    eprintln!("2 numbers {twin:?} CPU, 100,000 numbers {cpu:?} CPU");
+    assert!(cpu < twin * 2 + Duration::from_millis(20), "{cpu:?}");
+    assert!(has_limit(&big, "signatures"), "{:?}", big.issues());
 }
 
 #[test]
