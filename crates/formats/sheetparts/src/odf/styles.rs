@@ -60,7 +60,7 @@ struct CellStyle {
     margin: Option<f64>,
 }
 
-/// The most parent styles followed for a look.
+/// The most parent styles followed up a chain, for looks and number formats.
 const MAX_CHAIN: usize = 64;
 
 /// The look properties of a style after inheritance.
@@ -92,7 +92,7 @@ pub(super) struct StyleBook {
     table_hidden: HashMap<String, bool>,
     cell_cache: HashMap<String, Option<String>>,
     look_cache: HashMap<String, Look>,
-    props_cache: HashMap<String, Props>,
+    props_cache: HashMap<String, (Props, usize)>,
     deep_chain: bool,
     code_cache: HashMap<String, Option<String>>,
     // Parser state.
@@ -137,8 +137,8 @@ impl StyleBook {
         look
     }
 
-    /// Whether a style had more than [`MAX_CHAIN`] parents: the ones past the cap are not
-    /// inherited from.
+    /// Whether a style had parents more than [`MAX_CHAIN`] levels up: those are not inherited
+    /// from.
     pub fn chain_too_long(&self) -> bool {
         self.deep_chain
     }
@@ -150,22 +150,31 @@ impl StyleBook {
         let mut seen = HashSet::new();
         let mut name = Some(style.to_string());
         let mut base = Props::default();
+        // How many styles the kept result at the end of the path stands for.
+        let mut tail = 0;
+        let mut cut = false;
         while let Some(n) = name.take() {
-            if let Some(hit) = self.props_cache.get(&n) {
+            // A kept result is used only when the whole chain fits under the cap, so what a
+            // style inherits never depends on which style was asked for first.
+            if let Some((hit, len)) = self.props_cache.get(&n)
+                && path.len() + len <= MAX_CHAIN + 1
+            {
                 base = *hit;
+                tail = *len;
                 break;
             }
             if !seen.insert(n.clone()) || !self.cells.contains_key(&n) {
                 break;
             }
-            if path.len() >= MAX_CHAIN {
+            if path.len() > MAX_CHAIN {
                 self.deep_chain = true;
+                cut = true;
                 break;
             }
             name = self.cells.get(&n).and_then(|c| c.parent.clone());
             path.push(n);
         }
-        for n in path.iter().rev() {
+        for (i, n) in path.iter().enumerate().rev() {
             if let Some(c) = self.cells.get(n) {
                 base = Props {
                     bold: c.bold.or(base.bold),
@@ -175,7 +184,11 @@ impl StyleBook {
                     margin: c.margin.or(base.margin),
                 };
             }
-            self.props_cache.insert(n.clone(), base);
+            // The result of a cut path is only an answer for the style that was asked.
+            if !cut {
+                self.props_cache
+                    .insert(n.clone(), (base, tail + path.len() - i));
+            }
         }
         base
     }
@@ -340,7 +353,7 @@ impl StyleBook {
             if !seen.insert(n.clone()) {
                 break;
             }
-            if seen.len() > MAX_CHAIN {
+            if seen.len() > MAX_CHAIN + 1 {
                 self.deep_chain = true;
                 break;
             }

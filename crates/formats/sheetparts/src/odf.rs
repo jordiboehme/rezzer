@@ -273,10 +273,10 @@ impl List {
     fn what(self) -> &'static str {
         match self {
             List::Cells => {
-                "cells with content (number formats and notes) in repeated rows or columns"
+                "cells with content for number formats and notes (counted with their repeats)"
             }
-            List::Merges => "merged ranges",
-            List::Looks => "cells with a look",
+            List::Merges => "cells that start a merged range (counted with their repeats)",
+            List::Looks => "cells with a look (counted with their repeats)",
             List::Outline => "row group spans",
             List::Ranges => "database ranges",
             List::Pilots => "pivot tables",
@@ -294,10 +294,16 @@ struct Share {
 }
 
 impl Share {
+    /// The lists draw from the one total (`max_items`) in fixed shares that add up to at most
+    /// all of it: cells with content 40 %, looks 30 %, merges 20 %, row group spans 5 %,
+    /// database ranges 2.5 % and pivot tables 2.5 % (those two also at most 10,000 each).
     fn new(list: List, items: u64) -> Share {
         let limit = match list {
-            List::Ranges | List::Pilots => items.min(MAX_STRUCTURES),
-            _ => items,
+            List::Cells => items / 10 * 4,
+            List::Looks => items / 10 * 3,
+            List::Merges => items / 10 * 2,
+            List::Outline => items / 20,
+            List::Ranges | List::Pilots => (items / 40).min(MAX_STRUCTURES),
         };
         Share {
             used: 0,
@@ -348,7 +354,7 @@ impl Content {
             issues.push(Issue::new(
                 CONTENT,
                 IssueKind::Damaged,
-                "a cell style has more than 64 parent styles: what the styles past the 64th say about looks is not inherited",
+                "a cell style has parent styles more than 64 levels up: what they say about looks and number formats is not inherited",
             ));
         }
         if self.bad_counts > 0 {
@@ -980,10 +986,7 @@ impl Content {
             );
             return;
         };
-        if !self.charge(
-            List::Ranges,
-            1 + (name.len() + sheet.len() + range.len()) as u64 / 16,
-        ) {
+        if !self.charge(List::Ranges, 1) {
             return;
         }
         self.database_ranges.push(DatabaseRange {
@@ -1005,10 +1008,7 @@ impl Content {
             );
             return;
         };
-        if !self.charge(
-            List::Pilots,
-            1 + (name.len() + sheet.len() + range.len()) as u64 / 16,
-        ) {
+        if !self.charge(List::Pilots, 1) {
             return;
         }
         self.data_pilots.push(DataPilot { name, sheet, range });

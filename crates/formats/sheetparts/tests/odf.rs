@@ -985,7 +985,7 @@ fn long_style_chain_resolves_in_linear_time() {
     let deep: Vec<_> = parts
         .issues
         .iter()
-        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("64 parent"))
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("64 levels"))
         .collect();
     assert_eq!(deep.len(), 1, "{:?}", parts.issues);
 }
@@ -1091,4 +1091,75 @@ fn range_across_two_sheets_is_damaged() {
             .count(),
         1
     );
+}
+
+#[test]
+fn style_chain_cap_does_not_depend_on_cell_order() {
+    let mut styles = String::from(
+        "<style:style style:name=\"s0\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+    );
+    for i in 1..100 {
+        styles.push_str(&format!(
+            "<style:style style:name=\"s{i}\" style:family=\"table-cell\" style:parent-style-name=\"s{}\"/>",
+            i - 1
+        ));
+    }
+    for order in [[99, 40, 20], [20, 40, 99]] {
+        let cells: String = order
+            .iter()
+            .map(|i| {
+                format!("<table:table-cell office:value-type=\"float\" table:style-name=\"s{i}\"/>")
+            })
+            .collect();
+        let parts = one_sheet(
+            &styles,
+            &format!("<table:table-row>{cells}</table:table-row>"),
+        );
+        let s = sheet(&parts, "S");
+        // s99 is cut at the cap and never reaches the bold root; s40 and s20 always do.
+        for (col, style) in order.iter().enumerate() {
+            let bold = s.looks.iter().any(|(p, l)| p.col == col as u32 && l.bold);
+            assert_eq!(bold, *style != 99, "order {order:?} style s{style}");
+        }
+    }
+}
+
+#[test]
+fn database_ranges_and_pivots_are_capped_at_ten_thousand() {
+    let ranges: String = (0..10_050)
+        .map(|i| {
+            format!(
+                "<table:database-range table:name=\"d{i}\" table:target-range-address=\"S.A{}:S.B{}\"/>",
+                i + 1,
+                i + 2
+            )
+        })
+        .collect();
+    let pilots: String = (0..10_050)
+        .map(|i| {
+            format!(
+                "<table:data-pilot-table table:name=\"p{i}\" table:target-range-address=\"S.D{}:S.E{}\"/>",
+                i + 1,
+                i + 2
+            )
+        })
+        .collect();
+    let parts = with_parts(
+        &[],
+        "",
+        &format!(
+            "<table:table table:name=\"S\"/><table:database-ranges>{ranges}</table:database-ranges><table:data-pilots>{pilots}</table:data-pilots>"
+        ),
+    );
+    assert_eq!(parts.database_ranges.len(), 10_000);
+    assert_eq!(parts.data_pilots.len(), 10_000);
+    let said = |what: &str| {
+        parts
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::Limit && i.what.contains(what))
+            .count()
+    };
+    assert_eq!(said("database ranges"), 1, "{:?}", parts.issues);
+    assert_eq!(said("pivot tables"), 1, "{:?}", parts.issues);
 }
