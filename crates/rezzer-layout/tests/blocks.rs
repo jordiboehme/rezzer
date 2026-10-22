@@ -589,3 +589,22 @@ fn title_region_has_no_rows_and_section_headings_are_level_four() {
         "{h:?}"
     );
 }
+
+#[test]
+fn region_without_a_value_is_left_out() {
+    // Merged areas with no value: occupied for the detector, but nothing to show.
+    let s = Sheet::new()
+        .rows("A1", &["a|b", "1|2"])
+        .merge("A5:C6")
+        .merge("A8:B9");
+    let m = s.map();
+    let ranges: Vec<&str> = tables(&m).iter().map(|t| t.2.range.as_str()).collect();
+    assert_eq!(ranges, ["A1:B2"]);
+    // The one region left is the sheet's only table: no generated heading.
+    assert!(headings(&m).is_empty(), "{:?}", headings(&m));
+    assert!(m.losses.is_empty(), "{:?}", m.losses);
+    let only_merges = Sheet::new().merge("A1:C50");
+    let m = only_merges.map();
+    assert!(m.blocks.is_empty());
+    assert!(m.losses.is_empty(), "{:?}", m.losses);
+}

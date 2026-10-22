@@ -428,7 +428,8 @@ fn tunnel_side_table() {
 
 /// The brief expected the regions A1:F3, A5:F15, D17:F17 and A18:F36. Row 2 holds cells in A
 /// to C only, so D3:F3 touches A1:F2 only at a corner and is a region of its own (rule G,
-/// spec 6.2), and the bold title row 27 starts a region of its own after the caption run.
+/// spec 6.2). The same holds for D27, which touches the block of rows 18 to 26 (cells in A to C
+/// on row 26) only at a corner; D27 then joins A28:F36 as its title (rule T2).
 /// The merged sub-header that spreads is E28:F28, on the header row of A27:F36.
 #[test]
 fn merged_subheader_spreads() {
@@ -886,5 +887,22 @@ fn center_across_spreads_a_header() {
     let out = read(&Book::default().styles(LOOKS).sheet("S", &s));
     let r = &regions(&out.document, "S")[0];
     assert_eq!(r.layout.header_rows, [1, 2]);
-    assert_eq!(r.layout.header_paths, ["Region", "Sales / Q1", "Sales / Q2"]);
+    assert_eq!(
+        r.layout.header_paths,
+        ["Region", "Sales / Q1", "Sales / Q2"]
+    );
+}
+
+#[test]
+fn merges_without_values_leave_the_sheet_empty() {
+    let s = ws(
+        "",
+        "",
+        "<mergeCells count=\"2\"><mergeCell ref=\"A1:C3\"/><mergeCell ref=\"A5:B9\"/></mergeCells>",
+    );
+    let out = read(&Book::default().sheet("S", &s));
+    let doc = &out.document;
+    assert!(regions(doc, "S").is_empty());
+    assert_eq!(paragraphs(section(doc, "S")), ["The sheet is empty."]);
+    assert!(doc.losses.is_empty(), "{:?}", doc.losses);
 }

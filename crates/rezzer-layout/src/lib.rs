@@ -331,7 +331,8 @@ impl Ctx<'_> {
 /// caption (not hidden, not written by the application for itself). `caps` bounds what the
 /// tables show and is shared by the sheet's regions.
 ///
-/// Per region: a section heading (level 4) when the region has one; the region heading
+/// A region that holds no value is left out. Per region: a section heading (level 4) when the
+/// region has one; the region heading
 /// (level 3: its caption heading row, else a defined name caption, else `<Kind> <range>`,
 /// left out for a sheet whose only region is a table without a caption); the other caption
 /// rows as `caption` paragraphs; the table; the note rows as `note` paragraphs.
@@ -385,8 +386,13 @@ pub fn blocks(
         }
     }
 
-    let only = layout.regions.len() == 1;
+    // A region that holds no value (merged areas without a value, formulas without a
+    // result) has nothing to show and is left out: no cell is lost by it.
+    let only = held.iter().filter(|h| !h.is_empty()).count() == 1;
     for (i, region) in layout.regions.iter().enumerate() {
+        if held[i].is_empty() {
+            continue;
+        }
         if ctx.out.elements_out {
             ctx.loss(
                 format!("{sheet_q}!{}", region.rect.a1()),
