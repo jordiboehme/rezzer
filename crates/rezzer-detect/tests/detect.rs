@@ -11,6 +11,11 @@ use rezzer_limits::Limits;
 use rezzer_model::{Confidence, FormatId};
 use zip::write::SimpleFileOptions;
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 const CT_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>

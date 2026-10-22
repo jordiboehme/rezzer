@@ -13,6 +13,11 @@ use common::{Raw, append_update, assert_rss_bounded, bomb_2g, zlib_fill};
 use lopdf::{Document, Object, Stream, dictionary};
 use pdfparts::{Limits, OpenError, Pdf};
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn never() -> bool {
     false
 }

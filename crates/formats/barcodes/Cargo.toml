@@ -19,6 +19,9 @@ encode = ["rxing/encoders"]
 rxing.workspace = true
 
 [dev-dependencies]
+# Only for the allocator of the binary in the memory tests; the library itself depends on no
+# Rezzer crate.
+rezzer-limits = { path = "../../rezzer-limits" }
 rxing = { workspace = true, features = ["encoders"] }
 libc.workspace = true
 

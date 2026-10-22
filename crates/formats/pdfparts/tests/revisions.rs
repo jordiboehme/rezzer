@@ -14,6 +14,11 @@ use lopdf::xref::XrefType;
 use lopdf::{Document, Object, dictionary};
 use pdfparts::{IssueKind, Limits, Pdf, Revisions};
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn never() -> bool {
     false
 }

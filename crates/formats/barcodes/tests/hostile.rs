@@ -9,6 +9,11 @@ use std::time::{Duration, Instant};
 
 use barcodes::{Limits, Picture, Pixels, Stop, Worker};
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 /// Maximum resident set size of the process.
 fn max_rss_bytes() -> u64 {
     // SAFETY: getrusage fills the struct we pass.

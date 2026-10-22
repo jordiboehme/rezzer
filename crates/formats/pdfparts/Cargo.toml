@@ -20,4 +20,7 @@ adler2.workspace = true
 brotli-decompressor.workspace = true
 
 [dev-dependencies]
+# Only for the allocator of the binary in the memory tests; the library itself depends on no
+# Rezzer crate.
+rezzer-limits = { path = "../../rezzer-limits" }
 libc.workspace = true

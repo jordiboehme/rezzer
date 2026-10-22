@@ -29,6 +29,11 @@ use rezzer_model::Registry;
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
 use serde_json::Value;
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 const GENERATED_AT: &str = "2026-01-01T00:00:00Z";
 
 fn corpus_dir() -> PathBuf {

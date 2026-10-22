@@ -16,6 +16,11 @@ use rezzer_model::{
 };
 use rezzer_read_pdf::PdfReader;
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn corpus(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/corpus/pdf");
     std::fs::read(path.join(name)).expect("corpus file")

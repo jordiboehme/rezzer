@@ -15,7 +15,7 @@
     feature = "fmt-pdf"
 ))]
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
@@ -23,8 +23,13 @@ use rezzer_model::{Completeness, LossReason, Registry};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request, RunResult};
 
 /// Counts the heap of the thread that allocates, so tests that run side by side do not
-/// disturb a measurement. The pipeline runs on the calling thread.
+/// disturb a measurement. The pipeline runs on the calling thread. The memory itself comes
+/// from the allocator of the Rezzer binary, so the RSS these tests measure is the RSS it ships
+/// with.
 struct Counting;
+
+/// Where [`Counting`] takes its memory from.
+const INNER: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
 thread_local! {
     static CURRENT: Cell<isize> = const { Cell::new(0) };
@@ -46,16 +51,16 @@ fn shrink(n: usize) {
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         grow(l.size());
-        unsafe { System.alloc(l) }
+        unsafe { INNER.alloc(l) }
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
         shrink(l.size());
-        unsafe { System.dealloc(p, l) }
+        unsafe { INNER.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
         shrink(l.size());
         grow(new);
-        unsafe { System.realloc(p, l, new) }
+        unsafe { INNER.realloc(p, l, new) }
     }
 }
 

@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 use common::{Classic, assert_rss_bounded};
 use pdfparts::{IssueKind, Limits, Pdf};
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn never() -> bool {
     false
 }

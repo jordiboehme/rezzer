@@ -12,6 +12,11 @@ use pdfparts::{IssueKind, Limits, OpenError, Pdf};
 
 mod common;
 
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(corpus_dir().join(name)).unwrap()
 }

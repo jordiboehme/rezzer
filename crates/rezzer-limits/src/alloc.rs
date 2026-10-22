@@ -11,6 +11,11 @@
 //! page resident while the live heap stayed under 40 MiB, so the process went far past its
 //! memory limit. Moving large blocks by hand keeps the resident memory at the live heap.
 //!
+//! The move has a cost of its own: the old and the new block are both held while the bytes
+//! are copied, and on macOS a buffer grown by doubling past 1 MiB can end higher than with the
+//! system's realloc (a field name grown to 20 MB took 568 MiB against 302 MiB until it was
+//! built at its size). Large buffers whose size is known are best made at that size.
+//!
 //! Only a growth by half or more is moved: a block grown in small exact steps (a buffer that
 //! reserves 64 KiB more each time) would be copied whole at every step, which is quadratic.
 //! Growth by doubling, as `Vec` does it, is moved; smaller growth and shrinking go to the

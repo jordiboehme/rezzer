@@ -19,6 +19,13 @@ use rezzer_model::{
 };
 use rezzer_read_pdf::PdfReader;
 
+// These tests run on the system allocator, not on the allocator of the Rezzer binary. With
+// it, five shapes here end 8 to 50 MiB higher, over the 256 MiB target (257 to 289 MiB
+// against 238 to 243 MiB on macOS; megabyte_field_names_are_bounded 66 MiB over its twin
+// against 58). They stay under the hostile memory limit of 512 MiB. Whether the allocator
+// policy changes is an open decision; a move threshold of 8 or 16 MiB does not help both
+// these shapes and the scanned pages the move is for.
+
 /// The brief's hostile setting: 512 MiB of memory, so pdfparts keeps its objects to 256 MiB.
 fn hostile() -> Limits {
     Limits {
@@ -141,6 +148,7 @@ fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
 /// The bound the memory tests hold: a quarter of the hostile memory limit.
 fn assert_rss_under_256_mib() {
     let rss = common::max_rss_bytes();
+    eprintln!("max RSS {} MiB", rss >> 20);
     assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
 }
 
