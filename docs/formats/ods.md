@@ -45,6 +45,7 @@ The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with 
 
 Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records` and `--sheet` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
 
+## Example
 
 Real output of `rezzer read` for `formula-across-sheets.ods` from the test corpus. The part for the Calculation sheet, cut to four of its eight formula rows:
 

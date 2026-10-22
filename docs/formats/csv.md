@@ -50,6 +50,7 @@ Table A1:H276 (data A2:H276), header row 1, found by rules: no gaps, header by t
 
 `--table-style records` (MCP `table_style: "records"`) writes every row as one list item with the header of each value. A file without a header row stays a table, because there is no header to name the fields. A CSV file has only one sheet, so `--sheet` is not needed.
 
+## Example
 
 Real output of `rezzer read` for `csv-datahub-co2-fossil-global.csv` from the test corpus. The overview and the Logic section; the Properties section, the table of 275 rows and the Columns table between them are cut:
 
