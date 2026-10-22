@@ -1,0 +1,239 @@
+{
+  "cells": [
+    [
+      "'One-Var'!A1",
+      "A"
+    ],
+    [
+      "'One-Var'!A10",
+      "6"
+    ],
+    [
+      "'One-Var'!A11",
+      "7"
+    ],
+    [
+      "'One-Var'!A2",
+      "1"
+    ],
+    [
+      "'One-Var'!A4",
+      "Var A"
+    ],
+    [
+      "'One-Var'!A5",
+      "1"
+    ],
+    [
+      "'One-Var'!A6",
+      "2"
+    ],
+    [
+      "'One-Var'!A7",
+      "3"
+    ],
+    [
+      "'One-Var'!A8",
+      "4"
+    ],
+    [
+      "'One-Var'!A9",
+      "5"
+    ],
+    [
+      "'One-Var'!B1",
+      "B"
+    ],
+    [
+      "'One-Var'!B10",
+      "12"
+    ],
+    [
+      "'One-Var'!B11",
+      "14"
+    ],
+    [
+      "'One-Var'!B2",
+      "2"
+    ],
+    [
+      "'One-Var'!B4",
+      "2"
+    ],
+    [
+      "'One-Var'!B5",
+      "2"
+    ],
+    [
+      "'One-Var'!B6",
+      "4"
+    ],
+    [
+      "'One-Var'!B7",
+      "6"
+    ],
+    [
+      "'One-Var'!B8",
+      "8"
+    ],
+    [
+      "'One-Var'!B9",
+      "10"
+    ],
+    [
+      "'One-Var'!C1",
+      "=A*B"
+    ],
+    [
+      "'One-Var'!C2",
+      "2"
+    ],
+    [
+      "'One-Var'!D4",
+      "Var B"
+    ],
+    [
+      "'One-Var'!D5",
+      "2"
+    ],
+    [
+      "'One-Var'!E4",
+      "10"
+    ],
+    [
+      "'One-Var'!E5",
+      "10"
+    ],
+    [
+      "'One-Var'!F4",
+      "20"
+    ],
+    [
+      "'One-Var'!F5",
+      "20"
+    ],
+    [
+      "'One-Var'!G4",
+      "30"
+    ],
+    [
+      "'One-Var'!G5",
+      "30"
+    ],
+    [
+      "'One-Var'!H4",
+      "40"
+    ],
+    [
+      "'One-Var'!H5",
+      "40"
+    ],
+    [
+      "'One-Var'!I4",
+      "50"
+    ],
+    [
+      "'One-Var'!I5",
+      "50"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "'One-Var'!C2",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=A2*B2",
+      "kind": "cell",
+      "latex": "\\mathrm{A2} \\cdot \\mathrm{B2}",
+      "references": [
+        "'One-Var'!A2",
+        "'One-Var'!B2"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "'One-Var'!B4",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=C2",
+      "kind": "cell",
+      "references": [
+        "'One-Var'!C2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "'One-Var'!B5",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=TABLE(,A2)",
+      "kind": "data_table",
+      "note": "what-if data table: column input A2",
+      "range": "'One-Var'!B5:B11",
+      "references": [
+        "'One-Var'!A2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "'One-Var'!D5",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=C2",
+      "kind": "cell",
+      "references": [
+        "'One-Var'!C2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "'One-Var'!E5",
+      "cached": {
+        "type": "number",
+        "value": 10.0
+      },
+      "dialect": "excel",
+      "expression": "=TABLE(B2,)",
+      "kind": "data_table",
+      "note": "what-if data table: row input B2",
+      "range": "'One-Var'!E5:I5",
+      "references": [
+        "'One-Var'!B2"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "'One-Var'!A2",
+      "label": "A",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "'One-Var'!B2",
+      "label": "B",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    }
+  ],
+  "rules": []
+}

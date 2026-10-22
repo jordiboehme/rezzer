@@ -1,0 +1,300 @@
+{
+  "cells": [
+    [
+      "ArrayFormulas!A1",
+      "Array Formulas (CSE formulas) are legacy formulas (not supported in Excel for web)"
+    ],
+    [
+      "ArrayFormulas!A3",
+      "0.8414709848"
+    ],
+    [
+      "ArrayFormulas!B3",
+      "0.9092974268"
+    ],
+    [
+      "ArrayFormulas!C3",
+      "0.1411200081"
+    ],
+    [
+      "ArrayFormulas!D3",
+      "-0.7568024953"
+    ],
+    [
+      "DynamicArrays!A1",
+      "Dynamic Arrays SPILL to other cells"
+    ],
+    [
+      "DynamicArrays!A10",
+      "33"
+    ],
+    [
+      "DynamicArrays!A11",
+      "37"
+    ],
+    [
+      "DynamicArrays!A12",
+      "41"
+    ],
+    [
+      "DynamicArrays!A14",
+      "480"
+    ],
+    [
+      "DynamicArrays!A19",
+      "52"
+    ],
+    [
+      "DynamicArrays!A20",
+      "85"
+    ],
+    [
+      "DynamicArrays!A21",
+      "1"
+    ],
+    [
+      "DynamicArrays!A3",
+      "5"
+    ],
+    [
+      "DynamicArrays!A4",
+      "9"
+    ],
+    [
+      "DynamicArrays!A5",
+      "13"
+    ],
+    [
+      "DynamicArrays!A6",
+      "17"
+    ],
+    [
+      "DynamicArrays!A7",
+      "21"
+    ],
+    [
+      "DynamicArrays!A8",
+      "25"
+    ],
+    [
+      "DynamicArrays!A9",
+      "29"
+    ],
+    [
+      "DynamicArrays!B10",
+      "35"
+    ],
+    [
+      "DynamicArrays!B11",
+      "39"
+    ],
+    [
+      "DynamicArrays!B12",
+      "43"
+    ],
+    [
+      "DynamicArrays!B14",
+      "<= Sums everything in the SPILL"
+    ],
+    [
+      "DynamicArrays!B19",
+      "20"
+    ],
+    [
+      "DynamicArrays!B20",
+      "9"
+    ],
+    [
+      "DynamicArrays!B21",
+      "86"
+    ],
+    [
+      "DynamicArrays!B3",
+      "7"
+    ],
+    [
+      "DynamicArrays!B4",
+      "11"
+    ],
+    [
+      "DynamicArrays!B5",
+      "15"
+    ],
+    [
+      "DynamicArrays!B6",
+      "19"
+    ],
+    [
+      "DynamicArrays!B7",
+      "23"
+    ],
+    [
+      "DynamicArrays!B8",
+      "27"
+    ],
+    [
+      "DynamicArrays!B9",
+      "31"
+    ],
+    [
+      "DynamicArrays!C19",
+      "41"
+    ],
+    [
+      "DynamicArrays!C20",
+      "20"
+    ],
+    [
+      "DynamicArrays!C21",
+      "25"
+    ],
+    [
+      "DynamicArrays!C3",
+      "<= This is the SEQUENCE function"
+    ],
+    [
+      "DynamicArrays!E19",
+      "<= A random array of ints"
+    ],
+    [
+      "DynamicArrays!F3",
+      "5"
+    ],
+    [
+      "DynamicArrays!F4",
+      "9"
+    ],
+    [
+      "DynamicArrays!F5",
+      "13"
+    ],
+    [
+      "DynamicArrays!G3",
+      "<= Takes 3 rows 1 column of the spill"
+    ],
+    [
+      "DynamicArrays!K3",
+      "21"
+    ],
+    [
+      "DynamicArrays!K4",
+      "25"
+    ],
+    [
+      "DynamicArrays!K5",
+      "29"
+    ],
+    [
+      "DynamicArrays!K6",
+      "33"
+    ],
+    [
+      "DynamicArrays!K7",
+      "37"
+    ],
+    [
+      "DynamicArrays!K8",
+      "41"
+    ],
+    [
+      "DynamicArrays!L3",
+      "<= FILTER A for those in B > 20"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "DynamicArrays!A3",
+      "cached": {
+        "type": "number",
+        "value": 5.0
+      },
+      "dialect": "excel",
+      "expression": "=SEQUENCE(10,2,5,2)",
+      "kind": "spill",
+      "latex": "\\operatorname{SEQUENCE}(10, 2, 5, 2)",
+      "original": "=_xlfn.SEQUENCE(10,2,5,2)",
+      "range": "DynamicArrays!A3:B12",
+      "role": "constant"
+    },
+    {
+      "anchor": "DynamicArrays!F3",
+      "cached": {
+        "type": "number",
+        "value": 5.0
+      },
+      "dialect": "excel",
+      "expression": "=TAKE(ANCHORARRAY(A3),3,1)",
+      "kind": "spill",
+      "latex": "\\operatorname{TAKE}(\\operatorname{ANCHORARRAY}(\\mathrm{A3}), 3, 1)",
+      "original": "=_xlfn.TAKE(_xlfn.ANCHORARRAY(A3),3,1)",
+      "range": "DynamicArrays!F3:F5",
+      "references": [
+        "DynamicArrays!A3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DynamicArrays!K3",
+      "cached": {
+        "type": "number",
+        "value": 21.0
+      },
+      "dialect": "excel",
+      "expression": "=FILTER(A3:A12,  B3:B12>20)",
+      "kind": "spill",
+      "latex": "\\operatorname{FILTER}(\\mathrm{A3{:}A12}, \\mathrm{B3{:}B12}>20)",
+      "original": "=_xlfn._xlws.FILTER(A3:A12,  B3:B12>20)",
+      "range": "DynamicArrays!K3:K8",
+      "references": [
+        "DynamicArrays!A3:A12",
+        "DynamicArrays!B3:B12"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DynamicArrays!A14",
+      "cached": {
+        "type": "number",
+        "value": 480.0
+      },
+      "dialect": "excel",
+      "expression": "=SUM(ANCHORARRAY(A3))",
+      "kind": "cell",
+      "latex": "\\operatorname{SUM}(\\operatorname{ANCHORARRAY}(\\mathrm{A3}))",
+      "original": "=SUM(_xlfn.ANCHORARRAY(A3))",
+      "references": [
+        "DynamicArrays!A3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DynamicArrays!A19",
+      "cached": {
+        "type": "number",
+        "value": 52.0
+      },
+      "dialect": "excel",
+      "expression": "=RANDARRAY(3,3, 0, 100,TRUE)",
+      "kind": "spill",
+      "latex": "\\operatorname{RANDARRAY}(3, 3, 0, 100, \\mathrm{TRUE})",
+      "original": "=_xlfn.RANDARRAY(3,3, 0, 100,TRUE)",
+      "range": "DynamicArrays!A19:C21",
+      "role": "constant"
+    },
+    {
+      "anchor": "ArrayFormulas!A3",
+      "cached": {
+        "type": "number",
+        "value": 0.8414709848078965
+      },
+      "dialect": "excel",
+      "expression": "=SIN({1,2,3,4,5,6,7,8,9})",
+      "kind": "array",
+      "latex": "\\operatorname{SIN}(\\{1, 2, 3, 4, 5, 6, 7, 8, 9\\})",
+      "range": "ArrayFormulas!A3:D3",
+      "role": "constant"
+    }
+  ],
+  "parameters": [],
+  "rules": []
+}

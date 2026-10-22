@@ -1,0 +1,268 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "25"
+    ],
+    [
+      "Sheet1!A10",
+      "234"
+    ],
+    [
+      "Sheet1!A4",
+      "w"
+    ],
+    [
+      "Sheet1!A5",
+      "defabc"
+    ],
+    [
+      "Sheet1!A6",
+      "#NAME?"
+    ],
+    [
+      "Sheet1!A7",
+      "A"
+    ],
+    [
+      "Sheet1!A9",
+      "3.72"
+    ],
+    [
+      "Sheet1!B1",
+      "_abc"
+    ],
+    [
+      "Sheet1!B2",
+      "13"
+    ],
+    [
+      "Sheet1!B3",
+      "16"
+    ],
+    [
+      "Sheet1!C1",
+      "_abc2"
+    ],
+    [
+      "Sheet1!C2",
+      "14"
+    ],
+    [
+      "Sheet1!C3",
+      "17"
+    ],
+    [
+      "Sheet1!D2",
+      "15"
+    ],
+    [
+      "Sheet1!D3",
+      "18"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet1!B1",
+      "cached": {
+        "type": "text",
+        "value": "_abc"
+      },
+      "dialect": "excel",
+      "expression": "=myFunc(\"_\")",
+      "kind": "cell",
+      "latex": "\\operatorname{myFunc}(\\text{\"\\_\"})",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!C1",
+      "cached": {
+        "type": "text",
+        "value": "_abc2"
+      },
+      "dialect": "excel",
+      "expression": "=myFunc2(\"_\")",
+      "kind": "cell",
+      "latex": "\\operatorname{myFunc2}(\\text{\"\\_\"})",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!A5",
+      "cached": {
+        "type": "text",
+        "value": "defabc"
+      },
+      "dialect": "excel",
+      "expression": "=myFunc(\"def\")",
+      "kind": "cell",
+      "latex": "\\operatorname{myFunc}(\\text{\"def\"})",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!A6",
+      "cached": {
+        "type": "text",
+        "value": "#NAME?"
+      },
+      "dialect": "excel",
+      "expression": "=crapName(\"abc\")",
+      "kind": "cell",
+      "latex": "\\operatorname{crapName}(\\text{\"abc\"})",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!A7",
+      "cached": {
+        "type": "text",
+        "value": "A"
+      },
+      "dialect": "excel",
+      "expression": "=INDEX(n_array,1)",
+      "kind": "cell",
+      "latex": "\\operatorname{INDEX}(\\mathrm{n\\_array}, 1)",
+      "references": [
+        "name:n_array"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!A9",
+      "cached": {
+        "type": "number",
+        "value": 3.72
+      },
+      "dialect": "excel",
+      "expression": "=SUM(nr_B2_D3)/nr_A1",
+      "kind": "cell",
+      "latex": "\\frac{\\operatorname{SUM}(\\mathrm{nr\\_B2\\_D3})}{\\mathrm{nr\\_A1}}",
+      "references": [
+        "name:nr_B2_D3",
+        "name:nr_A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!A10",
+      "cached": {
+        "type": "number",
+        "value": 234.0
+      },
+      "dialect": "excel",
+      "expression": "=n_K234",
+      "kind": "cell",
+      "references": [
+        "name:n_K234"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:n_array",
+      "dialect": "excel",
+      "expression": "{\"A\",\"CC\",\"BBB\"}",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:n_K234",
+      "dialect": "excel",
+      "expression": "234",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:nr_A1",
+      "dialect": "excel",
+      "expression": "Sheet1!$A$1",
+      "kind": "name",
+      "references": [
+        "Sheet1!A1"
+      ]
+    },
+    {
+      "anchor": "name:nr_B2_D3",
+      "dialect": "excel",
+      "expression": "Sheet1!$B$2:$D$3",
+      "kind": "name",
+      "references": [
+        "Sheet1!B2:D3"
+      ]
+    },
+    {
+      "anchor": "name:nr_OFFSET",
+      "dialect": "excel",
+      "expression": "OFFSET(Sheet1!$A$1, 3, Sheet1!$A$2)",
+      "kind": "name",
+      "references": [
+        "Sheet1!A1",
+        "Sheet1!A2"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet1!A1",
+      "name": "nr_A1",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 25.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B2",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 13.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C2",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 14.0
+      }
+    },
+    {
+      "anchor": "Sheet1!D2",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 16.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 17.0
+      }
+    },
+    {
+      "anchor": "Sheet1!D3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 18.0
+      }
+    },
+    {
+      "anchor": "name:n_K234",
+      "name": "n_K234",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 234.0
+      }
+    }
+  ],
+  "rules": []
+}

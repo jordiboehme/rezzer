@@ -1,0 +1,9 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "contains": "34.56"
+  }
+]

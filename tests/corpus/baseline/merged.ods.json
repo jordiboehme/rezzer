@@ -1,0 +1,23 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "merged"
+    ],
+    [
+      "Sheet1!D16",
+      "yet another merged"
+    ],
+    [
+      "Sheet1!H3",
+      "another merged"
+    ],
+    [
+      "Sheet2!E4",
+      "merged on another sheet"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

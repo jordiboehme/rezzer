@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rezzer_model::Registry;
+use rezzer_model::{Block, Document, Registry, plain_text};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
 use serde_json::Value;
 
@@ -386,7 +386,7 @@ fn office_corpus_matches_manifest() {
     }
     let mut listed = manifest_rows();
     listed.retain(|k, _| k.starts_with("office/"));
-    assert_eq!(listed.len(), 33, "expected 33 office rows");
+    assert_eq!(listed.len(), 51, "expected 51 office rows");
     let mut files = Vec::new();
     walk(&corpus_dir().join("office"), &mut files);
     files.sort();
@@ -483,6 +483,130 @@ fn office(name: &str) -> Value {
 
 fn office_markdown(name: &str) -> String {
     run(&pipeline(), &corpus_dir().join("office").join(name)).markdown
+}
+
+/// `Sheet!A1` shape: a sheet name (quoted or not), `!`, and one cell reference (letters, digits).
+fn is_cell_anchor(anchor: &str) -> bool {
+    anchor.rsplit_once('!').is_some_and(|(sheet, cell)| {
+        let letters = cell.chars().take_while(char::is_ascii_uppercase).count();
+        let digits = &cell[letters..];
+        !sheet.is_empty()
+            && letters > 0
+            && !digits.is_empty()
+            && digits.chars().all(|c| c.is_ascii_digit())
+    })
+}
+
+/// The cells of a sheet document as (anchor, shown text): every block is walked (inside
+/// sections, quotes, callouts and lists too); the cells of tables without a `role` (so the
+/// generated Excel table, pivot and chart summary tables are out), paragraphs and headings
+/// count when the anchor has the `Sheet!A1` shape and the plain text is not empty. Sorted by
+/// anchor. The layout baseline and the layout checks share this helper.
+fn collect_cells(doc: &Document) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut push = |anchor: &Option<rezzer_model::Anchor>, inlines: &[rezzer_model::Inline]| {
+        if let Some(anchor) = anchor
+            && is_cell_anchor(&anchor.0)
+        {
+            let text = plain_text(inlines);
+            if !text.is_empty() {
+                out.push((anchor.0.clone(), text));
+            }
+        }
+    };
+    let mut stack: Vec<&Block> = doc.body.iter().rev().collect();
+    while let Some(block) = stack.pop() {
+        match block {
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => stack.extend(blocks.iter().rev()),
+            Block::List { items, .. } => stack.extend(items.iter().flatten().rev()),
+            Block::Heading {
+                inlines, anchor, ..
+            }
+            | Block::Paragraph {
+                inlines, anchor, ..
+            } => push(anchor, inlines),
+            Block::Table {
+                role: None, rows, ..
+            } => {
+                for cell in rows.iter().flatten() {
+                    push(&cell.anchor, &cell.inlines);
+                }
+            }
+            _ => {}
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The baseline of `office/<name>` from before the layout change: `cells` as
+/// `[[anchor, text], ...]` plus the `formulas`, `parameters` and `rules` facets as model JSON.
+fn baseline(name: &str) -> Value {
+    let path = corpus_dir().join("baseline").join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: no baseline: {e}", path.display()));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The spreadsheet files right in `office/`, sorted.
+fn office_spreadsheets() -> Vec<PathBuf> {
+    corpus_files()
+        .into_iter()
+        .filter(|f| f.parent().is_some_and(|p| p.ends_with("office")))
+        .filter(|f| {
+            f.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| ["xlsx", "xlsm", "xlsb", "ods"].contains(&e))
+        })
+        .collect()
+}
+
+/// Writes `tests/corpus/baseline/<file>.json` for every spreadsheet in `office/` with the
+/// current reader. Run on demand:
+/// `cargo nextest run -p rezzer --test corpus --run-ignored only write_layout_baseline`.
+#[test]
+#[ignore = "writes tests/corpus/baseline; run on demand"]
+fn write_layout_baseline() {
+    let pipeline = pipeline();
+    let dir = corpus_dir().join("baseline");
+    std::fs::create_dir_all(&dir).unwrap();
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let json = run(&pipeline, &file).json;
+        let doc: Document = serde_json::from_value(json.clone()).unwrap();
+        let cells: Vec<Value> = collect_cells(&doc)
+            .into_iter()
+            .map(|(a, t)| serde_json::json!([a, t]))
+            .collect();
+        let facet = |n: &str| {
+            json.pointer(&format!("/facets/{n}"))
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new()))
+        };
+        let out = serde_json::json!({
+            "cells": cells,
+            "formulas": facet("formulas"),
+            "parameters": facet("parameters"),
+            "rules": facet("rules"),
+        });
+        let mut text = serde_json::to_string_pretty(&out).unwrap();
+        text.push('\n');
+        std::fs::write(dir.join(format!("{name}.json")), text).unwrap();
+    }
+}
+
+/// Every spreadsheet in `office/` has a baseline with its four parts.
+#[test]
+fn layout_baseline_covers_the_spreadsheets() {
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let b = baseline(&name);
+        for key in ["cells", "formulas", "parameters", "rules"] {
+            assert!(b[key].is_array(), "{name}: baseline lacks {key}");
+        }
+    }
 }
 
 fn list<'a>(doc: &'a Value, pointer: &str) -> &'a [Value] {
@@ -1060,7 +1184,7 @@ fn all_corpus_formulas_parse() {
          names without text: {names_without_text:?}",
         failures.len()
     );
-    assert_eq!(cells, 3_466, "cell formulas in the spreadsheet corpus");
+    assert_eq!(cells, 3_477, "cell formulas in the spreadsheet corpus");
     assert!(
         failures.is_empty(),
         "{} formulas do not parse ({limit_refusals} by the parser limits):\n{}",

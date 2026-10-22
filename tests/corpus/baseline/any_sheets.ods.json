@@ -1,0 +1,35 @@
+{
+  "cells": [
+    [
+      "Visible!A1",
+      "1"
+    ],
+    [
+      "Visible!A2",
+      "3"
+    ],
+    [
+      "Visible!A3",
+      "5"
+    ],
+    [
+      "Visible!A5",
+      "This workbook contains 4 sheets: Visible, Hidden, VeryHidden and Chart"
+    ],
+    [
+      "Visible!B1",
+      "2"
+    ],
+    [
+      "Visible!B2",
+      "4"
+    ],
+    [
+      "Visible!B3",
+      "6"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

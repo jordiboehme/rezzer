@@ -1,0 +1,996 @@
+{
+  "cells": [
+    [
+      "Sheet1!A10",
+      "Less than"
+    ],
+    [
+      "Sheet1!A11",
+      "Less than equal to"
+    ],
+    [
+      "Sheet1!A12",
+      "Equal to"
+    ],
+    [
+      "Sheet1!A13",
+      "Not Equal to"
+    ],
+    [
+      "Sheet1!A14",
+      "Between"
+    ],
+    [
+      "Sheet1!A15",
+      "Not Between"
+    ],
+    [
+      "Sheet1!A18",
+      "Decimal Constraint"
+    ],
+    [
+      "Sheet1!A19",
+      "Greater than"
+    ],
+    [
+      "Sheet1!A2",
+      "List Validation"
+    ],
+    [
+      "Sheet1!A20",
+      "Greater than equal to"
+    ],
+    [
+      "Sheet1!A21",
+      "Less than"
+    ],
+    [
+      "Sheet1!A22",
+      "Less than equal to"
+    ],
+    [
+      "Sheet1!A23",
+      "Equal to"
+    ],
+    [
+      "Sheet1!A24",
+      "Not Equal to"
+    ],
+    [
+      "Sheet1!A25",
+      "Between"
+    ],
+    [
+      "Sheet1!A26",
+      "Not Between"
+    ],
+    [
+      "Sheet1!A28",
+      "Text Length"
+    ],
+    [
+      "Sheet1!A29",
+      "Greater than"
+    ],
+    [
+      "Sheet1!A30",
+      "Greater than equal to"
+    ],
+    [
+      "Sheet1!A31",
+      "Less than"
+    ],
+    [
+      "Sheet1!A32",
+      "Less than equal to"
+    ],
+    [
+      "Sheet1!A33",
+      "Equal to"
+    ],
+    [
+      "Sheet1!A34",
+      "Not Equal to"
+    ],
+    [
+      "Sheet1!A35",
+      "Between"
+    ],
+    [
+      "Sheet1!A36",
+      "Not Between"
+    ],
+    [
+      "Sheet1!A5",
+      "Integer Constraints"
+    ],
+    [
+      "Sheet1!A6",
+      "Greater than"
+    ],
+    [
+      "Sheet1!A8",
+      "Greater than equal to"
+    ],
+    [
+      "Sheet1!B1",
+      "Explicit"
+    ],
+    [
+      "Sheet1!B10",
+      "1"
+    ],
+    [
+      "Sheet1!B11",
+      "5"
+    ],
+    [
+      "Sheet1!B12",
+      "8"
+    ],
+    [
+      "Sheet1!B13",
+      "1"
+    ],
+    [
+      "Sheet1!B14",
+      "1"
+    ],
+    [
+      "Sheet1!B15",
+      "0"
+    ],
+    [
+      "Sheet1!B19",
+      "0.1"
+    ],
+    [
+      "Sheet1!B2",
+      "IN"
+    ],
+    [
+      "Sheet1!B20",
+      "2.05"
+    ],
+    [
+      "Sheet1!B21",
+      "1.1"
+    ],
+    [
+      "Sheet1!B22",
+      "5.05"
+    ],
+    [
+      "Sheet1!B23",
+      "8.01"
+    ],
+    [
+      "Sheet1!B24",
+      "1.001"
+    ],
+    [
+      "Sheet1!B25",
+      "1.01"
+    ],
+    [
+      "Sheet1!B26",
+      "1.009"
+    ],
+    [
+      "Sheet1!B29",
+      " "
+    ],
+    [
+      "Sheet1!B30",
+      "AB"
+    ],
+    [
+      "Sheet1!B31",
+      "ABC"
+    ],
+    [
+      "Sheet1!B32",
+      "ABCDEF"
+    ],
+    [
+      "Sheet1!B33",
+      "ABCDEFGH"
+    ],
+    [
+      "Sheet1!B34",
+      "abcdefghijk"
+    ],
+    [
+      "Sheet1!B35",
+      "ab"
+    ],
+    [
+      "Sheet1!B36",
+      "abcdefghijk"
+    ],
+    [
+      "Sheet1!B6",
+      "1"
+    ],
+    [
+      "Sheet1!B8",
+      "2"
+    ],
+    [
+      "Sheet1!C1",
+      "Formula"
+    ],
+    [
+      "Sheet1!C10",
+      "2"
+    ],
+    [
+      "Sheet1!C11",
+      "6"
+    ],
+    [
+      "Sheet1!C12",
+      "9"
+    ],
+    [
+      "Sheet1!C13",
+      "3"
+    ],
+    [
+      "Sheet1!C14",
+      "5"
+    ],
+    [
+      "Sheet1!C15",
+      "4"
+    ],
+    [
+      "Sheet1!C19",
+      "1.1"
+    ],
+    [
+      "Sheet1!C2",
+      "UK"
+    ],
+    [
+      "Sheet1!C20",
+      "3.05"
+    ],
+    [
+      "Sheet1!C21",
+      "2.5"
+    ],
+    [
+      "Sheet1!C22",
+      "6.5"
+    ],
+    [
+      "Sheet1!C23",
+      "9.01"
+    ],
+    [
+      "Sheet1!C24",
+      "2.01"
+    ],
+    [
+      "Sheet1!C25",
+      "5.01"
+    ],
+    [
+      "Sheet1!C26",
+      "5.009"
+    ],
+    [
+      "Sheet1!C29",
+      "BC"
+    ],
+    [
+      "Sheet1!C30",
+      "ABC"
+    ],
+    [
+      "Sheet1!C31",
+      "ABCD"
+    ],
+    [
+      "Sheet1!C32",
+      "ABCDEF"
+    ],
+    [
+      "Sheet1!C33",
+      "abcdefghi"
+    ],
+    [
+      "Sheet1!C34",
+      "abcdefghijkl"
+    ],
+    [
+      "Sheet1!C35",
+      "abcdef"
+    ],
+    [
+      "Sheet1!C36",
+      "abcd"
+    ],
+    [
+      "Sheet1!C6",
+      "2"
+    ],
+    [
+      "Sheet1!C7",
+      "4"
+    ],
+    [
+      "Sheet1!C8",
+      "3"
+    ],
+    [
+      "Sheet1!C9",
+      "4"
+    ],
+    [
+      "Sheet1!D1",
+      "UK"
+    ],
+    [
+      "Sheet1!D10",
+      "4"
+    ],
+    [
+      "Sheet1!D11",
+      "6"
+    ],
+    [
+      "Sheet1!D12",
+      "8"
+    ],
+    [
+      "Sheet1!D13",
+      "10"
+    ],
+    [
+      "Sheet1!D14",
+      "1,5"
+    ],
+    [
+      "Sheet1!D17",
+      "Constant value in formulae"
+    ],
+    [
+      "Sheet1!D19",
+      "0.05"
+    ],
+    [
+      "Sheet1!D20",
+      "2.05"
+    ],
+    [
+      "Sheet1!D21",
+      "4.05"
+    ],
+    [
+      "Sheet1!D22",
+      "6.05"
+    ],
+    [
+      "Sheet1!D23",
+      "8.01"
+    ],
+    [
+      "Sheet1!D24",
+      "1.01"
+    ],
+    [
+      "Sheet1!D25",
+      "1.01,4.99"
+    ],
+    [
+      "Sheet1!D27",
+      "Constant value in formulae"
+    ],
+    [
+      "Sheet1!D29",
+      "0"
+    ],
+    [
+      "Sheet1!D3",
+      "Constant value in formulae"
+    ],
+    [
+      "Sheet1!D30",
+      "2"
+    ],
+    [
+      "Sheet1!D31",
+      "4"
+    ],
+    [
+      "Sheet1!D32",
+      "6"
+    ],
+    [
+      "Sheet1!D33",
+      "8"
+    ],
+    [
+      "Sheet1!D34",
+      "10"
+    ],
+    [
+      "Sheet1!D35",
+      "1,5"
+    ],
+    [
+      "Sheet1!D6",
+      "0"
+    ],
+    [
+      "Sheet1!D8",
+      "2"
+    ],
+    [
+      "Sheet1!D9",
+      "2"
+    ],
+    [
+      "Sheet1!E1",
+      "IN"
+    ],
+    [
+      "Sheet1!E10",
+      "5"
+    ],
+    [
+      "Sheet1!E11",
+      "7"
+    ],
+    [
+      "Sheet1!E12",
+      "9"
+    ],
+    [
+      "Sheet1!E13",
+      "11"
+    ],
+    [
+      "Sheet1!E14",
+      "5"
+    ],
+    [
+      "Sheet1!E17",
+      "Cells Referenced in Formulae"
+    ],
+    [
+      "Sheet1!E19",
+      "1.05"
+    ],
+    [
+      "Sheet1!E20",
+      "3.05"
+    ],
+    [
+      "Sheet1!E21",
+      "5.05"
+    ],
+    [
+      "Sheet1!E22",
+      "7.05"
+    ],
+    [
+      "Sheet1!E23",
+      "9.01"
+    ],
+    [
+      "Sheet1!E24",
+      "2.02"
+    ],
+    [
+      "Sheet1!E25",
+      "5.01"
+    ],
+    [
+      "Sheet1!E28",
+      "Cells Referenced in Formulae"
+    ],
+    [
+      "Sheet1!E29",
+      "1"
+    ],
+    [
+      "Sheet1!E3",
+      "Cells Referenced in Formulae"
+    ],
+    [
+      "Sheet1!E30",
+      "3"
+    ],
+    [
+      "Sheet1!E31",
+      "5"
+    ],
+    [
+      "Sheet1!E32",
+      "7"
+    ],
+    [
+      "Sheet1!E33",
+      "9"
+    ],
+    [
+      "Sheet1!E34",
+      "11"
+    ],
+    [
+      "Sheet1!E35",
+      "5"
+    ],
+    [
+      "Sheet1!E6",
+      "1"
+    ],
+    [
+      "Sheet1!E8",
+      "3"
+    ],
+    [
+      "Sheet1!E9",
+      "3"
+    ],
+    [
+      "Sheet1!F1",
+      "IT"
+    ],
+    [
+      "Sheet1!F14",
+      "10"
+    ],
+    [
+      "Sheet1!F25",
+      "9.99"
+    ],
+    [
+      "Sheet1!F35",
+      "10"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": [
+    {
+      "anchor": "Sheet1!C6",
+      "detail": "whole greaterThan",
+      "formulas": [
+        "E6"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C8:C9",
+      "detail": "whole greaterThanOrEqual",
+      "formulas": [
+        "E8"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C10",
+      "detail": "whole lessThan",
+      "formulas": [
+        "E10"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C12",
+      "detail": "whole equal",
+      "formulas": [
+        "E12"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C13",
+      "detail": "whole notEqual",
+      "formulas": [
+        "E13"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C14",
+      "detail": "whole between",
+      "formulas": [
+        "E14",
+        "F14"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C15",
+      "detail": "whole notBetween",
+      "formulas": [
+        "E14",
+        "F14"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C19",
+      "detail": "decimal greaterThan",
+      "formulas": [
+        "E19"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C20",
+      "detail": "decimal greaterThanOrEqual",
+      "formulas": [
+        "E20"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C21",
+      "detail": "decimal lessThan",
+      "formulas": [
+        "E21"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C22",
+      "detail": "decimal lessThanOrEqual",
+      "formulas": [
+        "E22"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C23",
+      "detail": "decimal equal",
+      "formulas": [
+        "E23"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C25",
+      "detail": "decimal between",
+      "formulas": [
+        "E25",
+        "F25"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C26",
+      "detail": "decimal notBetween",
+      "formulas": [
+        "E25",
+        "F25"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C24",
+      "detail": "decimal notEqual",
+      "formulas": [
+        "E24"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C31",
+      "detail": "textLength lessThan",
+      "formulas": [
+        "E31"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C34",
+      "detail": "textLength notEqual",
+      "formulas": [
+        "E34"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C36",
+      "detail": "textLength notBetween",
+      "formulas": [
+        "E35",
+        "F35"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B40",
+      "detail": "custom",
+      "formulas": [
+        "\"c66 < b66 and b66 < d66\""
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C11",
+      "detail": "whole lessThanOrEqual",
+      "formulas": [
+        "E11"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C32",
+      "detail": "textLength lessThanOrEqual",
+      "formulas": [
+        "E32"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C7",
+      "detail": "whole greaterThan",
+      "formulas": [
+        "E6"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C30",
+      "detail": "textLength greaterThanOrEqual",
+      "formulas": [
+        "E30"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C29",
+      "detail": "textLength greaterThan",
+      "formulas": [
+        "E29"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C33",
+      "detail": "textLength equal",
+      "formulas": [
+        "E33"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B36",
+      "detail": "textLength notBetween",
+      "formulas": [
+        "1",
+        "5"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!C35",
+      "detail": "textLength between",
+      "formulas": [
+        "E35",
+        "F35"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B35",
+      "detail": "textLength between",
+      "formulas": [
+        "1",
+        "5"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B34",
+      "detail": "textLength notEqual",
+      "formulas": [
+        "10"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B33",
+      "detail": "textLength equal",
+      "formulas": [
+        "8"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B32",
+      "detail": "textLength lessThanOrEqual",
+      "formulas": [
+        "6"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B31",
+      "detail": "textLength lessThan",
+      "formulas": [
+        "4"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B30",
+      "detail": "textLength greaterThanOrEqual",
+      "formulas": [
+        "2"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!B29",
+      "detail": "textLength greaterThan",
+      "formulas": [
+        "0"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!B26",
+      "detail": "decimal notBetween",
+      "formulas": [
+        "1.01",
+        "4.99"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B25",
+      "detail": "decimal between",
+      "formulas": [
+        "1.01",
+        "4.99"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B24",
+      "detail": "decimal notEqual",
+      "formulas": [
+        "1.01"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B23",
+      "detail": "decimal equal",
+      "formulas": [
+        "8.01"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B22",
+      "detail": "decimal lessThanOrEqual",
+      "formulas": [
+        "6.05"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B21",
+      "detail": "decimal lessThan",
+      "formulas": [
+        "4.05"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B20",
+      "detail": "decimal greaterThanOrEqual",
+      "formulas": [
+        "2.05"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!B19",
+      "detail": "decimal greaterThan",
+      "formulas": [
+        "0.05"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!B15",
+      "detail": "whole notBetween",
+      "formulas": [
+        "1",
+        "5"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B14",
+      "detail": "whole between",
+      "formulas": [
+        "1",
+        "5"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B13",
+      "detail": "whole notEqual",
+      "formulas": [
+        "10"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B12",
+      "detail": "whole equal",
+      "formulas": [
+        "8"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B11",
+      "detail": "whole lessThanOrEqual",
+      "formulas": [
+        "6"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B8",
+      "detail": "whole greaterThanOrEqual",
+      "formulas": [
+        "2"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!B10",
+      "detail": "whole lessThan",
+      "formulas": [
+        "4"
+      ],
+      "kind": "validation"
+    },
+    {
+      "anchor": "Sheet1!B6",
+      "detail": "whole greaterThan",
+      "formulas": [
+        "0"
+      ],
+      "kind": "validation",
+      "message": "prompt: Enter an integer value."
+    },
+    {
+      "anchor": "Sheet1!C2",
+      "detail": "list",
+      "formulas": [
+        "$D$1:$F$1"
+      ],
+      "kind": "validation",
+      "message": "prompt: Choose a country code from the list of options.; error: The country code specified is not a valid option."
+    },
+    {
+      "anchor": "Sheet1!B2",
+      "detail": "list: IN, US, UK",
+      "formulas": [
+        "\"IN,US,UK\""
+      ],
+      "kind": "validation",
+      "message": "prompt: Choose a Country Code.; error: The specified country code is not a valid option."
+    }
+  ]
+}

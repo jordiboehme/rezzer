@@ -1,0 +1,4031 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "Operator:"
+    ],
+    [
+      "Sheet1!A10",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A102",
+      "+"
+    ],
+    [
+      "Sheet1!A106",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A110",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A114",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A118",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A122",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A126",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A130",
+      "+"
+    ],
+    [
+      "Sheet1!A134",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A138",
+      "<END>"
+    ],
+    [
+      "Sheet1!A14",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A18",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A2",
+      "+"
+    ],
+    [
+      "Sheet1!A22",
+      "+"
+    ],
+    [
+      "Sheet1!A26",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A30",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A34",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A38",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A42",
+      "+"
+    ],
+    [
+      "Sheet1!A46",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A50",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A54",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A58",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A6",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A62",
+      "+"
+    ],
+    [
+      "Sheet1!A66",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A70",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A74",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A78",
+      "MMULT"
+    ],
+    [
+      "Sheet1!A82",
+      "+"
+    ],
+    [
+      "Sheet1!A86",
+      "TRANSPOSE"
+    ],
+    [
+      "Sheet1!A90",
+      "MDETERM"
+    ],
+    [
+      "Sheet1!A94",
+      "MINVERSE"
+    ],
+    [
+      "Sheet1!A98",
+      "MMULT"
+    ],
+    [
+      "Sheet1!B1",
+      "Matrix A"
+    ],
+    [
+      "Sheet1!B102",
+      "1"
+    ],
+    [
+      "Sheet1!B103",
+      "2"
+    ],
+    [
+      "Sheet1!B106",
+      "1"
+    ],
+    [
+      "Sheet1!B107",
+      "2"
+    ],
+    [
+      "Sheet1!B110",
+      "1"
+    ],
+    [
+      "Sheet1!B111",
+      "2"
+    ],
+    [
+      "Sheet1!B114",
+      "1"
+    ],
+    [
+      "Sheet1!B115",
+      "2"
+    ],
+    [
+      "Sheet1!B118",
+      "1"
+    ],
+    [
+      "Sheet1!B119",
+      "2"
+    ],
+    [
+      "Sheet1!B122",
+      "1"
+    ],
+    [
+      "Sheet1!B126",
+      "1"
+    ],
+    [
+      "Sheet1!B127",
+      "2"
+    ],
+    [
+      "Sheet1!B130",
+      "1"
+    ],
+    [
+      "Sheet1!B131",
+      "3"
+    ],
+    [
+      "Sheet1!B22",
+      "1"
+    ],
+    [
+      "Sheet1!B26",
+      "1"
+    ],
+    [
+      "Sheet1!B30",
+      "1"
+    ],
+    [
+      "Sheet1!B34",
+      "1"
+    ],
+    [
+      "Sheet1!B38",
+      "1"
+    ],
+    [
+      "Sheet1!B42",
+      "1"
+    ],
+    [
+      "Sheet1!B46",
+      "1"
+    ],
+    [
+      "Sheet1!B50",
+      "1"
+    ],
+    [
+      "Sheet1!B54",
+      "1"
+    ],
+    [
+      "Sheet1!B58",
+      "1"
+    ],
+    [
+      "Sheet1!B62",
+      "1"
+    ],
+    [
+      "Sheet1!B66",
+      "1"
+    ],
+    [
+      "Sheet1!B70",
+      "1"
+    ],
+    [
+      "Sheet1!B74",
+      "1"
+    ],
+    [
+      "Sheet1!B78",
+      "1"
+    ],
+    [
+      "Sheet1!B82",
+      "1"
+    ],
+    [
+      "Sheet1!B83",
+      "2"
+    ],
+    [
+      "Sheet1!B86",
+      "1"
+    ],
+    [
+      "Sheet1!B87",
+      "2"
+    ],
+    [
+      "Sheet1!B90",
+      "1"
+    ],
+    [
+      "Sheet1!B91",
+      "2"
+    ],
+    [
+      "Sheet1!B94",
+      "1"
+    ],
+    [
+      "Sheet1!B95",
+      "2"
+    ],
+    [
+      "Sheet1!B98",
+      "1"
+    ],
+    [
+      "Sheet1!B99",
+      "2"
+    ],
+    [
+      "Sheet1!C102",
+      "2"
+    ],
+    [
+      "Sheet1!C103",
+      "3"
+    ],
+    [
+      "Sheet1!C106",
+      "2"
+    ],
+    [
+      "Sheet1!C107",
+      "3"
+    ],
+    [
+      "Sheet1!C110",
+      "2"
+    ],
+    [
+      "Sheet1!C111",
+      "3"
+    ],
+    [
+      "Sheet1!C114",
+      "2"
+    ],
+    [
+      "Sheet1!C115",
+      "3"
+    ],
+    [
+      "Sheet1!C118",
+      "2"
+    ],
+    [
+      "Sheet1!C119",
+      "3"
+    ],
+    [
+      "Sheet1!C122",
+      "2"
+    ],
+    [
+      "Sheet1!C130",
+      "2"
+    ],
+    [
+      "Sheet1!C131",
+      "4"
+    ],
+    [
+      "Sheet1!C62",
+      "2"
+    ],
+    [
+      "Sheet1!C66",
+      "2"
+    ],
+    [
+      "Sheet1!C70",
+      "2"
+    ],
+    [
+      "Sheet1!C74",
+      "2"
+    ],
+    [
+      "Sheet1!C78",
+      "2"
+    ],
+    [
+      "Sheet1!E1",
+      "Matrix B"
+    ],
+    [
+      "Sheet1!E102",
+      "1"
+    ],
+    [
+      "Sheet1!E103",
+      "2"
+    ],
+    [
+      "Sheet1!E106",
+      "1"
+    ],
+    [
+      "Sheet1!E107",
+      "2"
+    ],
+    [
+      "Sheet1!E110",
+      "1"
+    ],
+    [
+      "Sheet1!E111",
+      "2"
+    ],
+    [
+      "Sheet1!E114",
+      "1"
+    ],
+    [
+      "Sheet1!E115",
+      "2"
+    ],
+    [
+      "Sheet1!E118",
+      "1"
+    ],
+    [
+      "Sheet1!E119",
+      "2"
+    ],
+    [
+      "Sheet1!E122",
+      "1"
+    ],
+    [
+      "Sheet1!E123",
+      "2"
+    ],
+    [
+      "Sheet1!E126",
+      "1"
+    ],
+    [
+      "Sheet1!E130",
+      "1"
+    ],
+    [
+      "Sheet1!E131",
+      "3"
+    ],
+    [
+      "Sheet1!E22",
+      "1"
+    ],
+    [
+      "Sheet1!E26",
+      "1"
+    ],
+    [
+      "Sheet1!E30",
+      "1"
+    ],
+    [
+      "Sheet1!E34",
+      "1"
+    ],
+    [
+      "Sheet1!E38",
+      "1"
+    ],
+    [
+      "Sheet1!E42",
+      "1"
+    ],
+    [
+      "Sheet1!E46",
+      "1"
+    ],
+    [
+      "Sheet1!E50",
+      "1"
+    ],
+    [
+      "Sheet1!E54",
+      "1"
+    ],
+    [
+      "Sheet1!E58",
+      "1"
+    ],
+    [
+      "Sheet1!E62",
+      "1"
+    ],
+    [
+      "Sheet1!E66",
+      "1"
+    ],
+    [
+      "Sheet1!E70",
+      "1"
+    ],
+    [
+      "Sheet1!E74",
+      "1"
+    ],
+    [
+      "Sheet1!E78",
+      "1"
+    ],
+    [
+      "Sheet1!E82",
+      "1"
+    ],
+    [
+      "Sheet1!E83",
+      "2"
+    ],
+    [
+      "Sheet1!E86",
+      "1"
+    ],
+    [
+      "Sheet1!E87",
+      "2"
+    ],
+    [
+      "Sheet1!E90",
+      "1"
+    ],
+    [
+      "Sheet1!E91",
+      "2"
+    ],
+    [
+      "Sheet1!E94",
+      "1"
+    ],
+    [
+      "Sheet1!E95",
+      "2"
+    ],
+    [
+      "Sheet1!E98",
+      "1"
+    ],
+    [
+      "Sheet1!E99",
+      "2"
+    ],
+    [
+      "Sheet1!F102",
+      "2"
+    ],
+    [
+      "Sheet1!F103",
+      "3"
+    ],
+    [
+      "Sheet1!F106",
+      "2"
+    ],
+    [
+      "Sheet1!F107",
+      "3"
+    ],
+    [
+      "Sheet1!F110",
+      "2"
+    ],
+    [
+      "Sheet1!F111",
+      "3"
+    ],
+    [
+      "Sheet1!F114",
+      "2"
+    ],
+    [
+      "Sheet1!F115",
+      "3"
+    ],
+    [
+      "Sheet1!F118",
+      "2"
+    ],
+    [
+      "Sheet1!F119",
+      "3"
+    ],
+    [
+      "Sheet1!F126",
+      "2"
+    ],
+    [
+      "Sheet1!F130",
+      "2"
+    ],
+    [
+      "Sheet1!F131",
+      "4"
+    ],
+    [
+      "Sheet1!F62",
+      "2"
+    ],
+    [
+      "Sheet1!F66",
+      "2"
+    ],
+    [
+      "Sheet1!F70",
+      "2"
+    ],
+    [
+      "Sheet1!F74",
+      "2"
+    ],
+    [
+      "Sheet1!F78",
+      "2"
+    ],
+    [
+      "Sheet1!H1",
+      "Result"
+    ],
+    [
+      "Sheet1!H10",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H102",
+      "2"
+    ],
+    [
+      "Sheet1!H103",
+      "4"
+    ],
+    [
+      "Sheet1!H104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H106",
+      "1"
+    ],
+    [
+      "Sheet1!H107",
+      "2"
+    ],
+    [
+      "Sheet1!H108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H110",
+      "-1"
+    ],
+    [
+      "Sheet1!H114",
+      "-3"
+    ],
+    [
+      "Sheet1!H115",
+      "2"
+    ],
+    [
+      "Sheet1!H116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H118",
+      "5"
+    ],
+    [
+      "Sheet1!H119",
+      "8"
+    ],
+    [
+      "Sheet1!H120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H122",
+      "5"
+    ],
+    [
+      "Sheet1!H123",
+      "5"
+    ],
+    [
+      "Sheet1!H124",
+      "5"
+    ],
+    [
+      "Sheet1!H126",
+      "1"
+    ],
+    [
+      "Sheet1!H127",
+      "2"
+    ],
+    [
+      "Sheet1!H128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H130",
+      "2"
+    ],
+    [
+      "Sheet1!H131",
+      "6"
+    ],
+    [
+      "Sheet1!H132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H134",
+      "1"
+    ],
+    [
+      "Sheet1!H135",
+      "2"
+    ],
+    [
+      "Sheet1!H136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H2",
+      "0"
+    ],
+    [
+      "Sheet1!H20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H22",
+      "2"
+    ],
+    [
+      "Sheet1!H23",
+      "0"
+    ],
+    [
+      "Sheet1!H24",
+      "0"
+    ],
+    [
+      "Sheet1!H26",
+      "1"
+    ],
+    [
+      "Sheet1!H27",
+      "0"
+    ],
+    [
+      "Sheet1!H28",
+      "0"
+    ],
+    [
+      "Sheet1!H3",
+      "0"
+    ],
+    [
+      "Sheet1!H30",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H4",
+      "0"
+    ],
+    [
+      "Sheet1!H40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H42",
+      "2"
+    ],
+    [
+      "Sheet1!H43",
+      "2"
+    ],
+    [
+      "Sheet1!H44",
+      "2"
+    ],
+    [
+      "Sheet1!H46",
+      "1"
+    ],
+    [
+      "Sheet1!H47",
+      "1"
+    ],
+    [
+      "Sheet1!H48",
+      "1"
+    ],
+    [
+      "Sheet1!H50",
+      "1"
+    ],
+    [
+      "Sheet1!H54",
+      "1"
+    ],
+    [
+      "Sheet1!H55",
+      "1"
+    ],
+    [
+      "Sheet1!H56",
+      "1"
+    ],
+    [
+      "Sheet1!H58",
+      "1"
+    ],
+    [
+      "Sheet1!H59",
+      "1"
+    ],
+    [
+      "Sheet1!H6",
+      "0"
+    ],
+    [
+      "Sheet1!H60",
+      "1"
+    ],
+    [
+      "Sheet1!H62",
+      "2"
+    ],
+    [
+      "Sheet1!H63",
+      "2"
+    ],
+    [
+      "Sheet1!H64",
+      "2"
+    ],
+    [
+      "Sheet1!H66",
+      "1"
+    ],
+    [
+      "Sheet1!H67",
+      "2"
+    ],
+    [
+      "Sheet1!H68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H7",
+      "0"
+    ],
+    [
+      "Sheet1!H70",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H8",
+      "0"
+    ],
+    [
+      "Sheet1!H80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H82",
+      "2"
+    ],
+    [
+      "Sheet1!H83",
+      "4"
+    ],
+    [
+      "Sheet1!H84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!H86",
+      "1"
+    ],
+    [
+      "Sheet1!H87",
+      "1"
+    ],
+    [
+      "Sheet1!H88",
+      "1"
+    ],
+    [
+      "Sheet1!H90",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!H99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I102",
+      "4"
+    ],
+    [
+      "Sheet1!I103",
+      "6"
+    ],
+    [
+      "Sheet1!I104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I106",
+      "2"
+    ],
+    [
+      "Sheet1!I107",
+      "3"
+    ],
+    [
+      "Sheet1!I108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I114",
+      "2"
+    ],
+    [
+      "Sheet1!I115",
+      "-1"
+    ],
+    [
+      "Sheet1!I116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I118",
+      "8"
+    ],
+    [
+      "Sheet1!I119",
+      "13"
+    ],
+    [
+      "Sheet1!I120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I122",
+      "5"
+    ],
+    [
+      "Sheet1!I123",
+      "5"
+    ],
+    [
+      "Sheet1!I124",
+      "5"
+    ],
+    [
+      "Sheet1!I126",
+      "2"
+    ],
+    [
+      "Sheet1!I127",
+      "4"
+    ],
+    [
+      "Sheet1!I128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I130",
+      "4"
+    ],
+    [
+      "Sheet1!I131",
+      "8"
+    ],
+    [
+      "Sheet1!I132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I134",
+      "3"
+    ],
+    [
+      "Sheet1!I135",
+      "4"
+    ],
+    [
+      "Sheet1!I136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I2",
+      "0"
+    ],
+    [
+      "Sheet1!I20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I22",
+      "0"
+    ],
+    [
+      "Sheet1!I23",
+      "0"
+    ],
+    [
+      "Sheet1!I24",
+      "0"
+    ],
+    [
+      "Sheet1!I26",
+      "0"
+    ],
+    [
+      "Sheet1!I27",
+      "0"
+    ],
+    [
+      "Sheet1!I28",
+      "0"
+    ],
+    [
+      "Sheet1!I3",
+      "0"
+    ],
+    [
+      "Sheet1!I34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I4",
+      "0"
+    ],
+    [
+      "Sheet1!I40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I42",
+      "2"
+    ],
+    [
+      "Sheet1!I43",
+      "2"
+    ],
+    [
+      "Sheet1!I44",
+      "2"
+    ],
+    [
+      "Sheet1!I46",
+      "1"
+    ],
+    [
+      "Sheet1!I47",
+      "1"
+    ],
+    [
+      "Sheet1!I48",
+      "1"
+    ],
+    [
+      "Sheet1!I54",
+      "1"
+    ],
+    [
+      "Sheet1!I55",
+      "1"
+    ],
+    [
+      "Sheet1!I56",
+      "1"
+    ],
+    [
+      "Sheet1!I58",
+      "1"
+    ],
+    [
+      "Sheet1!I59",
+      "1"
+    ],
+    [
+      "Sheet1!I6",
+      "0"
+    ],
+    [
+      "Sheet1!I60",
+      "1"
+    ],
+    [
+      "Sheet1!I62",
+      "4"
+    ],
+    [
+      "Sheet1!I63",
+      "4"
+    ],
+    [
+      "Sheet1!I64",
+      "4"
+    ],
+    [
+      "Sheet1!I66",
+      "1"
+    ],
+    [
+      "Sheet1!I67",
+      "2"
+    ],
+    [
+      "Sheet1!I68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I7",
+      "0"
+    ],
+    [
+      "Sheet1!I74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I8",
+      "0"
+    ],
+    [
+      "Sheet1!I80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I82",
+      "2"
+    ],
+    [
+      "Sheet1!I83",
+      "4"
+    ],
+    [
+      "Sheet1!I84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!I86",
+      "2"
+    ],
+    [
+      "Sheet1!I87",
+      "2"
+    ],
+    [
+      "Sheet1!I88",
+      "2"
+    ],
+    [
+      "Sheet1!I94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!I99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J102",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J103",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J106",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J107",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J114",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J115",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J118",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J119",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J122",
+      "5"
+    ],
+    [
+      "Sheet1!J123",
+      "5"
+    ],
+    [
+      "Sheet1!J124",
+      "5"
+    ],
+    [
+      "Sheet1!J126",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J127",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J130",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J131",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J134",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J135",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J2",
+      "0"
+    ],
+    [
+      "Sheet1!J20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J22",
+      "0"
+    ],
+    [
+      "Sheet1!J23",
+      "0"
+    ],
+    [
+      "Sheet1!J24",
+      "0"
+    ],
+    [
+      "Sheet1!J26",
+      "0"
+    ],
+    [
+      "Sheet1!J27",
+      "0"
+    ],
+    [
+      "Sheet1!J28",
+      "0"
+    ],
+    [
+      "Sheet1!J3",
+      "0"
+    ],
+    [
+      "Sheet1!J34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J4",
+      "0"
+    ],
+    [
+      "Sheet1!J40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J42",
+      "2"
+    ],
+    [
+      "Sheet1!J43",
+      "2"
+    ],
+    [
+      "Sheet1!J44",
+      "2"
+    ],
+    [
+      "Sheet1!J46",
+      "1"
+    ],
+    [
+      "Sheet1!J47",
+      "1"
+    ],
+    [
+      "Sheet1!J48",
+      "1"
+    ],
+    [
+      "Sheet1!J54",
+      "1"
+    ],
+    [
+      "Sheet1!J55",
+      "1"
+    ],
+    [
+      "Sheet1!J56",
+      "1"
+    ],
+    [
+      "Sheet1!J58",
+      "1"
+    ],
+    [
+      "Sheet1!J59",
+      "1"
+    ],
+    [
+      "Sheet1!J6",
+      "0"
+    ],
+    [
+      "Sheet1!J60",
+      "1"
+    ],
+    [
+      "Sheet1!J62",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J63",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J64",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J66",
+      "1"
+    ],
+    [
+      "Sheet1!J67",
+      "2"
+    ],
+    [
+      "Sheet1!J68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J7",
+      "0"
+    ],
+    [
+      "Sheet1!J74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J8",
+      "0"
+    ],
+    [
+      "Sheet1!J80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J82",
+      "2"
+    ],
+    [
+      "Sheet1!J83",
+      "4"
+    ],
+    [
+      "Sheet1!J84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J86",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J87",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J88",
+      "#N/A"
+    ],
+    [
+      "Sheet1!J94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!J99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K1",
+      "Expected"
+    ],
+    [
+      "Sheet1!K10",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K102",
+      "2"
+    ],
+    [
+      "Sheet1!K103",
+      "4"
+    ],
+    [
+      "Sheet1!K104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K106",
+      "1"
+    ],
+    [
+      "Sheet1!K107",
+      "2"
+    ],
+    [
+      "Sheet1!K108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K110",
+      "-1"
+    ],
+    [
+      "Sheet1!K114",
+      "-3"
+    ],
+    [
+      "Sheet1!K115",
+      "2"
+    ],
+    [
+      "Sheet1!K116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K118",
+      "5"
+    ],
+    [
+      "Sheet1!K119",
+      "8"
+    ],
+    [
+      "Sheet1!K120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K122",
+      "5"
+    ],
+    [
+      "Sheet1!K123",
+      "5"
+    ],
+    [
+      "Sheet1!K124",
+      "5"
+    ],
+    [
+      "Sheet1!K126",
+      "1"
+    ],
+    [
+      "Sheet1!K127",
+      "2"
+    ],
+    [
+      "Sheet1!K128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K130",
+      "2"
+    ],
+    [
+      "Sheet1!K131",
+      "6"
+    ],
+    [
+      "Sheet1!K132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K134",
+      "1"
+    ],
+    [
+      "Sheet1!K135",
+      "2"
+    ],
+    [
+      "Sheet1!K136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K2",
+      "0"
+    ],
+    [
+      "Sheet1!K20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K22",
+      "2"
+    ],
+    [
+      "Sheet1!K23",
+      "0"
+    ],
+    [
+      "Sheet1!K24",
+      "0"
+    ],
+    [
+      "Sheet1!K26",
+      "1"
+    ],
+    [
+      "Sheet1!K27",
+      "0"
+    ],
+    [
+      "Sheet1!K28",
+      "0"
+    ],
+    [
+      "Sheet1!K3",
+      "0"
+    ],
+    [
+      "Sheet1!K30",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K4",
+      "0"
+    ],
+    [
+      "Sheet1!K40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K42",
+      "2"
+    ],
+    [
+      "Sheet1!K43",
+      "2"
+    ],
+    [
+      "Sheet1!K44",
+      "2"
+    ],
+    [
+      "Sheet1!K46",
+      "1"
+    ],
+    [
+      "Sheet1!K47",
+      "1"
+    ],
+    [
+      "Sheet1!K48",
+      "1"
+    ],
+    [
+      "Sheet1!K50",
+      "1"
+    ],
+    [
+      "Sheet1!K54",
+      "1"
+    ],
+    [
+      "Sheet1!K55",
+      "1"
+    ],
+    [
+      "Sheet1!K56",
+      "1"
+    ],
+    [
+      "Sheet1!K58",
+      "1"
+    ],
+    [
+      "Sheet1!K59",
+      "1"
+    ],
+    [
+      "Sheet1!K6",
+      "0"
+    ],
+    [
+      "Sheet1!K60",
+      "1"
+    ],
+    [
+      "Sheet1!K62",
+      "2"
+    ],
+    [
+      "Sheet1!K63",
+      "2"
+    ],
+    [
+      "Sheet1!K64",
+      "2"
+    ],
+    [
+      "Sheet1!K66",
+      "1"
+    ],
+    [
+      "Sheet1!K67",
+      "2"
+    ],
+    [
+      "Sheet1!K68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K7",
+      "0"
+    ],
+    [
+      "Sheet1!K70",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K8",
+      "0"
+    ],
+    [
+      "Sheet1!K80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K82",
+      "2"
+    ],
+    [
+      "Sheet1!K83",
+      "4"
+    ],
+    [
+      "Sheet1!K84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!K86",
+      "1"
+    ],
+    [
+      "Sheet1!K87",
+      "1"
+    ],
+    [
+      "Sheet1!K88",
+      "1"
+    ],
+    [
+      "Sheet1!K90",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!K99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L102",
+      "4"
+    ],
+    [
+      "Sheet1!L103",
+      "6"
+    ],
+    [
+      "Sheet1!L104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L106",
+      "2"
+    ],
+    [
+      "Sheet1!L107",
+      "3"
+    ],
+    [
+      "Sheet1!L108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L114",
+      "2"
+    ],
+    [
+      "Sheet1!L115",
+      "-1"
+    ],
+    [
+      "Sheet1!L116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L118",
+      "8"
+    ],
+    [
+      "Sheet1!L119",
+      "13"
+    ],
+    [
+      "Sheet1!L120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L122",
+      "5"
+    ],
+    [
+      "Sheet1!L123",
+      "5"
+    ],
+    [
+      "Sheet1!L124",
+      "5"
+    ],
+    [
+      "Sheet1!L126",
+      "2"
+    ],
+    [
+      "Sheet1!L127",
+      "4"
+    ],
+    [
+      "Sheet1!L128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L130",
+      "4"
+    ],
+    [
+      "Sheet1!L131",
+      "8"
+    ],
+    [
+      "Sheet1!L132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L134",
+      "3"
+    ],
+    [
+      "Sheet1!L135",
+      "4"
+    ],
+    [
+      "Sheet1!L136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L2",
+      "0"
+    ],
+    [
+      "Sheet1!L20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L22",
+      "0"
+    ],
+    [
+      "Sheet1!L23",
+      "0"
+    ],
+    [
+      "Sheet1!L24",
+      "0"
+    ],
+    [
+      "Sheet1!L26",
+      "0"
+    ],
+    [
+      "Sheet1!L27",
+      "0"
+    ],
+    [
+      "Sheet1!L28",
+      "0"
+    ],
+    [
+      "Sheet1!L3",
+      "0"
+    ],
+    [
+      "Sheet1!L34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L4",
+      "0"
+    ],
+    [
+      "Sheet1!L40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L42",
+      "2"
+    ],
+    [
+      "Sheet1!L43",
+      "2"
+    ],
+    [
+      "Sheet1!L44",
+      "2"
+    ],
+    [
+      "Sheet1!L46",
+      "1"
+    ],
+    [
+      "Sheet1!L47",
+      "1"
+    ],
+    [
+      "Sheet1!L48",
+      "1"
+    ],
+    [
+      "Sheet1!L54",
+      "1"
+    ],
+    [
+      "Sheet1!L55",
+      "1"
+    ],
+    [
+      "Sheet1!L56",
+      "1"
+    ],
+    [
+      "Sheet1!L58",
+      "1"
+    ],
+    [
+      "Sheet1!L59",
+      "1"
+    ],
+    [
+      "Sheet1!L6",
+      "0"
+    ],
+    [
+      "Sheet1!L60",
+      "1"
+    ],
+    [
+      "Sheet1!L62",
+      "4"
+    ],
+    [
+      "Sheet1!L63",
+      "4"
+    ],
+    [
+      "Sheet1!L64",
+      "4"
+    ],
+    [
+      "Sheet1!L66",
+      "1"
+    ],
+    [
+      "Sheet1!L67",
+      "2"
+    ],
+    [
+      "Sheet1!L68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L7",
+      "0"
+    ],
+    [
+      "Sheet1!L74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L8",
+      "0"
+    ],
+    [
+      "Sheet1!L80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L82",
+      "2"
+    ],
+    [
+      "Sheet1!L83",
+      "4"
+    ],
+    [
+      "Sheet1!L84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!L86",
+      "2"
+    ],
+    [
+      "Sheet1!L87",
+      "2"
+    ],
+    [
+      "Sheet1!L88",
+      "2"
+    ],
+    [
+      "Sheet1!L94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!L99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M100",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M102",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M103",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M104",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M106",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M107",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M108",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M114",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M115",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M116",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M118",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M119",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M120",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M122",
+      "5"
+    ],
+    [
+      "Sheet1!M123",
+      "5"
+    ],
+    [
+      "Sheet1!M124",
+      "5"
+    ],
+    [
+      "Sheet1!M126",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M127",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M128",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M130",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M131",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M132",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M134",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M135",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M136",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M14",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M15",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M16",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M18",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M19",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M2",
+      "0"
+    ],
+    [
+      "Sheet1!M20",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M22",
+      "0"
+    ],
+    [
+      "Sheet1!M23",
+      "0"
+    ],
+    [
+      "Sheet1!M24",
+      "0"
+    ],
+    [
+      "Sheet1!M26",
+      "0"
+    ],
+    [
+      "Sheet1!M27",
+      "0"
+    ],
+    [
+      "Sheet1!M28",
+      "0"
+    ],
+    [
+      "Sheet1!M3",
+      "0"
+    ],
+    [
+      "Sheet1!M34",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M35",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M36",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M38",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M39",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M4",
+      "0"
+    ],
+    [
+      "Sheet1!M40",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M42",
+      "2"
+    ],
+    [
+      "Sheet1!M43",
+      "2"
+    ],
+    [
+      "Sheet1!M44",
+      "2"
+    ],
+    [
+      "Sheet1!M46",
+      "1"
+    ],
+    [
+      "Sheet1!M47",
+      "1"
+    ],
+    [
+      "Sheet1!M48",
+      "1"
+    ],
+    [
+      "Sheet1!M54",
+      "1"
+    ],
+    [
+      "Sheet1!M55",
+      "1"
+    ],
+    [
+      "Sheet1!M56",
+      "1"
+    ],
+    [
+      "Sheet1!M58",
+      "1"
+    ],
+    [
+      "Sheet1!M59",
+      "1"
+    ],
+    [
+      "Sheet1!M6",
+      "0"
+    ],
+    [
+      "Sheet1!M60",
+      "1"
+    ],
+    [
+      "Sheet1!M62",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M63",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M64",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M66",
+      "1"
+    ],
+    [
+      "Sheet1!M67",
+      "2"
+    ],
+    [
+      "Sheet1!M68",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M7",
+      "0"
+    ],
+    [
+      "Sheet1!M74",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M75",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M76",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M78",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M79",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M8",
+      "0"
+    ],
+    [
+      "Sheet1!M80",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M82",
+      "2"
+    ],
+    [
+      "Sheet1!M83",
+      "4"
+    ],
+    [
+      "Sheet1!M84",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M86",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M87",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M88",
+      "#N/A"
+    ],
+    [
+      "Sheet1!M94",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M95",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M96",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M98",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!M99",
+      "#VALUE!"
+    ],
+    [
+      "Sheet1!N1",
+      "Test Params:"
+    ],
+    [
+      "Sheet1!N10",
+      "<-Singular Array Formula Out"
+    ],
+    [
+      "Sheet1!N102",
+      "Input: 2x2"
+    ],
+    [
+      "Sheet1!N103",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N110",
+      "<- Scalar Out"
+    ],
+    [
+      "Sheet1!N122",
+      "Input: 2x2"
+    ],
+    [
+      "Sheet1!N123",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N124",
+      "Compatible MMULT (NOT SQUARE)"
+    ],
+    [
+      "Sheet1!N2",
+      "Input: One Entry, NULL"
+    ],
+    [
+      "Sheet1!N22",
+      "Input: 3x3, One Entry"
+    ],
+    [
+      "Sheet1!N23",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N3",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N30",
+      "<-Singular Array Formula Out"
+    ],
+    [
+      "Sheet1!N42",
+      "Input: Scalar"
+    ],
+    [
+      "Sheet1!N43",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N50",
+      "<- Scalar Out"
+    ],
+    [
+      "Sheet1!N62",
+      "Input: 1x2"
+    ],
+    [
+      "Sheet1!N63",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N70",
+      "<- Scalar Out"
+    ],
+    [
+      "Sheet1!N82",
+      "Input: 2x1"
+    ],
+    [
+      "Sheet1!N83",
+      "Output: 3x3"
+    ],
+    [
+      "Sheet1!N90",
+      "<- Scalar Out"
+    ],
+    [
+      "Sheet1!Q1",
+      "Test Notes:"
+    ],
+    [
+      "Sheet1!Q2",
+      "MDETERM: Only outputs a scalar"
+    ],
+    [
+      "Sheet1!Q3",
+      "MMULT: Must"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet1!H2",
+      "cached": {
+        "type": "number",
+        "value": 0.0
+      },
+      "dialect": "excel",
+      "expression": "=B2:D4 + E2:G4",
+      "kind": "array",
+      "pattern": "p1",
+      "range": "Sheet1!H2:J4",
+      "references": [
+        "Sheet1!B2:D4",
+        "Sheet1!E2:G4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H6",
+      "cached": {
+        "type": "number",
+        "value": 0.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B6:D8)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B6{:}D8})",
+      "pattern": "p2",
+      "range": "Sheet1!H6:J8",
+      "references": [
+        "Sheet1!B6:D8"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H10",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B10:D12)",
+      "kind": "array",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B10{:}D12})",
+      "pattern": "p3",
+      "range": "Sheet1!H10",
+      "references": [
+        "Sheet1!B10:D12"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H14",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B14:D16)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B14{:}D16})",
+      "pattern": "p4",
+      "range": "Sheet1!H14:J16",
+      "references": [
+        "Sheet1!B14:D16"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H18",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B18:D20,E18:G20)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B18{:}D20}, \\mathrm{E18{:}G20})",
+      "pattern": "p5",
+      "range": "Sheet1!H18:J20",
+      "references": [
+        "Sheet1!B18:D20",
+        "Sheet1!E18:G20"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H22",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B22:D24 + E22:G24",
+      "kind": "array",
+      "pattern": "p1",
+      "range": "Sheet1!H22:J24",
+      "references": [
+        "Sheet1!B22:D24",
+        "Sheet1!E22:G24"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H26",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B26:D28)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B26{:}D28})",
+      "pattern": "p2",
+      "range": "Sheet1!H26:J28",
+      "references": [
+        "Sheet1!B26:D28"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H30",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B30:D32)",
+      "kind": "array",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B30{:}D32})",
+      "pattern": "p3",
+      "range": "Sheet1!H30",
+      "references": [
+        "Sheet1!B30:D32"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H34",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B34:D36)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B34{:}D36})",
+      "pattern": "p4",
+      "range": "Sheet1!H34:J36",
+      "references": [
+        "Sheet1!B34:D36"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H38",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B38:D40,E38:G40)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B38{:}D40}, \\mathrm{E38{:}G40})",
+      "pattern": "p5",
+      "range": "Sheet1!H38:J40",
+      "references": [
+        "Sheet1!B38:D40",
+        "Sheet1!E38:G40"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H42",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B42+E42",
+      "kind": "array",
+      "range": "Sheet1!H42:J44",
+      "references": [
+        "Sheet1!B42",
+        "Sheet1!E42"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H46",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B46)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B46})",
+      "range": "Sheet1!H46:J48",
+      "references": [
+        "Sheet1!B46"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H50",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B50)",
+      "kind": "cell",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B50})",
+      "references": [
+        "Sheet1!B50"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H54",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B54)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B54})",
+      "range": "Sheet1!H54:J56",
+      "references": [
+        "Sheet1!B54"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H58",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B58,E58)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B58}, \\mathrm{E58})",
+      "range": "Sheet1!H58:J60",
+      "references": [
+        "Sheet1!B58",
+        "Sheet1!E58"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H62",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B62:C62+E62:F62",
+      "kind": "array",
+      "range": "Sheet1!H62:J64",
+      "references": [
+        "Sheet1!B62:C62",
+        "Sheet1!E62:F62"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H66",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B66:C66)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B66{:}C66})",
+      "range": "Sheet1!H66:J68",
+      "references": [
+        "Sheet1!B66:C66"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H70",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B70:C70)",
+      "kind": "cell",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B70{:}C70})",
+      "references": [
+        "Sheet1!B70:C70"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H74",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B74:C74)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B74{:}C74})",
+      "range": "Sheet1!H74:J76",
+      "references": [
+        "Sheet1!B74:C74"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H78",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B78:C78,E78:F78)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B78{:}C78}, \\mathrm{E78{:}F78})",
+      "range": "Sheet1!H78:J80",
+      "references": [
+        "Sheet1!B78:C78",
+        "Sheet1!E78:F78"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H82",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B82:B83+E82:E83",
+      "kind": "array",
+      "range": "Sheet1!H82:J84",
+      "references": [
+        "Sheet1!B82:B83",
+        "Sheet1!E82:E83"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H86",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B86:B87)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B86{:}B87})",
+      "range": "Sheet1!H86:J88",
+      "references": [
+        "Sheet1!B86:B87"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H90",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B90:B91)",
+      "kind": "cell",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B90{:}B91})",
+      "references": [
+        "Sheet1!B90:B91"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H94",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B94:B95)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B94{:}B95})",
+      "range": "Sheet1!H94:J96",
+      "references": [
+        "Sheet1!B94:B95"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H98",
+      "cached": {
+        "type": "text",
+        "value": "#VALUE!"
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B98:B99,E98:E99)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B98{:}B99}, \\mathrm{E98{:}E99})",
+      "range": "Sheet1!H98:J100",
+      "references": [
+        "Sheet1!B98:B99",
+        "Sheet1!E98:E99"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H102",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B102:C103+E102:F103",
+      "kind": "array",
+      "pattern": "p6",
+      "range": "Sheet1!H102:J104",
+      "references": [
+        "Sheet1!B102:C103",
+        "Sheet1!E102:F103"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H106",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE(B106:C107)",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\mathrm{B106{:}C107})",
+      "range": "Sheet1!H106:J108",
+      "references": [
+        "Sheet1!B106:C107"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H110",
+      "cached": {
+        "type": "number",
+        "value": -1.0
+      },
+      "dialect": "excel",
+      "expression": "=MDETERM(B110:C111)",
+      "kind": "cell",
+      "latex": "\\operatorname{MDETERM}(\\mathrm{B110{:}C111})",
+      "references": [
+        "Sheet1!B110:C111"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H114",
+      "cached": {
+        "type": "number",
+        "value": -3.0
+      },
+      "dialect": "excel",
+      "expression": "=MINVERSE(B114:C115)",
+      "kind": "array",
+      "latex": "\\operatorname{MINVERSE}(\\mathrm{B114{:}C115})",
+      "range": "Sheet1!H114:J116",
+      "references": [
+        "Sheet1!B114:C115"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H118",
+      "cached": {
+        "type": "number",
+        "value": 5.0
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B118:C119,E118:F119)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B118{:}C119}, \\mathrm{E118{:}F119})",
+      "range": "Sheet1!H118:J120",
+      "references": [
+        "Sheet1!B118:C119",
+        "Sheet1!E118:F119"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H122",
+      "cached": {
+        "type": "number",
+        "value": 5.0
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B122:C122,E122:E123)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B122{:}C122}, \\mathrm{E122{:}E123})",
+      "range": "Sheet1!H122:J124",
+      "references": [
+        "Sheet1!B122:C122",
+        "Sheet1!E122:E123"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H126",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=MMULT(B126:B127,E126:F126)",
+      "kind": "array",
+      "latex": "\\operatorname{MMULT}(\\mathrm{B126{:}B127}, \\mathrm{E126{:}F126})",
+      "range": "Sheet1!H126:J128",
+      "references": [
+        "Sheet1!B126:B127",
+        "Sheet1!E126:F126"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!B130",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "={1,2;3,4}",
+      "kind": "array",
+      "pattern": "p7",
+      "range": "Sheet1!B130:C131",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!E130",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "={1,2;3,4}",
+      "kind": "array",
+      "pattern": "p7",
+      "range": "Sheet1!E130:F131",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!H130",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=B130:C131+E130:F131",
+      "kind": "array",
+      "pattern": "p6",
+      "range": "Sheet1!H130:J132",
+      "references": [
+        "Sheet1!B130:C131",
+        "Sheet1!E130:F131"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H134",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=TRANSPOSE({1,2;3,4})",
+      "kind": "array",
+      "latex": "\\operatorname{TRANSPOSE}(\\{1, 2; 3, 4\\})",
+      "range": "Sheet1!H134:J136",
+      "role": "constant"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet1!B22",
+      "label": "+",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E22",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B26",
+      "label": "TRANSPOSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B30",
+      "label": "MDETERM",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B34",
+      "label": "MINVERSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B38",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E38",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B42",
+      "label": "+",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E42",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B46",
+      "label": "TRANSPOSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B50",
+      "label": "MDETERM",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B54",
+      "label": "MINVERSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B58",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E58",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B62",
+      "label": "+",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C62",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E62",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F62",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B66",
+      "label": "TRANSPOSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C66",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B70",
+      "label": "MDETERM",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C70",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B74",
+      "label": "MINVERSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C74",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B78",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C78",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E78",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F78",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B82",
+      "label": "+",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E82",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B83",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E83",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B86",
+      "label": "TRANSPOSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B87",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B90",
+      "label": "MDETERM",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B91",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B94",
+      "label": "MINVERSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B95",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B98",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E98",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B99",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E99",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B102",
+      "label": "+",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C102",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E102",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F102",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B103",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C103",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E103",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F103",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B106",
+      "label": "TRANSPOSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C106",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B107",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C107",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B110",
+      "label": "MDETERM",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C110",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B111",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C111",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B114",
+      "label": "MINVERSE",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C114",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B115",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C115",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B118",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C118",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E118",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F118",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B119",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C119",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E119",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F119",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B122",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C122",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E122",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E123",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B126",
+      "label": "MMULT",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!E126",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet1!F126",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet1!B127",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    }
+  ],
+  "rules": []
+}

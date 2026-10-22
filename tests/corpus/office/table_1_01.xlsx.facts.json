@@ -1,0 +1,9 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "contains": "Generation at Utility Scale Facilities"
+  }
+]

@@ -1,0 +1,1865 @@
+{
+  "cells": [
+    [
+      "DataSheet!A1",
+      "Id"
+    ],
+    [
+      "DataSheet!A10",
+      "9"
+    ],
+    [
+      "DataSheet!A11",
+      "10"
+    ],
+    [
+      "DataSheet!A2",
+      "1"
+    ],
+    [
+      "DataSheet!A3",
+      "2"
+    ],
+    [
+      "DataSheet!A4",
+      "3"
+    ],
+    [
+      "DataSheet!A5",
+      "4"
+    ],
+    [
+      "DataSheet!A6",
+      "5"
+    ],
+    [
+      "DataSheet!A7",
+      "6"
+    ],
+    [
+      "DataSheet!A8",
+      "7"
+    ],
+    [
+      "DataSheet!A9",
+      "8"
+    ],
+    [
+      "DataSheet!B1",
+      "Name"
+    ],
+    [
+      "DataSheet!B10",
+      "i"
+    ],
+    [
+      "DataSheet!B11",
+      "j"
+    ],
+    [
+      "DataSheet!B2",
+      "a"
+    ],
+    [
+      "DataSheet!B3",
+      "b"
+    ],
+    [
+      "DataSheet!B4",
+      "c"
+    ],
+    [
+      "DataSheet!B5",
+      "d"
+    ],
+    [
+      "DataSheet!B6",
+      "e"
+    ],
+    [
+      "DataSheet!B7",
+      "f"
+    ],
+    [
+      "DataSheet!B8",
+      "g"
+    ],
+    [
+      "DataSheet!B9",
+      "h"
+    ],
+    [
+      "DataSheet!C1",
+      "Category"
+    ],
+    [
+      "DataSheet!C10",
+      "yellow"
+    ],
+    [
+      "DataSheet!C11",
+      "yellow"
+    ],
+    [
+      "DataSheet!C2",
+      "blue"
+    ],
+    [
+      "DataSheet!C3",
+      "blue"
+    ],
+    [
+      "DataSheet!C4",
+      "blue"
+    ],
+    [
+      "DataSheet!C5",
+      "blue"
+    ],
+    [
+      "DataSheet!C6",
+      "blue"
+    ],
+    [
+      "DataSheet!C7",
+      "yellow"
+    ],
+    [
+      "DataSheet!C8",
+      "yellow"
+    ],
+    [
+      "DataSheet!C9",
+      "yellow"
+    ],
+    [
+      "DataSheet!D1",
+      "Value"
+    ],
+    [
+      "DataSheet!D10",
+      "15"
+    ],
+    [
+      "DataSheet!D11",
+      "5"
+    ],
+    [
+      "DataSheet!D2",
+      "10"
+    ],
+    [
+      "DataSheet!D3",
+      "20"
+    ],
+    [
+      "DataSheet!D4",
+      "15"
+    ],
+    [
+      "DataSheet!D5",
+      "20"
+    ],
+    [
+      "DataSheet!D6",
+      "10"
+    ],
+    [
+      "DataSheet!D7",
+      "5"
+    ],
+    [
+      "DataSheet!D8",
+      "10"
+    ],
+    [
+      "DataSheet!D9",
+      "15"
+    ],
+    [
+      "DataSheet!E1",
+      "Size"
+    ],
+    [
+      "DataSheet!E10",
+      "1.0421"
+    ],
+    [
+      "DataSheet!E11",
+      "1.20452"
+    ],
+    [
+      "DataSheet!E2",
+      "1.78"
+    ],
+    [
+      "DataSheet!E3",
+      "2.012"
+    ],
+    [
+      "DataSheet!E4",
+      "3.121"
+    ],
+    [
+      "DataSheet!E5",
+      "1.052"
+    ],
+    [
+      "DataSheet!E6",
+      "3.102"
+    ],
+    [
+      "DataSheet!E7",
+      "1.02"
+    ],
+    [
+      "DataSheet!E8",
+      "0"
+    ],
+    [
+      "DataSheet!E9",
+      "4.031"
+    ],
+    [
+      "DataSheet!F1",
+      "Date"
+    ],
+    [
+      "DataSheet!F10",
+      "12-01-24"
+    ],
+    [
+      "DataSheet!F11",
+      "01-01-24"
+    ],
+    [
+      "DataSheet!F2",
+      "11-01-24"
+    ],
+    [
+      "DataSheet!F3",
+      "01-04-24"
+    ],
+    [
+      "DataSheet!F4",
+      "01-31-24"
+    ],
+    [
+      "DataSheet!F5",
+      "01-21-24"
+    ],
+    [
+      "DataSheet!F6",
+      "02-01-24"
+    ],
+    [
+      "DataSheet!F7",
+      "01-01-24"
+    ],
+    [
+      "DataSheet!F8",
+      "01-11-24"
+    ],
+    [
+      "DataSheet!F9",
+      "01-01-99"
+    ],
+    [
+      "DataSheet!G1",
+      "Value / Size"
+    ],
+    [
+      "DataSheet!G10",
+      "14.39401209"
+    ],
+    [
+      "DataSheet!G11",
+      "4.151031116"
+    ],
+    [
+      "DataSheet!G2",
+      "5.617977528"
+    ],
+    [
+      "DataSheet!G3",
+      "9.940357853"
+    ],
+    [
+      "DataSheet!G4",
+      "4.806151874"
+    ],
+    [
+      "DataSheet!G5",
+      "19.01140684"
+    ],
+    [
+      "DataSheet!G6",
+      "3.223726628"
+    ],
+    [
+      "DataSheet!G7",
+      "4.901960784"
+    ],
+    [
+      "DataSheet!G8",
+      "#DIV/0!"
+    ],
+    [
+      "DataSheet!G9",
+      "3.721161002"
+    ],
+    [
+      "DataSheet!H1",
+      "IsBlue"
+    ],
+    [
+      "DataSheet!H10",
+      "FALSE"
+    ],
+    [
+      "DataSheet!H11",
+      "FALSE"
+    ],
+    [
+      "DataSheet!H2",
+      "TRUE"
+    ],
+    [
+      "DataSheet!H3",
+      "TRUE"
+    ],
+    [
+      "DataSheet!H4",
+      "TRUE"
+    ],
+    [
+      "DataSheet!H5",
+      "TRUE"
+    ],
+    [
+      "DataSheet!H6",
+      "TRUE"
+    ],
+    [
+      "DataSheet!H7",
+      "FALSE"
+    ],
+    [
+      "DataSheet!H8",
+      "FALSE"
+    ],
+    [
+      "DataSheet!H9",
+      "FALSE"
+    ],
+    [
+      "DataSheet!I1",
+      "Null"
+    ],
+    [
+      "DataSheet!J1",
+      "Misc"
+    ],
+    [
+      "DataSheet!J10",
+      "10"
+    ],
+    [
+      "DataSheet!J11",
+      "blue"
+    ],
+    [
+      "DataSheet!J3",
+      "2.012"
+    ],
+    [
+      "DataSheet!J4",
+      "02-01-24"
+    ],
+    [
+      "DataSheet!J5",
+      "#DIV/0!"
+    ],
+    [
+      "DataSheet!J6",
+      "3.102"
+    ],
+    [
+      "DataSheet!J7",
+      "20"
+    ],
+    [
+      "DataSheet!J8",
+      "TRUE"
+    ],
+    [
+      "DataSheet!J9",
+      "5"
+    ],
+    [
+      "DataSheet2!A1",
+      "Id"
+    ],
+    [
+      "DataSheet2!A10",
+      "9"
+    ],
+    [
+      "DataSheet2!A11",
+      "10"
+    ],
+    [
+      "DataSheet2!A2",
+      "1"
+    ],
+    [
+      "DataSheet2!A3",
+      "2"
+    ],
+    [
+      "DataSheet2!A4",
+      "3"
+    ],
+    [
+      "DataSheet2!A5",
+      "4"
+    ],
+    [
+      "DataSheet2!A6",
+      "5"
+    ],
+    [
+      "DataSheet2!A7",
+      "6"
+    ],
+    [
+      "DataSheet2!A8",
+      "7"
+    ],
+    [
+      "DataSheet2!A9",
+      "8"
+    ],
+    [
+      "DataSheet2!B1",
+      "Name"
+    ],
+    [
+      "DataSheet2!B10",
+      "i"
+    ],
+    [
+      "DataSheet2!B11",
+      "j"
+    ],
+    [
+      "DataSheet2!B2",
+      "a"
+    ],
+    [
+      "DataSheet2!B3",
+      "b"
+    ],
+    [
+      "DataSheet2!B4",
+      "c"
+    ],
+    [
+      "DataSheet2!B5",
+      "d"
+    ],
+    [
+      "DataSheet2!B6",
+      "e"
+    ],
+    [
+      "DataSheet2!B7",
+      "f"
+    ],
+    [
+      "DataSheet2!B8",
+      "g"
+    ],
+    [
+      "DataSheet2!B9",
+      "h"
+    ],
+    [
+      "DataSheet2!C1",
+      "Category"
+    ],
+    [
+      "DataSheet2!C10",
+      "yellow"
+    ],
+    [
+      "DataSheet2!C11",
+      "yellow"
+    ],
+    [
+      "DataSheet2!C2",
+      "blue"
+    ],
+    [
+      "DataSheet2!C3",
+      "blue"
+    ],
+    [
+      "DataSheet2!C4",
+      "blue"
+    ],
+    [
+      "DataSheet2!C5",
+      "blue"
+    ],
+    [
+      "DataSheet2!C6",
+      "blue"
+    ],
+    [
+      "DataSheet2!C7",
+      "yellow"
+    ],
+    [
+      "DataSheet2!C8",
+      "yellow"
+    ],
+    [
+      "DataSheet2!C9",
+      "yellow"
+    ],
+    [
+      "DataSheet2!D1",
+      "Value"
+    ],
+    [
+      "DataSheet2!D10",
+      "15"
+    ],
+    [
+      "DataSheet2!D11",
+      "5"
+    ],
+    [
+      "DataSheet2!D2",
+      "20"
+    ],
+    [
+      "DataSheet2!D3",
+      "20"
+    ],
+    [
+      "DataSheet2!D4",
+      "20"
+    ],
+    [
+      "DataSheet2!D5",
+      "10"
+    ],
+    [
+      "DataSheet2!D6",
+      "5"
+    ],
+    [
+      "DataSheet2!D7",
+      "10"
+    ],
+    [
+      "DataSheet2!D8",
+      "5"
+    ],
+    [
+      "DataSheet2!D9",
+      "5"
+    ],
+    [
+      "DataSheet2!E1",
+      "Size"
+    ],
+    [
+      "DataSheet2!E10",
+      "1.0421"
+    ],
+    [
+      "DataSheet2!E11",
+      "1.20452"
+    ],
+    [
+      "DataSheet2!E2",
+      "1.78"
+    ],
+    [
+      "DataSheet2!E3",
+      "2.012"
+    ],
+    [
+      "DataSheet2!E4",
+      "3.121"
+    ],
+    [
+      "DataSheet2!E5",
+      "1.052"
+    ],
+    [
+      "DataSheet2!E6",
+      "3.102"
+    ],
+    [
+      "DataSheet2!E7",
+      "1.02"
+    ],
+    [
+      "DataSheet2!E8",
+      "0"
+    ],
+    [
+      "DataSheet2!E9",
+      "4.031"
+    ],
+    [
+      "DataSheet2!F1",
+      "Date"
+    ],
+    [
+      "DataSheet2!F10",
+      "12-01-24"
+    ],
+    [
+      "DataSheet2!F11",
+      "01-01-24"
+    ],
+    [
+      "DataSheet2!F2",
+      "11-01-24"
+    ],
+    [
+      "DataSheet2!F3",
+      "01-04-24"
+    ],
+    [
+      "DataSheet2!F4",
+      "01-31-24"
+    ],
+    [
+      "DataSheet2!F5",
+      "01-21-24"
+    ],
+    [
+      "DataSheet2!F6",
+      "02-01-24"
+    ],
+    [
+      "DataSheet2!F7",
+      "01-01-24"
+    ],
+    [
+      "DataSheet2!F8",
+      "01-11-24"
+    ],
+    [
+      "DataSheet2!F9",
+      "01-01-99"
+    ],
+    [
+      "DataSheet2!G1",
+      "Value / Size"
+    ],
+    [
+      "DataSheet2!G10",
+      "14.39401209"
+    ],
+    [
+      "DataSheet2!G11",
+      "4.151031116"
+    ],
+    [
+      "DataSheet2!G2",
+      "11.23595506"
+    ],
+    [
+      "DataSheet2!G3",
+      "9.940357853"
+    ],
+    [
+      "DataSheet2!G4",
+      "6.408202499"
+    ],
+    [
+      "DataSheet2!G5",
+      "9.505703422"
+    ],
+    [
+      "DataSheet2!G6",
+      "1.611863314"
+    ],
+    [
+      "DataSheet2!G7",
+      "9.803921569"
+    ],
+    [
+      "DataSheet2!G8",
+      "#DIV/0!"
+    ],
+    [
+      "DataSheet2!G9",
+      "1.240387001"
+    ],
+    [
+      "DataSheet2!H1",
+      "IsBlue"
+    ],
+    [
+      "DataSheet2!H10",
+      "FALSE"
+    ],
+    [
+      "DataSheet2!H11",
+      "FALSE"
+    ],
+    [
+      "DataSheet2!H2",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!H3",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!H4",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!H5",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!H6",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!H7",
+      "FALSE"
+    ],
+    [
+      "DataSheet2!H8",
+      "FALSE"
+    ],
+    [
+      "DataSheet2!H9",
+      "FALSE"
+    ],
+    [
+      "DataSheet2!I1",
+      "Null"
+    ],
+    [
+      "DataSheet2!J1",
+      "Misc"
+    ],
+    [
+      "DataSheet2!J10",
+      "10"
+    ],
+    [
+      "DataSheet2!J11",
+      "blue"
+    ],
+    [
+      "DataSheet2!J3",
+      "2.012"
+    ],
+    [
+      "DataSheet2!J4",
+      "02-01-24"
+    ],
+    [
+      "DataSheet2!J5",
+      "#DIV/0!"
+    ],
+    [
+      "DataSheet2!J6",
+      "3.102"
+    ],
+    [
+      "DataSheet2!J7",
+      "20"
+    ],
+    [
+      "DataSheet2!J8",
+      "TRUE"
+    ],
+    [
+      "DataSheet2!J9",
+      "5"
+    ],
+    [
+      "PivotSheet1!A1",
+      "Date"
+    ],
+    [
+      "PivotSheet1!A3",
+      "Row Labels"
+    ],
+    [
+      "PivotSheet1!A4",
+      "yellow"
+    ],
+    [
+      "PivotSheet1!A5",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet1!B1",
+      "(Multiple Items)"
+    ],
+    [
+      "PivotSheet1!B3",
+      "Sum of Size"
+    ],
+    [
+      "PivotSheet1!B4",
+      "6.25552"
+    ],
+    [
+      "PivotSheet1!B5",
+      "6.25552"
+    ],
+    [
+      "PivotSheet1!C3",
+      "Average of Value"
+    ],
+    [
+      "PivotSheet1!C4",
+      "8.333333333"
+    ],
+    [
+      "PivotSheet1!C5",
+      "8.333333333"
+    ],
+    [
+      "PivotSheet1!D3",
+      "Count of Size"
+    ],
+    [
+      "PivotSheet1!D4",
+      "3"
+    ],
+    [
+      "PivotSheet1!D5",
+      "3"
+    ],
+    [
+      "PivotSheet1!E3",
+      "Sum of Value x 2"
+    ],
+    [
+      "PivotSheet1!E4",
+      "25.54830581"
+    ],
+    [
+      "PivotSheet1!E5",
+      "25.54830581"
+    ],
+    [
+      "PivotSheet1!F3",
+      "<------------ calculated field"
+    ],
+    [
+      "PivotSheet2!A1",
+      "Name"
+    ],
+    [
+      "PivotSheet2!A10",
+      "20"
+    ],
+    [
+      "PivotSheet2!A11",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet2!A3",
+      "Sum of Size"
+    ],
+    [
+      "PivotSheet2!A4",
+      "Row Labels"
+    ],
+    [
+      "PivotSheet2!A5",
+      "5"
+    ],
+    [
+      "PivotSheet2!A6",
+      "5"
+    ],
+    [
+      "PivotSheet2!A7",
+      "Group1"
+    ],
+    [
+      "PivotSheet2!A8",
+      "10"
+    ],
+    [
+      "PivotSheet2!A9",
+      "15"
+    ],
+    [
+      "PivotSheet2!B1",
+      "(All)"
+    ],
+    [
+      "PivotSheet2!B10",
+      "3.064"
+    ],
+    [
+      "PivotSheet2!B11",
+      "11.067"
+    ],
+    [
+      "PivotSheet2!B3",
+      "Column Labels"
+    ],
+    [
+      "PivotSheet2!B4",
+      "blue"
+    ],
+    [
+      "PivotSheet2!B7",
+      "11.067"
+    ],
+    [
+      "PivotSheet2!B8",
+      "4.882"
+    ],
+    [
+      "PivotSheet2!B9",
+      "3.121"
+    ],
+    [
+      "PivotSheet2!C11",
+      "7.29762"
+    ],
+    [
+      "PivotSheet2!C4",
+      "yellow"
+    ],
+    [
+      "PivotSheet2!C5",
+      "2.22452"
+    ],
+    [
+      "PivotSheet2!C6",
+      "2.22452"
+    ],
+    [
+      "PivotSheet2!C7",
+      "5.0731"
+    ],
+    [
+      "PivotSheet2!C8",
+      "0"
+    ],
+    [
+      "PivotSheet2!C9",
+      "5.0731"
+    ],
+    [
+      "PivotSheet2!D10",
+      "3.064"
+    ],
+    [
+      "PivotSheet2!D11",
+      "18.36462"
+    ],
+    [
+      "PivotSheet2!D4",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet2!D5",
+      "2.22452"
+    ],
+    [
+      "PivotSheet2!D6",
+      "2.22452"
+    ],
+    [
+      "PivotSheet2!D7",
+      "16.1401"
+    ],
+    [
+      "PivotSheet2!D8",
+      "4.882"
+    ],
+    [
+      "PivotSheet2!D9",
+      "8.1941"
+    ],
+    [
+      "PivotSheet3!A1",
+      "Date"
+    ],
+    [
+      "PivotSheet3!A3",
+      "Row Labels"
+    ],
+    [
+      "PivotSheet3!A4",
+      "f"
+    ],
+    [
+      "PivotSheet3!A5",
+      "h"
+    ],
+    [
+      "PivotSheet3!A6",
+      "j"
+    ],
+    [
+      "PivotSheet3!A7",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet3!B1",
+      "(Multiple Items)"
+    ],
+    [
+      "PivotSheet3!B3",
+      "Count of Value2"
+    ],
+    [
+      "PivotSheet3!B4",
+      "1"
+    ],
+    [
+      "PivotSheet3!B5",
+      "1"
+    ],
+    [
+      "PivotSheet3!B6",
+      "1"
+    ],
+    [
+      "PivotSheet3!B7",
+      "3"
+    ],
+    [
+      "PivotSheet3!C3",
+      "<--------  grouped field as value"
+    ],
+    [
+      "PivotSheet4!A1",
+      "Row Labels"
+    ],
+    [
+      "PivotSheet4!A2",
+      "blue"
+    ],
+    [
+      "PivotSheet4!A3",
+      "yellow"
+    ],
+    [
+      "PivotSheet4!A4",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet4!A6",
+      "Row Labels"
+    ],
+    [
+      "PivotSheet4!A7",
+      "blue"
+    ],
+    [
+      "PivotSheet4!A8",
+      "yellow"
+    ],
+    [
+      "PivotSheet4!A9",
+      "Grand Total"
+    ],
+    [
+      "PivotSheet4!B1",
+      "Sum of Value"
+    ],
+    [
+      "PivotSheet4!B2",
+      "75"
+    ],
+    [
+      "PivotSheet4!B3",
+      "40"
+    ],
+    [
+      "PivotSheet4!B4",
+      "115"
+    ],
+    [
+      "PivotSheet4!B6",
+      "Sum of Value"
+    ],
+    [
+      "PivotSheet4!B7",
+      "75"
+    ],
+    [
+      "PivotSheet4!B8",
+      "50"
+    ],
+    [
+      "PivotSheet4!B9",
+      "125"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "DataSheet!G2",
+      "cached": {
+        "type": "number",
+        "value": 5.617977528089887
+      },
+      "dialect": "excel",
+      "expression": "=D2/E2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{D2}}{\\mathrm{E2}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D2",
+        "DataSheet!E2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G3",
+      "cached": {
+        "type": "number",
+        "value": 9.940357852882704
+      },
+      "dialect": "excel",
+      "expression": "=D3/E3",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D3}}{\\mathrm{E3}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D3",
+        "DataSheet!E3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G4",
+      "cached": {
+        "type": "number",
+        "value": 4.806151874399231
+      },
+      "dialect": "excel",
+      "expression": "=D4/E4",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D4}}{\\mathrm{E4}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D4",
+        "DataSheet!E4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G5",
+      "cached": {
+        "type": "number",
+        "value": 19.011406844106464
+      },
+      "dialect": "excel",
+      "expression": "=D5/E5",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D5}}{\\mathrm{E5}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D5",
+        "DataSheet!E5"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!J5",
+      "cached": {
+        "type": "text",
+        "value": "#DIV/0!"
+      },
+      "dialect": "excel",
+      "expression": "=1/0",
+      "kind": "cell",
+      "latex": "\\frac{1}{0}",
+      "role": "constant"
+    },
+    {
+      "anchor": "DataSheet!G6",
+      "cached": {
+        "type": "number",
+        "value": 3.223726627981947
+      },
+      "dialect": "excel",
+      "expression": "=D6/E6",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D6}}{\\mathrm{E6}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D6",
+        "DataSheet!E6"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G7",
+      "cached": {
+        "type": "number",
+        "value": 4.901960784313726
+      },
+      "dialect": "excel",
+      "expression": "=D7/E7",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D7}}{\\mathrm{E7}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D7",
+        "DataSheet!E7"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G8",
+      "cached": {
+        "type": "text",
+        "value": "#DIV/0!"
+      },
+      "dialect": "excel",
+      "expression": "=D8/E8",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D8}}{\\mathrm{E8}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D8",
+        "DataSheet!E8"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G9",
+      "cached": {
+        "type": "number",
+        "value": 3.721161002232697
+      },
+      "dialect": "excel",
+      "expression": "=D9/E9",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D9}}{\\mathrm{E9}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D9",
+        "DataSheet!E9"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G10",
+      "cached": {
+        "type": "number",
+        "value": 14.394012090970156
+      },
+      "dialect": "excel",
+      "expression": "=D10/E10",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D10}}{\\mathrm{E10}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D10",
+        "DataSheet!E10"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet!G11",
+      "cached": {
+        "type": "number",
+        "value": 4.151031116129246
+      },
+      "dialect": "excel",
+      "expression": "=D11/E11",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D11}}{\\mathrm{E11}}",
+      "pattern": "p1",
+      "range": "DataSheet!G2:G11",
+      "references": [
+        "DataSheet!D11",
+        "DataSheet!E11"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G2",
+      "cached": {
+        "type": "number",
+        "value": 11.235955056179774
+      },
+      "dialect": "excel",
+      "expression": "=D2/E2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{D2}}{\\mathrm{E2}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D2",
+        "DataSheet2!E2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G3",
+      "cached": {
+        "type": "number",
+        "value": 9.940357852882704
+      },
+      "dialect": "excel",
+      "expression": "=D3/E3",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D3}}{\\mathrm{E3}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D3",
+        "DataSheet2!E3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G4",
+      "cached": {
+        "type": "number",
+        "value": 6.408202499198975
+      },
+      "dialect": "excel",
+      "expression": "=D4/E4",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D4}}{\\mathrm{E4}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D4",
+        "DataSheet2!E4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G5",
+      "cached": {
+        "type": "number",
+        "value": 9.505703422053232
+      },
+      "dialect": "excel",
+      "expression": "=D5/E5",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D5}}{\\mathrm{E5}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D5",
+        "DataSheet2!E5"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!J5",
+      "cached": {
+        "type": "text",
+        "value": "#DIV/0!"
+      },
+      "dialect": "excel",
+      "expression": "=1/0",
+      "kind": "cell",
+      "latex": "\\frac{1}{0}",
+      "role": "constant"
+    },
+    {
+      "anchor": "DataSheet2!G6",
+      "cached": {
+        "type": "number",
+        "value": 1.6118633139909735
+      },
+      "dialect": "excel",
+      "expression": "=D6/E6",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D6}}{\\mathrm{E6}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D6",
+        "DataSheet2!E6"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G7",
+      "cached": {
+        "type": "number",
+        "value": 9.803921568627452
+      },
+      "dialect": "excel",
+      "expression": "=D7/E7",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D7}}{\\mathrm{E7}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D7",
+        "DataSheet2!E7"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G8",
+      "cached": {
+        "type": "text",
+        "value": "#DIV/0!"
+      },
+      "dialect": "excel",
+      "expression": "=D8/E8",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D8}}{\\mathrm{E8}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D8",
+        "DataSheet2!E8"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G9",
+      "cached": {
+        "type": "number",
+        "value": 1.2403870007442324
+      },
+      "dialect": "excel",
+      "expression": "=D9/E9",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D9}}{\\mathrm{E9}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D9",
+        "DataSheet2!E9"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G10",
+      "cached": {
+        "type": "number",
+        "value": 14.394012090970156
+      },
+      "dialect": "excel",
+      "expression": "=D10/E10",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D10}}{\\mathrm{E10}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D10",
+        "DataSheet2!E10"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "DataSheet2!G11",
+      "cached": {
+        "type": "number",
+        "value": 4.151031116129246
+      },
+      "dialect": "excel",
+      "expression": "=D11/E11",
+      "kind": "shared",
+      "latex": "\\frac{\\mathrm{D11}}{\\mathrm{E11}}",
+      "pattern": "p2",
+      "range": "DataSheet2!G2:G11",
+      "references": [
+        "DataSheet2!D11",
+        "DataSheet2!E11"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "DataSheet!D2",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E2",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.78
+      }
+    },
+    {
+      "anchor": "DataSheet!D3",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E3",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.012
+      }
+    },
+    {
+      "anchor": "DataSheet!D4",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E4",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.121
+      }
+    },
+    {
+      "anchor": "DataSheet!D5",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E5",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.052
+      }
+    },
+    {
+      "anchor": "DataSheet!D6",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E6",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.102
+      }
+    },
+    {
+      "anchor": "DataSheet!D7",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E7",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.02
+      }
+    },
+    {
+      "anchor": "DataSheet!D8",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E8",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "DataSheet!D9",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E9",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 4.031
+      }
+    },
+    {
+      "anchor": "DataSheet!D10",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E10",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0421
+      }
+    },
+    {
+      "anchor": "DataSheet!D11",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet!E11",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.20452
+      }
+    },
+    {
+      "anchor": "DataSheet2!D2",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E2",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.78
+      }
+    },
+    {
+      "anchor": "DataSheet2!D3",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E3",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.012
+      }
+    },
+    {
+      "anchor": "DataSheet2!D4",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E4",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.121
+      }
+    },
+    {
+      "anchor": "DataSheet2!D5",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E5",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.052
+      }
+    },
+    {
+      "anchor": "DataSheet2!D6",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E6",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.102
+      }
+    },
+    {
+      "anchor": "DataSheet2!D7",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E7",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.02
+      }
+    },
+    {
+      "anchor": "DataSheet2!D8",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E8",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!D9",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E9",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 4.031
+      }
+    },
+    {
+      "anchor": "DataSheet2!D10",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E10",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0421
+      }
+    },
+    {
+      "anchor": "DataSheet2!D11",
+      "label": "Value",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "DataSheet2!E11",
+      "label": "Size",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.20452
+      }
+    }
+  ],
+  "rules": []
+}

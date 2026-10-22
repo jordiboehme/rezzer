@@ -1,0 +1,15 @@
+{
+  "cells": [
+    [
+      "Feuil1!A1",
+      "Fichier test pour propriétés sur xlsx"
+    ],
+    [
+      "Feuil1!A2",
+      "Second line"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

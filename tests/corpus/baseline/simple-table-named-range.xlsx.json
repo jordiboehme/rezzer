@@ -1,0 +1,90 @@
+{
+  "cells": [
+    [
+      "Sheet1!B3",
+      "a"
+    ],
+    [
+      "Sheet1!B4",
+      "1"
+    ],
+    [
+      "Sheet1!B5",
+      "2"
+    ],
+    [
+      "Sheet1!B7",
+      "9"
+    ],
+    [
+      "Sheet1!C3",
+      "b"
+    ],
+    [
+      "Sheet1!C4",
+      "2"
+    ],
+    [
+      "Sheet1!C5",
+      "4"
+    ],
+    [
+      "Sheet1!D3",
+      "c"
+    ],
+    [
+      "Sheet1!D4",
+      "3"
+    ],
+    [
+      "Sheet1!D5",
+      "6"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet1!B7",
+      "cached": {
+        "type": "number",
+        "value": 9.0
+      },
+      "dialect": "excel",
+      "expression": "=total",
+      "kind": "cell",
+      "references": [
+        "name:total"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:total",
+      "dialect": "excel",
+      "expression": "SUM(Table1[c])",
+      "kind": "name",
+      "references": [
+        "table:Table1"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet1!D4",
+      "label": "c",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet1!D5",
+      "label": "c",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 6.0
+      }
+    }
+  ],
+  "rules": []
+}

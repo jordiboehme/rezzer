@@ -1,0 +1,380 @@
+{
+  "cells": [
+    [
+      "ExcelTable!A1",
+      "Name"
+    ],
+    [
+      "ExcelTable!A2",
+      "Anton"
+    ],
+    [
+      "ExcelTable!A3",
+      "Bertha"
+    ],
+    [
+      "ExcelTable!A4",
+      "Cäsar"
+    ],
+    [
+      "ExcelTable!B1",
+      "Age"
+    ],
+    [
+      "ExcelTable!B2",
+      "44"
+    ],
+    [
+      "ExcelTable!B3",
+      "33"
+    ],
+    [
+      "ExcelTable!B4",
+      "21"
+    ],
+    [
+      "ExcelTable!C1",
+      "AgeGroup"
+    ],
+    [
+      "ExcelTable!C2",
+      "4"
+    ],
+    [
+      "ExcelTable!C3",
+      "3"
+    ],
+    [
+      "ExcelTable!C4",
+      "2"
+    ],
+    [
+      "ExcelTable!G1",
+      "Name"
+    ],
+    [
+      "ExcelTable!G2",
+      "Anton"
+    ],
+    [
+      "ExcelTable!G3",
+      "Bertha"
+    ],
+    [
+      "ExcelTable!G4",
+      "Cäsar"
+    ],
+    [
+      "ExcelTable!H1",
+      "Age"
+    ],
+    [
+      "ExcelTable!H2",
+      "44"
+    ],
+    [
+      "ExcelTable!H3",
+      "33"
+    ],
+    [
+      "ExcelTable!H4",
+      "21"
+    ],
+    [
+      "ExcelTable!I1",
+      "AgeGroup"
+    ],
+    [
+      "ExcelTable!I2",
+      "4"
+    ],
+    [
+      "ExcelTable!I3",
+      "3"
+    ],
+    [
+      "ExcelTable!I4",
+      "2"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "ExcelTable!C2",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(B2/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{B2}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!B2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "ExcelTable!I2",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(H2/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{H2}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!H2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "ExcelTable!C3",
+      "cached": {
+        "type": "number",
+        "value": 3.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(B3/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{B3}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!B3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "ExcelTable!I3",
+      "cached": {
+        "type": "number",
+        "value": 3.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(H3/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{H3}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!H3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "ExcelTable!C4",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(B4/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{B4}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!B4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "ExcelTable!I4",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "excel",
+      "expression": "=INT(H4/10)",
+      "kind": "cell",
+      "latex": "\\operatorname{INT}(\\frac{\\mathrm{H4}}{10})",
+      "pattern": "p1",
+      "range": "ExcelTable!C2:I4",
+      "references": [
+        "ExcelTable!H4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:NonTable",
+      "dialect": "excel",
+      "expression": "ExcelTable!$A$1:$C$4",
+      "kind": "name",
+      "references": [
+        "ExcelTable!A1:C4"
+      ]
+    },
+    {
+      "anchor": "name:TableAsRangeName",
+      "dialect": "excel",
+      "expression": "TableName[#All]",
+      "kind": "name",
+      "references": [
+        "table:TableName"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "ExcelTable!A1",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Name"
+      }
+    },
+    {
+      "anchor": "ExcelTable!B1",
+      "label": "Name",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Age"
+      }
+    },
+    {
+      "anchor": "ExcelTable!C1",
+      "label": "Age",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "AgeGroup"
+      }
+    },
+    {
+      "anchor": "ExcelTable!G1",
+      "label": "AgeGroup",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Name"
+      }
+    },
+    {
+      "anchor": "ExcelTable!H1",
+      "label": "Name",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Age"
+      }
+    },
+    {
+      "anchor": "ExcelTable!I1",
+      "label": "Age",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "AgeGroup"
+      }
+    },
+    {
+      "anchor": "ExcelTable!A2",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Anton"
+      }
+    },
+    {
+      "anchor": "ExcelTable!B2",
+      "label": "Anton",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 44.0
+      }
+    },
+    {
+      "anchor": "ExcelTable!G2",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Anton"
+      }
+    },
+    {
+      "anchor": "ExcelTable!H2",
+      "label": "Anton",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 44.0
+      }
+    },
+    {
+      "anchor": "ExcelTable!A3",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Bertha"
+      }
+    },
+    {
+      "anchor": "ExcelTable!B3",
+      "label": "Bertha",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 33.0
+      }
+    },
+    {
+      "anchor": "ExcelTable!G3",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Bertha"
+      }
+    },
+    {
+      "anchor": "ExcelTable!H3",
+      "label": "Bertha",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 33.0
+      }
+    },
+    {
+      "anchor": "ExcelTable!A4",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Cäsar"
+      }
+    },
+    {
+      "anchor": "ExcelTable!B4",
+      "label": "Cäsar",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 21.0
+      }
+    },
+    {
+      "anchor": "ExcelTable!G4",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Cäsar"
+      }
+    },
+    {
+      "anchor": "ExcelTable!H4",
+      "label": "Cäsar",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 21.0
+      }
+    }
+  ],
+  "rules": []
+}
