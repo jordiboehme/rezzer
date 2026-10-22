@@ -6,6 +6,7 @@ members = [
     "crates/rezzer-detect",
     "crates/rezzer-enrich",
     "crates/rezzer-render",
+    "crates/rezzer-layout",
     "crates/rezzer-pipeline",
     "crates/rezzer-cli",
     "crates/rezzer-mcp",

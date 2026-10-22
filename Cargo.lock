@@ -1772,6 +1772,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rezzer-layout"
+version = "0.1.0"
+dependencies = [
+ "rezzer-limits",
+ "rezzer-model",
+ "sheetlayout",
+]
+
+[[package]]
 name = "rezzer-limits"
 version = "0.1.0"
 dependencies = [
