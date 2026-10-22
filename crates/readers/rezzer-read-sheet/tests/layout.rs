@@ -1373,3 +1373,52 @@ fn tall_merged_title_costs_no_cells_xlsx() {
         assert_tall_title(&out.document, "S", top, near);
     }
 }
+
+#[test]
+fn overlapping_tables_keep_every_value() {
+    // A damaged file: two Excel tables of one sheet overlap. The value at D6, inside the
+    // outer table and right of the inner one, is written once with its anchor.
+    let s = ws(
+        "",
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Title</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>Region</t></is></c></row><row r=\"6\"><c r=\"D6\"><v>51</v></c></row>",
+        "",
+    );
+    let columns = ["A", "B", "C", "D", "E", "F", "G"];
+    let out = read(
+        &Book::default()
+            .sheet("S", &s)
+            .related(
+                "table",
+                "xl/tables/table1.xml",
+                &table_part("Outer", "A1:G7", " headerRowCount=\"0\"", &columns),
+            )
+            .related(
+                "table",
+                "xl/tables/table2.xml",
+                &table_part(
+                    "Inner",
+                    "B2:C11",
+                    " headerRowCount=\"2\" totalsRowCount=\"1\"",
+                    &["X", "Y"],
+                ),
+            ),
+    );
+    let at_d6 = |anchor: &Option<rezzer_model::Anchor>, inlines: &[rezzer_model::Inline]| {
+        anchor.as_ref().is_some_and(|a| a.0 == "S!D6") && plain_text(inlines) == "51"
+    };
+    let written: usize = all_blocks(&out.document)
+        .into_iter()
+        .map(|b| match b {
+            Block::Paragraph {
+                inlines, anchor, ..
+            } => usize::from(at_d6(anchor, inlines)),
+            Block::Table { rows, .. } => rows
+                .iter()
+                .flatten()
+                .filter(|c| at_d6(&c.anchor, &c.inlines))
+                .count(),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(written, 1);
+}

@@ -18,5 +18,16 @@
   {
     "pointer": "/body/1/title",
     "equals": "Structural_Lining"
+  },
+  {
+    "contains": "### PROJECT DESCRIPTION\n\nLabel and value pairs A5:B9:"
+  },
+  {
+    "pointer": "/body/0/blocks/7/layout/kind",
+    "equals": "text"
+  },
+  {
+    "pointer": "/body/0/blocks/7/layout/data",
+    "equals": "A19:A25"
   }
 ]

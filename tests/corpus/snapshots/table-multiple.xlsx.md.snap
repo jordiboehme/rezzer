@@ -1,0 +1,108 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "table-multiple.xlsx"
+resource: "<corpus>/office/table-multiple.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "8d39e98b17bcd2937171dacbae296c2f3cd975bbf41809738c05c7ffdccc977f"
+source_size: 11520
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["John"]
+created: "2025-07-07T22:15:34Z"
+modified: "2025-07-08T23:00:40Z"
+---
+
+# table-multiple.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Sheet1 | sheet | 4 rows x 3 columns |  |  |
+| Sheet2 | sheet | 4 rows x 2 columns |  |  |
+| Sheet3 | sheet | 4 rows x 2 columns, 2 regions |  |  |
+
+- Sheets: 3
+- Last changed: 2025-07-08T23:00:40Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | John |
+
+## Sheet1
+
+Table A1:C5 (data A2:C5), header row 1, found by: Excel table Inventory.
+
+| Item | Type | Quantity |
+| --- | --- | --- |
+| 1 | Apple | 50 |
+| 2 | Banana | 200 |
+| 3 | Orange | 60 |
+| 4 | Pear | 100 |
+
+**Excel tables**
+
+| Table | Range | Columns |
+| --- | --- | --- |
+| Inventory | A1:C5 | Item, Type, Quantity |
+
+## Sheet2
+
+Table A1:B5 (data A2:B5), header row 1, found by: Excel table Pricing.
+
+| Item | Price |
+| --- | --- |
+| 1 | 0.85 |
+| 2 | 0.75 |
+| 3 | 0.55 |
+| 4 | 0.45 |
+
+**Excel tables**
+
+| Table | Range | Columns |
+| --- | --- | --- |
+| Pricing | A1:B5 | Item, Price |
+
+## Sheet3
+
+### Table A1:B5
+
+Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales\_Alice.
+
+| Item | Units |
+| --- | --- |
+| 1 | 1000 |
+| 2 | 500 |
+| 3 | 200 |
+| 4 | 50 |
+
+### Table A7:B11
+
+Table A7:B11 (data A8:B11), header row 7, found by: Excel table Sales\_Bob.
+
+| Item | Units |
+| --- | --- |
+| 1 | 750 |
+| 2 | 800 |
+| 3 | 100 |
+| 4 | 70 |
+
+**Excel tables**
+
+| Table | Range | Columns |
+| --- | --- | --- |
+| Sales\_Bob | A7:B11 | Item, Units |
+| Sales\_Alice | A1:B5 | Item, Units |

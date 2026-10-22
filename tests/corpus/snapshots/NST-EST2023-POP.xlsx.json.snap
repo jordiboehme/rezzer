@@ -1,0 +1,1172 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "'NST-EST2023-POP'",
+      "blocks": [
+        {
+          "anchor": "'NST-EST2023-POP'!A2",
+          "inlines": [
+            {
+              "text": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A1",
+          "inlines": [
+            {
+              "text": "table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts)",
+              "type": "text"
+            }
+          ],
+          "role": "caption",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A1:F68",
+          "caption": "table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts) Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "header_rows": 2,
+          "layout": {
+            "certainty": "exact",
+            "data": "A5:F62",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "kind": "defined_name",
+                "name": "_NST01"
+              },
+              {
+                "detail": "caption rows 1 to 2",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "kind": "print_titles"
+              },
+              {
+                "detail": "header rows 3 to 4 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "bold header rows 3 to 4",
+                "id": "H2",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Geographic Area",
+              "April 1, 2020 Estimates Base",
+              "Population Estimate (as of July 1) / 2020",
+              "Population Estimate (as of July 1) / 2021",
+              "Population Estimate (as of July 1) / 2022",
+              "Population Estimate (as of July 1) / 2023"
+            ],
+            "header_rows": [
+              3,
+              4
+            ],
+            "key": "'NST-EST2023-POP'!A1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A1:F68"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Geographic Area",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 2
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "April 1, 2020 Estimates Base",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 2
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C3",
+                "col_span": 4,
+                "inlines": [
+                  {
+                    "text": "Population Estimate (as of July 1)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2020",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2021",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2022",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2023",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "United States",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "331,464,948",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "331,526,933",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "332,048,977",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "333,271,411",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "334,914,895",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Northeast",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57,614,141",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57,430,477",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57,243,423",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "57,026,847",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "56,983,517",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Midwest",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68,987,296",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68,969,794",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68,850,246",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68,783,028",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "68,909,283",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "South",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "126,268,529",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "126,465,281",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "127,353,282",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "128,702,030",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "130,125,290",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "West",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,594,982",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,661,381",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,602,026",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,759,506",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,896,805",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": ".Alabama",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5,024,294",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5,031,864",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5,050,380",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5,073,903",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5,108,468",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": ".Alaska",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "733,374",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "732,964",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "734,923",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "733,276",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "733,406",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": ".Arizona",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,157,902",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,186,683",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,272,487",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,365,684",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,431,344",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": ".Arkansas",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,011,490",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,014,348",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,028,443",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,046,404",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,067,732",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'NST-EST2023-POP'!A14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": ".California",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!B14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "39,538,212",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!C14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "39,503,200",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!D14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "39,145,060",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!E14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "39,040,616",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'NST-EST2023-POP'!F14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "38,965,193",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            "<48 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A63",
+          "inlines": [
+            {
+              "text": "Vintage 2023 data products are associated with Data Management System projects P-6000042, P-7501659, and P-7527355. The U.S. Census Bureau reviewed these data products for unauthorized disclosure of confidential information and approved the disclosure avoidance practices applied to this release (CBDRB-FY24-0085).  ",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A64",
+          "inlines": [
+            {
+              "text": "Note: The estimates are developed from a base that integrates the 2020 Census, Vintage 2020 estimates, and (for the U.S. only) 2020 Demographic Analysis estimates.  For population estimates methodology statements, see https://www.census.gov/programs-surveys/popest/technical-documentation/methodology.html. See Geographic Terms and Definitions at https://www.census.gov/programs-surveys/popest/guidance-geographies/terms-and-definitions.html for a list of the states that are included in each region. All geographic boundaries for the 2023 population estimates series are as of January 1, 2023.",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A65",
+          "inlines": [
+            {
+              "text": "Suggested Citation:",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A66",
+          "inlines": [
+            {
+              "text": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (NST-EST2023-POP)",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A67",
+          "inlines": [
+            {
+              "text": "Source: U.S. Census Bureau, Population Division",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "'NST-EST2023-POP'!A68",
+          "inlines": [
+            {
+              "text": "Release Date: December 2023",
+              "type": "text"
+            }
+          ],
+          "role": "note",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "sheet",
+      "title": "NST-EST2023-POP",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "name:_NST01",
+        "dialect": "excel",
+        "expression": "'NST-EST2023-POP'!$A$4:$F$62",
+        "kind": "name",
+        "references": [
+          "'NST-EST2023-POP'!A4:F62"
+        ]
+      },
+      {
+        "anchor": "name:'NST-EST2023-POP'!_xlnm.Print_Area",
+        "dialect": "excel",
+        "expression": "'NST-EST2023-POP'!$A$2:$F$68",
+        "kind": "name",
+        "references": [
+          "'NST-EST2023-POP'!A2:F68"
+        ]
+      },
+      {
+        "anchor": "name:'NST-EST2023-POP'!_xlnm.Print_Titles",
+        "dialect": "excel",
+        "expression": "'NST-EST2023-POP'!$A:$A,'NST-EST2023-POP'!$2:$4",
+        "kind": "name",
+        "references": [
+          "'NST-EST2023-POP'!A:A",
+          "'NST-EST2023-POP'!2:4"
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "'NST-EST2023-POP'!A1",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts)"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!A2",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!A3",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Geographic Area"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!B3",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / Geographic Area",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "Geographic Area"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "April 1, 2020 Estimates Base"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!C3",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / April 1, 2020 Estimates Base",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "April 1, 2020 Estimates Base"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Population Estimate (as of July 1)"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!C4",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / Population Estimate (as of July 1)",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "Population Estimate (as of July 1)"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 2020.0
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!D4",
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 2021.0
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!E4",
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 2022.0
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!F4",
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 2023.0
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!A5",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / Geographic Area",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "Geographic Area"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "United States"
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!B5",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / April 1, 2020 Estimates Base / United States",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "April 1, 2020 Estimates Base",
+          "United States"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 331464948.0
+        }
+      },
+      {
+        "anchor": "'NST-EST2023-POP'!C5",
+        "label": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 / Population Estimate (as of July 1) / 2020 / United States",
+        "path": [
+          "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023",
+          "Population Estimate (as of July 1)",
+          "2020",
+          "United States"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "number",
+          "value": 331526933.0
+        }
+      },
+      "<345 more items>"
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Parameters",
+        "357"
+      ],
+      [
+        "Names",
+        "3"
+      ],
+      [
+        "Last changed",
+        "2023-12-12T20:02:38Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "'NST-EST2023-POP'",
+        "kind": "sheet",
+        "name": "NST-EST2023-POP",
+        "size": "58 rows x 6 columns"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "sas user"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2023-12-05T02:34:45Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "company": {
+        "type": "text",
+        "value": "SAS Institute Inc"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "Joyce N Augustin (CENSUS/POP FED)"
+      }
+    },
+    "language": "en",
+    "modified": {
+      "type": "date_time",
+      "value": "2023-12-12T20:02:38Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "NST-EST2023-POP.xlsx",
+    "path": "<corpus>/office/NST-EST2023-POP.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "aec49456a006a06bdaba1ec90f032e0412617da40cdda26709074fbc6bb528e6",
+    "size": 14964
+  }
+}

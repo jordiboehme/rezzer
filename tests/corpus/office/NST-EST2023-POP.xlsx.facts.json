@@ -5,5 +5,30 @@
   },
   {
     "contains": "Alabama"
+  },
+  {
+    "contains": "Population Estimate (as of July 1) / 2021"
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/range",
+    "equals": "A1:F68"
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/data",
+    "equals": "A5:F62"
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/header_rows",
+    "equals": [
+      3,
+      4
+    ]
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/key",
+    "equals": "'NST-EST2023-POP'!A1"
+  },
+  {
+    "contains": "found by: defined name \\_NST01, print titles"
   }
 ]

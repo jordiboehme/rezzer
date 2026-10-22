@@ -68,9 +68,14 @@ const PIPELINE_FOLDERS: [&str; 3] = ["web-text", "office", "pdf"];
 
 /// The spreadsheets with golden files: one of each format and the main kinds of logic
 /// (engineering chains, folded add-in calls, data tables, LAMBDA and spills, threaded
-/// comments, OpenFormula across sheets, pivot tables).
-const GOLDEN_OFFICE: [&str; 8] = [
+/// comments, OpenFormula across sheets, pivot tables) and the sheet layouts (titles and a
+/// two-row header, group rows, a named range beside a table, two tables on one sheet).
+const GOLDEN_OFFICE: [&str; 12] = [
     "tunnel_design_calculations.xlsx",
+    "NST-EST2023-POP.xlsx",
+    "table_1_01.xlsx",
+    "ExcelTables.xlsx",
+    "table-multiple.xlsx",
     "ex012.PVT_z_factor.xlsm",
     "one-variable.xlsx",
     "LAMBDA.xlsx",

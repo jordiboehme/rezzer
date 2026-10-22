@@ -5,5 +5,24 @@
   },
   {
     "contains": "Anton"
+  },
+  {
+    "pointer": "/body/0/blocks/1/layout/range",
+    "equals": "A1:C4"
+  },
+  {
+    "pointer": "/body/0/blocks/1/layout/found_by/1/name",
+    "equals": "NonTable"
+  },
+  {
+    "pointer": "/body/0/blocks/3/layout/key",
+    "equals": "table:TableName"
+  },
+  {
+    "pointer": "/body/0/blocks/3/layout/certainty",
+    "equals": "exact"
+  },
+  {
+    "contains": "### NonTable"
   }
 ]

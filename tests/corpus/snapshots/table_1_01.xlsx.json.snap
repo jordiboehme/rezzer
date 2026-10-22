@@ -1,0 +1,1879 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "Table_1_01",
+      "blocks": [
+        {
+          "anchor": "Table_1_01!A1",
+          "inlines": [
+            {
+              "text": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Table_1_01!A2",
+          "inlines": [
+            {
+              "text": "(Thousand Megawatthours)",
+              "type": "text"
+            }
+          ],
+          "role": "caption",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "Table_1_01!A1:P57",
+          "caption": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 (Thousand Megawatthours)",
+          "header_rows": 2,
+          "layout": {
+            "certainty": "exact",
+            "data": "A5:P56",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "caption rows 1 to 2",
+                "id": "T",
+                "kind": "rule"
+              },
+              {
+                "kind": "frozen_panes"
+              },
+              {
+                "kind": "print_titles"
+              },
+              {
+                "detail": "header rows 3 to 4 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "bold header rows 3 to 4",
+                "id": "H2",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Period",
+              "Generation at Utility Scale Facilities / Coal",
+              "Generation at Utility Scale Facilities / Petroleum\nLiquids",
+              "Generation at Utility Scale Facilities / Petroleum\nCoke",
+              "Generation at Utility Scale Facilities / Natural\nGas",
+              "Generation at Utility Scale Facilities / Other\nFossil\nGas",
+              "Generation at Utility Scale Facilities / Nuclear",
+              "Generation at Utility Scale Facilities / Hydroelectric\nConventional",
+              "Generation at Utility Scale Facilities / Solar",
+              "Generation at Utility Scale Facilities / Renewable\nSources\nExcluding\nHydroelectric and Solar",
+              "Generation at Utility Scale Facilities / Hydroelectric\nPumped\nStorage",
+              "Generation at Utility Scale Facilities / Other",
+              "<4 more items>"
+            ],
+            "header_rows": [
+              3,
+              4
+            ],
+            "key": "Table_1_01!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:P57",
+            "rows": [
+              {
+                "kind": "group",
+                "row": 5,
+                "why": "one merged area across the table"
+              },
+              {
+                "kind": "group",
+                "row": 16,
+                "why": "one merged area across the table"
+              },
+              {
+                "kind": "group",
+                "row": 29,
+                "why": "one merged area across the table"
+              },
+              {
+                "kind": "group",
+                "row": 42,
+                "why": "one merged area across the table"
+              },
+              {
+                "kind": "group",
+                "row": 50,
+                "why": "one merged area across the table"
+              },
+              {
+                "kind": "group",
+                "row": 54,
+                "why": "one merged area across the table"
+              }
+            ]
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Table_1_01!A3",
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B3",
+                "col_span": 12,
+                "inlines": [
+                  {
+                    "text": "Generation at Utility Scale Facilities",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!N3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Small Scale Generation",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!O3",
+                "col_span": 2,
+                "inlines": [
+                  {
+                    "text": "Net Generation From Utility and Small Scale Facilities",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Period",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Coal",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Petroleum",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Liquids",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Petroleum",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Coke",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Natural",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Gas",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Other",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Fossil",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Gas",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Nuclear",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hydroelectric",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Conventional",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Solar",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Renewable",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Sources",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Excluding",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Hydroelectric and Solar",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Hydroelectric",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Pumped",
+                    "type": "text"
+                  },
+                  {
+                    "type": "line_break"
+                  },
+                  {
+                    "text": "Storage",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Other",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A5",
+                "col_span": 16,
+                "inlines": [
+                  {
+                    "text": "Annual Totals",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2016",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,239,149",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13,008",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,197",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,379,271",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,807",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "805,694",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "267,812",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "36,054",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "305,579",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-6,686",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13,689",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2017",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,205,835",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,414",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8,976",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,297,703",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,469",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "804,950",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "300,333",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "53,287",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "332,963",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-6,495",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13,008",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2018",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,149,487",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "16,245",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8,981",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,471,843",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13,463",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "807,084",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "292,524",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "63,825",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "350,467",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,905",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,973",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2019",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "964,957",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,522",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6,819",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,588,533",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,591",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "809,409",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "287,874",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "71,937",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "368,862",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,261",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "13,331",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2020",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "773,393",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9,662",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,679",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,626,790",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,818",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "789,879",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "285,274",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "89,199",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "408,539",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,321",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,855",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2021",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "897,999",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,663",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,511",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,579,190",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,397",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "779,645",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "251,585",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "115,258",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "448,424",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,112",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12,140",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2022",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "831,512",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "15,805",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7,126",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,687,065",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,722",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "771,537",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "254,789",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "143,792",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "502,234",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-6,028",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L12",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,114",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2023",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "675,115",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,397",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4,836",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,806,063",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,778",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "774,873",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "245,002",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "165,530",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "484,708",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,990",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L13",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "9,957",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            [
+              {
+                "anchor": "Table_1_01!A14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2024",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!B14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "652,156",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!C14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11,456",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!D14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3,629",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!E14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1,869,902",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!F14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10,845",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!G14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "781,865",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!H14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "242,896",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!I14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "219,834",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!J14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "513,733",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!K14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "-5,852",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Table_1_01!L14",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8,170",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              "<4 more items>"
+            ],
+            "<42 more items>"
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "Table_1_01!A57",
+          "inlines": [
+            {
+              "text": "Coal includes anthracite, bituminous, subbituminous, lignite, and waste coal; synthetic coal and refined coal; and beginning in 2011, coal-derived synthesis gas. Prior to 2011 coal-derived synthesis gas was included in Other Fossil Gas.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Petroleum Liquids includes distillate and residual fuel oils, jet fuel, kerosene, waste oil, and beginning in 2011, propane. Prior to 2011 propane was included in Other Fossil Gas.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Petroleum Coke includes petroleum coke-derived synthesis gas. Prior to 2011, petroleum coke-derived synthesis gas was included in Other Fossil Gas.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Other Fossil Gas includes gaseous propane, blast furnace gas, other manufactured and waste gases derived from fossil fuels other than hydrogen.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "See the Technical Notes for fuel conversion factors.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Renewable Sources include wood, black liquor, other wood waste, biogenic municipal solid waste, landfill gas, sludge waste, agriculture byproducts, other biomass, geothermal, solar thermal, photovoltaic energy, and wind.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            "<17 more items>"
+          ],
+          "role": "note",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Table_1_01",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "name:Table_1_01!_xlnm.Print_Titles",
+        "dialect": "excel",
+        "expression": "Table_1_01!$1:$4",
+        "kind": "name",
+        "references": [
+          "Table_1_01!1:4"
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "Table_1_01!A1",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026"
+        }
+      },
+      {
+        "anchor": "Table_1_01!A2",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "(Thousand Megawatthours)"
+        }
+      },
+      {
+        "anchor": "Table_1_01!A3",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      {
+        "anchor": "Table_1_01!B3",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Generation at Utility Scale Facilities"
+        }
+      },
+      {
+        "anchor": "Table_1_01!N3",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Small Scale Generation"
+        }
+      },
+      {
+        "anchor": "Table_1_01!O3",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Small Scale Generation",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Small Scale Generation"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Net Generation From Utility and Small Scale Facilities"
+        }
+      },
+      {
+        "anchor": "Table_1_01!A4",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Period"
+        }
+      },
+      {
+        "anchor": "Table_1_01!B4",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Period",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Period"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Coal"
+        }
+      },
+      {
+        "anchor": "Table_1_01!C4",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Coal",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Coal"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Petroleum\nLiquids"
+        }
+      },
+      {
+        "anchor": "Table_1_01!D4",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Petroleum\nLiquids",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Petroleum\nLiquids"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Petroleum\nCoke"
+        }
+      },
+      {
+        "anchor": "Table_1_01!E4",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Petroleum\nCoke",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Petroleum\nCoke"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Natural\nGas"
+        }
+      },
+      {
+        "anchor": "Table_1_01!F4",
+        "label": "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 / Natural\nGas",
+        "path": [
+          "Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026",
+          "Natural\nGas"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Other\nFossil\nGas"
+        }
+      },
+      "<10 more items>"
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Parameters",
+        "22"
+      ],
+      [
+        "Names",
+        "1"
+      ],
+      [
+        "Last changed",
+        "2026-09-21T19:29:46Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "Table_1_01",
+        "kind": "sheet",
+        "name": "Table_1_01",
+        "size": "52 rows x 16 columns"
+      }
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2026-09-21T19:29:46Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "Betancourt, Maria"
+      }
+    },
+    "language": "en",
+    "modified": {
+      "type": "date_time",
+      "value": "2026-09-21T19:29:46Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "table_1_01.xlsx",
+    "path": "<corpus>/office/table_1_01.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "1ad53bb04a8ac5144b55efa97dec3678035826ce9f04a3833fe061bf322b840d",
+    "size": 20505
+  }
+}

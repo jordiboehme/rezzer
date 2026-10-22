@@ -20,5 +20,25 @@
   },
   {
     "contains": "| Sales\\_Bob | A7:B11 | Item, Units |"
+  },
+  {
+    "pointer": "/body/2/blocks/1/layout/key",
+    "equals": "table:Sales_Alice"
+  },
+  {
+    "pointer": "/body/2/blocks/1/layout/range",
+    "equals": "A1:B5"
+  },
+  {
+    "pointer": "/body/2/blocks/3/layout/key",
+    "equals": "table:Sales_Bob"
+  },
+  {
+    "pointer": "/body/2/blocks/3/layout/range",
+    "equals": "A7:B11"
+  },
+  {
+    "pointer": "/body/2/blocks/3/layout/certainty",
+    "equals": "exact"
   }
 ]

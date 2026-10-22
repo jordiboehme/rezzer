@@ -903,6 +903,202 @@ fn ods_content_cut_at_a_limit_names_that_limit() {
     );
 }
 
+// Hostile sheet layouts: many merges, many tiny regions, one merge over the whole sheet. The
+// layout works on the sparse cells and on merge intervals, never on a grid of the used area.
+// Work is bounded by the CPU time of the calling thread (every sheet reader runs on it), so a
+// busy machine does not fail the test; memory by the heap peak of that thread, with the RSS
+// of the process as a loose guard.
+
+/// The CPU time the calling thread has used.
+#[cfg(unix)]
+fn thread_cpu() -> Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+fn thread_cpu() -> Duration {
+    Duration::ZERO
+}
+
+/// The work bound of the layout tests: the whole read, layout included, in thread CPU time.
+const LAYOUT_BOUND: Duration = Duration::from_secs(2);
+
+/// Runs `input` (the bytes, or the path of a file) as `name` and returns the result, its peak
+/// heap and the thread CPU time it used.
+fn layout_run(
+    name: &str,
+    input: Result<Vec<u8>, std::path::PathBuf>,
+) -> (RunResult, usize, Duration) {
+    let p = sheet_pipeline();
+    let start = thread_cpu();
+    let (result, peak) = peak_heap(|| match input {
+        Ok(bytes) => p.run_bytes(name, bytes, None, &markdown_request()),
+        Err(path) => p.run_path(&path, &markdown_request()),
+    });
+    (result, peak, thread_cpu() - start)
+}
+
+/// The layouts of every table block in the document, in body order.
+fn layouts(result: &RunResult) -> Vec<&rezzer_model::TableLayout> {
+    result
+        .document
+        .as_ref()
+        .map(|d| d.body.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .flat_map(|b| match b {
+            rezzer_model::Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => &[],
+        })
+        .filter_map(|b| match b {
+            rezzer_model::Block::Table {
+                layout: Some(l), ..
+            } => Some(l.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Column letters of a 0-based column: 0 is A, 26 is AA.
+fn column_letters(mut col: u32) -> String {
+    let mut out = Vec::new();
+    loop {
+        out.push(b'A' + (col % 26) as u8);
+        if col < 26 {
+            break;
+        }
+        col = col / 26 - 1;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap()
+}
+
+#[test]
+fn many_merges_without_values_is_bounded() {
+    // POI's bug 57893: 50,000 two-cell merges over empty styled cells and no value at all.
+    // The merges are occupied areas for the layout; they cost by their count, not their area.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/office/malformed/57893-many-merges.xlsx");
+    let (result, peak, used) = layout_run("57893-many-merges.xlsx", Err(path));
+    eprintln!(
+        "many_merges: peak heap {} MB, {used:?} CPU: {:?}",
+        peak / MB,
+        losses(&result)
+    );
+    assert!(
+        matches!(
+            result.completeness,
+            Completeness::Complete | Completeness::Partial
+        ),
+        "{:?}",
+        losses(&result)
+    );
+    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert!(peak < 512 * MB, "peak heap {peak} bytes");
+    assert!(result.markdown_pages.join("").contains("## Sheet1"));
+    #[cfg(unix)]
+    assert_rss_bounded("many_merges_without_values_is_bounded");
+}
+
+#[test]
+fn checkerboard_sheet_hits_region_limit() {
+    // 40,000 single cells, one wherever row plus column is even: no row or column is empty,
+    // every cell touches the next only at a corner, so each would be a region of its own.
+    // Past 10,000 regions the rest of the sheet stays one grid with a Limit loss.
+    let (rows, cols) = (400u32, 200u32);
+    let mut xml = String::new();
+    for r in 0..rows {
+        xml.push_str(&format!("<row r=\"{}\">", r + 1));
+        for c in (r % 2..cols).step_by(2) {
+            xml.push_str(&format!(
+                "<c r=\"{}{}\"><v>{}</v></c>",
+                column_letters(c),
+                r + 1,
+                (r * cols + c) % 97
+            ));
+        }
+        xml.push_str("</row>");
+    }
+    let book = xlsx(&[("Board", worksheet("", &xml, ""))]);
+    let (result, peak, used) = layout_run("board.xlsx", Ok(book));
+    let regions = layouts(&result);
+    eprintln!(
+        "checkerboard: {} regions, peak heap {} MB, {used:?} CPU: {:?}",
+        regions.len(),
+        peak / MB,
+        losses(&result)
+    );
+    assert_ne!(
+        result.completeness,
+        Completeness::Failed,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert!(peak < 512 * MB, "peak heap {peak} bytes");
+    assert!(regions.len() <= 10_000, "{} regions", regions.len());
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit") && l.contains("region limit")),
+        "{:?}",
+        losses(&result)
+    );
+    let grids: Vec<_> = regions
+        .iter()
+        .filter(|l| l.kind == rezzer_model::LayoutKind::Grid)
+        .collect();
+    assert_eq!(grids.len(), 1, "{:?}", losses(&result));
+    // The rest grid holds the cells past the limit: it ends at the last row of the board.
+    assert!(
+        grids[0].range.ends_with(&rows.to_string()),
+        "{}",
+        grids[0].range
+    );
+}
+
+#[test]
+fn one_huge_merge_is_bounded() {
+    // One merge over the whole sheet, A1:XFD1048576, with a value at its anchor and one
+    // under it. The merge is one interval per axis; no cell of its 17 billion is made.
+    let sheet = worksheet(
+        "<dimension ref=\"A1:XFD1048576\"/>",
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Anchor</t></is></c></row><row r=\"3\"><c r=\"C3\"><v>42</v></c></row>",
+        "<mergeCells count=\"1\"><mergeCell ref=\"A1:XFD1048576\"/></mergeCells>",
+    );
+    let (result, peak, used) = layout_run("merge.xlsx", Ok(xlsx(&[("M", sheet)])));
+    eprintln!(
+        "one_huge_merge: peak heap {} MB, {used:?} CPU: {:?}",
+        peak / MB,
+        losses(&result)
+    );
+    assert_ne!(
+        result.completeness,
+        Completeness::Failed,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert!(peak < 64 * MB, "peak heap {peak} bytes");
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Anchor"), "{md}");
+    // The value under the merge is not shown, and the output says so.
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.contains("M!C3") && l.contains("under the merged area A1:XFD1048576")),
+        "{:?}",
+        losses(&result)
+    );
+}
+
 // Hostile PDFs. The files are written by hand (a classic cross-reference table, or a
 // cross-reference stream where an object stream needs one). The PDF reader works on more than
 // one thread, so memory is measured as the maximum resident set size of the process, not as
