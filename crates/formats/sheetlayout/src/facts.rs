@@ -378,7 +378,9 @@ pub(crate) fn join_names(
         for &i in &hits[1..] {
             let merges = std::mem::take(&mut works[i].merges);
             works[i].dead = true;
+            let coarse = works[i].coarse;
             works[first].merges.extend(merges);
+            works[first].coarse |= coarse;
         }
         let w = &mut works[first];
         w.region.rect = joined;
@@ -393,5 +395,51 @@ pub(crate) fn join_names(
             kind: IssueKind::Limit,
             rect: None,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::Fact;
+
+    #[test]
+    fn resolve_asks_the_stop() {
+        let facts: Vec<Fact> = (0..2_000u32)
+            .map(|k| Fact {
+                rect: Rect {
+                    top: 0,
+                    left: 0,
+                    bottom: 1 + k,
+                    right: 1,
+                },
+                kind: FactKind::DatabaseRange {
+                    name: format!("r{k}"),
+                    header: true,
+                    footer: false,
+                },
+            })
+            .collect();
+        let input = Input {
+            cells: Vec::new(),
+            merges: Vec::new(),
+            facts,
+            names: Vec::new(),
+            outline: Vec::new(),
+            frozen: None,
+            print_titles: None,
+            header_guess: None,
+            styles_read: false,
+            is_label: &|_| true,
+            is_unit_column: &|_| false,
+        };
+        let mut issues = Vec::new();
+        let (kept, stopped) = resolve(&input, 10_000, &mut issues, &|| true);
+        assert!(stopped);
+        assert_eq!(kept.len(), STOP_EVERY - 1);
+        let mut issues = Vec::new();
+        let (kept, stopped) = resolve(&input, 10_000, &mut issues, &|| false);
+        assert!(!stopped);
+        assert_eq!(kept.len(), 2_000);
     }
 }

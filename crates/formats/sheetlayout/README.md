@@ -22,7 +22,8 @@ merged area covers it. A styled cell without a value is not occupied. The sheet 
 every run of empty rows, then each band at every run of empty columns, again and again until
 no piece can be cut. Two blocks that touch only at a corner are two regions. The corner
 split follows the cells and merges, not the area they span. A shape with very many long
-merges crossed by many wide merges needs too much work and stays one region.
+merges crossed by many wide merges needs too much work and stays one region, and an issue
+says so.
 
 Cells inside an Excel table, database range, pivot table or autofilter range belong to that
 range. The cells around it are cut apart from it, so no other region holds its cells.

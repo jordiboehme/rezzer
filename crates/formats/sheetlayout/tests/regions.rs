@@ -995,6 +995,130 @@ fn random_sheets_keep_every_cell_once() {
     }
 }
 
+/// `k` long one-column merges crossed by `k` merges over the whole width, and a 2 by 2 block
+/// that touches the big block only at its lower right corner.
+fn crossed_merges(k: u32) -> Sheet {
+    let mut sheet = Sheet::new();
+    for c in 0..k {
+        sheet.merges.push(Rect {
+            top: 0,
+            left: c,
+            bottom: 2 * k,
+            right: c,
+        });
+    }
+    for r in 0..k {
+        sheet.merges.push(Rect {
+            top: 2 * r,
+            left: 0,
+            bottom: 2 * r,
+            right: k - 1,
+        });
+    }
+    sheet
+        .cell("A1", "x")
+        .rows(&rect_name(2 * k + 1, k), &["a|b", "c|d"])
+}
+
+fn rect_name(row: u32, col: u32) -> String {
+    Rect {
+        top: row,
+        left: col,
+        bottom: row,
+        right: col,
+    }
+    .a1()
+}
+
+#[test]
+fn corner_split_past_its_work_budget_says_so() {
+    let layout = crossed_merges(1_000).segment();
+    assert_eq!(layout.regions.len(), 1);
+    let coarse: Vec<_> = layout
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Coarse)
+        .collect();
+    assert_eq!(coarse.len(), 1);
+    assert_eq!(coarse[0].rect, Some(layout.regions[0].rect));
+    assert!(!layout.regions[0].rest);
+    // A small shape of the same kind is split and needs no issue.
+    let layout = crossed_merges(20).segment();
+    assert_eq!(ranges(&layout), ["A1:T41", "U42:V43"]);
+    assert!(layout.issues.is_empty());
+}
+
+#[test]
+fn cuts_around_facts_do_not_count_toward_the_depth_limit() {
+    // 70 facts of three rows in B:C, each with a full connecting row below it. Cutting the
+    // free cells around them takes 70 cuts in a row; the cells left of each fact then need
+    // one more cut (rows 1 and 3 of the fact, with row 2 empty in column A).
+    let mut sheet = Sheet::new();
+    for k in 0..70u32 {
+        let top = 4 * k;
+        sheet.put(Pos { row: top, col: 0 }, "l");
+        sheet.put(
+            Pos {
+                row: top + 2,
+                col: 0,
+            },
+            "l",
+        );
+        for row in top..top + 3 {
+            sheet.put(Pos { row, col: 1 }, "1");
+            sheet.put(Pos { row, col: 2 }, "2");
+            sheet.put(Pos { row, col: 3 }, "r");
+        }
+        for col in 0..4 {
+            sheet.put(Pos { row: top + 3, col }, "c");
+        }
+        sheet.facts.push(sheetlayout::Fact {
+            rect: Rect {
+                top,
+                left: 1,
+                bottom: top + 2,
+                right: 2,
+            },
+            kind: FactKind::AutoFilter,
+        });
+    }
+    let layout = sheet.segment();
+    assert_eq!(
+        layout
+            .regions
+            .iter()
+            .filter(|r| r.kind == Kind::Table)
+            .count(),
+        70
+    );
+    assert!(layout.regions.iter().all(|r| !r.rest));
+    assert!(layout.issues.is_empty(), "{:?}", layout.issues);
+}
+
+#[test]
+fn depth_rest_folded_into_the_region_rest_leaves_no_stale_issue() {
+    // Band 1: A1 and A3 (they need a third cut), C2 and E1. Band 2: row 5. With depth 2 and
+    // room for 3 regions, A1:A3 stays uncut, C2 is placed, and E1 trips the region limit;
+    // the rest A1:I5 then holds the uncut piece too.
+    let sheet = Sheet::new()
+        .cell("A1", "1")
+        .cell("A3", "2")
+        .cell("C2", "3")
+        .cell("E1", "4")
+        .rows("A5", &["5|6|7|8|9|1|2|3|4"]);
+    let input = sheet.input();
+    let limits = Limits {
+        max_cut_depth: 2,
+        max_regions: 3,
+        ..Limits::default()
+    };
+    let layout = segment(&input, &limits, &never);
+    every_cell_once(&input, &layout);
+    assert_eq!(ranges(&layout), ["A1:I5"]);
+    assert_eq!(layout.issues.len(), 1, "{:?}", layout.issues);
+    assert!(layout.issues[0].what.contains("region limit"));
+}
+
 /// The Census NST-EST2023-POP shape: title rows 1 and 2, a two-row header, data to row 60,
 /// an empty row 61 and Puerto Rico plus notes in rows 62 to 68.
 fn census(with_name: bool) -> Sheet {

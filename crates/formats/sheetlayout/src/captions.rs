@@ -155,7 +155,9 @@ pub(crate) fn attach_titles(works: &mut [Work]) {
             let heading = works[i].region.caption_heading;
             let merges = std::mem::take(&mut works[i].merges);
             works[i].dead = true;
+            let coarse = works[i].coarse;
             let w = &mut works[t];
+            w.coarse |= coarse;
             w.region.evidence.push(Evidence::Rule {
                 id: "T2",
                 detail: format!("title in {}", row_words(&caption)),

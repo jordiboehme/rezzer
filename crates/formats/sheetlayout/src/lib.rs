@@ -166,6 +166,10 @@ pub enum IssueKind {
     Overlap,
     /// The stop callback ended the work; the rest of the sheet is one grid region.
     Stopped,
+    /// Information: the region may hold more than one block, because the corner split needed
+    /// more work than its budget. The region is decided by the rules like any other. A caller
+    /// maps it to an informational note.
+    Coarse,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,6 +202,8 @@ pub(crate) struct Work {
     pub merges: Vec<u32>,
     pub origin: Origin,
     pub dead: bool,
+    /// The corner split was skipped for this region (it may hold several blocks).
+    pub coarse: bool,
 }
 
 fn rule_region(rect: Rect, detail: &str) -> Region {
@@ -259,6 +265,12 @@ fn rest_region(
         let mut grew = false;
         for w in works.iter_mut() {
             if !w.dead && w.region.rect.intersects(&rect) {
+                if w.region.rest {
+                    // A piece past the depth limit is folded in: its issue names a range that
+                    // no longer has a region of its own.
+                    let gone = Some(w.region.rect);
+                    issues.retain(|i| !(i.kind == IssueKind::Limit && i.rect == gone));
+                }
                 rect = rect.union(&w.region.rect);
                 merges.append(&mut w.merges);
                 w.dead = true;
@@ -297,6 +309,7 @@ fn rest_region(
         merges,
         origin: Origin::Rest,
         dead: false,
+        coarse: false,
     })
 }
 
@@ -322,6 +335,7 @@ pub(crate) fn segment_work<'a>(
             merges,
             origin: Origin::Fact,
             dead: false,
+            coarse: false,
         })
         .collect();
 
@@ -362,6 +376,7 @@ pub(crate) fn segment_work<'a>(
                 merges,
                 origin,
                 dead: false,
+                coarse: leaf.coarse,
             });
         }
         cut.rest
@@ -404,6 +419,16 @@ pub(crate) fn segment_work<'a>(
         }
     }
 
+    for w in works.iter().filter(|w| !w.dead && w.coarse) {
+        issues.push(Issue {
+            what: format!(
+                "the corner split needs too much work: {} stays one region and may hold more than one block",
+                w.region.rect.a1()
+            ),
+            kind: IssueKind::Coarse,
+            rect: Some(w.region.rect),
+        });
+    }
     works.retain(|w| !w.dead);
     works.sort_by_key(|w| (w.region.rect.top, w.region.rect.left));
     (prep, works, issues)
@@ -441,15 +466,22 @@ mod tests {
         }
     }
 
-    fn input(mut cells: Vec<CellIn>, merges: Vec<Rect>, fact: Rect) -> Input<'static> {
+    fn input(cells: Vec<CellIn>, merges: Vec<Rect>, fact: Rect) -> Input<'static> {
+        input_with(cells, merges, vec![fact])
+    }
+
+    fn input_with(mut cells: Vec<CellIn>, merges: Vec<Rect>, facts: Vec<Rect>) -> Input<'static> {
         cells.sort_by_key(|c| c.pos);
         Input {
             cells,
             merges,
-            facts: vec![Fact {
-                rect: fact,
-                kind: FactKind::AutoFilter,
-            }],
+            facts: facts
+                .into_iter()
+                .map(|rect| Fact {
+                    rect,
+                    kind: FactKind::AutoFilter,
+                })
+                .collect(),
             names: Vec::new(),
             outline: Vec::new(),
             frozen: None,
@@ -518,5 +550,54 @@ mod tests {
         let (_, works, _) = segment_work(&input, &Limits::default(), &|| false);
         let holder = works.iter().find(|w| w.merges == [0]).unwrap();
         assert!(holder.region.rect.contains(Pos { row: 0, col: 0 }));
+    }
+
+    #[test]
+    fn merge_reaching_two_facts_belongs_to_the_one_with_its_anchor() {
+        // The first fact (C3:E5) is reached; the second (A1:B2) holds the anchor A1.
+        let mut cells = Vec::new();
+        for row in 0..=1 {
+            for col in 0..=1 {
+                cells.push(text(row, col));
+            }
+        }
+        for row in 2..=4 {
+            for col in 2..=4 {
+                cells.push(text(row, col));
+            }
+        }
+        let input = input_with(
+            cells,
+            vec![rect(0, 0, 3, 2)],
+            vec![rect(2, 2, 4, 4), rect(0, 0, 1, 1)],
+        );
+        merges_once(&input);
+        let (_, works, _) = segment_work(&input, &Limits::default(), &|| false);
+        let holder = works.iter().find(|w| w.merges == [0]).unwrap();
+        assert_eq!(holder.region.rect, rect(0, 0, 1, 1));
+    }
+
+    #[test]
+    fn loose_merge_goes_to_the_part_with_its_anchor() {
+        // A fact B2:D5 ringed by row 1, column A, column E and row 6. The merge A3:A6 crosses
+        // the line below the fact; its anchor A3 is in the part left of the fact, while a part
+        // above it exists too.
+        let mut cells = Vec::new();
+        for col in 0..=4 {
+            cells.push(text(0, col));
+            cells.push(text(5, col));
+        }
+        for row in 1..=4 {
+            cells.push(text(row, 0));
+            cells.push(text(row, 4));
+            for col in 1..=3 {
+                cells.push(text(row, col));
+            }
+        }
+        let input = input(cells, vec![rect(2, 0, 5, 0)], rect(1, 1, 4, 3));
+        merges_once(&input);
+        let (_, works, _) = segment_work(&input, &Limits::default(), &|| false);
+        let holder = works.iter().find(|w| w.merges == [0]).unwrap();
+        assert_eq!(holder.region.rect, rect(1, 0, 4, 0));
     }
 }

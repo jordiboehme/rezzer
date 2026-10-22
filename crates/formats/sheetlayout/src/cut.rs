@@ -37,6 +37,8 @@ pub(crate) struct Leaf {
     pub beside: bool,
     /// The piece needed a cut deeper than the limit and stays uncut.
     pub deep: bool,
+    /// The corner split needed more work than its budget: the leaf may hold several blocks.
+    pub coarse: bool,
 }
 
 pub(crate) struct Cut {
@@ -201,6 +203,7 @@ pub(crate) fn cut(
             parts = Some(groups);
             how = How::Fact;
         }
+        let mut coarse = false;
         if parts.is_none() && p.next != Next::Leaf {
             match corners(prep, &p.ids, stop) {
                 Corners::Parts(v) => {
@@ -208,6 +211,7 @@ pub(crate) fn cut(
                     how = How::Corner;
                 }
                 Corners::One => {}
+                Corners::Skipped => coarse = true,
                 Corners::Stopped => {
                     return Cut {
                         leaves,
@@ -280,6 +284,7 @@ pub(crate) fn cut(
                     corner: p.corner,
                     beside: p.beside,
                     deep,
+                    coarse,
                 });
             }
         }
@@ -332,6 +337,9 @@ fn around(prep: &Prep, ids: &[u32], f: &Rect) -> (Vec<Vec<u32>>, Vec<Loose>) {
 /// What the corner split found.
 enum Corners {
     One,
+    /// The split needed more work than its budget, or the rejoin did not settle: the piece
+    /// stays one region, and an issue says so.
+    Skipped,
     Parts(Vec<Vec<u32>>),
     Stopped,
 }
@@ -520,7 +528,8 @@ fn connect(
 /// Splits a piece that no empty row or column cuts into its parts that touch only at
 /// corners: the orthogonally connected parts of its occupied positions. Parts whose bounds
 /// overlap are joined again, so regions never overlap. Gives `One` when the piece is one
-/// part, or when the shape needs more work than the visit budget allows.
+/// part, and `Skipped` when the shape needs more work than the visit budget allows or the
+/// rejoin does not settle.
 fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
     let k = ids.len();
     if k < 2 {
@@ -532,7 +541,7 @@ fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
     match connect(&item, k, true, &mut dsu, &mut visits, stop) {
         Ok(_) => {}
         Err(Halt::Stopped) => return Corners::Stopped,
-        Err(Halt::Budget) => return Corners::One,
+        Err(Halt::Budget) => return Corners::Skipped,
     }
     // Number the parts and take their bounds.
     let mut part_of = vec![u32::MAX; k];
@@ -572,7 +581,7 @@ fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
             }
             Ok(_) => {}
             Err(Halt::Stopped) => return Corners::Stopped,
-            Err(Halt::Budget) => return Corners::One,
+            Err(Halt::Budget) => return Corners::Skipped,
         }
         let mut renumber = vec![u32::MAX; boxes.len()];
         let mut next: Vec<Rect> = Vec::new();
@@ -591,7 +600,10 @@ fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
         }
         boxes = next;
     }
-    if !joined_all || boxes.len() < 2 {
+    if !joined_all {
+        return Corners::Skipped;
+    }
+    if boxes.len() < 2 {
         return Corners::One;
     }
     let mut parts: Vec<Vec<u32>> = vec![Vec::new(); boxes.len()];
@@ -607,4 +619,52 @@ fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
 /// The bounding rectangle of a leaf.
 pub(crate) fn leaf_rect(prep: &Prep, leaf: &Leaf) -> Rect {
     bounds(prep, &leaf.ids).expect("a leaf holds at least one item")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::{CellIn, Class, Input, Style};
+
+    #[test]
+    fn corners_ask_the_stop() {
+        let mut cells = Vec::new();
+        for row in 0..300u32 {
+            for col in (row % 2..300).step_by(2) {
+                cells.push(CellIn {
+                    pos: Pos { row, col },
+                    class: Class::Text,
+                    text: "x".to_string(),
+                    number: None,
+                    style: Style::default(),
+                    formula: None,
+                });
+            }
+        }
+        let input = Input {
+            cells,
+            merges: Vec::new(),
+            facts: Vec::new(),
+            names: Vec::new(),
+            outline: Vec::new(),
+            frozen: None,
+            print_titles: None,
+            header_guess: None,
+            styles_read: false,
+            is_label: &|_| true,
+            is_unit_column: &|_| false,
+        };
+        let prep = Prep::new(&input);
+        let ids: Vec<u32> = (0..prep.items() as u32).collect();
+        assert!(matches!(corners(&prep, &ids, &|| false), Corners::Parts(_)));
+        // The first question comes inside the sweep and says go on; the second ends it,
+        // before the rejoin round would ask.
+        let calls = std::cell::Cell::new(0);
+        let stop = || {
+            calls.set(calls.get() + 1);
+            calls.get() > 1
+        };
+        assert!(matches!(corners(&prep, &ids, &stop), Corners::Stopped));
+        assert_eq!(calls.get(), 2);
+    }
 }
