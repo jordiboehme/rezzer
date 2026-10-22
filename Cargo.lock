@@ -162,6 +162,7 @@ name = "barcodes"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "rezzer-limits",
  "rxing",
 ]
 
@@ -1413,6 +1414,7 @@ dependencies = [
  "libc",
  "lopdf",
  "quick-xml",
+ "rezzer-limits",
  "weezl",
 ]
 
