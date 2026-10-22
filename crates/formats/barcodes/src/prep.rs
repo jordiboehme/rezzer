@@ -151,7 +151,17 @@ impl Tile {
                 best = Some((score, plane));
             }
         }
-        best.map(|(_, plane)| plane)
+        // The more common class is the background: it is made light, so the code is dark on
+        // light as in the gray attempt.
+        best.map(|(_, plane)| {
+            let (t, _) = otsu(&plane);
+            let light = plane.iter().filter(|&&p| p > t).count();
+            if light * 2 < plane.len() {
+                plane.iter().map(|p| 255 - p).collect()
+            } else {
+                plane
+            }
+        })
     }
 }
 
@@ -219,22 +229,13 @@ pub(crate) fn doubled(v: &[u8], w: u32, h: u32) -> Vec<u8> {
     out
 }
 
-/// `v` of `w` by `h` pixels with `pad` pixels on each side in the color of its border, black
-/// or white: a code cut tight has no quiet zone, and an inverted code needs a dark one.
+/// `v` of `w` by `h` pixels with `pad` white pixels on each side: a code cut tight has no
+/// quiet zone. The attempt decides the polarity: an inverted code is dark on light in the
+/// inverted attempt, where white is its quiet zone.
 pub(crate) fn pad(v: &[u8], w: u32, h: u32, pad: u32) -> Vec<u8> {
     let (w, h, p) = (w as usize, h as usize, pad as usize);
-    let mut sum = 0u64;
-    let mut n = 0u64;
-    for (i, &x) in v.iter().enumerate() {
-        let (cx, cy) = (i % w.max(1), i / w.max(1));
-        if cx == 0 || cy == 0 || cx + 1 == w || cy + 1 == h {
-            sum += u64::from(x);
-            n += 1;
-        }
-    }
-    let fill = if n == 0 || sum / n >= 128 { 255 } else { 0 };
     let pw = w + 2 * p;
-    let mut out = vec![fill; pw * (h + 2 * p)];
+    let mut out = vec![255u8; pw * (h + 2 * p)];
     for (row, line) in v.chunks_exact(w.max(1)).take(h).enumerate() {
         let at = (row + p) * pw + p;
         out[at..at + w].copy_from_slice(line);
@@ -288,36 +289,61 @@ pub(crate) fn inside_2d(c: &Code, codes: &[Code]) -> bool {
 }
 
 /// Whether a linear code read along a line of `v` (`w` by `h` pixels) between the hit's
-/// points has bars: the row a little above or below the line shows the same pattern. Noise
-/// can read as a linear code along one row, but its rows differ.
+/// first and last point has bars: a line beside it, parallel and a little away, shows the
+/// same pattern, give or take two pixels of shift. Noise can read as a linear code along one
+/// line, but its neighbouring lines differ. The line may run in any direction, so a code
+/// turned a quarter or a little is checked along its own line.
 pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool {
-    if points.is_empty() {
+    let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
         return false;
-    }
-    let y = points.iter().map(|p| p.1).sum::<f32>() / points.len() as f32;
-    let x0 = points.iter().map(|p| p.0).fold(f32::MAX, f32::min).max(0.0) as u32;
-    let x1 = points
-        .iter()
-        .map(|p| p.0)
-        .fold(f32::MIN, f32::max)
-        .min(w as f32 - 1.0) as u32;
-    if x1 <= x0 + 8 || !(y >= 0.0 && (y as u32) < h) {
-        return false;
-    }
-    let y = y as u32;
-    let d = ((x1 - x0) / 20).max(3);
-    let row = |r: u32| &v[(r * w + x0) as usize..=(r * w + x1) as usize];
-    let (t, _) = otsu(row(y));
-    let line: Vec<bool> = row(y).iter().map(|&p| p <= t).collect();
-    let agrees = |r: u32| {
-        let same = row(r)
-            .iter()
-            .zip(&line)
-            .filter(|&(&p, &dark)| (p <= t) == dark)
-            .count();
-        same * 10 >= line.len() * 9
     };
-    (y >= d && agrees(y - d)) || (y + d < h && agrees(y + d))
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = dx.hypot(dy);
+    if len.is_nan() || len <= 8.0 {
+        return false;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let (nx, ny) = (-uy, ux);
+    let at = |x: f32, y: f32| -> Option<u8> {
+        (x >= 0.0 && y >= 0.0 && (x as u32) < w && (y as u32) < h)
+            .then(|| v[(y as u32 * w + x as u32) as usize])
+    };
+    let steps = len as i32;
+    let line = |off: f32| -> Vec<Option<u8>> {
+        (0..=steps)
+            .map(|t| {
+                at(
+                    a.0 + ux * t as f32 + nx * off,
+                    a.1 + uy * t as f32 + ny * off,
+                )
+            })
+            .collect()
+    };
+    let base = line(0.0);
+    let known: Vec<u8> = base.iter().flatten().copied().collect();
+    if known.len() < 8 {
+        return false;
+    }
+    let (t, _) = otsu(&known);
+    let dark: Vec<Option<bool>> = base.iter().map(|p| p.map(|p| p <= t)).collect();
+    let d = (len / 20.0).max(3.0);
+    let agrees = |other: &[Option<u8>]| {
+        (-2i32..=2).any(|shift| {
+            let (mut same, mut n) = (0usize, 0usize);
+            for (k, mine) in dark.iter().enumerate() {
+                let j = k as i32 + shift;
+                if j < 0 || j as usize >= other.len() {
+                    continue;
+                }
+                if let (Some(m), Some(o)) = (mine, other[j as usize]) {
+                    n += 1;
+                    same += usize::from(*m == (o <= t));
+                }
+            }
+            n >= 8 && same * 100 >= n * 85
+        })
+    };
+    agrees(&line(d)) || agrees(&line(-d))
 }
 
 /// The most Aztec finders looked at in one tile.
@@ -422,11 +448,9 @@ mod tests {
     }
 
     #[test]
-    fn padding_takes_the_border_color() {
+    fn padding_is_white() {
         let dark = pad(&[0, 0, 0, 0], 2, 2, 1);
-        assert!(dark.iter().all(|&v| v == 0));
-        let light = pad(&[255, 0, 255, 255], 2, 2, 1);
-        assert_eq!(light[0], 255);
-        assert_eq!(light.len(), 16);
+        assert_eq!(dark.len(), 16);
+        assert_eq!(dark.iter().filter(|&&v| v == 255).count(), 12);
     }
 }

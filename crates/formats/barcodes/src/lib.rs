@@ -65,6 +65,9 @@ pub struct Limits {
     pub max_payload: usize,
     /// The time one picture may take.
     pub time: Duration,
+    /// Only the first two attempts (gray and inverted): a cheaper scan for renders of whole
+    /// pages, where a finer look at the likely codes follows.
+    pub quick: bool,
 }
 
 impl Default for Limits {
@@ -76,6 +79,7 @@ impl Default for Limits {
             max_codes: 64,
             max_payload: 64 * 1024,
             time: Duration::from_secs(10),
+            quick: false,
         }
     }
 }
@@ -142,6 +146,8 @@ pub enum Payload {
 pub struct Code {
     pub symbology: Symbology,
     pub payload: Payload,
+    /// The size of the payload in bytes, as the code holds it.
+    pub bytes: usize,
     /// About where it lies, in pixels of the picture: left, top, right and bottom. For a
     /// linear code it is the line that was read, a little widened.
     pub bounds: [u32; 4],
@@ -206,8 +212,8 @@ enum Attempt {
 /// The most times one attempt runs again after painting over what it found.
 const ROUNDS: usize = 8;
 
-/// The quiet zone put around each attempt, in pixels: a picture cut tight around a code has
-/// none.
+/// The white quiet zone put around each attempt, in pixels: a picture cut tight around a
+/// code has none.
 const PAD: u32 = 16;
 
 /// How many modules a window around an Aztec finder reaches out on each side: the largest
@@ -263,7 +269,13 @@ fn aztec_windows(
             )
         };
         for hit in hits {
-            let Some(code) = read::code_of(&hit, &map, w, h, limits.max_payload) else {
+            let window = [
+                r.x + x,
+                r.y + y,
+                (r.x + x + side).min(w),
+                (r.y + y + side).min(h),
+            ];
+            let Some(code) = read::code_of(&hit, &map, (w, h), window, limits.max_payload) else {
                 continue;
             };
             if out.codes.iter().any(|c| prep::same(c, &code)) {
@@ -308,13 +320,18 @@ pub(crate) fn scan(
     for tile in prep::tiles(w, h, limits) {
         let base = prep::Tile::cut(picture, tile);
         let mut found_any = false;
-        for attempt in [
-            Attempt::Luma,
-            Attempt::Inverted,
-            Attempt::Channel,
-            Attempt::Otsu,
-            Attempt::Doubled,
-        ] {
+        let attempts: &[Attempt] = if limits.quick {
+            &[Attempt::Luma, Attempt::Inverted]
+        } else {
+            &[
+                Attempt::Luma,
+                Attempt::Inverted,
+                Attempt::Channel,
+                Attempt::Otsu,
+                Attempt::Doubled,
+            ]
+        };
+        for &attempt in attempts {
             let image = match attempt {
                 Attempt::Luma => Some(base.luma.clone()),
                 Attempt::Inverted => Some(base.luma.iter().map(|v| 255 - v).collect()),
@@ -356,7 +373,10 @@ pub(crate) fn scan(
                     if !hit.symbology.two_d() && !prep::bars_hold(&padded, pw, ph, &hit.points) {
                         continue;
                     }
-                    let Some(code) = read::code_of(&hit, &map, w, h, limits.max_payload) else {
+                    let tile_box = [tile.x, tile.y, tile.x + tile.w, tile.y + tile.h];
+                    let Some(code) =
+                        read::code_of(&hit, &map, (w, h), tile_box, limits.max_payload)
+                    else {
                         continue;
                     };
                     if out.codes.iter().any(|c| prep::same(c, &code))
@@ -418,4 +438,53 @@ pub(crate) fn scan(
     out.codes
         .retain(|c| c.symbology.two_d() || !prep::inside_2d(c, &twod));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A decoder that gives a QR code and a Code 128 read across its middle, once.
+    struct Fake(bool);
+
+    impl Runner for Fake {
+        fn run(&mut self, job: read::Job, _: Instant) -> Result<Vec<read::Hit>, Stop> {
+            if self.0 || job.aztec_only {
+                return Ok(Vec::new());
+            }
+            self.0 = true;
+            let hit = |symbology, text: &str, points: Vec<(f32, f32)>| read::Hit {
+                symbology,
+                text: text.into(),
+                bytes: None,
+                points,
+            };
+            Ok(vec![
+                hit(
+                    Symbology::QrCode,
+                    "https://example.org/q",
+                    vec![(40.0, 40.0), (140.0, 40.0), (40.0, 140.0)],
+                ),
+                hit(Symbology::Code128, "123", vec![(50.0, 90.0), (130.0, 90.0)]),
+            ])
+        }
+    }
+
+    #[test]
+    fn a_linear_hit_inside_a_matrix_code_is_dropped() {
+        // A white picture: the bars check would drop the fake linear hit anyway, so the
+        // pixels show a bar pattern on all rows.
+        let (w, h) = (200u32, 200u32);
+        let gray: Vec<u8> = (0..w * h)
+            .map(|i| if (i % w) / 4 % 2 == 0 { 0 } else { 255 })
+            .collect();
+        let pic = Picture {
+            pixels: Pixels::Gray(&gray),
+            width: w,
+            height: h,
+        };
+        let scan = scan(&pic, &Limits::default(), &mut Fake(false)).expect("scan");
+        let kinds: Vec<Symbology> = scan.codes.iter().map(|c| c.symbology).collect();
+        assert_eq!(kinds, [Symbology::QrCode]);
+    }
 }

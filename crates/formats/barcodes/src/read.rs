@@ -174,43 +174,50 @@ fn allowed(c: char) -> bool {
 /// set; else they are bytes. rxing turns every payload into a string (unknown bytes as
 /// ISO-8859-1), so the string alone cannot tell text from bytes. A payload rxing read as
 /// characters outside ISO-8859-1 (through an ECI) is text as it is.
-pub(crate) fn payload(hit: &Hit, max: usize) -> Payload {
+/// Also the payload's size in bytes as the code holds it.
+pub(crate) fn payload(hit: &Hit, max: usize) -> (Payload, usize) {
     let bytes = match hit.bytes.clone().or_else(|| latin1(&hit.text)) {
         Some(b) => b,
         None => {
             let t = hit.text.clone();
-            if t.len() > max {
-                return Payload::TooLarge(t.len());
+            let n = t.len();
+            if n > max {
+                return (Payload::TooLarge(n), n);
             }
             return if t.chars().all(allowed) {
-                Payload::Text(t)
+                (Payload::Text(t), n)
             } else {
-                Payload::Bytes(t.into_bytes())
+                (Payload::Bytes(t.into_bytes()), n)
             };
         }
     };
-    if bytes.len() > max {
-        return Payload::TooLarge(bytes.len());
+    let n = bytes.len();
+    if n > max {
+        return (Payload::TooLarge(n), n);
     }
     if let Ok(t) = std::str::from_utf8(&bytes)
         && t.chars().all(allowed)
     {
-        return Payload::Text(t.to_string());
+        return (Payload::Text(t.to_string()), n);
     }
     let printable = |b: u8| b >= 0xa0 || (0x20..0x7f).contains(&b) || allowed(char::from(b));
     if bytes.iter().all(|&b| printable(b)) {
-        return Payload::Text(bytes.iter().map(|&b| char::from(b)).collect());
+        return (
+            Payload::Text(bytes.iter().map(|&b| char::from(b)).collect()),
+            n,
+        );
     }
-    Payload::Bytes(bytes)
+    (Payload::Bytes(bytes), n)
 }
 
 /// The code of `hit`, its points moved into the picture by `map` and clamped to its `w` by
-/// `h` pixels. `None` when it has no points.
+/// `h` pixels. A hit without points (rxing gives none for some small codes) lies somewhere in
+/// `area`, the part of the picture that was read.
 pub(crate) fn code_of(
     hit: &Hit,
     map: &dyn Fn(f32, f32) -> (f32, f32),
-    w: u32,
-    h: u32,
+    (w, h): (u32, u32),
+    area: [u32; 4],
     max_payload: usize,
 ) -> Option<Code> {
     let points: Vec<(f32, f32)> = hit
@@ -219,7 +226,20 @@ pub(crate) fn code_of(
         .map(|&(x, y)| map(x, y))
         .filter(|(x, y)| x.is_finite() && y.is_finite())
         .collect();
-    let first = points.first()?;
+    let Some(first) = points.first() else {
+        let (payload, bytes) = payload(hit, max_payload);
+        return Some(Code {
+            symbology: hit.symbology,
+            payload,
+            bytes,
+            bounds: [
+                area[0].min(w),
+                area[1].min(h),
+                area[2].min(w),
+                area[3].min(h),
+            ],
+        });
+    };
     let (mut x0, mut y0, mut x1, mut y1) = (first.0, first.1, first.0, first.1);
     for &(x, y) in &points {
         x0 = x0.min(x);
@@ -236,9 +256,11 @@ pub(crate) fn code_of(
         (0.0, ((x1 - x0) / 8.0).max(2.0))
     };
     let clamp = |v: f32, max: u32| v.clamp(0.0, max as f32).round() as u32;
+    let (payload, bytes) = payload(hit, max_payload);
     Some(Code {
         symbology: hit.symbology,
-        payload: payload(hit, max_payload),
+        payload,
+        bytes,
         bounds: [
             clamp(x0 - gx, w),
             clamp(y0 - gy, h),
@@ -266,7 +288,7 @@ mod tests {
         let raw = [0x00u8, 0xff, 0x10, 0x80];
         let text: String = raw.iter().map(|&b| char::from(b)).collect();
         assert_eq!(
-            payload(&hit(&text, Some(&raw)), 100),
+            payload(&hit(&text, Some(&raw)), 100).0,
             Payload::Bytes(raw.to_vec())
         );
     }
@@ -277,7 +299,7 @@ mod tests {
         // rxing may read UTF-8 bytes as ISO-8859-1.
         let misread: String = raw.iter().map(|&b| char::from(b)).collect();
         assert_eq!(
-            payload(&hit(&misread, Some(raw)), 100),
+            payload(&hit(&misread, Some(raw)), 100).0,
             Payload::Text("Grüße".into())
         );
     }
@@ -285,11 +307,11 @@ mod tests {
     #[test]
     fn gs1_separators_stay_text_and_other_controls_do_not() {
         assert_eq!(
-            payload(&hit("01\u{1d}10", None), 100),
+            payload(&hit("01\u{1d}10", None), 100).0,
             Payload::Text("01\u{1d}10".into())
         );
         assert_eq!(
-            payload(&hit("a\u{7}b", None), 100),
+            payload(&hit("a\u{7}b", None), 100).0,
             Payload::Bytes(b"a\x07b".to_vec())
         );
     }
@@ -297,13 +319,13 @@ mod tests {
     #[test]
     fn printable_latin1_is_text() {
         assert_eq!(
-            payload(&hit("Gr\u{fc}\u{df}e", None), 100),
+            payload(&hit("Gr\u{fc}\u{df}e", None), 100).0,
             Payload::Text("Grüße".into())
         );
     }
 
     #[test]
     fn a_payload_over_the_cap_is_only_counted() {
-        assert_eq!(payload(&hit("abcdef", None), 4), Payload::TooLarge(6));
+        assert_eq!(payload(&hit("abcdef", None), 4).0, Payload::TooLarge(6));
     }
 }

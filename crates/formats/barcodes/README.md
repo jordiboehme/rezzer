@@ -3,7 +3,7 @@
 Reads barcodes and QR codes in untrusted pictures, with bounds.
 
 - Input is 8-bit gray or RGBA pixels. Transparent pixels count as white.
-- QR Code, Micro QR Code, Data Matrix, Aztec and PDF417, then Code 128, Code 39, EAN-13, UPC-A and ITF.
+- QR Code, Data Matrix, Aztec and PDF417, then Code 128, Code 39, EAN-13, UPC-A and ITF. Micro QR Code is looked for but not tested.
 - MaxiCode, EAN-8 and UPC-E are not read.
 - A large picture is read at its own resolution in overlapping tiles.
 - Each picture has a time limit, a pixel cap, a code cap and a payload cap.

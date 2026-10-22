@@ -548,3 +548,129 @@ fn block_noise_gives_no_linear_code() {
         other => panic!("{other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// Fix round 1
+
+/// `gray` of `w` by `h` turned by `deg` degrees around its middle on a white picture large
+/// enough to hold it (nearest pixel).
+fn turned(gray: &[u8], w: u32, h: u32, deg: f64) -> (Vec<u8>, u32, u32) {
+    let (s, c) = deg.to_radians().sin_cos();
+    let side = ((w * w + h * h) as f64).sqrt().ceil() as u32 + 20;
+    let mut out = vec![255u8; (side * side) as usize];
+    let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
+    let m = f64::from(side) / 2.0;
+    for y in 0..side {
+        for x in 0..side {
+            let (dx, dy) = (f64::from(x) - m, f64::from(y) - m);
+            let (sx, sy) = (c * dx + s * dy + cx, -s * dx + c * dy + cy);
+            if sx >= 0.0 && sy >= 0.0 && (sx as u32) < w && (sy as u32) < h {
+                out[(y * side + x) as usize] = gray[(sy as u32 * w + sx as u32) as usize];
+            }
+        }
+    }
+    (out, side, side)
+}
+
+#[test]
+fn linear_codes_turned_a_quarter_or_a_little_are_read() {
+    let m = modules(Symbology::Code128, "RZ-2026-1021", None);
+    let (gray, w, h) = m.gray(3, 10, 40);
+    for deg in [90.0, 7.0, -7.0] {
+        let (t, tw, th) = turned(&gray, w, h, deg);
+        assert_eq!(
+            texts(&scan_gray(&t, tw, th)),
+            vec![(Symbology::Code128, "RZ-2026-1021".to_string())],
+            "{deg} degrees"
+        );
+    }
+}
+
+#[test]
+fn codes_cut_tight_are_read() {
+    for (s, text) in [
+        (Symbology::QrCode, URL),
+        (Symbology::DataMatrix, "DM TIGHT 4711"),
+        (Symbology::Code128, "TIGHT-0042"),
+    ] {
+        let (gray, w, h) = modules(s, text, None).gray(3, 0, 30);
+        assert_eq!(
+            texts(&scan_gray(&gray, w, h)),
+            vec![(s, text.to_string())],
+            "{s:?}"
+        );
+    }
+}
+
+#[test]
+fn binary_aztec_and_pdf417_payloads_come_back_as_their_bytes() {
+    let raw: Vec<u8> = vec![0, 1, 0xff, 0x41, 0x42, 0x80, 0x9f, 0x10];
+    for s in [Symbology::Aztec, Symbology::Pdf417] {
+        let m = encode::bytes(s, &raw, &Options::default()).expect("encode");
+        let (gray, w, h) = m.gray(3, 4, 0);
+        let scan = scan_gray(&gray, w, h);
+        assert_eq!(scan.codes.len(), 1, "{s:?}: {scan:?}");
+        assert_eq!(scan.codes[0].payload, Payload::Bytes(raw.clone()), "{s:?}");
+        assert_eq!(scan.codes[0].bytes, raw.len(), "{s:?}");
+    }
+}
+
+#[test]
+fn the_size_is_the_payload_bytes() {
+    // 20 bytes of ISO-8859-1 letters: text of 40 UTF-8 bytes, a payload of 20.
+    let raw: Vec<u8> = (0xc0u8..0xd4).collect();
+    let m = encode::bytes(Symbology::QrCode, &raw, &Options::default()).expect("encode");
+    let (gray, w, h) = m.gray(3, 4, 0);
+    let scan = scan_gray(&gray, w, h);
+    assert!(
+        matches!(scan.codes[0].payload, Payload::Text(_)),
+        "{scan:?}"
+    );
+    assert_eq!(scan.codes[0].bytes, 20);
+}
+
+#[test]
+fn the_quick_attempts_are_gray_and_inverted_only() {
+    // Pure red on a green of the same luma splits only in a color channel: the full scan
+    // reads it, the quick one does not. An inverted code the quick scan reads.
+    let m = modules(Symbology::QrCode, URL, None);
+    let (gray, w, h) = m.gray(4, 4, 0);
+    let rgba = colored(&gray, [255, 0, 0, 255], [0, 76, 0, 255]);
+    let pic = Picture {
+        pixels: Pixels::Rgba(&rgba),
+        width: w,
+        height: h,
+    };
+    let quick = Limits {
+        quick: true,
+        ..Limits::default()
+    };
+    assert_eq!(
+        decode(&pic, &Limits::default()).expect("scan").codes.len(),
+        1
+    );
+    assert!(decode(&pic, &quick).expect("scan").codes.is_empty());
+    let inverted: Vec<u8> = gray.iter().map(|v| 255 - v).collect();
+    let pic = Picture {
+        pixels: Pixels::Gray(&inverted),
+        width: w,
+        height: h,
+    };
+    assert_eq!(decode(&pic, &quick).expect("scan").codes.len(), 1);
+}
+
+#[test]
+fn small_codes_of_one_pixel_a_module_are_read() {
+    // Data Matrix gives no points at this size; Aztec needs the doubled attempt.
+    for (s, text) in [
+        (Symbology::DataMatrix, "PARCEL 00340434161094042016"),
+        (Symbology::Aztec, "PARCEL 00340434161094042016"),
+    ] {
+        let (gray, w, h) = modules(s, text, None).gray(1, 4, 0);
+        assert_eq!(
+            texts(&scan_gray(&gray, w, h)),
+            vec![(s, text.to_string())],
+            "{s:?}"
+        );
+    }
+}
