@@ -475,30 +475,36 @@ fn print_titles_and_panes_are_matched() {
     assert!(!layout.regions[1].evidence.contains(&Evidence::FrozenPanes));
 }
 
-#[test]
-fn checkerboard_hits_region_limit() {
-    // 300 by 300 single cells, each with an empty row and column to the next: 90,000 pieces.
+/// A real checkerboard: a cell wherever row plus column is even. No row or column is empty, so
+/// only the corner split separates the cells.
+fn checkerboard(n: u32) -> Sheet {
     let mut sheet = Sheet::new();
-    for i in 0..300u32 {
-        for j in 0..300u32 {
-            sheet.put(
-                Pos {
-                    row: 2 * i,
-                    col: 2 * j,
-                },
-                "x",
-            );
+    for row in 0..n {
+        for col in (row % 2..n).step_by(2) {
+            sheet.put(Pos { row, col }, "x");
         }
     }
-    let input = sheet.input();
+    sheet
+}
+
+/// Segments with no stop and gives the layout and the thread CPU time it took.
+fn timed(input: &sheetlayout::Input) -> (sheetlayout::Layout, std::time::Duration) {
     let start = thread_cpu();
-    let layout = segment(&input, &Limits::default(), &never);
-    let used = thread_cpu() - start;
+    let layout = segment(input, &Limits::default(), &never);
+    (layout, thread_cpu() - start)
+}
+
+const BOUND: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[test]
+fn checkerboard_hits_region_limit() {
+    let input = checkerboard(300).input();
+    let (layout, used) = timed(&input);
     eprintln!(
-        "checkerboard: {} regions, {used:?} CPU",
+        "checkerboard 300: {} regions, {used:?} CPU",
         layout.regions.len()
     );
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(used < BOUND, "{used:?}");
     assert!(layout.regions.len() <= 10_000);
     let limits: Vec<_> = layout
         .issues
@@ -506,12 +512,9 @@ fn checkerboard_hits_region_limit() {
         .filter(|i| i.kind == IssueKind::Limit)
         .collect();
     assert_eq!(limits.len(), 1);
-    let rest: Vec<_> = layout
-        .regions
-        .iter()
-        .filter(|r| r.unsure.iter().any(|u| u.contains("region limit")))
-        .collect();
+    let rest: Vec<_> = layout.regions.iter().filter(|r| r.rest).collect();
     assert_eq!(rest.len(), 1);
+    assert!(rest[0].unsure[0].contains("region limit"));
     assert_eq!(rest[0].kind, Kind::Grid);
     assert_eq!(limits[0].rect, Some(rest[0].rect));
     every_cell_once(&input, &layout);
@@ -519,7 +522,38 @@ fn checkerboard_hits_region_limit() {
 }
 
 #[test]
+fn large_checkerboards_are_bounded() {
+    for n in [600, 1000] {
+        let input = checkerboard(n).input();
+        let (layout, used) = timed(&input);
+        eprintln!(
+            "checkerboard {n}: {} regions, {used:?} CPU",
+            layout.regions.len()
+        );
+        assert!(used < BOUND, "{n}: {used:?}");
+        assert_eq!(layout.regions.iter().filter(|r| r.rest).count(), 1);
+    }
+}
+
+#[test]
+fn diagonal_staircase_is_bounded() {
+    let mut sheet = Sheet::new();
+    for k in 0..20_000u32 {
+        sheet.put(Pos { row: k, col: k }, "x");
+    }
+    let input = sheet.input();
+    let (layout, used) = timed(&input);
+    eprintln!("staircase: {} regions, {used:?} CPU", layout.regions.len());
+    assert!(used < BOUND, "{used:?}");
+    assert_eq!(layout.regions.len(), 10_000);
+    assert_eq!(layout.regions.iter().filter(|r| r.rest).count(), 1);
+    every_cell_once(&input, &layout);
+    no_overlap(&layout);
+}
+
+#[test]
 fn cut_depth_limit_gives_rest() {
+    // The depth limit holds per branch: only the pieces that need a deeper cut are rest.
     let sheet = Sheet::new()
         .rows("A1", &["a|b||c"])
         .rows("A3", &["d"])
@@ -531,10 +565,32 @@ fn cut_depth_limit_gives_rest() {
     };
     let layout = segment(&input, &limits, &never);
     every_cell_once(&input, &layout);
-    assert_eq!(ranges(&layout), ["A1:D5"]);
-    assert_eq!(layout.issues.len(), 1);
-    assert_eq!(layout.issues[0].kind, IssueKind::Limit);
-    assert!(layout.issues[0].what.contains("cut depth"));
+    assert_eq!(ranges(&layout), ["A1:D1", "A3", "A5:D5"]);
+    let rest: Vec<bool> = layout.regions.iter().map(|r| r.rest).collect();
+    assert_eq!(rest, [true, false, true]);
+    assert_eq!(layout.issues.len(), 2);
+    for i in &layout.issues {
+        assert_eq!(i.kind, IssueKind::Limit);
+        assert!(i.what.contains("cut depth"));
+    }
+}
+
+#[test]
+fn region_limit_is_exact() {
+    let mut sheet = Sheet::new();
+    for k in 0..5 {
+        sheet = sheet.cell(&format!("A{}", 1 + 2 * k), "1");
+    }
+    let input = sheet.input();
+    for max in 1..=6 {
+        let limits = Limits {
+            max_regions: max,
+            ..Limits::default()
+        };
+        let layout = segment(&input, &limits, &never);
+        every_cell_once(&input, &layout);
+        assert_eq!(layout.regions.len(), max.min(5), "max_regions {max}");
+    }
 }
 
 #[test]
@@ -577,6 +633,7 @@ fn stop_callback_ends_early() {
         .filter(|r| r.unsure.iter().any(|u| u.contains("time limit")))
         .collect();
     assert_eq!(rest.len(), 1);
+    assert!(rest[0].rest);
     assert_eq!(stopped[0].rect, Some(rest[0].rect));
 
     // A stop before any work: the whole sheet is one grid region.
@@ -636,6 +693,306 @@ fn unsorted_and_repeated_cells_are_tolerated() {
     input.cells.push(dup);
     let layout = segment(&input, &Limits::default(), &never);
     assert_eq!(ranges(&layout), ["A1:B2", "A5"]);
+}
+
+#[test]
+fn title_three_rows_away_does_not_attach() {
+    let layout = Sheet::new()
+        .cell("A1", "Sales")
+        .rows("A5", &["region|q1", "north|1"])
+        .segment();
+    assert_eq!(ranges(&layout), ["A1", "A5:B6"]);
+    assert!(layout.regions[1].captions.is_empty());
+}
+
+#[test]
+fn caption_row_needs_its_merge_to_hold_the_text() {
+    // A text in A1 and an empty merge B1:C1 beside it: not a single-text row.
+    let layout = Sheet::new()
+        .cell("A1", "Title")
+        .merge("B1:C1")
+        .rows("A2", &["a|b|c", "1|2|3"])
+        .segment();
+    assert!(layout.regions[0].captions.is_empty());
+    // A text in a merge and a second merge in the row: not a single-text row either.
+    let layout = Sheet::new()
+        .cell("A1", "Title")
+        .merge("A1:B1")
+        .merge("C1:D1")
+        .rows("A2", &["a|b|c|d", "1|2|3|4"])
+        .segment();
+    assert!(layout.regions[0].captions.is_empty());
+    // One merge that holds the text is one.
+    let layout = Sheet::new()
+        .cell("A1", "Title")
+        .merge("A1:D1")
+        .rows("A2", &["a|b|c|d", "1|2|3|4"])
+        .segment();
+    assert_eq!(layout.regions[0].captions, [0]);
+}
+
+#[test]
+fn one_row_name_never_joins() {
+    let layout = Sheet::new()
+        .rows("A1", &["a|b||d|e"])
+        .name("Row", "A1:E1")
+        .segment();
+    assert_eq!(ranges(&layout), ["A1:B1", "D1:E1"]);
+}
+
+#[test]
+fn name_join_that_would_reach_another_region_is_skipped() {
+    let layout = Sheet::new()
+        .rows("A1", &["a|b|c"])
+        .cell("C3", "7")
+        .rows("A5", &["d|e|f"])
+        .name("Both", "A1:B5")
+        .segment();
+    assert_eq!(ranges(&layout), ["A1:C1", "C3", "A5:C5"]);
+}
+
+#[test]
+fn name_on_an_exact_range_is_evidence() {
+    let layout = Sheet::new()
+        .rows("B2", &["a|b", "1|2"])
+        .name("Block", "B2:C3")
+        .segment();
+    assert!(layout.regions[0].evidence.contains(&Evidence::DefinedName {
+        name: "Block".into()
+    }));
+    let layout = Sheet::new()
+        .rows("B2", &["a|b", "1|2"])
+        .name("Bigger", "B2:C4")
+        .segment();
+    assert!(
+        !layout.regions[0]
+            .evidence
+            .iter()
+            .any(|e| matches!(e, Evidence::DefinedName { .. }))
+    );
+}
+
+#[test]
+fn stop_during_fact_assignment_leaves_no_fact_region() {
+    let sheet = Sheet::new()
+        .rows("A1", &["a|b", "1|2"])
+        .rows("B10", &["c|d", "3|4"])
+        .fact("B10:C11", list_object("Far"));
+    let input = sheet.input();
+    let layout = segment(&input, &Limits::default(), &|| true);
+    every_cell_once(&input, &layout);
+    assert_eq!(ranges(&layout), ["A1:C11"]);
+    assert!(layout.regions[0].rest);
+}
+
+#[test]
+fn pane_and_print_title_boundaries() {
+    // The split row (3) is the region's last row: the pane covers it.
+    let mut sheet = Sheet::new().rows("A1", &["a|b", "1|2", "3|4", "5|6"]);
+    sheet.frozen = Some((3, 0));
+    let layout = sheet.segment();
+    assert!(layout.regions[0].evidence.contains(&Evidence::FrozenPanes));
+    // The split is below the region: not matched.
+    let mut sheet = Sheet::new().rows("A1", &["a|b", "1|2", "3|4"]);
+    sheet.frozen = Some((3, 0));
+    assert!(
+        !sheet.segment().regions[0]
+            .evidence
+            .contains(&Evidence::FrozenPanes)
+    );
+    // Print titles must lie inside the region, not only touch it.
+    let mut sheet = Sheet::new().rows("A2", &["a|b", "1|2", "3|4"]);
+    sheet.print_titles = Some((0, 1));
+    assert!(
+        !sheet.segment().regions[0]
+            .evidence
+            .contains(&Evidence::PrintTitles)
+    );
+    sheet.print_titles = Some((1, 2));
+    assert!(
+        sheet.segment().regions[0]
+            .evidence
+            .contains(&Evidence::PrintTitles)
+    );
+}
+
+/// The shape where every name hits almost every region and a join is always blocked.
+fn names_sheet(names: usize) -> Sheet {
+    let mut sheet = Sheet::new();
+    for row in 0..400u32 {
+        sheet.put(Pos { row, col: 0 }, "t");
+    }
+    for i in 0..200u32 {
+        for j in 0..49u32 {
+            sheet.put(
+                Pos {
+                    row: 2 * i,
+                    col: 2 + 2 * j,
+                },
+                "1",
+            );
+        }
+    }
+    sheet.put(Pos { row: 399, col: 99 }, "end");
+    let mut k = 0;
+    'outer: for c in (2..=98u32).rev().step_by(2) {
+        for r in (100..398u32).rev() {
+            if k == names {
+                break 'outer;
+            }
+            sheet.names.push(NameIn {
+                name: format!("n{k}"),
+                rect: Rect {
+                    top: 0,
+                    left: 0,
+                    bottom: r,
+                    right: c,
+                },
+                hidden: false,
+                builtin: false,
+            });
+            k += 1;
+        }
+    }
+    sheet
+}
+
+#[test]
+fn many_names_over_many_regions_are_bounded() {
+    let input = names_sheet(3_000).input();
+    let (layout, used) = timed(&input);
+    eprintln!("names: {} regions, {used:?} CPU", layout.regions.len());
+    assert!(used < BOUND, "{used:?}");
+    assert!(layout.regions.len() > 9_000);
+    every_cell_once(&input, &layout);
+}
+
+#[test]
+fn stop_during_the_names_step_is_said() {
+    let input = names_sheet(3_000).input();
+    let calls = Cell::new(0u64);
+    let count = || {
+        calls.set(calls.get() + 1);
+        false
+    };
+    let _ = segment(&input, &Limits::default(), &count);
+    let total = calls.get();
+    // The names step asks last: stop at its first question.
+    calls.set(0);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() > total - 3_000 / 64
+    };
+    let layout = segment(&input, &Limits::default(), &stop);
+    every_cell_once(&input, &layout);
+    assert!(layout.regions.iter().all(|r| !r.rest));
+    let stopped: Vec<_> = layout
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Stopped)
+        .collect();
+    assert_eq!(stopped.len(), 1);
+    assert!(stopped[0].what.contains("names"));
+}
+
+/// A small random generator for the property test.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, n: u32) -> u32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((self.0 >> 33) % u64::from(n)) as u32
+    }
+}
+
+#[test]
+fn random_sheets_keep_every_cell_once() {
+    let mut g = Lcg(7);
+    for case in 0..3_000 {
+        let mut sheet = if g.next(2) == 0 {
+            Sheet::new()
+        } else {
+            Sheet::styled()
+        };
+        for _ in 0..g.next(40) {
+            let p = Pos {
+                row: g.next(12),
+                col: g.next(12),
+            };
+            let token = ["x", "1", "*t", "^u", "=", "*^v"][g.next(6) as usize];
+            sheet.put(p, token);
+        }
+        let rect_at = |g: &mut Lcg| {
+            let (top, left) = (g.next(12), g.next(12));
+            Rect {
+                top,
+                left,
+                bottom: top + g.next(4),
+                right: left + g.next(4),
+            }
+        };
+        for _ in 0..g.next(5) {
+            sheet.merges.push(rect_at(&mut g));
+        }
+        // Facts of different levels only, so no two facts of one level overlap.
+        let kinds = [
+            list_object("L"),
+            FactKind::DatabaseRange {
+                name: "D".into(),
+                header: true,
+                footer: false,
+            },
+            FactKind::AutoFilter,
+        ];
+        for kind in kinds {
+            if g.next(3) == 0 {
+                sheet.facts.push(sheetlayout::Fact {
+                    rect: rect_at(&mut g),
+                    kind,
+                });
+            }
+        }
+        for k in 0..g.next(3) {
+            sheet.names.push(NameIn {
+                name: format!("n{k}"),
+                rect: rect_at(&mut g),
+                hidden: false,
+                builtin: false,
+            });
+        }
+        let input = sheet.input();
+        let limits = Limits {
+            max_cut_depth: g.next(5),
+            max_regions: 1 + g.next(8) as usize,
+            ..Limits::default()
+        };
+        let after = g.next(12);
+        let calls = Cell::new(0u32);
+        let stop = || {
+            calls.set(calls.get() + 1);
+            calls.get() > after
+        };
+        let layout = segment(&input, &limits, &stop);
+        every_cell_once(&input, &layout);
+        no_overlap(&layout);
+        assert!(
+            layout.regions.len() <= limits.max_regions,
+            "case {case}: {} regions over {}",
+            layout.regions.len(),
+            limits.max_regions
+        );
+        assert!(
+            layout
+                .issues
+                .iter()
+                .filter(|i| i.kind == IssueKind::Stopped)
+                .count()
+                <= 1
+        );
+    }
 }
 
 /// The Census NST-EST2023-POP shape: title rows 1 and 2, a two-row header, data to row 60,

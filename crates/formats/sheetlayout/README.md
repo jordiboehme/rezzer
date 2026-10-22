@@ -20,8 +20,9 @@ A region is a rectangle of occupied cells with at least one fully empty row or c
 it and other content. A cell is occupied when it holds a value, a text or a formula, or when a
 merged area covers it. A styled cell without a value is not occupied. The sheet is cut at
 every run of empty rows, then each band at every run of empty columns, again and again until
-no piece can be cut. Two blocks that touch only at a corner are two regions. This corner
-split is skipped for a very sparse piece, which then stays one region.
+no piece can be cut. Two blocks that touch only at a corner are two regions. The corner
+split follows the cells and merges, not the area they span. A shape with very many long
+merges crossed by many wide merges needs too much work and stays one region.
 
 Cells inside an Excel table, database range, pivot table or autofilter range belong to that
 range. The cells around it are cut apart from it, so no other region holds its cells.
@@ -31,8 +32,10 @@ This rule has limits:
 - It cannot separate two tables that touch with no empty row or column between them.
 - It cannot join one table that has an empty row inside it. A defined name over both parts
   joins them.
-- It cuts at most 64 levels deep and gives at most 10,000 regions per sheet. Past either
-  limit the rest of the sheet is one grid region, and an issue says so.
+- It cuts at most 64 levels deep. A piece that needs a deeper cut stays one grid region,
+  and an issue says so.
+- It gives at most 10,000 regions per sheet. Past that limit the rest of the sheet is one
+  grid region, and an issue says so.
 
 A stop function lets the caller end the work early. The cells not yet placed then become one
 grid region, and an issue says so.

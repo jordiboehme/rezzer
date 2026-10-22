@@ -108,3 +108,60 @@ fn huge_merge_is_counted_by_intervals() {
     assert_eq!(ranges(&layout), ["A1:XFD1048576"]);
     every_cell_once(&input, &layout);
 }
+
+#[test]
+fn overlapping_facts_give_few_issues() {
+    // 4,000 database ranges of one level, each over the one before.
+    let mut sheet = Sheet::new().rows("A1", &["a|b", "1|2"]);
+    for k in 0..4_000u32 {
+        sheet.facts.push(sheetlayout::Fact {
+            rect: Rect {
+                top: 0,
+                left: 0,
+                bottom: 1 + k,
+                right: 1,
+            },
+            kind: sheetlayout::FactKind::DatabaseRange {
+                name: format!("r{k}"),
+                header: true,
+                footer: false,
+            },
+        });
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| segment(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    eprintln!(
+        "overlapping facts: {} issues, peak heap {peak} bytes, {used:?} CPU",
+        layout.issues.len()
+    );
+    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert!(peak < 16 * MB, "peak heap {peak}");
+    assert!(layout.issues.len() <= 102, "{} issues", layout.issues.len());
+    assert!(
+        layout
+            .issues
+            .iter()
+            .any(|i| i.what.contains("more ranges overlap"))
+    );
+}
+
+#[test]
+fn dense_block_heap_follows_the_cells() {
+    // 1000 by 1000 cells that no cut splits: the corner split runs on all of them.
+    let mut sheet = Sheet::new();
+    for row in 0..1000u32 {
+        for col in 0..1000u32 {
+            sheet.put(Pos { row, col }, "1");
+        }
+    }
+    let input = sheet.input();
+    let start = thread_cpu();
+    let (layout, peak) = peak_heap(|| segment(&input, &Limits::default(), &never));
+    let used = thread_cpu() - start;
+    let per_cell = peak / 1_000_000;
+    eprintln!("dense block: peak heap {peak} bytes ({per_cell} per cell), {used:?} CPU");
+    assert!(per_cell <= 64, "{per_cell} bytes per cell");
+    assert_eq!(ranges(&layout), ["A1:ALL1000"]);
+}

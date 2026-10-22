@@ -7,7 +7,7 @@
 //! Nothing here is per row or per position of the used area. An item is either one occupied
 //! cell or one merge; occupancy of a band comes from the items' row or column intervals.
 
-use crate::input::{CellIn, Input, Rect};
+use crate::input::{CellIn, Input, Pos, Rect};
 
 pub(crate) struct Prep<'a> {
     pub input: &'a Input<'a>,
@@ -84,6 +84,14 @@ impl<'a> Prep<'a> {
         let from = slice.partition_point(|&i| self.input.cells[i as usize].pos.col < left);
         let to = slice.partition_point(|&i| self.input.cells[i as usize].pos.col <= right);
         r.start + from..r.start + to.max(from)
+    }
+}
+
+impl Prep<'_> {
+    /// The index into `cells` (and the item id) of the occupied cell at `p`.
+    pub fn cell_at(&self, p: Pos) -> Option<usize> {
+        let r = self.row_span(p.row, p.col, p.col);
+        (!r.is_empty()).then_some(r.start)
     }
 }
 

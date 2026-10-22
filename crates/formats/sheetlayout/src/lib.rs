@@ -152,6 +152,9 @@ pub struct Region {
     pub rows: Vec<RowNote>,
     /// The file states the table has no header row in the sheet.
     pub hidden_header: bool,
+    /// The rest of the sheet after a limit or a stop: one grid of the cells not placed, which
+    /// no rule decides. An issue with the same rectangle says why.
+    pub rest: bool,
 }
 
 /// What an issue is about.
@@ -217,6 +220,7 @@ fn rule_region(rect: Rect, detail: &str) -> Region {
         unsure: vec!["not decided".to_string()],
         rows: Vec::new(),
         hidden_header: false,
+        rest: false,
     }
 }
 
@@ -243,12 +247,14 @@ fn rest_region(
     prep: &Prep,
     works: &mut [Work],
     ids: &[u32],
+    loose: &[u32],
     why: Trip,
     limits: &Limits,
     issues: &mut Vec<Issue>,
 ) -> Option<Work> {
     let mut rect = bounds(prep, ids)?;
     let mut merges: Vec<u32> = ids.iter().filter_map(|&id| prep.merge_of(id)).collect();
+    merges.extend_from_slice(loose);
     loop {
         let mut grew = false;
         for w in works.iter_mut() {
@@ -269,11 +275,6 @@ fn rest_region(
             "region limit",
             IssueKind::Limit,
         ),
-        Trip::Depth => (
-            format!("cut depth limit of {} reached", limits.max_cut_depth),
-            "cut depth limit",
-            IssueKind::Limit,
-        ),
         Trip::Stopped => (
             "time limit reached".to_string(),
             "time limit",
@@ -290,6 +291,7 @@ fn rest_region(
     });
     let mut region = rule_region(rect, &format!("rest of the sheet after the {reason}"));
     region.unsure = vec![what];
+    region.rest = true;
     Some(Work {
         region,
         merges,
@@ -309,8 +311,9 @@ pub(crate) fn segment_work<'a>(
     let mut issues = Vec::new();
 
     // 1. Fact regions.
-    let kept = facts::resolve(input, max - 1, &mut issues);
-    let held = facts::assign(&prep, &kept, stop);
+    let (kept, stopped) = facts::resolve(input, max - 1, &mut issues, stop);
+    let mut held = facts::assign(&prep, &kept, &|| stopped || stop());
+    held.stopped |= stopped;
     let mut works: Vec<Work> = kept
         .iter()
         .zip(held.merges)
@@ -327,34 +330,50 @@ pub(crate) fn segment_work<'a>(
         .filter(|&id| !held.taken[id as usize])
         .collect();
     let rest = if held.stopped {
-        (!free.is_empty()).then_some((Trip::Stopped, free))
+        (!free.is_empty()).then_some((Trip::Stopped, free, Vec::new()))
     } else {
         let room = max.saturating_sub(works.len()).max(1);
         let fact_rects: Vec<Rect> = kept.iter().map(|k| k.rect).collect();
         let cut = cut::cut(&prep, free, &fact_rects, limits, room, stop);
         for leaf in cut.leaves {
             let rect = cut::leaf_rect(&prep, &leaf);
+            let mut merges: Vec<u32> = leaf
+                .ids
+                .iter()
+                .filter_map(|&id| prep.merge_of(id))
+                .collect();
+            merges.extend_from_slice(&leaf.loose);
+            let (region, origin) = if leaf.deep {
+                let what = format!("cut depth limit of {} reached", limits.max_cut_depth);
+                issues.push(Issue {
+                    what: format!("{what}: {} is one grid region", rect.a1()),
+                    kind: IssueKind::Limit,
+                    rect: Some(rect),
+                });
+                let mut region = rule_region(rect, "a piece past the cut depth limit");
+                region.unsure = vec![what];
+                region.rest = true;
+                (region, Origin::Rest)
+            } else {
+                (rule_region(rect, &gap_words(&leaf)), Origin::Rule)
+            };
             works.push(Work {
-                region: rule_region(rect, &gap_words(&leaf)),
-                merges: leaf
-                    .ids
-                    .iter()
-                    .filter_map(|&id| prep.merge_of(id))
-                    .collect(),
-                origin: Origin::Rule,
+                region,
+                merges,
+                origin,
                 dead: false,
             });
         }
         cut.rest
     };
-    if let Some((why, ids)) = rest
-        && let Some(w) = rest_region(&prep, &mut works, &ids, why, limits, &mut issues)
+    if let Some((why, ids, loose)) = rest
+        && let Some(w) = rest_region(&prep, &mut works, &ids, &loose, why, limits, &mut issues)
     {
         works.push(w);
     }
 
     // 3. Joining by defined names.
-    facts::join_names(input, &mut works, max, &mut issues);
+    facts::join_names(input, &mut works, max, &mut issues, stop);
 
     // 4. Caption rows, then title regions.
     for w in works.iter_mut() {
@@ -396,11 +415,108 @@ pub(crate) fn segment_work<'a>(
 /// Fact regions are tables with an exact header. Rule regions are grids with certainty
 /// `Unsure` until the header rules decide them. `stop` is asked between pieces of work; when
 /// it says stop, the cells not yet placed become one grid region and a `Stopped` issue says
-/// so. Past a limit the same happens with a `Limit` issue.
+/// so. Past the region limit the same happens with a `Limit` issue; a piece past the cut
+/// depth limit stays one grid region of its own with a `Limit` issue. Such rest regions have
+/// `rest` set, and their issue carries the same rectangle.
 pub fn segment(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout {
     let (_, works, issues) = segment_work(input, limits, stop);
     Layout {
         regions: works.into_iter().map(|w| w.region).collect(),
         issues,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(row: u32, col: u32) -> CellIn {
+        CellIn {
+            pos: Pos { row, col },
+            class: Class::Text,
+            text: "t".to_string(),
+            number: None,
+            style: Style::default(),
+            formula: None,
+        }
+    }
+
+    fn input(mut cells: Vec<CellIn>, merges: Vec<Rect>, fact: Rect) -> Input<'static> {
+        cells.sort_by_key(|c| c.pos);
+        Input {
+            cells,
+            merges,
+            facts: vec![Fact {
+                rect: fact,
+                kind: FactKind::AutoFilter,
+            }],
+            names: Vec::new(),
+            outline: Vec::new(),
+            frozen: None,
+            print_titles: None,
+            header_guess: None,
+            styles_read: false,
+            is_label: &|_| true,
+            is_unit_column: &|_| false,
+        }
+    }
+
+    fn rect(top: u32, left: u32, bottom: u32, right: u32) -> Rect {
+        Rect {
+            top,
+            left,
+            bottom,
+            right,
+        }
+    }
+
+    /// Every merge is listed by exactly one region.
+    fn merges_once(input: &Input) {
+        let (prep, works, _) = segment_work(input, &Limits::default(), &|| false);
+        for m in 0..prep.merges.len() as u32 {
+            let n = works.iter().filter(|w| w.merges.contains(&m)).count();
+            assert_eq!(
+                n, 1,
+                "merge {:?} is in {n} regions",
+                prep.merges[m as usize]
+            );
+        }
+    }
+
+    #[test]
+    fn merge_reaching_into_a_fact_belongs_to_the_fact() {
+        let mut cells = vec![text(0, 0)];
+        for row in 2..=4 {
+            for col in 0..=2 {
+                cells.push(text(row, col));
+            }
+        }
+        let input = input(cells, vec![rect(0, 0, 4, 0)], rect(2, 0, 4, 2));
+        merges_once(&input);
+        let (_, works, _) = segment_work(&input, &Limits::default(), &|| false);
+        let fact = works.iter().find(|w| w.origin == Origin::Fact).unwrap();
+        assert_eq!(fact.merges, [0]);
+    }
+
+    #[test]
+    fn merge_crossing_a_line_around_a_fact_stays_with_its_anchor() {
+        // A1 merged over A1:A3 beside a fact B2:D5, with a column E and row 6 around it.
+        let mut cells = vec![text(0, 0)];
+        for row in 0..=5 {
+            cells.push(text(row, 4));
+        }
+        for col in 0..=3 {
+            cells.push(text(5, col));
+        }
+        for row in 1..=4 {
+            for col in 1..=3 {
+                cells.push(text(row, col));
+            }
+        }
+        let input = input(cells, vec![rect(0, 0, 2, 0)], rect(1, 1, 4, 3));
+        merges_once(&input);
+        let (_, works, _) = segment_work(&input, &Limits::default(), &|| false);
+        let holder = works.iter().find(|w| w.merges == [0]).unwrap();
+        assert!(holder.region.rect.contains(Pos { row: 0, col: 0 }));
     }
 }

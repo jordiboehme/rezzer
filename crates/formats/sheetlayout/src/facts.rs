@@ -5,6 +5,8 @@
 //! Facts first: Excel tables, database ranges, pivots and autofilters set exact regions, and
 //! defined names join rule regions.
 
+use std::collections::HashSet;
+
 use crate::input::{FactKind, Input, Rect};
 use crate::occupancy::Prep;
 use crate::{Certainty, Evidence, Issue, IssueKind, Kind, Origin, Region, Work};
@@ -47,15 +49,35 @@ fn label(kind: &FactKind) -> String {
     }
 }
 
+/// Overlap issues written one by one; past this, one summary counts the rest.
+const OVERLAP_ISSUES: usize = 100;
+/// Facts between two questions to the stop callback.
+const STOP_EVERY: usize = 1024;
+/// Names between two questions to the stop callback.
+const NAMES_STOP_EVERY: usize = 64;
+
 /// Picks the facts that set regions. A fact on the range of a higher one becomes its
-/// evidence; facts of one level that overlap both stay, with an `Overlap` issue. At most
-/// `cap` facts are kept.
-pub(crate) fn resolve(input: &Input, cap: usize, issues: &mut Vec<Issue>) -> Vec<Kept> {
+/// evidence; facts of one level that overlap both stay. Each such fact gives one `Overlap`
+/// issue that names the first range it overlaps and how many it overlaps in all; past 100
+/// such issues one summary counts the rest. At most `cap` facts are kept. Gives `true` with
+/// the facts when the stop callback ended the work.
+pub(crate) fn resolve(
+    input: &Input,
+    cap: usize,
+    issues: &mut Vec<Issue>,
+    stop: &dyn Fn() -> bool,
+) -> (Vec<Kept>, bool) {
     let mut order: Vec<usize> = (0..input.facts.len()).collect();
     order.sort_by_key(|&i| level(&input.facts[i].kind));
     let mut kept: Vec<Kept> = Vec::new();
     let mut dropped = 0usize;
-    for i in order {
+    let mut overlaps = 0usize;
+    let mut stopped = false;
+    for (n, i) in order.into_iter().enumerate() {
+        if n % STOP_EVERY == STOP_EVERY - 1 && stop() {
+            stopped = true;
+            break;
+        }
         let fact = &input.facts[i];
         let rect = fact.rect.normalized();
         let lv = level(&fact.kind);
@@ -79,13 +101,27 @@ pub(crate) fn resolve(input: &Input, cap: usize, issues: &mut Vec<Issue>) -> Vec
             dropped += 1;
             continue;
         }
+        let mut first = None;
+        let mut count = 0usize;
         for k in &kept {
             if let Some(common) = k.rect.intersection(&rect) {
+                first.get_or_insert((k.fact, common));
+                count += 1;
+            }
+        }
+        if let Some((other, common)) = first {
+            overlaps += 1;
+            if overlaps <= OVERLAP_ISSUES {
+                let more = match count - 1 {
+                    0 => String::new(),
+                    1 => " and 1 other range".to_string(),
+                    m => format!(" and {m} other ranges"),
+                };
                 issues.push(Issue {
                     what: format!(
-                        "{} and {} overlap in {}; both are kept",
-                        label(&input.facts[k.fact].kind),
+                        "{} overlaps {} in {}{more}; all are kept",
                         label(&fact.kind),
+                        label(&input.facts[other].kind),
                         common.a1()
                     ),
                     kind: IssueKind::Overlap,
@@ -99,6 +135,16 @@ pub(crate) fn resolve(input: &Input, cap: usize, issues: &mut Vec<Issue>) -> Vec
             evidence: vec![evidence_of(&fact.kind)],
         });
     }
+    if overlaps > OVERLAP_ISSUES {
+        issues.push(Issue {
+            what: format!(
+                "{} more ranges overlap others of the same kind; all are kept",
+                overlaps - OVERLAP_ISSUES
+            ),
+            kind: IssueKind::Overlap,
+            rect: None,
+        });
+    }
     if dropped > 0 {
         issues.push(Issue {
             what: format!(
@@ -108,7 +154,7 @@ pub(crate) fn resolve(input: &Input, cap: usize, issues: &mut Vec<Issue>) -> Vec
             rect: None,
         });
     }
-    kept
+    (kept, stopped)
 }
 
 /// What the facts hold.
@@ -120,8 +166,10 @@ pub(crate) struct Held {
     pub stopped: bool,
 }
 
-/// Gives each fact the cells and merges anchored in it. A merge that reaches into a fact is
-/// not free either: its anchor cell stays free and is cut like any cell.
+/// Gives each fact the cells in its range and the merges that reach into it. A merge belongs
+/// to the fact that holds its anchor cell, else to the first fact it reaches into; its anchor
+/// cell outside the fact stays free and is cut like any cell. So every merge belongs to
+/// exactly one region.
 pub(crate) fn assign(prep: &Prep, kept: &[Kept], stop: &dyn Fn() -> bool) -> Held {
     let ncells = prep.cells.len();
     let mut taken = vec![false; prep.items()];
@@ -160,15 +208,19 @@ pub(crate) fn assign(prep: &Prep, kept: &[Kept], stop: &dyn Fn() -> bool) -> Hel
             row: m.top,
             col: m.left,
         };
-        let mut owner = false;
+        let mut owner = None;
         for (f, k) in kept.iter().enumerate() {
             if k.rect.intersects(m) {
                 taken[ncells + j] = true;
-                if !owner && k.rect.contains(anchor) {
-                    merges[f].push(j as u32);
-                    owner = true;
+                if k.rect.contains(anchor) {
+                    owner = Some(f);
+                    break;
                 }
+                owner.get_or_insert(f);
             }
+        }
+        if let Some(f) = owner {
+            merges[f].push(j as u32);
         }
     }
     Held {
@@ -223,17 +275,57 @@ pub(crate) fn region(input: &Input, kept: &Kept) -> Region {
         unsure: Vec::new(),
         rows: Vec::new(),
         hidden_header,
+        rest: false,
     }
 }
 
 /// Spec 6.1 item 7: a name over two or more rule regions, inside their combined bounds,
 /// joins them. A name never cuts. A name whose rectangle is a region's is its evidence.
-pub(crate) fn join_names(input: &Input, works: &mut [Work], cap: usize, issues: &mut Vec<Issue>) {
+pub(crate) fn join_names(
+    input: &Input,
+    works: &mut [Work],
+    cap: usize,
+    issues: &mut Vec<Issue>,
+    stop: &dyn Fn() -> bool,
+) {
     let mut used = 0usize;
     let mut skipped = 0usize;
-    for name in &input.names {
+    let mut seen: HashSet<Rect> = HashSet::new();
+    let mut hit = vec![false; works.len()];
+    let mut hits: Vec<usize> = Vec::new();
+    for (n, name) in input.names.iter().enumerate() {
+        if n % NAMES_STOP_EVERY == 0 && stop() {
+            let left = input.names.len() - n;
+            let words = format!("{left} defined names were not used to join regions");
+            match issues.iter_mut().find(|i| i.kind == IssueKind::Stopped) {
+                Some(i) => {
+                    i.what.push_str("; ");
+                    i.what.push_str(&words);
+                }
+                None => issues.push(Issue {
+                    what: format!("time limit reached: {words}"),
+                    kind: IssueKind::Stopped,
+                    rect: None,
+                }),
+            }
+            break;
+        }
         let rect = name.rect.normalized();
         if name.builtin || rect.height() < 2 || rect.width() < 2 {
+            continue;
+        }
+        let evidence = Evidence::DefinedName {
+            name: name.name.clone(),
+        };
+        if !seen.insert(rect) {
+            // A name over the same rectangle as one before: only its evidence can differ.
+            if let Some(w) = works
+                .iter_mut()
+                .find(|w| !w.dead && w.origin == Origin::Rule && w.region.rect == rect)
+                && !w.region.evidence.contains(&evidence)
+            {
+                w.region.evidence.push(evidence);
+            }
             continue;
         }
         if used >= cap {
@@ -241,15 +333,16 @@ pub(crate) fn join_names(input: &Input, works: &mut [Work], cap: usize, issues: 
             continue;
         }
         used += 1;
-        let hits: Vec<usize> = works
-            .iter()
-            .enumerate()
-            .filter(|(_, w)| !w.dead && w.origin == Origin::Rule && w.region.rect.intersects(&rect))
-            .map(|(i, _)| i)
-            .collect();
-        let evidence = Evidence::DefinedName {
-            name: name.name.clone(),
-        };
+        hits.clear();
+        hits.extend(
+            works
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| {
+                    !w.dead && w.origin == Origin::Rule && w.region.rect.intersects(&rect)
+                })
+                .map(|(i, _)| i),
+        );
         if hits.len() == 1 {
             let w = &mut works[hits[0]];
             if w.region.rect == rect && !w.region.evidence.contains(&evidence) {
@@ -268,10 +361,16 @@ pub(crate) fn join_names(input: &Input, works: &mut [Work], cap: usize, issues: 
         if !joined.covers(&rect) {
             continue;
         }
+        for &i in &hits {
+            hit[i] = true;
+        }
         let blocked = works
             .iter()
             .enumerate()
-            .any(|(i, w)| !w.dead && !hits.contains(&i) && w.region.rect.intersects(&joined));
+            .any(|(i, w)| !w.dead && !hit[i] && w.region.rect.intersects(&joined));
+        for &i in &hits {
+            hit[i] = false;
+        }
         if blocked {
             continue;
         }

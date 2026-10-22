@@ -139,7 +139,6 @@ impl Sheet {
         } else {
             (Class::Text, None)
         };
-        self.cells.retain(|c| c.pos != p);
         self.cells.push(CellIn {
             pos: p,
             class,
@@ -174,8 +173,11 @@ impl Sheet {
     }
 
     pub fn input(&self) -> Input<'static> {
+        // The last cell put at a position wins.
         let mut cells = self.cells.clone();
+        cells.reverse();
         cells.sort_by_key(|c| (c.pos.row, c.pos.col));
+        cells.dedup_by_key(|c| c.pos);
         Input {
             cells,
             merges: self.merges.clone(),

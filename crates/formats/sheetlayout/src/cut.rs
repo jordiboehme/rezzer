@@ -2,20 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Rule G: the recursive XY cut at fully empty rows and columns.
+//! Rule G: the recursive XY cut at fully empty rows and columns, and the split of blocks that
+//! touch only at a corner.
 //!
 //! Each piece holds only its own items. A split sorts the piece's items by their first row
 //! (or column) and sweeps their intervals; a gap in the union is an empty row (or column)
 //! run. A merge never crosses a cut, because its whole span is occupied. The cost is the
-//! number of items times the cut depth, times the log of the sort.
+//! number of items times the cut depth, times the log of the sort. The corner split is a
+//! union-find over the items' rectangles by a sweep, with no grid of positions.
 
-use crate::input::{Limits, Rect};
+use std::collections::BTreeMap;
+
+use crate::input::{Limits, Pos, Rect};
 use crate::occupancy::{Prep, bounds};
 
 /// Why the cut ended before every item was placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Trip {
-    Depth,
     Regions,
     Stopped,
 }
@@ -23,18 +26,23 @@ pub(crate) enum Trip {
 /// One piece that cannot be cut further.
 pub(crate) struct Leaf {
     pub ids: Vec<u32>,
+    /// Merges that no longer count as occupied (they crossed a line around a fact range) and
+    /// belong here, because their anchor lies here.
+    pub loose: Vec<u32>,
     pub rows_cut: bool,
     pub cols_cut: bool,
     /// Split from a piece it touched only at a corner.
     pub corner: bool,
     /// Cut apart from a piece that reached around a fact range.
     pub beside: bool,
+    /// The piece needed a cut deeper than the limit and stays uncut.
+    pub deep: bool,
 }
 
 pub(crate) struct Cut {
     pub leaves: Vec<Leaf>,
-    /// The limit that ended the cut, with the items not placed.
-    pub rest: Option<(Trip, Vec<u32>)>,
+    /// The limit that ended the cut, with the items and loose merges not placed.
+    pub rest: Option<(Trip, Vec<u32>, Vec<u32>)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -54,8 +62,16 @@ enum How {
     Corner,
 }
 
+/// A merge that is no longer occupied, with the item of its anchor cell when there is one.
+#[derive(Clone, Copy)]
+struct Loose {
+    merge: u32,
+    anchor: Option<u32>,
+}
+
 struct Piece {
     ids: Vec<u32>,
+    loose: Vec<Loose>,
     depth: u32,
     next: Next,
     rows_cut: bool,
@@ -99,8 +115,35 @@ fn split(prep: &Prep, ids: &mut [u32], rows: bool) -> Option<Vec<Vec<u32>>> {
     Some(parts)
 }
 
+/// Gives each loose merge to the part that holds its anchor cell, or to the first part when
+/// it has none.
+fn hand_down(
+    loose: Vec<Loose>,
+    parts: &[Vec<u32>],
+    owner: &mut Vec<u32>,
+    items: usize,
+) -> Vec<Vec<Loose>> {
+    let mut out: Vec<Vec<Loose>> = parts.iter().map(|_| Vec::new()).collect();
+    if loose.is_empty() || out.is_empty() {
+        return out;
+    }
+    if owner.is_empty() {
+        *owner = vec![0; items];
+    }
+    for (k, part) in parts.iter().enumerate() {
+        for &id in part {
+            owner[id as usize] = k as u32;
+        }
+    }
+    for l in loose {
+        let k = l.anchor.map_or(0, |a| owner[a as usize] as usize);
+        out[k].push(l);
+    }
+    out
+}
+
 /// Cuts the free items into leaves in reading order. `room` is how many regions the cut may
-/// still give, the rest region included.
+/// still give, the rest region included. `facts` are the fact ranges no leaf may reach.
 pub(crate) fn cut(
     prep: &Prep,
     free: Vec<u32>,
@@ -111,9 +154,11 @@ pub(crate) fn cut(
 ) -> Cut {
     let mut leaves = Vec::new();
     let mut stack = Vec::new();
+    let mut owner = Vec::new();
     if !free.is_empty() {
         stack.push(Piece {
             ids: free,
+            loose: Vec::new(),
             depth: 0,
             next: Next::Both,
             rows_cut: false,
@@ -124,10 +169,12 @@ pub(crate) fn cut(
     }
     let rest = |p: Piece, stack: Vec<Piece>, why: Trip| {
         let mut ids = p.ids;
+        let mut loose: Vec<u32> = p.loose.iter().map(|l| l.merge).collect();
         for q in stack {
             ids.extend(q.ids);
+            loose.extend(q.loose.iter().map(|l| l.merge));
         }
-        Some((why, ids))
+        Some((why, ids, loose))
     };
     while let Some(mut p) = stack.pop() {
         if stop() {
@@ -149,25 +196,57 @@ pub(crate) fn cut(
             && let Some(f) =
                 bounds(prep, &p.ids).and_then(|b| facts.iter().find(|f| f.intersects(&b)))
         {
-            parts = Some(around(prep, &p.ids, f));
+            let (groups, dropped) = around(prep, &p.ids, f);
+            p.loose.extend(dropped);
+            parts = Some(groups);
             how = How::Fact;
         }
         if parts.is_none() && p.next != Next::Leaf {
-            parts = corners(prep, &p.ids);
-            how = How::Corner;
-        }
-        match parts {
-            Some(parts) => {
-                if p.depth >= limits.max_cut_depth {
+            match corners(prep, &p.ids, stop) {
+                Corners::Parts(v) => {
+                    parts = Some(v);
+                    how = How::Corner;
+                }
+                Corners::One => {}
+                Corners::Stopped => {
                     return Cut {
                         leaves,
-                        rest: rest(p, stack, Trip::Depth),
+                        rest: rest(p, stack, Trip::Stopped),
                     };
                 }
-                for ids in parts.into_iter().rev() {
+            }
+        }
+        // A cut around a fact range never reaches that range again, so it needs no depth
+        // limit. A piece past the limit is cut around the facts it reaches first, so an uncut
+        // piece never encloses a fact.
+        let mut deep = parts.is_some() && how != How::Fact && p.depth >= limits.max_cut_depth;
+        if deep
+            && let Some(f) =
+                bounds(prep, &p.ids).and_then(|b| facts.iter().find(|f| f.intersects(&b)))
+        {
+            let (groups, dropped) = around(prep, &p.ids, f);
+            p.loose.extend(dropped);
+            parts = Some(groups);
+            how = How::Fact;
+            deep = false;
+        }
+        match parts {
+            Some(parts) if !deep => {
+                let loose = hand_down(
+                    std::mem::take(&mut p.loose),
+                    &parts,
+                    &mut owner,
+                    prep.items(),
+                );
+                for (ids, loose) in parts.into_iter().zip(loose).rev() {
                     stack.push(Piece {
                         ids,
-                        depth: p.depth + 1,
+                        loose,
+                        depth: if how == How::Fact {
+                            p.depth
+                        } else {
+                            p.depth + 1
+                        },
                         next: match how {
                             How::Rows => Next::Cols,
                             How::Cols => Next::Rows,
@@ -181,7 +260,7 @@ pub(crate) fn cut(
                     });
                 }
             }
-            None => {
+            _ => {
                 let full = if stack.is_empty() {
                     leaves.len() >= room
                 } else {
@@ -195,10 +274,12 @@ pub(crate) fn cut(
                 }
                 leaves.push(Leaf {
                     ids: p.ids,
+                    loose: p.loose.iter().map(|l| l.merge).collect(),
                     rows_cut: p.rows_cut,
                     cols_cut: p.cols_cut,
                     corner: p.corner,
                     beside: p.beside,
+                    deep,
                 });
             }
         }
@@ -208,10 +289,11 @@ pub(crate) fn cut(
 
 /// Cuts a piece whose bounds reach a fact range into the items above it, left of it, right
 /// of it and below it. A merge that crosses one of these lines is no longer counted as
-/// occupied; its anchor cell stays. The parts never reach the fact range, so a rule region
-/// never holds a fact's cells.
-fn around(prep: &Prep, ids: &[u32], f: &Rect) -> Vec<Vec<u32>> {
+/// occupied; it is handed on with the part that holds its anchor cell. The parts never reach
+/// the fact range, so a rule region never holds a fact's cells.
+fn around(prep: &Prep, ids: &[u32], f: &Rect) -> (Vec<Vec<u32>>, Vec<Loose>) {
     let mut groups: [Vec<u32>; 4] = Default::default();
+    let mut dropped = Vec::new();
     for &id in ids {
         let r = prep.item_rect(id);
         let g = if r.bottom < f.top {
@@ -219,161 +301,310 @@ fn around(prep: &Prep, ids: &[u32], f: &Rect) -> Vec<Vec<u32>> {
         } else if r.top > f.bottom {
             3
         } else if r.top < f.top || r.bottom > f.bottom {
-            continue;
+            usize::MAX
         } else if r.right < f.left {
             1
         } else if r.left > f.right {
             2
         } else {
-            continue;
+            usize::MAX
         };
+        if g == usize::MAX {
+            if let Some(merge) = prep.merge_of(id) {
+                let anchor = prep
+                    .cell_at(Pos {
+                        row: r.top,
+                        col: r.left,
+                    })
+                    .map(|k| k as u32);
+                dropped.push(Loose { merge, anchor });
+            }
+            continue;
+        }
         groups[g].push(id);
     }
-    groups.into_iter().filter(|g| !g.is_empty()).collect()
+    (
+        groups.into_iter().filter(|g| !g.is_empty()).collect(),
+        dropped,
+    )
 }
 
-/// The largest grid of elementary cells the corner split builds, and its size per item: a
-/// sparser piece is not split at corners and stays one region.
-const CORNER_AREA_MAX: u64 = 1 << 20;
-const CORNER_AREA_PER_ITEM: u64 = 64;
+/// What the corner split found.
+enum Corners {
+    One,
+    Parts(Vec<Vec<u32>>),
+    Stopped,
+}
+
+enum Halt {
+    Stopped,
+    Budget,
+}
+
+/// Union-find with path halving.
+struct Dsu(Vec<u32>);
+
+impl Dsu {
+    fn new(n: usize) -> Self {
+        Self((0..n as u32).collect())
+    }
+
+    fn find(&mut self, mut x: u32) -> u32 {
+        while self.0[x as usize] != x {
+            let up = self.0[self.0[x as usize] as usize];
+            self.0[x as usize] = up;
+            x = up;
+        }
+        x
+    }
+
+    fn union(&mut self, a: u32, b: u32) -> bool {
+        let (a, b) = (self.find(a), self.find(b));
+        if a == b {
+            return false;
+        }
+        self.0[a.max(b) as usize] = a.min(b);
+        true
+    }
+}
+
+/// A run of columns and the rectangle that covers it to the lowest row.
+#[derive(Clone, Copy)]
+struct Seg {
+    right: u32,
+    bottom: u32,
+    item: u32,
+}
+
+/// Visits of the column map a corner split may make, per item and in all: a shape that needs
+/// more (many long merges crossed by many wide ones) is not split at corners.
+const VISITS_PER_ITEM: u64 = 64;
+const VISITS_BASE: u64 = 4096;
+/// Rectangles between two questions to the stop callback.
+const STOP_EVERY: usize = 4096;
+/// Rounds of joining parts whose bounds overlap.
+const REJOIN_ROUNDS: usize = 64;
+
+/// Joins rectangles that overlap; with `touch` also rectangles side by side or stacked, never
+/// on a diagonal only. A sweep by top row keeps a map of column runs, each holding the
+/// rectangle that covers it down to the lowest row; a new rectangle joins the runs it meets.
+/// Gives the number of joins.
+fn connect(
+    rect: &dyn Fn(u32) -> Rect,
+    n: usize,
+    touch: bool,
+    dsu: &mut Dsu,
+    visits: &mut u64,
+    stop: &dyn Fn() -> bool,
+) -> Result<usize, Halt> {
+    let mut order: Vec<u32> = (0..n as u32).collect();
+    order.sort_unstable_by_key(|&i| {
+        let r = rect(i);
+        (r.top, r.left)
+    });
+    let mut map: BTreeMap<u32, Seg> = BTreeMap::new();
+    let mut joins = 0usize;
+    let mut met: Vec<(u32, Seg)> = Vec::new();
+    for (k, &b) in order.iter().enumerate() {
+        if k % STOP_EVERY == STOP_EVERY - 1 && stop() {
+            return Err(Halt::Stopped);
+        }
+        let r = rect(b);
+        let (lo, hi) = if touch {
+            (r.left.saturating_sub(1), r.right.saturating_add(1))
+        } else {
+            (r.left, r.right)
+        };
+        let start = match map.range(..=lo).next_back() {
+            Some((&key, s)) if s.right >= lo => key,
+            _ => lo,
+        };
+        met.clear();
+        met.extend(map.range(start..=hi).map(|(&key, s)| (key, *s)));
+        *visits = visits
+            .checked_sub(met.len() as u64 + 1)
+            .ok_or(Halt::Budget)?;
+        for &(key, s) in &met {
+            map.remove(&key);
+            if u64::from(s.bottom) + 1 < u64::from(r.top) {
+                // Ended above the row before: it meets nothing any more.
+                continue;
+            }
+            let meets = if s.bottom >= r.top {
+                true
+            } else {
+                // Ends in the row above: stacked only when the columns overlap.
+                touch && s.right >= r.left && key <= r.right
+            };
+            if meets && dsu.union(b, s.item) {
+                joins += 1;
+            }
+        }
+        // Write the new rectangle over its columns where it reaches lower than what is there.
+        let mut cur = u64::from(r.left);
+        let put = |map: &mut BTreeMap<u32, Seg>, left: u64, seg: Seg| {
+            map.insert(left as u32, seg);
+        };
+        for &(key, s) in &met {
+            if u64::from(s.bottom) + 1 < u64::from(r.top) {
+                continue;
+            }
+            if s.right < r.left || key > r.right {
+                // Outside the new columns (the side runs of `touch`): unchanged.
+                put(&mut map, u64::from(key), s);
+                continue;
+            }
+            if key < r.left {
+                put(
+                    &mut map,
+                    u64::from(key),
+                    Seg {
+                        right: r.left - 1,
+                        ..s
+                    },
+                );
+            }
+            let a = u64::from(key.max(r.left));
+            let z = s.right.min(r.right);
+            if a > cur {
+                put(
+                    &mut map,
+                    cur,
+                    Seg {
+                        right: (a - 1) as u32,
+                        bottom: r.bottom,
+                        item: b,
+                    },
+                );
+            }
+            if s.bottom >= r.bottom {
+                put(&mut map, a, Seg { right: z, ..s });
+            } else {
+                put(
+                    &mut map,
+                    a,
+                    Seg {
+                        right: z,
+                        bottom: r.bottom,
+                        item: b,
+                    },
+                );
+            }
+            cur = u64::from(z) + 1;
+            if s.right > r.right {
+                put(
+                    &mut map,
+                    u64::from(r.right) + 1,
+                    Seg {
+                        right: s.right,
+                        ..s
+                    },
+                );
+            }
+        }
+        if cur <= u64::from(r.right) {
+            put(
+                &mut map,
+                cur,
+                Seg {
+                    right: r.right,
+                    bottom: r.bottom,
+                    item: b,
+                },
+            );
+        }
+    }
+    Ok(joins)
+}
 
 /// Splits a piece that no empty row or column cuts into its parts that touch only at
 /// corners: the orthogonally connected parts of its occupied positions. Parts whose bounds
-/// overlap stay together, so the regions never overlap. Works on the grid of elementary
-/// cells between the items' edges, not on sheet positions; gives `None` when the piece is
-/// one part or that grid would be too large for the piece.
-fn corners(prep: &Prep, ids: &[u32]) -> Option<Vec<Vec<u32>>> {
-    if ids.len() < 2 {
-        return None;
+/// overlap are joined again, so regions never overlap. Gives `One` when the piece is one
+/// part, or when the shape needs more work than the visit budget allows.
+fn corners(prep: &Prep, ids: &[u32], stop: &dyn Fn() -> bool) -> Corners {
+    let k = ids.len();
+    if k < 2 {
+        return Corners::One;
     }
-    let rects: Vec<Rect> = ids.iter().map(|&id| prep.item_rect(id)).collect();
-    let edges = |a: fn(&Rect) -> u32, b: fn(&Rect) -> u32| {
-        let mut v: Vec<u64> = rects
-            .iter()
-            .flat_map(|r| [u64::from(a(r)), u64::from(b(r)) + 1])
-            .collect();
-        v.sort_unstable();
-        v.dedup();
-        v
-    };
-    let rows = edges(|r| r.top, |r| r.bottom);
-    let cols = edges(|r| r.left, |r| r.right);
-    let (h, w) = (rows.len() - 1, cols.len() - 1);
-    let budget = CORNER_AREA_MAX.min((ids.len() as u64).saturating_mul(CORNER_AREA_PER_ITEM));
-    if (h as u64) * (w as u64) > budget.max(4096) {
-        return None;
+    let item = |i: u32| prep.item_rect(ids[i as usize]);
+    let mut visits = (k as u64).saturating_mul(VISITS_PER_ITEM) + VISITS_BASE;
+    let mut dsu = Dsu::new(k);
+    match connect(&item, k, true, &mut dsu, &mut visits, stop) {
+        Ok(_) => {}
+        Err(Halt::Stopped) => return Corners::Stopped,
+        Err(Halt::Budget) => return Corners::One,
     }
-    let at = |v: &[u64], x: u64| v.partition_point(|&e| e < x);
-    // Coverage by a 2D difference array, then prefix sums.
-    let stride = w + 1;
-    let mut grid = vec![0i32; (h + 1) * stride];
-    let mut corner_of = Vec::with_capacity(rects.len());
-    for r in &rects {
-        let (r0, r1) = (
-            at(&rows, u64::from(r.top)),
-            at(&rows, u64::from(r.bottom) + 1),
-        );
-        let (c0, c1) = (
-            at(&cols, u64::from(r.left)),
-            at(&cols, u64::from(r.right) + 1),
-        );
-        grid[r0 * stride + c0] += 1;
-        grid[r0 * stride + c1] -= 1;
-        grid[r1 * stride + c0] -= 1;
-        grid[r1 * stride + c1] += 1;
-        corner_of.push(r0 * stride + c0);
-    }
-    for i in 0..=h {
-        for j in 0..=w {
-            let mut v = grid[i * stride + j];
-            if i > 0 {
-                v += grid[(i - 1) * stride + j];
-            }
-            if j > 0 {
-                v += grid[i * stride + j - 1];
-            }
-            if i > 0 && j > 0 {
-                v -= grid[(i - 1) * stride + j - 1];
-            }
-            grid[i * stride + j] = v;
+    // Number the parts and take their bounds.
+    let mut part_of = vec![u32::MAX; k];
+    let mut boxes: Vec<Rect> = Vec::new();
+    for i in 0..k as u32 {
+        let root = dsu.find(i) as usize;
+        if part_of[root] == u32::MAX {
+            part_of[root] = boxes.len() as u32;
+            boxes.push(item(i));
         }
+        let p = part_of[root];
+        part_of[i as usize] = p;
+        boxes[p as usize] = boxes[p as usize].union(&item(i));
     }
-    // Label the covered cells by flood fill; a label is stored as -(label + 1).
-    let mut labels = 0i32;
-    let mut queue: Vec<u32> = Vec::new();
-    for start in 0..h * stride {
-        if start % stride == w || grid[start] <= 0 {
-            continue;
+    drop(dsu);
+    let mut joined_all = false;
+    for _ in 0..REJOIN_ROUNDS {
+        if boxes.len() < 2 {
+            return Corners::One;
         }
-        labels += 1;
-        grid[start] = -labels;
-        queue.push(start as u32);
-        while let Some(k) = queue.pop() {
-            let k = k as usize;
-            let (i, j) = (k / stride, k % stride);
-            let mut visit = |n: usize| {
-                if grid[n] > 0 {
-                    grid[n] = -labels;
-                    queue.push(n as u32);
-                }
-            };
-            if i > 0 {
-                visit(k - stride);
-            }
-            if i + 1 < h {
-                visit(k + stride);
-            }
-            if j > 0 {
-                visit(k - 1);
-            }
-            if j + 1 < w {
-                visit(k + 1);
-            }
+        if stop() {
+            return Corners::Stopped;
         }
+        let mut d2 = Dsu::new(boxes.len());
+        let b = &boxes;
+        match connect(
+            &|i| b[i as usize],
+            boxes.len(),
+            false,
+            &mut d2,
+            &mut visits,
+            stop,
+        ) {
+            Ok(0) => {
+                joined_all = true;
+                break;
+            }
+            Ok(_) => {}
+            Err(Halt::Stopped) => return Corners::Stopped,
+            Err(Halt::Budget) => return Corners::One,
+        }
+        let mut renumber = vec![u32::MAX; boxes.len()];
+        let mut next: Vec<Rect> = Vec::new();
+        for (p, bx) in boxes.iter().enumerate() {
+            let root = d2.find(p as u32) as usize;
+            if renumber[root] == u32::MAX {
+                renumber[root] = next.len() as u32;
+                next.push(*bx);
+            }
+            let q = renumber[root] as usize;
+            renumber[p] = q as u32;
+            next[q] = next[q].union(bx);
+        }
+        for p in part_of.iter_mut() {
+            *p = renumber[*p as usize];
+        }
+        boxes = next;
     }
-    if labels < 2 {
-        return None;
+    if !joined_all || boxes.len() < 2 {
+        return Corners::One;
     }
-    let mut parts: Vec<(Rect, Vec<u32>)> = Vec::new();
-    let mut index = vec![usize::MAX; labels as usize];
-    for ((&id, r), &k) in ids.iter().zip(&rects).zip(&corner_of) {
-        let l = (-grid[k] - 1) as usize;
-        if index[l] == usize::MAX {
-            index[l] = parts.len();
-            parts.push((*r, Vec::new()));
-        }
-        let part = &mut parts[index[l]];
-        part.0 = part.0.union(r);
-        part.1.push(id);
+    let mut parts: Vec<Vec<u32>> = vec![Vec::new(); boxes.len()];
+    for (i, &p) in part_of.iter().enumerate() {
+        parts[p as usize].push(ids[i]);
     }
-    drop(grid);
-    // Parts whose bounds overlap are joined until none do.
-    for _ in 0..64 {
-        parts.sort_by_key(|p| (p.0.top, p.0.left));
-        let mut joined = false;
-        let mut out: Vec<(Rect, Vec<u32>)> = Vec::with_capacity(parts.len());
-        for part in parts {
-            match out.iter_mut().rev().find(|q| q.0.intersects(&part.0)) {
-                Some(q) => {
-                    q.0 = q.0.union(&part.0);
-                    q.1.extend(part.1);
-                    joined = true;
-                }
-                None => out.push(part),
-            }
-        }
-        parts = out;
-        if parts.len() < 2 {
-            return None;
-        }
-        if !joined {
-            return Some(parts.into_iter().map(|p| p.1).collect());
-        }
-    }
-    None
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_unstable_by_key(|&p| (boxes[p].top, boxes[p].left));
+    let mut slots: Vec<Option<Vec<u32>>> = parts.into_iter().map(Some).collect();
+    Corners::Parts(order.into_iter().filter_map(|p| slots[p].take()).collect())
 }
 
 /// The bounding rectangle of a leaf.
-pub(crate) fn leaf_rect(prep: &Prep, leaf: &Leaf) -> crate::input::Rect {
+pub(crate) fn leaf_rect(prep: &Prep, leaf: &Leaf) -> Rect {
     bounds(prep, &leaf.ids).expect("a leaf holds at least one item")
 }
