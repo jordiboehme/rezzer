@@ -419,7 +419,15 @@ impl<'a> Build<'a> {
         let open = name.as_ref().is_some_and(|(_, open)| *open);
         let full_name = match name {
             Some((t, _)) if parent.is_empty() => t,
-            Some((t, _)) => format!("{parent}.{t}"),
+            // Made at its size: a long name grown step by step would leave its earlier
+            // buffers to the allocator.
+            Some((t, _)) => {
+                let mut full = String::with_capacity(parent.len() + 1 + t.len());
+                full.push_str(parent);
+                full.push('.');
+                full.push_str(&t);
+                full
+            }
             None => parent.to_string(),
         };
         if open {
