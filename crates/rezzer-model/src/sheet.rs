@@ -21,7 +21,14 @@ pub struct CellArea {
 
 /// The index of the area that holds each `(row, column)` point, 0-based. Areas normally do
 /// not overlap. When some do (ranges of a damaged file), a point goes to the smallest area
-/// that holds it: the innermost range. Every point lies in at most one area either way.
+/// that holds it: the innermost range. Between areas of equal size the one that starts
+/// higher, then further left, wins, and between equal rectangles the lower index, so the
+/// answer does not depend on the order of the list. Every point lies in at most one area
+/// either way.
+///
+/// The layout detector gives cells to its regions by the same rule with its own copy of this
+/// sweep (`sheetlayout`'s `locate`), so the detector and the reader agree on every cell; the
+/// two keep the same structure.
 ///
 /// One sweep by row. The areas that have begun are kept in a segment tree over their column
 /// edges: each area sits in the O(log R) nodes that cover its columns, in a heap ordered by
@@ -60,7 +67,14 @@ pub fn locate_cells(areas: &[CellArea], points: &[(u32, u32)]) -> Vec<Option<usi
             let a = areas[k];
             let from = leaf_of(u64::from(a.left)).unwrap_or(0);
             let to = leaf_of(u64::from(a.right)).unwrap_or(0);
-            tree.insert(1, 0, leaves, from, to, Reverse((size(&a), k)));
+            tree.insert(
+                1,
+                0,
+                leaves,
+                from,
+                to,
+                Reverse((size(&a), a.top, a.left, k)),
+            );
             next += 1;
         }
         let Some(leaf) = leaf_of(u64::from(col)).filter(|&l| l < leaves) else {
@@ -71,10 +85,13 @@ pub fn locate_cells(areas: &[CellArea], points: &[(u32, u32)]) -> Vec<Option<usi
     out
 }
 
+/// The order of areas for a point: size, top row, left column, index; the least wins.
+type Key = (u64, u32, u32, usize);
+
 /// A segment tree over column leaves; each node holds the areas that cover all its leaves
 /// (and not all of its parent's), smallest first.
 struct Tree {
-    heaps: Vec<BinaryHeap<Reverse<(u64, usize)>>>,
+    heaps: Vec<BinaryHeap<Reverse<Key>>>,
     leaves: usize,
 }
 
@@ -88,7 +105,7 @@ impl Tree {
         hi: usize,
         from: usize,
         to: usize,
-        item: Reverse<(u64, usize)>,
+        item: Reverse<Key>,
     ) {
         if to < lo || hi <= from {
             return;
@@ -106,10 +123,10 @@ impl Tree {
     /// any more (`live` is false: they ended above the sweep row) leave their heap for good.
     fn smallest(&mut self, leaf: usize, live: impl Fn(usize) -> bool) -> Option<usize> {
         let (mut node, mut lo, mut hi) = (1, 0, self.leaves);
-        let mut best: Option<(u64, usize)> = None;
+        let mut best: Option<Key> = None;
         loop {
             let heap = &mut self.heaps[node];
-            while let Some(&Reverse((_, k))) = heap.peek() {
+            while let Some(&Reverse((_, _, _, k))) = heap.peek() {
                 if live(k) {
                     break;
                 }
@@ -130,7 +147,7 @@ impl Tree {
                 (node, lo) = (2 * node + 1, mid);
             }
         }
-        best.map(|(_, k)| k)
+        best.map(|(_, _, _, k)| k)
     }
 }
 

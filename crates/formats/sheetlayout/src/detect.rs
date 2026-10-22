@@ -10,10 +10,11 @@
 
 use std::cell::Cell;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use crate::header::{self, Band};
-use crate::input::{CellIn, FactKind, Input, Limits, Rect};
+use crate::input::{CellIn, FactKind, Input, Limits, Pos, Rect};
+use crate::locate::locate_until;
 use crate::occupancy::Prep;
 use crate::paths::{self, PathStop};
 use crate::report;
@@ -236,60 +237,18 @@ impl<'p, 'a> Lines<'p, 'a> {
     }
 }
 
-/// How many open regions left of a cell the search looks at when facts overlap, once one of
-/// them holds the cell: past this many the smallest region found so far takes it. Until a
-/// region holds the cell the search goes on, over at most every open region (at most
-/// `Limits::max_regions`), and the stop callback is asked at each step.
-const OVERLAP_SCAN: usize = 64;
-
-/// Gives each region the cells it holds, by a sweep over the rows with the regions that are
-/// open in each row keyed by their left column. Regions do not overlap, so a cell has at most
-/// one; the one exception is facts of the same level that overlap in a damaged file
-/// (`overlap`, stated by an `Overlap` issue). Then a cell goes to the smallest region that
-/// holds it, the innermost fact, so every cell is in exactly one region.
-fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option<Vec<Vec<u32>>> {
+/// Gives each region the cells it holds. Regions do not overlap, except facts of the same
+/// level in a damaged file (stated by an `Overlap` issue); a cell then goes to the smallest
+/// region that holds it, the innermost fact, so every cell is in exactly one region. The
+/// rule is [`crate::locate::locate`], the twin of the reader's `rezzer_model::locate_cells`,
+/// so the detector and the reader place every cell alike. The stop callback is asked once
+/// per cell.
+fn distribute(prep: &Prep, rects: &[Rect], tick: &Tick) -> Option<Vec<Vec<u32>>> {
+    let points: Vec<Pos> = (0..prep.cells.len()).map(|k| prep.cell(k).pos).collect();
+    let owners = locate_until(rects, &points, &mut || tick.step())?;
     let mut out = vec![Vec::new(); rects.len()];
-    let mut order: Vec<usize> = (0..rects.len()).collect();
-    order.sort_by_key(|&i| rects[i].top);
-    let mut next = 0usize;
-    // Keyed by left column and index, so regions with the same left column all stay open.
-    let mut open: BTreeSet<(u32, usize)> = BTreeSet::new();
-    let mut ended: Vec<(u32, usize)> = Vec::new();
-    let size = |r: &Rect| r.height() * r.width();
-    for k in 0..prep.cells.len() {
-        if tick.step() {
-            return None;
-        }
-        let p = prep.cell(k).pos;
-        while next < order.len() && rects[order[next]].top <= p.row {
-            let i = order[next];
-            open.insert((rects[i].left, i));
-            next += 1;
-        }
-        let mut best: Option<usize> = None;
-        let mut looked = 0usize;
-        for &(left, i) in open.range(..=(p.col, usize::MAX)).rev() {
-            let r = &rects[i];
-            if r.bottom < p.row {
-                // Ended above: it can never hold a cell again.
-                ended.push((left, i));
-                continue;
-            }
-            if p.col <= r.right && best.is_none_or(|b| size(r) < size(&rects[b])) {
-                best = Some(i);
-            }
-            looked += 1;
-            if !overlap || (looked >= OVERLAP_SCAN && best.is_some()) {
-                break;
-            }
-            if tick.step() {
-                return None;
-            }
-        }
-        for e in ended.drain(..) {
-            open.remove(&e);
-        }
-        if let Some(i) = best {
+    for (k, owner) in owners.into_iter().enumerate() {
+        if let Some(i) = owner {
             out[i].push(k as u32);
         }
     }
@@ -397,8 +356,7 @@ pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout
     let rects: Vec<Rect> = works.iter().map(|w| w.region.rect).collect();
     let mut handed = !tick.hit();
     if handed {
-        let overlap = issues.iter().any(|i| i.kind == IssueKind::Overlap);
-        match distribute(&prep, &rects, overlap, &tick) {
+        match distribute(&prep, &rects, &tick) {
             Some(all) => {
                 for (w, cells) in works.iter_mut().zip(all) {
                     w.cells = cells;

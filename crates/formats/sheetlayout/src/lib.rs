@@ -53,6 +53,7 @@ mod detect;
 mod facts;
 mod header;
 mod input;
+mod locate;
 mod occupancy;
 mod paths;
 mod report;
@@ -64,6 +65,7 @@ pub use input::{
 };
 
 pub use detect::detect;
+pub use locate::locate;
 
 use cut::Trip;
 use occupancy::{Prep, bounds};
