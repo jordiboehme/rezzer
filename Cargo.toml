@@ -92,3 +92,11 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Measured 2026-10-22 on an Apple M5, cold build of the binary: strip takes it from 22.2 MB
+# to 17.6 MB, one codegen unit to 15.0 MB for 13 s more (63 to 76 s). Thin LTO gives no
+# smaller binary on top and makes a rebuild slower. Never set panic = "abort": the render
+# sizing, the barcode worker and the pipeline rely on catching a panic.
+[profile.release]
+strip = true
+codegen-units = 1
