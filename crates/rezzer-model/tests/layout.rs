@@ -480,3 +480,39 @@ fn row_size_uses_the_column_of_each_cell() {
     let ranges = split_rows(&[], &t, &[], 56);
     assert_eq!(borders(&ranges), vec![(2, 4), (5, 5)]);
 }
+
+#[test]
+fn row_ranges_keep_group_with_data_past_blank_rows() {
+    // Group row 4, blank row 5, data row 6: the group goes with its first data row, the blank
+    // row between them too. Rows 2 and 3 (18) with 4 and 5 (6 + 3) fit 39, row 6 does not.
+    let mut rows = vec![vec![cell("Name", "A1"), cell("Value", "B1")]];
+    for r in 2..=11 {
+        match r {
+            4 => rows.push(vec![cell("G", "A4")]),
+            5 => rows.push(Vec::new()),
+            _ => rows.push(data_row(r)),
+        }
+    }
+    let note = |row: u32, kind: RowKind| RowNote {
+        row,
+        kind,
+        level: None,
+        parent: None,
+        why: String::new(),
+    };
+    let notes = vec![note(4, RowKind::Group), note(5, RowKind::Blank)];
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(layout(vec![1], 2, 11, notes))),
+    };
+    let ranges = split_rows(&[heading()], &t, &[], 39);
+    let b = borders(&ranges);
+    // The next range holds 4 to 6 (18) and row 7 (9): 12 + 27 = 39.
+    assert_eq!(b[..2], [(2, 3), (4, 7)], "{b:?}");
+    assert!(b.iter().all(|(_, last)| !(4..=5).contains(last)), "{b:?}");
+}

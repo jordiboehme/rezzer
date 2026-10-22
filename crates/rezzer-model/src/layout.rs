@@ -201,7 +201,7 @@ const CELL_BASE: usize = 6;
 /// Every range repeats `lead` (heading and caption blocks) and the table's header band (its
 /// first `header_rows` rows); `tail` (notes) goes only into the last range, and is not
 /// counted. Rows are cut only at row borders, never between a [`RowKind::Group`] row and
-/// the row after it and never inside the rows a data cell's `row_span` covers. A unit
+/// its next row that is no group or blank row, and never inside the rows a data cell's `row_span` covers. A unit
 /// larger than the limit is a range of its own. Each range's table names its own data rows
 /// in `layout.data` and keeps the row notes of those rows.
 ///
@@ -252,7 +252,7 @@ pub fn split_rows(
         let (first, last) = data_rows(layout).unwrap_or((0, 0));
         return vec![whole(first, last)];
     };
-    let columns = columns(rows);
+    let columns = columns(rows, layout.header_paths.len());
     let tokens: Vec<usize> = rows
         .iter()
         .zip(&columns)
@@ -387,12 +387,10 @@ fn sheet_rows(layout: &TableLayout, data: &[Vec<Cell>]) -> Vec<u32> {
         .collect()
 }
 
-/// The most columns a span is placed over; wider spans only matter for their first column.
-const MAX_SPAN_COLUMNS: usize = 16_384;
-
 /// The 0-based table column of every cell, placed as the renderer places them: left to
-/// right, past positions a cell from a row above covers.
-fn columns(rows: &[Vec<Cell>]) -> Vec<Vec<usize>> {
+/// right, past positions a cell from a row above covers. Only the first `width` columns are
+/// tracked: a cell at or past them has no header path either way.
+fn columns(rows: &[Vec<Cell>], width: usize) -> Vec<Vec<usize>> {
     // Per column, the first row it is free again.
     let mut free: Vec<usize> = Vec::new();
     rows.iter()
@@ -405,17 +403,18 @@ fn columns(rows: &[Vec<Cell>]) -> Vec<Vec<usize>> {
                         c += 1;
                     }
                     let at = c;
-                    let cs = (cell.col_span.max(1) as usize).min(MAX_SPAN_COLUMNS);
+                    let cs = cell.col_span.max(1) as usize;
                     let until = r
                         .saturating_add(cell.row_span.max(1) as usize)
                         .min(rows.len());
-                    if free.len() < at + cs {
-                        free.resize(at + cs, 0);
+                    let fill = at.saturating_add(cs).min(width);
+                    if free.len() < fill {
+                        free.resize(fill, 0);
                     }
-                    for f in &mut free[at..at + cs] {
+                    for f in free.iter_mut().take(fill).skip(at) {
                         *f = until;
                     }
-                    c = at + cs;
+                    c = at.saturating_add(cs);
                     at
                 })
                 .collect()
@@ -440,14 +439,19 @@ fn row_tokens(row: &[Cell], cols: &[usize], paths: &[String]) -> usize {
 }
 
 /// The data rows that may not be cut apart, as (first, last) indexes into `data`: a group
-/// row goes with the row after it, and a cell over several rows keeps them together.
+/// row goes with the next row that is neither a group nor a blank row, and a cell over
+/// several rows keeps them together.
 fn units(layout: &TableLayout, data: &[Vec<Cell>], numbers: &[u32]) -> Vec<(usize, usize)> {
-    let groups: HashSet<u32> = layout
-        .rows
-        .iter()
-        .filter(|n| n.kind == RowKind::Group)
-        .map(|n| n.row)
-        .collect();
+    let of_kind = |kind: RowKind| -> HashSet<u32> {
+        layout
+            .rows
+            .iter()
+            .filter(|n| n.kind == kind)
+            .map(|n| n.row)
+            .collect()
+    };
+    let groups = of_kind(RowKind::Group);
+    let blanks = of_kind(RowKind::Blank);
     let end = data.len() - 1;
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -462,7 +466,11 @@ fn units(layout: &TableLayout, data: &[Vec<Cell>], numbers: &[u32]) -> Vec<(usiz
                 .unwrap_or(1);
             reach = reach.max(j.saturating_add(span - 1).min(end));
             if groups.contains(&numbers[j]) {
-                reach = reach.max((j + 1).min(end));
+                let mut k = j + 1;
+                while k < end && (groups.contains(&numbers[k]) || blanks.contains(&numbers[k])) {
+                    k += 1;
+                }
+                reach = reach.max(k.min(end));
             }
             if j >= reach {
                 break;
