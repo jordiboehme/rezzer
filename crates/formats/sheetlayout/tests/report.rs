@@ -128,26 +128,38 @@ fn trailing_rows_of_one_text_are_notes() {
     assert_eq!(ones(&r.notes), [4, 5]);
     assert_eq!(r.data, Some(rect("A2:C3")));
     assert!(r.rows.iter().all(|n| n.kind != RowKind::Group));
-    // A label alone in the first column, with no data row after it, is a data row with
-    // empty values, not a note.
+    // Single-text rows after the last value row are notes, merged or not.
     let layout = small_table()
         .rows("A4", &["Note 1", "Note 2"])
         .merge("A5:C5")
         .detect();
     let r = only(&layout);
-    assert_eq!(ones(&r.notes), [5]);
-    assert_eq!(r.data, Some(rect("A2:C4")));
+    assert_eq!(ones(&r.notes), [4, 5]);
+    assert_eq!(r.data, Some(rect("A2:C3")));
+    let layout = small_table().cell("A4", "Source: x").detect();
+    let r = only(&layout);
+    assert_eq!(ones(&r.notes), [4]);
+    assert_eq!(r.data, Some(rect("A2:C3")));
 }
 
 #[test]
 fn label_only_rows_stay_data() {
-    // Sparse data: "b" is followed by a data row and reads as a group row; "d" at the end
-    // is a data row with empty values, not a note.
+    // Sparse data: "b" is followed by a data row and reads as a group row; "d" after the
+    // last value row is a trailing note.
     let layout = Sheet::new()
         .rows("A1", &["Name|Q1|Q2", "a|1|2", "b||", "c|3|4", "d||"])
         .detect();
     let r = only(&layout);
     assert_eq!(rows_of(r, RowKind::Group), [3]);
+    assert_eq!(ones(&r.notes), [5]);
+    assert_eq!(r.data, Some(rect("A2:C4")));
+    // A label between two value rows that no data row directly follows is a data row.
+    let layout = Sheet::new()
+        .rows("A1", &["Name|Q1|Q2", "a|1|2", "b||", "|kg|", "c|3|4"])
+        .merge("A3:B3")
+        .detect();
+    let r = only(&layout);
+    assert!(r.rows.is_empty(), "{:?}", r.rows);
     assert!(r.notes.is_empty());
     assert_eq!(r.data, Some(rect("A2:C5")));
 }

@@ -98,8 +98,8 @@ After the header, `detect` looks at the rows of each table.
 - A row with one text in the first column, or one merged area over at least 80 % of the
   width, is a group row when a data row follows it. Several such rows in a row are nested
   groups when a data row follows the last one.
-- Rows with one text at the end of a table are notes. A label alone in the first column is
-  a data row with empty values, not a note.
+- Rows with one text after the last row with values are notes, merged or not. A row with
+  one text between value rows is a data row unless it is a group row.
 - Rows can have levels: from the row outline first, then from the indent, then from the
   length of leading spaces or dots. The parent of a row is the nearest row above it with a
   lower level. Group rows can be parents. When no row gets a parent, no levels are given.
@@ -143,7 +143,6 @@ These rules have limits:
   of the next block.
 - A label alone in the first column with a data row after it reads as a group row, even
   when it is a data row with empty values.
-- A line of text in the first column right under a table, with no empty row between, is a
-  data row of that table, not a note. A merged line is a note.
+- A data row with only a label at the end of a table, such as `d | | `, is taken as a note.
 
 License: MPL-2.0

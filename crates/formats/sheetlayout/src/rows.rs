@@ -447,9 +447,9 @@ fn formula_kinds(
 /// `pivot` keeps the pivot's own label columns. Gives false when the stop callback ends the
 /// work.
 ///
-/// A row of one label in the first column (no merge across the table) in a table with
-/// values is a data row with empty values: it is a group row only when a data row follows
-/// it, and never a trailing note.
+/// Single-text rows after the last row with a value are trailing notes, merged or not. A
+/// single-text row between value rows is a group row only when a data row follows its run;
+/// otherwise it is a data row.
 pub(crate) fn table_rows(
     lines: &Lines,
     region: &mut Region,
@@ -467,28 +467,15 @@ pub(crate) fn table_rows(
     let totals = stated_totals(fact.as_ref(), data);
     let range = line_range(lines, data.top, data.bottom);
     let single = |l: &Line| lines.single_text(l).is_some();
-    let mut values = false;
-    for l in &lines.lines[range.clone()] {
-        if tick.step() {
-            return false;
-        }
-        if !single(l) {
-            values = true;
-            break;
-        }
-    }
-    let label_only =
-        |l: &Line| values && group_words(lines, l, body) == Some("one text in the first column");
     let mut end = range.end;
     // Trailing rows of one text are notes (rule N inside a region); a stated totals row
-    // stays a total, and a label alone in the first column stays a data row.
+    // stays a total.
     if totals.is_none() {
         while end > range.start {
             if tick.step() {
                 return false;
             }
-            let l = &lines.lines[end - 1];
-            if !single(l) || label_only(l) {
+            if !single(&lines.lines[end - 1]) {
                 break;
             }
             end -= 1;
