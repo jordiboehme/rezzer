@@ -218,9 +218,10 @@ const CELL_BASE: usize = 6;
 /// The size of a row is estimated from the model, the same for every table style:
 /// `ceil((10 + sum over non-empty cells of (chars of its header path + chars of its text +
 /// 6)) / 4)` tokens. The fixed part is `ceil(chars / 4)` per lead block plus the header band
-/// rows by the same formula. When the fixed part alone is at or above `max_tokens`, the data
-/// rows get a budget of `max_tokens` of their own, so a range holds about the fixed part
-/// plus `max_tokens` and a wide band never gives one range per row.
+/// rows by the same formula. The data rows always get at least half of `max_tokens`: the
+/// fixed part counts at most `max_tokens / 2` against the limit. So a wide band never gives
+/// one range per row, and a range holds at most about 1.5 times `max_tokens` while the fixed
+/// part is below `max_tokens`, or the fixed part plus half of `max_tokens` above it.
 ///
 /// A table without layout, a block that is no table, a table that stores no data row, or a
 /// table that fits with its notes gives one range with the blocks unchanged. Its `first` and
@@ -278,9 +279,9 @@ pub fn split_rows(
             .fold(0, usize::saturating_add)
     };
     let fixed = block_tokens(lead).saturating_add(tokens[..head].iter().sum::<usize>());
-    // A fixed part that alone fills the part leaves the data rows a part of their own.
-    let base = if max_tokens > 0 && fixed >= max_tokens {
-        0
+    // The data rows always get at least half the part, however large the fixed part.
+    let base = if max_tokens > 0 {
+        fixed.min(max_tokens / 2)
     } else {
         fixed
     };

@@ -597,13 +597,15 @@ fn row_ranges_follow_sheet_rows_across_gaps() {
     // range that holds the next data row.
     let mut rows = vec![vec![cell("Name", "A1"), cell("Value", "B1")]];
     rows.extend([2, 3, 5, 6].map(data_row));
-    let notes = vec![RowNote {
-        row: 4,
+    // Row 8 is a blank row after the last stored row: the last range keeps it.
+    let blank = |row: u32| RowNote {
+        row,
         kind: RowKind::Blank,
         level: None,
         parent: None,
         why: String::new(),
-    }];
+    };
+    let notes = vec![blank(4), blank(8)];
     let t = Block::Table {
         caption: None,
         header_rows: 1,
@@ -621,8 +623,8 @@ fn row_ranges_follow_sheet_rows_across_gaps() {
     assert_eq!(first.data.as_deref(), Some("A2:B3"));
     assert_eq!(second.data.as_deref(), Some("A5:B6"));
     assert!(first.rows.is_empty());
-    assert_eq!(second.rows.len(), 1);
-    assert_eq!(second.rows[0].row, 4);
+    let kept: Vec<u32> = second.rows.iter().map(|n| n.row).collect();
+    assert_eq!(kept, vec![4, 8]);
 }
 
 #[test]
@@ -709,7 +711,8 @@ fn no_data_rows_are_zero_with_and_without_layout() {
 #[test]
 fn wide_band_gives_the_data_rows_their_own_budget() {
     // A band of 3 rows by 200 columns is 3 * 1,248 = 3,744 tokens, above the part size of
-    // 2,500: the data rows still fill 2,500 tokens per range, not one row each.
+    // 2,500: the data rows still fill half the part, 1,250 tokens per range, not one row
+    // each.
     let cols = 200usize;
     let paths: Vec<String> = (0..cols).map(|c| format!("Column {c}")).collect();
     let band_row = |r: u32| -> Vec<Cell> {
@@ -730,16 +733,37 @@ fn wide_band_gives_the_data_rows_their_own_budget() {
         anchor: None,
         layout: Some(Box::new(l)),
     };
-    // A data row `a` under `Column 0`: ceil((10 + 8 + 1 + 6) / 4) = 7 tokens; 357 per range.
+    // A data row `a` under `Column 0`: ceil((10 + 8 + 1 + 6) / 4) = 7 tokens; 178 per range.
     let ranges = split_rows(&[], &t, &[], 2_500);
-    assert_eq!(ranges.len(), 5_000usize.div_ceil(357), "{}", ranges.len());
+    assert_eq!(ranges.len(), 5_000usize.div_ceil(178), "{}", ranges.len());
     for r in &ranges {
-        // Each range holds the band and at most 2,500 tokens of data rows.
-        assert!(r.last - r.first < 357, "{:?}", (r.first, r.last));
+        // Each range holds the band and at most 1,250 tokens of data rows.
+        assert!(r.last - r.first < 178, "{:?}", (r.first, r.last));
         assert_eq!(table_of(r).0.len(), 3 + (r.last - r.first + 1) as usize);
     }
 }
 
 fn column(c: usize) -> String {
     rezzer_model::column_letter(c)
+}
+
+#[test]
+fn fixed_part_counts_at_most_half_the_part() {
+    // Part size 40, data rows of 9 tokens, band 10. A lead of 10 tokens makes the fixed
+    // part 20 (half the part), one of 30 makes it 40 (the whole part), one of 60 makes it
+    // 70: each time the data rows get 20 tokens, two rows per range. A lead of 3 tokens
+    // (fixed 13) leaves them 27, three rows.
+    let lead = |chars: usize| Block::Heading {
+        level: 3,
+        inlines: vec![txt(&"h".repeat(chars))],
+        anchor: None,
+    };
+    let t = table(11);
+    let two = vec![(2, 3), (4, 5), (6, 7), (8, 9), (10, 11)];
+    for chars in [40, 120, 240] {
+        let ranges = split_rows(&[lead(chars)], &t, &[], 40);
+        assert_eq!(borders(&ranges), two, "lead of {chars} chars");
+    }
+    let ranges = split_rows(&[lead(12)], &t, &[], 40);
+    assert_eq!(borders(&ranges), vec![(2, 4), (5, 7), (8, 10), (11, 11)]);
 }

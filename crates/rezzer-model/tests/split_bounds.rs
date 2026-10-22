@@ -104,7 +104,7 @@ fn layout(band: Vec<u32>, paths: Vec<String>, rows: Vec<RowNote>) -> TableLayout
 fn wide_band_does_not_multiply_ranges() {
     // The review's shape, with a band above the part size: 200 columns by 3 band rows over
     // 5,000 one-cell data rows (5,600 input cells). One range per row would clone the band
-    // 5,000 times (3,000,000 cells); with its own budget the data takes 15 ranges.
+    // 5,000 times (3,000,000 cells); with half the part for the data it takes 29 ranges.
     let cols = 200usize;
     let band_row = |r: u32| -> Vec<Cell> {
         (0..cols)
@@ -133,11 +133,61 @@ fn wide_band_does_not_multiply_ranges() {
             _ => 0,
         })
         .sum();
-    assert!(ranges.len() <= 20, "{} ranges", ranges.len());
+    assert!(ranges.len() <= 30, "{} ranges", ranges.len());
     assert!(
         cells <= 20 * input_cells,
         "{cells} cells from {input_cells}"
     );
+    assert!(peak < 64 * MB, "peak heap {peak}");
+}
+
+#[test]
+fn band_just_below_the_part_does_not_multiply_ranges() {
+    // The re-review's shape: a one-row band of 237 columns just below the part size (each
+    // cell 26 path chars, 10 text chars and 6: ceil((10 + 237 * 42) / 4) = 2,491 tokens)
+    // over 5,000 data rows of 11 tokens. With the fixed part counted in full that was one
+    // range per row (1,190,000 cloned cells); with half the part for the data, 113 rows fit
+    // a range: 45 ranges.
+    let cols = 237usize;
+    let path = |c: usize| format!("Population estimate / {c:04}");
+    let band: Vec<Cell> = (0..cols)
+        .map(|c| cell(&format!("{c:010}"), format!("{}1", column_letter(c))))
+        .collect();
+    let mut rows = vec![band];
+    rows.extend((2..5002).map(|r| vec![cell("ab", format!("A{r}"))]));
+    let input_cells: usize = rows.iter().map(Vec::len).sum();
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(layout(
+            vec![1],
+            (0..cols).map(path).collect(),
+            Vec::new(),
+        ))),
+    };
+    let (ranges, peak) = peak_heap(|| split_rows(&[], &t, &[], 2_500));
+    eprintln!(
+        "band below the part: {} ranges, peak heap {peak} bytes",
+        ranges.len()
+    );
+    let cells: usize = ranges
+        .iter()
+        .map(|r| match &r.blocks[r.table.unwrap()] {
+            Block::Table { rows, .. } => rows.iter().map(Vec::len).sum::<usize>(),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(
+        ranges.len(),
+        5_000usize.div_ceil(113),
+        "{} ranges",
+        ranges.len()
+    );
+    assert!(cells <= 4 * input_cells, "{cells} cells from {input_cells}");
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
 
