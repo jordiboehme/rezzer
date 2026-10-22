@@ -14,6 +14,7 @@ members = [
     "crates/formats/zipguard",
     "crates/formats/formulakit",
     "crates/formats/sheetparts",
+    "crates/formats/sheetlayout",
     "crates/formats/pdfparts",
     "crates/formats/barcodes",
     "crates/readers/rezzer-read-text",
