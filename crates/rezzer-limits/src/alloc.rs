@@ -3,18 +3,32 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The allocator of the Rezzer binary: the system allocator, except that a block that grows
-//! to 1 MiB or more is moved by allocate, copy and free.
+//! to 1 MiB or more, by at least half its size at once, is moved by allocate, copy and free.
 //!
 //! Why: decoders grow their output by reallocating (the Flate decoder of a page picture goes
 //! from 4 to 8 to 16 MiB). On macOS the system's realloc of large blocks leaves memory
 //! resident that no program structure holds: reading 60 scanned pages kept about 9.5 MiB a
 //! page resident while the live heap stayed under 40 MiB, so the process went far past its
 //! memory limit. Moving large blocks by hand keeps the resident memory at the live heap.
+//!
+//! Only a growth by half or more is moved: a block grown in small exact steps (a buffer that
+//! reserves 64 KiB more each time) would be copied whole at every step, which is quadratic.
+//! Growth by doubling, as `Vec` does it, is moved; smaller growth and shrinking go to the
+//! system's realloc, which does them in place.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 
 /// New sizes from which a block is moved by allocate, copy and free.
 const MOVE_FROM: usize = 1 << 20;
+
+/// Whether a block of `old` bytes that is to hold `new` is moved by hand: from 1 MiB on, and
+/// only when it grows by half or more.
+fn moved_by_hand(old: usize, new: usize) -> bool {
+    new >= MOVE_FROM
+        && old
+            .checked_add(old / 2)
+            .is_some_and(|half_more| new >= half_more)
+}
 
 /// The system allocator, with large blocks moved by hand when they grow or shrink.
 pub struct Allocator;
@@ -39,7 +53,7 @@ unsafe impl GlobalAlloc for Allocator {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if new_size < MOVE_FROM {
+        if !moved_by_hand(layout.size(), new_size) {
             // SAFETY: forwarded unchanged.
             return unsafe { System.realloc(ptr, layout, new_size) };
         }
@@ -63,25 +77,138 @@ unsafe impl GlobalAlloc for Allocator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+
+    const MIB: usize = 1 << 20;
+
+    fn fill(p: *mut u8, n: usize) {
+        for k in 0..n {
+            // SAFETY: the caller's block holds `n` bytes.
+            unsafe { *p.add(k) = (k % 251) as u8 };
+        }
+    }
+
+    fn holds(p: *const u8, n: usize) -> bool {
+        // SAFETY: the caller's block holds `n` bytes.
+        (0..n).all(|k| unsafe { *p.add(k) } == (k % 251) as u8)
+    }
 
     #[test]
     fn large_blocks_keep_their_contents_when_they_move() {
         let a = Allocator;
-        let layout = Layout::from_size_align(3 << 20, 8).unwrap();
+        let layout = Layout::from_size_align(3 * MIB, 8).unwrap();
         // SAFETY: valid layouts; each block is freed once with its own layout.
         unsafe {
             let p = a.alloc(layout);
             assert!(!p.is_null());
-            for k in 0..layout.size() {
-                *p.add(k) = (k % 251) as u8;
-            }
-            let q = a.realloc(p, layout, 5 << 20);
+            fill(p, layout.size());
+            let q = a.realloc(p, layout, 5 * MIB);
             assert!(!q.is_null());
-            assert!((0..layout.size()).all(|k| *q.add(k) == (k % 251) as u8));
-            let grown = Layout::from_size_align(5 << 20, 8).unwrap();
-            let r = a.realloc(q, grown, 2 << 20);
-            assert!((0..(2 << 20)).all(|k| *r.add(k) == (k % 251) as u8));
-            a.dealloc(r, Layout::from_size_align(2 << 20, 8).unwrap());
+            assert!(holds(q, layout.size()));
+            a.dealloc(q, Layout::from_size_align(5 * MIB, 8).unwrap());
         }
+    }
+
+    #[test]
+    fn which_growth_is_moved_by_hand() {
+        // The 1 MiB edge.
+        assert!(!moved_by_hand(MIB / 4, MIB - 1));
+        assert!(moved_by_hand(MIB / 4, MIB));
+        assert!(moved_by_hand(MIB / 4, MIB + 1));
+        // Growth by half or more, not less; shrinking never.
+        assert!(moved_by_hand(2 * MIB, 3 * MIB));
+        assert!(!moved_by_hand(2 * MIB, 3 * MIB - 1));
+        assert!(!moved_by_hand(4 * MIB, 2 * MIB));
+        // No overflow at the top.
+        assert!(!moved_by_hand(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn blocks_across_the_1_mib_edge_keep_their_contents() {
+        let a = Allocator;
+        for new in [MIB - 1, MIB, MIB + 1] {
+            let old = Layout::from_size_align(MIB / 4, 16).unwrap();
+            // SAFETY: valid layouts; each block is freed once with its own layout.
+            unsafe {
+                let p = a.alloc(old);
+                fill(p, old.size());
+                let q = a.realloc(p, old, new);
+                assert!(!q.is_null(), "{new}");
+                assert!(holds(q, old.size()), "{new}");
+                assert_eq!(q as usize % 16, 0);
+                a.dealloc(q, Layout::from_size_align(new, 16).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn a_large_alignment_is_kept() {
+        let a = Allocator;
+        let old = Layout::from_size_align(MIB, 65_536).unwrap();
+        // SAFETY: valid layouts; each block is freed once with its own layout.
+        unsafe {
+            let p = a.alloc(old);
+            assert_eq!(p as usize % 65_536, 0);
+            fill(p, old.size());
+            let q = a.realloc(p, old, 4 * MIB);
+            assert_eq!(q as usize % 65_536, 0);
+            assert!(holds(q, old.size()));
+            a.dealloc(q, Layout::from_size_align(4 * MIB, 65_536).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_refused_request_leaves_the_old_block() {
+        let a = Allocator;
+        let old = Layout::from_size_align(2 * MIB, 8).unwrap();
+        // SAFETY: valid layouts; the huge size stays under isize::MAX after rounding, as the
+        // realloc contract asks; the old block is freed once.
+        unsafe {
+            let p = a.alloc(old);
+            fill(p, old.size());
+            let q = a.realloc(p, old, isize::MAX as usize / 2);
+            assert!(q.is_null());
+            assert!(holds(p, old.size()));
+            a.dealloc(p, old);
+        }
+    }
+
+    #[test]
+    fn shrinking_keeps_the_front() {
+        let a = Allocator;
+        let old = Layout::from_size_align(8 * MIB, 8).unwrap();
+        // SAFETY: valid layouts; each block is freed once with its own layout.
+        unsafe {
+            let p = a.alloc(old);
+            fill(p, old.size());
+            let q = a.realloc(p, old, 2 * MIB);
+            assert!(holds(q, 2 * MIB));
+            a.dealloc(q, Layout::from_size_align(2 * MIB, 8).unwrap());
+        }
+    }
+
+    #[test]
+    fn growth_in_small_exact_steps_stays_fast() {
+        // 2,000 steps of 64 KiB, from 1 MiB to about 126 MiB: copied whole at every step
+        // this takes seconds; in place it takes milliseconds.
+        let a = Allocator;
+        let step = 64 * 1024;
+        let start = Instant::now();
+        // SAFETY: each realloc gets the layout of the block it was given; the last block is
+        // freed with its own layout.
+        unsafe {
+            let mut layout = Layout::from_size_align(MIB, 8).unwrap();
+            let mut p = a.alloc(layout);
+            assert!(!p.is_null());
+            for _ in 0..2_000 {
+                let new = layout.size() + step;
+                p = a.realloc(p, layout, new);
+                assert!(!p.is_null());
+                layout = Layout::from_size_align(new, 8).unwrap();
+            }
+            a.dealloc(p, layout);
+        }
+        let took = start.elapsed();
+        assert!(took < Duration::from_secs(2), "{took:?}");
     }
 }
