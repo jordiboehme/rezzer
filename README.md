@@ -273,6 +273,12 @@ flowchart LR
 
 It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue.
 
+## What Rezzer is not
+
+Rezzer reads, it doesn't search. It's not a search engine, a query language or a RAG system: no full-text index, no filters, no embeddings, no vector store. It turns your files into Markdown an agent can read and a knowledge base can import. That's where it stops.
+
+For search, filters and recall across everything you have read, use [Crystalline](https://github.com/jordiboehme/crystalline). Import Rezzer's output there and your agents can search it, follow the links between notes and build on what they learned. Any other knowledge base or RAG system works too: the output is plain Markdown with OKF frontmatter.
+
 ## Principles
 
 - **Knowledge first.** Structure, metadata, logic and context are the product. Plain text alone is a bug.
