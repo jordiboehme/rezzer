@@ -10,7 +10,7 @@
 
 use std::cell::Cell;
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeSet, BinaryHeap};
 
 use crate::header::{self, Band};
 use crate::input::{CellIn, FactKind, Input, Limits, Rect};
@@ -238,13 +238,18 @@ impl<'p, 'a> Lines<'p, 'a> {
 
 /// Gives each region the cells it holds, by a sweep over the rows with the regions that are
 /// open in each row keyed by their left column. Regions do not overlap, so a cell has at most
-/// one.
-fn distribute(prep: &Prep, rects: &[Rect], tick: &Tick) -> Option<Vec<Vec<u32>>> {
+/// one; the one exception is facts of the same level that overlap in a damaged file
+/// (`overlap`, stated by an `Overlap` issue). Then the nearest open region to the left may
+/// not hold a cell that one further left does, so the search goes on leftwards and the cell
+/// goes to the first region that holds it: no cell is lost.
+fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option<Vec<Vec<u32>>> {
     let mut out = vec![Vec::new(); rects.len()];
     let mut order: Vec<usize> = (0..rects.len()).collect();
     order.sort_by_key(|&i| rects[i].top);
     let mut next = 0usize;
-    let mut open: BTreeMap<u32, usize> = BTreeMap::new();
+    // Keyed by left column and index, so regions with the same left column all stay open.
+    let mut open: BTreeSet<(u32, usize)> = BTreeSet::new();
+    let mut ended: Vec<(u32, usize)> = Vec::new();
     for k in 0..prep.cells.len() {
         if tick.step() {
             return None;
@@ -252,20 +257,29 @@ fn distribute(prep: &Prep, rects: &[Rect], tick: &Tick) -> Option<Vec<Vec<u32>>>
         let p = prep.cell(k).pos;
         while next < order.len() && rects[order[next]].top <= p.row {
             let i = order[next];
-            open.insert(rects[i].left, i);
+            open.insert((rects[i].left, i));
             next += 1;
         }
-        while let Some((&left, &i)) = open.range(..=p.col).next_back() {
+        for &(left, i) in open.range(..=(p.col, usize::MAX)).rev() {
             let r = &rects[i];
             if r.bottom < p.row {
                 // Ended above: it can never hold a cell again.
-                open.remove(&left);
+                ended.push((left, i));
                 continue;
             }
             if p.col <= r.right {
                 out[i].push(k as u32);
+                break;
             }
-            break;
+            if !overlap {
+                break;
+            }
+            if tick.step() {
+                return None;
+            }
+        }
+        for e in ended.drain(..) {
+            open.remove(&e);
         }
     }
     Some(out)
@@ -372,7 +386,8 @@ pub fn detect(input: &Input, limits: &Limits, stop: &dyn Fn() -> bool) -> Layout
     let rects: Vec<Rect> = works.iter().map(|w| w.region.rect).collect();
     let mut handed = !tick.hit();
     if handed {
-        match distribute(&prep, &rects, &tick) {
+        let overlap = issues.iter().any(|i| i.kind == IssueKind::Overlap);
+        match distribute(&prep, &rects, overlap, &tick) {
             Some(all) => {
                 for (w, cells) in works.iter_mut().zip(all) {
                     w.cells = cells;

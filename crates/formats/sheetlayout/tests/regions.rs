@@ -310,6 +310,63 @@ fn equal_facts_overlap_is_an_issue() {
     assert!(overlaps[0].what.contains("One") && overlaps[0].what.contains("Two"));
 }
 
+/// A list object fact with `header_rows` header rows and no columns.
+fn bare_list_object(name: &str, header_rows: u32) -> FactKind {
+    FactKind::ListObject {
+        name: name.to_string(),
+        header_rows,
+        totals_rows: 0,
+        columns: Vec::new(),
+    }
+}
+
+#[test]
+fn overlapping_facts_lose_no_cell() {
+    // A damaged file: facts of one level overlap and all stay. A cell that only the outer
+    // fact holds still reaches it: right of the inner fact (D6), and below an inner fact with
+    // the same left column (E20).
+    let sheet = Sheet::new()
+        .cell("A1", "Title")
+        .cell("A2", "Region")
+        .cell("D6", "51")
+        .fact("A1:G7", bare_list_object("Outer", 0))
+        .fact("B2:C11", bare_list_object("Inner", 2))
+        .cell("C14", "Title")
+        .cell("E20", "7")
+        .fact("C14:K23", bare_list_object("Tall", 0))
+        .fact("C16:K18", bare_list_object("Short", 0));
+    let input = sheet.input();
+    let layout = sheetlayout::detect(&input, &Limits::default(), &never);
+    assert!(
+        layout.issues.iter().any(|i| i.kind == IssueKind::Overlap),
+        "{:?}",
+        layout.issues
+    );
+    let region = |name: &str| {
+        layout
+            .regions
+            .iter()
+            .find(|r| {
+                r.evidence.contains(&Evidence::ListObject {
+                    name: name.to_string(),
+                })
+            })
+            .unwrap_or_else(|| panic!("region {name}"))
+    };
+    assert_eq!(region("Outer").data, Some(rect("A1:G7")));
+    assert_eq!(region("Tall").data, Some(rect("C14:K23")));
+    for c in &input.cells {
+        assert!(
+            layout
+                .regions
+                .iter()
+                .any(|r| r.data.is_some_and(|d| d.contains(c.pos))),
+            "{:?} is in no region",
+            c.pos
+        );
+    }
+}
+
 #[test]
 fn name_joins_regions_across_gap() {
     // Census shape: A1:F60 and A62:F68 with the name _NST01 over A4:F62.
