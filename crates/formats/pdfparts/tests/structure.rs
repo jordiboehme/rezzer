@@ -144,7 +144,13 @@ fn role_map_applied() {
 }
 
 #[test]
-fn alt_and_table_headers() {
+fn alt_texts() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/corpus/pdf/nist-sp800-53r5.pdf");
+    if !path.exists() {
+        eprintln!("skipped: {} is not fetched", path.display());
+        return;
+    }
     let nist = corpus("nist-sp800-53r5.pdf");
     let nist = nist.struct_tree().unwrap();
     assert_eq!(nist.elems.iter().filter(|e| e.alt.is_some()).count(), 36);
@@ -153,7 +159,10 @@ fn alt_and_table_headers() {
             .as_deref()
             .is_some_and(|a| a.starts_with("Table C-20 provides a summary"))
     }));
+}
 
+#[test]
+fn table_headers() {
     let irs = corpus("irs-f1040-2025.pdf");
     let irs = irs.struct_tree().unwrap();
     let th = irs
