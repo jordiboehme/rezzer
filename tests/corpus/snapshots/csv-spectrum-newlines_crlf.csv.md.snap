@@ -37,6 +37,8 @@ losses: 0
 
 ## csv-spectrum-newlines\_crlf
 
+Table A1:C4 (data A2:C4), header row 1, found by rules: no gaps, header by type change.
+
 | a | b | c |
 | --- | --- | --- |
 | 1 | 2 | 3 |

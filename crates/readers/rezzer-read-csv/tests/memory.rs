@@ -109,9 +109,11 @@ fn one_wide_row_stays_small() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (out, extra) = read_measured(one_wide_row(100));
     let (cells, rows, width) = table_cells(&out);
-    assert_eq!(width, 1_000);
-    assert_eq!(rows, 102);
-    assert_eq!(cells, 102_000, "the table is rectangular");
+    // The wide row holds no value: the table spans the two columns with values, and the
+    // empty row is no table row.
+    assert_eq!(width, 2);
+    assert_eq!(rows, 101);
+    assert_eq!(cells, 202, "the table is rectangular");
     assert!(cells <= 200_000, "{cells} cells");
     assert!(extra < 64 * 1024 * 1024, "extra heap: {extra} bytes");
     let cut = out

@@ -238,6 +238,13 @@ fn csv_saved_as_txt_is_csv() {
 }
 
 #[test]
+fn csv_with_title_lines_is_csv() {
+    let text = b"Station report 2024\nSource: test data\nid,name,value\n1,alpha,10\n2,beta,20\n3,gamma,30\n";
+    let (f, d) = detect("x.txt", text);
+    assert_eq!(f, FormatId::Csv, "{}", d.evidence);
+}
+
+#[test]
 fn tsv_by_tabs() {
     let (f, d) = detect("x.csv", b"name\tage\tcity\nann\t31\tBonn\nbob\t42\tKoeln\n");
     assert_eq!(f, FormatId::Tsv, "{}", d.evidence);

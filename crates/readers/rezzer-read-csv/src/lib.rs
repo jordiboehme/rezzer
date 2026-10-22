@@ -2,19 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CSV and TSV reader: one sheet with the data table, a table of column facts and the sum
-//! relations between columns as formulas.
+//! CSV and TSV reader: one sheet with the tables, titles and notes the layout detector finds
+//! in the records, a table of column facts and the sum relations between columns as
+//! formulas.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use csvsniff::{ColumnKind, Dialect};
+use csvsniff::{CellClass, ColumnKind, Dialect};
+use rezzer_layout::{Caps, CellText, ColumnNames};
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Anchor, Block, Cell, Completeness, Document, FormatId, Formula, Inline, Loss, LossReason,
-    ReadOptions, ReadOutcome, Reader, ReaderInfo, Role, SectionKind, Severity, Source, Value,
-    column_letter, source_info,
+    Anchor, Block, Cell, Completeness, Document, FormatId, Formula, Inline, LayoutKind, Loss,
+    LossReason, ReadOptions, ReadOutcome, Reader, ReaderInfo, Role, SectionKind, Severity, Source,
+    Value, column_letter, source_info,
 };
+use sheetlayout::{CellIn, Class, Input, Kind, Layout, Pos, Style};
 
 /// Data rows in the body table. Further rows are analyzed and counted but not shown.
 const MAX_TABLE_ROWS: usize = 10_000;
@@ -30,6 +33,9 @@ const MAX_FACT_ROWS: usize = 500;
 
 /// Rows read between two time checks.
 const CHECK_EVERY: usize = 1000;
+
+/// Bytes of a text that still reads as a label, as in the sheet reader.
+const MAX_LABEL: usize = 200;
 
 /// Reads CSV and TSV. The encoding and the dialect are detected; the output has the data as a
 /// table, the facts per column and observed sum relations.
@@ -105,6 +111,7 @@ impl Reader for CsvReader {
                         b','
                     },
                     quote: b'"',
+                    lead_records: 0,
                     has_header: false,
                     consistent_rows: 0.0,
                 }
@@ -156,21 +163,26 @@ impl Reader for CsvReader {
             },
         );
 
+        // The ragged-row losses wait for the layout: a record that became a caption, note or
+        // text line is no damaged table row. They keep their place among the losses.
         let record_of_line = record_numbers(text, &dialect, &analysis);
+        let ragged_at = doc.losses.len();
+        let mut ragged: Vec<(Option<usize>, Loss)> = Vec::new();
         for r in &analysis.ragged_rows {
             let location = match record_of_line.get(&r.line) {
                 Some(n) => format!("record {n} (line {})", r.line),
                 None => format!("line {}", r.line),
             };
-            doc.losses.push(Loss {
+            let loss = Loss {
                 location,
                 what: format!("row has {} fields, expected {}", r.fields, r.expected),
                 why: LossReason::Damaged,
                 severity: Severity::Warning,
-            });
+            };
+            ragged.push((Some(r.line), loss));
         }
         if analysis.ragged_total > analysis.ragged_rows.len() {
-            doc.losses.push(Loss {
+            let loss = Loss {
                 location: "document".into(),
                 what: format!(
                     "{} more rows with an unexpected field count not listed",
@@ -178,7 +190,8 @@ impl Reader for CsvReader {
                 ),
                 why: LossReason::Damaged,
                 severity: Severity::Warning,
-            });
+            };
+            ragged.push((None, loss));
         }
         for problem in &analysis.quote_problems {
             let place = match record_at(text, &dialect, problem.offset) {
@@ -197,10 +210,10 @@ impl Reader for CsvReader {
                 severity: Severity::Error,
             });
         }
-        let damaged = doc.losses.iter().any(|l| l.why == LossReason::Damaged);
-        partial |= damaged;
 
         if analysis.rows == 0 {
+            place_ragged(&mut doc, ragged_at, ragged, |_| true);
+            partial |= damaged(&doc);
             let msg = if dialect.has_header {
                 "The file has a header row but no data rows."
             } else {
@@ -210,11 +223,12 @@ impl Reader for CsvReader {
             return finish(doc, partial);
         }
 
-        // The data table: header plus at most MAX_TABLE_ROWS data rows, at most
-        // MAX_TABLE_COLUMNS wide and at most MAX_TABLE_CELLS cells after padding.
-        let header = usize::from(dialect.has_header);
+        // The shown records: title lines, the header and at most MAX_TABLE_ROWS data rows, at
+        // most MAX_TABLE_COLUMNS wide and at most MAX_TABLE_CELLS cells after padding. A run of
+        // blank lines between two records is one empty sheet row.
+        let lead = dialect.lead_records;
+        let skip = lead + usize::from(dialect.has_header);
         let known = analysis.columns.len();
-        let mut rows: Vec<Vec<Cell>> = Vec::new();
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(dialect.delimiter)
             .quote(dialect.quote)
@@ -222,20 +236,29 @@ impl Reader for CsvReader {
             .flexible(true)
             .from_reader(text.as_bytes());
         let mut rec = csv::StringRecord::new();
-        let wanted = MAX_TABLE_ROWS + header;
+        let wanted = MAX_TABLE_ROWS + skip;
         // The padded width (capped) and the widest record seen (not capped).
         let (mut width, mut widest) = (0usize, 0usize);
         // Non-empty data cells per column past the known ones, for the facts table.
         let mut extra_filled: Vec<usize> = Vec::new();
-        let mut stopped: Option<(usize, &str)> = None;
-        while !timed_out && rows.len() < wanted {
+        let mut stopped: Option<(u64, &str)> = None;
+        let ragged_lines: HashSet<usize> = analysis.ragged_rows.iter().map(|r| r.line).collect();
+        let mut row_of_line: HashMap<usize, u32> = HashMap::new();
+        let mut texts: Vec<CellText> = Vec::new();
+        let mut input: Vec<CellIn> = Vec::new();
+        let mut guess_row: Option<u32> = None;
+        // Records read, the sheet row of the next one (0-based) and where the last one ended.
+        let (mut read, mut row) = (0usize, 0u32);
+        let mut after: Option<usize> = None;
+        let max_elements = budget.limits().max_elements;
+        while !timed_out && read < wanted {
             match reader.read_record(&mut rec) {
                 Ok(true) => {}
                 Ok(false) => break,
                 Err(e) => {
                     partial = true;
                     doc.losses.push(Loss {
-                        location: format!("record {}", rows.len() + 1),
+                        location: format!("record {}", read + 1),
                         what: format!("record could not be read: {e}"),
                         why: LossReason::Damaged,
                         severity: Severity::Warning,
@@ -243,26 +266,33 @@ impl Reader for CsvReader {
                     break;
                 }
             }
-            if rows.len() % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
-                stopped = Some((rows.len() + 1, "rest of the file not read"));
+            if after.is_some_and(|end| blank_line_after(text, end)) {
+                row = row.saturating_add(1);
+            }
+            if read % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
+                stopped = Some((u64::from(row) + 1, "rest of the file not read"));
                 break;
             }
             let shown = rec.len().min(MAX_TABLE_COLUMNS);
             let new_width = width.max(shown);
             // Padding makes every row as wide as the widest one: count padded cells.
-            if !rows.is_empty() && (rows.len() + 1).saturating_mul(new_width) > MAX_TABLE_CELLS {
+            if read > 0 && (read + 1).saturating_mul(new_width) > MAX_TABLE_CELLS {
                 break;
             }
-            if budget.add_elements(shown as u64).is_err() {
+            // Stop before the record that would pass the element limit, so the layout can
+            // still place the records read.
+            if budget.elements().saturating_add(shown as u64) > max_elements
+                || budget.add_elements(shown as u64).is_err()
+            {
                 stopped = Some((
-                    rows.len() + 1,
+                    u64::from(row) + 1,
                     "element limit reached, rest of the file not read",
                 ));
                 break;
             }
             width = new_width;
             widest = widest.max(rec.len());
-            if rows.len() >= header {
+            if read >= skip {
                 for (j, v) in rec.iter().enumerate().take(MAX_FACT_ROWS).skip(known) {
                     if extra_filled.len() <= j - known {
                         extra_filled.resize(j - known + 1, 0);
@@ -272,16 +302,32 @@ impl Reader for CsvReader {
                     }
                 }
             }
-            let row_no = rows.len() + 1; // 1-based, the header is row 1
-            let cells = rec
-                .iter()
-                .take(MAX_TABLE_COLUMNS)
-                .enumerate()
-                .map(|(j, v)| anchored(&sheet, j, row_no, cell_inlines(v)))
-                .collect();
-            rows.push(cells);
+            if read == lead {
+                guess_row = Some(row);
+            }
+            if let Some(line) = rec.position().map(|p| p.line() as usize)
+                && ragged_lines.contains(&line)
+            {
+                row_of_line.insert(line, row);
+            }
+            for (j, v) in rec.iter().take(MAX_TABLE_COLUMNS).enumerate() {
+                let shown = shown_text(v);
+                if shown.is_empty() {
+                    continue;
+                }
+                let col = j as u32;
+                input.push(cell_in(row, col, v, &shown));
+                texts.push(CellText {
+                    row,
+                    col,
+                    text: shown,
+                });
+            }
+            after = Some(reader.position().byte() as usize);
+            read += 1;
+            row = row.saturating_add(1);
         }
-        let data_shown = rows.len().saturating_sub(header);
+        let data_shown = read.saturating_sub(skip);
         if let Some((n, what)) = stopped {
             partial = true;
             doc.losses.push(Loss {
@@ -315,30 +361,82 @@ impl Reader for CsvReader {
             });
         }
 
-        // Rectangular: pad short rows (and the header) to the widest row.
-        for (i, row) in rows.iter_mut().enumerate() {
-            for j in row.len()..width {
-                let label = if dialect.has_header && i == 0 {
-                    format!("Column {}", j + 1)
-                } else {
-                    String::new()
-                };
-                row.push(anchored(&sheet, j, i + 1, vec![Inline::plain(label)]));
-            }
-        }
-
+        // The layout decides titles, headers and blocks; csvsniff's header guess is one of
+        // its signals.
         let mut blocks = Vec::new();
-        if !timed_out {
-            blocks.push(Block::Table {
-                caption: None,
-                header_rows: header,
-                role: None,
-                rows,
-                alignments: Vec::new(),
-                anchor: None,
-                layout: None,
+        if timed_out {
+            place_ragged(&mut doc, ragged_at, ragged, |_| true);
+        } else {
+            let input = Input {
+                cells: input,
+                merges: Vec::new(),
+                facts: Vec::new(),
+                names: Vec::new(),
+                outline: Vec::new(),
+                frozen: None,
+                print_titles: None,
+                header_guess: guess_row.map(|r| (r, dialect.has_header)),
+                styles_read: false,
+                is_label: &is_label,
+                is_unit_column: &|_| false,
+            };
+            let stop = || budget.check_time().is_err();
+            let mut layout = sheetlayout::detect(&input, &rezzer_layout::limits(budget), &stop);
+            drop(input);
+            name_empty_header_cells(&mut layout);
+            let mapped = rezzer_layout::blocks(
+                &sheet,
+                &layout,
+                &texts,
+                &[],
+                ColumnNames::Numbers,
+                &[],
+                &mut Caps::default(),
+                budget,
+            );
+            drop(texts);
+            // A ragged record is listed when it is a row of a table, or was not shown.
+            place_ragged(&mut doc, ragged_at, ragged, |line| {
+                row_of_line
+                    .get(&line)
+                    .is_none_or(|&r| in_table_row(&layout, r))
             });
+            partial |= mapped.partial || mapped.elements_out;
+            doc.losses.extend(mapped.losses);
+            blocks = mapped.blocks;
+            // The layout decides the header and so the data rows: the rows of every region
+            // table without its header rows, plus the records not shown.
+            let placed: usize = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Table {
+                        rows,
+                        header_rows,
+                        layout: Some(_),
+                        ..
+                    } => Some(rows.len().saturating_sub(*header_rows)),
+                    _ => None,
+                })
+                .sum();
+            let has_header = blocks.iter().find_map(|b| match b {
+                Block::Table {
+                    header_rows,
+                    layout: Some(l),
+                    ..
+                } if l.kind == LayoutKind::Table => Some(*header_rows > 0),
+                _ => None,
+            });
+            let custom = &mut doc.properties.custom;
+            let rows = placed + analysis.rows.saturating_sub(data_shown);
+            custom.insert("rows".into(), Value::number(rows as f64, None));
+            custom.insert(
+                "has_header".into(),
+                Value::Bool {
+                    value: has_header.unwrap_or(false),
+                },
+            );
         }
+        partial |= damaged(&doc);
 
         // The column facts. The column count is the widest record, also columns not shown.
         let ncols_total = if timed_out { known } else { widest.max(known) };
@@ -445,13 +543,6 @@ impl Reader for CsvReader {
     }
 }
 
-/// A cell with its spreadsheet-style anchor (`sheet!B3`, `row` is 1-based, header is row 1).
-fn anchored(sheet: &str, column: usize, row: usize, inlines: Vec<Inline>) -> Cell {
-    let mut cell = Cell::new(inlines);
-    cell.anchor = Some(Anchor(format!("{sheet}!{}{row}", column_letter(column))));
-    cell
-}
-
 /// Sets the `columns` property.
 fn custom_columns(doc: &mut Document, columns: usize) {
     doc.properties
@@ -465,40 +556,137 @@ fn value_empty(value: &str) -> bool {
     value.is_empty() || (value.trim().is_empty() && value.contains(['\n', '\r']))
 }
 
-/// The inlines of a cell: its text, with each run of whitespace that contains a line break
-/// replaced by `Inline::LineBreak` (the renderer writes it as one space inside a table).
-fn cell_inlines(value: &str) -> Vec<Inline> {
-    if !value.contains(['\n', '\r']) {
-        return vec![Inline::plain(value)];
+/// The shown text of a field: empty when it holds only whitespace, else the field with each
+/// run of whitespace that contains a line break made one `\n` (the renderer writes it as one
+/// space inside a table).
+fn shown_text(value: &str) -> String {
+    if value.trim().is_empty() {
+        return String::new();
     }
-    let mut out: Vec<Inline> = Vec::new();
-    let mut text = String::new();
+    if !value.contains(['\n', '\r']) {
+        return value.to_string();
+    }
+    let mut out = String::with_capacity(value.len());
     let mut run = String::new();
-    let flush = |run: &mut String, text: &mut String, out: &mut Vec<Inline>| {
-        if run.contains(['\n', '\r']) {
-            if !text.is_empty() {
-                out.push(Inline::plain(text.as_str()));
-                text.clear();
-            }
-            out.push(Inline::LineBreak);
-        } else {
-            text.push_str(run);
-        }
-        run.clear();
-    };
     for c in value.chars() {
         if c.is_whitespace() {
             run.push(c);
-        } else {
-            flush(&mut run, &mut text, &mut out);
-            text.push(c);
+            continue;
+        }
+        flush_run(&mut run, &mut out);
+        out.push(c);
+    }
+    flush_run(&mut run, &mut out);
+    out
+}
+
+fn flush_run(run: &mut String, out: &mut String) {
+    if run.contains(['\n', '\r']) {
+        out.push('\n');
+    } else {
+        out.push_str(run);
+    }
+    run.clear();
+}
+
+/// A field as the layout detector sees it: its class from csvsniff's header rule and no
+/// style (CSV has none).
+fn cell_in(row: u32, col: u32, value: &str, shown: &str) -> CellIn {
+    let (class, number) = match csvsniff::cell_class(value) {
+        CellClass::Number => (Class::Number, value.trim().parse::<f64>().ok()),
+        CellClass::Date => (Class::Date, None),
+        CellClass::Bool => (Class::Bool, None),
+        CellClass::Text | CellClass::Empty => (Class::Text, None),
+    };
+    CellIn {
+        pos: Pos { row, col },
+        class,
+        text: shown.to_string(),
+        number,
+        style: Style::default(),
+        formula: None,
+    }
+}
+
+/// Whether a text reads as a label: not empty after trimming and at most [`MAX_LABEL`] bytes
+/// (the label rule of the sheet reader).
+fn is_label(text: &str) -> bool {
+    text.len() <= MAX_LABEL && !text.trim().is_empty()
+}
+
+/// Whether a blank line follows the record that ended at byte `end` of `text`. The csv
+/// reader skips blank lines and puts the next record's position at `end`, so the text from
+/// there tells. `end` can sit between the `\r` and the `\n` of the record's line break;
+/// that `\n` belongs to the record.
+fn blank_line_after(text: &str, end: usize) -> bool {
+    let Some(rest) = text.get(end..) else {
+        return false;
+    };
+    let rest = if text[..end].ends_with('\r') {
+        rest.strip_prefix('\n').unwrap_or(rest)
+    } else {
+        rest
+    };
+    rest.starts_with(['\n', '\r'])
+}
+
+/// Names the empty header paths of the tables with a header row by their column number,
+/// `Column 4`, as the column facts do (a header record shorter than the rows, an empty
+/// header field).
+fn name_empty_header_cells(layout: &mut Layout) {
+    for r in &mut layout.regions {
+        if r.kind != Kind::Table || r.header_rows.is_empty() {
+            continue;
+        }
+        let Some(cols) = r.body.or(r.data) else {
+            continue;
+        };
+        let width = usize::try_from(cols.width()).unwrap_or(usize::MAX);
+        if r.header_paths.len() < width {
+            r.header_paths.resize(width, String::new());
+        }
+        for (i, path) in r.header_paths.iter_mut().enumerate() {
+            if path.is_empty() {
+                *path = format!("Column {}", u64::from(cols.left) + i as u64 + 1);
+            }
         }
     }
-    flush(&mut run, &mut text, &mut out);
-    if !text.is_empty() {
-        out.push(Inline::plain(&text));
-    }
-    out
+}
+
+/// Whether sheet row `row` is a header or data row of a table or grid region, not a
+/// caption, heading or note line and not in a label and value, text or title region.
+fn in_table_row(layout: &Layout, row: u32) -> bool {
+    layout.regions.iter().any(|r| {
+        matches!(r.kind, Kind::Table | Kind::Grid)
+            && r.rect.top <= row
+            && row <= r.rect.bottom
+            && !r.captions.contains(&row)
+            && !r.notes.contains(&row)
+            && !r.above_header.contains(&row)
+            && r.caption_heading != Some(row)
+            && r.heading.is_none_or(|(h, _)| h != row)
+    })
+}
+
+/// Puts the ragged-row losses that `keep` accepts (by the line a record starts on; the
+/// count of rows not listed is always kept) at `at` among the losses.
+fn place_ragged(
+    doc: &mut Document,
+    at: usize,
+    ragged: Vec<(Option<usize>, Loss)>,
+    keep: impl Fn(usize) -> bool,
+) {
+    let kept: Vec<Loss> = ragged
+        .into_iter()
+        .filter(|(line, _)| line.is_none_or(&keep))
+        .map(|(_, loss)| loss)
+        .collect();
+    doc.losses.splice(at..at, kept);
+}
+
+/// Whether a loss says the file is damaged.
+fn damaged(doc: &Document) -> bool {
+    doc.losses.iter().any(|l| l.why == LossReason::Damaged)
 }
 
 /// The 1-based record that contains the byte `offset`, with the line it starts on.

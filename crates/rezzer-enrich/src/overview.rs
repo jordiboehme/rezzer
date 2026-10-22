@@ -191,7 +191,8 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 /// `, <k> regions` follows when there is more than one; a sheet without a table region is
 /// `<k> regions`.
 /// When the document has only this one sheet and the reader gave `rows` and `columns`
-/// properties, those are the size and the rows in the table are noted as shown when fewer.
+/// properties, those are the size and the rows in the table (with regions: in all region
+/// tables, without their header rows) are noted as shown when fewer.
 /// For any other part: the paragraph count.
 fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
     let Block::Section { kind, blocks, .. } = section else {
@@ -231,7 +232,7 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
         if regions > 0 && table.is_none() && totals.is_none() {
             return plural(regions, "region", "regions");
         }
-        let shown = table.map(|(rows, header)| {
+        let mut shown = table.map(|(rows, header)| {
             let columns = rows
                 .iter()
                 .map(|r| r.iter().map(|c| c.col_span.max(1) as usize).sum::<usize>())
@@ -239,6 +240,22 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
                 .unwrap_or(0);
             (rows.len().saturating_sub(header), columns)
         });
+        // Against the reader's totals, every region's rows count as shown.
+        if totals.is_some() && regions > 0 {
+            let rows = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Table {
+                        rows,
+                        header_rows,
+                        layout: Some(_),
+                        ..
+                    } => Some(rows.len().saturating_sub(*header_rows)),
+                    _ => None,
+                })
+                .sum();
+            shown = Some((rows, 0));
+        }
         match (totals, shown) {
             (Some((rows, columns)), shown) => {
                 let base = format!(
@@ -247,8 +264,8 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
                     plural(columns, "column", "columns")
                 );
                 return match shown {
-                    Some((n, _)) if n >= rows => base,
-                    Some((n, _)) => format!("{base} ({n} shown)"),
+                    Some((n, _)) if n >= rows => format!("{base}{more}"),
+                    Some((n, _)) => format!("{base} ({n} shown){more}"),
                     None => format!("{base} (none shown)"),
                 };
             }

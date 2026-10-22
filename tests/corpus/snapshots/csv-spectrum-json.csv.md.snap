@@ -24,7 +24,7 @@ losses: 1
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-json | sheet | 2 rows x 2 columns |  |  |
+| csv-spectrum-json | sheet | 1 row x 2 columns |  |  |
 
 ## Properties
 
@@ -32,14 +32,15 @@ losses: 1
 | --- | --- |
 | columns | 2 |
 | delimiter | , |
-| has\_header | false |
-| rows | 2 |
+| has\_header | true |
+| rows | 1 |
 
 ## csv-spectrum-json
 
-|  |  |
-| --- | --- |
+Table A1:B2 (data A2:B2), header row 1, found by rules: no gaps, header by type change.
+
 | key | val |
+| --- | --- |
 | 1 | {"type": "Point", "coordinates": \[102.0, 0.5\]} |
 
 **Columns**

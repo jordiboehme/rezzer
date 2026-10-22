@@ -37,7 +37,9 @@ losses: 0
 
 ## tsv-noheader-geonames-admin1
 
-|  |  |  |  |
+Table A1:D3865, row labels in A to C, found by rules: no gaps, no header found.
+
+| 1 | 2 | 3 | 4 |
 | --- | --- | --- | --- |
 | AD.06 | Sant Julià de Loria | Sant Julia de Loria | 3039162 |
 | AD.05 | Ordino | Ordino | 3039676 |

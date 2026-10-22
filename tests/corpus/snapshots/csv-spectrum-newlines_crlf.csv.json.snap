@@ -7,7 +7,36 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-spectrum-newlines_crlf",
       "blocks": [
         {
+          "anchor": "csv-spectrum-newlines_crlf!A1:C4",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C4",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "a",
+              "b",
+              "c"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-spectrum-newlines_crlf!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C4"
+          },
           "rows": [
             [
               {

@@ -11,4 +11,9 @@ rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
 textenc = { path = "../../formats/textenc" }
 csvsniff = { path = "../../formats/csvsniff" }
+sheetlayout = { path = "../../formats/sheetlayout" }
+rezzer-layout = { path = "../../rezzer-layout" }
 csv.workspace = true
+
+[dev-dependencies]
+rezzer-render = { path = "../../rezzer-render" }

@@ -7,7 +7,36 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-spectrum-empty",
       "blocks": [
         {
+          "anchor": "csv-spectrum-empty!A1:C3",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C3",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "a",
+              "b",
+              "c"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-spectrum-empty!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C3"
+          },
           "rows": [
             [
               {
@@ -59,23 +88,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-spectrum-empty!B2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-spectrum-empty!C2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               }
             ],

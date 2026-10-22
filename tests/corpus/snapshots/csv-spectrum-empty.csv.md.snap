@@ -37,6 +37,8 @@ losses: 0
 
 ## csv-spectrum-empty
 
+Table A1:C3 (data A2:C3), header row 1, found by rules: no gaps, header by type change.
+
 | a | b | c |
 | --- | --- | --- |
 | 1 |  |  |

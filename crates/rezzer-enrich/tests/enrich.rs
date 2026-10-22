@@ -1086,6 +1086,40 @@ fn region(name: &str, kind: rezzer_model::LayoutKind, rows: usize, cols: usize) 
 }
 
 #[test]
+fn reader_totals_count_the_rows_of_every_region() {
+    use rezzer_model::LayoutKind;
+    // A CSV split into two tables by a blank line: every region's data rows are shown.
+    let two = || Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("data".into()),
+        anchor: Some(a("data")),
+        blocks: vec![
+            region("data", LayoutKind::Table, 4, 2),
+            region("data", LayoutKind::Table, 5, 2),
+        ],
+    };
+    let mut d = doc();
+    d.body.push(two());
+    custom_number(&mut d, "rows", 7.0);
+    custom_number(&mut d, "columns", 2.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(
+        d.overview.unwrap().parts[0].size,
+        "7 rows x 2 columns, 2 regions"
+    );
+    // Rows the reader did not show are still noted.
+    let mut d = doc();
+    d.body.push(two());
+    custom_number(&mut d, "rows", 10.0);
+    custom_number(&mut d, "columns", 2.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(
+        d.overview.unwrap().parts[0].size,
+        "10 rows x 2 columns (7 shown), 2 regions"
+    );
+}
+
+#[test]
 fn sheet_size_counts_regions() {
     use rezzer_model::LayoutKind;
     let mut d = doc();

@@ -39,6 +39,8 @@ losses: 0
 
 ## csv-datahub-co2-fossil-global
 
+Table A1:H276 (data A2:H276), header row 1, found by rules: no gaps, header by type change.
+
 | Year | Total | Gas Fuel | Liquid Fuel | Solid Fuel | Cement | Gas Flaring | Per Capita |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1750 | 3 |  |  | 3 |  |  | 0 |

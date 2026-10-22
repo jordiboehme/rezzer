@@ -7,7 +7,45 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-pandas-fdic-banklist",
       "blocks": [
         {
+          "anchor": "csv-pandas-fdic-banklist!A1:G507",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:G507",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Bank Name",
+              "City",
+              "ST",
+              "CERT",
+              "Acquiring Institution",
+              "Closing Date",
+              "Updated Date"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-pandas-fdic-banklist!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:G507"
+          },
           "rows": [
             [
               {

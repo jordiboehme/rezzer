@@ -7,7 +7,39 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-latin1-noheader-derived-geonames",
       "blocks": [
         {
+          "anchor": "csv-latin1-noheader-derived-geonames!A1:D83",
           "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A1:D83",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "key": "csv-latin1-noheader-derived-geonames!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:D83"
+          },
           "rows": [
             [
               {

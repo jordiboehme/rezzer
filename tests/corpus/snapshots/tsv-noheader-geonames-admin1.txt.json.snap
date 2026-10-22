@@ -7,7 +7,39 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "tsv-noheader-geonames-admin1",
       "blocks": [
         {
+          "anchor": "tsv-noheader-geonames-admin1!A1:D3865",
           "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A1:D3865",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "key": "tsv-noheader-geonames-admin1!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:D3865"
+          },
           "rows": [
             [
               {

@@ -184,6 +184,8 @@ struct Pick {
     numeric: f32,
     rank: usize,
     delimiter: u8,
+    /// The records before the table that were left out (title lines).
+    lead: usize,
     rows: Vec<Vec<String>>,
 }
 
@@ -194,6 +196,69 @@ impl Pick {
         let b = (other.share, other.count, other.numeric);
         a > b || (a == b && self.rank < other.rank)
     }
+}
+
+/// Leading records with fewer fields than the modal count, at most this many, may be title
+/// lines above the table. They are left out only when the records as a whole fail the checks.
+const MAX_LEAD_RECORDS: usize = 10;
+
+/// The share, the modal field count and the share of numeric-looking cells of the sampled
+/// records of one delimiter, when they pass the checks (see [`sniff`]).
+fn judge(rows: &[Vec<String>], quoted: &[Vec<bool>]) -> Option<(f32, usize, f32)> {
+    let counts: Vec<usize> = rows.iter().map(Vec::len).collect();
+    let n = counts.len();
+    if n < 2 {
+        return None;
+    }
+    let (count, freq) = modal(&histogram(&counts))?;
+    if count < 2 || (n < MIN_RECORDS && !(n == 2 && counts.iter().all(|&c| c >= 3))) {
+        return None;
+    }
+    let share = freq as f32 / n as f32;
+    // A ragged file is accepted when the header line and the first data
+    // line both have the modal field count.
+    let ragged_ok = share >= MIN_RAGGED_CONSISTENCY
+        && n >= MIN_RAGGED_RECORDS
+        && counts[0] == count
+        && counts[1] == count;
+    if share < MIN_CONSISTENCY && !ragged_ok {
+        return None;
+    }
+    let cells: Vec<&str> = rows.iter().flatten().map(String::as_str).collect();
+    let filled: Vec<&&str> = cells.iter().filter(|c| !c.trim().is_empty()).collect();
+    if filled.is_empty() {
+        return None;
+    }
+    // Prose: most unquoted fields are long free text (quoted text is
+    // normal in CSV: translations, questions and answers).
+    let unquoted: Vec<&str> = rows
+        .iter()
+        .zip(quoted)
+        .flat_map(|(r, q)| {
+            r.iter()
+                .zip(q.iter().chain(std::iter::repeat(&false)))
+                .filter(|(c, q)| !**q && !c.trim().is_empty())
+                .map(|(c, _)| c.as_str())
+        })
+        .collect();
+    let long = unquoted
+        .iter()
+        .filter(|c| c.split_whitespace().count() > 4)
+        .count();
+    if long * 2 > unquoted.len() {
+        return None;
+    }
+    let numeric = filled.iter().filter(|c| numeric_looking(c)).count() as f32 / filled.len() as f32;
+    Some((share, count, numeric))
+}
+
+/// The number of leading records with fewer fields than the modal count, when there are
+/// 1 to [`MAX_LEAD_RECORDS`] of them.
+fn lead_records(rows: &[Vec<String>]) -> Option<usize> {
+    let counts: Vec<usize> = rows.iter().map(Vec::len).collect();
+    let (count, _) = modal(&histogram(&counts))?;
+    let lead = counts.iter().take_while(|&&c| c < count).count();
+    (1..=MAX_LEAD_RECORDS).contains(&lead).then_some(lead)
 }
 
 /// Sniffing looks at most at this many bytes from the start (and at most [`SAMPLE_RECORDS`]
@@ -230,7 +295,10 @@ fn head(text: &str, max: usize) -> &str {
 /// best share below 0.8. A share between 0.6 and 0.8 is accepted when the
 /// first two records both have the modal field count and at least ten
 /// records exist (a ragged or broken file; `consistent_rows` keeps the real
-/// share). The header flag is a heuristic: see [`Dialect::has_header`].
+/// share). When the records fail these checks only because of 1 to 10 short
+/// records at the start (title lines above the table), the checks run on the
+/// records after them and [`Dialect::lead_records`] counts them. The header
+/// flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = head(strip_bom(text), SNIFF_MAX_BYTES);
     if looks_like_other_format(text) {
@@ -254,53 +322,17 @@ pub fn sniff(text: &str) -> Option<Dialect> {
             ));
             rows.push(rec.iter().map(str::to_owned).collect());
         }
-        let counts: Vec<usize> = rows.iter().map(Vec::len).collect();
-        let n = counts.len();
-        if n < 2 {
-            continue;
-        }
-        let Some((count, freq)) = modal(&histogram(&counts)) else {
-            continue;
+        // The records as they are; else without title lines above the table.
+        let (lead, (share, count, numeric)) = match judge(&rows, &quoted) {
+            Some(found) => (0, found),
+            None => match lead_records(&rows)
+                .and_then(|lead| Some((lead, judge(&rows[lead..], &quoted[lead..])?)))
+            {
+                Some(found) => found,
+                None => continue,
+            },
         };
-        if count < 2 || (n < MIN_RECORDS && !(n == 2 && counts.iter().all(|&c| c >= 3))) {
-            continue;
-        }
-        let share = freq as f32 / n as f32;
-        // A ragged file is accepted when the header line and the first data
-        // line both have the modal field count.
-        let ragged_ok = share >= MIN_RAGGED_CONSISTENCY
-            && n >= MIN_RAGGED_RECORDS
-            && counts[0] == count
-            && counts[1] == count;
-        if share < MIN_CONSISTENCY && !ragged_ok {
-            continue;
-        }
-        let cells: Vec<&str> = rows.iter().flatten().map(String::as_str).collect();
-        let filled: Vec<&&str> = cells.iter().filter(|c| !c.trim().is_empty()).collect();
-        if filled.is_empty() {
-            continue;
-        }
-        // Prose: most unquoted fields are long free text (quoted text is
-        // normal in CSV: translations, questions and answers).
-        let unquoted: Vec<&str> = rows
-            .iter()
-            .zip(&quoted)
-            .flat_map(|(r, q)| {
-                r.iter()
-                    .zip(q.iter().chain(std::iter::repeat(&false)))
-                    .filter(|(c, q)| !**q && !c.trim().is_empty())
-                    .map(|(c, _)| c.as_str())
-            })
-            .collect();
-        let long = unquoted
-            .iter()
-            .filter(|c| c.split_whitespace().count() > 4)
-            .count();
-        if long * 2 > unquoted.len() {
-            continue;
-        }
-        let numeric =
-            filled.iter().filter(|c| numeric_looking(c)).count() as f32 / filled.len() as f32;
+        rows.drain(..lead);
         let rank = PREFERENCE
             .iter()
             .position(|&d| d == delimiter)
@@ -311,6 +343,7 @@ pub fn sniff(text: &str) -> Option<Dialect> {
             numeric,
             rank,
             delimiter,
+            lead,
             rows,
         };
         if best.as_ref().is_none_or(|b| pick.beats(b)) {
@@ -320,36 +353,56 @@ pub fn sniff(text: &str) -> Option<Dialect> {
     let Pick {
         share,
         delimiter,
+        lead,
         rows,
         ..
     } = best?;
     Some(Dialect {
         delimiter,
         quote,
+        lead_records: lead,
         has_header: detect_header(&rows),
         consistent_rows: share,
     })
 }
 
-/// Coarse class of one cell, for header detection.
-#[derive(PartialEq)]
-enum Class {
+/// The coarse class of one cell value, as the header rule sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellClass {
+    /// Nothing but whitespace.
     Empty,
-    Numeric,
+    /// Anything that is no number, date or bool.
+    Text,
+    /// A plain number: optional sign, digits, optional fraction with a point.
+    Number,
+    /// A date, also with a time (see [`crate::ColumnKind::Date`]).
     Date,
-    Other,
+    /// `true`, `false`, `yes` or `no` in any case.
+    Bool,
 }
 
-fn class(cell: &str) -> Class {
+/// The class of one cell value, judged on its trimmed text. The header rule of [`sniff`]
+/// uses the same classes and counts a bool cell as text.
+pub fn cell_class(cell: &str) -> CellClass {
     let t = cell.trim();
     if t.is_empty() {
-        Class::Empty
+        CellClass::Empty
     } else if number(t).is_some() {
-        Class::Numeric
+        CellClass::Number
     } else if is_date(t) {
-        Class::Date
+        CellClass::Date
+    } else if is_bool(t) {
+        CellClass::Bool
     } else {
-        Class::Other
+        CellClass::Text
+    }
+}
+
+/// The class of a cell for header detection: a bool cell counts as text.
+fn class(cell: &str) -> CellClass {
+    match cell_class(cell) {
+        CellClass::Bool => CellClass::Text,
+        c => c,
     }
 }
 
@@ -360,8 +413,8 @@ fn year_header(first: &[String], next: &[String]) -> bool {
     let mut years = Vec::new();
     for (j, c) in first.iter().enumerate() {
         match class(c) {
-            Class::Other | Class::Empty => {}
-            Class::Numeric => match c.trim().parse::<u32>() {
+            CellClass::Text | CellClass::Bool | CellClass::Empty => {}
+            CellClass::Number => match c.trim().parse::<u32>() {
                 Ok(y)
                     if (1000..=2999).contains(&y)
                         && next.get(j).is_none_or(|n| n.trim() != c.trim()) =>
@@ -370,7 +423,7 @@ fn year_header(first: &[String], next: &[String]) -> bool {
                 }
                 _ => return false,
             },
-            Class::Date => return false,
+            CellClass::Date => return false,
         }
     }
     years.len() >= 2
@@ -388,10 +441,10 @@ fn detect_header(rows: &[Vec<String>]) -> bool {
     if year_header(first, &rest[0]) {
         return true;
     }
-    let first_classes: Vec<Class> = first.iter().map(|c| class(c)).collect();
+    let first_classes: Vec<CellClass> = first.iter().map(|c| class(c)).collect();
     if first_classes
         .iter()
-        .any(|c| matches!(c, Class::Numeric | Class::Date))
+        .any(|c| matches!(c, CellClass::Number | CellClass::Date))
     {
         return false;
     }
@@ -400,10 +453,10 @@ fn detect_header(rows: &[Vec<String>]) -> bool {
         let mut seen = 0;
         let mut all = true;
         for row in rest {
-            match row.get(j).map_or(Class::Empty, |c| class(c)) {
-                Class::Empty => {}
-                Class::Numeric | Class::Date => seen += 1,
-                Class::Other => {
+            match row.get(j).map_or(CellClass::Empty, |c| class(c)) {
+                CellClass::Empty => {}
+                CellClass::Number | CellClass::Date => seen += 1,
+                CellClass::Text | CellClass::Bool => {
                     all = false;
                     break;
                 }
@@ -739,7 +792,8 @@ fn find_quote_problems(text: &str, delimiter: u8, quote: u8) -> Vec<QuoteProblem
 /// column names, types, units, missing counts and key candidates, ragged
 /// rows, an unterminated-quote flag and observed sum relations. The number
 /// of columns is the modal field count; extra cells in longer records only
-/// show up as ragged rows. Memory does not grow with the number of rows,
+/// show up as ragged rows. The first [`Dialect::lead_records`] records (title
+/// lines) are left out of all of it. Memory does not grow with the number of rows,
 /// except for a uniqueness set of at most 200,000 value hashes per column
 /// (above that a column counts as not unique).
 ///
@@ -773,9 +827,13 @@ pub fn analyze_until(
     let mut rdr = reader(text, delimiter, quote);
     let mut byte_rec = csv::ByteRecord::new();
     let mut seen = 0usize;
+    // Title lines above the table are not part of it.
+    let lead = dialect.lead_records;
     while rdr.read_byte_record(&mut byte_rec).unwrap_or(false) {
-        *hist.entry(byte_rec.len()).or_default() += 1;
         seen += 1;
+        if seen > lead {
+            *hist.entry(byte_rec.len()).or_default() += 1;
+        }
         if seen.is_multiple_of(STOP_CHECK_EVERY) && stop() {
             truncated = true;
             break;
@@ -799,6 +857,9 @@ pub fn analyze_until(
         if seen.is_multiple_of(STOP_CHECK_EVERY) && stop() {
             truncated = true;
             break;
+        }
+        if seen <= lead {
+            continue;
         }
         if rec.len() != expected {
             ragged_total += 1;
@@ -869,7 +930,7 @@ pub fn analyze_until(
             let mut values: Vec<Vec<Option<f64>>> =
                 vec![Vec::with_capacity(checked_rows); eligible.len()];
             let mut rdr = reader(text, delimiter, quote);
-            let skip = usize::from(dialect.has_header);
+            let skip = lead + usize::from(dialect.has_header);
             for rec in rdr
                 .records()
                 .map_while(Result::ok)

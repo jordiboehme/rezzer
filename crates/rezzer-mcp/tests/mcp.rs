@@ -294,7 +294,7 @@ async fn rez_sections_and_format() {
     )
     .await;
     assert_eq!(structured(&only)["status"], "complete");
-    assert!(!text(&only).contains("| 1 "), "{}", text(&only));
+    assert!(!text(&only).contains("| 1 | 2 |"), "{}", text(&only));
 }
 
 #[tokio::test(flavor = "multi_thread")]

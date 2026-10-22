@@ -37,6 +37,8 @@ losses: 0
 
 ## csv-spectrum-escaped\_quotes
 
+Table A1:B3 (data A2:B3), header row 1, found by rules: no gaps, header by type change.
+
 | a | b |
 | --- | --- |
 | 1 | ha "ha" ha |

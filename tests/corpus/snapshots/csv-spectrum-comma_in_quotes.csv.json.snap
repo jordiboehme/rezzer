@@ -7,7 +7,43 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-spectrum-comma_in_quotes",
       "blocks": [
         {
+          "anchor": "csv-spectrum-comma_in_quotes!A1:E2",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:E2",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "first",
+              "last",
+              "address",
+              "city",
+              "zip"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-spectrum-comma_in_quotes!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:E2"
+          },
           "rows": [
             [
               {

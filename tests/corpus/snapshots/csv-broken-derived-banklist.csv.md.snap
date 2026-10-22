@@ -40,6 +40,8 @@ language: "en"
 
 ## csv-broken-derived-banklist
 
+Table A1:I10 (data A2:I10), header row 1, row labels in A to C, found by rules: no gaps, header by type change.
+
 | Bank Name | City | ST | CERT | Acquiring Institution | Closing Date | Updated Date | Column 8 | Column 9 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Banks of Wisconsin d/b/a Bank of Kenosha | Kenosha | WI | 35386 | North Shore Bank, FSB | 31-May-13 | 31-May-13 |  |  |

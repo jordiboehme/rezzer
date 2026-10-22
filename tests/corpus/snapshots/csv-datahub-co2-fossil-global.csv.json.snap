@@ -7,7 +7,41 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-datahub-co2-fossil-global",
       "blocks": [
         {
+          "anchor": "csv-datahub-co2-fossil-global!A1:H276",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:H276",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Year",
+              "Total",
+              "Gas Fuel",
+              "Liquid Fuel",
+              "Solid Fuel",
+              "Cement",
+              "Gas Flaring",
+              "Per Capita"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-datahub-co2-fossil-global!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:H276"
+          },
           "rows": [
             [
               {
@@ -125,23 +159,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -158,23 +180,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -215,23 +225,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C3",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D3",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -248,23 +246,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F3",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G3",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -305,23 +291,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C4",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D4",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -338,23 +312,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F4",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G4",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -395,23 +357,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C5",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D5",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -428,23 +378,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F5",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G5",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -485,23 +423,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C6",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D6",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -518,23 +444,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F6",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G6",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -575,23 +489,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C7",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D7",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -608,23 +510,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F7",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G7",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -665,23 +555,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C8",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D8",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -698,23 +576,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F8",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G8",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -755,23 +621,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C9",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D9",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -788,23 +642,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F9",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G9",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -845,23 +687,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C10",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D10",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -878,23 +708,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F10",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G10",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -935,23 +753,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C11",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D11",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -968,23 +774,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F11",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G11",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -1025,23 +819,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!C12",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!D12",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
@@ -1058,23 +840,11 @@ source: crates/rezzer/tests/corpus.rs
               {
                 "anchor": "csv-datahub-co2-fossil-global!F12",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
                 "anchor": "csv-datahub-co2-fossil-global!G12",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {

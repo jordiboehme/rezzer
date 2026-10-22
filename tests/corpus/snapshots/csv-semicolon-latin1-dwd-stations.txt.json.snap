@@ -7,7 +7,39 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "csv-semicolon-latin1-dwd-stations",
       "blocks": [
         {
+          "anchor": "csv-semicolon-latin1-dwd-stations!A1:F1092",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:F1092",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Stations_id",
+              "Stationsname",
+              "geogr. Breite",
+              "geogr. Laenge",
+              "Stationshoehe",
+              "Bundesland"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "csv-semicolon-latin1-dwd-stations!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:F1092"
+          },
           "rows": [
             [
               {
@@ -71,17 +103,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Bundesland",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G1",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -154,17 +175,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G2",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -229,17 +239,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Nordrhein-Westfalen                     ",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G3",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -312,17 +311,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G4",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -387,17 +375,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Schleswig-Holstein                      ",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G5",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -470,17 +447,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G6",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -545,17 +511,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Baden-Württemberg                       ",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G7",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -628,17 +583,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G8",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -703,17 +647,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Baden-Württemberg                       ",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G9",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
@@ -786,17 +719,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G10",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -865,17 +787,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G11",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
               }
             ],
             [
@@ -940,17 +851,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Hessen                                  ",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "csv-semicolon-latin1-dwd-stations!G12",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
                     "type": "text"
                   }
                 ],
