@@ -153,11 +153,15 @@ fn gap_above(works: &[Work], by_bottom: &[(u32, u32, usize)], i: usize, c: Rect)
         };
         // Regions that share a bottom row do not share a column, so the one that starts
         // nearest left of the title's right edge is the only one that can reach it.
+        // A title already joined into its table is dead and skipped, so it does not hide a
+        // live region further left.
         let k = by_bottom.partition_point(|&(b, l, _)| (b, l) <= (bottom, c.right));
-        by_bottom[..k].last().is_some_and(|&(b, _, j)| {
-            let r = works[j].region.rect;
-            b == bottom && j != i && !works[j].dead && r.right >= c.left
-        })
+        by_bottom[..k]
+            .iter()
+            .rev()
+            .take_while(|&&(b, _, _)| b == bottom)
+            .find(|&&(_, _, j)| j != i && !works[j].dead)
+            .is_some_and(|&(_, _, j)| works[j].region.rect.right >= c.left)
     })
 }
 

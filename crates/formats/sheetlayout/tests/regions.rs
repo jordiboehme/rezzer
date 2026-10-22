@@ -832,6 +832,33 @@ fn title_nearer_the_block_above_does_not_name_the_block_below() {
 }
 
 #[test]
+fn joined_title_does_not_hide_the_block_above() {
+    // C3 is a title joined into the side table E4:F4. The table A1:A3 ends at the same row
+    // further left, one empty row above the title in A5:C5, which stands 2 empty rows above
+    // the next table: the title stays with the block above.
+    let layout = Sheet::new()
+        .rows("A1", &["a", "1", "2"])
+        .cell("C3", "Side title")
+        .rows("E4", &["x|y"])
+        .cell("A5", "Source: test data")
+        .merge("A5:C5")
+        .rows("A8", &["c|d", "5|6"])
+        .segment();
+    let side = layout
+        .regions
+        .iter()
+        .find(|r| r.rect.right == 5)
+        .expect("the side table");
+    assert_eq!(side.captions, [2], "{:?}", ranges(&layout));
+    let below = layout
+        .regions
+        .iter()
+        .find(|r| r.rect.bottom == 8)
+        .expect("the table below");
+    assert!(below.captions.is_empty(), "{:?}", ranges(&layout));
+}
+
+#[test]
 fn title_three_rows_away_does_not_attach() {
     let layout = Sheet::new()
         .cell("A1", "Sales")
