@@ -748,8 +748,7 @@ fn without_label_and_path(list: &Value) -> Value {
 
 /// For every corpus workbook the parameters equal the baseline of Task 1 in anchor, name,
 /// value, unit, unit source and read count, in the same order: only `label` and `path`
-/// may differ (spec 8.7, D2). A label is the path joined with " / ", and a parameter in no
-/// region keeps the label it had.
+/// may differ (spec 8.7, D2). A label is the path joined with " / ".
 #[test]
 fn parameter_values_and_cells_unchanged() {
     let pipeline = pipeline();
@@ -2013,4 +2012,27 @@ fn multicolumn_reads_column_by_column() {
     assert!(end_left < start_right, "{text}");
     let abstract_at = text.find("This is a sample document").unwrap();
     assert!(abstract_at < end_left);
+}
+
+/// The Census caption is the group title of its sheet's parameters, written once: equal
+/// paths show the parts after the title, never the title again (spec 8.7). Its label
+/// column cells and header cells all have paths like `<caption> / Geographic Area`.
+#[test]
+fn census_caption_is_written_once_as_the_group_title() {
+    let md = office_markdown("NST-EST2023-POP.xlsx");
+    let caption = "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023";
+    let logic = &md[md.find("## Logic").expect("a Logic section")..];
+    let head = "#### Parameters\n";
+    let rest = &logic[logic.find(head).expect("a Parameters part") + head.len()..];
+    let part = &rest[..rest.find("\n#").map_or(rest.len(), |e| e + 1)];
+    let title = format!("Parameters in {caption}:");
+    assert_eq!(part.matches(title.as_str()).count(), 1, "{part}");
+    // No row's label repeats it (cell A2, whose value is the caption, shows it as a value).
+    let labels: Vec<&str> = part
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| Cell") && !l.starts_with("| ---"))
+        .map(|l| l.split(" | ").nth(2).unwrap_or(""))
+        .collect();
+    assert!(labels.len() > 300, "{part}");
+    assert!(!labels.iter().any(|l| l.contains(caption)), "{part}");
 }

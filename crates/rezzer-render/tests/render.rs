@@ -1005,27 +1005,6 @@ fn snapshot_rich_document() {
     insta::assert_snapshot!(md);
 }
 
-/// A page without the lines a continued page begins with (`... (continued)` and a blank).
-fn without_lead(page: &str) -> &str {
-    let mut rest = page;
-    while let Some((line, after)) = rest.split_once("\n\n") {
-        if line.contains('\n') || !line.ends_with(" (continued)") {
-            break;
-        }
-        rest = after;
-    }
-    rest
-}
-
-/// The pages joined without the lines a continued page begins with: the input again.
-fn unpaged(pages: &[String]) -> String {
-    pages
-        .iter()
-        .enumerate()
-        .map(|(i, p)| if i == 0 { p.as_str() } else { without_lead(p) })
-        .collect()
-}
-
 #[test]
 fn paginate_splits_before_h2_not_in_fence() {
     let filler = "word ".repeat(40); // 200 chars, 50 tokens
@@ -1033,7 +1012,7 @@ fn paginate_splits_before_h2_not_in_fence() {
         "---\ntype: document\n---\n\n# T\n\n{filler}\n\n## A\n\n{filler}\n\n```text\n## not a heading\n{filler}\n```\n\n## B\n\n{filler}\n"
     );
     let pages = paginate(&md, 150);
-    assert_eq!(unpaged(&pages), md);
+    assert_eq!(pages.concat(), md);
     assert!(pages.len() >= 3, "{pages:#?}");
     for page in &pages[1..] {
         assert!(
@@ -1055,7 +1034,7 @@ fn paginate_keeps_frontmatter_on_page_1() {
     let md =
         format!("---\ntype: document\ntitle: \"{long}\"\n---\n\n# T\n\nshort\n\n## A\n\nmore\n");
     let pages = paginate(&md, 10);
-    assert_eq!(unpaged(&pages), md);
+    assert_eq!(pages.concat(), md);
     assert!(pages[0].starts_with("---\ntype: document\n"));
     // The title keeps its first block with it.
     assert!(
@@ -1073,14 +1052,14 @@ fn paginate_splits_large_section_at_h3_then_blank_line() {
         "# T\n\n## A\n\n{filler}\n\n### A1\n\n{filler}\n\n{filler}\n\n    indented\n\n---\n\nend\n"
     );
     let pages = paginate(&md, 60);
-    assert_eq!(unpaged(&pages), md);
+    assert_eq!(pages.concat(), md);
     assert!(
         pages.iter().any(|p| p.starts_with("### A1\n")),
         "{pages:#?}"
     );
     for page in &pages {
-        assert!(!without_lead(page).starts_with("    "), "{pages:#?}");
-        assert!(!without_lead(page).starts_with("---"), "{pages:#?}");
+        assert!(!page.starts_with("    "), "{pages:#?}");
+        assert!(!page.starts_with("---"), "{pages:#?}");
     }
     assert!(pages.len() >= 3, "{pages:#?}");
 }
@@ -1199,10 +1178,10 @@ fn paginate_keeps_caption_table_and_merge_note_together() {
         "# T\n\n## A\n\n{filler}\n\n**Costs**\n\n| a |\n| --- |\n| x |\n\nMerged cells: A1:A2\n\n{filler}\n"
     );
     let pages = paginate(&md, 30);
-    assert_eq!(unpaged(&pages), md);
+    assert_eq!(pages.concat(), md);
     for page in &pages {
-        assert!(!without_lead(page).starts_with('|'), "{pages:#?}");
-        assert!(!without_lead(page).starts_with("Merged"), "{pages:#?}");
+        assert!(!page.starts_with('|'), "{pages:#?}");
+        assert!(!page.starts_with("Merged"), "{pages:#?}");
     }
 }
 
@@ -4475,7 +4454,7 @@ fn layout_line_kept_with_table() {
     for size in [10, 30, 60, 120] {
         let pages = paginate(&md, size);
         assert!(pages.len() > 1, "{size}");
-        assert_eq!(unpaged(&pages), md);
+        assert_eq!(pages.concat(), md);
         for page in &pages[1..] {
             for start in [
                 "|",
@@ -4489,7 +4468,7 @@ fn layout_line_kept_with_table() {
                 "Text ",
                 "- ",
             ] {
-                assert!(!without_lead(page).starts_with(start), "{size}: {page:?}");
+                assert!(!page.starts_with(start), "{size}: {page:?}");
             }
         }
     }
@@ -5185,9 +5164,9 @@ fn records_blocks_of_fifty() {
     );
     let pages = paginate(&whole, 400);
     assert!(pages.len() > 2, "{}", pages.len());
-    assert_eq!(unpaged(&pages), whole);
+    assert_eq!(pages.concat(), whole);
     for page in &pages[1..] {
-        let first = without_lead(page).trim_start_matches('\n');
+        let first = page.trim_start_matches('\n');
         assert!(
             !first.starts_with("  ") && !first.starts_with("- N:"),
             "a page starts inside a record: {page}"
@@ -5597,6 +5576,26 @@ fn empty_sheet_list_writes_every_sheet() {
     assert_eq!(empty, none);
 }
 
+/// A workbook whose `Inputs` sheet holds a layout table over each range, each under its
+/// anchored heading when it has one.
+fn regions_book(regions: &[(Option<&str>, &str)]) -> Document {
+    let mut d = workbook();
+    let mut blocks = Vec::new();
+    for (k, (title, range)) in regions.iter().enumerate() {
+        if let Some(t) = title {
+            blocks.push(heading(3, t, Some(&format!("Inputs!A{}", k + 1))));
+        }
+        blocks.push(ltable(Vec::new(), 0, lay(LayoutKind::Table, range, None)));
+    }
+    d.body[0] = Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Inputs".into()),
+        anchor: Some(Anchor("Inputs".into())),
+        blocks,
+    };
+    d
+}
+
 /// A parameter with a path; its label is the path joined.
 fn path_param(anchor: &str, path: &[&str], value: f64) -> Parameter {
     Parameter {
@@ -5627,7 +5626,7 @@ fn label_cells(md: &str) -> Vec<String> {
 
 #[test]
 fn param_label_is_shortest_unique_suffix() {
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("Lining"), "A1:C20")]);
     d.facets.parameters = vec![
         path_param("Inputs!B5", &["Lining", "Loads", "Dead"], 1.0),
         path_param("Inputs!B6", &["Lining", "Loads", "Live"], 2.0),
@@ -5651,7 +5650,7 @@ fn param_label_is_shortest_unique_suffix() {
 #[test]
 fn parameter_title_leaves_every_label_a_part() {
     // One member: the title is its start, the label its last part.
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("INPUTS"), "A1:C20")]);
     d.facets.parameters = vec![path_param("Inputs!B5", &["INPUTS", "Span"], 1.0)];
     let part = parameters_part(&logic_of(&d, false), "Inputs");
     assert!(part.contains("Parameters in INPUTS:"), "{part}");
@@ -5662,6 +5661,7 @@ fn parameter_title_leaves_every_label_a_part() {
     assert!(!part.contains("Parameters in"), "{part}");
     assert_eq!(label_cells(&part), ["Span"], "{part}");
     // A path that is the start of another: the title stops before the shorter one's end.
+    let mut d = regions_book(&[(Some("A"), "A1:C20")]);
     d.facets.parameters = vec![
         path_param("Inputs!B5", &["A", "B"], 1.0),
         path_param("Inputs!B7", &["A", "B", "C"], 2.0),
@@ -5669,7 +5669,9 @@ fn parameter_title_leaves_every_label_a_part() {
     let part = parameters_part(&logic_of(&d, false), "Inputs");
     assert!(part.contains("Parameters in A:"), "{part}");
     assert_eq!(label_cells(&part), ["B", "C"], "{part}");
-    // Equal paths keep the full path; their cells tell them apart.
+    // Equal paths show the parts after the title, never the title again; their cells tell
+    // them apart.
+    let mut d = regions_book(&[(Some("INPUTS"), "A1:C20")]);
     d.facets.parameters = vec![
         path_param("Inputs!B5", &["INPUTS", "t"], 1.0),
         path_param("Inputs!B9", &["INPUTS", "t"], 2.0),
@@ -5677,16 +5679,12 @@ fn parameter_title_leaves_every_label_a_part() {
     ];
     let part = parameters_part(&logic_of(&d, false), "Inputs");
     assert!(part.contains("Parameters in INPUTS:"), "{part}");
-    assert_eq!(
-        label_cells(&part),
-        ["INPUTS / t", "INPUTS / t", "Span"],
-        "{part}"
-    );
+    assert_eq!(label_cells(&part), ["t", "t", "Span"], "{part}");
 }
 
 #[test]
 fn parameter_without_label_keeps_the_group_title() {
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("INPUTS"), "A1:C20")]);
     d.facets.parameters = vec![
         path_param("Inputs!B5", &["INPUTS", "Span"], 1.0),
         parameter("Inputs!B6", None, 2.0, 1),
@@ -5700,7 +5698,7 @@ fn parameter_without_label_keeps_the_group_title() {
 #[test]
 fn equal_paths_of_a_run_fold_and_take_one_label() {
     // A run of cells with one path is one row: its label is the path's end, not the full path.
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("Sensitivity"), "E48:F72")]);
     let mut list: Vec<Parameter> = (0..4)
         .map(|i| path_param(&format!("Inputs!E{}", 49 + i), &["Sensitivity", "t"], 0.1))
         .collect();
@@ -5721,11 +5719,13 @@ fn parameters_group_by_region_in_reading_order() {
             title: Some("Inputs".into()),
             anchor: Some(Anchor("Inputs".into())),
             blocks: vec![
+                heading(3, "INPUTS", Some("Inputs!A1")),
                 ltable(
                     Vec::new(),
                     0,
                     lay(LayoutKind::KeyValue, "A1:B3", Some("A2:B3")),
                 ),
+                heading(3, "Loads", Some("Inputs!D1")),
                 ltable(
                     Vec::new(),
                     1,
@@ -5759,7 +5759,7 @@ fn parameters_group_by_region_in_reading_order() {
 
 #[test]
 fn group_title_text_is_escaped() {
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("*Loads* [kN]"), "A1:C20")]);
     d.facets.parameters = vec![
         path_param("Inputs!B5", &["*Loads* [kN]", "Dead"], 1.0),
         path_param("Inputs!B6", &["*Loads* [kN]", "Live"], 2.0),
@@ -5773,7 +5773,7 @@ fn group_title_text_is_escaped() {
 
 #[test]
 fn cross_sheet_reference_uses_full_path() {
-    let mut d = workbook();
+    let mut d = regions_book(&[(Some("Lining"), "A1:C20")]);
     d.facets.formulas = vec![
         cell_formula("Calc!C1", "=Inputs!B5*2", &["Inputs!B5"], Role::Result, 2.0),
         cell_formula(
@@ -5853,6 +5853,75 @@ fn names_table_without_labelled_cells_keeps_its_columns() {
     let logic = logic_of(&d, false);
     assert!(
         logic.contains("| Name | Scope | Kind | Refers to | Value | Read by | Note |"),
+        "{logic}"
+    );
+}
+
+#[test]
+fn column_header_alone_is_no_group_title() {
+    // `Parameter | Value | Unit` with no heading above: every path starts with the header
+    // `Value`, which is no title.
+    let mut d = regions_book(&[(None, "A1:C20")]);
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["Value", "Diameter"], 1.0),
+        path_param("Inputs!B6", &["Value", "Length"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(!part.contains("Parameters in"), "{part}");
+    assert_eq!(label_cells(&part), ["Diameter", "Length"], "{part}");
+    // Equal paths without a title keep the header part: it is written nowhere else.
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["Value", "kg"], 1.0),
+        path_param("Inputs!B7", &["Value", "kg"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert_eq!(label_cells(&part), ["Value / kg", "Value / kg"], "{part}");
+    // Under a heading the title stays, written whole.
+    let mut d = regions_book(&[(Some("INPUTS"), "A1:C20")]);
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["INPUTS", "Value", "Diameter"], 1.0),
+        path_param("Inputs!B6", &["INPUTS", "Value", "Length"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(part.contains("Parameters in INPUTS / Value:"), "{part}");
+    assert_eq!(label_cells(&part), ["Diameter", "Length"], "{part}");
+    // Parameters in no region have no title.
+    let mut d = workbook();
+    d.facets.parameters = vec![
+        path_param("Inputs!B5", &["Lining", "Dead"], 1.0),
+        path_param("Inputs!B6", &["Lining", "Live"], 2.0),
+    ];
+    let part = parameters_part(&logic_of(&d, false), "Inputs");
+    assert!(!part.contains("Parameters in"), "{part}");
+    assert_eq!(label_cells(&part), ["Dead", "Live"], "{part}");
+}
+
+#[test]
+fn names_label_that_repeats_the_name_is_left_out() {
+    let mut d = workbook();
+    d.facets.formulas = vec![
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:gg", "Inputs!$B$1", &["Inputs!B1"], None)
+        },
+        Formula {
+            role: None,
+            kind: Some(FormulaKind::Name),
+            ..formula("name:span", "Inputs!$B$2", &["Inputs!B2"], None)
+        },
+    ];
+    d.facets.parameters = vec![
+        path_param("Inputs!B1", &["gg"], 1.0),
+        path_param("Inputs!B2", &["Lining", "Span"], 2.0),
+    ];
+    let logic = logic_of(&d, false);
+    assert!(
+        logic.contains("| gg | workbook | name | `Inputs!$B$1` |  |"),
+        "{logic}"
+    );
+    assert!(
+        logic.contains("| span | workbook | name | `Inputs!$B$2` | Lining / Span |"),
         "{logic}"
     );
 }

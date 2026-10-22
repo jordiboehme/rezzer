@@ -16,6 +16,7 @@ mod layout;
 mod loss;
 mod reader;
 mod registry;
+mod sheet;
 mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
@@ -36,4 +37,5 @@ pub use layout::{
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
+pub use sheet::{CellArea, locate_cells, table_headings};
 pub use value::Value;

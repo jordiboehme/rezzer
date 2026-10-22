@@ -896,3 +896,77 @@ fn formula_kinds_serialize_snake_case() {
         assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
     }
 }
+
+#[test]
+fn locate_cells_finds_the_area_of_each_point() {
+    use rezzer_model::{CellArea, locate_cells};
+    let area = |top, left, bottom, right| CellArea {
+        top,
+        left,
+        bottom,
+        right,
+    };
+    // X ends above Z; Y lies left of where the point is; Z starts later with a smaller left.
+    let areas = [area(0, 0, 5, 10), area(10, 5, 20, 6), area(25, 0, 60, 9)];
+    let points = [(3, 7), (15, 5), (15, 7), (50, 7), (50, 20), (70, 0)];
+    assert_eq!(
+        locate_cells(&areas, &points),
+        [Some(0), Some(1), None, Some(2), None, None]
+    );
+    assert_eq!(locate_cells(&[], &[(0, 0)]), [None]);
+}
+
+#[test]
+fn table_headings_follow_the_heading_nesting() {
+    use rezzer_model::table_headings;
+    let heading = |level, text: &str, anchor: Option<&str>| Block::Heading {
+        level,
+        inlines: vec![Inline::plain(text), Inline::Code { text: "x".into() }],
+        anchor: anchor.map(|a| Anchor(a.into())),
+    };
+    let table = |range: &str| Block::Table {
+        caption: None,
+        header_rows: 0,
+        role: None,
+        rows: Vec::new(),
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(TableLayout {
+            kind: LayoutKind::Table,
+            key: format!("S!{range}"),
+            range: range.into(),
+            data: None,
+            header_rows: Vec::new(),
+            header_paths: Vec::new(),
+            label_cols: 0,
+            certainty: Certainty::Rule,
+            found_by: Vec::new(),
+            unsure: Vec::new(),
+            rows: Vec::new(),
+            hidden_header: false,
+        })),
+    };
+    let blocks = [
+        heading(3, "Lining ", Some("S!A1")),
+        table("A1:B2"),
+        heading(4, "Loads", Some("S!A3")),
+        heading(5, "Table A3:B4", None),
+        table("A3:B4"),
+        heading(3, "Table D1:E2", None),
+        table("D1:E2"),
+    ];
+    let found = table_headings(&blocks);
+    let found: Vec<(&str, Vec<&str>)> = found
+        .iter()
+        .map(|(r, h)| (*r, h.iter().map(String::as_str).collect()))
+        .collect();
+    // Code text is kept; a generated heading adds nothing and closes the deeper ones.
+    assert_eq!(
+        found,
+        [
+            ("A1:B2", vec!["Lining x"]),
+            ("A3:B4", vec!["Lining x", "Loadsx"]),
+            ("D1:E2", vec![]),
+        ]
+    );
+}

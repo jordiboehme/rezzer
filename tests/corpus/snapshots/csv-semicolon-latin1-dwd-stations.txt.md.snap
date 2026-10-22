@@ -1132,8 +1132,6 @@ language: "de"
 | 19647 | Eberbach/Neckar | 49.454703 | 8.979441 | 178 | Baden-Württemberg |  |
 | 19781 | Ingolstadt | 48.742909 | 11.423324 | 367 | Bayern |  |
 
-## csv-semicolon-latin1-dwd-stations (continued)
-
 **Columns**
 
 | Column | Type | Unit | Missing | Unique | Key |

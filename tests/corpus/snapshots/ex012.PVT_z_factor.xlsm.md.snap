@@ -236,10 +236,10 @@ For formulas copied over several cells the first cell is shown.
 
 ### Names
 
-| Name | Scope | Kind | Refers to | Label | Value | Read by | Note |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| gg | workbook | name | `z!$L$3` | gg |  |  |  |
-| zcor | workbook | name | `z!$L$4` | zcor |  |  |  |
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| gg | workbook | name | `z!$L$3` |  |  |  |
+| zcor | workbook | name | `z!$L$4` |  |  |  |
 
 ### Dependencies
 

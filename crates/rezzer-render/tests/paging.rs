@@ -114,7 +114,14 @@ fn split_section_repeats_title() {
     // every page after the first starts inside `### Lining` and says so.
     let mut d = workbook();
     if let Block::Section { blocks, .. } = &mut d.body[0] {
-        blocks.extend(["A10:B15", "A20:B25", "A30:B35"].map(region));
+        for range in ["A10:B15", "A20:B25", "A30:B35"] {
+            blocks.push(Block::Heading {
+                level: 3,
+                inlines: vec![Inline::plain("Lining")],
+                anchor: Some(Anchor(format!("Lining!{range}"))),
+            });
+            blocks.push(region(range));
+        }
     }
     let mut params = Vec::new();
     for (g, name) in ["Loads", "Geometry", "Material"].iter().enumerate() {
@@ -189,24 +196,51 @@ fn page_inside_a_group_repeats_its_title() {
 }
 
 #[test]
-fn page_at_a_section_start_or_outside_logic_repeats_nothing_else() {
+fn page_outside_logic_repeats_nothing() {
     let filler = "word ".repeat(30);
-    // `Parameters in` outside `## Logic` is a plain paragraph, never a group title.
+    // Outside `## Logic` paging is as before: no lead, and `Parameters in` is a plain
+    // paragraph, never a group title.
     let md = format!(
-        "# T\n\n## Sheet\n\nParameters in a box:\n\n{filler}\n\n{filler}\n\n### Part\n\n{filler}\n"
+        "# T\n\n## Sheet\n\nParameters in a box:\n\n{filler}\n\n{filler}\n\n### Part\n\n{filler}\n\n{filler}\n"
+    );
+    let pages = paginate(&md, 40);
+    assert!(pages.len() > 2, "{pages:#?}");
+    assert_eq!(pages.concat(), md);
+    for page in &pages {
+        assert!(!page.contains(" (continued)"), "{pages:#?}");
+    }
+}
+
+#[test]
+fn page_at_a_section_start_in_logic_has_no_lead() {
+    let filler = "word ".repeat(30);
+    let md = format!("# T\n\n## Logic\n\n### A\n\n{filler}\n\n{filler}\n\n### B\n\n{filler}\n");
+    let pages = paginate(&md, 40);
+    assert_eq!(unpaged(&pages), md);
+    let b = pages
+        .iter()
+        .find(|p| without_lead(p).starts_with("### B"))
+        .expect("a page at ### B");
+    assert!(b.starts_with("### B\n"), "{pages:#?}");
+    assert!(
+        pages.iter().any(|p| p.starts_with("### A (continued)\n\n")),
+        "{pages:#?}"
+    );
+}
+
+#[test]
+fn untitled_table_after_a_group_ends_the_group() {
+    let filler = "word ".repeat(30);
+    // A table with no title line before it starts a group without a title, so a page after
+    // it does not repeat the title of the group before.
+    let md = format!(
+        "# T\n\n## Logic\n\n### S\n\n#### Parameters\n\nParameters in Loads:\n\n| Cell |\n| --- |\n| B5 |\n\n| Cell |\n| --- |\n| H9 |\n\n{filler}\n\n{filler}\n"
     );
     let pages = paginate(&md, 40);
     assert_eq!(unpaged(&pages), md);
-    for page in &pages[1..] {
-        assert!(
-            !page.contains("Parameters in a box: (continued)"),
-            "{pages:#?}"
-        );
-        let body = without_lead(page);
-        if body.starts_with("### Part") {
-            assert_eq!(page.as_str(), body, "a page at a section start: {pages:#?}");
-        } else {
-            assert!(page.starts_with("## Sheet (continued)\n\n"), "{pages:#?}");
-        }
-    }
+    let page = pages
+        .iter()
+        .find(|p| without_lead(p).starts_with("word"))
+        .expect("a page at the filler");
+    assert!(page.starts_with("### S (continued)\n\nword"), "{pages:#?}");
 }

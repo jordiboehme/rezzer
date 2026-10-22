@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use rezzer_layout::{Caps, CellText, ColumnNames, Mapped, NameCaption};
 use rezzer_limits::Budget;
-use rezzer_model::{Block, Inline};
+use rezzer_model::{Block, CellArea, locate_cells};
 use sheetlayout::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Kind, NameIn, Pos, Rect, Style,
 };
@@ -112,27 +112,12 @@ impl SheetPaths {
                 labels: Vec::new(),
             });
         }
-        // The headings open at each table, by level; `None` for a generated one.
-        let mut open: Vec<(u8, Option<String>)> = Vec::new();
-        for b in blocks {
-            match b {
-                Block::Heading {
-                    level,
-                    inlines,
-                    anchor,
-                } => {
-                    open.retain(|(l, _)| l < level);
-                    let text = anchor.as_ref().map(|_| plain_text(inlines));
-                    open.push((*level, text.filter(|t| logic::is_label(t))));
-                }
-                Block::Table {
-                    layout: Some(l), ..
-                } => {
-                    if let Some(&k) = by_range.get(&l.range) {
-                        out[k].base = open.iter().filter_map(|(_, t)| t.clone()).collect();
-                    }
-                }
-                _ => {}
+        for (range, headings) in rezzer_model::table_headings(blocks) {
+            if let Some(&k) = by_range.get(range) {
+                out[k].base = headings
+                    .into_iter()
+                    .filter(|t| logic::is_label(t))
+                    .collect();
             }
         }
         // The label texts, each cell located once.
@@ -150,46 +135,23 @@ impl SheetPaths {
         paths
     }
 
-    /// The region whose data area (`whole`: whole rectangle) holds each point. Regions never
-    /// overlap; one sweep by row with the rectangles that have begun, by left column.
+    /// The region whose data area (`whole`: whole rectangle) holds each `(row, column)`
+    /// point. Regions never overlap.
     pub fn locate(&self, points: &[(u32, u32)], whole: bool) -> Vec<Option<usize>> {
-        let rect = |k: usize| {
-            if whole {
-                self.regions[k].rect
-            } else {
-                self.regions[k].area
-            }
-        };
-        let mut order: Vec<usize> = (0..points.len()).collect();
-        order.sort_unstable_by_key(|&i| points[i]);
-        let mut by_top: Vec<usize> = (0..self.regions.len()).collect();
-        by_top.sort_unstable_by_key(|&k| (rect(k).top, rect(k).left));
-        let mut next = 0;
-        let mut open: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
-        let mut out = vec![None; points.len()];
-        for i in order {
-            let (row, col) = points[i];
-            while let Some(&k) = by_top.get(next)
-                && rect(k).top <= row
-            {
-                open.insert(rect(k).left, k);
-                next += 1;
-            }
-            // An area that ended above is closed; an open area left of the point that does
-            // not reach it means no area holds it, as areas never overlap.
-            while let Some((&left, &k)) = open.range(..=col).next_back() {
-                let a = rect(k);
-                if a.bottom < row {
-                    open.remove(&left);
-                    continue;
+        let areas: Vec<CellArea> = self
+            .regions
+            .iter()
+            .map(|r| {
+                let a = if whole { r.rect } else { r.area };
+                CellArea {
+                    top: a.top,
+                    left: a.left,
+                    bottom: a.bottom,
+                    right: a.right,
                 }
-                if a.right >= col {
-                    out[i] = Some(k);
-                }
-                break;
-            }
-        }
-        out
+            })
+            .collect();
+        locate_cells(&areas, points)
     }
 
     /// The narrow end of the path of the data cell at `row`, `col` of region `k`, without
@@ -220,19 +182,6 @@ impl SheetPaths {
         let r = &self.regions[k];
         col < r.area.left.saturating_add(r.label_cols)
     }
-}
-
-/// The text of a heading's inlines, a line break as a space, trimmed.
-fn plain_text(inlines: &[Inline]) -> String {
-    let mut text = String::new();
-    for i in inlines {
-        match i {
-            Inline::Text { text: t, .. } => text.push_str(t),
-            Inline::LineBreak => text.push(' '),
-            _ => {}
-        }
-    }
-    text.trim().to_string()
 }
 
 /// A text as one path part: a label (the label rule) without the unit it names. A text that

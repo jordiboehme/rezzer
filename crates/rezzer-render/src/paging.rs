@@ -12,10 +12,11 @@
 //! region's layout line stays with what comes before it and with the table or list after
 //! it.
 //!
-//! A page that starts inside a `##` or `###` section at a blank line begins with that
-//! section's heading line, and inside a parameter group of `## Logic` with the group's title
-//! line, each followed by ` (continued)` (spec 8.7). Joining the pages without these lines
-//! gives the input back unchanged.
+//! Inside `## Logic` only (spec 8.7), a page that starts at a blank line begins with the
+//! heading line of the `##` or `###` section it lies in and, inside a parameter group, with
+//! the group's title line, each followed by ` (continued)`. Joining the pages without these
+//! lines gives the input back unchanged; outside `## Logic` joining the pages gives the
+//! input back as it is.
 
 /// The token estimate: characters divided by four.
 pub(crate) fn tokens(text: &str) -> usize {
@@ -76,8 +77,8 @@ fn layout_line(text: &str) -> bool {
 /// The words that start the title line of a parameter group in `## Logic`.
 const GROUP_TITLE: &str = "Parameters in ";
 
-/// What a line opens or stands in: the line of the `##` or `###` section it lies in (the
-/// innermost), and of the parameter group title it lies under, as line numbers.
+/// What a line stands in, inside `## Logic`: the line of the `##` or `###` section it lies
+/// in (the innermost), and of the parameter group title it lies under, as line numbers.
 #[derive(Debug, Clone, Copy, Default)]
 struct Context {
     section: Option<usize>,
@@ -97,6 +98,8 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>, Vec<Context>) {
     let mut h3: Option<usize> = None;
     let mut logic = false;
     let mut group: Option<usize> = None;
+    // The last line that is not blank.
+    let mut last_text: Option<usize> = None;
 
     // Frontmatter and the title heading right after it are never split.
     let mut protected_until = 0;
@@ -156,12 +159,18 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>, Vec<Context>) {
                 group = None;
             } else if logic && prev_blank && text.starts_with(GROUP_TITLE) && text.ends_with(':') {
                 group = Some(n);
+            } else if prev_blank && text.starts_with('|') && last_text != group {
+                // A table with no title line right before it starts a group without a title.
+                group = None;
             }
         }
         contexts.push(Context {
-            section: h3.or(h2),
+            section: if logic { h3.or(h2) } else { None },
             group,
         });
+        if !text.trim().is_empty() {
+            last_text = Some(n);
+        }
         if n >= protected_until {
             match fence {
                 None => {
