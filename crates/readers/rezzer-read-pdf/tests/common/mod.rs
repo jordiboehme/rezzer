@@ -6,7 +6,9 @@
 
 #![allow(dead_code)]
 
+use std::alloc::{GlobalAlloc, Layout};
 use std::io::Write;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// One page of a generated file.
 #[derive(Default, Clone)]
@@ -185,6 +187,82 @@ pub fn zeros_packed(n: usize) -> Vec<u8> {
         left -= k;
     }
     z.finish().expect("deflate")
+}
+
+/// Bytes the test process holds on the heap now. The counters move only in a test binary
+/// whose `#[global_allocator]` is [`Counting`]; elsewhere they stay at zero.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// The highest `LIVE` since the last `reset_heap_peak`. Nextest runs every test in its own
+/// process, so one global peak is the figure of one test.
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+fn grow(n: usize) {
+    let now = LIVE.fetch_add(n, Ordering::Relaxed) + n;
+    PEAK.fetch_max(now, Ordering::Relaxed);
+}
+
+fn shrink(n: usize) {
+    LIVE.fetch_sub(n, Ordering::Relaxed);
+}
+
+/// `rezzer_limits::Allocator`, counting the live bytes and their peak. A block that grows is
+/// counted with its old and its new size until the call returns, as the allocator holds both
+/// while it moves a large block; for a block grown in place that is more than it holds, so
+/// the peak errs high, never low.
+pub struct Counting;
+
+// SAFETY: every call goes to `rezzer_limits::Allocator` unchanged; the counters only add and
+// take away the sizes of the blocks.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.alloc(layout) };
+        if !p.is_null() {
+            grow(layout.size());
+        }
+        p
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.alloc_zeroed(layout) };
+        if !p.is_null() {
+            grow(layout.size());
+        }
+        p
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        shrink(layout.size());
+        // SAFETY: forwarded unchanged.
+        unsafe { rezzer_limits::Allocator.dealloc(ptr, layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        grow(new_size);
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.realloc(ptr, layout, new_size) };
+        // On failure the old block stays and the new one never was.
+        shrink(if p.is_null() { new_size } else { layout.size() });
+        p
+    }
+}
+
+/// Starts a new peak at what the heap holds now.
+pub fn reset_heap_peak() {
+    PEAK.store(LIVE.load(Ordering::Relaxed), Ordering::Relaxed);
+}
+
+/// The heap peak since the last reset, or since the process started.
+pub fn heap_peak_bytes() -> usize {
+    PEAK.load(Ordering::Relaxed)
+}
+
+/// Runs `f` with a new heap peak and returns its result with that peak.
+pub fn peak_of<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    reset_heap_peak();
+    let out = f();
+    (out, heap_peak_bytes())
 }
 
 /// Maximum resident set size of the process. It is the figure of one test only under nextest,

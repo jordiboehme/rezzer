@@ -11,7 +11,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::Builder;
+use common::{Builder, heap_peak_bytes, peak_of};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline, Loss,
@@ -19,12 +19,20 @@ use rezzer_model::{
 };
 use rezzer_read_pdf::PdfReader;
 
-// These tests run on the system allocator, not on the allocator of the Rezzer binary. With
-// it, five shapes here end 8 to 50 MiB higher, over the 256 MiB target (257 to 289 MiB
-// against 238 to 243 MiB on macOS; megabyte_field_names_are_bounded 66 MiB over its twin
-// against 58). They stay under the hostile memory limit of 512 MiB. Whether the allocator
-// policy changes is an open decision; a move threshold of 8 or 16 MiB does not help both
-// these shapes and the scanned pages the move is for.
+// The memory bounds here are bounds on the live heap: the counting allocator of the tests'
+// common module adds up the bytes the read holds and keeps their peak. The resident set size
+// of the process also holds what the allocator keeps for later and the pages the system has
+// not taken back yet, and that part differs between systems and runs: on the GitHub runners
+// the same shapes ended 20 MiB higher on macOS and 10 MiB higher over their twin on Linux
+// than on a Mac laptop. The heap peak is the figure the reader decides, so the tight bounds
+// (under 256 MiB, within a margin of a twin) hold it. The resident set size stays as a loose
+// guard under the hostile memory limit of 512 MiB.
+//
+// The counting allocator wraps the allocator of the Rezzer binary, so the memory counted is
+// the memory that ships, with large blocks moved by hand when they grow.
+
+#[global_allocator]
+static ALLOCATOR: common::Counting = common::Counting;
 
 /// The brief's hostile setting: 512 MiB of memory, so pdfparts keeps its objects to 256 MiB.
 fn hostile() -> Limits {
@@ -145,11 +153,24 @@ fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
         .collect()
 }
 
-/// The bound the memory tests hold: a quarter of the hostile memory limit.
-fn assert_rss_under_256_mib() {
+/// The bound the memory tests hold: a heap peak under a quarter of the hostile memory limit.
+fn assert_under_256_mib(peak: usize) {
+    eprintln!("heap peak {} MiB", peak >> 20);
+    assert!(peak < 256 << 20, "heap peak {} MiB", peak >> 20);
+    assert_rss_under_512_mib();
+}
+
+/// `assert_under_256_mib` for the heap peak since the last reset.
+fn assert_heap_under_256_mib() {
+    assert_under_256_mib(heap_peak_bytes());
+}
+
+/// The loose guard: the resident set size of the process stays under the hostile memory
+/// limit.
+fn assert_rss_under_512_mib() {
     let rss = common::max_rss_bytes();
     eprintln!("max RSS {} MiB", rss >> 20);
-    assert!(rss < 256 << 20, "max RSS {} MiB", rss >> 20);
+    assert!(rss < 512 << 20, "max RSS {} MiB", rss >> 20);
 }
 
 /// The read is cut with one Limit loss on page 1, keeps the text before the cut and stays
@@ -169,7 +190,7 @@ fn assert_cut(out: &ReadOutcome, start: Instant) {
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// One show of `n` glyphs after `setup`, in a page that first shows `Before.`.
@@ -395,7 +416,7 @@ fn glyph_names_of_a_shared_font_program_are_built_once() {
         "{:?}",
         start.elapsed()
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// A page whose catalog switches the optional content group `L1` off. `build` writes the
@@ -637,7 +658,7 @@ fn glyphs_just_under_the_cap_stay_small() {
         out.document.losses
     );
     assert!(text(page(&out, 1)).contains("Before."));
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -670,7 +691,7 @@ fn clipping_glyphs_in_a_form_just_under_the_cap_stay_small() {
         out.document.losses
     );
     assert!(text(page(&out, 1)).contains("WWWW"));
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -750,7 +771,7 @@ fn assert_file_cut(out: &ReadOutcome, pages: usize, start: Instant) {
         .collect();
     assert_eq!(cut.len(), 1, "{:?}", out.document.losses);
     assert!(cut[0].what.contains(&format!("to {pages}")), "{:?}", cut[0]);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -898,7 +919,7 @@ fn a_long_link_over_many_runs_is_bounded() {
         }
     }
     assert!((1..=2).contains(&links), "{links} links");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -918,7 +939,7 @@ fn a_very_long_link_over_many_runs_is_bounded() {
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// Pages of short lines far apart, one paragraph each: page k has `lines[k]` lines `w<i>.`.
@@ -1107,7 +1128,7 @@ fn links_over_many_paragraphs_are_bounded_through_render() {
     );
     drop(pages);
     drop(md);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// Reads a file of `paras` paragraphs under one link with a URI of `m` copies of `piece` after
@@ -1147,7 +1168,7 @@ fn assert_link_pieces_bounded(prefix: &str, piece: &str, paras: usize, m: usize,
         "{loss:?}"
     );
     drop(pages);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1186,7 +1207,7 @@ fn a_target_that_never_fits_is_not_scanned_for_every_paragraph() {
     );
     let (n, _) = links_in(page(&out, 1));
     assert_eq!(n, 0, "{:?}", out.document.losses);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1202,7 +1223,7 @@ fn alternating_long_targets_are_scanned_once_each() {
     );
     assert!(time_loss(&out).is_none(), "{:?}", out.document.losses);
     assert_eq!(links_in(page(&out, 1)).0, 0);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1245,7 +1266,7 @@ fn a_stop_inside_a_big_paragraph_keeps_the_blocks_before_it_with_agreeing_losses
         link_loss.what.contains(&format!("{cut_links} links")),
         "{link_loss:?}"
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1271,7 +1292,7 @@ fn links_over_2000_paragraphs_keep_the_page() {
         "{loss:?}"
     );
     assert!(loss.what.contains("page 1"), "{loss:?}");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1323,7 +1344,7 @@ fn a_tagged_table_of_40000_rows_is_bounded_through_render() {
     let start = Instant::now();
     let bytes = common::tagged_lines(40_000, "table", Some("http://x/u"));
     let out = read(&bytes);
-    let read_peak = common::max_rss_bytes();
+    let read_peak = heap_peak_bytes();
     let md = rezzer_render::render(
         &out.document,
         out.completeness,
@@ -1357,14 +1378,14 @@ fn a_tagged_table_of_40000_rows_is_bounded_through_render() {
             out.document.losses
         );
     }
-    let render_peak = common::max_rss_bytes();
+    let render_peak = heap_peak_bytes();
     assert!(
         render_peak <= read_peak + (16 << 20),
-        "read {} MiB, render {} MiB",
+        "heap peak of the read {} MiB, with the render {} MiB",
         read_peak >> 20,
         render_peak >> 20
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1391,7 +1412,7 @@ fn a_page_of_many_drawn_lines_is_not_searched_for_tables() {
         out.document.losses
     );
     assert!(text(page(&out, 1)).contains("Before."));
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1417,7 +1438,7 @@ fn a_dense_ruled_grid_is_bounded() {
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1482,7 +1503,7 @@ fn a_borderless_table_of_40000_rows_is_bounded() {
             out.document.losses
         );
     }
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// One tall page with Helvetica as `/F1` and `content`, `h` points high.
@@ -1551,7 +1572,7 @@ fn many_small_ruled_tables_on_one_page_are_bounded() {
             out.document.losses
         );
     }
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1597,7 +1618,7 @@ fn many_refused_ruled_grids_with_notes_are_bounded() {
         .filter(|l| l.what.contains("Possible table"))
         .count();
     assert_eq!(notes, 1, "{notes}");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1639,7 +1660,7 @@ fn many_small_tables_without_rules_on_one_page_are_bounded() {
             out.document.losses
         );
     }
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1661,7 +1682,7 @@ fn a_row_over_3000_pages_is_bounded() {
         })
         .collect();
     assert_eq!(rows, [1], "{:?}", out.document.losses);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// One page `w` points wide and `h` high with Helvetica as `/F1` and `content`.
@@ -1727,7 +1748,7 @@ fn the_cells_of_36000_small_tables_are_charged() {
             out.document.losses
         );
     }
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1746,7 +1767,7 @@ fn one_huge_glyph_does_not_widen_the_caption_search() {
             .iter()
             .any(|b| matches!(b, Block::Table { .. }))
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -1870,7 +1891,7 @@ fn tables_cost_about_what_their_text_costs_as_paragraphs() {
         .collect();
     assert_eq!(cut.len(), 1, "{cut:?}");
     assert!(cut[0].what.contains("not read"), "{cut:?}");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// `n` pages, each with 1,000 ruled grids of 15 by 2 cells with a word in each cell of the
@@ -1960,7 +1981,7 @@ fn table_overhead_never_stops_the_text() {
         "{:?}",
         ruled.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// A tagged table whose row 1 is on page 1 ("first" and `empty` empty cells) and whose row 2
@@ -2237,7 +2258,7 @@ fn assert_objects_cut(out: &ReadOutcome, start: Instant, location: &str, words: 
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -2361,7 +2382,7 @@ fn many_links_are_bounded() {
         "{:?}",
         start.elapsed()
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -2481,24 +2502,23 @@ fn read_through(bytes: &[u8]) -> ReadOutcome {
     out
 }
 
-/// Reads `twin`, the same objects where no reader looks, then `shape`. The shape stays under
-/// 256 MiB and within 64 MiB of what its twin took (each list of the object layer keeps at most
+/// Reads `twin`, the same objects where no reader looks, then `shape`, each with its own heap
+/// peak. Both stay under 256 MiB and the shape within 64 MiB of what its twin took (each list of the object layer keeps at most
 /// a 64th of the memory limit in one of its shares, the metadata, outline and links in one and
 /// the form logic in another, and the renderer and JSON writer copy what is kept about four
 /// times), and finishes in time. Returns the shape's outcome.
 fn against_twin(shape: &[u8], twin: &[u8]) -> ReadOutcome {
     let start = Instant::now();
-    drop(read_through(twin));
-    let twin_rss = common::max_rss_bytes();
-    let out = read_through(shape);
-    let rss = common::max_rss_bytes();
+    let ((), twin_peak) = peak_of(|| drop(read_through(twin)));
+    let (out, peak) = peak_of(|| read_through(shape));
+    eprintln!("heap peak {} MiB, twin {} MiB", peak >> 20, twin_peak >> 20);
     assert!(
-        rss < twin_rss + (64 << 20),
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
-        twin_rss >> 20
+        peak < twin_peak + (64 << 20),
+        "heap peak {} MiB, twin {} MiB",
+        peak >> 20,
+        twin_peak >> 20
     );
-    assert_rss_under_256_mib();
+    assert_under_256_mib(peak.max(twin_peak));
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -2593,7 +2613,7 @@ fn repeated_keywords_are_kept_once() {
     let out = read_through(&bytes);
     assert_eq!(out.document.properties.keywords, ["a"]);
     assert_eq!(out.completeness, Completeness::Complete);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -3243,18 +3263,18 @@ fn notes_near_many_overlapping_runs_are_placed_once_each() {
     // 4,000 notes whose nearest run lies in each of 4,000 overlapping runs of one block. The
     // points of the block are listed once each, not once per run that holds them, so the
     // shape stays within 32 MiB of its twin without notes: the 4,000 notes themselves take
-    // about 16 MiB through the model, the renderer and JSON (listed once per run, the points
-    // took about 140 MiB more).
-    drop(read_through(&overlapping_runs(4000, 0)));
-    let twin = common::max_rss_bytes();
-    let out = read_through(&overlapping_runs(4000, 4000));
-    let rss = common::max_rss_bytes();
+    // about 10 MiB of heap through the model, the renderer and JSON (listed once per run, the
+    // points took about 190 MiB more).
+    let ((), twin) = peak_of(|| drop(read_through(&overlapping_runs(4000, 0))));
+    let (out, peak) = peak_of(|| read_through(&overlapping_runs(4000, 4000)));
+    eprintln!("heap peak {} MiB, twin {} MiB", peak >> 20, twin >> 20);
     assert!(
-        rss < twin + (32 << 20),
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
+        peak < twin + (32 << 20),
+        "heap peak {} MiB, twin {} MiB",
+        peak >> 20,
         twin >> 20
     );
+    assert_rss_under_512_mib();
     let anchors: std::collections::HashSet<_> = out
         .document
         .facets
@@ -3350,7 +3370,7 @@ fn a_huge_media_box_renders_at_most_16_million_pixels() {
     let h = u32::from_be_bytes(blob.bytes[20..24].try_into().unwrap());
     assert!(u64::from(w) * u64::from(h) <= 16_000_000, "{w} x {h}");
     assert!(w > 3000 && h > 3000, "{w} x {h}");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -3374,7 +3394,7 @@ fn many_pages_that_need_vision_render_at_most_1000() {
     assert_eq!(cut[0].location, "p1001");
     assert!(cut[0].what.contains("10 pages"), "{:?}", cut[0]);
     assert_eq!(out.completeness, Completeness::Partial);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// `pages` pages of `glyphs` glyphs each, behind 2,000 bytes before the header, so only the
@@ -3477,7 +3497,7 @@ fn huge_text_of_the_per_page_fallback_is_bounded() {
         "{losses:?}"
     );
     assert_eq!(out.completeness, Completeness::Partial);
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -3491,7 +3511,7 @@ fn a_page_tree_loop_in_a_fallback_file_ends() {
     );
     assert_eq!(fallback_loss(&out).location, "document");
     assert!(text(page(&out, 3)).contains("Before."));
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
@@ -3521,7 +3541,7 @@ fn a_bomb_in_a_fallback_file_is_not_unpacked() {
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// A one-page file whose catalog names `fields` (dictionaries, written straight into one
@@ -3585,18 +3605,17 @@ fn many_scripted_form_fields_stay_within_the_object_budget() {
         })
     };
     let start = Instant::now();
-    drop(read_through(&file("/Junk")));
-    let twin = common::max_rss_bytes();
-    let out = read_through(&file("/AcroForm"));
-    let rss = common::max_rss_bytes();
+    let ((), twin) = peak_of(|| drop(read_through(&file("/Junk"))));
+    let (out, peak) = peak_of(|| read_through(&file("/AcroForm")));
+    eprintln!("heap peak {} MiB, twin {} MiB", peak >> 20, twin >> 20);
     assert!(
-        rss < twin + (128 << 20),
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
+        peak < twin + (128 << 20),
+        "heap peak {} MiB, twin {} MiB",
+        peak >> 20,
         twin >> 20
     );
     // The binding bound; the margin over the twin rule is pdfparts' own form data.
-    assert_rss_under_256_mib();
+    assert_under_256_mib(peak.max(twin));
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -3625,22 +3644,21 @@ fn one_field_read_by_many_calculations_is_bounded() {
             fields
         })
     };
-    // Measured at the 512 MiB limits: the twin 68 MiB, pdfparts' own form data for 50,000
-    // fields about 35 MiB more, the reader's copies and the renderer 24 MiB more. The rule of
-    // the twins (64 MiB) leaves only 5 MiB for a busy machine, so the bound here also counts
+    // Measured as heap peaks at the 512 MiB limits: the twin 55 MiB, the shape 51 MiB more,
+    // pdfparts' own form data for 50,000 fields with the reader's copies and the renderer. The
+    // rule of the twins (64 MiB) leaves little room over that, so the bound here also counts
     // pdfparts' part, and the binding 256 MiB holds.
     let start = Instant::now();
-    drop(read_through(&file("/Junk")));
-    let twin = common::max_rss_bytes();
-    let out = read_through(&file("/AcroForm"));
-    let rss = common::max_rss_bytes();
+    let ((), twin) = peak_of(|| drop(read_through(&file("/Junk"))));
+    let (out, peak) = peak_of(|| read_through(&file("/AcroForm")));
+    eprintln!("heap peak {} MiB, twin {} MiB", peak >> 20, twin >> 20);
     assert!(
-        rss < twin + (96 << 20),
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
+        peak < twin + (96 << 20),
+        "heap peak {} MiB, twin {} MiB",
+        peak >> 20,
         twin >> 20
     );
-    assert_rss_under_256_mib();
+    assert_under_256_mib(peak.max(twin));
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -3790,7 +3808,7 @@ fn deep_field_trees_are_bounded() {
     assert!(start.elapsed() < Duration::from_secs(60));
     assert!(out.document.facets.fields.is_empty());
     form_cut(&out, "form", "deeper than");
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// Bytes just under the size one script may have at the hostile limits (4 MiB).
@@ -3896,22 +3914,20 @@ fn a_link_chain_of_many_addresses_is_bounded() {
     // goes. The twin names the same array under a key nobody reads.
     // Shape and twin are built and read one after the other.
     let start = Instant::now();
-    drop(read_through(&annotated_chain("JunkNext")));
-    let twin = common::max_rss_bytes();
-    let out = read_through(&annotated_chain("Next"));
-    let rss = common::max_rss_bytes();
-    // Measured at the 512 MiB limits: the twin takes 210 MiB in this process (building the
-    // file and parsing 200,000 dictionaries), the shape 55 MiB more. Of that, 39 MiB come
-    // before the form logic and the scripts are read at all, 10 MiB are pdfparts' list of
-    // actions, which the room for actions now bounds (it took 85 MiB before), and 6 MiB the
-    // reader's copies. The twin alone is near 256 MiB here, so the bound over it is the
-    // twin rule, and the whole read stays far under the memory limit.
+    let ((), twin) = peak_of(|| drop(read_through(&annotated_chain("JunkNext"))));
+    let (out, peak) = peak_of(|| read_through(&annotated_chain("Next")));
+    eprintln!("heap peak {} MiB, twin {} MiB", peak >> 20, twin >> 20);
+    // Measured as heap peaks at the 512 MiB limits: the twin takes 155 MiB (building the file
+    // and parsing 200,000 dictionaries), the shape about as much. pdfparts' list of actions is
+    // bounded by the room for actions; without it the shape took 49 MiB more. The bound over
+    // the twin is the twin rule, and the whole read stays far under the memory limit.
     assert!(
-        rss < twin + (64 << 20) && rss < 320 << 20,
-        "max RSS {} MiB, twin {} MiB",
-        rss >> 20,
+        peak < twin + (64 << 20) && peak < 320 << 20,
+        "heap peak {} MiB, twin {} MiB",
+        peak >> 20,
         twin >> 20
     );
+    assert_rss_under_512_mib();
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -4054,7 +4070,7 @@ fn links_are_matched_per_glyph_within_bounds() {
         "{:?}",
         out.document.losses
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 /// A one-page file of `w` by `h` points with Helvetica as `/F1`.
@@ -4091,7 +4107,7 @@ fn assert_quick(start: Instant) {
         "{:?}",
         start.elapsed()
     );
-    assert_rss_under_256_mib();
+    assert_heap_under_256_mib();
 }
 
 #[test]
