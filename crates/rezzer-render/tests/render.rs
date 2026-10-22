@@ -4145,7 +4145,10 @@ fn unnamed_header_column_is_a_letter_in_sheets_and_a_number_in_csv() {
         md.contains("Table A1:D2 (data A2:D2), header row 1, 1 column without a header: 4,"),
         "{md}"
     );
-    assert!(!md.contains("Column D") && !md.contains("header: D"), "{md}");
+    assert!(
+        !md.contains("Column D") && !md.contains("header: D"),
+        "{md}"
+    );
     let md = render_as(FormatId::Tsv, TableStyle::Records);
     assert!(md.contains("  - Column 4: 9"), "{md}");
     assert!(md.contains("1 column without a header: 4,"), "{md}");
