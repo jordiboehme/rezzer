@@ -1028,3 +1028,64 @@ fn symlinked_target_file_is_not_followed() {
     assert!(!std::fs::symlink_metadata(&written).unwrap().is_symlink());
     assert_eq!(res.completeness, Completeness::Complete);
 }
+
+/// The names in `dir`, sorted.
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_second_run_with_fewer_pictures_leaves_no_old_file() {
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    let assets = out.path().join("scan.txt.assets");
+    let (registry, _) = pictures(&["page-1", "page-2", "page-3"]);
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(
+        names_in(&assets),
+        ["page-1.png", "page-2.png", "page-3.png"]
+    );
+    let (registry, _) = pictures(&["page-1"]);
+    let res =
+        Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(res.completeness, Completeness::Complete);
+    assert_eq!(names_in(&assets), ["page-1.png"]);
+    let (registry, _) = pictures(&[]);
+    let res =
+        Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(res.completeness, Completeness::Complete);
+    assert!(names_in(&assets).is_empty(), "{:?}", names_in(&assets));
+}
+
+#[cfg(unix)]
+#[test]
+fn old_files_are_removed_but_links_and_folders_are_not_followed() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    let assets = out.join("scan.txt.assets");
+    std::fs::create_dir_all(assets.join("sub")).unwrap();
+    std::fs::write(assets.join("sub/keep.png"), b"keep").unwrap();
+    std::fs::write(assets.join("page-9.png"), b"old").unwrap();
+    let victim = root.path().join("victim");
+    std::fs::write(&victim, b"keep").unwrap();
+    std::os::unix::fs::symlink(&victim, assets.join("page-8.png")).unwrap();
+    let req = Request {
+        output_dir: Some(out.clone()),
+        ..request()
+    };
+    let (registry, _) = pictures(&["page-1"]);
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(names_in(&assets), ["page-1.png", "page-8.png", "sub"]);
+    assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    assert_eq!(std::fs::read(assets.join("sub/keep.png")).unwrap(), b"keep");
+}

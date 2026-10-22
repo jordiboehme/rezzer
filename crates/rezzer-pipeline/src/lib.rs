@@ -16,6 +16,7 @@ mod config;
 mod panics;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -493,10 +494,13 @@ fn asset_extension(mime: &str) -> &'static str {
 
 /// Writes each blob to `<dir>/<bundle>.assets/<asset id>.<ext>` and sets the asset's path
 /// (relative to `dir`). A bad asset id or a write error is a loss, never a failed read; an
-/// asset without a written blob keeps no path. A blob without an asset is dropped.
+/// asset without a written blob keeps no path. A blob without an asset is dropped. Files an
+/// earlier run left in the folder that this run does not write are removed (see
+/// [`remove_stale`]), so the folder holds what the Markdown names.
 fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &str) {
     let folder = format!("{bundle}.assets");
     let mut losses = Vec::new();
+    let mut written_names: HashSet<std::ffi::OsString> = HashSet::new();
     let folder_ready = if blobs.is_empty() {
         Ok(())
     } else {
@@ -522,8 +526,12 @@ fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &
             Ok(()) => write_new(&target, &blob.bytes),
             Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
         };
+        let name = target.file_name().map(std::ffi::OsStr::to_os_string);
         match written {
-            Ok(()) => asset.path = Some(relative),
+            Ok(()) => {
+                asset.path = Some(relative);
+                written_names.extend(name);
+            }
             Err(e) => losses.push(Loss {
                 location,
                 what: format!("the picture was not written: {}", one_line(&e.to_string())),
@@ -532,7 +540,41 @@ fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &
             }),
         }
     }
+    if folder_ready.is_ok()
+        && let Err(e) = remove_stale(&dir.join(&folder), &written_names)
+    {
+        losses.push(Loss {
+            location: "assets".into(),
+            what: format!(
+                "files of an earlier run in {} were not all removed: {}",
+                one_line(&folder),
+                one_line(&e.to_string())
+            ),
+            why: LossReason::Internal,
+            severity: Severity::Warning,
+        });
+    }
     document.losses.extend(losses);
+}
+
+/// Removes the regular files in `folder` whose names are not in `keep`: what an earlier run
+/// wrote there and this one does not. Symlinks and folders inside are left alone and never
+/// followed. A folder that is missing, or not a plain directory, is left as it is.
+fn remove_stale(folder: &Path, keep: &HashSet<std::ffi::OsString>) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(folder) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    }
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        // The entry's own type: a symlink is a symlink here, never what it points at.
+        if entry.file_type()?.is_file() && !keep.contains(&entry.file_name()) {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Makes `<dir>/<folder>`, a real directory: an existing symlink or file there is refused, so

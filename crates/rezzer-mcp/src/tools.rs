@@ -61,8 +61,8 @@ pub struct RezParams {
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
     /// Absolute path of an existing directory. Pictures (for example rendered PDF pages) are
-    /// written to `<output_dir>/<file name>.assets/` and the Markdown links to them. Without
-    /// it nothing is written.
+    /// written to `<output_dir>/<file name>.assets/` and the Markdown links to them. Older
+    /// files there that this read does not write are removed. Without it nothing is written.
     #[serde(default)]
     pub output_dir: Option<String>,
     /// The password of an encrypted file. It is never stored or cached.

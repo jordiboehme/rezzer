@@ -1472,7 +1472,11 @@ fn web_address(t: &str) -> bool {
         return false;
     };
     let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
-    let after = if web { rest.strip_prefix("//") } else { Some(rest) };
+    let after = if web {
+        rest.strip_prefix("//")
+    } else {
+        Some(rest)
+    };
     link_scheme(scheme)
         && after.is_some_and(|a| !a.is_empty())
         && safe_target(t)
