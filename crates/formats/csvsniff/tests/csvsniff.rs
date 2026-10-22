@@ -669,6 +669,9 @@ fn prose_with_a_title_line_is_no_csv() {
     assert_eq!(sniff(letter), None);
     let list = "Shopping list\nmilk, eggs\nbread, butter\njam, tea\n";
     assert_eq!(sniff(list), None);
+    // Three fields per line are no table either when no column holds numbers or dates.
+    let three = "Hello all\nWe met, talked, and left early\nAnna came, saw it, and smiled\nBen wrote, read, and slept\n";
+    assert_eq!(sniff(three), None);
     // Two columns under a title are a table when a header names a column of numbers.
     let d =
         sniff("Prices 2024\nSource: shop\nitem,price\nmilk,1.20\nbread,2.50\njam,3.10\n").unwrap();

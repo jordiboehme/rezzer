@@ -250,6 +250,8 @@ fn prose_and_lists_under_a_title_line_are_text() {
     assert_eq!(detect("letter.txt", letter).0, FormatId::Text);
     let list = b"Shopping list\nmilk, eggs\nbread, butter\njam, tea\n";
     assert_eq!(detect("shop.txt", list).0, FormatId::Text);
+    let three = b"Hello all\nWe met, talked, and left early\nAnna came, saw it, and smiled\nBen wrote, read, and slept\n";
+    assert_eq!(detect("three.txt", three).0, FormatId::Text);
 }
 
 #[test]

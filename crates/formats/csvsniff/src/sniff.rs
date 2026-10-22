@@ -253,10 +253,35 @@ fn judge(rows: &[Vec<String>], quoted: &[Vec<bool>]) -> Option<(f32, usize, f32)
 }
 
 /// Whether the records after title lines show a table beyond a consistent field count, so
-/// short prose or a list with commas under a title stays text: at least three fields, a
-/// header over a column of numbers or dates, or at least [`MIN_RAGGED_RECORDS`] records.
-fn table_evidence(rows: &[Vec<String>], (_, count, numeric): (f32, usize, f32)) -> bool {
-    count >= 3 || rows.len() >= MIN_RAGGED_RECORDS || (numeric > 0.0 && detect_header(rows))
+/// prose or a list with commas under a title stays text: a column of numbers or dates below
+/// the first record, and also at least three fields, at least [`MIN_RAGGED_RECORDS`]
+/// records or a header by the header rule.
+fn table_evidence(rows: &[Vec<String>], (_, count, _): (f32, usize, f32)) -> bool {
+    numeric_column(rows) && (count >= 3 || rows.len() >= MIN_RAGGED_RECORDS || detect_header(rows))
+}
+
+/// Whether some column holds only numbers or dates (at least one) below the first record.
+fn numeric_column(rows: &[Vec<String>]) -> bool {
+    let Some((first, rest)) = rows.split_first() else {
+        return false;
+    };
+    let width = rest
+        .iter()
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0)
+        .max(first.len());
+    (0..width).any(|j| {
+        let mut seen = false;
+        for row in rest {
+            match row.get(j).map_or(CellClass::Empty, |c| class(c)) {
+                CellClass::Empty => {}
+                CellClass::Number | CellClass::Date => seen = true,
+                CellClass::Text | CellClass::Bool => return false,
+            }
+        }
+        seen
+    })
 }
 
 /// The number of leading records with fewer fields than the modal count, when there are
@@ -305,8 +330,8 @@ fn head(text: &str, max: usize) -> &str {
 /// share). When the records fail these checks only because of 1 to 10 short
 /// records at the start (title lines above the table), the checks run on the
 /// records after them and [`Dialect::lead_records`] counts them. Those records
-/// must then also have at least three fields, a header over a column of numbers
-/// or dates, or be at least ten. The header
+/// must then also hold a column of numbers or dates below their first record,
+/// and have at least three fields, a header or at least ten records. The header
 /// flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = head(strip_bom(text), SNIFF_MAX_BYTES);
