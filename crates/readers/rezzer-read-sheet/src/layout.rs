@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use rezzer_layout::{Caps, CellText, ColumnNames, Mapped, NameCaption};
 use rezzer_limits::Budget;
-use rezzer_model::{Block, CellArea, locate_cells};
+use rezzer_model::{Block, CellArea, Loss, LossReason, Severity, locate_cells};
 use sheetlayout::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Kind, NameIn, Pos, Rect, Style,
 };
@@ -260,7 +260,7 @@ pub(crate) fn map_sheet(
         .zip(free)
         .filter(|(p, under)| !under && at.binary_search(p).is_err())
         .map(|(p, _)| p)
-        .take(MAX_CENTER_CELLS)
+        .take(MAX_CENTER_CELLS + 1)
         .map(|&(row, col)| CellIn {
             pos: Pos { row, col },
             class: Class::Text,
@@ -270,6 +270,8 @@ pub(crate) fn map_sheet(
             formula: None,
         })
         .collect();
+    let centered_cut = extra.len() > MAX_CENTER_CELLS;
+    extra.truncate(MAX_CENTER_CELLS);
     if !extra.is_empty() {
         input_cells.append(&mut extra);
         input_cells.sort_by_key(|c| c.pos);
@@ -291,7 +293,7 @@ pub(crate) fn map_sheet(
     let layout = sheetlayout::detect(&input, &rezzer_layout::limits(budget), &stop);
     drop(input);
     let mut caps = Caps::default();
-    let mapped = rezzer_layout::blocks(
+    let mut mapped = rezzer_layout::blocks(
         sheet_q,
         &layout,
         &texts,
@@ -301,6 +303,16 @@ pub(crate) fn map_sheet(
         &mut caps,
         budget,
     );
+    if centered_cut {
+        mapped.losses.push(Loss {
+            location: sheet_q.to_string(),
+            what: format!(
+                "more than {MAX_CENTER_CELLS} empty cells centered across a selection; past them a text does not spread over its neighbours"
+            ),
+            why: LossReason::Limit,
+            severity: Severity::Info,
+        });
+    }
     let paths = SheetPaths::of(&layout, &texts, &mapped.blocks);
     SheetLayout {
         mapped,

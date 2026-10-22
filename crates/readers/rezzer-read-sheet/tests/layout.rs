@@ -1527,3 +1527,45 @@ fn pivot_grand_total_column_comes_from_the_pivot() {
     assert_eq!(total("PivotSheet2", "pivot:PivotSheet2!PivotTable2"), [4]);
     assert!(total("PivotSheet1", "pivot:PivotSheet1!PivotTable1").is_empty());
 }
+
+#[test]
+fn too_many_centered_empty_cells_give_a_loss() {
+    // 100,001 empty cells centered across a selection, one cap more than the detector takes.
+    let mut xml = String::from(
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Region</t></is></c><c r=\"B1\" s=\"5\" t=\"inlineStr\"><is><t>Sales</t></is></c><c r=\"C1\" s=\"5\"/></row>",
+    );
+    xml.push_str(&row(2, &["", "Q1", "Q2"]));
+    xml.push_str(&row(3, &["North", "1", "2"]));
+    for r in 10..10 + 1_000 {
+        xml.push_str(&format!("<row r=\"{r}\">"));
+        for c in 0..100 {
+            let at = format!("{}{r}", rezzer_model::column_letter(c + 10));
+            xml.push_str(&format!("<c r=\"{at}\" s=\"5\"/>"));
+        }
+        xml.push_str("</row>");
+    }
+    xml.push_str("<row r=\"2000\"><c r=\"A2000\" s=\"5\"/></row>");
+    let out = read(&Book::default().styles(LOOKS).sheet("S", &ws("", &xml, "")));
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.what.contains("centered across"))
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert_eq!(loss.location, "S");
+    assert_eq!(
+        loss.what,
+        "more than 100000 empty cells centered across a selection; past them a text does not spread over its neighbours"
+    );
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(loss.severity, Severity::Info);
+    // Under the cap: no loss.
+    let s = ws("", &row(1, &["a", "b"]), "");
+    let out = read(&Book::default().styles(LOOKS).sheet("S", &s));
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("centered across"))
+    );
+}
