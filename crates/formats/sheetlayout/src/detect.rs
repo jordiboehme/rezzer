@@ -236,12 +236,15 @@ impl<'p, 'a> Lines<'p, 'a> {
     }
 }
 
+/// How many open regions left of a cell the search looks at when facts overlap. Past this
+/// many the smallest region found so far takes the cell, so the cost stays bounded.
+const OVERLAP_SCAN: usize = 64;
+
 /// Gives each region the cells it holds, by a sweep over the rows with the regions that are
 /// open in each row keyed by their left column. Regions do not overlap, so a cell has at most
 /// one; the one exception is facts of the same level that overlap in a damaged file
-/// (`overlap`, stated by an `Overlap` issue). Then the nearest open region to the left may
-/// not hold a cell that one further left does, so the search goes on leftwards and the cell
-/// goes to the first region that holds it: no cell is lost.
+/// (`overlap`, stated by an `Overlap` issue). Then a cell goes to the smallest region that
+/// holds it, the innermost fact, so every cell is in exactly one region.
 fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option<Vec<Vec<u32>>> {
     let mut out = vec![Vec::new(); rects.len()];
     let mut order: Vec<usize> = (0..rects.len()).collect();
@@ -250,6 +253,7 @@ fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option
     // Keyed by left column and index, so regions with the same left column all stay open.
     let mut open: BTreeSet<(u32, usize)> = BTreeSet::new();
     let mut ended: Vec<(u32, usize)> = Vec::new();
+    let size = |r: &Rect| r.height() * r.width();
     for k in 0..prep.cells.len() {
         if tick.step() {
             return None;
@@ -260,6 +264,8 @@ fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option
             open.insert((rects[i].left, i));
             next += 1;
         }
+        let mut best: Option<usize> = None;
+        let mut looked = 0usize;
         for &(left, i) in open.range(..=(p.col, usize::MAX)).rev() {
             let r = &rects[i];
             if r.bottom < p.row {
@@ -267,11 +273,11 @@ fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option
                 ended.push((left, i));
                 continue;
             }
-            if p.col <= r.right {
-                out[i].push(k as u32);
-                break;
+            if p.col <= r.right && best.is_none_or(|b| size(r) < size(&rects[b])) {
+                best = Some(i);
             }
-            if !overlap {
+            looked += 1;
+            if !overlap || looked >= OVERLAP_SCAN {
                 break;
             }
             if tick.step() {
@@ -280,6 +286,9 @@ fn distribute(prep: &Prep, rects: &[Rect], overlap: bool, tick: &Tick) -> Option
         }
         for e in ended.drain(..) {
             open.remove(&e);
+        }
+        if let Some(i) = best {
+            out[i].push(k as u32);
         }
     }
     Some(out)

@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Anchor, Block, Cell, Certainty, Evidence, Inline, LayoutKind, Loss, LossReason, RowKind,
-    RowNote, Severity, TableLayout, table_key,
+    Anchor, Block, Cell, CellArea, Certainty, Evidence, Inline, LayoutKind, Loss, LossReason,
+    RowKind, RowNote, Severity, TableLayout, table_key,
 };
 use sheetlayout::{IssueKind, Kind, Layout, Rect, Region, column_letters};
 
@@ -178,31 +178,20 @@ pub fn covered(at: &[(u32, u32)], merges: &[Rect]) -> Vec<bool> {
         .collect()
 }
 
-/// For each point (sorted by row, then column), the index of the rectangle that holds it.
-/// The rectangles do not overlap.
+/// For each point, the index of the rectangle that holds it. Rectangles overlap only when
+/// facts of a damaged file do; then the smallest one that holds a point has it, as the
+/// detector decides (see [`rezzer_model::locate_cells`]).
 fn locate(rects: &[Rect], points: &[(u32, u32)]) -> Vec<Option<usize>> {
-    let mut order: Vec<usize> = (0..rects.len()).collect();
-    order.sort_by_key(|&i| rects[i].top);
-    let mut next = 0usize;
-    let mut open: BTreeMap<u32, usize> = BTreeMap::new();
-    points
+    let areas: Vec<CellArea> = rects
         .iter()
-        .map(|&(row, col)| {
-            while let Some(&i) = order.get(next).filter(|&&i| rects[i].top <= row) {
-                open.insert(rects[i].left, i);
-                next += 1;
-            }
-            loop {
-                let (&left, &i) = open.range(..=col).next_back()?;
-                let r = &rects[i];
-                if r.bottom < row {
-                    open.remove(&left);
-                    continue;
-                }
-                return (col <= r.right).then_some(i);
-            }
+        .map(|r| CellArea {
+            top: r.top,
+            left: r.left,
+            bottom: r.bottom,
+            right: r.right,
         })
-        .collect()
+        .collect();
+    rezzer_model::locate_cells(&areas, points)
 }
 
 /// `row 4` or `rows 12 to 40`, 1-based.

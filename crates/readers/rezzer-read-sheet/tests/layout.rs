@@ -1375,6 +1375,66 @@ fn tall_merged_title_costs_no_cells_xlsx() {
 }
 
 #[test]
+fn overlapping_tables_give_each_cell_to_the_innermost() {
+    // A damaged file: two Excel tables of one sheet overlap. Every value is written once, in
+    // the table of the smallest range that holds it: C5 (inside both) in the inner table, D6
+    // (right of the inner one) in the outer table. No value becomes a stray paragraph.
+    let s = ws(
+        "",
+        "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Title</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>Region</t></is></c></row><row r=\"5\"><c r=\"C5\"><v>9</v></c></row><row r=\"6\"><c r=\"D6\"><v>51</v></c></row>",
+        "",
+    );
+    let columns = ["A", "B", "C", "D", "E", "F", "G"];
+    let out = read(
+        &Book::default()
+            .sheet("S", &s)
+            .related(
+                "table",
+                "xl/tables/table1.xml",
+                &table_part("Outer", "A1:G7", " headerRowCount=\"0\"", &columns),
+            )
+            .related(
+                "table",
+                "xl/tables/table2.xml",
+                &table_part(
+                    "Inner",
+                    "B2:C11",
+                    " headerRowCount=\"2\" totalsRowCount=\"1\"",
+                    &["X", "Y"],
+                ),
+            ),
+    );
+    let doc = &out.document;
+    let shown = |key: &str, anchor: &str| {
+        regions(doc, "S")
+            .iter()
+            .find(|r| r.layout.key == key)
+            .unwrap_or_else(|| panic!("no region {key}"))
+            .rows
+            .iter()
+            .flatten()
+            .find(|c| c.anchor.as_ref().is_some_and(|a| a.0 == anchor))
+            .map(|c| plain_text(&c.inlines))
+    };
+    assert_eq!(shown("table:Outer", "S!D6").as_deref(), Some("51"));
+    assert_eq!(shown("table:Inner", "S!C5").as_deref(), Some("9"));
+    assert!(
+        !all_blocks(doc).iter().any(|b| matches!(
+            b,
+            Block::Paragraph { role: Some(r), .. } if r == "cell"
+        )),
+        "a value became a stray paragraph"
+    );
+    assert!(
+        doc.losses
+            .iter()
+            .any(|l| l.why == LossReason::Uncertain && l.what.contains("overlaps")),
+        "{:?}",
+        doc.losses
+    );
+}
+
+#[test]
 fn overlapping_tables_keep_every_value() {
     // A damaged file: two Excel tables of one sheet overlap. The value at D6, inside the
     // outer table and right of the inner one, is written once with its anchor.

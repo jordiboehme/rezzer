@@ -917,6 +917,25 @@ fn locate_cells_finds_the_area_of_each_point() {
 }
 
 #[test]
+fn locate_cells_gives_overlapping_areas_to_the_innermost() {
+    use rezzer_model::{CellArea, locate_cells};
+    let area = |top, left, bottom, right| CellArea {
+        top,
+        left,
+        bottom,
+        right,
+    };
+    // A damaged file: an outer range, an inner one right of its left edge and one with the
+    // same left column. A point goes to the smallest area that holds it.
+    let areas = [area(0, 0, 20, 10), area(2, 3, 8, 5), area(12, 0, 14, 2)];
+    let points = [(4, 4), (4, 7), (13, 1), (16, 1), (30, 0)];
+    assert_eq!(
+        locate_cells(&areas, &points),
+        [Some(1), Some(0), Some(2), Some(0), None]
+    );
+}
+
+#[test]
 fn table_headings_follow_the_heading_nesting() {
     use rezzer_model::table_headings;
     let heading = |level, text: &str, anchor: Option<&str>| Block::Heading {
