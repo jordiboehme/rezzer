@@ -1,0 +1,136 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "mustang-gnuaccounting-invoice-508.pdf"
+resource: "<corpus>/pdf/mustang-gnuaccounting-invoice-508.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "6fd91b9e3b47193c4a7d6ea4bc30b80d1fd3f9e2cf74f3300f66f16303157dc1"
+source_size: 90271
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: partial
+losses: 6
+pages: 1
+tagged: true
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+authors: ["Jochen Stärk"]
+language: "de-DE"
+created: "2020-11-21T18:21:23+01:00"
+---
+
+# mustang-gnuaccounting-invoice-508.pdf
+
+## Overview
+
+- Pages: 1
+- Images: 1
+- Not read: 6
+- Last changed: 2020-11-21T18:21:23+01:00
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| creator | Writer |
+| pdf\_version | 1.4 |
+| pdfa | PDF/A-1a |
+| producer | LibreOffice 7.0 |
+
+:status[Page 1]{grey}
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 451, 724 to 522, 795) is not extracted.
+
+|  |  |
+| --- | --- |
+|  | 2020-11-21 |
+
+**Bei Spiel GmbH**
+
+Ecke 12
+
+12345 Stadthausen
+
+phone (555) 23 78 -0
+
+HRA 12345
+
+http://localhost/
+
+Ingmar N. Fo
+
+phone (555) 23 78 -23
+
+info@localhost.local
+
+Bei Spiel GmbH ●    Ecke 12 ● 12345 Stadthausen   ● Germany
+
+Theodor Est
+
+Bahnstr. 42
+
+88802 Spielkreis
+
+Deutschland / Germany
+
+Customer:2
+
+**Your order AB321**
+
+Invoice # RE-20201121/508 issued at 2020-11-21
+
+Date of delivery 2020-11-10
+
+|  |  |  |  |  |
+| --- | --- | --- | --- | --- |
+| Amount | Product | VAT | Price | Total |
+| 1.00 | Design (hours): Of a sample invoice | 7% | 160.00 € | 160.00 € |
+| 400.00 | Ballons: various colors, \~2000ml | 19% | 0.79 € | 316.00 € |
+| 800.00 | Hot air „heiße Luft“ (litres): | 19% | 0.025 € | 20.00 € |
+
+Net total: 496.00 €
+
+plus VAT
+
+|  |  |  |
+| --- | --- | --- |
+| VAT | Net amout | VAT amount |
+| 7% | 160.00 € | 11.20 € |
+| 19% | 336.00 € | 63.84 € |
+| VAT total: | ← | 75.04 € |
+
+Merged cells: 〃 same as above, ← same as left.
+
+Due payable: 571.04 €
+
+**Please remit until 2020-12-12.**
+
+VAT-ID: DE136695976
+
+IBAN DE88200800000970375700
+
+BIC COBADEFFXXX
+
+Commerzbank
+
+Account holder:  Max Mustermann
+
+Page 1/1
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| structure tree | the role map has a loop at Figure | damaged | warning |
+| structure tree | the role map has a loop at Document | damaged | warning |
+| structure tree | the role map has a loop at Table | damaged | warning |
+| structure tree | the role map has a loop at TR | damaged | warning |
+| structure tree | the role map has a loop at TD | damaged | warning |
+| structure tree | the role map has a loop at Div | damaged | warning |

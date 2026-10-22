@@ -1,0 +1,16 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 3
+  },
+  {
+    "contains": "あいうえお"
+  },
+  {
+    "contains": "日本語"
+  }
+]

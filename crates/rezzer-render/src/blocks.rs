@@ -9,10 +9,12 @@
 //! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use rezzer_model::{
-    Align, Asset, Block, CalloutKind, Cell, Inline, StatusColor, TaskState, column_letter,
-    plain_text,
+    Align, Annotation, Asset, Barcode, Block, CalloutKind, Cell, Inline, SectionKind, StatusColor,
+    TaskState, column_letter, plain_text,
 };
 
 /// Deeper nesting than this is cut with a visible note, so a hostile file cannot overflow
@@ -37,6 +39,95 @@ pub(crate) struct Ctx<'a> {
     pub assets: &'a [Asset],
     /// Added to every body heading level, so body headings stay below the title.
     pub heading_offset: u8,
+    /// Annotations to show at their passage; only the content has them.
+    pub notes: Option<&'a Notes<'a>>,
+    /// The assets whose codes were written already: a code is written once, at the first
+    /// place of its picture.
+    pub codes_shown: RefCell<std::collections::HashSet<String>>,
+}
+
+/// The annotations of a document by the anchor they stand at, and which of them the content
+/// showed. Each one is shown once: after the first block with its anchor that is rendered, or
+/// at the end of its page section. The ones not shown stay for `## Annotations`.
+pub(crate) struct Notes<'a> {
+    list: &'a [Annotation],
+    at: HashMap<&'a str, Vec<usize>>,
+    shown: RefCell<Vec<bool>>,
+}
+
+impl<'a> Notes<'a> {
+    pub(crate) fn new(list: &'a [Annotation]) -> Notes<'a> {
+        let mut at: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (i, a) in list.iter().enumerate() {
+            if let Some(anchor) = &a.anchor {
+                at.entry(anchor.0.as_str()).or_default().push(i);
+            }
+        }
+        Notes {
+            list,
+            at,
+            shown: RefCell::new(vec![false; list.len()]),
+        }
+    }
+
+    /// True when annotation `i` was shown at its passage.
+    pub(crate) fn shown(&self, i: usize) -> bool {
+        self.shown.borrow().get(i).copied().unwrap_or(false)
+    }
+
+    /// The annotations at `anchor` not shown yet, now marked as shown.
+    fn take(&self, anchor: &str) -> Vec<&'a Annotation> {
+        let Some(list) = self.at.get(anchor) else {
+            return Vec::new();
+        };
+        let mut shown = self.shown.borrow_mut();
+        list.iter()
+            .filter(|&&i| !std::mem::replace(&mut shown[i], true))
+            .map(|&i| &self.list[i])
+            .collect()
+    }
+}
+
+/// The nesting levels a note at a passage may take below that passage.
+const NOTE_DEPTH: usize = 8;
+
+/// The anchor a block's annotations stand at, for every block but sections.
+fn passage_anchor(b: &Block) -> Option<&str> {
+    match b {
+        Block::Section { .. } => None,
+        Block::Heading { anchor, .. }
+        | Block::Paragraph { anchor, .. }
+        | Block::List { anchor, .. }
+        | Block::Table { anchor, .. }
+        | Block::Code { anchor, .. }
+        | Block::Quote { anchor, .. }
+        | Block::Math { anchor, .. }
+        | Block::Media { anchor, .. }
+        | Block::Callout { anchor, .. }
+        | Block::Rule { anchor, .. }
+        | Block::Task { anchor, .. } => anchor.as_ref().map(|a| a.0.as_str()),
+    }
+}
+
+/// `text` with the note callouts of the annotations at `anchor` after it.
+fn with_notes(text: String, anchor: Option<&str>, ctx: &Ctx, depth: usize, level: u8) -> String {
+    let (Some(notes), Some(anchor)) = (ctx.notes, anchor) else {
+        return text;
+    };
+    // A note needs a few levels of its own (callout, quote, reply lists); too deep a passage
+    // leaves its notes to `## Annotations`, where they are shown whole.
+    if depth + NOTE_DEPTH > MAX_DEPTH {
+        return text;
+    }
+    let mut out = text;
+    for a in notes.take(anchor) {
+        let note = block(&crate::facets::passage_note(a), ctx, depth + 1, level);
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&note);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -531,8 +622,17 @@ fn inline_math(latex: &str, mode: Mode, out: &mut String) {
     }
 }
 
-/// True for a target with no scheme (a relative path or `#anchor`) or with http, https,
-/// mailto, ftp or file. Tabs and newlines are ignored and leading spaces and controls
+/// The schemes a link from a document may have: addresses come from the file and are not
+/// trusted, so `file:`, `ftp:`, `data:` and script schemes stay text.
+const LINK_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+
+/// Whether `scheme` is one of [`LINK_SCHEMES`], in any case.
+fn link_scheme(scheme: &str) -> bool {
+    LINK_SCHEMES.iter().any(|s| scheme.eq_ignore_ascii_case(s))
+}
+
+/// True for a target with no scheme (a relative path or `#anchor`) or with one of
+/// [`LINK_SCHEMES`]. Tabs and newlines are ignored and leading spaces and controls
 /// trimmed first, as browsers do.
 fn safe_target(target: &str) -> bool {
     let decoded = decode_references(target);
@@ -567,10 +667,7 @@ fn safe_target(target: &str) -> bool {
     if !is_scheme {
         return true;
     }
-    matches!(
-        scheme.to_ascii_lowercase().as_str(),
-        "http" | "https" | "mailto" | "ftp" | "file"
-    )
+    link_scheme(scheme)
 }
 
 /// A numeric reference after `&#`: decimal or `x` hex digits of any length, with or
@@ -673,31 +770,67 @@ fn decode_references(text: &str) -> String {
     out
 }
 
+/// Writes one character of a link destination. Its size must stay within
+/// `rezzer_model::link_target_written_len`.
+fn destination_char(c: char, out: &mut String) {
+    match c {
+        ' ' => out.push_str("%20"),
+        '(' => out.push_str("%28"),
+        ')' => out.push_str("%29"),
+        '<' => out.push_str("%3C"),
+        '>' => out.push_str("%3E"),
+        '[' => out.push_str("%5B"),
+        ']' => out.push_str("%5D"),
+        '|' => out.push_str("%7C"),
+        '&' => out.push_str("\\&"),
+        '\\' => out.push_str("\\\\"),
+        c if c.is_control() => {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+        c => out.push(c),
+    }
+}
+
+/// The path of an extracted file as a link destination: `%` and `#` are encoded first, so a
+/// reader that decodes percent codes or cuts the target at `#` still finds the file. The
+/// rest is encoded as in any destination. Only asset paths take this: a web address keeps
+/// its percent codes and an anchor its `#`.
+pub(crate) fn asset_target(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for c in path.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '#' => out.push_str("%23"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A link to an extracted file, its path as the text.
+pub(crate) fn asset_link(path: &str, mode: Mode) -> String {
+    inlines(
+        &[Inline::Link {
+            target: asset_target(path),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(path)],
+        }],
+        mode,
+    )
+}
+
 /// A link or image destination plus optional title, without the parentheses.
 fn destination(target: &str, title: Option<&str>, mode: Mode, out: &mut String) {
     if target.is_empty() {
         out.push_str("<>");
     }
     for c in target.chars() {
-        match c {
-            ' ' => out.push_str("%20"),
-            '(' => out.push_str("%28"),
-            ')' => out.push_str("%29"),
-            '<' => out.push_str("%3C"),
-            '>' => out.push_str("%3E"),
-            '[' => out.push_str("%5B"),
-            ']' => out.push_str("%5D"),
-            '|' => out.push_str("%7C"),
-            '&' => out.push_str("\\&"),
-            '\\' => out.push_str("\\\\"),
-            c if c.is_control() => {
-                let mut buf = [0u8; 4];
-                for b in c.encode_utf8(&mut buf).bytes() {
-                    out.push_str(&format!("%{b:02X}"));
-                }
-            }
-            c => out.push(c),
-        }
+        destination_char(c, out);
     }
     if let Some(title) = title
         && !title.is_empty()
@@ -851,7 +984,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                     prev.kind == PrevKind::Bullet && !prev.alt
                 };
                 (
-                    task(*state, inlines, alt),
+                    with_notes(
+                        task(*state, inlines, alt),
+                        passage_anchor(item),
+                        ctx,
+                        depth,
+                        level,
+                    ),
                     Prev {
                         kind: PrevKind::Bullet,
                         alt,
@@ -868,7 +1007,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                 };
                 let alt = prev.kind == same && !prev.alt;
                 (
-                    list_block(*ordered, items, alt, ctx, depth, level),
+                    with_notes(
+                        list_block(*ordered, items, alt, ctx, depth, level),
+                        passage_anchor(item),
+                        ctx,
+                        depth,
+                        level,
+                    ),
                     Prev {
                         kind: same,
                         alt,
@@ -878,7 +1023,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
                 )
             }
             other => (
-                block(other, ctx, depth, level),
+                with_notes(
+                    block(other, ctx, depth, level),
+                    passage_anchor(other),
+                    ctx,
+                    depth,
+                    level,
+                ),
                 Prev {
                     kind: PrevKind::Other,
                     alt: false,
@@ -908,13 +1059,13 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
 fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
     match b {
         Block::Section {
+            kind,
             title,
             anchor,
             blocks: inner,
-            ..
         } => {
             let label = anchor.as_ref().and_then(|a| a.0.strip_prefix("fn:"));
-            match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
+            let text = match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
                 (None, Some(label)) => footnote(label, inner, ctx, depth),
                 (Some(title), _) => {
                     let head = heading_line(level.min(6), &line_text(title.trim()));
@@ -922,7 +1073,12 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                     join2(head, body)
                 }
                 (None, None) => blocks(inner, ctx, depth + 1, level, false),
-            }
+            };
+            // The annotations of a page that stand at no block close its section.
+            let page = (*kind == SectionKind::Page)
+                .then(|| anchor.as_ref().map(|a| a.0.as_str()))
+                .flatten();
+            with_notes(text, page, ctx, depth, level)
         }
         Block::Heading {
             level: l,
@@ -949,7 +1105,7 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             prefix_lines(&body, ">")
         }
         Block::Math { latex, .. } => math_block(latex),
-        Block::Media { asset, .. } => media(asset, ctx),
+        Block::Media { asset, alt, .. } => media(asset, alt.as_deref(), ctx),
         Block::Callout {
             kind,
             title,
@@ -1202,26 +1358,33 @@ fn math_is_plain(body: &str) -> bool {
     })
 }
 
-fn media(id: &str, ctx: &Ctx) -> String {
+/// A picture by its asset `id`; `place` is what this place of it says, when it says more than
+/// the asset's alt text (one picture drawn at several places, each with its own box).
+fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
     let mut parts: Vec<Inline> = Vec::new();
     let text = Inline::plain;
-    match ctx.assets.iter().find(|a| a.id == id) {
+    let found = ctx.assets.iter().find(|a| a.id == id);
+    match found {
         None => parts.push(text(format!("Picture {id} is missing from the assets."))),
         Some(asset) => {
+            let alt = place.or(asset.alt.as_deref());
             match &asset.path {
                 Some(path) => parts.push(Inline::Image {
-                    target: path.clone(),
-                    alt: asset
-                        .alt
-                        .clone()
+                    target: asset_target(path),
+                    alt: alt
+                        .map(str::to_string)
                         .or_else(|| asset.caption.clone())
                         .unwrap_or_else(|| asset.id.clone()),
                     title: None,
                 }),
-                None => parts.push(text(format!(
-                    "Picture {} ({}) is not extracted.",
-                    asset.id, asset.mime
-                ))),
+                // The alt text says what the picture is or why it needs a look.
+                None => parts.push(text(match alt.map(str::trim) {
+                    Some(alt) if !alt.is_empty() => format!(
+                        "Picture {} ({}, {alt}) is not extracted.",
+                        asset.id, asset.mime
+                    ),
+                    _ => format!("Picture {} ({}) is not extracted.", asset.id, asset.mime),
+                })),
             }
             if let Some(caption) = asset.caption.as_ref().filter(|c| !c.trim().is_empty()) {
                 parts.push(text(" ".into()));
@@ -1241,7 +1404,129 @@ fn media(id: &str, ctx: &Ctx) -> String {
             }
         }
     }
+    let mut out = paragraph(&parts);
+    let first = found.is_some_and(|a| !a.codes.is_empty())
+        && ctx.codes_shown.borrow_mut().insert(id.to_string());
+    let codes = if first {
+        found.map_or(&[][..], |a| a.codes.as_slice())
+    } else {
+        &[][..]
+    };
+    for c in codes {
+        out.push_str("\n\n");
+        out.push_str(&code_lines(c));
+    }
+    out
+}
+
+/// One code read from a picture: `QR Code: <payload>`. Its payload is data: a web address
+/// becomes a link, other text stays escaped text (a payload of several lines a fenced block,
+/// control characters as their symbols), bytes are written in base64.
+fn code_lines(c: &Barcode) -> String {
+    let mut head = c.symbology.clone();
+    if let Some(b) = c.bounds {
+        let r = |v: f32| v.round() as i64;
+        head.push_str(&format!(
+            ", box {}, {} to {}, {}",
+            r(b[0]),
+            r(b[1]),
+            r(b[2]),
+            r(b[3])
+        ));
+    }
+    head.push_str(": ");
+    let mut parts = vec![Inline::plain(head.clone())];
+    match (&c.text, &c.base64) {
+        (Some(t), _) if t.contains(['\n', '\r']) => {
+            return format!(
+                "{}\n\n{}",
+                paragraph(&[Inline::plain(head.trim_end().to_string())]),
+                fence(None, &visible_controls(t))
+            );
+        }
+        (Some(t), _) if web_address(t) => parts.push(Inline::Link {
+            target: t.clone(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(t.clone())],
+        }),
+        (Some(t), _) => parts.push(Inline::plain(visible_controls(t))),
+        (None, Some(b64)) => {
+            parts.push(Inline::plain(format!("{} bytes, base64 ", c.bytes)));
+            parts.push(Inline::Code { text: b64.clone() });
+        }
+        (None, None) => parts.push(Inline::plain(format!(
+            "{} bytes, not kept: more than the reader keeps",
+            c.bytes
+        ))),
+    }
     paragraph(&parts)
+}
+
+/// Whether the payload `t` is an address with one of [`LINK_SCHEMES`] (the rule for links
+/// from a document), with something after the scheme and no spaces, control or format
+/// characters: only those become links.
+fn web_address(t: &str) -> bool {
+    let Some((scheme, rest)) = t.split_once(':') else {
+        return false;
+    };
+    let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+    let after = if web {
+        rest.strip_prefix("//")
+    } else {
+        Some(rest)
+    };
+    link_scheme(scheme)
+        && after.is_some_and(|a| !a.is_empty())
+        && safe_target(t)
+        && !t.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || format_char(c) || matches!(c, '<' | '>')
+        })
+}
+
+/// Whether `c` is a Unicode format character (category Cf): invisible, and some turn the
+/// text around (U+202E) or hide in a word (U+200B).
+fn format_char(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0xad | 0x600..=0x605
+            | 0x61c
+            | 0x6dd
+            | 0x70f
+            | 0x890..=0x891
+            | 0x8e2
+            | 0x180e
+            | 0x200b..=0x200f
+            | 0x202a..=0x202e
+            | 0x2060..=0x2064
+            | 0x2066..=0x206f
+            | 0xfeff
+            | 0xfff9..=0xfffb
+            | 0x110bd
+            | 0x110cd
+            | 0x13430..=0x1343f
+            | 0x1bca0..=0x1bca3
+            | 0x1d173..=0x1d17a
+            | 0xe0001
+            | 0xe0020..=0xe007f
+    )
+}
+
+/// `t` with its control characters other than tab and line breaks as their Unicode symbols
+/// (U+2400 on), so a separator such as GS shows, and format characters as `<U+XXXX>`.
+fn visible_controls(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    for c in t.chars() {
+        match c {
+            '\t' | '\n' | '\r' => out.push(c),
+            '\u{0}'..='\u{1f}' => out.push(char::from_u32(0x2400 + c as u32).unwrap_or(c)),
+            '\u{7f}' => out.push('\u{2421}'),
+            c if format_char(c) => out.push_str(&format!("<U+{:04X}>", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1288,6 +1573,29 @@ const MAX_COLUMNS: usize = 1_000;
 /// A table's rendered grid (rows times width) holds at most this many cells.
 const MAX_CELLS: usize = 200_000;
 
+/// The mark for a grid position a cell merged from above covers (U+3003, ditto mark).
+const SAME_AS_ABOVE: &str = "\u{3003}";
+
+/// The mark for a grid position a cell merged from the left covers.
+const SAME_AS_LEFT: &str = "\u{2190}";
+
+/// What a grid position of a rendered table shows: the cell that starts there, or a mark for
+/// a position a merged cell covers. Each names the cell by its place in the table's texts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Spot {
+    Own(usize),
+    Above(usize),
+    Left(usize),
+}
+
+impl Spot {
+    fn cell(self) -> usize {
+        match self {
+            Spot::Own(k) | Spot::Above(k) | Spot::Left(k) => k,
+        }
+    }
+}
+
 fn model_table(
     caption: Option<&str>,
     header_rows: usize,
@@ -1314,9 +1622,12 @@ fn model_table(
         .max()
         .unwrap_or(1)
         .clamp(1, MAX_COLUMNS);
-    // Place every cell on a grid; spanned positions repeat the text. Rows stop once the
-    // grid would pass MAX_CELLS; the header row is always shown.
-    let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
+    // Place every cell on a grid; a merged cell's text stands once, in its first position.
+    // The other positions of its first row say "same as left", every position below its
+    // first row "same as above". Rows stop once the grid would pass MAX_CELLS; the header
+    // row is always shown.
+    let mut grid: Vec<Vec<Option<Spot>>> = vec![Vec::new(); rows.len()];
+    let mut texts: Vec<String> = Vec::new();
     // (row, column, column span, row span) of every merged cell.
     let mut merged: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut filled = 0usize;
@@ -1334,7 +1645,6 @@ fn model_table(
                 c += 1;
                 continue;
             }
-            let text = inlines(&cell.inlines, Mode::Cell).trim().to_string();
             let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
             let cs = (cell.col_span.max(1) as usize)
                 .min(real.saturating_sub(c).max(1))
@@ -1346,12 +1656,18 @@ fn model_table(
                 (rs, cs)
             };
             filled += fill_rows * fill_cols;
-            for grid_row in &mut grid[r..r + fill_rows] {
+            let k = texts.len();
+            texts.push(inlines(&cell.inlines, Mode::Cell).trim().to_string());
+            for (dr, grid_row) in grid[r..r + fill_rows].iter_mut().enumerate() {
                 if grid_row.len() < c + fill_cols {
                     grid_row.resize(c + fill_cols, None);
                 }
-                for slot in &mut grid_row[c..c + fill_cols] {
-                    *slot = Some(text.clone());
+                for (dc, slot) in grid_row[c..c + fill_cols].iter_mut().enumerate() {
+                    *slot = Some(match (dr, dc) {
+                        (0, 0) => Spot::Own(k),
+                        (0, _) => Spot::Left(k),
+                        _ => Spot::Above(k),
+                    });
                 }
             }
             if rs > 1 || cs > 1 {
@@ -1367,37 +1683,100 @@ fn model_table(
         }
     }
     grid.truncate(shown);
-    let grid: Vec<Vec<String>> = grid
-        .into_iter()
-        .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
-        .collect();
-    let (header, body) = if header_rows == 0 {
-        (Vec::new(), &grid[..])
+    // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
+    // sheet does; only rows that are shown are named, and a range into hidden rows ends at
+    // the last one.
+    let sheet = rows
+        .iter()
+        .flatten()
+        .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
+    let ranges: Vec<String> = if sheet {
+        merged
+            .into_iter()
+            .filter(|(r, ..)| *r < shown)
+            .map(|(r, c, cs, rs)| {
+                format!(
+                    "{}{}:{}{}",
+                    column_letter(c),
+                    r + 1,
+                    column_letter(c + cs - 1),
+                    (r + rs).min(shown)
+                )
+            })
+            .collect()
     } else {
-        (grid[0].clone(), &grid[1..])
+        Vec::new()
     };
+    // Several header rows are one header line, so their marks are never shown; the marks of
+    // the other rows are, and then the legend explains them.
+    let head = header_rows.min(grid.len());
+    let marked = grid.iter().enumerate().any(|(r, row)| {
+        (head < 2 || r >= head)
+            && row
+                .iter()
+                .any(|s| matches!(s, Some(Spot::Above(_) | Spot::Left(_))))
+    });
+    let legend = marked || !ranges.is_empty();
+    // A real cell whose whole text is a mark is escaped where the table carries marks, so it
+    // is never read as one; elsewhere it is written as it is.
+    let own = |k: usize| -> String {
+        let t = &texts[k];
+        if legend && (t == SAME_AS_ABOVE || t == SAME_AS_LEFT) {
+            format!("\\{t}")
+        } else {
+            t.clone()
+        }
+    };
+    let line = |row: &[Option<Spot>]| -> Vec<String> {
+        row.iter()
+            .map(|spot| match spot {
+                None => String::new(),
+                Some(Spot::Own(k)) => own(*k),
+                Some(Spot::Above(_)) => SAME_AS_ABOVE.to_string(),
+                Some(Spot::Left(_)) => SAME_AS_LEFT.to_string(),
+            })
+            .collect()
+    };
+    // Several header rows are one header line: per column the texts of the cells over it,
+    // top down, a cell over several rows once.
+    let header: Vec<String> = match head {
+        0 => Vec::new(),
+        1 => line(&grid[0]),
+        _ => (0..width)
+            .map(|c| {
+                let mut parts: Vec<String> = Vec::new();
+                let mut last = None;
+                for row in &grid[..head] {
+                    let Some(spot) = row.get(c).copied().flatten() else {
+                        continue;
+                    };
+                    if last == Some(spot.cell()) {
+                        continue;
+                    }
+                    last = Some(spot.cell());
+                    let t = own(spot.cell());
+                    if !t.is_empty() {
+                        parts.push(t);
+                    }
+                }
+                parts.join(" ")
+            })
+            .collect(),
+    };
+    let body: Vec<Vec<String>> = grid[head..].iter().map(|row| line(row)).collect();
     let mut out = String::new();
     if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
     }
-    out.push_str(&pipe_table(&header, aligns, body));
+    out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    // Only rows that are shown are named; a span into hidden rows ends at the last one.
-    let merged: Vec<String> = merged
-        .into_iter()
-        .filter(|(r, ..)| *r < shown)
-        .map(|(r, c, cs, rs)| {
-            format!(
-                "{}{}:{}{}",
-                column_letter(c),
-                r + 1,
-                column_letter(c + cs - 1),
-                (r + rs).min(shown)
-            )
-        })
-        .collect();
-    if !merged.is_empty() {
-        notes.push(format!("Merged cells: {}", merged.join(", ")));
+    if legend {
+        let mut note =
+            format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
+        if !ranges.is_empty() {
+            note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
+        }
+        notes.push(note);
     }
     if shown < rows.len() {
         notes.push(format!(
@@ -1452,5 +1831,90 @@ fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
         None
     } else {
         Some(format!("[[{target}|{text}]]"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Mode, destination_char, inline_into};
+    use rezzer_model::Inline;
+
+    #[test]
+    fn a_destination_never_takes_more_than_the_model_says() {
+        let chars = (0..0x3000u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in chars {
+            let mut out = String::new();
+            destination_char(c, &mut out);
+            let s = c.to_string();
+            assert!(
+                out.len() as u64 <= rezzer_model::link_target_written_len(&s),
+                "{c:?} is written as {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_whole_link_never_takes_more_than_the_model_says_plus_its_overhead() {
+        // Both written forms (destination and code span), block and cell mode, wiki on and
+        // off. The overhead is what the reader charges besides the target: 64 bytes.
+        let prefixes = ["", "http://x/", "javascript:", "mailto:"];
+        let pieces = (0..0x300u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in pieces {
+            for prefix in prefixes {
+                let target = format!("{prefix}{}", c.to_string().repeat(40));
+                for mode in [Mode::Block, Mode::Cell] {
+                    for wiki in [false, true] {
+                        let link = Inline::Link {
+                            target: target.clone(),
+                            title: None,
+                            internal: false,
+                            wiki,
+                            inlines: Vec::new(),
+                        };
+                        let mut out = String::new();
+                        inline_into(&link, mode, 0, false, &mut out);
+                        let allowed = rezzer_model::link_target_written_len(&target) + 64;
+                        assert!(
+                            out.len() as u64 <= allowed,
+                            "{target:?} in {mode:?} wiki {wiki} is written as {out:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_link_target_in_json_never_takes_more_than_the_model_says() {
+        let link = |target: String| Inline::Link {
+            target,
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: Vec::new(),
+        };
+        let size = |target: String| {
+            serde_json::to_string_pretty(&link(target))
+                .expect("the model serializes")
+                .len() as u64
+        };
+        let empty = size(String::new());
+        let pieces = (0..0x300u32)
+            .filter_map(char::from_u32)
+            .chain(['\u{1F600}', '\u{10FFFF}']);
+        for c in pieces {
+            for prefix in ["", "http://x/", "javascript:"] {
+                let target = format!("{prefix}{}", c.to_string().repeat(40));
+                let written = size(target.clone()) - empty;
+                assert!(
+                    written <= rezzer_model::link_target_written_len(&target),
+                    "{target:?} is written as {written} bytes in JSON"
+                );
+            }
+        }
     }
 }

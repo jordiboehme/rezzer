@@ -1,0 +1,592 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The object layer of a PDF file, read with a stream guard.
+//!
+//! A PDF library gives you objects. This crate reads what they mean: document metadata (Info
+//! and XMP), language, pages with their labels, sizes and images, the outline, named
+//! destinations, links, annotations, the structure tree, embedded files, layers, article
+//! threads, form fields, scripts, signatures and revisions. Scripts are read as text and never
+//! run.
+//!
+//! [`Pdf::open`] parses the file with its own bounded parser, keeps only the objects the
+//! document reaches, and writes them as canonical bytes ([`Pdf::canonical`]): a plain PDF with a
+//! classic cross-reference table, no object streams and no encryption. Other parsers get only
+//! those bytes. Every stream is measured once before open returns: a stream that unpacks past
+//! the size or ratio caps is refused, and so is every page that uses it. An object stream bomb
+//! ends the open with [`OpenError::Limit`]. A problem never panics. It becomes an [`Issue`],
+//! and the other parts are still read.
+//!
+//! ```
+//! use pdfparts::objects::{pdf_date, text_string};
+//! assert_eq!(text_string(b"Is\xEDs"), "Is\u{ed}s");
+//! assert_eq!(pdf_date("D:20151230152248+01'00'").as_deref(), Some("2015-12-30T15:22:48+01:00"));
+//! ```
+
+mod actions;
+mod annots;
+mod extras;
+mod forms;
+mod guard;
+mod meta;
+mod nav;
+pub mod objects;
+mod pagetree;
+mod parse;
+mod revisions;
+pub mod script;
+mod signatures;
+mod structure;
+
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use lopdf::{Document, ObjectId};
+
+pub use actions::Script;
+pub use annots::Annot;
+pub use extras::{EmbeddedFile, Layer, Thread};
+pub use forms::{Field, FieldKind, Form};
+pub use meta::{Info, PdfDate};
+pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
+pub use revisions::{Revision, Revisions};
+pub use signatures::{Sig, SigKind};
+pub use structure::{StructElem, StructTree};
+
+/// Bounds for reading one file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Deepest nesting of a tree (page tree, outline, number and name trees, XML).
+    pub max_depth: usize,
+    /// Most items in one structure: one walk (tree entries, XML events, objects visited), one
+    /// array or dictionary, or the members of one object stream.
+    pub max_items: usize,
+    /// Most bytes one stream may unpack to.
+    pub max_stream_bytes: u64,
+    /// Most bytes all streams together may unpack to.
+    pub max_total_bytes: u64,
+    /// Most times a stream may grow when it is unpacked.
+    pub max_ratio: u64,
+    /// Most revisions (incremental updates) that are read.
+    pub max_revisions: usize,
+    /// Most bytes the parsed objects and the canonical copy may take: every value counts a
+    /// fixed 128 bytes plus its strings, names and stream data.
+    pub max_object_bytes: u64,
+    /// Most bytes one script (`/JS`) may have, packed or unpacked: a longer one is not read.
+    pub max_script_bytes: u64,
+    /// Most bytes of script text all scripts of the document may hold together, each script
+    /// object counted once: a script past it is listed without its text.
+    pub max_script_total_bytes: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_depth: 256,
+            max_items: 2_000_000,
+            max_stream_bytes: 1 << 30,
+            max_total_bytes: 4 << 30,
+            max_ratio: 100,
+            max_revisions: 64,
+            max_object_bytes: 1 << 30,
+            max_script_bytes: 4 << 20,
+            max_script_total_bytes: 16 << 20,
+        }
+    }
+}
+
+/// Why a part, or a piece of it, could not be read in full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IssueKind {
+    /// The part is broken or points at something that is not there.
+    Damaged,
+    /// A limit was hit or the caller asked to stop.
+    Limit,
+    /// The part uses something that is not read, on purpose.
+    Unsupported,
+    /// The part was read in full, but a check says it may hold wrong values.
+    Uncertain,
+}
+
+/// One thing that went wrong while reading, with the place it concerns.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Issue {
+    /// Where: `document`, `page 3`, `field Total`, `object 12 0`, `outline`, `metadata`.
+    pub location: String,
+    /// What happened, in plain words.
+    pub what: String,
+    /// The class of the problem.
+    pub kind: IssueKind,
+}
+
+impl Issue {
+    pub(crate) fn new(location: &str, kind: IssueKind, what: impl Into<String>) -> Issue {
+        Issue {
+            location: location.to_string(),
+            what: what.into(),
+            kind,
+        }
+    }
+}
+
+/// Why a file could not be opened. The text never contains the password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenError {
+    /// The bytes are not a PDF file.
+    NotPdf,
+    /// The file is too broken to read.
+    Damaged(String),
+    /// The file is encrypted and does not open without a password.
+    NeedsPassword,
+    /// The given password opens neither as user nor as owner password.
+    WrongPassword,
+    /// The file uses encryption that is not supported.
+    UnsupportedEncryption(String),
+    /// A limit was hit or the caller asked to stop.
+    Limit(String),
+}
+
+impl fmt::Display for OpenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpenError::NotPdf => write!(f, "not a PDF file"),
+            OpenError::Damaged(why) => write!(f, "the file is damaged: {why}"),
+            OpenError::NeedsPassword => write!(f, "the file needs a password"),
+            OpenError::WrongPassword => write!(f, "the password is wrong"),
+            OpenError::UnsupportedEncryption(why) => {
+                write!(f, "the encryption is not supported: {why}")
+            }
+            OpenError::Limit(why) => write!(f, "a limit was hit: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for OpenError {}
+
+/// How a file is encrypted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Encryption {
+    /// `AES-128`, `AES-256`, `RC4-40`, `RC4-128` and so on.
+    pub method: String,
+    /// The file opens without a password. The empty string may match the user or the owner
+    /// password; the file does not say which.
+    pub empty_user_password: bool,
+}
+
+/// What the streams of a file that does not open unpack to, measured with the guard's
+/// decoder from the file as it is. It is for a parser that has to read such a file itself:
+/// that parser asks [`RawStreams::size`] before it unpacks a stream.
+#[derive(Debug, Clone, Default)]
+pub struct RawStreams {
+    sizes: HashMap<(u32, u16), u64>,
+    unpacked: u64,
+    broken: HashSet<(u32, u16)>,
+}
+
+impl RawStreams {
+    /// Measures every stream of `bytes`: one forward pass finds every object header, also the
+    /// ones a later definition of the number replaces, and every extent a parser may take
+    /// for each. A stream over a cap, a stream whose filters are named indirectly, an object
+    /// or cross-reference stream that stops with a decoding error and an encrypted file give
+    /// [`OpenError::Limit`], [`OpenError::Damaged`] or [`OpenError::UnsupportedEncryption`]:
+    /// such a file must not be handed to the parser.
+    pub fn measure(
+        bytes: &[u8],
+        limits: &Limits,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<RawStreams, OpenError> {
+        let m = parse::measure_raw(bytes, limits, stop)?;
+        Ok(RawStreams {
+            sizes: m.sizes,
+            unpacked: m.unpacked,
+            broken: m.broken,
+        })
+    }
+
+    /// What the stream with this object number and generation unpacks to; the largest when
+    /// the file defines the number more than once. `None` when no stream has that number.
+    pub fn size(&self, object: u32, generation: u16) -> Option<u64> {
+        self.sizes.get(&(object, generation)).copied()
+    }
+
+    /// Bytes all streams unpack to.
+    pub fn unpacked(&self) -> u64 {
+        self.unpacked
+    }
+
+    /// The stream stops with a decoding error: a lenient decoder may unpack more of it than
+    /// was measured, so the parser must not unpack it. An object or cross-reference stream
+    /// like that refuses the whole measure.
+    pub fn broken(&self, object: u32, generation: u16) -> bool {
+        self.broken.contains(&(object, generation))
+    }
+
+    /// Some stream stops with a decoding error.
+    pub fn any_broken(&self) -> bool {
+        !self.broken.is_empty()
+    }
+}
+
+/// The decode parameters of one filter that change what it unpacks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilterParms {
+    /// `/EarlyChange` of LZWDecode: true (1) unless the stream says 0.
+    pub early_change: bool,
+}
+
+impl Default for FilterParms {
+    fn default() -> Self {
+        FilterParms { early_change: true }
+    }
+}
+
+/// Measures one stream's data `raw` through the filters named `filters`, in order, each with
+/// its parameters from `parms` (the default where `parms` has none), with the guard's decoder
+/// and caps; `budget` is what is left of the total. `Err` says which cap it passes, that it
+/// stops with a decoding error (another decoder may go on and unpack more), or that the
+/// caller asked to stop.
+pub fn measure_stream(
+    raw: &[u8],
+    filters: &[&[u8]],
+    parms: &[FilterParms],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+) -> Result<u64, String> {
+    let chain: Vec<guard::Filter> = filters
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let early = parms.get(i).copied().unwrap_or_default().early_change;
+            guard::Filter::from_name(name, early)
+        })
+        .collect();
+    match guard::measure_checked(raw, &chain, limits, budget, stop) {
+        (guard::Measure::Fits(_), true) => Err(
+            "it stops with a decoding error, and a lenient decoder may unpack more than can be \
+             measured"
+                .into(),
+        ),
+        (guard::Measure::Fits(n), false) => Ok(n),
+        (guard::Measure::Over(cap), _) => Err(format!("it {}", guard::cap_words(cap, limits))),
+        (guard::Measure::Stopped, _) => Err("stopped by the caller".into()),
+    }
+}
+
+/// Unpacks one stream's data `raw` through the filters named `filters` (with `parms`, as for
+/// [`measure_stream`]) under the guard's caps, and hands the output to `each` piece by piece,
+/// keeping none of it, so a reader can scan a large stream with a small buffer. `each`
+/// returns false to stop. `Err` says which cap the stream passes, or that it was stopped.
+pub fn read_stream(
+    raw: &[u8],
+    filters: &[&[u8]],
+    parms: &[FilterParms],
+    limits: &Limits,
+    budget: u64,
+    stop: &dyn Fn() -> bool,
+    each: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u64, String> {
+    let chain: Vec<guard::Filter> = filters
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let early = parms.get(i).copied().unwrap_or_default().early_change;
+            guard::Filter::from_name(name, early)
+        })
+        .collect();
+    match guard::each_piece(raw, &chain, limits, budget, stop, each) {
+        guard::Measure::Fits(n) => Ok(n),
+        guard::Measure::Over(cap) => Err(format!("it {}", guard::cap_words(cap, limits))),
+        guard::Measure::Stopped => Err("stopped".into()),
+    }
+}
+
+/// An open PDF file.
+pub struct Pdf {
+    doc: Document,
+    canonical: Arc<Vec<u8>>,
+    original: Vec<u8>,
+    /// Values parsed and the bytes charged for them and the canonical copy.
+    values: usize,
+    object_bytes: u64,
+    limits: Limits,
+    encryption: Option<Encryption>,
+    /// The decryption key, to read the objects of earlier revisions. Never printed.
+    crypt: Option<parse::Crypt>,
+    /// Page objects in page order; page number = index + 1.
+    pages: Vec<pagetree::PageNode>,
+    page_numbers: HashMap<ObjectId, u32>,
+    verdict: guard::Verdict,
+    unsafe_tree: bool,
+    issues: Mutex<IssueLog>,
+    /// The structure tree, read on first use.
+    structure: OnceLock<Option<structure::Built>>,
+    /// The embedded files, read on first use.
+    attachments: OnceLock<extras::Attachments>,
+    /// The form, the scripts and the signatures, each read on first use.
+    form: OnceLock<forms::FormData>,
+    scripts: OnceLock<Vec<Script>>,
+    signatures: OnceLock<Vec<Sig>>,
+    /// The revisions, read on first use.
+    revisions: OnceLock<Revisions>,
+    /// What all readers together may still copy out of the document: the object budget left
+    /// after open.
+    text_left: AtomicU64,
+    /// The script text all readers hold, each script object read once.
+    script_room: Mutex<actions::ScriptRoom>,
+}
+
+/// Issues in the order found, each once.
+#[derive(Default)]
+struct IssueLog {
+    list: Vec<Issue>,
+    seen: HashSet<Issue>,
+}
+
+impl IssueLog {
+    fn add(&mut self, issue: Issue) {
+        if self.seen.insert(issue.clone()) {
+            self.list.push(issue);
+        }
+    }
+}
+
+impl fmt::Debug for Pdf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Pdf")
+            .field("pages", &self.pages.len())
+            .field("encryption", &self.encryption)
+            .field("refused_pages", &self.verdict.refused_pages)
+            .field("unpacked", &self.verdict.unpacked)
+            .field("values", &self.values)
+            .field("object_bytes", &self.object_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Pdf {
+    /// Opens a PDF file from memory. `password` is tried as user and as owner password when the
+    /// file does not open with an empty one. Every stream is measured before this returns.
+    pub fn open(
+        bytes: &[u8],
+        password: Option<&str>,
+        limits: &Limits,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Pdf, OpenError> {
+        let head = &bytes[..bytes.len().min(parse::HEADER_WINDOW)];
+        if !head.windows(5).any(|w| w == b"%PDF-") {
+            return Err(OpenError::NotPdf);
+        }
+        if stop() {
+            return Err(OpenError::Limit("stopped by the caller".into()));
+        }
+        let built = parse::build(bytes, password, limits, stop)?;
+        let mut doc = built.doc;
+        let mut issues = built.issues;
+        let catalog_ok = doc
+            .trailer
+            .get(b"Root")
+            .ok()
+            .and_then(|r| objects::dict(&doc, r))
+            .is_some();
+        if !catalog_ok {
+            return Err(OpenError::Damaged(
+                "the file has no document catalog".into(),
+            ));
+        }
+        let tree = pagetree::page_tree(&doc, limits, &mut issues);
+        let pages = tree.pages;
+        let verdict = guard::measure(&doc, &pages, built.unpacked, limits, stop, &mut issues)?;
+        // A stream over a limit is written without its data, so no parser that reads the
+        // canonical copy can unpack it, whichever page it asks for.
+        for id in &verdict.refused_objects {
+            if let Some(lopdf::Object::Stream(stream)) = doc.objects.get_mut(id) {
+                stream.dict.remove(b"Filter");
+                stream.dict.remove(b"DecodeParms");
+                stream.set_content(Vec::new());
+            }
+        }
+        // A stream that stops with a decoding error keeps only what the guard measured.
+        for (id, &measured) in &verdict.broken {
+            let Some(lopdf::Object::Stream(mut stream)) = doc.objects.remove(id) else {
+                continue;
+            };
+            guard::cut_to_measured(&doc, &mut stream, measured, limits, stop);
+            doc.objects.insert(*id, lopdf::Object::Stream(stream));
+        }
+        let (canonical, charged) = parse::write_canonical(&mut doc, limits, built.charged)?;
+        // A page listed twice keeps its first number.
+        let mut page_numbers = HashMap::new();
+        for (i, p) in pages.iter().enumerate() {
+            page_numbers.entry(p.id).or_insert(i as u32 + 1);
+        }
+        let mut log = IssueLog::default();
+        for issue in issues {
+            log.add(issue);
+        }
+        Ok(Pdf {
+            doc,
+            canonical: Arc::new(canonical),
+            original: bytes.to_vec(),
+            values: built.items,
+            object_bytes: charged,
+            limits: *limits,
+            encryption: built.encryption,
+            crypt: built.crypt,
+            pages,
+            page_numbers,
+            verdict,
+            unsafe_tree: tree.unsafe_tree,
+            issues: Mutex::new(log),
+            structure: OnceLock::new(),
+            attachments: OnceLock::new(),
+            form: OnceLock::new(),
+            scripts: OnceLock::new(),
+            signatures: OnceLock::new(),
+            revisions: OnceLock::new(),
+            text_left: AtomicU64::new(limits.max_object_bytes.saturating_sub(charged)),
+            script_room: Mutex::new(actions::ScriptRoom::new(limits.max_script_total_bytes)),
+        })
+    }
+
+    /// How the file is encrypted, or `None` for a plain file.
+    pub fn encryption(&self) -> Option<Encryption> {
+        self.encryption.clone()
+    }
+
+    /// The document as canonical bytes: the objects it reaches, decrypted, with a classic
+    /// cross-reference table and no object streams. A stream the guard refused is written
+    /// empty (its dictionary without `/Filter`), so another parser can read any page that was
+    /// not refused. Other parsers must read these bytes and never the original file.
+    pub fn canonical(&self) -> &[u8] {
+        &self.canonical
+    }
+
+    /// [`Pdf::canonical`] as shared bytes, for a parser that keeps its input without a copy.
+    pub fn canonical_shared(&self) -> Arc<Vec<u8>> {
+        Arc::clone(&self.canonical)
+    }
+
+    /// Takes `bytes` from the pool every reader draws on for what it copies out of the
+    /// document (the object budget left after open). False when they do not fit; the pool is
+    /// then spent and the caller must stop copying.
+    pub fn charge_copy(&self, bytes: u64) -> bool {
+        self.text_budget().take(bytes)
+    }
+
+    /// Takes `bytes` from the same pool as [`Pdf::charge_copy`] for memory a reader holds for
+    /// a while, only when they fit: unlike `charge_copy`, a reservation that does not fit
+    /// leaves the pool as it is. Give the bytes back with [`Pdf::release_copy`] once the
+    /// memory is gone.
+    pub fn reserve_copy(&self, bytes: u64) -> bool {
+        self.text_left
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(bytes)
+            })
+            .is_ok()
+    }
+
+    /// Gives back the bytes of a [`Pdf::reserve_copy`].
+    pub fn release_copy(&self, bytes: u64) {
+        let _ = self
+            .text_left
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                Some(left.saturating_add(bytes))
+            });
+    }
+
+    /// The bytes charged for the objects parsed at open, against `max_object_bytes`.
+    pub fn object_bytes(&self) -> u64 {
+        self.object_bytes
+    }
+
+    /// The bytes the file was opened from, for checks that need them as they are (signature
+    /// byte ranges, revisions). They must not be handed to another parser.
+    pub fn original(&self) -> &[u8] {
+        &self.original
+    }
+
+    /// Pages (1-based) whose streams broke a limit. They must not be handed to other parsers.
+    pub fn refused_pages(&self) -> &[u32] {
+        &self.verdict.refused_pages
+    }
+
+    /// The page tree has a cycle, a shared or repeated node, an untyped node or more depth
+    /// than the limits allow. Page numbers here follow lopdf's page walk, a depth-first walk
+    /// of `/Kids` in order; a parser with a different walk may number such a file
+    /// differently, so it must not get the file.
+    pub fn unsafe_page_tree(&self) -> bool {
+        self.unsafe_tree
+    }
+
+    /// Bytes all measured streams unpack to.
+    pub fn unpacked(&self) -> u64 {
+        self.verdict.unpacked
+    }
+
+    /// Bytes the stream with object number `object` and generation `generation` unpacks to,
+    /// as the guard measured it. `None` when the object is not a measured stream (not a
+    /// stream, refused, or not in the file). The canonical copy keeps the object numbers, so
+    /// another parser can ask before it unpacks a stream of that copy.
+    pub fn unpacked_size(&self, object: u32, generation: u16) -> Option<u64> {
+        self.verdict.sizes.get(&(object, generation)).copied()
+    }
+
+    /// Every issue found so far: while opening, and by the readers called since.
+    pub fn issues(&self) -> Vec<Issue> {
+        let mut list = self
+            .issues
+            .lock()
+            .map(|i| i.list.clone())
+            .unwrap_or_default();
+        if let Ok(room) = self.script_room.lock() {
+            list.extend(room.issues(self.limits.max_script_total_bytes));
+        }
+        list
+    }
+
+    /// Number of pages found in the page tree.
+    pub fn page_count(&self) -> u32 {
+        self.pages.len() as u32
+    }
+
+    /// Records issues found by a reader, each only once.
+    pub(crate) fn note(&self, found: Vec<Issue>) {
+        if found.is_empty() {
+            return;
+        }
+        if let Ok(mut log) = self.issues.lock() {
+            for issue in found {
+                log.add(issue);
+            }
+        }
+    }
+
+    /// The budget for what a reader copies. Every reader draws on the same pool: the object
+    /// budget left after open.
+    pub(crate) fn text_budget(&self) -> objects::TextBudget<'_> {
+        objects::TextBudget::shared(&self.text_left)
+    }
+
+    pub(crate) fn catalog(&self) -> Option<&lopdf::Dictionary> {
+        objects::dict(&self.doc, self.doc.trailer.get(b"Root").ok()?)
+    }
+
+    /// The unpacked bytes of a stream, `None` when the guard refused it or it does not decode.
+    pub(crate) fn plain(&self, id: ObjectId) -> Option<Vec<u8>> {
+        if self.verdict.refused_objects.contains(&id) {
+            return None;
+        }
+        let stream = self.doc.objects.get(&id)?.as_stream().ok()?;
+        let cap = usize::try_from(self.limits.max_stream_bytes).unwrap_or(usize::MAX);
+        stream.get_plain_content_with_limit(cap).ok()
+    }
+
+    /// The page number of a page object.
+    pub(crate) fn page_number(&self, id: ObjectId) -> Option<u32> {
+        self.page_numbers.get(&id).copied()
+    }
+}

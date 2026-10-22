@@ -12,7 +12,7 @@ Built on (versions as used in the development version):
 - [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells, ranges, names and tables each formula reads
 - Rezzer's own readers on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for the parts no crate exposes well (XLSX and XLSM): sheetparts for the workbook parts, zipguard to check the package before anything is unpacked
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
@@ -67,7 +67,9 @@ Only units from a fixed list count. One-letter units in round brackets count onl
 
 Each sheet becomes a value table. Then a Logic section follows with one part per sheet: parameters, formulas grouped by pattern, results, rules. After that come the defined names, a Mermaid dependency graph and the hidden logic (user functions, add-ins, other workbooks, data tables, spill ranges, VBA modules, calculation settings). Formulas can also be shown as LaTeX math (`--no-math` turns that off). In the graph a copied formula is one box, not one box per cell.
 
-Example from a tunnel design workbook in the test files (shortened):
+## Example
+
+Real output of `rezzer read` for `tunnel_design_calculations.xlsx` from the test corpus. The part for the Ventilation sheet, cut to two of its 13 parameters and three of its 14 formula rows:
 
 ```markdown
 ### Ventilation
@@ -81,10 +83,11 @@ Example from a tunnel design workbook in the test files (shortened):
 
 #### Formulas
 
-| Cells | Count | Formula | Reads | Role | Value |
-| --- | --- | --- | --- | --- | --- |
-| B20 | 1 | `=PI()*B6^2/4` | B6 | intermediate | 78.53981634 |
-| B34 | 1 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | B33 | result | OK |
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B20 | 1 | `=PI()*B6^2/4` | B6 | intermediate | 78.53981634 | $`\frac{\pi \cdot \mathrm{B6}^{2}}{4}`$ |
+| B33 | 1 | `=MAX(B29,B32)` | B29, B32 | intermediate | 2.184635247 | $`\operatorname{MAX}(\mathrm{B29}, \mathrm{B32})`$ |
+| B34 | 1 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | B33 | result | OK | $`\operatorname{IF}(\operatorname{AND}(\mathrm{B33} \geq 1, \mathrm{B33} \leq 10), \text{"OK"}, \text{"CHECK RANGE"})`$ |
 ```
 
 ## Known limitations
@@ -108,6 +111,15 @@ Rezzer reads every file as untrusted data:
 - A package that can be read in two ways is refused as damaged: two main workbook parts, two relationships with one id, two sheets with one name, part paths with `.` or `..`, entries that differ only in case, relationship or sheet markup Excel never writes, control characters in sheet names
 - A sheet that breaks halfway keeps the cells before the break. The output says where it stopped
 
-## Tested with
+## How it is tested
 
-24 XLSX, 3 XLSM and 2 XLSB public test files (one of the XLSB files is broken on purpose) from Apache POI, Apache Tika, LibreOffice, calamine, IronCalc and two open engineering projects. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+The corpus has 24 XLSX, 3 XLSM and 2 XLSB public test files from Apache POI, Apache Tika, LibreOffice, calamine, IronCalc and two open engineering projects. One XLSB file is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
+
+- A sheet of 64 MB of spaces, packed far over 100 times: refused before it is unpacked, peak heap under 512 MB
+- Two cells, A1 and XFD1048576, 17 billion cells apart: peak heap under 64 MB, the far formula is still listed
+- 100,000 nested XML elements after the cells: the read stops at 256 levels and keeps the cells before
+- An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
+
+Speed: `ex012.PVT_z_factor.xlsm` (130 KB, 2,133 formulas) reads in 0.02 seconds with a peak memory of 14 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

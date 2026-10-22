@@ -447,11 +447,44 @@ fn table_alignment_merged_cells_and_pipes() {
     let expected = "**Costs**\n\n\
 | A | B | C |\n\
 | :--- | :---: | ---: |\n\
-| x \\| y | wide | wide |\n\
+| x \\| y | wide | \u{2190} |\n\
 | `a\\|b` | -5 |  |\n\
 \n\
-Merged cells: B2:C2\n";
+Merged cells: \u{3003} same as above, \u{2190} same as left.\n";
     assert!(md.contains(expected), "{md}");
+}
+
+#[test]
+fn sheet_tables_keep_a1_merge_notes() {
+    // Cells with sheet anchors: the note names the range as the sheet does. The text stands
+    // once, in the first cell, as in the sheet.
+    let cell = |text: &str, at: &str| {
+        let mut c = Cell::new(vec![txt(text)]);
+        c.anchor = Some(Anchor(format!("Sheet1!{at}")));
+        c
+    };
+    let mut merged = cell("wide", "B2");
+    merged.col_span = 2;
+    merged.row_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![cell("A", "A1"), cell("B", "B1"), cell("C", "C1")],
+            vec![cell("x", "A2"), merged],
+            vec![cell("y", "A3")],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "| x | wide | \u{2190} |\n| y | \u{3003} | \u{3003} |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B2:C3\n"
+        ),
+        "{md}"
+    );
 }
 
 #[test]
@@ -733,10 +766,12 @@ fn rich_document() -> Document {
         },
         Block::Media {
             asset: "img1".into(),
+            alt: None,
             anchor: None,
         },
         Block::Media {
             asset: "img2".into(),
+            alt: None,
             anchor: None,
         },
         Block::Section {
@@ -765,6 +800,8 @@ fn rich_document() -> Document {
         caption: Some("Figure 1".into()),
         alt: Some("A chart".into()),
         needs_vision: true,
+        codes: Vec::new(),
+        code_unread: false,
     }];
     d.facets.formulas = vec![formula("Sheet 1!B2", "=A2*2", &["Sheet 1!A2"], None)];
     d.facets.annotations = vec![Annotation {
@@ -794,6 +831,7 @@ fn rich_document() -> Document {
         text: Some("and a pipe".into()),
     }];
     d.facets.embedded = vec![Embedded {
+        text: None,
         kind: "macro".into(),
         name: "AutoOpen".into(),
         detail: Some("VBA".into()),
@@ -1048,7 +1086,16 @@ fn hostile_spans_stay_bounded() {
         alignments: Vec::new(),
         anchor: None,
     }]);
-    assert!(md.contains("Merged cells: A2:B3"), "{}", &md[..300]);
+    assert!(
+        md.contains("| h | \u{2190} |") && md.contains("| \u{3003} | \u{3003} |"),
+        "{}",
+        &md[..300]
+    );
+    assert!(
+        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left."),
+        "{}",
+        &md[..300]
+    );
     assert!(md.len() < 1_000_000, "{}", md.len());
 }
 
@@ -1623,8 +1670,15 @@ fn merge_note_names_only_shown_rows() {
         alignments: Vec::new(),
         anchor: None,
     }]);
+    // The cell merged down stands in the header; each shown row below says "same as above".
+    assert_eq!(
+        md.matches("\n| \u{3003} | 0 |").count(),
+        199,
+        "{}",
+        &md[..300]
+    );
     assert!(
-        md.contains("Merged cells: A1:A200\n"),
+        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left.\n"),
         "{}",
         &md[md.len() - 200..]
     );
@@ -2198,6 +2252,7 @@ fn hidden_logic_lists_udf_and_external() {
         },
     ];
     let embedded = |kind: &str, name: &str, detail: &str, target: Option<&str>| Embedded {
+        text: None,
         kind: kind.into(),
         name: name.into(),
         detail: Some(detail.into()),
@@ -2677,4 +2732,871 @@ fn sheet_heading_that_clashes_with_a_section_says_sheet() {
     assert!(logic.contains("\n### Sheet: Names\n"), "{logic}");
     assert!(logic.contains("\n### Calc\n"), "{logic}");
     assert_eq!(logic.matches("\n### Names\n").count(), 1, "{logic}");
+}
+
+#[test]
+fn a_picture_not_extracted_says_why_it_needs_a_look() {
+    let mut d = doc();
+    d.body = vec![Block::Media {
+        asset: "page-3".into(),
+        alt: None,
+        anchor: None,
+    }];
+    d.assets = vec![
+        Asset {
+            id: "page-3".into(),
+            path: None,
+            sha256: String::new(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: Some("no text layer".into()),
+            needs_vision: true,
+            codes: Vec::new(),
+            code_unread: false,
+        },
+        Asset {
+            id: "img2".into(),
+            path: None,
+            sha256: String::new(),
+            mime: "image/jpeg".into(),
+            caption: None,
+            alt: None,
+            needs_vision: false,
+            codes: Vec::new(),
+            code_unread: false,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    // The list of pictures that need vision says why each needs a look.
+    assert!(
+        md.contains(
+            "| Picture | File | Caption | Note |\n| --- | --- | --- | --- |\n\
+             | page-3 | not extracted |  | no text layer |\n"
+        ),
+        "{md}"
+    );
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Picture page-3 (image/png, no text layer) is not extracted."),
+        "{md}"
+    );
+    d.body = vec![Block::Media {
+        asset: "img2".into(),
+        alt: None,
+        anchor: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Picture img2 (image/jpeg) is not extracted."),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_picture_at_several_places_says_each_place() {
+    // One asset drawn at two places: each place says its own words, the list of pictures that
+    // need vision has the asset once with its own words.
+    let mut d = doc();
+    let place = |alt: &str| Block::Media {
+        asset: "page-1-pic-1".into(),
+        alt: Some(alt.into()),
+        anchor: None,
+    };
+    d.body = vec![
+        place("small picture, box 1, 2 to 3, 4"),
+        place("small picture, box 5, 6 to 7, 8"),
+    ];
+    let mut a = asset("page-1-pic-1", None, "image/png", true);
+    a.alt = Some("small picture, pages 1, 2".into());
+    d.assets = vec![a.clone()];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "Picture page-1-pic-1 (image/png, small picture, box 1, 2 to 3, 4) is not extracted."
+        ),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "Picture page-1-pic-1 (image/png, small picture, box 5, 6 to 7, 8) is not extracted."
+        ),
+        "{md}"
+    );
+    assert_eq!(md.matches("| page-1-pic-1 |").count(), 1, "{md}");
+    assert!(md.contains("| small picture, pages 1, 2 |"), "{md}");
+    // With a file, the place's words are the alt text of the picture link.
+    a.path = Some("f.pdf.assets/page-1-pic-1.png".into());
+    d.assets = vec![a];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("![small picture, box 5, 6 to 7, 8](f.pdf.assets/page-1-pic-1.png)"),
+        "{md}"
+    );
+}
+
+/// Every link and image destination in `md`, in order, as a Markdown reader sees them.
+fn destinations(md: &str) -> Vec<String> {
+    Parser::new_ext(md, Options::ENABLE_TABLES)
+        .filter_map(|e| match e {
+            Event::Start(Tag::Link { dest_url, .. })
+            | Event::Start(Tag::Image { dest_url, .. }) => Some(dest_url.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn asset(id: &str, path: Option<&str>, mime: &str, needs_vision: bool) -> Asset {
+    Asset {
+        id: id.into(),
+        path: path.map(str::to_string),
+        sha256: String::new(),
+        mime: mime.into(),
+        caption: None,
+        alt: None,
+        needs_vision,
+        codes: Vec::new(),
+        code_unread: false,
+    }
+}
+
+#[test]
+fn pictures_and_attachments_link_to_their_files() {
+    let mut d = doc();
+    d.body = vec![Block::Media {
+        asset: "page-1".into(),
+        alt: None,
+        anchor: None,
+    }];
+    let mut file = asset(
+        "attachment-1",
+        Some("50% #2.assets/attachment-1.bin"),
+        "text/plain",
+        false,
+    );
+    file.caption = Some("notes.txt".into());
+    d.assets = vec![
+        asset(
+            "page-1",
+            Some("50% #2.assets/page-1.png"),
+            "image/png",
+            true,
+        ),
+        file,
+    ];
+    d.facets.embedded = vec![Embedded {
+        kind: "attachment".into(),
+        name: "notes.txt".into(),
+        detail: Some("text/plain, 5 bytes".into()),
+        target: None,
+        text: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    // The picture in the body, the File column of the vision table and the attachment's row:
+    // `%` and `#` of the path are encoded, so a reader that splits at `#` or decodes `%` finds
+    // the file.
+    assert_eq!(
+        destinations(&md),
+        [
+            "50%25%20%232.assets/page-1.png",
+            "50%25%20%232.assets/attachment-1.bin",
+            "50%25%20%232.assets/page-1.png",
+        ],
+        "{md}"
+    );
+    assert!(!md.contains('`'), "{md}");
+}
+
+#[test]
+fn links_keep_their_fragments_and_percent_codes() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: target.starts_with('#'),
+        wiki: false,
+        inlines: vec![txt("here")],
+    };
+    let md = body_of(vec![Block::paragraph(vec![
+        link("#numbers"),
+        txt(" and "),
+        link("https://example.org/a%20b?q=1#part"),
+    ])]);
+    assert_eq!(
+        destinations(&md),
+        ["#numbers", "https://example.org/a%20b?q=1#part"],
+        "{md}"
+    );
+}
+
+use rezzer_model::{FieldAction, FileFacts, FormField, Signature};
+
+fn form_field(name: &str, role: Role, calc: Option<u32>, flags: &[&str]) -> FormField {
+    FormField {
+        anchor: Anchor(format!("field:{name}")),
+        name: name.into(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: Some(role),
+        format: None,
+        calc_order: calc,
+        actions: Vec::new(),
+        flags: flags.iter().map(|f| f.to_string()).collect(),
+        options: Vec::new(),
+        pages: vec![1],
+    }
+}
+
+fn calculate(field: &mut FormField, script: &str, words: Option<&str>) {
+    field.actions.push(FieldAction {
+        trigger: "calculate".into(),
+        script: script.into(),
+        words: words.map(str::to_string),
+    });
+}
+
+fn js_formula(name: &str, script: &str, reads: &[&str], note: Option<&str>) -> Formula {
+    Formula {
+        anchor: Anchor(format!("field:{name}")),
+        expression: script.into(),
+        dialect: "pdf-js".into(),
+        references: reads.iter().map(|r| Anchor(format!("field:{r}"))).collect(),
+        cached: None,
+        role: Some(Role::Result),
+        pattern: None,
+        latex: None,
+        note: note.map(str::to_string),
+        kind: None,
+        range: None,
+        original: None,
+    }
+}
+
+/// A form: Source is typed in, Mirror copies it, Total sums both, Odd reads a field whose name
+/// it builds.
+fn form_document() -> Document {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    let mut source = form_field("Source", Role::Input, None, &[]);
+    source.value = Some(Value::Text { value: "5".into() });
+    source.label = Some("Your number".into());
+    let mirror_js = r#"event.value = this.getField("Source").value;"#;
+    let mut mirror = form_field("Mirror", Role::Result, Some(1), &["read-only"]);
+    calculate(&mut mirror, mirror_js, None);
+    let total_js = r#"AFSimple_Calculate("SUM", new Array("Source", "Mirror"));"#;
+    let mut total = form_field("Total", Role::Result, Some(2), &[]);
+    total.format = Some("number, 2 decimals".into());
+    calculate(&mut total, total_js, Some("sum of Source, Mirror"));
+    let odd_js = r#"event.value = this.getField("S" + n).value;"#;
+    let mut odd = form_field("Odd", Role::Result, None, &[]);
+    calculate(&mut odd, odd_js, None);
+    d.facets.fields = vec![source, mirror, total, odd];
+    d.facets.formulas = vec![
+        js_formula("Mirror", mirror_js, &["Source"], None),
+        js_formula("Total", total_js, &["Source", "Mirror"], None),
+        js_formula("Odd", odd_js, &[], Some("reads unknown fields, see script")),
+    ];
+    let node = |name: &str, label: &str| Node {
+        id: format!("f{name}"),
+        label: label.into(),
+        kind: None,
+        anchor: Some(Anchor(format!("field:{name}"))),
+    };
+    d.facets.graphs = vec![Graph {
+        id: "form".into(),
+        kind: "dependency".into(),
+        nodes: vec![
+            node("Source", "Source (input)"),
+            node("Mirror", "Mirror (result, calc 1)"),
+            node("Total", "Total (result, calc 2)"),
+        ],
+        edges: vec![
+            edge("fMirror", "fSource", "reads"),
+            edge("fTotal", "fSource", "reads"),
+            edge("fTotal", "fMirror", "reads"),
+        ],
+    }];
+    d
+}
+
+#[test]
+fn facts_in_frontmatter_after_losses() {
+    let mut d = doc();
+    d.properties.authors = vec!["Ann".into()];
+    d.properties.facts = FileFacts {
+        pages: Some(3),
+        tagged: Some(false),
+        encrypted: Some(false),
+        signed: Some(true),
+        signatures: Some(1),
+        revisions: Some(2),
+        form_fields: Some(4),
+        has_javascript: Some(true),
+        layers: None,
+    };
+    let md = render(&d, Completeness::Complete, &opts());
+    let fm = frontmatter_of(&md);
+    assert!(
+        fm.contains(
+            "losses: 0\npages: 3\ntagged: false\nencrypted: false\nsigned: true\nsignatures: 1\n\
+             revisions: 2\nform_fields: 4\nhas_javascript: true\nauthors: [\"Ann\"]\n"
+        ),
+        "{fm}"
+    );
+    // A document without facts has none of these keys.
+    let md = render(&doc(), Completeness::Complete, &opts());
+    assert!(!frontmatter_of(&md).contains("pages:"), "{md}");
+}
+
+#[test]
+fn form_logic_table_and_mermaid() {
+    let md = render(&form_document(), Completeness::Complete, &opts());
+    let logic = md.split("\n## Logic\n").nth(1).expect("a logic section");
+    let want = "\n### Form\n\n\
+        | Field | Type | Role | Value | Format | Rule | Reads | Flags |\n\
+        | --- | --- | --- | --- | --- | --- | --- | --- |\n\
+        | Source (Your number) | text | input | 5 |  |  |  |  |\n\
+        | Mirror | text | result (calc 1) |  |  | script, see below | Source | read-only |\n\
+        | Total | text | result (calc 2) |  | number, 2 decimals | sum of Source, Mirror | Source, Mirror |  |\n\
+        | Odd | text | result |  |  | script, see below | unknown, see script |  |\n\n\
+        ### Graph: form\n\n\
+        Kind dependency, 3 nodes, 3 edges.\n```mermaid\nflowchart LR\n";
+    assert!(logic.starts_with(want), "{logic}");
+    assert_valid_mermaid(&mermaid_lines(logic));
+    let calcs = logic
+        .split("\n### Calculations\n\n")
+        .nth(1)
+        .expect("the calculations");
+    assert!(
+        calcs.starts_with(
+            "Mirror, calc 1:\n```javascript\nevent.value = this.getField(\"Source\").value;\n```\n\n\
+             Total, calc 2:\n```javascript\n"
+        ),
+        "{calcs}"
+    );
+    assert!(calcs.contains("\n\nOdd:\n```javascript\n"), "{calcs}");
+    // The calculations are not repeated in a formula table.
+    assert!(!md.contains("| Cells | Formula |"), "{md}");
+    assert_eq!(md.matches("```mermaid").count(), 1, "{md}");
+}
+
+/// A page section with its marker and the given blocks.
+fn page(n: u32, blocks: Vec<Block>) -> Block {
+    let mut all = vec![Block::Paragraph {
+        inlines: vec![Inline::Status {
+            text: format!("Page {n}"),
+            color: StatusColor::Grey,
+        }],
+        role: Some("page".into()),
+        anchor: None,
+    }];
+    all.extend(blocks);
+    Block::Section {
+        kind: SectionKind::Page,
+        title: None,
+        anchor: Some(Anchor(format!("p{n}"))),
+        blocks: all,
+    }
+}
+
+fn anchored(text: &str, anchor: &str) -> Block {
+    Block::Paragraph {
+        inlines: vec![txt(text)],
+        role: None,
+        anchor: Some(Anchor(anchor.into())),
+    }
+}
+
+fn note(kind: &str, anchor: &str, quoted: Option<&str>, body: &str) -> Annotation {
+    Annotation {
+        kind: kind.into(),
+        author: Some("Ann".into()),
+        date: Some("2026-01-02T10:00:00Z".into()),
+        anchor: Some(Anchor(anchor.into())),
+        quoted: quoted.map(str::to_string),
+        body: vec![txt(body)],
+        replies: Vec::new(),
+        resolved: None,
+    }
+}
+
+fn paged_document() -> Document {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.body = vec![
+        page(
+            1,
+            vec![
+                anchored("First words.", "p1:b1"),
+                anchored("Second words.", "p1:b2"),
+            ],
+        ),
+        page(2, vec![anchored("Third words.", "p2:b1")]),
+    ];
+    d
+}
+
+#[test]
+fn annotation_renders_next_to_its_block() {
+    let mut d = paged_document();
+    let mut hl = note("highlight", "p1:b1", Some("First"), "Check this.");
+    hl.replies = vec![Annotation {
+        kind: "note".into(),
+        author: Some("Bob".into()),
+        date: None,
+        anchor: None,
+        quoted: None,
+        body: vec![txt("Done.")],
+        replies: Vec::new(),
+        resolved: None,
+    }];
+    hl.resolved = Some(true);
+    d.facets.annotations = vec![hl];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "First words.\n\n\
+             > [!NOTE] Highlight by Ann, 2026-01-02T10:00:00Z\n\
+             > > First\n\
+             >\n\
+             > :status[Resolved]{green}\n\
+             >\n\
+             > Check this.\n\
+             >\n\
+             > - **note** by Bob\n\
+             >\n\
+             >   Done.\n\n\
+             Second words."
+        ),
+        "{md}"
+    );
+    // Shown at its passage, it is not listed again.
+    assert!(!md.contains("## Annotations"), "{md}");
+}
+
+#[test]
+fn page_annotation_at_end_of_page() {
+    let mut d = paged_document();
+    let mut sticky = note("note", "p1", None, "About the whole page.");
+    sticky.author = None;
+    d.facets.annotations = vec![
+        sticky,
+        note("note", "p9:b1", None, "On a page that is not there."),
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "Second words.\n\n\
+             > [!NOTE] Note, 2026-01-02T10:00:00Z\n\
+             > About the whole page.\n\n\
+             :status[Page 2]{grey}"
+        ),
+        "{md}"
+    );
+    // The one without a place is listed at the end.
+    let listed = md.split("## Annotations").nth(1).expect("the list");
+    assert!(listed.contains("On a page that is not there."), "{md}");
+    assert!(!listed.contains("About the whole page."), "{md}");
+    // Without the content, every annotation is listed.
+    let mut o = opts();
+    o.sections = Some(vec![OutputSection::Annotations]);
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(md.contains("About the whole page."), "{md}");
+    assert!(!md.contains("[!NOTE]"), "{md}");
+}
+
+#[test]
+fn sheet_annotations_unchanged() {
+    // Cell anchors are never block anchors, and a sheet is not a page: a comment on a cell
+    // and one on the sheet stay in the list.
+    let mut d = workbook();
+    d.facets.annotations = vec![
+        note("comment", "Inputs!A1", None, "On a cell."),
+        note("comment", "Inputs", None, "On the sheet."),
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(!md.contains("[!NOTE]"), "{md}");
+    let listed = md.split("## Annotations").nth(1).expect("the list");
+    assert!(
+        listed.contains("On a cell.") && listed.contains("On the sheet."),
+        "{md}"
+    );
+}
+
+#[test]
+fn script_with_fence_stays_fenced() {
+    let mut d = doc();
+    let text = "let a = 1;\n```\n# not a heading\n````\n> nor a quote";
+    d.facets.embedded = vec![
+        Embedded {
+            kind: "script".into(),
+            name: "document".into(),
+            detail: Some("javascript, callback".into()),
+            target: None,
+            text: Some(text.into()),
+        },
+        Embedded {
+            kind: "launch-action".into(),
+            name: "calc.exe".into(),
+            detail: None,
+            target: Some("calc.exe".into()),
+            text: None,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    let scripts = md.split("\n### Scripts\n\n").nth(1).expect("scripts");
+    assert!(
+        scripts.starts_with(
+            "document (javascript, callback), listed, not run.\n`````javascript\nlet a = 1;\n"
+        ),
+        "{scripts}"
+    );
+    let headings = Parser::new_ext(after_frontmatter(&md), Options::ENABLE_TABLES)
+        .filter(|e| matches!(e, Event::Start(Tag::Heading { .. })))
+        .count();
+    // The title, Embedded and Scripts: the script adds no heading.
+    assert_eq!(headings, 3, "{md}");
+    let blocks: Vec<String> = Parser::new(&md)
+        .scan(false, |inside, e| {
+            Some(match e {
+                Event::Start(Tag::CodeBlock(_)) => {
+                    *inside = true;
+                    None
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    *inside = false;
+                    None
+                }
+                Event::Text(t) if *inside => Some(t.to_string()),
+                _ => None,
+            })
+        })
+        .flatten()
+        .collect();
+    assert_eq!(blocks.concat(), format!("{text}\n"));
+}
+
+#[test]
+fn signatures_table_in_changes() {
+    let mut d = doc();
+    d.facets.timeline = vec![TimelineEvent {
+        time: Some("2026-01-02T10:00:00Z".into()),
+        actor: None,
+        kind: "revision".into(),
+        anchor: None,
+        text: Some("first save".into()),
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("## Changes\n\n| When | Who | What | Where | Text |"),
+        "{md}"
+    );
+    assert!(!md.contains("### Revisions"), "{md}");
+    d.facets.signatures = vec![
+        Signature {
+            anchor: Some(Anchor("field:Sig|1".into())),
+            kind: "field".into(),
+            signer: Some("Ann".into()),
+            date: Some("2026-01-02T10:00:00Z".into()),
+            reason: Some("I agree".into()),
+            location: None,
+            sub_filter: Some("adbe.pkcs7.detached".into()),
+            covers_whole_file: false,
+            later_revisions: 1,
+        },
+        Signature {
+            anchor: None,
+            kind: "usage-rights".into(),
+            signer: None,
+            date: None,
+            reason: None,
+            location: None,
+            sub_filter: None,
+            covers_whole_file: true,
+            later_revisions: 0,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "## Changes\n\n### Signatures\n\n\
+             | Signature | Kind | Signer | Date | Reason | Whole file | Saves after | Verified |\n\
+             | --- | --- | --- | --- | --- | --- | --- | --- |\n\
+             | Sig\\|1 | field | Ann | 2026-01-02T10:00:00Z | I agree | no | 1 | no |\n\
+             | no field | usage-rights |  |  |  | yes | 0 | no |\n\n\
+             ### Revisions\n\n| When | Who | What | Where | Text |"
+        ),
+        "{md}"
+    );
+    // Signatures without a timeline still get the section.
+    d.facets.timeline.clear();
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("## Changes\n\n### Signatures\n"), "{md}");
+    assert!(!md.contains("### Revisions"), "{md}");
+}
+
+#[test]
+fn field_names_render_valid_table_and_mermaid() {
+    let mut d = form_document();
+    let hostile = "a|b]c\"d`e\nf";
+    let mut field = form_field(hostile, Role::Result, Some(3), &["read-only"]);
+    calculate(&mut field, "x", None);
+    field.value = Some(Value::Text {
+        value: "v|w\nx".into(),
+    });
+    d.facets.fields.push(field);
+    d.facets
+        .formulas
+        .push(js_formula(hostile, "x", &[hostile, "Source"], None));
+    let graph = &mut d.facets.graphs[0];
+    graph.nodes.push(Node {
+        id: "fhostile".into(),
+        label: format!("{hostile} (result, calc 3)"),
+        kind: None,
+        anchor: Some(Anchor(format!("field:{hostile}"))),
+    });
+    graph.edges.push(edge("fhostile", "fSource", "reads"));
+    let md = render(&d, Completeness::Complete, &opts());
+    let form = md.split("### Form\n\n").nth(1).unwrap();
+    let table = form.split("\n\n").next().unwrap();
+    let cells = cells_of_rows(table);
+    assert_eq!(cells.len(), 6, "{table}");
+    assert!(cells.iter().all(|&n| n == 8), "{cells:?}\n{table}");
+    assert_valid_mermaid(&mermaid_lines(&md));
+    // The calculation line names the field on one line.
+    assert!(
+        md.contains("a\\|b\\]c\"d\\`e f, calc 3:\n```javascript\nx\n```"),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_note_too_deep_for_its_passage_stays_in_the_list() {
+    let mut inner = anchored("Deep words.", "deep");
+    for _ in 0..62 {
+        inner = Block::Quote {
+            blocks: vec![inner],
+            anchor: None,
+        };
+    }
+    let mut d = doc();
+    d.body = vec![inner];
+    d.facets.annotations = vec![note("note", "deep", None, "Deep body.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    let listed = md.split("## Annotations").nth(1).expect("the list");
+    assert!(listed.contains("Deep body."), "{md}");
+}
+
+#[test]
+fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
+    // A block of two by two cells: its text once, the first row's other cell "same as left",
+    // the cells below "same as above". A real cell that holds only a mark is escaped.
+    let mut block = Cell::new(vec![txt("both")]);
+    block.col_span = 2;
+    block.row_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![
+                Cell::new(vec![txt("A")]),
+                Cell::new(vec![txt("B")]),
+                Cell::new(vec![txt("C")]),
+            ],
+            vec![block, Cell::new(vec![txt("\u{3003}")])],
+            vec![Cell::new(vec![txt("\u{2190}")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "| A | B | C |\n| --- | --- | --- |\n\
+             | both | \u{2190} | \\\u{3003} |\n\
+             | \u{3003} | \u{3003} | \\\u{2190} |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left.\n"
+        ),
+        "{md}"
+    );
+    // Without a merged cell, no note, and a lone mark is written as it is.
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![Cell::new(vec![txt("A")])],
+            vec![Cell::new(vec![txt("\u{3003}")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(md.contains("\n| \u{3003} |\n"), "{md}");
+    assert!(!md.contains("Merged cells"), "{md}");
+}
+
+#[test]
+fn header_rows_join_into_one_header_line() {
+    // Two header rows: a title over two rows stands once, a title over two columns heads
+    // each of them; no merge note, as no mark is left.
+    let mut date = Cell::new(vec![txt("ISSUING DATE")]);
+    date.row_span = 2;
+    let mut vat = Cell::new(vec![txt("VAT")]);
+    vat.col_span = 2;
+    let md = body_of(vec![Block::Table {
+        caption: None,
+        header_rows: 2,
+        role: None,
+        rows: vec![
+            vec![date, vat],
+            vec![Cell::new(vec![txt("RATE")]), Cell::new(vec![txt("AMOUNT")])],
+            vec![
+                Cell::new(vec![txt("2030-01-02")]),
+                Cell::new(vec![txt("0.00")]),
+                Cell::new(vec![txt("1.00")]),
+            ],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "| ISSUING DATE | VAT RATE | VAT AMOUNT |\n| --- | --- | --- |\n\
+             | 2030-01-02 | 0.00 | 1.00 |\n"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Merged cells"), "{md}");
+}
+
+// ---------------------------------------------------------------------------------------
+// Barcodes and QR codes
+
+/// A document with one picture holding codes of `texts`, drawn at `places` places.
+fn coded(texts: &[&str], places: usize) -> String {
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1-pic-1".into(),
+        path: Some("assets/page-1-pic-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("QR Code".into()),
+        needs_vision: false,
+        codes: texts
+            .iter()
+            .map(|t| rezzer_model::Barcode {
+                symbology: "QR Code".into(),
+                text: Some((*t).to_string()),
+                base64: None,
+                bytes: t.len() as u64,
+                bounds: None,
+            })
+            .collect(),
+        code_unread: false,
+    }];
+    d.body = (0..places)
+        .map(|k| Block::Media {
+            asset: "page-1-pic-1".into(),
+            alt: Some(format!("QR Code, box {k}, 0 to 10, 10")),
+            anchor: None,
+        })
+        .collect();
+    render(&d, Completeness::Complete, &opts())
+}
+
+#[test]
+fn only_web_and_mail_addresses_become_links() {
+    // One rule for addresses from a file, in links and in code payloads alike.
+    let md = coded(
+        &[
+            "file:///etc/passwd",
+            "data:text/html,x",
+            "ftp://example.org/a",
+            "https://example.org/b",
+            "mailto:desk@example.org",
+            "mailto:",
+        ],
+        1,
+    );
+    assert!(md.contains("QR Code: file:///etc/passwd"), "{md}");
+    assert!(!md.contains("](file:"), "{md}");
+    assert!(!md.contains("](data:"), "{md}");
+    assert!(!md.contains("](ftp:"), "{md}");
+    assert!(md.contains("](https://example.org/b)"), "{md}");
+    assert!(
+        md.contains("[mailto:desk@example.org](mailto:desk@example.org)"),
+        "{md}"
+    );
+    assert!(md.contains("QR Code: mailto:\n"), "{md}");
+}
+
+#[test]
+fn file_ftp_and_data_targets_stay_text() {
+    let link = |target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: false,
+        wiki: false,
+        inlines: vec![txt("go")],
+    };
+    let md = body_of(vec![Block::Paragraph {
+        inlines: vec![
+            link("file:///etc/passwd"),
+            txt(" "),
+            link("FTP://example.org/a"),
+            txt(" "),
+            link("data:text/html,x"),
+            txt(" "),
+            Inline::Image {
+                target: "file:///tmp/a.png".into(),
+                alt: "pic".into(),
+                title: None,
+            },
+            txt(" "),
+            link("http://example.org/"),
+        ],
+        role: None,
+        anchor: None,
+    }]);
+    assert!(
+        md.contains(
+            "go `file:///etc/passwd` go `FTP://example.org/a` go `data:text/html,x` \
+pic `file:///tmp/a.png` [go](http://example.org/)\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn control_and_format_characters_in_codes_show() {
+    let md = coded(
+        &[
+            "(01)0950\u{1d}(10)ABC",
+            "https://example.org/\u{202e}gpj.exe",
+            "pay\u{200b}pal.com",
+        ],
+        1,
+    );
+    // GS as its symbol, format characters by their code point, and no link with one.
+    assert!(md.contains("(01)0950\u{241d}(10)ABC"), "{md}");
+    assert!(md.contains("&lt;U+202E>gpj.exe"), "{md}");
+    assert!(!md.contains("\u{202e}"), "{md}");
+    assert!(!md.contains("](https://example.org/"), "{md}");
+    assert!(md.contains("pay&lt;U+200B>pal.com"), "{md}");
+}
+
+#[test]
+fn codes_are_written_once_at_the_first_place() {
+    let md = coded(&["https://example.org/once"], 5);
+    assert_eq!(
+        md.matches("QR Code: [https://example.org/once]").count(),
+        1,
+        "{md}"
+    );
+    let first = md.find("box 0, 0").expect("first place");
+    let code = md.find("QR Code: [").expect("code");
+    assert!(
+        code > first && code < md.find("box 1, 0").expect("second place"),
+        "{md}"
+    );
 }

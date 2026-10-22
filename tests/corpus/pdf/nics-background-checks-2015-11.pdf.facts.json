@@ -1,0 +1,20 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "contains": "NICS Firearm Background Checks November - 2015"
+  },
+  {
+    "pointer": "/losses",
+    "contains": "it has more than 15 columns"
+  },
+  {
+    "contains": "Alabama 18,870"
+  }
+]

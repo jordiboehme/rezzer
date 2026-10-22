@@ -410,6 +410,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     embedded(&mut out, false, &[], &vba, &formulas);
     if zip.names().iter().any(|n| n.starts_with("Basic/")) {
         out.doc.facets.embedded.push(Embedded {
+            text: None,
             kind: "macro".into(),
             name: "Basic".into(),
             detail: Some("LibreOffice Basic macros, never run".into()),

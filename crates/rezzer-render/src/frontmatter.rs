@@ -6,7 +6,7 @@
 //! then Rezzer's own snake_case keys (document properties last). Every value that comes from a file goes through
 //! [`quote`].
 
-use rezzer_model::{Completeness, Document, FormatId, Value};
+use rezzer_model::{Completeness, Document, FileFacts, FormatId, Value};
 
 use crate::RenderOptions;
 
@@ -215,6 +215,7 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
         completeness_name(completeness)
     ));
     out.push_str(&format!("losses: {}\n", doc.losses.len()));
+    facts(&p.facts, &mut out);
     if !p.authors.is_empty() {
         out.push_str(&format!("authors: {}\n", quoted_list(&p.authors)));
     }
@@ -232,6 +233,42 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
     }
     out.push_str("---\n");
     out
+}
+
+/// The facts about the file that are set, in the order of [`FileFacts`], as plain YAML
+/// numbers and booleans.
+fn facts(f: &FileFacts, out: &mut String) {
+    let numbers = |key: &str, v: Option<u32>, out: &mut String| {
+        if let Some(v) = v {
+            out.push_str(&format!("{key}: {v}\n"));
+        }
+    };
+    let flags = |key: &str, v: Option<bool>, out: &mut String| {
+        if let Some(v) = v {
+            out.push_str(&format!("{key}: {v}\n"));
+        }
+    };
+    // Destructured, so a new fact cannot be forgotten here.
+    let FileFacts {
+        pages,
+        tagged,
+        encrypted,
+        signed,
+        signatures,
+        revisions,
+        form_fields,
+        has_javascript,
+        layers,
+    } = f;
+    numbers("pages", *pages, out);
+    flags("tagged", *tagged, out);
+    flags("encrypted", *encrypted, out);
+    flags("signed", *signed, out);
+    numbers("signatures", *signatures, out);
+    numbers("revisions", *revisions, out);
+    numbers("form_fields", *form_fields, out);
+    flags("has_javascript", *has_javascript, out);
+    numbers("layers", *layers, out);
 }
 
 #[cfg(test)]

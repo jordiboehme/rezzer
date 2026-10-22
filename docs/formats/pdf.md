@@ -2,87 +2,189 @@
 
 Rezzer reads the text of a PDF in reading order, and also the layer behind it: outline, annotations with author and date, form fields with their calculations, scripts, signatures and saved revisions.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: available in the development version (no release yet).
 
 File types: `.pdf`. Rezzer detects the format by content, not by extension.
 
-Built on (versions as tested on 2026-10-19):
+Built on (versions as used in the development version):
 
-- [lopdf](https://crates.io/crates/lopdf) 0.45.0 for the object layer: metadata, outline, annotations, forms, scripts, layers, signatures, revisions
-- [pdf-inspector](https://crates.io/crates/pdf-inspector) 1.25.2 for text in reading order, tables and the "does this page need OCR" check
-- [hayro](https://crates.io/crates/hayro) 0.8.0 to render pages for OCR and vision, for exact glyph boxes and as a fallback for broken files
-- Rezzer's own reader for the interpretation: page labels, name trees, the form logic, revision diffs and XMP
+- Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.45.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
+- [hayro](https://crates.io/crates/hayro) 0.8.0 (with hayro-interpret and hayro-syntax) for the text with its position on the page, the exact glyph boxes under an annotation, page renders and as a fallback parser for broken files
+- Rezzer's own crate barcodes for barcodes and QR codes. It uses [rxing](https://crates.io/crates/rxing) 0.9.3 (Apache-2.0) with bounds of its own
+- Rezzer's own reader for the interpretation: reading order, headings, tables, the form logic, field formats in words and revision diffs
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
-- Text in reading order, also on two-column pages
-- Headings, lists, tables and footnotes from the tag tree when the PDF is tagged. Untagged PDFs get headings from font size
-- Tables as cells
+- Text in reading order, also on two-column pages. Every page starts with a marker that names its label and its number in the file
+- Headings, lists and tables from the tag tree when the PDF is tagged. Untagged PDFs get headings from the font size
+- Tables as cells. A tagged PDF gives its tables from the tag tree. On untagged pages Rezzer rebuilds a table from a grid of drawn lines, or from text in columns with white space between them. A grid with more than 15 columns or with more than 60 % empty cells is read as a form or a chart. In a table without lines at least 80 % of the rows must stay inside the columns and the cells must be short (under 40 characters on median, unless most are numbers). A table that fails a check stays text, with a note that names the check
+- Running headers and footers are marked in the JSON model; the Markdown keeps them as text. Text that is invisible on the page is listed apart, with its render mode
 - Outline (bookmarks) with level, title and target page
 - Page labels (i, ii, iii, then 1, 2, 3 and so on)
-- Links: internal targets, named destinations and web links
+- Links: web links in the text, internal targets and named destinations. Internal links stay text, because there is no target to link to in the output. Only `http`, `https` and `mailto` addresses become links. Other addresses, such as `file:` or `ftp:`, stay text with the address as code
 - Article threads (reading paths across pages)
-- Alt text, ActualText and table header attributes from the tag tree
+- Arabic text and vertical Japanese text in logical order
 
 ### Metadata
 
 - Info dictionary: title, author, subject, keywords, creator, producer, dates with their time zone
-- XMP metadata
-- Document language
+- XMP metadata, also PDF/A
+- Document language and PDF version
+- File facts in the frontmatter: pages, tagged, encrypted, signed, signatures, revisions, form fields, whether it has scripts and layers
 
 ### Hidden logic
 
-- Annotations: highlight, underline, strikeout, free text, sticky notes, ink and others, with author, dates, color and the text they cover. Replies and popups stay with their annotation
-- Form fields: name, type, value and flags (read-only, required)
-- Form calculations: the calculation order and the field each calculation reads (from `getField("...")` calls)
-- Field formats in words: `AFNumber_Format(2, 0, 0, 0, "$", true)` becomes "number, 2 decimals, $ before the number". The same for date, percent and special formats (ZIP, phone, SSN)
+- Annotations: highlight, underline, strikeout, squiggly, free text, sticky notes, ink, caret, stamps, shapes and others, with author and date. A markup annotation quotes the exact words under it. Replies stay with their annotation, and a review state marks it as resolved
+- Form fields: name, label, type, value, flags (read-only, required, multiline and others) and options
+- Form calculations: the calculation order and the fields each calculation reads (from `getField("...")` calls)
+- Field formats in words: `AFNumber_Format(2, 0, 0, 0, "$", true)` becomes `number, 2 decimals, "$" before the number`. The same for date, time, percent and special formats (ZIP code, phone number, social security number)
 - Each field gets a role: input (the user fills it), result (a calculation sets it) or constant (read-only, no calculation)
-- Scripts: document JavaScript, open actions, page and field actions. Listed as text, never run
-- Digital signatures: signer, date, reason, type and whether the signature covers the whole file
+- Scripts: document JavaScript, open actions, page and field actions. Listed with their text, never run
+- Digital signatures: signer, date, reason, location, kind (field, usage rights, certification), whether the signature covers the whole file and how many saves came after it. Signatures are not verified
 - Revisions: each incremental save, with its date and what changed
 - Layers (optional content) with name and default visibility
+- XFA form data is found and said, not read
 
 ### Pictures and embedded files
 
-- Pages that need OCR or hold pictures are rendered to PNG and listed as "needs vision" with page number and reason
-- Embedded files are listed and can be read by Rezzer as well
+- A page without a text layer, with glyphs that have no Unicode mapping or with large pictures needs vision. It is listed with the reason. With an output directory (`-o` on the command line), Rezzer renders it to a PNG file at 144 dpi, at most 16 million pixels
+- Small pictures (1 square centimeter or more, together under 2 % of the page) do not make the whole page need vision. Each one is written at its place in the text with its box in points. With an output directory, Rezzer cuts it out of the page render with a margin of 8 pixels and writes it as `page-<N>-pic-<K>.png` (picture K on page N, in reading order). On a very large page, where the page render is coarser than 144 dpi, the crop is rendered again at 144 dpi
+- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 15 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures are marked "Needs vision", unless a code is read from them
+- Equal pictures share one file. The same picture on three pages is one PNG, and each place links to it with its own box. The list of pictures that need vision has it once, with its pages and boxes. When the page of its first place is not rendered, the file is cut from the next page that shows it. The overview counts the places and the distinct pictures
+- In a tagged file, the alt text of a Figure goes to the picture drawn inside it. A Figure that marks no picture gives its alt text to the one new small picture of its page. Every other Figure alt text stays in the text as "Figure (not matched to a picture): " and the alt text. It stands at the picture the Figure marks, else at the first picture of the page, else at the end of the page
+- A picture at the same place on at least 3 pages and half the pages is page furniture, like a running header. It is not listed
+- Attachments are listed with name and size. They are never opened
 
-## How it shows up in the output
+### Barcodes and QR codes
 
-The text comes first, with annotations next to their passage. Then a `Form logic` section with one table per form, a Mermaid graph when a field reads another field, a `Scripts` section and a `Revisions` section. Signatures, revision count, layers and the form field count go into the frontmatter.
+- Rezzer reads QR Code, Data Matrix, Aztec, PDF417, Code 128, Code 39, EAN-13, UPC-A and ITF, also turned a quarter or a little. It reads them with and without an output directory
+- It looks in small pictures (logos and page furniture too), in pages that need vision and in codes drawn as paths (many small squares or bars filled in any solid color, on one module grid, with the pattern of a code: the finder squares of a QR code, the solid L of a Data Matrix, the bullseye of an Aztec code, the start bars of a PDF417 or bars of a linear code with free space at both ends; light modules on a dark field count too). A page that needs vision is read once at its own scale with two quick attempts; the likely codes on it are looked at again finer. A small picture that gives no code is looked at again at its own resolution when that is finer than the page render. A code drawn as paths is rendered again with each module on 3 whole pixels. Its crop is written as `page-<N>-code-<K>.png`
+- A small picture with a code is named after the code, for example "QR Code, box 480, 40 to 570, 130". It does not need vision and is not in the list of pictures that need vision. Below its first place, each code has a line with its kind and its content: `QR Code: https://example.org/t/dNuKThV1`. Later places of the same picture say "its codes are listed at its first place on page N"
+- The content is data from the file. It is escaped for Markdown and never run or followed. Only `http`, `https` and `mailto` addresses without hidden characters become links, as for links in the text. Content of several lines is a code block. Control and format characters show as their symbols or as `<U+XXXX>`. Bytes that are not text are shown as their size and in base64
+- A code read from a page that needs vision is listed below the page picture with its box in points. The page still needs vision for the rest of it
+- A picture that looks like a code but gives none keeps "Needs vision" and says "barcode or QR code found, not decoded". A drawing that looks like a code but gives none is listed with its crop as "a drawing that looks like a barcode or QR code" and "not decoded", and needs vision. Ruled tables, checkerboards, zebra rows, heatmaps and bar charts are not taken for codes
+- A code in the page furniture (the same picture at one place on many pages) is read once and named once, at its first place, with its pages. Furniture without a code stays unlisted
+- Equal pictures are read once
+- The overview counts the codes by kind, and the pictures that look like a code but gave none
+- In the JSON, the codes are in `codes` of their asset: kind, text or base64, the size of the payload in bytes and the box on the page for a page picture
+- Bounds: 10 seconds a picture, a quarter of the time limit for the file, 50 codes a picture, 500 a file, 64 KiB a code, 500 parts of pages rendered again a file, pictures up to 100 million pixels, read in tiles of up to 4 million pixels. What is not read because of a bound is named in the output. When the time for codes runs out, the pages not read for codes are named in an info note and the read stays complete: their pictures keep their need of vision
+- A PDF with a user password is read with `--password-stdin` (command line) or the `password` option (MCP). The password never shows up in the output, in the logs or in the cache
 
-Example (not final):
+## Example
 
-```markdown
-## Form logic
+Real output of `rezzer read` for two files of the test corpus, cut to the parts that show the form logic and an annotation. From `pdfjs-text-field-calc.pdf` (the empty page markers and the Embedded section are cut):
 
-| Field | Type | Role | Format | Rule | Reads | Flags |
-|---|---|---|---|---|---|---|
-| Source | text | input | | | | |
-| Mirror | text | result (calc 1) | | `event.value = this.getField("Source").value` | Source | read-only |
-| Allottment Amount | text | input | number, 2 decimals, "$" before | | | |
-```
+````markdown
+## Logic
 
+### Form
+
+| Field | Type | Role | Value | Format | Rule | Reads | Flags |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Source | text | input |  |  |  |  |  |
+| Mirror | text | result (calc 1) |  |  | script, see below | Source | read-only |
+
+### Graph: form
+
+Kind dependency, 2 nodes, 1 edge.
 ```mermaid
 flowchart LR
-  Source["Source (input)"] --> Mirror["Mirror (result, calc 1)"]
+    n_f1["Source (input)"]
+    n_f2["Mirror (result, calc 1)"]
+    n_f2 -->|"reads"| n_f1
+```
+
+### Calculations
+
+Mirror, calc 1:
+```javascript
+event.value = this.getField("Source").value;
+```
+````
+
+From `pdfjs-annotation-highlight.pdf` (the frontmatter and the overview are cut):
+
+```markdown
+:status[Page 1]{grey}
+
+Highlight
+
+Lorem ipsum dolor sit amet
+
+> [!NOTE] Highlight by Tim van der Meij, 2015-12-30T15:22:48+01:00
+> > Lorem ipsum dolor sit amet
+>
+> Highlight content
+```
+
+No file of the test corpus has a barcode or QR code. This part comes from a generated invoice: a QR code picture in the bottom right corner and a Code 128 drawn as bars. It is the real output of `rezzer read invoice.pdf -o out`, cut to the overview and the page:
+
+```markdown
+## Overview
+
+- Pages: 1
+- Images: 2
+- Codes: 2 (Code 128 1, QR Code 1)
+
+:status[Page 1]{grey}
+
+## Invoice 2026-114
+
+Two chairs, 240.00 EUR
+
+Pay within 14 days.
+
+![Code 128, box 72, 600 to 197, 640](invoice.pdf.assets/page-1-code-1.png)
+
+Code 128: RZ-2026-114
+
+![QR Code, box 480, 40 to 570, 130](invoice.pdf.assets/page-1-pic-1.png)
+
+QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 ```
 
 ## Known limitations
 
 - XFA forms are not read. The output says "XFA form data present, not read"
 - Scripts are listed, never run. When a script builds field names at run time, the dependency is marked "unknown, see script"
-- Tables on untagged PDFs are found by layout rules. Expect gaps on complex tables
-- Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer
-- lopdf 0.45.0 decodes some outline titles wrongly ("Isís" as "Is?s"). Rezzer decodes titles itself
-- pdf-inspector 1.25.2 does not decode UTF-16 form values and reports a file with a broken cross-reference table as "scanned". Rezzer reads form values through lopdf and checks pages with fonts before it trusts a "scanned" result
-- When lopdf can't load a file, Rezzer falls back to hayro for that file and says so in the output
-- Revision diffs skip the first save of a linearized file
-- No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the crate API but are not proven on a real file
-- Form flags inherited from parent fields are not handled yet
+- Tables marked only by a rule at the top and at the bottom (as in many scientific papers) stay paragraphs. A note says "Possible table on page N not rebuilt" with the reason
+- A header row of several lines is found by bold text or font size, not by its fill color alone
+- Header icons drawn with curves are not marked
+- Some line breaks are joined: lines of verse with five words or more, two-line blocks that are aligned right, label pairs and lines like "Suite 200 of the / Old Mill Building". No text is lost
+- Tables on pages with form fields and tables inside pictures are not rebuilt
+- Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
+- A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
+- A small picture in a corner or in the top or bottom band is taken as a logo, even when it shows content. It is listed with its box, but not marked as needing vision
+- A QR code with a logo over more than about 15 % of its area cannot be read. The error correction does not reach that far
+- Aztec codes in scans, and codes turned by an angle other than a quarter, are read less well than codes that are drawn straight. Micro QR Code is looked for but not tested
+- EAN-8, UPC-E and MaxiCode are not read. The first two give too many false hits, the last one can take minutes on a small picture
+- Codes are read as text or bytes. What a ticket, a payment or a boarding pass code means (EPC QR, Swiss QR bill, UIC 918, IATA BCBP) is read in a later version
+- A code drawn as one outline path, not as squares or bars, is only found when its page is rendered for vision
+- Codes in scans are read from the page render at 144 dpi only. A code whose modules are finer than about 2 pixels at 144 dpi is not read. An invoice QR code of about 20 mm still has about 2.3 pixels a module there
+- The MCP server has one barcode worker for all its reads. When the decoder runs past its time on one file, it delays the code reading of later files in the same server. Those files name the pages without codes in an info note
+- Without an output directory, a page that draws more than 1,000 pictures is not rendered to look for codes. The output says so
+- Equal pictures are found by all of their data. Two copies of one picture with different compression get a file each, and so do two copies in their own objects after the first 65,536 picture objects of a file. A stencil mask drawn in two colors is one picture
+- At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
+- The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so
+- A word split by a hyphen at a line end keeps its hyphen ("adip-iscing"). Rezzer cannot tell a break hyphen from a real one, so it keeps both
+- Paragraphs marked only by an indent of their first line, with no space between them, stay one paragraph with line breaks (as in LaTeX two-column papers)
+- On a form page, a block of two text columns can be read in bands across both columns, with each printed line as its own paragraph (the directions on the front of the SF 1199A form)
+- When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
+- Revision diffs count the first save of a linearized file as one save
+- No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the format specification but are not proven on a real file
 
-## Tested with
+## How it is tested
 
-33 public test files from the pdf.js, qpdf, PDFBox and py-pdf test suites, arXiv, US government sites and the US National Archives. See [MANIFEST-pdf.md](../spike-2026-10-19/MANIFEST-pdf.md).
+The corpus has 41 public PDF files. Most come from the test suites of pdf.js, qpdf, PDFBox, py-pdf, pdfplumber and Mustang. The others come from the IRS, the National Archives, NIST and arXiv. 39 of them are in the repository. The two large ones (NIST and arXiv) are fetched by a script.
+
+Extreme cases that were held, at the default limits unless a limit is named. Figures from the release build, measured as below:
+
+- A content stream of 1 MB that unpacks to 1 GiB: the page is not read, the other page is, peak memory 9 MiB
+- An object stream of 1 MB that unpacks to 1 GiB: the file is refused, peak memory 73 MiB
+- A picture of 40,000 by 40,000 pixels on a page that needs vision: not rendered, peak memory 7 MiB
+- 100,000 pages that share one content stream of 40 lines, with a time limit of 2 seconds: the read stops after 1.8 seconds, keeps the text of the 4,746 pages it read and names the first page it did not read, peak memory 433 MiB
+- A script of 64 MiB: listed without its text, peak memory 124 MiB
+
+Speed: the NIST report SP 800-53 revision 5 (6.1 MB, 492 pages) reads in 0.81 seconds with a peak memory of 206 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

@@ -1,0 +1,29 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/annotations",
+    "len": 1
+  },
+  {
+    "pointer": "/facets/annotations/0/kind",
+    "equals": "highlight"
+  },
+  {
+    "pointer": "/facets/annotations/0/quoted",
+    "equals": "Lorem ipsum dolor sit amet"
+  },
+  {
+    "pointer": "/facets/annotations/0/date",
+    "equals": "2015-12-30T15:22:48+01:00"
+  },
+  {
+    "contains": "> > Lorem ipsum dolor sit amet"
+  }
+]

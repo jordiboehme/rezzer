@@ -1,0 +1,46 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/body/0/blocks/1/type",
+    "equals": "table"
+  },
+  {
+    "pointer": "/body/0/blocks/1/header_rows",
+    "equals": 2
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/0/0/inlines/0/text",
+    "equals": "DOCUMENT NO."
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/0/2/inlines/0/text",
+    "equals": "PAYEE NAME"
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/1/0/inlines/0/text",
+    "equals": "START"
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/2/2/inlines/0/text",
+    "equals": "BAIN, J MATTHEW"
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/2/6/inlines/0/text",
+    "equals": "37,499.96"
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/12/0/inlines/0/text",
+    "equals": "DHAW20190001"
+  },
+  {
+    "pointer": "/body/0/blocks/1/rows/12/6/inlines/0/text",
+    "equals": "920.68"
+  }
+]

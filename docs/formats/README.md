@@ -2,11 +2,11 @@
 
 One page per format: what Rezzer gets out of it, which crates it builds on, how it shows up in the output and what it can't do yet.
 
-Rezzer is in early development. Text, Markdown, CSV, XLSX, XLSM, XLSB and ODS work in the development version. The other formats are planned. Their pages describe what is planned.
+Rezzer is in early development. Text, Markdown, CSV, XLSX, XLSM, XLSB, ODS and PDF work in the development version. Their pages show real output from the test files and how each format is tested. The other formats are planned. Their pages describe what is planned.
 
 | Page | Formats | Status |
 |---|---|---|
-| [PDF](pdf.md) | PDF | first release |
+| [PDF](pdf.md) | PDF | available (development version) |
 | [XLSX](xlsx.md) | XLSX, XLSM, XLSB | available (development version) |
 | [XLS](xls.md) | XLS (Excel 97-2003) | first release |
 | [ODS](ods.md) | ODS | available (development version) |

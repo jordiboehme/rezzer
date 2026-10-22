@@ -1,5 +1,16 @@
 [licenses]
-allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "MPL-2.0", "Unicode-3.0", "Unlicense", "0BSD", "CC0-1.0", "BSL-1.0"]
+# Data bundled inside crates is not seen by this check. hayro-interpret 0.8.0 (default
+# features) embeds data under other licenses, and a binary release must reproduce their
+# notices (BSD-3-Clause: "Redistributions in binary form must reproduce the above copyright
+# notice"):
+# - the predefined CMaps, through hayro-cmap 0.1.0 (assets/LICENSE.txt):
+#   "Copyright 1990-2023 Adobe. All rights reserved." BSD-3-Clause
+# - the standard 14 font substitutes from PDFium (assets/LICENSE_FOXIT):
+#   "Copyright 2014 PDFium Authors. All rights reserved." and "Original code copyright 2014
+#   Foxit Software Inc." BSD-3-Clause
+# - a CMYK ICC profile from Compact-ICC-Profiles, CC0-1.0
+# Only licenses the tree uses are listed; add one (MIT-like or MPL) when a new crate needs it.
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "Zlib", "MPL-2.0", "Unicode-3.0", "Unlicense", "0BSD"]
 
 [bans]
 multiple-versions = "warn"
@@ -14,3 +25,4 @@ skip = [
 ]
 
 [advisories]
+ignore = []

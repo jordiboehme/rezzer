@@ -1,0 +1,13 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "contains": "我们都是黑体字"
+  }
+]

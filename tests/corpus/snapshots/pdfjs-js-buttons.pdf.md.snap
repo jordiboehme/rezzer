@@ -1,0 +1,173 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "pdfjs-js-buttons.pdf"
+resource: "<corpus>/pdf/pdfjs-js-buttons.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "4679ee03ee84b48d8b67ba39975e946de49216ba744a729fa30ef8f32c3ea9ba"
+source_size: 29410
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 1
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+form_fields: 10
+has_javascript: true
+created: "2020-12-16T05:45:43-08:00"
+modified: "2021-01-08T06:22:14-08:00"
+---
+
+# pdfjs-js-buttons.pdf
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Outline | other | 1 paragraph |  |  |
+
+- Pages: 1
+- Form fields: 10
+- Scripts: 14
+- Last changed: 2021-01-08T06:22:14-08:00
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| creator | Adobe Acrobat Pro DC 20.13.20074 |
+| pdf\_version | 1.6 |
+| producer | Adobe Acrobat Pro DC 20.13.20074 |
+
+## Outline
+
+- Blank Page, page 1
+
+:status[Page 1]{grey}
+
+Radios
+
+Checkboxes
+
+Radio Checkboxes
+
+## Logic
+
+### Form
+
+| Field | Type | Role | Value | Format | Rule | Reads | Flags |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Field1 | text | input |  |  |  |  |  |
+| Group1 | radio | input |  |  |  |  | no-toggle-to-off |
+| Check1 | checkbox | input |  |  |  |  |  |
+| Check2 | checkbox | input |  |  |  |  |  |
+| Check3 | checkbox | input |  |  |  |  |  |
+| Check4 | checkbox | input |  |  |  |  |  |
+| Check5 | checkbox | input |  |  |  |  |  |
+| NoAct1 | checkbox | input |  |  |  |  |  |
+| Group2 | radio | input |  |  |  |  | no-toggle-to-off |
+| Button3 | button | input |  |  |  |  |  |
+
+## Embedded
+
+| Kind | Name | Detail | Target |
+| --- | --- | --- | --- |
+| script | document | javascript, callback |  |
+| script | field Group1 activate | javascript |  |
+| script | field Group1 activate | javascript |  |
+| script | field Group1 activate | javascript |  |
+| script | field Group1 activate | javascript |  |
+| script | field Check1 activate | javascript |  |
+| script | field Check2 activate | javascript |  |
+| script | field Check3 activate | javascript |  |
+| script | field Check4 activate | javascript |  |
+| script | field Check5 activate | javascript |  |
+| script | field Check5 activate | javascript |  |
+| script | field Check5 activate | javascript |  |
+| script | field Check5 activate | javascript |  |
+| script | field Button3 activate | javascript |  |
+
+### Scripts
+
+document (javascript, callback), listed, not run.
+```javascript
+function callback(x)
+{
+this.getField("Field1").value = event.target.name + "=" + event.target.value + "::" + x;
+}
+```
+
+field Group1 activate (javascript), listed, not run.
+```javascript
+callback(1);
+```
+
+field Group1 activate (javascript), listed, not run.
+```javascript
+callback(2);
+```
+
+field Group1 activate (javascript), listed, not run.
+```javascript
+callback(3);
+```
+
+field Group1 activate (javascript), listed, not run.
+```javascript
+callback(4);
+```
+
+field Check1 activate (javascript), listed, not run.
+```javascript
+callback(5);
+```
+
+field Check2 activate (javascript), listed, not run.
+```javascript
+callback(6);
+```
+
+field Check3 activate (javascript), listed, not run.
+```javascript
+callback(7);
+```
+
+field Check4 activate (javascript), listed, not run.
+```javascript
+callback(8);
+```
+
+field Check5 activate (javascript), listed, not run.
+```javascript
+callback(9);
+```
+
+field Check5 activate (javascript), listed, not run.
+```javascript
+callback(10);
+```
+
+field Check5 activate (javascript), listed, not run.
+```javascript
+callback(11);
+```
+
+field Check5 activate (javascript), listed, not run.
+```javascript
+callback(12);
+```
+
+field Button3 activate (javascript), listed, not run.
+```javascript
+var t = this.getField("Field1");
+t.value = [this.getField("NoAct1").value,
+           this.getField("Group2").value].join(";");
+```

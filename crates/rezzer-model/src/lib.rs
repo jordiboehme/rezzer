@@ -19,16 +19,16 @@ mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
 pub use document::{
-    Asset, Confidence, Detection, Document, MODEL_VERSION, Overview, OverviewPart, Properties,
-    ReaderInfo, SourceInfo,
+    Asset, Barcode, Confidence, Detection, Document, MODEL_VERSION, Overview, OverviewPart,
+    Properties, ReaderInfo, SourceInfo,
 };
 pub use facet::{
-    Annotation, Edge, Embedded, Event, Facets, Formula, FormulaKind, Graph, Node, Parameter, Role,
-    Rule,
+    Annotation, Edge, Embedded, Event, Facets, FieldAction, FileFacts, FormField, Formula,
+    FormulaKind, Graph, Node, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
-pub use inline::{Anchor, Inline, StatusColor, plain_text};
+pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
-pub use reader::{Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
+pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
 pub use value::Value;

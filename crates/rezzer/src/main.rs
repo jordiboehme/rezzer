@@ -4,6 +4,11 @@
 
 use rezzer_model::Registry;
 
+/// The system allocator with large blocks moved by hand (see `rezzer_limits::Allocator`):
+/// on macOS the system's realloc of large blocks leaves memory resident that nothing holds.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
 fn main() -> std::process::ExitCode {
     rezzer_cli::main(registry())
 }
@@ -20,5 +25,7 @@ fn registry() -> Registry {
     registry.register(Box::new(rezzer_read_csv::CsvReader));
     #[cfg(any(feature = "fmt-xlsx", feature = "fmt-ods"))]
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    #[cfg(feature = "fmt-pdf")]
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
     registry
 }

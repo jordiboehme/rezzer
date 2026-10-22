@@ -85,6 +85,10 @@ pub enum Block {
     /// A picture or other file, by [`crate::Asset`] id.
     Media {
         asset: String,
+        /// What this place shows, when one asset stands at several places: the words the
+        /// place is written with instead of the asset's alt text, for example its box.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alt: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },

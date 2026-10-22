@@ -1,0 +1,543 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "outline",
+      "blocks": [
+        {
+          "items": [
+            [
+              {
+                "inlines": [
+                  {
+                    "text": "Isís 1 -> 5: /XYZ null null null, page iv",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "items": [
+                  [
+                    {
+                      "inlines": [
+                        {
+                          "text": "Amanda 1.1 -> 11: /Fit, page 12 (page 12 of the file)",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    },
+                    {
+                      "items": [
+                        [
+                          {
+                            "inlines": [
+                              {
+                                "text": "Isosicle 1.1.1 -> 12: /FitV 100, page 2 (page 13 of the file)",
+                                "type": "text"
+                              }
+                            ],
+                            "type": "paragraph"
+                          },
+                          {
+                            "items": [
+                              [
+                                {
+                                  "inlines": [
+                                    {
+                                      "text": "Isosicle 1.1.1.1 -> 18: /XYZ null null null, page 9 (page 19 of the file)",
+                                      "type": "text"
+                                    }
+                                  ],
+                                  "type": "paragraph"
+                                }
+                              ],
+                              [
+                                {
+                                  "inlines": [
+                                    {
+                                      "text": "Isosicle 1.1.1.2 -> 19: /XYZ null null null, page 20",
+                                      "type": "text"
+                                    }
+                                  ],
+                                  "type": "paragraph"
+                                }
+                              ]
+                            ],
+                            "ordered": false,
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          {
+                            "inlines": [
+                              {
+                                "text": "Isosicle 1.1.2 -> 12: /XYZ null null null, page 2 (page 13 of the file)",
+                                "type": "text"
+                              }
+                            ],
+                            "type": "paragraph"
+                          },
+                          {
+                            "items": [
+                              [
+                                {
+                                  "inlines": [
+                                    {
+                                      "text": "Isosicle 1.1.2.1 -> 22: /XYZ null null null, page 16059",
+                                      "type": "text"
+                                    }
+                                  ],
+                                  "type": "paragraph"
+                                }
+                              ]
+                            ],
+                            "ordered": false,
+                            "type": "list"
+                          }
+                        ]
+                      ],
+                      "ordered": false,
+                      "type": "list"
+                    }
+                  ],
+                  [
+                    {
+                      "inlines": [
+                        {
+                          "text": "Sandy ÷Σανδι÷ 1.2 -> 13: /FitH 792, page 3",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    },
+                    {
+                      "items": [
+                        [
+                          {
+                            "inlines": [
+                              {
+                                "text": "Trepsichord 1.2.1 -> 1: /FitR 66 714 180 770, page 2 (page 2 of the file)",
+                                "type": "text"
+                              }
+                            ],
+                            "type": "paragraph"
+                          }
+                        ],
+                        [
+                          {
+                            "inlines": [
+                              {
+                                "text": "Trepsicle 1.2.2 -> 0: /XYZ null null null, page 1",
+                                "type": "text"
+                              }
+                            ],
+                            "type": "paragraph"
+                          }
+                        ]
+                      ],
+                      "ordered": false,
+                      "type": "list"
+                    }
+                  ]
+                ],
+                "ordered": false,
+                "type": "list"
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "text": "Trepak 2 -> 15: /XYZ 66 756 3, page 6",
+                    "type": "text"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ]
+          ],
+          "ordered": false,
+          "type": "list"
+        }
+      ],
+      "kind": "other",
+      "title": "Outline",
+      "type": "section"
+    },
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "text": "Potato 0",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p2",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 2",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b1",
+          "inlines": [
+            {
+              "text": "Potato 1",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p3",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page i (3)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b1",
+          "inlines": [
+            {
+              "text": "Potato 2",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p4",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page ii (4)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p4:b1",
+          "inlines": [
+            {
+              "text": "Potato 3",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p5",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page iii (5)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p5:b1",
+          "inlines": [
+            {
+              "text": "Potato 4",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p6",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page iv (6)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p6:b1",
+          "inlines": [
+            {
+              "text": "Potato 5",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p7",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page v (7)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p7:b1",
+          "inlines": [
+            {
+              "text": "Potato 6",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p8",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 8",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p8:b1",
+          "inlines": [
+            {
+              "text": "Potato 7",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p9",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 9",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p9:b1",
+          "inlines": [
+            {
+              "text": "Potato 8",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p10",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page vi (10)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p10:b1",
+          "inlines": [
+            {
+              "text": "Potato 9",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p11",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page vii (11)",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p11:b1",
+          "inlines": [
+            {
+              "text": "Potato 10",
+              "type": "text"
+            }
+          ],
+          "role": "page-header",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    "<19 more items>"
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "30"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "outline",
+        "kind": "other",
+        "name": "Outline",
+        "size": "11 paragraphs"
+      }
+    ]
+  },
+  "properties": {
+    "custom": {
+      "pdf_version": {
+        "type": "text",
+        "value": "1.3"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "has_javascript": false,
+      "pages": 30,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    },
+    "language": "en"
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "qpdf-page-labels-and-outlines.pdf",
+    "path": "<corpus>/pdf/qpdf-page-labels-and-outlines.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "08b0f999c02abb75cae0854eb042f4ed75ad0b65017a0a584276b90d5e8194b7",
+    "size": 15986
+  }
+}

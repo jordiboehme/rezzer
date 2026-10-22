@@ -1,0 +1,19 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 3
+  },
+  {
+    "contains": "## Two-Column Document with Lorem Ipsum"
+  },
+  {
+    "contains": "### Abstract"
+  },
+  {
+    "contains": "Nam dui ligula, fringilla a, euismod sodales"
+  }
+]

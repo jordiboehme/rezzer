@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/embedded/0/kind",
+    "equals": "attachment"
+  },
+  {
+    "pointer": "/facets/embedded/0/name",
+    "equals": "image.png"
+  },
+  {
+    "pointer": "/facets/embedded/0/detail",
+    "equals": "6669 bytes"
+  },
+  {
+    "contains": "Lorem ipsum dolor sit amet, consetetur"
+  }
+]

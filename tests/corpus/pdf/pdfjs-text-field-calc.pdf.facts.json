@@ -1,0 +1,38 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 3
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 2
+  },
+  {
+    "pointer": "/facets/fields/1/name",
+    "equals": "Mirror"
+  },
+  {
+    "pointer": "/facets/fields/1/role",
+    "equals": "result"
+  },
+  {
+    "pointer": "/facets/formulas/0/anchor",
+    "equals": "field:Mirror"
+  },
+  {
+    "pointer": "/facets/formulas/0/references/0",
+    "equals": "field:Source"
+  },
+  {
+    "pointer": "/facets/fields/1/calc_order",
+    "equals": 1
+  },
+  {
+    "pointer": "/facets/fields/1/flags/0",
+    "equals": "read-only"
+  }
+]

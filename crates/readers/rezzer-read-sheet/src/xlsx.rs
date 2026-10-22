@@ -1277,6 +1277,7 @@ pub(crate) fn embedded(
     let list = &mut out.doc.facets.embedded;
     if has_vba && vba.modules.is_empty() {
         list.push(Embedded {
+            text: None,
             kind: "macro".into(),
             name: "VBA project".into(),
             detail: Some("VBA project, never run".into()),
@@ -1285,6 +1286,7 @@ pub(crate) fn embedded(
     }
     for m in &vba.modules {
         list.push(Embedded {
+            text: None,
             kind: "macro".into(),
             name: m.clone(),
             detail: Some("VBA module, never run".into()),
@@ -1307,6 +1309,7 @@ pub(crate) fn embedded(
             .filter(|n| !n.is_empty())
             .unwrap_or(&link.target);
         list.push(Embedded {
+            text: None,
             kind: kind.to_string(),
             name: name.to_string(),
             detail: Some(format!("[{}] in formulas, never opened", link.index)),
@@ -1316,6 +1319,7 @@ pub(crate) fn embedded(
     for (name, _first_use) in &formulas.user_functions {
         let (detail, target) = user_function_source(name, links, vba);
         list.push(Embedded {
+            text: None,
             kind: "user-function".into(),
             name: name.clone(),
             detail: Some(detail),

@@ -4,6 +4,7 @@
 
 //! `rezzer read <PATH>`.
 
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -14,6 +15,14 @@ use crate::{ReadArgs, print};
 
 pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result<ExitCode, String> {
     let pipeline = Pipeline::new(config, registry);
+    let password = if args.password_stdin {
+        if args.path.as_os_str() == "-" {
+            return Err("--password-stdin needs a file path".to_string());
+        }
+        Some(read_password()?)
+    } else {
+        None
+    };
     let req = Request {
         output: if args.json {
             OutputKind::Json
@@ -22,6 +31,8 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
         },
         sections: args.sections.clone(),
         math: !args.no_math,
+        password,
+        output_dir: args.output_dir.clone(),
         ..Request::default()
     };
     let result = pipeline.run_path(&args.path, &req);
@@ -59,6 +70,16 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
         eprintln!("rezzer: {message}");
     }
     Ok(exit_code(result.completeness))
+}
+
+/// The first line of stdin without its line ending. Never printed or logged.
+fn read_password() -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .map_err(|e| format!("cannot read the password from stdin: {e}"))?;
+    Ok(line.trim_end_matches(['\n', '\r']).to_string())
 }
 
 fn exit_code(completeness: Completeness) -> ExitCode {

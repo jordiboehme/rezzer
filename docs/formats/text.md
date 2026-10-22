@@ -12,7 +12,7 @@ Built on (versions as tested on 2026-10-19):
 - [whatlang](https://crates.io/crates/whatlang) 0.18.0 for a language hint
 - Rezzer's own reader for line endings and the byte order mark
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
@@ -32,6 +32,42 @@ Built on (versions as tested on 2026-10-19):
 
 The text as is, with the encoding, the way it was found and the language hint in the frontmatter.
 
+## Example
+
+Real output of `rezzer read` for `text-cp1252-derived-gutenberg-alice.txt` from the test corpus, cut after the first line of the text:
+
+```markdown
+---
+type: document
+title: "text-cp1252-derived-gutenberg-alice.txt"
+resource: "/path/to/tests/corpus/web-text/text-cp1252-derived-gutenberg-alice.txt"
+generated: { by: rezzer/0.1.0, at: 2026-10-21T00:00:00Z }
+source_date: 2026-10-20
+temporal_confidence: medium
+source_sha256: "233b828e6dd75253e67925d33bb427209250ba40eedce0d3b25262b89ff74047"
+source_size: 167712
+format: text
+detected_by: "text (windows-1252)"
+encoding: "windows-1252"
+reader: "text/0.1.0"
+completeness: complete
+losses: 0
+language: "en"
+---
+
+# text-cp1252-derived-gutenberg-alice.txt
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Part 1 | other | 877 paragraphs |  |  |
+
+The Project Gutenberg eBook of Alice's Adventures in Wonderland
+```
+
+The `resource` path is shortened here (Rezzer writes the full path of the file), and the time in `generated` was set to midnight for the example.
+
 ## Known limitations
 
 - chardetng 1.0.0 gives no confidence score. Short Latin-1 files with few special characters are a weak spot. The output says when the encoding is a guess
@@ -39,6 +75,14 @@ The text as is, with the encoding, the way it was found and the language hint in
 - Latin-1 files are reported as windows-1252. That is correct under the WHATWG encoding standard
 - The language hint is reliable on prose, not on tables or lists of names
 
-## Tested with
+## How it is tested
 
-4 public text files from Project Gutenberg and Aozora Bunko (UTF-8, ISO-8859-1, Windows-1252 and Shift_JIS; the Windows-1252 file was transcoded from a public file). The encoding detection also ran on the CSV test files: 10 files in total, all decoded without a replacement character. See [MANIFEST-web-text.md](../spike-2026-10-19/MANIFEST-web-text.md).
+The corpus has 4 public text files from Project Gutenberg and Aozora Bunko (UTF-8, ISO-8859-1, Windows-1252 and Shift_JIS; the Windows-1252 file was transcoded from a public file). See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
+
+- 100 MB without a line break: one paragraph, peak heap under 4 times the file size
+- 1.1 million short paragraphs: the read stops at 2 million elements and says so
+- A file of 3 GB: refused by its size before it is read
+
+Speed: `text-utf8-gutenberg-faust.txt` (218 KB) reads in under 0.01 seconds with a peak memory of 8 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

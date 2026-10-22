@@ -12,7 +12,7 @@ Built on (versions as used in the development version):
 - [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells and ranges each formula reads. formulakit turns OpenFormula into the familiar A1 form first
 - Rezzer's own reader sheetparts on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for named ranges, annotations, hidden sheets, rows and columns, validation, number formats and document properties
 
-## What Rezzer extracts
+## What Rezzer reads
 
 ### Structure
 
@@ -36,6 +36,32 @@ Built on (versions as used in the development version):
 
 The same as for [XLSX](xlsx.md): one value table per sheet, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
 
+## Example
+
+Real output of `rezzer read` for `formula-across-sheets.ods` from the test corpus. The part for the Calculation sheet, cut to four of its eight formula rows:
+
+```markdown
+### Calculation
+
+#### Parameters
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 |  | Colonne b | 1.4965 |  |  | 3 |
+| G2 |  | haut (n) | -0.1459 |  |  | 3 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| B4, C4, E4 | 3 | `=Data!A3` | Data!A3 | intermediate | 1.4666 |  |
+| B5, C5, E5 | 3 | `=(B4-$G$1)/$G$2` | B4, G1, G2 | intermediate | 20.493488691 % | $`\frac{\mathrm{B4}-\mathrm{G1}}{\mathrm{G2}}`$ |
+| B6:E6 | 4 | `=B5/(1-B5)` | B5 | intermediate, result | 25.775862069 % | $`\frac{\mathrm{B5}}{1-\mathrm{B5}}`$ |
+| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L\_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
+```
+
 ## Known limitations
 
 - Rezzer does not calculate. It shows the cached results stored in the file
@@ -50,6 +76,14 @@ The same as for [XLSX](xlsx.md): one value table per sheet, then the Logic secti
 - `content.xml` must be markup that calamine and Rezzer read the same way: well formed UTF-8, every namespace declared on the root, no DOCTYPE. Anything else is refused as damaged
 - The same limits as for [XLSX](xlsx.md) apply: size, unpacked size, packing ratio, XML depth, time and elements
 
-## Tested with
+## How it is tested
 
-4 public test files from LibreOffice and calamine, 1 of them broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+The corpus has 4 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+
+Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
+
+- Repeat counts that ask for about 3.9 TB of cells, with a time limit of 10 seconds: refused within the limit plus 2 seconds, peak heap under 512 MB
+- 100,000 nested spans in one cell: refused for its depth before any parser reads it
+- An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
+
+Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 7 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.

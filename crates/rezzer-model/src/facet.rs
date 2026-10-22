@@ -28,6 +28,12 @@ pub struct Facets {
     /// Validation and conditional-format rules, attached to the range they apply to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
+    /// Form fields with their value, role and actions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FormField>,
+    /// Digital signatures and signature-like marks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signatures: Vec<Signature>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -205,4 +211,107 @@ pub struct Embedded {
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// A script's source. Listed, never run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// A form field. The anchor is `field:<full name>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FormField {
+    pub anchor: Anchor,
+    pub name: String,
+    /// The user-facing label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// `text`, `checkbox`, `radio`, `button`, `combo`, `list`, `signature` or `unknown`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
+    /// What the format does to the value, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// Position in the calculation order, counted from 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calc_order: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<FieldAction>,
+    /// For example `read-only`, `required`, `no-export`, `multiline`, `password`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    /// Physical pages (1-based) that show the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<u32>,
+}
+
+/// A script a field runs on an event. Listed, never run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FieldAction {
+    /// For example `calculate`, `format`, `keystroke`, `validate`, `focus`, `blur`, `mouse-up`.
+    pub trigger: String,
+    pub script: String,
+    /// What the script does, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<String>,
+}
+
+/// A digital signature or a signature-like mark.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Signature {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Anchor>,
+    /// `field`, `usage-rights` or `doc-mdp`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_filter: Option<String>,
+    pub covers_whole_file: bool,
+    /// How many revisions were saved after this signature.
+    #[serde(default)]
+    pub later_revisions: u32,
+}
+
+/// Facts about the file as a whole. A closed set of keys: only these can reach the frontmatter.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FileFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tagged: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signatures: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revisions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_fields: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_javascript: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layers: Option<u32>,
+}
+
+impl FileFacts {
+    /// True when no fact is set.
+    pub fn is_empty(&self) -> bool {
+        *self == FileFacts::default()
+    }
 }

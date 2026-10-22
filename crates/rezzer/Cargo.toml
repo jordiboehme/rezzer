@@ -11,21 +11,24 @@ name = "rezzer"
 path = "src/main.rs"
 
 [features]
-default = ["fmt-text", "fmt-markdown", "fmt-csv", "fmt-xlsx", "fmt-ods"]
+default = ["fmt-text", "fmt-markdown", "fmt-csv", "fmt-xlsx", "fmt-ods", "fmt-pdf"]
 fmt-text = ["dep:rezzer-read-text"]
 fmt-markdown = ["dep:rezzer-read-markdown"]
 fmt-csv = ["dep:rezzer-read-csv"]
 # XLSX, XLSM and XLSB.
 fmt-xlsx = ["dep:rezzer-read-sheet", "rezzer-read-sheet/xlsx"]
 fmt-ods = ["dep:rezzer-read-sheet", "rezzer-read-sheet/ods"]
+fmt-pdf = ["dep:rezzer-read-pdf"]
 
 [dependencies]
+rezzer-limits = { path = "../rezzer-limits" }
 rezzer-cli = { path = "../rezzer-cli" }
 rezzer-model = { path = "../rezzer-model" }
 rezzer-read-text = { path = "../readers/rezzer-read-text", optional = true }
 rezzer-read-markdown = { path = "../readers/rezzer-read-markdown", optional = true }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv", optional = true }
 rezzer-read-sheet = { path = "../readers/rezzer-read-sheet", optional = true, default-features = false }
+rezzer-read-pdf = { path = "../readers/rezzer-read-pdf", optional = true }
 
 [dev-dependencies]
 rezzer-model = { path = "../rezzer-model" }
@@ -38,3 +41,6 @@ predicates.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
+libc.workspace = true
+flate2 = { workspace = true, features = ["zlib-rs"] }
+barcodes = { path = "../formats/barcodes", features = ["encode"] }

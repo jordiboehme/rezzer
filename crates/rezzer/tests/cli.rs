@@ -518,3 +518,271 @@ fn xlsx_named_csv_still_reads_as_xlsx() {
         .stdout(predicate::str::contains("format: xlsx"))
         .stdout(predicate::str::contains("## Logic"));
 }
+
+#[test]
+fn password_stdin_sets_password() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    // A run with a password is never cached, which shows the password reached the request.
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .arg("--password-stdin")
+        .write_stdin("secret\r\nignored\n")
+        .assert()
+        .code(0);
+    assert_eq!(env.cache_entries(), 0);
+    env.cmd().arg("read").arg(&md).assert().code(0);
+    assert_eq!(env.cache_entries(), 1);
+}
+
+#[test]
+fn password_stdin_with_dash_is_error() {
+    let env = Env::new();
+    env.cmd()
+        .args(["read", "-", "--password-stdin"])
+        .write_stdin("secret\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--password-stdin needs a file path",
+        ));
+}
+
+#[cfg(feature = "fmt-pdf")]
+fn pdf_corpus(name: &str) -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/pdf")
+        .join(name)
+}
+
+/// The user password of `pdf/qpdf-user-password.pdf` (see the corpus MANIFEST).
+#[cfg(feature = "fmt-pdf")]
+const PDF_PASSWORD: &str = "view";
+
+/// The text without the paths of the checkout and of the test's own folder, and without the
+/// word "overview", in lower case: the password `view` must not be in what is left. A path
+/// may hold the password by chance (a folder named "review"); what Rezzer writes must not.
+#[cfg(feature = "fmt-pdf")]
+fn scrubbed(text: &str, env: &Env) -> String {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths: Vec<std::path::PathBuf> = vec![
+        manifest.clone(),
+        manifest.join("../.."),
+        env.root.path().to_path_buf(),
+    ];
+    let canonical: Vec<std::path::PathBuf> = paths
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
+    paths.extend(canonical);
+    // The longest first, so a path inside another goes as a whole.
+    let mut paths: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    let mut text = text.to_string();
+    for p in paths {
+        text = text.replace(&p, "<path>");
+    }
+    text.to_lowercase().replace("overview", "")
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn rezzer_formats_lists_pdf_reader() {
+    let env = Env::new();
+    let out = env.cmd().arg("formats").output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(
+        text.lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>())
+            .any(|r| r[..] == ["pdf", "pdf", version]),
+        "{text}"
+    );
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn pdf_end_to_end_exit_0() {
+    let env = Env::new();
+    // Named .txt: the format is found by content.
+    let file = env.file(
+        "form.txt",
+        &std::fs::read(pdf_corpus("pdfjs-text-field-calc.pdf")).unwrap(),
+    );
+    env.cmd()
+        .arg("read")
+        .arg(&file)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("format: pdf"))
+        .stdout(predicate::str::contains("completeness: complete"))
+        .stdout(predicate::str::contains("### Form"));
+    assert_eq!(env.cache_entries(), 1);
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn pdf_with_user_password_exits_1_without_password() {
+    let env = Env::new();
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("completeness: failed"))
+        .stdout(predicate::str::contains(
+            "This PDF is protected with a password and is not read.",
+        ));
+    // A wrong password says so and fails too.
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .arg("--password-stdin")
+        .write_stdin("wrong\n")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "The given password does not open this PDF.",
+        ));
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_stdin_reads_protected_pdf() {
+    let env = Env::new();
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("qpdf-user-password.pdf"))
+        .arg("--password-stdin")
+        .write_stdin(format!("{PDF_PASSWORD}\n"))
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("completeness: complete"))
+        .stdout(predicate::str::contains("encrypted: true"))
+        .stdout(predicate::str::contains("pages: 30"));
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_never_in_output_or_cache() {
+    let env = Env::new();
+    let file = pdf_corpus("qpdf-user-password.pdf");
+    let dir = env.root.path().join("out");
+    let mut seen = Vec::new();
+    for extra in [
+        &[][..],
+        &["--json"][..],
+        &["-o", dir.to_str().unwrap(), "--json"][..],
+    ] {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&file)
+            .arg("--password-stdin")
+            .args(extra)
+            .write_stdin(format!("{PDF_PASSWORD}\n"))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{extra:?}");
+        seen.push(String::from_utf8(out.stdout).unwrap());
+        seen.push(String::from_utf8(out.stderr).unwrap());
+    }
+    // The JSON on stdout is the model; it is complete and holds no password.
+    let doc: Document = serde_json::from_str(&seen[2]).unwrap();
+    assert!(!doc.body.is_empty());
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        seen.push(std::fs::read_to_string(entry.unwrap().path()).unwrap());
+    }
+    for text in &seen {
+        assert!(!scrubbed(text, &env).contains(PDF_PASSWORD), "{text}");
+    }
+    // A read with a password is never cached.
+    assert_eq!(env.cache_entries(), 0);
+}
+
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn o_bundle_holds_page_png() {
+    let env = Env::new();
+    let dir = env.root.path().join("out");
+    env.cmd()
+        .arg("read")
+        .arg(pdf_corpus("scan-truman-letter-nara.pdf"))
+        .arg("-o")
+        .arg(&dir)
+        .assert()
+        .code(0)
+        .stdout("");
+    let md = std::fs::read_to_string(dir.join("scan-truman-letter-nara.pdf.md")).unwrap();
+    assert!(
+        md.contains("scan-truman-letter-nara.pdf.assets/page-1.png"),
+        "{md}"
+    );
+    let png = std::fs::read(dir.join("scan-truman-letter-nara.pdf.assets/page-1.png")).unwrap();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    // Reads that extract assets bypass the cache.
+    assert_eq!(env.cache_entries(), 0);
+}
+
+/// With every log level on, the password shows up neither on stderr nor in the MCP
+/// replies, for the CLI and for the MCP `rez` tool.
+#[cfg(feature = "fmt-pdf")]
+#[test]
+fn password_never_in_logs() {
+    let env = Env::new();
+    let file = pdf_corpus("qpdf-user-password.pdf");
+    let out = env
+        .cmd()
+        .env("RUST_LOG", "trace")
+        .env("RUST_BACKTRACE", "1")
+        .arg("read")
+        .arg(&file)
+        .arg("--password-stdin")
+        .write_stdin(format!("{PDF_PASSWORD}\n"))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(!scrubbed(&stderr, &env).contains(PDF_PASSWORD), "{stderr}");
+    // Rezzer logs nothing today, even with RUST_LOG=trace. Empty stderr guards a logger added
+    // later: it must not start to write the password, or anything else, here.
+    assert_eq!(stderr, "", "a read writes nothing to stderr");
+
+    let call = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "rez",
+            "arguments": { "path": file.to_str().unwrap(), "password": PDF_PASSWORD }
+        }
+    });
+    let input = format!(
+        "{}\n{}\n{}\n",
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        call
+    );
+    let out = env
+        .cmd()
+        .env("RUST_LOG", "trace")
+        .arg("mcp")
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stdout.contains("encrypted: true"), "{stdout}");
+    for text in [&stdout, &stderr] {
+        assert!(!scrubbed(text, &env).contains(PDF_PASSWORD), "{text}");
+    }
+    // The same guard for the server: it logs nothing to stderr.
+    assert_eq!(stderr, "", "the server writes nothing to stderr");
+    assert_eq!(env.cache_entries(), 0);
+}

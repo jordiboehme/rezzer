@@ -1,0 +1,31 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/tagged",
+    "equals": true
+  },
+  {
+    "pointer": "/properties/custom/pdfa/value",
+    "equals": "PDF/A-2b"
+  },
+  {
+    "contains": "Test form for PDFBox glyph layout"
+  },
+  {
+    "contains": "DIN 91379: Characters in Unicode"
+  },
+  {
+    "contains": "R̥̄"
+  },
+  {
+    "pointer": "/losses",
+    "absent": true
+  }
+]

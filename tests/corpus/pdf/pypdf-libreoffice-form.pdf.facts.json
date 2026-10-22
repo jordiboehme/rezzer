@@ -1,0 +1,33 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 8
+  },
+  {
+    "pointer": "/facets/fields/0/value/value",
+    "equals": "Alice"
+  },
+  {
+    "pointer": "/facets/fields/0/name",
+    "equals": "First Name"
+  },
+  {
+    "pointer": "/facets/fields/7/name",
+    "equals": "Nationality"
+  },
+  {
+    "pointer": "/facets/fields/7/kind",
+    "equals": "combo"
+  },
+  {
+    "contains": "## Example for a Form"
+  }
+]

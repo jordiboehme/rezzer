@@ -1,0 +1,640 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "text": "Two-Column Document with Lorem Ipsum",
+              "type": "text"
+            }
+          ],
+          "level": 1,
+          "type": "heading"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "Your Name",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b3",
+          "inlines": [
+            {
+              "text": "January 3, 2024",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b4",
+          "inlines": [
+            {
+              "text": "Abstract",
+              "type": "text"
+            }
+          ],
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "anchor": "p1:b5",
+          "inlines": [
+            {
+              "text": "This is a sample document with two columns filled with Lorem Ipsum text.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Lorem ipsum dolor sit amet, consectetuer adip-iscing elit. Ut purus elit, vestibulum ut, placerat ac, adipiscing vitae, felis. Curabitur dictum gravida mauris. Nam arcu libero, nonummy eget, con-sectetuer id, vulputate a, magna. Donec vehicula augue eu neque. Pellentesque habitant morbi tris-tique senectus et netus et malesuada fames ac turpis egestas. Mauris ut leo. Cras viverra metus rhon-cus sem. Nulla et lectus vestibulum urna fringilla ultrices. Phasellus eu tellus sit amet tortor gravida placerat. Integer sapien est, iaculis in, pretium quis, viverra ac, nunc. Praesent eget sem vel leo ultri-ces bibendum. Aenean faucibus. Morbi dolor nulla, malesuada eu, pulvinar at, mollis ac, nulla. Cur-abitur auctor semper nulla. Donec varius orci eget risus. Duis nibh mi, congue eu, accumsan eleifend, sagittis quis, diam. Duis eget orci sit amet orci dig-nissim rutrum.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Nam dui ligula, fringilla a, euismod sodales, sollic-itudin vel, wisi. Morbi auctor lorem non justo. Nam lacus libero, pretium at, lobortis vitae, ultricies et, tellus. Donec aliquet, tortor sed accumsan biben-dum, erat ligula aliquet magna, vitae ornare odio metus a mi. Morbi ac orci et nisl hendrerit mollis. Suspendisse ut massa. Cras nec ante. Pellentesque a nulla. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Aliquam tincidunt urna. Nulla ullamcorper vestibulum turpis. Pellentesque cursus luctus mauris.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Nulla malesuada porttitor diam. Donec felis erat, congue non, volutpat at, tincidunt tristique, libero. Vivamus viverra fermentum felis. Donec nonummy",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b6",
+          "inlines": [
+            {
+              "text": "pellentesque ante. Phasellus adipiscing semper elit. Proin fermentum massa ac quam. Sed diam turpis, molestie vitae, placerat a, molestie nec, leo. Maece-nas lacinia. Nam ipsum ligula, eleifend at, accumsan nec, suscipit a, ipsum. Morbi blandit ligula feugiat magna. Nunc eleifend consequat lorem. Sed lacinia nulla vitae enim. Pellentesque tincidunt purus vel magna. Integer non enim. Praesent euismod nunc eu purus. Donec bibendum quam in tellus. Nullam cursus pulvinar lectus. Donec et mi. Nam vulpu-tate metus eu enim. Vestibulum pellentesque felis eu massa.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b7",
+          "inlines": [
+            {
+              "text": "Quisque ullamcorper placerat ipsum. Cras nibh. Morbi vel justo vitae lacus tincidunt ultrices. Lorem ipsum dolor sit amet, consectetuer adipiscing elit. In hac habitasse platea dictumst. Integer tempus conva-llis augue. Etiam facilisis. Nunc elementum fermen-tum wisi. Aenean placerat. Ut imperdiet, enim sed gravida sollicitudin, felis odio placerat quam, ac pul-vinar elit purus eget enim. Nunc vitae tortor. Proin tempus nibh sit amet nisl. Vivamus quis tortor vitae risus porta vehicula.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b8",
+          "inlines": [
+            {
+              "text": "Fusce mauris. Vestibulum luctus nibh at lectus. Sed bibendum, nulla a faucibus semper, leo velit ul-tricies tellus, ac venenatis arcu wisi vel nisl. Vestibu-lum diam. Aliquam pellentesque, augue quis sagittis posuere, turpis lacus congue quam, in hendrerit risus eros eget felis. Maecenas eget erat in sapien mattis porttitor. Vestibulum porttitor. Nulla facilisi. Sed a turpis eu lacus commodo facilisis. Morbi fringilla, wisi in dignissim interdum, justo lectus sagittis dui, et vehicula libero dui cursus dui. Mauris tempor ligula sed lacus. Duis cursus enim ut augue. Cras ac magna. Cras nulla. Nulla egestas. Curabitur a leo. Quisque egestas wisi eget nunc. Nam feugiat",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b9",
+          "inlines": [
+            {
+              "text": "1",
+              "type": "text"
+            }
+          ],
+          "role": "page-footer",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p2",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 2",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b1",
+          "inlines": [
+            {
+              "text": "lacus vel est. Curabitur consectetuer. Suspendisse vel felis. Ut lorem lorem, interdum eu, tincidunt sit amet, laoreet vitae, arcu. Aenean faucibus pede eu ante. Praesent enim elit, rutrum at, molestie non, nonummy vel, nisl. Ut lectus eros, malesuada sit amet, fermentum eu, sodales cursus, magna. Donec eu purus. Quisque vehicula, urna sed ultricies auctor, pede lorem egestas dui, et convallis elit erat sed nulla. Donec luctus. Curabitur et nunc. Aliquam dolor odio, commodo pretium, ultricies non, pharetra in, velit. Integer arcu est, nonummy in, fer-mentum faucibus, egestas vel, odio.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Sed commodo posuere pede. Mauris ut est. Ut quis purus. Sed ac odio. Sed vehicula hendrerit sem. Duis non odio. Morbi ut dui. Sed accumsan risus eget odio. In hac habitasse platea dictumst. Pellen-tesque non elit. Fusce sed justo eu urna porta tin-cidunt. Mauris felis odio, sollicitudin sed, volutpat a, ornare ac, erat. Morbi quis dolor. Donec pellen-tesque, erat ac sagittis semper, nunc dui lobortis pu-rus, quis congue purus metus ultricies tellus. Proin et quam. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos hymenaeos. Prae-sent sapien turpis, fermentum vel, eleifend faucibus, vehicula eu, lacus.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Donec odio elit, dictum in, hendrerit sit amet, egestas sed, leo. Praesent feugiat sapien aliquet odio. Inte-ger vitae justo. Aliquam vestibulum fringilla lorem. Sed neque lectus, consectetuer at, consectetuer sed, eleifend ac, lectus. Nulla facilisi. Pellentesque eget lectus. Proin eu metus. Sed porttitor. In hac habitasse platea dictumst. Suspendisse eu lectus. Ut mi mi, lacinia sit amet, placerat et, mollis vitae, dui. Sed ante tellus, tristique ut, iaculis eu, malesuada ac, dui. Mauris nibh leo, facilisis non, adipiscing quis, ultrices a, dui.",
+              "type": "text"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "text": "Morbi luctus, wisi viverra faucibus pretium, nibh est placerat odio, nec commodo wisi enim eget quam. Quisque libero justo, consectetuer a, feugiat vitae, porttitor eu, libero. Suspendisse sed mauris vitae elit sollicitudin malesuada. Maecenas ultricies eros sit amet ante. Ut venenatis velit. Maecenas sed mi eget dui varius euismod. Phasellus aliquet volutpat odio. Vestibulum ante ipsum primis in faucibus orci",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b2",
+          "inlines": [
+            {
+              "text": "luctus et ultrices posuere cubilia Curae; Pellentesque sit amet pede ac sem eleifend consectetuer. Nullam elementum, urna vel imperdiet sodales, elit ipsum pharetra ligula, ac pretium ante justo a nulla. Cur-abitur tristique arcu eu metus. Vestibulum lectus. Proin mauris. Proin eu nunc eu urna hendrerit fau-cibus. Aliquam auctor, pede consequat laoreet var-ius, eros tellus scelerisque quam, pellentesque hen-drerit ipsum dolor sed augue. Nulla nec lacus.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b3",
+          "inlines": [
+            {
+              "text": "Suspendisse vitae elit. Aliquam arcu neque, ornare in, ullamcorper quis, commodo eu, libero. Fusce sagittis erat at erat tristique mollis. Maecenas sapien libero, molestie et, lobortis in, sodales eget, dui. Morbi ultrices rutrum lorem. Nam elementum ullam-corper leo. Morbi dui. Aliquam sagittis. Nunc plac-erat. Pellentesque tristique sodales est. Maecenas imperdiet lacinia velit. Cras non urna. Morbi eros pede, suscipit ac, varius vel, egestas non, eros. Prae-sent malesuada, diam id pretium elementum, eros sem dictum tortor, vel consectetuer odio sem sed wisi.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p2:b4",
+          "inlines": [
+            {
+              "text": "2",
+              "type": "text"
+            }
+          ],
+          "role": "page-footer",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p3",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 3",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:b1",
+          "inlines": [
+            {
+              "text": "Table 1: EU Countries Information",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p3:t1",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Country",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Population (millions)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Area (km2)",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Capital",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Official Language",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Austria",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8.9",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "83,879",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Vienna",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "German",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Belgium",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "11.5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "30,689",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Brussels",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Dutch, French, German",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Czech Republic",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10.7",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "78,866",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Prague",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Czech",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Denmark",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5.8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "42,951",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Copenhagen",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Danish",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Finland",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5.5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "338,424",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Helsinki",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Finnish, Swedish",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "p3:b2",
+          "inlines": [
+            {
+              "text": "3",
+              "type": "text"
+            }
+          ],
+          "role": "page-footer",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "3"
+      ],
+      [
+        "Last changed",
+        "2024-01-03T09:38:26+01:00"
+      ]
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2024-01-03T09:38:26+01:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "TeX"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.5"
+      },
+      "producer": {
+        "type": "text",
+        "value": "pdfTeX-1.40.21"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "has_javascript": false,
+      "pages": 3,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    },
+    "language": "la",
+    "modified": {
+      "type": "date_time",
+      "value": "2024-01-03T09:38:26+01:00"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pypdf-multicolumn.pdf",
+    "path": "<corpus>/pdf/pypdf-multicolumn.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "bdb495e95b3e1afae95013099dc59b0cea047f1fa70f677ee9cb33f10faa1c6c",
+    "size": 78657
+  }
+}

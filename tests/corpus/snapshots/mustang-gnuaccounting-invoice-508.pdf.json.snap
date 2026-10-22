@@ -1,0 +1,266 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "assets": [
+    {
+      "alt": "logo or small picture, box 451, 724 to 522, 795",
+      "id": "page-1-pic-1",
+      "mime": "image/png",
+      "needs_vision": false,
+      "sha256": ""
+    }
+  ],
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "alt": "logo or small picture, box 451, 724 to 522, 795",
+          "asset": "page-1-pic-1",
+          "type": "media"
+        },
+        {
+          "anchor": "p1:t1",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2020-11-21",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "p1:b1",
+          "inlines": [
+            {
+              "strong": true,
+              "text": "Bei Spiel GmbH",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b2",
+          "inlines": [
+            {
+              "text": "Ecke 12",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b3",
+          "inlines": [
+            {
+              "text": "12345 Stadthausen",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b4",
+          "inlines": [
+            {
+              "text": "phone (555) 23 78 -0",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b5",
+          "inlines": [
+            {
+              "text": "HRA 12345",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b6",
+          "inlines": [
+            {
+              "text": "http://localhost/",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b7",
+          "inlines": [
+            {
+              "text": "Ingmar N. Fo",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b8",
+          "inlines": [
+            {
+              "text": "phone (555) 23 78 -23",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "anchor": "p1:b9",
+          "inlines": [
+            {
+              "text": "info@localhost.local",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        "<23 more items>"
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "losses": [
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at Figure",
+      "why": "damaged"
+    },
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at Document",
+      "why": "damaged"
+    },
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at Table",
+      "why": "damaged"
+    },
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at TR",
+      "why": "damaged"
+    },
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at TD",
+      "why": "damaged"
+    },
+    {
+      "location": "structure tree",
+      "severity": "warning",
+      "what": "the role map has a loop at Div",
+      "why": "damaged"
+    }
+  ],
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "1"
+      ],
+      [
+        "Images",
+        "1"
+      ],
+      [
+        "Not read",
+        "6"
+      ],
+      [
+        "Last changed",
+        "2020-11-21T18:21:23+01:00"
+      ]
+    ]
+  },
+  "properties": {
+    "authors": [
+      "Jochen Stärk"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2020-11-21T18:21:23+01:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "Writer"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.4"
+      },
+      "pdfa": {
+        "type": "text",
+        "value": "PDF/A-1a"
+      },
+      "producer": {
+        "type": "text",
+        "value": "LibreOffice 7.0"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "has_javascript": false,
+      "pages": 1,
+      "revisions": 1,
+      "signed": false,
+      "tagged": true
+    },
+    "language": "de-DE"
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "mustang-gnuaccounting-invoice-508.pdf",
+    "path": "<corpus>/pdf/mustang-gnuaccounting-invoice-508.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "6fd91b9e3b47193c4a7d6ea4bc30b80d1fd3f9e2cf74f3300f66f16303157dc1",
+    "size": 90271
+  }
+}

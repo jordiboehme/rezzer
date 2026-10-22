@@ -28,12 +28,25 @@ pub trait Reader: Send + Sync {
 pub struct ReadOutcome {
     pub document: Document,
     pub completeness: Completeness,
+    /// Raw bytes of extracted assets, by [`crate::Asset`] id. Never serialized, never cached.
+    pub blobs: Vec<Blob>,
+}
+
+/// The bytes of one extracted asset. Deliberately no serde: it must never reach the
+/// [`Document`] JSON or the cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Blob {
+    /// The id of the [`crate::Asset`] these bytes belong to.
+    pub asset: String,
+    pub bytes: Vec<u8>,
 }
 
 /// Options for one read. Debug and Clone only: never serialized, and Debug hides the password.
 #[derive(Clone, Default)]
 pub struct ReadOptions {
     pub password: Option<String>,
+    /// Extract pictures and attachments as files (their bytes come back in `blobs`).
+    pub extract_assets: bool,
 }
 
 impl fmt::Debug for ReadOptions {
@@ -41,6 +54,7 @@ impl fmt::Debug for ReadOptions {
         let password = self.password.as_ref().map(|_| "<redacted>");
         f.debug_struct("ReadOptions")
             .field("password", &password)
+            .field("extract_assets", &self.extract_assets)
             .finish()
     }
 }

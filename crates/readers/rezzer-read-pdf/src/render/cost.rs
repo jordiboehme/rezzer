@@ -1,0 +1,1000 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! What a render takes, worked out before it runs.
+//!
+//! hayro sizes several buffers from values in the file, and an allocation that fails ends
+//! the process, which no `catch_unwind` can stop. So each page is first run through the same
+//! interpreter, with the same settings, into [`Dry`], a device that draws nothing and adds up
+//! the buffers the renderer would build for each call, at the transform it has then (forms,
+//! patterns, Type3 glyphs, soft masks and annotation appearances are followed the way the
+//! renderer follows them). A page whose estimate passes the render room is not rendered.
+//!
+//! The renderer's buffers that depend on the file, and how they are counted (bytes):
+//! - the page pixmap and the PNG: width x height x 4 each;
+//! - a raster image: what its filter unpacks to (the measured size; a DCT, JPX or JBIG2
+//!   frame or the CCITT `/Columns` and `/Rows` give the decoded size), the samples at the
+//!   stated size, an RGB copy, and the RGBA copy at the size it is drawn (kept until the end of
+//!   the render); its soft mask the same way;
+//! - a stencil mask: its samples, the RGBA copy, and with a pattern as paint a sub-render of
+//!   the page's size and a mask kept until the end;
+//! - a tiling pattern: a cell pixmap and render context sized from its step, as the renderer
+//!   sizes it, for every fill (none is cached), and the cost of its content inside the cell;
+//! - a shading pattern that is not drawn as a gradient: a texture of the filled area; a mesh
+//!   shading also a map entry for each pixel its triangles cover, and its patches' triangles;
+//! - a soft mask: a render of the page's size and the mask, once for each mask in a render;
+//! - a Type3 glyph: its content, as drawn;
+//! - every draw call (fill, stroke, clip, glyph, picture, group): what vello keeps for it
+//!   until its target is rendered, from the rows of tiles its path covers (measured, see
+//!   [`DRAW_BASE`]), a dashed stroke by its dashes ([`DASH_BASE`]).
+//!
+//! Stencil masks and inline stencils do not show their data to a device, so
+//! `stencils.rs` checks every stencil a page's render can reach first, unpacking only
+//! the streams the renderer reads as content: one whose decoded size cannot be known, or
+//! alone passes the room, keeps the page from rendering. What the interpreter and the outline
+//! cache keep is bounded by the guard's stream sizes, like the text walk.
+//!
+//! The JPEG 2000 (x5) and JBIG2 (x2) factors are read from the decoders, not measured: no
+//! encoder for either is at hand in the tree or the corpus.
+
+use std::collections::HashSet;
+use std::panic::{self, AssertUnwindSafe};
+
+use hayro_interpret::encode::{EncodedShadingType, texture_dimensions};
+use hayro_interpret::font::Glyph;
+use hayro_interpret::pattern::Pattern;
+use hayro_interpret::shading::ShadingType;
+use hayro_interpret::util::x_y_advances;
+use hayro_interpret::{
+    BlendMode, CacheKey, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
+    InterpreterCache, InterpreterSettings, Paint, SoftMask, StrokeProps, interpret_page,
+};
+use hayro_syntax::object::{Array, Dict, Name, Object, Stream};
+use hayro_syntax::page::Page;
+use kurbo::{Affine, BezPath, Rect, Shape};
+
+use super::headers::{jbig2_page, jpeg_frame, jpx_frame};
+use crate::fallback::filters_of;
+
+/// Bytes a page pixel takes while its PNG is written: the pixmap, and twice it for the PNG.
+pub(crate) const PNG_BYTES: u64 = 12;
+
+/// Device calls one page's estimate may take.
+const MAX_CALLS: u64 = 16_000_000;
+
+/// Device calls between two questions to the stop callback.
+const POLL: u64 = 4096;
+
+/// Nesting of patterns, soft masks and Type3 glyphs the estimate follows.
+const MAX_DEPTH: usize = 32;
+
+/// Bytes the renderer's map of a mesh shading takes for each pixel a triangle covers.
+const MESH_ENTRY: u64 = 64;
+
+/// Triangles the renderer makes of each patch of a patch mesh.
+const PATCH_TRIANGLES: u64 = 2 * 19 * 19;
+
+// What vello_cpu 0.3.0 keeps for each draw until its target is rendered: commands per wide
+// tile and strips per row of tiles a path's edges cross. Measured with hayro 0.8.0 on a
+// 1,190 by 1,684 pixmap (an A4 page at 144 dpi), peak RSS of 4,000 to 8,000 equal draws less
+// the same file read without a render:
+// - a full-page rectangle fill: 53.5 KB (231 MiB at 4,000 fills, 445 MiB at 8,000);
+// - a fill of a quarter of the page (half its height): 29 KB, so the cost follows the rows of
+//   4 pixels the path covers, not its area;
+// - a 1 by 1 point fill: 0.3 KB;
+// - a full-page rectangle outline stroke: 60 KB; a full-height diagonal line stroke: 29 KB;
+// - one 800 point "W" glyph (1,600 pixels high): 108 KB; one line of 23 glyphs at 10 points:
+//   8.4 KB;
+// - a full-page picture drawn: 71 KB; a rectangle clip with nothing drawn: about 0.1 KB.
+// The model below is above each of these: a base, a strip term for every row of tiles each
+// edge of the path crosses (twice for a stroke, whose outline has two sides), and a command
+// term for every row of tiles the path's box covers.
+
+/// Bytes each draw keeps, whatever its size.
+const DRAW_BASE: u64 = 512;
+
+/// Bytes for each row of tiles an edge of a path crosses.
+const EDGE_ROW: u64 = 64;
+
+/// Bytes for each row of tiles the box of a path covers.
+const FILL_ROW: u64 = 64;
+
+/// Pixel rows in one row of vello's tiles.
+const TILE_ROWS: f64 = 4.0;
+
+// A dashed stroke: kurbo expands the dashes of the whole path into one outline that vello
+// fills as one draw (vello_common 0.3.0 flatten.rs): the draw's base and box rows once, the
+// strips of each dash's tiles, and while drawn each dash's outline, in buffers vello keeps.
+// Measured as above less the page rendered empty (12 MiB), bytes a dash, lines 0.5 points wide:
+// - lines stroked one by one, 1,000 vertical of 800 points: `[6 3]` 306, `[12 6]` 590,
+//   `[24 12]` 1,133, `[1 1]` 79, round caps `[6 3]` 353; `[0.5 0.5]` 57, `[0.1 0.1]` 12;
+//   horizontal `[6 3]` 160, diagonal 228; 5 points wide 566, 40 points wide 943;
+// - all in one path: `[1 1]` 385, `[0.1 0.1]` 385 to 388, diagonal 370, round caps 553; 600
+//   tight curves, round caps: `[24 12]` 1,050, `[6 3]` 655, `[1 1]` 557.
+// The model is above each: a base and a part a pixel of the longest dash plus the line width,
+// kept, and the outlines of the largest stroke's dashes.
+/// Bytes each dash keeps, whatever its size.
+const DASH_BASE: u64 = 96;
+
+/// Bytes each dash keeps for each pixel of its length plus the line width.
+const DASH_PIXEL: f64 = 32.0;
+
+/// Bytes the outline of one dash takes while its stroke is drawn.
+const DASH_OUTLINE: u64 = 576;
+
+/// Dashes one stroke may draw; past that, working out the render is refused (the room
+/// refuses far fewer dashes, at about 700 bytes each, on the way).
+const MAX_DASHES: f64 = 1_000_000.0;
+
+/// What a render's memory goes to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Kind {
+    #[default]
+    Page,
+    Pictures,
+    Patterns,
+    Shadings,
+    SoftMasks,
+    Drawing,
+}
+
+impl Kind {
+    pub(crate) fn words(self) -> &'static str {
+        match self {
+            Kind::Page => "the page itself",
+            Kind::Pictures => "its pictures",
+            Kind::Patterns => "its tiling patterns",
+            Kind::Shadings => "its shadings",
+            Kind::SoftMasks => "its soft masks",
+            Kind::Drawing => "its drawing operations",
+        }
+    }
+}
+
+/// Why a page's estimate was not finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Unknown {
+    /// The estimate passed the room on the way: what took the most, and the bytes so far.
+    Over(Kind, u64),
+    /// Something's size cannot be known before rendering.
+    Unbounded(String),
+    /// The caller asked to stop.
+    Stopped,
+}
+
+/// Payload of the panic that ends an estimate early.
+struct Abort(Unknown);
+
+/// What the estimate needs to know of the file.
+pub(crate) struct Facts<'f> {
+    /// What a stream of the canonical bytes unpacks to, as the guard measured it.
+    pub sizes: &'f dyn Fn(u32, u16) -> Option<u64>,
+    pub limits: &'f pdfparts::Limits,
+    pub stop: &'f dyn Fn() -> bool,
+}
+
+/// One render target: the page, a pattern cell, a soft mask.
+struct Level {
+    w: u64,
+    h: u64,
+    /// Bytes kept until this target is done.
+    kept: u64,
+    /// The largest dash outline this target's renderer built, whose buffers it keeps.
+    outlines: u64,
+    /// Soft masks this target's renderer already built.
+    masks: HashSet<u128>,
+}
+
+/// A device that adds up what the renderer would build.
+struct Dry<'f> {
+    facts: &'f Facts<'f>,
+    room: u64,
+    levels: Vec<Level>,
+    /// Bytes kept by all open targets.
+    alive: u64,
+    peak: u64,
+    by_kind: [u64; 6],
+    calls: u64,
+    depth: usize,
+}
+
+impl Dry<'_> {
+    fn level(&self) -> &Level {
+        self.levels.last().expect("a render target")
+    }
+
+    fn kind_index(kind: Kind) -> usize {
+        kind as usize
+    }
+
+    fn most(&self) -> Kind {
+        [
+            Kind::Page,
+            Kind::Pictures,
+            Kind::Patterns,
+            Kind::Shadings,
+            Kind::SoftMasks,
+            Kind::Drawing,
+        ]
+        .into_iter()
+        .max_by_key(|k| self.by_kind[Self::kind_index(*k)])
+        .unwrap_or_default()
+    }
+
+    /// A buffer that lives for the call (`passing`) and one kept until the target is done.
+    fn charge(&mut self, kind: Kind, passing: u64, kept: u64) {
+        self.by_kind[Self::kind_index(kind)] =
+            self.by_kind[Self::kind_index(kind)].saturating_add(passing.saturating_add(kept));
+        let now = self.alive.saturating_add(passing).saturating_add(kept);
+        self.peak = self.peak.max(now);
+        self.alive = self.alive.saturating_add(kept);
+        if let Some(l) = self.levels.last_mut() {
+            l.kept = l.kept.saturating_add(kept);
+        }
+        if self.peak > self.room {
+            let most = self.most();
+            panic::resume_unwind(Box::new(Abort(Unknown::Over(most, self.peak))));
+        }
+    }
+
+    /// The tile rows between `y0` and `y1` (device pixels) inside the current target.
+    fn rows(&self, y0: f64, y1: f64) -> u64 {
+        let h = self.level().h as f64;
+        let (a, b) = (y0.max(0.0), y1.min(h));
+        if !(a.is_finite() && b.is_finite()) || b < a {
+            return 0;
+        }
+        ((b - a) / TILE_ROWS).ceil() as u64 + 1
+    }
+
+    /// What the render keeps for drawing `path` (device space), stroked `stroke` pixels wide
+    /// when given, as the comment at [`DRAW_BASE`] says.
+    fn draw(&mut self, path: &BezPath, stroke: Option<f64>) {
+        let pad = stroke.unwrap_or(0.0).max(0.0);
+        let mut edges = 0u64;
+        for seg in path.segments() {
+            let b = seg.bounding_box();
+            edges = edges.saturating_add(self.rows(b.y0 - pad, b.y1 + pad));
+        }
+        let b = path.bounding_box();
+        let edges = if stroke.is_some() { edges * 2 } else { edges };
+        let bytes = DRAW_BASE
+            .saturating_add(edges.saturating_mul(EDGE_ROW))
+            .saturating_add(self.rows(b.y0 - pad, b.y1 + pad).saturating_mul(FILL_ROW));
+        self.charge(Kind::Drawing, 0, bytes);
+    }
+
+    /// What a stroke of `user` (user space, `device` in device space), `width` pixels wide,
+    /// keeps when `stroke` has a dash pattern, as the comment at [`DASH_BASE`] says: one draw
+    /// whose outline is the dashes. False when it has none, so the caller charges the stroke
+    /// as drawn whole.
+    fn dashes(
+        &mut self,
+        (user, device): (&BezPath, &BezPath),
+        stroke: &StrokeProps,
+        transform: &Affine,
+        width: f64,
+    ) -> bool {
+        if stroke.dash_array.is_empty() {
+            return false;
+        }
+        // kurbo never finishes a pattern of negative length (measured: `[1 -2]`, `[-1 -1]`);
+        // hayro makes each 0 in a pattern 0.01, so a valid one has a length.
+        let period: f64 = stroke.dash_array.iter().map(|d| f64::from(*d)).sum();
+        if stroke.dash_array.iter().any(|d| !d.is_finite() || *d < 0.0) || period <= 0.0 {
+            Self::unbounded("it strokes with a dash pattern the renderer cannot finish".into());
+        }
+        // The renderer dashes the path in user space, where the pattern is; the control
+        // polygon is never shorter than the curve.
+        let length: f64 = user
+            .segments()
+            .map(|s| match s {
+                kurbo::PathSeg::Line(l) => l.p0.distance(l.p1),
+                kurbo::PathSeg::Quad(q) => q.p0.distance(q.p1) + q.p1.distance(q.p2),
+                kurbo::PathSeg::Cubic(c) => {
+                    c.p0.distance(c.p1) + c.p1.distance(c.p2) + c.p2.distance(c.p3)
+                }
+            })
+            .sum();
+        let per_period = (stroke.dash_array.len() as f64 / 2.0).ceil().max(1.0);
+        let count = (length / period).ceil() * per_period;
+        if !count.is_finite() || count > MAX_DASHES {
+            Self::unbounded(format!(
+                "it strokes with a dash pattern of more than {MAX_DASHES} dashes, too many to \
+                 work out its render first"
+            ));
+        }
+        let count = count as u64;
+        let (a, b) = x_y_advances(transform);
+        let longest = stroke
+            .dash_array
+            .iter()
+            .map(|d| f64::from(*d) * a.length().max(b.length()))
+            .fold(0.0, f64::max);
+        // The renderer draws a line at least a pixel wide.
+        let pixels = (longest + width.max(1.0)).min(f64::from(u32::MAX));
+        let each = DASH_BASE.saturating_add((pixels * DASH_PIXEL).ceil() as u64);
+        let (b, pad) = (device.bounding_box(), width.max(0.0));
+        let bytes = DRAW_BASE
+            .saturating_add(self.rows(b.y0 - pad, b.y1 + pad).saturating_mul(FILL_ROW))
+            .saturating_add(count.saturating_mul(each));
+        // The outline buffers grow to the largest stroke and stay.
+        let outlines = count.saturating_mul(DASH_OUTLINE);
+        let more = outlines.saturating_sub(self.level().outlines);
+        if let Some(l) = self.levels.last_mut() {
+            l.outlines = l.outlines.max(outlines);
+        }
+        self.charge(Kind::Drawing, 0, bytes.saturating_add(more));
+        true
+    }
+
+    /// The box `(0, 0, w, h)` under `transform`, drawn as a path.
+    fn draw_box(&mut self, w: f64, h: f64, transform: Affine) {
+        let path = transform * Rect::new(0.0, 0.0, w, h).to_path(0.1);
+        self.draw(&path, None);
+    }
+
+    fn tick(&mut self) {
+        self.calls += 1;
+        if self.calls > MAX_CALLS {
+            panic::resume_unwind(Box::new(Abort(Unknown::Unbounded(format!(
+                "it draws more than {MAX_CALLS} times, too much to work out its render first"
+            )))));
+        }
+        if self.calls.is_multiple_of(POLL) && (self.facts.stop)() {
+            panic::resume_unwind(Box::new(Abort(Unknown::Stopped)));
+        }
+    }
+
+    fn unbounded(why: String) -> ! {
+        panic::resume_unwind(Box::new(Abort(Unknown::Unbounded(why))))
+    }
+
+    /// Runs `inner` with a new render target of `w` by `h` pixels; what it keeps is freed
+    /// after, but the target's own pixmap stays when `result` says so.
+    fn nested(&mut self, kind: Kind, w: u64, h: u64, result: u64, inner: impl FnOnce(&mut Self)) {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            Self::unbounded(format!(
+                "its patterns, soft masks or Type3 glyphs nest more than {MAX_DEPTH} deep"
+            ));
+        }
+        // The target's render context and pixmap.
+        let target = w.saturating_mul(h).saturating_mul(8);
+        self.levels.push(Level {
+            w,
+            h,
+            kept: 0,
+            outlines: 0,
+            masks: HashSet::new(),
+        });
+        self.charge(kind, 0, target);
+        inner(self);
+        let done = self.levels.pop().map_or(0, |l| l.kept);
+        self.alive = self.alive.saturating_sub(done);
+        self.charge(kind, 0, result);
+        self.depth -= 1;
+    }
+
+    fn soft_mask(&mut self, mask: Option<&SoftMask<'_>>) {
+        let Some(mask) = mask else {
+            return;
+        };
+        let key = mask.cache_key();
+        let (w, h) = (self.level().w, self.level().h);
+        let new = self.levels.last_mut().is_some_and(|l| l.masks.insert(key));
+        if !new {
+            return;
+        }
+        // A sub-render of the target's size; the mask (a byte a pixel) stays.
+        let mask = mask.clone();
+        self.nested(Kind::SoftMasks, w, h, w.saturating_mul(h), |dry| {
+            mask.interpret(dry);
+        });
+    }
+
+    /// The paint of a fill or stroke over `area` (device pixels).
+    fn paint(&mut self, paint: &Paint<'_>, area: Rect, is_stroke: bool) {
+        let Paint::Pattern(p) = paint else {
+            return;
+        };
+        let (cw, ch) = (self.level().w as f64, self.level().h as f64);
+        let area = area.intersect(Rect::new(0.0, 0.0, cw, ch));
+        match &**p {
+            Pattern::Shading(s) => {
+                match s.shading.shading_type.as_ref() {
+                    ShadingType::TriangleMesh { triangles, .. } => {
+                        let covered: u64 = triangles
+                            .iter()
+                            .map(|t| {
+                                let pts = [t.p0.point, t.p1.point, t.p2.point];
+                                pixels_under(&pts.map(|p| s.matrix * p))
+                            })
+                            .fold(0, u64::saturating_add);
+                        self.charge(Kind::Shadings, covered.saturating_mul(MESH_ENTRY), 0);
+                    }
+                    ShadingType::CoonsPatchMesh { patches, .. } => {
+                        let covered: u64 = patches
+                            .iter()
+                            .map(|p| pixels_under(&p.control_points.map(|c| s.matrix * c)))
+                            .fold(0, u64::saturating_add);
+                        let triangles = (patches.len() as u64)
+                            .saturating_mul(PATCH_TRIANGLES)
+                            .saturating_mul(256);
+                        self.charge(
+                            Kind::Shadings,
+                            covered.saturating_mul(MESH_ENTRY).saturating_add(triangles),
+                            0,
+                        );
+                    }
+                    ShadingType::TensorProductPatchMesh { patches, .. } => {
+                        let covered: u64 = patches
+                            .iter()
+                            .map(|p| pixels_under(&p.control_points.map(|c| s.matrix * c)))
+                            .fold(0, u64::saturating_add);
+                        let triangles = (patches.len() as u64)
+                            .saturating_mul(PATCH_TRIANGLES)
+                            .saturating_mul(256);
+                        self.charge(
+                            Kind::Shadings,
+                            covered.saturating_mul(MESH_ENTRY).saturating_add(triangles),
+                            0,
+                        );
+                    }
+                    _ => {}
+                }
+                // The renderer encodes every shading; a gradient it can draw natively needs
+                // no texture.
+                let native = match s.shading.shading_type.as_ref() {
+                    ShadingType::RadialAxial { .. } => {
+                        let encoded = s.encode();
+                        matches!(&encoded.shading_type, EncodedShadingType::RadialAxial(g)
+                            if g.as_svg_gradient(&encoded, area, 0.01).is_some())
+                    }
+                    _ => false,
+                };
+                if !native {
+                    let (w, h) = texture_dimensions(area, 1.0);
+                    self.charge(Kind::Shadings, 0, u64::from(w) * u64::from(h) * 4);
+                }
+            }
+            Pattern::Tiling(t) => {
+                // As the renderer sizes the cell (hayro 0.8.0, paint.rs).
+                let bbox = t.bbox;
+                let (bw, bh) = (bbox.width() as f32, bbox.height() as f32);
+                let (xa, ya) = x_y_advances(&t.matrix);
+                let xs = (xa.length() as f32).max(1.0 / bw).min(3000.0 / bw);
+                let ys = (ya.length() as f32).max(1.0 / bh).min(3000.0 / bh);
+                let pw = u64::from((xs * t.x_step).abs().round() as u16);
+                let ph = u64::from((ys * t.y_step).abs().round() as u16);
+                let cell = pw.saturating_mul(ph).saturating_mul(4);
+                let initial = Affine::scale_non_uniform(f64::from(xs), f64::from(ys))
+                    * Affine::translate((-bbox.x0, -bbox.y0));
+                let t = t.clone();
+                self.nested(Kind::Patterns, pw, ph, cell, |dry| {
+                    t.interpret(dry, initial, is_stroke);
+                });
+            }
+        }
+    }
+
+    fn raster(&mut self, stream: &Stream<'_>, transform: Affine) {
+        let dict = stream.dict();
+        let spec = Spec::of(dict);
+        let decoded =
+            decoded_size(&spec, stream, self.facts).unwrap_or_else(|why| Self::unbounded(why));
+        let alpha = dict
+            .get::<Stream<'_>>(b"SMask")
+            .map(|m| {
+                let s = Spec::of(m.dict());
+                decoded_size(&s, &m, self.facts)
+                    .map(|d| {
+                        d.bytes
+                            .saturating_add(d.w.saturating_mul(d.h).saturating_mul(2))
+                    })
+                    .unwrap_or_else(|why| Self::unbounded(why))
+            })
+            .unwrap_or(0);
+        // An explicit mask is a stencil the decoder unpacks with the picture.
+        let mask = dict
+            .get::<Stream<'_>>(b"Mask")
+            .map(|m| {
+                let s = Spec {
+                    comps: 1,
+                    out: 1,
+                    direct: false,
+                    native: true,
+                    ..Spec::of(m.dict())
+                };
+                decoded_size(&s, &m, self.facts)
+                    .map(|d| {
+                        d.bytes
+                            .saturating_add(d.w.saturating_mul(d.h).saturating_mul(2))
+                    })
+                    .unwrap_or_else(|why| Self::unbounded(why))
+            })
+            .unwrap_or(0);
+        let (passing, kept) = image_bytes(&spec, &decoded, transform, alpha.saturating_add(mask));
+        self.charge(Kind::Pictures, passing, kept);
+    }
+
+    fn stencil(&mut self, w: u32, h: u32, transform: Affine) -> u64 {
+        let spec = Spec {
+            w: u64::from(w),
+            h: u64::from(h),
+            comps: 1,
+            out: 1,
+            direct: false,
+            native: true,
+        };
+        let decoded = Decoded {
+            w: spec.w,
+            h: spec.h,
+            bytes: spec.w.saturating_mul(spec.h),
+        };
+        let (passing, kept) = image_bytes(&spec, &decoded, transform, 0);
+        self.charge(Kind::Pictures, passing, kept);
+        spec.w.saturating_mul(spec.h)
+    }
+}
+
+/// How an image is stated in its dictionary.
+pub(super) struct Spec {
+    pub w: u64,
+    pub h: u64,
+    /// Components a sample has.
+    pub comps: u64,
+    /// Components after conversion: 1 for gray, 3 for color.
+    pub out: u64,
+    /// 8-bit samples without a `/Decode` array, used as unpacked without a copy.
+    pub direct: bool,
+    /// Gray or device RGB samples, which need no conversion buffer.
+    pub native: bool,
+}
+
+impl Spec {
+    pub(super) fn of(dict: &Dict<'_>) -> Spec {
+        let int = |a: &[u8], b: &[u8]| {
+            dict.get::<u32>(a)
+                .or_else(|| dict.get::<u32>(b))
+                .map_or(0, u64::from)
+        };
+        let (comps, out, native) = color_components(
+            dict.get::<Object<'_>>(b"ColorSpace")
+                .or_else(|| dict.get::<Object<'_>>(b"CS")),
+        );
+        let bpc = int(b"BitsPerComponent", b"BPC");
+        let decode = dict.contains_key(b"Decode") || dict.contains_key(b"D");
+        Spec {
+            w: int(b"Width", b"W"),
+            h: int(b"Height", b"H"),
+            comps,
+            out,
+            direct: bpc == 8 && !decode,
+            native,
+        }
+    }
+}
+
+/// Components of a color space, after conversion, and whether its samples are used without a
+/// conversion buffer; unknown spaces count as four components.
+fn color_components(cs: Option<Object<'_>>) -> (u64, u64, bool) {
+    let name_of = |n: &[u8]| match n {
+        b"DeviceGray" | b"G" | b"CalGray" => (1, 1, true),
+        b"DeviceRGB" | b"RGB" => (3, 3, true),
+        b"CalRGB" | b"Lab" => (3, 3, false),
+        _ => (4, 3, false),
+    };
+    match cs {
+        None => (4, 3, false),
+        Some(Object::Name(n)) => name_of(n.as_ref()),
+        Some(Object::Array(a)) => {
+            let first = a.iter::<Name<'_>>().next();
+            match first.as_deref() {
+                Some(b"ICCBased") => {
+                    let n = a
+                        .iter::<Stream<'_>>()
+                        .next()
+                        .and_then(|s| s.dict().get::<u32>(b"N"))
+                        .map_or(4, u64::from)
+                        .clamp(1, 32);
+                    (n, if n == 1 { 1 } else { 3 }, false)
+                }
+                Some(b"Indexed" | b"I") => (1, 3, false),
+                Some(b"Separation") => (1, 3, false),
+                Some(b"DeviceN") => {
+                    let n = a
+                        .iter::<Array<'_>>()
+                        .next()
+                        .map_or(4, |names| names.raw_iter().count() as u64)
+                        .clamp(1, 32);
+                    (n, 3, false)
+                }
+                Some(other) => name_of(other),
+                None => (4, 3, false),
+            }
+        }
+        Some(_) => (4, 3, false),
+    }
+}
+
+/// What a decoder builds: the size of the picture it gives and the bytes it unpacks to.
+pub(super) struct Decoded {
+    pub w: u64,
+    pub h: u64,
+    pub bytes: u64,
+}
+
+/// What the filter chain of an image unpacks to. `Err` when it cannot be known.
+pub(super) fn decoded_size(
+    spec: &Spec,
+    stream: &Stream<'_>,
+    facts: &Facts<'_>,
+) -> Result<Decoded, String> {
+    let (names, _) = filters_of(stream.dict());
+    let stated = Decoded {
+        w: spec.w,
+        h: spec.h,
+        bytes: spec.w.saturating_mul(spec.h).saturating_mul(spec.comps),
+    };
+    let Some(last) = names.last() else {
+        return Ok(stated);
+    };
+    // The codec's own header can only be read when it is the only filter.
+    let alone = names.len() == 1;
+    let data = stream.raw_data();
+    let id = stream.obj_id();
+    match last.as_slice() {
+        b"DCTDecode" | b"DCT" => {
+            // The decoder cuts a frame larger than the dictionary to the dictionary's size.
+            let frame = if alone { jpeg_frame(&data) } else { None };
+            let (fw, fh, fc, progressive) = frame.unwrap_or((0, 0, 0, true));
+            let (w, h) = larger((spec.w, spec.h), (fw, fh));
+            let c = fc.max(spec.comps.min(4)).max(1);
+            // A progressive frame (or one whose kind is not known) keeps 16-bit coefficients
+            // next to the output.
+            let copies = if progressive { 3 } else { 1 };
+            Ok(Decoded {
+                w,
+                h,
+                bytes: w.saturating_mul(h).saturating_mul(c).saturating_mul(copies),
+            })
+        }
+        b"JPXDecode" => {
+            let (w, h, c) = alone
+                .then(|| jpx_frame(&data))
+                .flatten()
+                .ok_or_else(|| "the size of a JPEG 2000 picture cannot be read".to_string())?;
+            Ok(Decoded {
+                w,
+                h,
+                bytes: w
+                    .saturating_mul(h)
+                    .saturating_mul(c.max(1))
+                    .saturating_mul(5),
+            })
+        }
+        b"JBIG2Decode" => {
+            let (w, h) = alone
+                .then(|| jbig2_page(&data))
+                .flatten()
+                .ok_or_else(|| "the size of a JBIG2 picture cannot be read".to_string())?;
+            let (w, h) = larger((spec.w, spec.h), (w, h));
+            Ok(Decoded {
+                w,
+                h,
+                bytes: w.saturating_mul(h).saturating_mul(2),
+            })
+        }
+        b"CCITTFaxDecode" | b"CCF" => {
+            let parms = ccitt_parms(stream.dict(), names.len() - 1);
+            let columns = parms
+                .as_ref()
+                .and_then(|p| p.get::<u32>(b"Columns"))
+                .map_or(1728, u64::from);
+            let rows = parms
+                .as_ref()
+                .and_then(|p| p.get::<u32>(b"Rows"))
+                .map_or(0, u64::from)
+                .max(spec.h);
+            Ok(Decoded {
+                w: spec.w,
+                h: spec.h,
+                bytes: columns.saturating_mul(rows),
+            })
+        }
+        _ => {
+            let measured = match (u32::try_from(id.obj_number), u16::try_from(id.gen_number)) {
+                (Ok(n), Ok(g)) if n > 0 => (facts.sizes)(n, g),
+                _ => None,
+            };
+            let unpacked = match measured {
+                Some(n) => n,
+                // An inline image: its data is measured here.
+                None => {
+                    let (names, parms) = filters_of(stream.dict());
+                    let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
+                    pdfparts::measure_stream(
+                        &data,
+                        &names,
+                        &parms,
+                        facts.limits,
+                        facts.limits.max_total_bytes,
+                        facts.stop,
+                    )
+                    .map_err(|why| format!("an inline picture cannot be measured: {why}"))?
+                }
+            };
+            Ok(Decoded {
+                bytes: unpacked,
+                ..stated
+            })
+        }
+    }
+}
+
+fn larger(a: (u64, u64), b: (u64, u64)) -> (u64, u64) {
+    if b.0.saturating_mul(b.1) > a.0.saturating_mul(a.1) {
+        b
+    } else {
+        a
+    }
+}
+
+/// The decode parameters of filter `i` of a stream.
+fn ccitt_parms<'a>(dict: &Dict<'a>, i: usize) -> Option<Dict<'a>> {
+    dict.get::<Dict<'a>>(b"DecodeParms")
+        .or_else(|| dict.get::<Dict<'a>>(b"DP"))
+        .or_else(|| {
+            dict.get::<Array<'a>>(b"DecodeParms")
+                .or_else(|| dict.get::<Array<'a>>(b"DP"))
+                .and_then(|a| a.iter::<Object<'a>>().nth(i))
+                .and_then(Object::into_dict)
+        })
+}
+
+/// What drawing an image takes: the bytes that live for the call and those kept until the end
+/// of the render, as the renderer builds them (hayro 0.8.0, image.rs).
+fn image_bytes(spec: &Spec, d: &Decoded, transform: Affine, alpha: u64) -> (u64, u64) {
+    let (w, h) = (d.w.max(1), d.h.max(1));
+    let px = w.saturating_mul(h);
+    // The samples, unless the unpacked data is used as it is.
+    let samples = if spec.direct {
+        0
+    } else {
+        px.saturating_mul(spec.comps)
+    };
+    // A conversion to RGB writes a new buffer unless the samples are RGB already.
+    let rgb = if spec.native { 0 } else { px.saturating_mul(3) };
+    // The size the renderer resamples to when the picture is drawn smaller.
+    let (xa, ya) = x_y_advances(&transform);
+    let (xs, ys) = (
+        xa.length() * spec.w.max(1) as f64 / w as f64,
+        ya.length() * spec.h.max(1) as f64 / h as f64,
+    );
+    let (nw, nh, resized) = if xs < 1.0 || ys < 1.0 {
+        let side =
+            |v: u64, s: f64| ((v as f64 * s).ceil().clamp(1.0, f64::from(u16::MAX / 2))) as u64;
+        let (nw, nh) = (side(w, xs), side(h, ys));
+        (nw, nh, nw.saturating_mul(nh).saturating_mul(spec.out + 1))
+    } else {
+        (w, h, 0)
+    };
+    let rgba = nw.saturating_mul(nh).saturating_mul(4);
+    // Drawn at its size, the RGBA copy is the kept one; drawn smaller, it is made of the
+    // resampled samples.
+    let passing = d
+        .bytes
+        .saturating_add(samples)
+        .saturating_add(rgb)
+        .saturating_add(resized)
+        .saturating_add(alpha);
+    (passing, rgba)
+}
+
+/// Pixels the box of `points` covers, each side clamped as the renderer clamps it.
+fn pixels_under(points: &[kurbo::Point]) -> u64 {
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for p in points {
+        x0 = x0.min(p.x);
+        y0 = y0.min(p.y);
+        x1 = x1.max(p.x);
+        y1 = y1.max(p.y);
+    }
+    let side = |a: f64, b: f64| {
+        let a = a.floor().clamp(0.0, 65_535.0);
+        let b = b.ceil().clamp(0.0, 65_535.0);
+        (b - a).max(0.0) as u64
+    };
+    side(x0, x1).saturating_mul(side(y0, y1))
+}
+
+impl<'a> Device<'a> for Dry<'_> {
+    fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
+        self.tick();
+        self.soft_mask(props.soft_mask.as_ref());
+        let device = props.transform * path.clone();
+        let mut area = device.bounding_box();
+        let stroke = matches!(mode, DrawMode::Stroke(_) | DrawMode::FillAndStroke(..));
+        let mut width = None;
+        if let DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s) = mode {
+            let (a, b) = x_y_advances(&props.transform);
+            let f = a.length().max(b.length()) * f64::from(s.line_width);
+            area = area.inflate(f, f);
+            width = Some(f);
+        }
+        if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
+            self.draw(&device, None);
+        }
+        if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) = (mode, width)
+            && !self.dashes((path, &device), s, &props.transform, w)
+        {
+            self.draw(&device, width);
+        }
+        self.paint(&props.paint, area, stroke);
+    }
+
+    fn push_clip_path(&mut self, clip: &ClipPath) {
+        self.tick();
+        // Clip paths come in device space.
+        self.draw(&clip.path, None);
+    }
+
+    fn push_clip_rect(&mut self, _: &Rect) {
+        self.tick();
+        self.charge(Kind::Drawing, 0, DRAW_BASE);
+    }
+
+    fn push_transparency_group(&mut self, _: f32, mask: Option<SoftMask<'a>>, _: BlendMode) {
+        self.tick();
+        self.charge(Kind::Drawing, 0, DRAW_BASE);
+        self.soft_mask(mask.as_ref());
+    }
+
+    fn draw_glyph_run(
+        &mut self,
+        run: &hayro_interpret::font::GlyphRun<'_, 'a>,
+        props: DrawProps<'a>,
+        mode: &DrawMode,
+    ) {
+        self.tick();
+        self.soft_mask(props.soft_mask.as_ref());
+        let (w, h) = (self.level().w as f64, self.level().h as f64);
+        // Outline glyphs with a pattern take the pattern once for the run, over at most the
+        // whole target.
+        let stroke = matches!(mode, DrawMode::Stroke(_));
+        self.paint(&props.paint, Rect::new(0.0, 0.0, w, h), stroke);
+        let width = match mode {
+            DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s) => {
+                let (a, b) = x_y_advances(&props.transform);
+                Some(a.length().max(b.length()) * f64::from(s.line_width))
+            }
+            _ => None,
+        };
+        for g in run.glyphs() {
+            if let Glyph::Outline(o) = &**g {
+                self.tick();
+                let user = g.transform() * o.outline();
+                let device = props.transform * user.clone();
+                if matches!(mode, DrawMode::Fill(_) | DrawMode::FillAndStroke(..)) {
+                    self.draw(&device, None);
+                }
+                if let (DrawMode::Stroke(s) | DrawMode::FillAndStroke(_, s), Some(w)) =
+                    (mode, width)
+                    && !self.dashes((&user, &device), s, &props.transform, w)
+                {
+                    self.draw(&device, width);
+                }
+            }
+            if let Glyph::Type3(t) = &**g {
+                self.tick();
+                self.depth += 1;
+                if self.depth > MAX_DEPTH {
+                    Self::unbounded(format!("its Type3 glyphs nest more than {MAX_DEPTH} deep"));
+                }
+                t.interpret(self, props.transform, g.transform(), &props.paint);
+                self.depth -= 1;
+            }
+        }
+    }
+
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        self.tick();
+        self.soft_mask(props.soft_mask.as_ref());
+        self.draw_box(
+            f64::from(image.width()),
+            f64::from(image.height()),
+            props.transform,
+        );
+        match image {
+            Image::Raster(r) => self.raster(r.stream(), props.transform),
+            Image::Stencil(s) => {
+                let px = self.stencil(s.width(), s.height(), props.transform);
+                // The paint shows only once the stencil is unpacked; it was just charged, and
+                // its decoded size was checked for the whole file before.
+                let mut paint = None;
+                if px <= self.room {
+                    s.with_stencil(|_, p| paint = Some(p.clone()), Some((1, 1)));
+                }
+                if let Some(paint @ Paint::Pattern(_)) = paint {
+                    let (w, h) = (self.level().w, self.level().h);
+                    // A sub-render of the target's size, an RGB copy and a mask that stays.
+                    self.charge(
+                        Kind::Pictures,
+                        w.saturating_mul(h)
+                            .saturating_mul(8)
+                            .saturating_add(px.saturating_mul(3)),
+                        w.saturating_mul(h),
+                    );
+                    self.paint(&paint, Rect::new(0.0, 0.0, w as f64, h as f64), false);
+                }
+            }
+        }
+    }
+
+    fn pop_clip(&mut self) {
+        self.tick();
+    }
+
+    fn pop_transparency_group(&mut self) {
+        self.tick();
+    }
+}
+
+/// The most bytes the render of `page` at `transform` into `w` by `h` pixels holds at once,
+/// with the same interpreter `settings` the renderer uses. `Err` when it passes `room` on the
+/// way, or cannot be known.
+pub(crate) fn estimate(
+    page: &Page<'_>,
+    transform: Affine,
+    (w, h): (u16, u16),
+    settings: &InterpreterSettings,
+    room: u64,
+    facts: &Facts<'_>,
+) -> Result<u64, Unknown> {
+    let (w, h) = (u64::from(w), u64::from(h));
+    let mut dry = Dry {
+        facts,
+        room,
+        levels: vec![Level {
+            w,
+            h,
+            kept: 0,
+            outlines: 0,
+            masks: HashSet::new(),
+        }],
+        alive: 0,
+        peak: 0,
+        by_kind: [0; 6],
+        calls: 0,
+        depth: 0,
+    };
+    let run = panic::catch_unwind(AssertUnwindSafe(|| {
+        // The page's pixmap and render context, and its PNG (charged again at the end).
+        let px = w.saturating_mul(h);
+        dry.charge(Kind::Page, px * 4, px * 4);
+        let cache = InterpreterCache::new();
+        let mut ctx = Context::new(
+            transform,
+            Rect::new(0.0, 0.0, w as f64, h as f64),
+            &cache,
+            page.xref(),
+            settings.clone(),
+        );
+        interpret_page(page, &mut ctx, &mut dry);
+        // The render context goes before the PNG, which can grow to twice the pixmap.
+        dry.alive = px * 4;
+        dry.charge(Kind::Page, px * (PNG_BYTES - 4), 0);
+        dry.peak
+    }));
+    match run {
+        Ok(peak) => Ok(peak),
+        Err(payload) => match payload.downcast::<Abort>() {
+            Ok(abort) => Err(abort.0),
+            Err(_) => Err(Unknown::Unbounded(
+                "working out its render stopped with an internal error".into(),
+            )),
+        },
+    }
+}

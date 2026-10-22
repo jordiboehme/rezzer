@@ -249,6 +249,7 @@ fn overview_lists_sections_and_counts() {
         },
         Block::Media {
             asset: "img1".into(),
+            alt: None,
             anchor: None,
         },
     ];
@@ -260,6 +261,8 @@ fn overview_lists_sections_and_counts() {
         caption: None,
         alt: None,
         needs_vision: false,
+        codes: Vec::new(),
+        code_unread: false,
     });
     d.facets.formulas = vec![formula("Calc!A1", &["Input!A1", "Input!B2"])];
     d.facets.graphs.push(Graph {
@@ -318,6 +321,35 @@ fn overview_lists_sections_and_counts() {
             ("Last changed", "2026-02-03T04:05:06Z"),
         ]
     );
+}
+
+#[test]
+fn overview_counts_one_picture_at_several_places_once_more() {
+    // One picture at three places and one at one: four images, two distinct.
+    let mut d = doc();
+    let place = |asset: &str| Block::Media {
+        asset: asset.into(),
+        alt: None,
+        anchor: None,
+    };
+    d.body = vec![place("logo"), place("logo"), place("chart"), place("logo")];
+    for id in ["logo", "chart"] {
+        d.assets.push(Asset {
+            id: id.into(),
+            path: None,
+            sha256: "00".into(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: None,
+            needs_vision: false,
+            codes: Vec::new(),
+            code_unread: false,
+        });
+    }
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    let images = o.facts.iter().find(|(k, _)| k == "Images").map(|(_, v)| v);
+    assert_eq!(images.map(String::as_str), Some("4 (2 distinct)"));
 }
 
 #[test]
@@ -811,6 +843,7 @@ fn workbook_overview_counts() {
         resolved: None,
     }];
     let embedded = |kind: &str| rezzer_model::Embedded {
+        text: None,
         kind: kind.into(),
         name: "x".into(),
         detail: None,
@@ -845,6 +878,179 @@ fn workbook_overview_counts() {
             ("Comments", "1"),
             ("External links", "2"),
             ("Embedded", "3"),
+        ]
+    );
+}
+
+#[test]
+fn pages_fact_and_no_page_parts() {
+    use rezzer_model::{Embedded, FormField, Signature};
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    let page = |n: u32| Block::Section {
+        kind: SectionKind::Page,
+        title: None,
+        anchor: Some(a(&format!("p{n}"))),
+        blocks: vec![para("text", Some(&format!("p{n}:b1")))],
+    };
+    d.body = vec![
+        Block::Section {
+            kind: SectionKind::Other,
+            title: Some("Outline".into()),
+            anchor: Some(a("outline")),
+            blocks: vec![para("Intro, page 1", None)],
+        },
+        page(1),
+        page(2),
+        page(3),
+    ];
+    d.facets.fields = vec![FormField {
+        anchor: a("field:Name"),
+        name: "Name".into(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: Some(Role::Input),
+        format: None,
+        calc_order: None,
+        actions: Vec::new(),
+        flags: Vec::new(),
+        options: Vec::new(),
+        pages: vec![1],
+    }];
+    d.facets.signatures = vec![Signature {
+        anchor: None,
+        kind: "usage-rights".into(),
+        signer: None,
+        date: None,
+        reason: None,
+        location: None,
+        sub_filter: None,
+        covers_whole_file: true,
+        later_revisions: 0,
+    }];
+    let script = |name: &str| Embedded {
+        kind: "script".into(),
+        name: name.into(),
+        detail: Some("javascript".into()),
+        target: None,
+        text: Some("x".into()),
+    };
+    d.facets.embedded = vec![script("document"), script("open")];
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    let names: Vec<&str> = o.parts.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Outline"]);
+    let fact = |label: &str| {
+        o.facts
+            .iter()
+            .find(|(l, _)| l == label)
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(fact("Pages"), Some("3"));
+    assert_eq!(fact("Form fields"), Some("1"));
+    assert_eq!(fact("Signatures"), Some("1"));
+    assert_eq!(fact("Scripts"), Some("2"));
+    // Scripts are not counted again as embedded objects.
+    assert_eq!(fact("Embedded"), None);
+    assert_eq!(o.facts[0].0, "Pages");
+    // A document without pages, fields, signatures or scripts has none of these facts.
+    let mut plain = doc();
+    plain.body = vec![para("x", None)];
+    enrich(&mut plain, &only(&[]));
+    let facts = plain.overview.map(|o| o.facts).unwrap_or_default();
+    for label in ["Pages", "Form fields", "Signatures", "Scripts"] {
+        assert!(facts.iter().all(|(l, _)| l != label), "{facts:?}");
+    }
+}
+
+#[test]
+fn form_field_anchors_and_their_parents_resolve() {
+    use rezzer_model::FormField;
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.facets.fields = vec![FormField {
+        anchor: a("field:items.0"),
+        name: "items.0".into(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: Some(Role::Result),
+        format: None,
+        calc_order: None,
+        actions: Vec::new(),
+        flags: Vec::new(),
+        options: Vec::new(),
+        pages: Vec::new(),
+    }];
+    let mut f = formula(
+        "field:items.0",
+        &["field:items", "field:items.0", "field:other"],
+    );
+    f.dialect = "pdf-js".into();
+    d.facets.formulas = vec![f];
+    enrich(&mut d, &only(&[]));
+    let missing: Vec<&str> = d.losses.iter().map(|l| l.what.as_str()).collect();
+    assert_eq!(missing, ["reference to field:other not found"]);
+}
+
+#[test]
+fn deep_dotted_field_names_resolve_quickly() {
+    use rezzer_model::FormField;
+    // One field whose full name is about 1 MB of `a.` parts, read by a formula that names it
+    // and many of its parents.
+    let name = "a.".repeat(500_000) + "z";
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.facets.fields = vec![FormField {
+        anchor: a(&format!("field:{name}")),
+        name: name.clone(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: Some(Role::Input),
+        format: None,
+        calc_order: None,
+        actions: Vec::new(),
+        flags: Vec::new(),
+        options: Vec::new(),
+        pages: Vec::new(),
+    }];
+    let refs: Vec<String> = (1..200)
+        .map(|k| format!("field:{}", &name[..name.len() - 2 * k - 2]))
+        .chain([format!("field:{name}")])
+        .collect();
+    let refs: Vec<&str> = refs.iter().map(String::as_str).collect();
+    let mut f = formula(&format!("field:{name}"), &refs);
+    f.dialect = "pdf-js".into();
+    d.facets.formulas = vec![f];
+    let start = Instant::now();
+    enrich(&mut d, &only(&[]));
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert!(d.losses.is_empty(), "{:?}", d.losses.len());
+}
+
+#[test]
+fn references_to_fields_the_form_did_not_keep_are_said_once() {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.losses.push(Loss {
+        location: "form".into(),
+        what: "5 of 9 form fields are not kept, from field \"e\" on: room".into(),
+        why: LossReason::Limit,
+        severity: Severity::Warning,
+    });
+    let mut f = formula("field:a", &["field:e", "field:f"]);
+    f.dialect = "pdf-js".into();
+    let mut g = formula("field:b", &["field:g"]);
+    g.dialect = "pdf-js".into();
+    d.facets.formulas = vec![f, g];
+    enrich(&mut d, &only(&[]));
+    let said: Vec<&str> = d.losses[1..].iter().map(|l| l.what.as_str()).collect();
+    assert_eq!(
+        said,
+        [
+            "5 references point at form fields that were not kept (the form was cut), the first from field:a"
         ]
     );
 }

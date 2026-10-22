@@ -1,0 +1,25 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/assets/0/id",
+    "equals": "page-1"
+  },
+  {
+    "pointer": "/assets/0/needs_vision",
+    "equals": true
+  },
+  {
+    "pointer": "/assets/0/alt",
+    "equals": "no text layer, 1 picture"
+  },
+  {
+    "contains": ":status[Needs vision]{yellow}"
+  }
+]

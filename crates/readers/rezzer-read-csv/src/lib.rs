@@ -555,6 +555,7 @@ fn record_numbers(
 
 fn finish(document: Document, partial: bool) -> ReadOutcome {
     ReadOutcome {
+        blobs: Vec::new(),
         document,
         completeness: if partial {
             Completeness::Partial

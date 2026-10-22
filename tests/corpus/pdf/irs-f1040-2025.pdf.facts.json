@@ -1,0 +1,61 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 2
+  },
+  {
+    "pointer": "/properties/facts/tagged",
+    "equals": true
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 199
+  },
+  {
+    "pointer": "/properties/facts/has_javascript",
+    "equals": true
+  },
+  {
+    "pointer": "/properties/facts/signatures",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/signed",
+    "equals": false
+  },
+  {
+    "pointer": "/properties/facts/revisions",
+    "equals": 2
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "2025 Form 1040"
+  },
+  {
+    "pointer": "/facets/fields",
+    "len": 199
+  },
+  {
+    "pointer": "/facets/signatures/0/kind",
+    "equals": "usage-rights"
+  },
+  {
+    "pointer": "/facets/signatures/0/covers_whole_file",
+    "equals": true
+  },
+  {
+    "pointer": "/losses",
+    "contains": "XFA form data present, not read"
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 3
+  },
+  {
+    "contains": "U.S. Individual Income Tax Return"
+  }
+]

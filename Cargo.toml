@@ -14,10 +14,13 @@ members = [
     "crates/formats/zipguard",
     "crates/formats/formulakit",
     "crates/formats/sheetparts",
+    "crates/formats/pdfparts",
+    "crates/formats/barcodes",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
     "crates/readers/rezzer-read-sheet",
+    "crates/readers/rezzer-read-pdf",
     "crates/rezzer",
 ]
 # The fuzz targets are their own cargo-fuzz project (nightly only).
@@ -42,7 +45,7 @@ encoding_rs = "=0.8.42"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
 csv = "=1.4.0"
 whatlang = "=0.18.0"
-tokio = "=1.54.0"
+tokio = "=1.54.1"
 schemars = "=1.2.3"
 toml = "=1.1.8"
 saphyr-parser = "=0.2.2"
@@ -62,6 +65,25 @@ percent-encoding = "=2.3.2"
 formualizer-parse = { version = "=4.0.0", default-features = false }
 quick-xml = "=0.42.0"
 calamine = { version = "=0.37.0", default-features = false }
+lopdf = { version = "=0.45.0", default-features = false }
+weezl = "=0.2.1"
+# The Adler-32 of zlib streams; already in the tree through miniz_oxide.
+adler2 = { version = "=2.0.1", default-features = false }
+brotli-decompressor = "=5.0.3"
+# One version for the three hayro crates. hayro-interpret's default features embed the
+# standard 14 font substitutes and the predefined CMaps that text extraction needs.
+hayro = "=0.8.0"
+hayro-interpret = "=0.8.0"
+hayro-syntax = "=0.8.0"
+# The versions hayro-interpret 0.8.0 uses, so its glyph and font types are the same types.
+kurbo = "=0.13.1"
+skrifa = "=0.46.2"
+# skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
+read-fonts = { version = "=0.43.3", features = ["agl"] }
+unicode-bidi = "=0.3.18"
+# Barcode and QR code reading. Its default features pull in the image crate and the encoders;
+# Rezzer hands it Luma8 pixels. MaxiCode stays off through the formats each pass asks for.
+rxing = { version = "=0.9.3", default-features = false, features = ["decoders", "multi_barcode_readers", "full_barcode_format_support", "encoding_rs"] }
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.
@@ -70,3 +92,11 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Measured 2026-10-22 on an Apple M5, cold build of the binary: strip takes it from 22.2 MB
+# to 17.6 MB, one codegen unit to 15.0 MB for 13 s more (63 to 76 s). Thin LTO gives no
+# smaller binary on top and makes a rebuild slower. Never set panic = "abort": the render
+# sizing, the barcode worker and the pipeline rely on catching a panic.
+[profile.release]
+strip = true
+codegen-units = 1

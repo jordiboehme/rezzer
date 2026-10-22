@@ -1,1 +1,3 @@
 # path<TAB>url<TAB>sha256 - files over 2 MB that are not in the repo. Fetch with scripts/fetch-corpus.sh
+pdf/nist-sp800-53r5.pdf	https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf	fc63bcd61715d0181dd8e85998b1e6201ae3515fc6626102101cab1841e11ec6
+pdf/arxiv-2408.09869-docling-report.pdf	https://arxiv.org/pdf/2408.09869v5	82dd470712ce8389f19f20eb9330475e2166a281f8c7990a9f1d0763d73b4d22

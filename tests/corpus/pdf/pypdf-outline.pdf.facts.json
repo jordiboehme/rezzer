@@ -1,0 +1,23 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 4
+  },
+  {
+    "pointer": "/body/0/anchor",
+    "equals": "outline"
+  },
+  {
+    "contains": "- Foo, page 2\n- Bar, page 2\n- Baz, page 2"
+  },
+  {
+    "contains": "- Baz, page 4"
+  },
+  {
+    "contains": "## Contents"
+  }
+]

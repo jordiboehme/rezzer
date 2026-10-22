@@ -1,0 +1,104 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "assets": [
+    {
+      "alt": "no text layer, 1 picture",
+      "id": "page-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": ""
+    }
+  ],
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        },
+        {
+          "asset": "page-1",
+          "type": "media"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "1"
+      ],
+      [
+        "Images",
+        "1"
+      ],
+      [
+        "Last changed",
+        "2010-03-10T13:43:42-05:00"
+      ]
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2010-03-10T12:01:52-05:00"
+    },
+    "custom": {
+      "creator": {
+        "type": "text",
+        "value": "Adobe Acrobat 9.3.1"
+      },
+      "pdf_version": {
+        "type": "text",
+        "value": "1.6"
+      },
+      "producer": {
+        "type": "text",
+        "value": "Adobe Acrobat 9.3.1 Image Conversion Plug-in"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "has_javascript": false,
+      "pages": 1,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2010-03-10T13:43:42-05:00"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "scan-truman-letter-nara.pdf",
+    "path": "<corpus>/pdf/scan-truman-letter-nara.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "a775d592b0780a097bd41a3738b9ce369a98cc2eabf4831a17251beb9f0cb7fd",
+    "size": 266833
+  }
+}

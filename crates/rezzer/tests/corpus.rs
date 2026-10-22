@@ -3,11 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The public test corpus in `tests/corpus/`, run through the real pipeline (text, Markdown,
-//! CSV and spreadsheet readers, no cache, `generated.at` fixed). Each corpus file has a
+//! CSV, spreadsheet and PDF readers, no cache, `generated.at` fixed). Each corpus file has a
 //! `<file>.facts.json` next to it; `corpus_facts` checks them all and reports every failure
 //! at once, `corpus_golden` keeps `insta` snapshots of the model JSON and the Markdown of the
-//! text files and of [`GOLDEN_OFFICE`]. The named spreadsheet tests below check what the
-//! workbooks prove: knowledge, not formatting.
+//! text files, of [`GOLDEN_OFFICE`] and of [`GOLDEN_PDF`]. The named spreadsheet and PDF
+//! tests below check what the files prove: knowledge, not formatting. The large files of
+//! `remote.tsv` are not walked; ignored tests read them after `scripts/fetch-corpus.sh`.
 //!
 //! A fact is `{ "pointer": "/json/pointer", "equals"?: v, "len"?: n, "min_len"?: n,
 //! "contains"?: "text", "absent"?: true }`. `absent`: the pointer must not exist. `pointer` points into the Document JSON; `contains` is a substring
@@ -18,7 +19,8 @@
     feature = "fmt-markdown",
     feature = "fmt-csv",
     feature = "fmt-xlsx",
-    feature = "fmt-ods"
+    feature = "fmt-ods",
+    feature = "fmt-pdf"
 ))]
 
 use std::path::{Path, PathBuf};
@@ -26,6 +28,11 @@ use std::path::{Path, PathBuf};
 use rezzer_model::Registry;
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
 use serde_json::Value;
+
+/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
+/// ships with.
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
 const GENERATED_AT: &str = "2026-01-01T00:00:00Z";
 
@@ -39,6 +46,7 @@ fn pipeline() -> Pipeline {
     registry.register(Box::new(rezzer_read_markdown::MarkdownReader));
     registry.register(Box::new(rezzer_read_csv::CsvReader));
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
     let config = Config {
         cache: false,
         ..Config::default()
@@ -56,7 +64,7 @@ fn request() -> Request {
 
 /// Folders whose files run through the pipeline with facts. `office/malformed/` is not walked:
 /// the hostile tests read those files.
-const PIPELINE_FOLDERS: [&str; 2] = ["web-text", "office"];
+const PIPELINE_FOLDERS: [&str; 3] = ["web-text", "office", "pdf"];
 
 /// The spreadsheets with golden files: one of each format and the main kinds of logic
 /// (engineering chains, folded add-in calls, data tables, LAMBDA and spills, threaded
@@ -72,8 +80,25 @@ const GOLDEN_OFFICE: [&str; 8] = [
     "testEXCEL_various.xlsb",
 ];
 
-/// Corpus files, sorted: the files right in the pipeline folders, except facts files.
+/// The PDFs with golden files: form logic (a calculation, formats in words, a LibreOffice
+/// form, buttons with scripts), an annotation at its passage, two columns, page labels with
+/// an outline, a scan that needs vision, and an invoice with a logo.
+const GOLDEN_PDF: [&str; 9] = [
+    "pdfjs-text-field-calc.pdf",
+    "pdfbox-sf1199a-direct-deposit.pdf",
+    "pdfjs-annotation-highlight.pdf",
+    "pypdf-multicolumn.pdf",
+    "qpdf-page-labels-and-outlines.pdf",
+    "pdfjs-js-buttons.pdf",
+    "pypdf-libreoffice-form.pdf",
+    "scan-truman-letter-nara.pdf",
+    "mustang-gnuaccounting-invoice-508.pdf",
+];
+
+/// Corpus files, sorted: the files right in the pipeline folders, except facts files and the
+/// large files of `remote.tsv` (they may be absent).
 fn corpus_files() -> Vec<PathBuf> {
+    let remote = remote_rows();
     let mut files = Vec::new();
     for folder in std::fs::read_dir(corpus_dir()).unwrap() {
         let folder = folder.unwrap().path();
@@ -87,7 +112,11 @@ fn corpus_files() -> Vec<PathBuf> {
         for file in std::fs::read_dir(&folder).unwrap() {
             let file = file.unwrap().path();
             let name = file.file_name().unwrap().to_string_lossy().to_string();
-            if file.is_file() && !name.ends_with(".facts.json") && !name.starts_with('.') {
+            if file.is_file()
+                && !name.ends_with(".facts.json")
+                && !name.starts_with('.')
+                && !remote.contains_key(&relative(&file))
+            {
                 files.push(file);
             }
         }
@@ -265,6 +294,10 @@ fn corpus_golden() {
             if office && !GOLDEN_OFFICE.contains(&name.as_str()) {
                 continue;
             }
+            let pdf = file.parent().is_some_and(|p| p.ends_with("pdf"));
+            if pdf && !GOLDEN_PDF.contains(&name.as_str()) {
+                continue;
+            }
             let out = run(&pipeline, &file);
             insta::assert_snapshot!(format!("{name}.json"), snapshot_json(&out, &corpus));
             insta::assert_snapshot!(format!("{name}.md"), redact(&out.markdown, &corpus));
@@ -373,6 +406,71 @@ fn office_corpus_matches_manifest() {
     }
     problems.extend(listed.keys().map(|k| format!("{k}: no such file")));
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Every file in `pdf/` (without the facts files) is listed in MANIFEST.md with its full
+/// SHA-256, every `pdf/` row has a file, and no file is over 2 MB. The two large files that are
+/// not in the repo are listed in `remote.tsv` only: they may be absent, and when present they
+/// must match their hash.
+#[test]
+fn pdf_corpus_matches_manifest() {
+    let mut listed = manifest_rows();
+    listed.retain(|k, _| k.starts_with("pdf/"));
+    assert_eq!(listed.len(), 39, "expected 39 pdf rows");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(corpus_dir().join("pdf"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| !p.to_string_lossy().ends_with(".facts.json"))
+        .collect();
+    files.sort();
+    let remote = remote_rows();
+    let mut problems = Vec::new();
+    for file in &files {
+        let rel = relative(file);
+        if let Some(expected) = remote.get(&rel) {
+            if sha256_of(file) != *expected {
+                problems.push(format!("{rel}: hash differs from remote.tsv"));
+            }
+            continue;
+        }
+        let len = std::fs::metadata(file).unwrap().len();
+        if len > 2 * 1024 * 1024 {
+            problems.push(format!("{rel}: {len} bytes, over 2 MB"));
+        }
+        match listed.remove(&rel) {
+            None => problems.push(format!("{rel}: not in MANIFEST.md")),
+            Some(h) if h.len() != 64 => problems.push(format!("{rel}: not a full SHA-256")),
+            Some(h) if h != sha256_of(file) => problems.push(format!("{rel}: hash differs")),
+            Some(_) => {}
+        }
+    }
+    problems.extend(listed.keys().map(|k| format!("{k}: no such file")));
+    for name in [
+        "pdf/nist-sp800-53r5.pdf",
+        "pdf/arxiv-2408.09869-docling-report.pdf",
+    ] {
+        if !remote.contains_key(name) {
+            problems.push(format!("{name}: not in remote.tsv"));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The `pdf/` rows of `remote.tsv` (path, SHA-256): large files that are fetched, not committed.
+fn remote_rows() -> std::collections::BTreeMap<String, String> {
+    let list = std::fs::read_to_string(corpus_dir().join("remote.tsv")).unwrap();
+    let mut rows = std::collections::BTreeMap::new();
+    for line in list
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let cells: Vec<&str> = line.split('\t').collect();
+        assert_eq!(cells.len(), 3, "bad remote.tsv row: {line}");
+        assert!(cells[1].starts_with("https://"), "not https: {line}");
+        assert_eq!(cells[2].len(), 64, "not a full SHA-256: {line}");
+        rows.insert(cells[0].to_string(), cells[2].to_string());
+    }
+    rows
 }
 
 // The spreadsheet corpus: what each workbook proves. The checks read the model JSON (and the
@@ -969,4 +1067,635 @@ fn all_corpus_formulas_parse() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+// The PDF corpus: what each file proves. As for the spreadsheets, the checks read the model
+// JSON, and the Markdown only for what exists only there.
+
+/// The model JSON and the Markdown of `pdf/<name>`.
+fn pdf(name: &str) -> Output {
+    run(&pipeline(), &corpus_dir().join("pdf").join(name))
+}
+
+fn texts<'a>(values: &'a [Value], key: &str) -> Vec<&'a str> {
+    values.iter().filter_map(|v| v[key].as_str()).collect()
+}
+
+/// Maximum resident set size of the process: the PDF reader works on more than one thread,
+/// so the heap of the calling thread is not enough. It is the figure of one test only under
+/// nextest, which runs every test in its own process.
+#[cfg(unix)]
+fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
+}
+
+#[test]
+fn irs_form_fields_and_xfa() {
+    let doc = pdf("irs-f1040-2025.pdf").json;
+    let fields = list(&doc, "/facets/fields");
+    // Every field of the form is a terminal field: the widgets that hold a value.
+    assert_eq!(fields.len(), 199);
+    assert!(fields.iter().all(|f| {
+        f["name"]
+            .as_str()
+            .unwrap()
+            .starts_with("topmostSubform[0].Page")
+    }));
+    let kinds: std::collections::BTreeMap<&str, usize> =
+        fields.iter().fold(Default::default(), |mut m, f| {
+            *m.entry(f["kind"].as_str().unwrap()).or_default() += 1;
+            m
+        });
+    assert_eq!(kinds, [("checkbox", 73), ("text", 126)].into());
+    // The XFA data is said, not read.
+    assert!(
+        list(&doc, "/losses").iter().any(
+            |l| l["what"] == "XFA form data present, not read" && l["why"] == "not_implemented"
+        ),
+        "{:?}",
+        doc["losses"]
+    );
+    // Three document scripts, listed with their text, never run.
+    let scripts: Vec<&Value> = list(&doc, "/facets/embedded")
+        .iter()
+        .filter(|e| e["kind"] == "script")
+        .collect();
+    assert_eq!(scripts.len(), 3);
+    assert!(scripts.iter().all(|s| s["name"] == "document"));
+    assert!(
+        scripts
+            .iter()
+            .all(|s| s["text"].as_str().is_some_and(|t| !t.is_empty()))
+    );
+    assert!(scripts[2]["detail"].as_str().unwrap().contains("XFACheck"));
+    // The usage-rights signature covers the whole file. It is listed, not counted as signed.
+    let sigs = list(&doc, "/facets/signatures");
+    assert_eq!(sigs.len(), 1);
+    assert_eq!(sigs[0]["kind"], "usage-rights");
+    assert_eq!(sigs[0]["covers_whole_file"], true);
+    assert_eq!(sigs[0]["later_revisions"], 0);
+    let facts = &doc["properties"]["facts"];
+    assert_eq!(facts["signatures"], 1);
+    assert_eq!(facts["signed"], false);
+    // The file is linearized: the first-page section and the main section are one save, the
+    // signature is the second.
+    assert_eq!(facts["revisions"], 2);
+    let timeline = list(&doc, "/facets/timeline");
+    assert_eq!(timeline.len(), 2);
+    assert!(timeline[1]["text"].as_str().unwrap().contains("(Sig)"));
+}
+
+#[test]
+fn sf1199a_formats_in_words() {
+    let doc = pdf("pdfbox-sf1199a-direct-deposit.pdf").json;
+    let format = |name: &str| {
+        list(&doc, "/facets/fields")
+            .iter()
+            .find(|f| f["name"] == name)
+            .unwrap_or_else(|| panic!("no field {name}"))["format"]
+            .clone()
+    };
+    assert_eq!(format("Phone"), "phone number");
+    assert_eq!(format("Bank Rep Phone"), "phone number");
+    assert_eq!(
+        format("Allottment Amount"),
+        "number, 2 decimals, \"$\" before the number"
+    );
+    assert_eq!(format("Check Digit"), "number, 0 decimals");
+    assert_eq!(
+        format("Prefix for Claim or Payrooo ID Number"),
+        "number, 0 decimals, no thousands separator"
+    );
+    assert_eq!(format("Bank Rep Date"), "date mm/dd/yyyy");
+    assert_eq!(format("Name"), Value::Null);
+    // The words come from the AF calls, which stay as the script text.
+    let date = list(&doc, "/facets/fields")
+        .iter()
+        .find(|f| f["name"] == "Bank Rep Date")
+        .unwrap();
+    assert_eq!(date["actions"][0]["trigger"], "format");
+    assert_eq!(
+        date["actions"][0]["script"],
+        "AFDate_FormatEx(\"mm/dd/yyyy\");"
+    );
+    assert_eq!(date["actions"][0]["words"], "date mm/dd/yyyy");
+}
+
+#[test]
+fn calc_order_file() {
+    let doc = pdf("pdfjs-acroform-calculation-order.pdf").json;
+    let fields = list(&doc, "/facets/fields");
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0]["name"], "group");
+    assert_eq!(fields[0]["calc_order"], 1);
+    // The calculation order of the text-field file comes with its rule.
+    let out = pdf("pdfjs-text-field-calc.pdf");
+    let mirror = list(&out.json, "/facets/fields")
+        .iter()
+        .find(|f| f["name"] == "Mirror")
+        .unwrap();
+    assert_eq!(mirror["calc_order"], 1);
+    assert_eq!(mirror["role"], "result");
+    let formula = at(&out.json, "formulas", "field:Mirror");
+    assert_eq!(formula["dialect"], "pdf-js");
+    assert_eq!(refs(formula), ["field:Source"]);
+    assert!(out.markdown.contains("Mirror, calc 1:"), "{}", out.markdown);
+}
+
+#[test]
+fn annotations_by_author() {
+    let tim = "Tim van der Meij";
+    for (file, kind, author, date, quoted, body) in [
+        (
+            "pdfjs-annotation-highlight.pdf",
+            "highlight",
+            tim,
+            "2015-12-30T15:22:48+01:00",
+            Some("Lorem ipsum dolor sit amet"),
+            Some("Highlight content"),
+        ),
+        (
+            "pdfjs-annotation-strikeout.pdf",
+            "strikeout",
+            tim,
+            "2015-12-29T15:05:16+01:00",
+            Some("Lorem ipsum dolor sit amet"),
+            Some("StrikeOut content"),
+        ),
+        (
+            "pdfjs-annotation-underline.pdf",
+            "underline",
+            tim,
+            "2015-12-28T00:27:36+01:00",
+            Some("Lorem ipsum dolor sit amet"),
+            Some("Underline content"),
+        ),
+        (
+            "pdfjs-annotation-caret-ink.pdf",
+            "caret",
+            tim,
+            "2015-12-20T23:46:04+01:00",
+            None,
+            Some("Caret content"),
+        ),
+        (
+            "pdfjs-annotation-caret-ink.pdf",
+            "ink",
+            tim,
+            "2015-12-20T23:46:43+01:00",
+            None,
+            Some("Ink content"),
+        ),
+        (
+            "pdfjs-annotation-freetext.pdf",
+            "free-text",
+            tim,
+            "2015-12-20T23:32:13+01:00",
+            None,
+            Some("FreeText content"),
+        ),
+        (
+            "pdfjs-annotation-link-text-popup.pdf",
+            "note",
+            tim,
+            "2015-12-20T23:37:35+01:00",
+            None,
+            Some("Text content"),
+        ),
+        (
+            "pypdf-annotated.pdf",
+            "ink",
+            "Lucas",
+            "",
+            None,
+            Some("Hello world!"),
+        ),
+    ] {
+        let out = pdf(file);
+        let a = list(&out.json, "/facets/annotations")
+            .iter()
+            .find(|a| a["kind"] == kind)
+            .unwrap_or_else(|| panic!("{file}: no {kind}"));
+        assert_eq!(a["author"], author, "{file} {kind}");
+        if !date.is_empty() {
+            assert_eq!(a["date"], date, "{file} {kind}");
+        }
+        assert_eq!(a["quoted"].as_str(), quoted, "{file} {kind}");
+        assert_eq!(a["body"][0]["text"].as_str(), body, "{file} {kind}");
+        // Every annotation sits at a block of its page, and the Markdown shows it there.
+        let anchor = a["anchor"].as_str().unwrap();
+        assert!(anchor.starts_with("p1:b"), "{file}: {anchor}");
+        let mut words = kind.replace('-', " ");
+        words[..1].make_ascii_uppercase();
+        let head = format!("> [!NOTE] {} by {author}", words.replace(' ', "-"));
+        assert!(
+            out.markdown.contains(&head),
+            "{file}: {head}\n{}",
+            out.markdown
+        );
+    }
+    // pypdf's highlight spans two lines and has no author; its date has no zone.
+    let doc = pdf("pypdf-annotated.pdf").json;
+    let hl = list(&doc, "/facets/annotations")
+        .iter()
+        .find(|a| a["kind"] == "highlight")
+        .unwrap();
+    assert_eq!(hl["quoted"], "Line 1 Line 2");
+    assert!(hl.get("author").is_none());
+    assert_eq!(hl["date"], "1990-04-28T00:00:00");
+    assert_eq!(
+        texts(list(&doc, "/facets/annotations"), "kind"),
+        ["note", "highlight", "ink"]
+    );
+}
+
+/// The text of every list item of the outline section, depth first.
+fn outline_items(doc: &Value) -> Vec<String> {
+    fn walk(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::Object(m) => {
+                if m.get("type").and_then(Value::as_str) == Some("paragraph") {
+                    let text: String = list(v, "/inlines")
+                        .iter()
+                        .filter_map(|i| i["text"].as_str())
+                        .collect();
+                    out.push(text);
+                }
+                m.values().for_each(|v| walk(v, out));
+            }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let outline = list(doc, "/body")
+        .iter()
+        .find(|s| s["anchor"] == "outline")
+        .expect("an outline section");
+    let mut out = Vec::new();
+    walk(&outline["blocks"], &mut out);
+    out
+}
+
+#[test]
+fn outline_and_labels() {
+    let out = pdf("qpdf-page-labels-and-outlines.pdf");
+    let items = outline_items(&out.json);
+    assert_eq!(items.len(), 11, "{items:?}");
+    // An outline item names the page by its label; when the label is not unique, the
+    // physical page follows.
+    assert_eq!(items[0], "Isís 1 -> 5: /XYZ null null null, page iv");
+    assert_eq!(
+        items[2],
+        "Isosicle 1.1.1 -> 12: /FitV 100, page 2 (page 13 of the file)"
+    );
+    assert_eq!(items[10], "Trepak 2 -> 15: /XYZ 66 756 3, page 6");
+    // Every page section carries its label and its physical number.
+    let markers: Vec<String> = list(&out.json, "/body")
+        .iter()
+        .filter(|s| s["kind"] == "page")
+        .map(|s| {
+            s["blocks"][0]["inlines"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(markers.len(), 30);
+    assert_eq!(
+        markers[..5],
+        [
+            "Page 1",
+            "Page 2",
+            "Page i (3)",
+            "Page ii (4)",
+            "Page iii (5)"
+        ]
+    );
+    assert_eq!(markers[12], "Page 2 (13)");
+    // Internal links never render as Markdown links: no target exists.
+    let section = out.markdown.split("## Outline").nth(1).unwrap();
+    let section = section.split(":status[Page 1]").next().unwrap();
+    assert!(!section.contains("]("), "{section}");
+    // pypdf's outline is flat, nine items over pages 2 to 4.
+    let items = outline_items(&pdf("pypdf-outline.pdf").json);
+    assert_eq!(items.len(), 9, "{items:?}");
+    assert_eq!(items[0], "Foo, page 2");
+    assert_eq!(items[8], "Baz, page 4");
+}
+
+#[test]
+fn layers_six() {
+    let doc = pdf("pypdf-ocg-layers.pdf").json;
+    assert_eq!(doc["properties"]["facts"]["layers"], 6);
+    let names = doc["properties"]["custom"]["layers"]["value"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        names,
+        "North Arrow (shown), Scale Bar (shown), Map Frame (shown), Map (shown), \
+         Light Gray Base (shown), Data Source Attribution (shown)"
+    );
+}
+
+#[test]
+fn threads_titles() {
+    let doc = pdf("pdfbox-poems-article-threads.pdf").json;
+    let threads: Vec<(&str, &str)> = list(&doc, "/facets/embedded")
+        .iter()
+        .filter(|e| e["kind"] == "article-thread")
+        .map(|e| (e["name"].as_str().unwrap(), e["detail"].as_str().unwrap()))
+        .collect();
+    // The second title is spelled so in the file.
+    assert_eq!(
+        threads,
+        [("Erlkönig", "page 1"), ("Moulière", "pages 1, 2")]
+    );
+}
+
+#[test]
+fn attachment_listed() {
+    let out = pdf("pypdf-attachment.pdf");
+    let attachments: Vec<&Value> = list(&out.json, "/facets/embedded")
+        .iter()
+        .filter(|e| e["kind"] == "attachment")
+        .collect();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0]["name"], "image.png");
+    assert_eq!(attachments[0]["detail"], "6669 bytes");
+    // Listed, never extracted without an output directory.
+    assert!(list(&out.json, "/assets").is_empty());
+}
+
+#[test]
+fn xmp_title() {
+    let doc = pdf("pypdf-xmp.pdf").json;
+    assert_eq!(doc["properties"]["title"], "Sample PDF with XMP Metadata");
+    assert_eq!(
+        doc["properties"]["authors"],
+        serde_json::json!(["John Doe"])
+    );
+    assert_eq!(
+        doc["properties"]["created"]["value"],
+        "2023-04-10T07:46:54Z"
+    );
+    assert_eq!(
+        doc["properties"]["custom"]["subject"]["value"],
+        "This is a text"
+    );
+}
+
+#[test]
+fn aes_files_encrypted_fact() {
+    for file in [
+        "qpdf-aes128-empty-user-password.pdf",
+        "qpdf-aes256-empty-user-password.pdf",
+    ] {
+        let out = pdf(file);
+        let facts = &out.json["properties"]["facts"];
+        assert_eq!(facts["encrypted"], true, "{file}");
+        assert_eq!(facts["pages"], 30, "{file}");
+        assert!(list(&out.json, "/losses").is_empty(), "{file}");
+        assert!(out.markdown.contains("encrypted: true"), "{file}");
+        assert!(out.markdown.contains("Potato 29"), "{file}");
+    }
+    // The same text without encryption has no such fact.
+    let plain = pdf("qpdf-page-labels-and-outlines.pdf").json;
+    assert_eq!(plain["properties"]["facts"]["encrypted"], false);
+    // A file that needs a password is not read and says so.
+    let locked = pdf("qpdf-user-password.pdf");
+    assert_eq!(locked.json["losses"][0]["why"], "encrypted");
+    assert!(locked.markdown.contains("completeness: failed"));
+}
+
+#[test]
+fn scan_needs_vision() {
+    let out = pdf("scan-truman-letter-nara.pdf");
+    let assets = list(&out.json, "/assets");
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["id"], "page-1");
+    assert_eq!(assets[0]["mime"], "image/png");
+    assert_eq!(assets[0]["needs_vision"], true);
+    assert_eq!(assets[0]["alt"], "no text layer, 1 picture");
+    // The page has no word of its own; the reader says what to look at.
+    let page = &list(&out.json, "/body")[0];
+    assert!(
+        list(page, "/blocks")
+            .iter()
+            .any(|b| b["type"] == "media" && b["asset"] == "page-1"),
+        "{page}"
+    );
+    // Without an output directory nothing is rendered: the asset has no file.
+    assert!(assets[0].get("path").is_none(), "{}", assets[0]);
+}
+
+#[test]
+fn arabic_not_reversed() {
+    let out = pdf("pypdf-arabic-habibi.pdf");
+    // حَبيبي in logical order: hah first.
+    assert!(
+        out.markdown
+            .contains("\u{62d}\u{64e}\u{628}\u{64a}\u{628}\u{64a} habibi"),
+        "{}",
+        out.markdown
+    );
+    assert!(
+        !out.markdown
+            .contains("\u{64a}\u{628}\u{64a}\u{628}\u{64e}\u{62d}")
+    );
+    assert!(!out.markdown.contains("ibibah"));
+}
+
+/// The reads of the large remote files run under the default limits; their time and maximum
+/// resident set size are printed for the report (`--no-capture`).
+fn remote_pdf(name: &str) -> PathBuf {
+    let path = corpus_dir().join("pdf").join(name);
+    assert!(
+        path.exists(),
+        "{name} is missing: run scripts/fetch-corpus.sh first"
+    );
+    path
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs scripts/fetch-corpus.sh"]
+fn nist_reads_under_limits() {
+    let path = remote_pdf("nist-sp800-53r5.pdf");
+    let start = std::time::Instant::now();
+    let out = run(&pipeline(), &path);
+    let took = start.elapsed();
+    let rss = max_rss_bytes();
+    eprintln!(
+        "nist-sp800-53r5.pdf: {took:?}, max RSS {} MiB, {} bytes of Markdown",
+        rss >> 20,
+        out.markdown.len()
+    );
+    let doc = &out.json;
+    assert_eq!(doc["properties"]["facts"]["pages"], 492);
+    assert_eq!(doc["properties"]["facts"]["tagged"], true);
+    let pages = list(doc, "/body")
+        .iter()
+        .filter(|s| s["kind"] == "page")
+        .count();
+    assert_eq!(pages, 492);
+    // Read whole under the default limits: no page is cut.
+    assert!(
+        !list(doc, "/losses").iter().any(|l| l["why"] == "limit"),
+        "{:?}",
+        doc["losses"]
+    );
+    assert!(
+        out.markdown
+            .contains("Security and Privacy Controls for Information Systems")
+    );
+    assert!(took < Config::default().limits.max_time, "{took:?}");
+    // The RSS is the figure of this test only under nextest (one process per test).
+    assert!(
+        std::env::var_os("NEXTEST").is_none() || rss < 1 << 30,
+        "max RSS {} MiB",
+        rss >> 20
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs scripts/fetch-corpus.sh"]
+fn arxiv_tables_and_pictures() {
+    let path = remote_pdf("arxiv-2408.09869-docling-report.pdf");
+    let dir = tempfile::tempdir().unwrap();
+    let request = Request {
+        output_dir: Some(dir.path().to_path_buf()),
+        ..request()
+    };
+    let start = std::time::Instant::now();
+    let result = pipeline().run_path(&path, &request);
+    let took = start.elapsed();
+    let rss = max_rss_bytes();
+    eprintln!(
+        "arxiv-2408.09869-docling-report.pdf: {took:?}, max RSS {} MiB",
+        rss >> 20
+    );
+    let doc: Value = serde_json::from_str(result.json.as_deref().unwrap()).unwrap();
+    assert_eq!(doc["properties"]["facts"]["pages"], 9);
+    // The pages with figures need vision and are rendered into the bundle.
+    let pictures: Vec<&str> = list(&doc, "/assets")
+        .iter()
+        .filter(|a| a["needs_vision"] == true)
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    assert_eq!(pictures, ["page-1", "page-3", "page-8", "page-9"]);
+    let bundle = dir
+        .path()
+        .join("arxiv-2408.09869-docling-report.pdf.assets");
+    for id in &pictures {
+        let png = std::fs::read(bundle.join(format!("{id}.png"))).unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "{id}");
+    }
+    // The tables of the report are drawn with a top and a bottom rule only. They stay
+    // paragraphs, and the output says where a table may be.
+    let unsure: Vec<&str> = list(&doc, "/losses")
+        .iter()
+        .filter(|l| l["why"] == "uncertain")
+        .filter_map(|l| l["location"].as_str())
+        .collect();
+    assert_eq!(unsure, ["p5", "p8", "p9"], "{:?}", doc["losses"]);
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Table 1: Runtime characteristics of Docling"));
+    assert!(md.contains("Apple M3 Max"));
+    assert!(took < Config::default().limits.max_time, "{took:?}");
+    assert!(
+        std::env::var_os("NEXTEST").is_none() || rss < 512 << 20,
+        "max RSS {} MiB",
+        rss >> 20
+    );
+}
+
+/// The text of one page section of the model, its blocks joined by blank lines.
+fn page_text(doc: &Value, page: u32) -> String {
+    fn walk(v: &Value, out: &mut String) {
+        match v {
+            Value::Object(m) => {
+                if let Some(t) = m.get("text").and_then(Value::as_str) {
+                    out.push_str(t);
+                }
+                if m.get("type").and_then(Value::as_str) == Some("line_break") {
+                    out.push(' ');
+                }
+                if let Some(inlines) = m.get("inlines") {
+                    walk(inlines, out);
+                }
+                for key in ["blocks", "items", "rows", "cells"] {
+                    if let Some(inner) = m.get(key) {
+                        walk(inner, out);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let section = list(doc, "/body")
+        .iter()
+        .find(|s| s["anchor"] == format!("p{page}"))
+        .unwrap_or_else(|| panic!("no page {page}"));
+    let mut out = String::new();
+    for block in list(section, "/blocks") {
+        walk(block, &mut out);
+        out.push_str("\n\n");
+    }
+    out
+}
+
+#[test]
+fn sf1199a_back_page_reads_as_prose() {
+    // The back of the form is set in a larger size than the front. Its body text is prose,
+    // not headings, and its sentences stay whole.
+    let doc = pdf("pdfbox-sf1199a-direct-deposit.pdf").json;
+    let section = list(&doc, "/body")
+        .iter()
+        .find(|s| s["anchor"] == "p4")
+        .unwrap();
+    let headings: Vec<&Value> = list(section, "/blocks")
+        .iter()
+        .filter(|b| b["type"] == "heading")
+        .collect();
+    assert!(headings.is_empty(), "{headings:?}");
+    let text = page_text(&doc, 4);
+    for sentence in [
+        "is required under 31 USC 3322, 31 CFR 209 and/or 210.",
+        "Failure to provide the requested information may affect the processing of this form",
+        "The financial institution cannot cancel the authorization by advice to the Government agency.",
+    ] {
+        let squeezed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(squeezed.contains(sentence), "{sentence}\n{text}");
+    }
+    // A number that goes on a sentence is not a list item.
+    assert!(
+        !list(section, "/blocks").iter().any(|b| b["type"] == "list"),
+        "{section}"
+    );
+}
+
+#[test]
+fn multicolumn_reads_column_by_column() {
+    // The left column of page 1 ends with "Donec nonummy"; the right column goes on with
+    // "pellentesque ante". The left column is read whole before the right one.
+    let text = page_text(&pdf("pypdf-multicolumn.pdf").json, 1);
+    let end_left = text
+        .find("Donec nonummy")
+        .expect("the end of the left column");
+    let start_right = text
+        .find("pellentesque ante. Phasellus")
+        .expect("the start of the right column");
+    assert!(end_left < start_right, "{text}");
+    let abstract_at = text.find("This is a sample document").unwrap();
+    assert!(abstract_at < end_left);
 }

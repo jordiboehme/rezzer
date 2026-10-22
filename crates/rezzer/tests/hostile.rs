@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Hostile input through the whole pipeline (text, Markdown, CSV and spreadsheet readers, no
-//! cache): the run ends cleanly, inside its limits, and says what it could not do. The files
+//! Hostile input through the whole pipeline (text, Markdown, CSV, spreadsheet and PDF readers,
+//! no cache): the run ends cleanly, inside its limits, and says what it could not do. The files
 //! are made in memory or in a temp dir, or come from `tests/corpus/office/malformed/`;
 //! nothing is executed.
 #![cfg(all(
@@ -11,10 +11,11 @@
     feature = "fmt-markdown",
     feature = "fmt-csv",
     feature = "fmt-xlsx",
-    feature = "fmt-ods"
+    feature = "fmt-ods",
+    feature = "fmt-pdf"
 ))]
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
@@ -22,8 +23,13 @@ use rezzer_model::{Completeness, LossReason, Registry};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request, RunResult};
 
 /// Counts the heap of the thread that allocates, so tests that run side by side do not
-/// disturb a measurement. The pipeline runs on the calling thread.
+/// disturb a measurement. The pipeline runs on the calling thread. The memory itself comes
+/// from the allocator of the Rezzer binary, so the RSS these tests measure is the RSS it ships
+/// with.
 struct Counting;
+
+/// Where [`Counting`] takes its memory from.
+const INNER: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
 thread_local! {
     static CURRENT: Cell<isize> = const { Cell::new(0) };
@@ -45,16 +51,16 @@ fn shrink(n: usize) {
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         grow(l.size());
-        unsafe { System.alloc(l) }
+        unsafe { INNER.alloc(l) }
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
         shrink(l.size());
-        unsafe { System.dealloc(p, l) }
+        unsafe { INNER.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
         shrink(l.size());
         grow(new);
-        unsafe { System.realloc(p, l, new) }
+        unsafe { INNER.realloc(p, l, new) }
     }
 }
 
@@ -81,6 +87,7 @@ fn pipeline_with(max_time: Option<Duration>) -> Pipeline {
     registry.register(Box::new(rezzer_read_markdown::MarkdownReader));
     registry.register(Box::new(rezzer_read_csv::CsvReader));
     registry.register(Box::new(rezzer_read_sheet::SheetReader));
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
     let mut config = Config {
         cache: false,
         ..Config::default()
@@ -885,4 +892,774 @@ fn ods_content_cut_at_a_limit_names_that_limit() {
         "{:?}",
         losses(&result)
     );
+}
+
+// Hostile PDFs. The files are written by hand (a classic cross-reference table, or a
+// cross-reference stream where an object stream needs one). The PDF reader works on more than
+// one thread, so memory is measured as the maximum resident set size of the process, not as
+// the heap of the calling thread.
+
+/// Maximum resident set size of the process. It is the figure of one test only under
+/// nextest, which runs every test in its own process; under `cargo test` it covers every
+/// test that ran before in the same process.
+#[cfg(unix)]
+fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
+}
+
+/// The bound every hostile PDF test holds.
+#[cfg(unix)]
+const RSS_BOUND: u64 = 512 * MB as u64;
+
+/// Whether the test runs under nextest, which runs every test in its own process. Only then
+/// is the process's maximum RSS the figure of one test; under `cargo test` the RSS checks are
+/// skipped (and say so) rather than fail on the tests that ran before.
+#[cfg(unix)]
+fn own_process(test: &str) -> bool {
+    let own = std::env::var_os("NEXTEST").is_some();
+    if !own {
+        eprintln!("{test}: RSS not checked, the test needs nextest (one process per test)");
+    }
+    own
+}
+
+#[cfg(unix)]
+fn assert_rss_bounded(test: &str) {
+    if !own_process(test) {
+        return;
+    }
+    let rss = max_rss_bytes();
+    eprintln!("{test}: max RSS {} MiB", rss >> 20);
+    assert!(rss < RSS_BOUND, "{test}: max RSS {} MiB", rss >> 20);
+}
+
+/// A PDF being written: object `n` is `objects[n - 1]`.
+#[cfg(unix)]
+#[derive(Default)]
+struct PdfFile {
+    objects: Vec<Vec<u8>>,
+}
+
+#[cfg(unix)]
+impl PdfFile {
+    fn reserve(&mut self) -> u32 {
+        self.objects.push(Vec::new());
+        self.objects.len() as u32
+    }
+
+    fn set(&mut self, n: u32, body: impl Into<Vec<u8>>) {
+        self.objects[n as usize - 1] = body.into();
+    }
+
+    fn add(&mut self, body: impl Into<Vec<u8>>) -> u32 {
+        let n = self.reserve();
+        self.set(n, body);
+        n
+    }
+
+    fn stream(&mut self, dict: &str, data: &[u8]) -> u32 {
+        let mut body = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
+        body.extend(data);
+        body.extend(b"\nendstream");
+        self.add(body)
+    }
+
+    /// The file with a classic cross-reference table.
+    fn finish(self, root: u32) -> Vec<u8> {
+        let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in self.objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+            out.extend(body);
+            out.extend(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend(
+            format!(
+                "trailer\n<< /Size {} /Root {root} 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                self.objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        out
+    }
+}
+
+/// A one-page A4 file: Helvetica as `/F1`, `content` as the page's content stream (already
+/// packed when `dict` names a filter), `catalog_extra` in the catalog and `build` adding
+/// objects and returning more entries for the page's resources.
+#[cfg(unix)]
+fn pdf_page(
+    content: &[u8],
+    dict: &str,
+    catalog_extra: &str,
+    build: impl FnOnce(&mut PdfFile) -> String,
+) -> Vec<u8> {
+    let mut b = PdfFile::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let resources = build(&mut b);
+    let c = b.stream(dict, content);
+    let page = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> {resources} >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{page} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R {catalog_extra} >>"),
+    );
+    b.finish(catalog)
+}
+
+#[cfg(unix)]
+const HELLO: &[u8] = b"BT /F1 12 Tf 72 720 Td (Before the bomb.) Tj ET";
+
+/// `n` bytes of `fill`, packed with zlib in chunks, so building the file never holds them.
+#[cfg(unix)]
+fn packed_fill(fill: u8, n: usize) -> Vec<u8> {
+    use std::io::Write;
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    let chunk = vec![fill; MB];
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(MB);
+        z.write_all(&chunk[..k]).unwrap();
+        left -= k;
+    }
+    z.finish().unwrap()
+}
+
+/// Runs a PDF through the pipeline (default limits unless `max_time`) and returns the result
+/// and its time.
+#[cfg(unix)]
+fn read_pdf(
+    bytes: Vec<u8>,
+    max_time: Option<Duration>,
+    request: &Request,
+) -> (RunResult, Duration) {
+    let p = pipeline_with(max_time);
+    let start = Instant::now();
+    let result = p.run_bytes("hostile.pdf", bytes, None, request);
+    (result, start.elapsed())
+}
+
+#[cfg(unix)]
+#[test]
+fn objstm_bomb_is_bounded() {
+    // An object stream of about 1 MB that inflates to 1 GiB. Object 6 lives in it and the
+    // catalog points to it, so a reader that trusts the file must unpack the stream. The file
+    // uses a cross-reference stream (type 2 entries name the object stream).
+    let packed = packed_fill(0, 1 << 30);
+    assert!(packed.len() < 2 * MB, "{}", packed.len());
+    let content = HELLO;
+    let mut objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /Bomb 6 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \
+          /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> \
+          /Contents 4 0 R >>"
+            .to_vec(),
+    ];
+    let mut c = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+    c.extend(content);
+    c.extend(b"\nendstream");
+    objects.push(c);
+    let mut objstm = format!(
+        "<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length {} >>\nstream\n",
+        packed.len()
+    )
+    .into_bytes();
+    objstm.extend(&packed);
+    objstm.extend(b"\nendstream");
+    objects.push(objstm);
+    drop(packed);
+    let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend(body);
+        out.extend(b"\nendobj\n");
+    }
+    // Object 7 is the cross-reference stream: entries 0 to 7, 1 + 4 + 2 bytes each.
+    let xref_at = out.len();
+    let mut rows = vec![0u8, 0, 0, 0, 0, 0xff, 0xff];
+    for o in &offsets {
+        rows.push(1);
+        rows.extend((*o as u32).to_be_bytes());
+        rows.extend([0, 0]);
+    }
+    rows.extend([2, 0, 0, 0, 5, 0, 0]);
+    rows.push(1);
+    rows.extend((xref_at as u32).to_be_bytes());
+    rows.extend([0, 0]);
+    out.extend(
+        format!(
+            "7 0 obj\n<< /Type /XRef /Size 8 /W [1 4 2] /Root 1 0 R /Length {} >>\nstream\n",
+            rows.len()
+        )
+        .as_bytes(),
+    );
+    out.extend(&rows);
+    out.extend(format!("\nendstream\nendobj\nstartxref\n{xref_at}\n%%EOF\n").as_bytes());
+
+    let (result, took) = read_pdf(out, None, &markdown_request());
+    eprintln!(
+        "objstm_bomb: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    // An object stream belongs to the file's structure: the whole file is refused.
+    assert_eq!(
+        result.completeness,
+        Completeness::Failed,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result).iter().any(|l| l.starts_with("Limit")
+            && l.contains("an object stream or cross-reference stream unpacks to more than")),
+        "{:?}",
+        losses(&result)
+    );
+    assert!(took < Duration::from_secs(120) + SLACK, "took {took:?}");
+    assert_rss_bounded("objstm_bomb_is_bounded");
+}
+
+#[cfg(unix)]
+#[test]
+fn content_stream_bomb_is_bounded() {
+    // A page whose content stream of about 1 MB inflates to 1 GiB of spaces; a second page is
+    // plain. The bomb page is refused, the plain page is read.
+    let packed = packed_fill(b' ', 1 << 30);
+    let mut b = PdfFile::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bomb = b.stream("/Filter /FlateDecode", &packed);
+    drop(packed);
+    let plain = b.stream("", b"BT /F1 12 Tf 72 720 Td (The plain page.) Tj ET");
+    let mut kids = String::new();
+    for c in [bomb, plain] {
+        let page = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+        ));
+        kids.push_str(&format!("{page} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 2 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let (result, took) = read_pdf(b.finish(catalog), None, &markdown_request());
+    eprintln!(
+        "content_stream_bomb: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit p1 the page is not read")
+                && l.contains("unpacks to more than 100 times its size")),
+        "{:?}",
+        losses(&result)
+    );
+    assert!(result.markdown_pages.join("").contains("The plain page."));
+    assert!(took < Duration::from_secs(120) + SLACK, "took {took:?}");
+    assert_rss_bounded("content_stream_bomb_is_bounded");
+}
+
+#[cfg(unix)]
+#[test]
+fn page_tree_cycle_is_partial() {
+    // The page tree lists itself as its own kid.
+    let mut b = PdfFile::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let c = b.stream("", b"BT /F1 12 Tf 72 720 Td (In the loop.) Tj ET");
+    let page = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{page} 0 R {tree} 0 R] /Count 2 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let (result, took) = read_pdf(b.finish(catalog), None, &markdown_request());
+    eprintln!(
+        "page_tree_cycle: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Damaged") && l.contains("cycle")),
+        "{:?}",
+        losses(&result)
+    );
+    // Other parsers could number the pages of such a tree differently, so no page text is
+    // read, and the output says so.
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.contains("text not read on any page")),
+        "{:?}",
+        losses(&result)
+    );
+    assert!(took < Duration::from_secs(10), "took {took:?}");
+    assert_rss_bounded("page_tree_cycle_is_partial");
+}
+
+/// Writes a file of `pages` pages to `path`, built in memory and dropped before the read so
+/// that its bytes are not part of the measure. With `own`, every page has its own resources,
+/// media box and content stream of one line (`Page N`); else the pages inherit their
+/// resources and media box and share one content stream of 40 lines (`Line K of a page`).
+#[cfg(unix)]
+fn many_pages(path: &std::path::Path, pages: usize, own: bool) {
+    use std::io::Write;
+    let mut b = PdfFile::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut text = String::from("BT /F1 10 Tf 72 780 Td 14 TL ");
+    for line in 0..40 {
+        text.push_str(&format!(
+            "(Line {line} of a page that is shown again and again.) ' "
+        ));
+    }
+    text.push_str("ET");
+    let shared = b.stream("", text.as_bytes());
+    let mut kids = String::with_capacity(pages * 10);
+    for i in 0..pages {
+        let page = if own {
+            let c = b.stream(
+                "",
+                format!("BT /F1 12 Tf 72 720 Td (Page {i}) Tj ET").as_bytes(),
+            );
+            b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+            ))
+        } else {
+            b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /Contents {shared} 0 R >>"
+            ))
+        };
+        kids.push_str(&format!("{page} 0 R "));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font} 0 R >> >> \
+             /Kids [{kids}] /Count {pages} >>"
+        ),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let mut out = std::fs::File::create(path).unwrap();
+    out.write_all(&b.finish(catalog)).unwrap();
+}
+
+/// A pipeline with the PDF reader only, under `memory` bytes of memory and `time`.
+#[cfg(unix)]
+fn pdf_pipeline(memory: u64, time: Duration) -> Pipeline {
+    let mut config = Config {
+        cache: false,
+        ..Config::default()
+    };
+    config.limits.max_memory_bytes = memory;
+    config.limits.max_time = time;
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    Pipeline::new(config, registry)
+}
+
+/// The peak RSS of the test stays under the memory limit the read was given.
+#[cfg(unix)]
+fn assert_rss_under(test: &str, limit: u64) {
+    if !own_process(test) {
+        return;
+    }
+    let rss = max_rss_bytes();
+    eprintln!(
+        "{test}: max RSS {} MiB, limit {} MiB",
+        rss >> 20,
+        limit >> 20
+    );
+    assert!(rss < limit, "{test}: max RSS {} MiB", rss >> 20);
+}
+
+/// The pages of a page section with text besides its marker.
+#[cfg(unix)]
+fn pages_with_text(result: &RunResult) -> usize {
+    result.document.as_ref().map_or(0, |d| {
+        d.body
+            .iter()
+            .filter(
+                |b| matches!(b, rezzer_model::Block::Section { blocks, .. } if blocks.len() > 1),
+            )
+            .count()
+    })
+}
+
+#[cfg(unix)]
+#[test]
+fn hundred_thousand_pages_stop_in_time() {
+    // 100,000 pages that share one content stream of 40 lines, far more than 2 s of work, at
+    // the default memory limit. The pages read before the stop keep their text, and one loss
+    // names the first page without it.
+    const PAGES: usize = 100_000;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, false);
+    let limit = Duration::from_secs(2);
+    let p = pipeline_with(Some(limit));
+    let start = Instant::now();
+    let result = p.run_path(&path, &markdown_request());
+    let took = start.elapsed();
+    eprintln!(
+        "hundred_thousand_pages: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert!(took < limit + SLACK, "took {took:?}");
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    let read = pages_with_text(&result);
+    assert!(read > 0 && read < PAGES, "{read} pages with text");
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Line 39 of a page"));
+    let timed: Vec<String> = losses(&result)
+        .into_iter()
+        .filter(|l| l.contains("time limit"))
+        .collect();
+    assert_eq!(
+        timed,
+        [format!(
+            "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and the \
+             pages read before are laid out in the time left",
+            read + 1,
+            read + 1
+        )]
+    );
+    assert_rss_bounded("hundred_thousand_pages_stop_in_time");
+}
+
+/// The files in the cache dir `dir`.
+fn cache_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir).map_or_else(
+        |_| Vec::new(),
+        |entries| entries.map(|e| e.unwrap().path()).collect(),
+    )
+}
+
+#[test]
+fn a_text_cut_near_the_time_limit_is_not_cached() {
+    // The PDF reader stops its text at three quarters of the time limit, before the budget's
+    // own time is over. That cut depends on the machine's load, so it is not cached.
+    const PAGES: usize = 20_000;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, false);
+    let cache = dir.path().join("cache");
+    let mut config = Config {
+        cache: true,
+        cache_dir: Some(cache.clone()),
+        ..Config::default()
+    };
+    config.limits.max_time = Duration::from_secs(1);
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    let p = Pipeline::new(config, registry);
+    let result = p.run_path(&path, &markdown_request());
+    let doc = result.document.as_ref().unwrap();
+    let cut = doc
+        .losses
+        .iter()
+        .find(|l| l.what.contains("the time limit was near"))
+        .unwrap_or_else(|| panic!("{:?}", losses(&result)));
+    assert_eq!(cut.why, LossReason::Limit);
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(
+        cache_entries(&cache).is_empty(),
+        "{:?}",
+        cache_entries(&cache)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn pages_with_their_own_resources_are_read_under_the_memory_limit() {
+    // 15,000 pages, each with its own resources, media box and content stream, at a memory
+    // limit of 256 MiB: the objects and the text parser's page list fit in the object budget,
+    // every page is read, and the process stays under the limit.
+    const PAGES: usize = 15_000;
+    let limit: u64 = 256 << 20;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    many_pages(&path, PAGES, true);
+    let p = pdf_pipeline(limit, Duration::from_secs(120));
+    let result = p.run_path(&path, &markdown_request());
+    eprintln!(
+        "own resources: {:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(pages_with_text(&result), PAGES, "{:?}", losses(&result));
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Page 14999"));
+    assert_rss_under(
+        "pages_with_their_own_resources_are_read_under_the_memory_limit",
+        limit,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn hundred_thousand_pages_stay_under_the_memory_limit() {
+    // 100,000 pages with their own content streams at a memory limit of 512 MiB. The objects
+    // take almost all of the object budget; the text parser's list of the pages (about 2 KB a
+    // page) does not fit beside them, so the text is not read and the output says why,
+    // instead of going over the limit.
+    const PAGES: usize = 100_000;
+    let limit: u64 = 512 << 20;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pages.pdf");
+    {
+        // The pages inherit their resources and media box, so the objects fit the budget.
+        use std::io::Write;
+        let mut b = PdfFile::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let mut kids = String::with_capacity(PAGES * 10);
+        for i in 0..PAGES {
+            let c = b.stream(
+                "",
+                format!("BT /F1 12 Tf 72 720 Td (Page {i}) Tj ET").as_bytes(),
+            );
+            let page = b.add(format!(
+                "<< /Type /Page /Parent {tree} 0 R /Contents {c} 0 R >>"
+            ));
+            kids.push_str(&format!("{page} 0 R "));
+        }
+        b.set(
+            tree,
+            format!(
+                "<< /Type /Pages /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font} 0 R >> >> \
+                 /Kids [{kids}] /Count {PAGES} >>"
+            ),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let mut out = std::fs::File::create(&path).unwrap();
+        out.write_all(&b.finish(catalog)).unwrap();
+    }
+    let p = pdf_pipeline(limit, Duration::from_secs(120));
+    let result = p.run_path(&path, &markdown_request());
+    eprintln!(
+        "page list: {:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result).iter().any(|l| l
+            .starts_with("Limit p1 text of pages 1 to 100000 not read")
+            && l.contains("the text parser's list of the 100000 pages")),
+        "{:?}",
+        losses(&result)
+    );
+    assert_rss_under("hundred_thousand_pages_stay_under_the_memory_limit", limit);
+}
+
+#[cfg(unix)]
+#[test]
+fn image_pixel_bomb_skips_render() {
+    // A page covered by a picture of 40,000 by 40,000 one-bit pixels from one row of packed
+    // data: 200 MB as bits, 1.6 GB as the bytes a renderer decodes. The page needs vision.
+    // Pictures are costed as decoded bytes against the room of one render (a quarter of the
+    // memory limit, 512 MiB by default), so the render is skipped with a Limit loss and no
+    // PNG is written.
+    let image = |b: &mut PdfFile| {
+        let n = b.stream(
+            "/Type /XObject /Subtype /Image /Width 40000 /Height 40000 \
+             /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /FlateDecode",
+            &packed_fill(0, 5000),
+        );
+        format!("/XObject << /Im1 {n} 0 R >>")
+    };
+    let bytes = pdf_page(b"q 595 0 0 842 0 0 cm /Im1 Do Q", "", "", image);
+    let dir = tempfile::tempdir().unwrap();
+    let request = Request {
+        output_dir: Some(dir.path().to_path_buf()),
+        ..markdown_request()
+    };
+    let (result, took) = read_pdf(bytes, None, &request);
+    eprintln!(
+        "image_pixel_bomb: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    let doc = result.document.as_ref().expect("a document");
+    assert!(
+        doc.assets
+            .iter()
+            .any(|a| a.id == "page-1" && a.needs_vision),
+        "{:?}",
+        doc.assets
+    );
+    assert!(
+        doc.losses.iter().any(|l| l.location == "p1"
+            && l.why == LossReason::Limit
+            && l.what.contains("not rendered")
+            && l.what.contains("pictures")),
+        "{:?}",
+        losses(&result)
+    );
+    let bundle = dir.path().join("hostile.pdf.assets");
+    let written = std::fs::read_dir(&bundle).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(written, 0, "no render is written");
+    assert!(took < Duration::from_secs(60), "took {took:?}");
+    assert_rss_bounded("image_pixel_bomb_skips_render");
+}
+
+#[cfg(unix)]
+#[test]
+fn deep_array_nesting_stops_at_depth() {
+    // 100,000 nested arrays in an object the catalog points to.
+    let deep = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    let bytes = pdf_page(HELLO, "", "/Deep 4 0 R", |b| {
+        let n = b.add(deep);
+        assert_eq!(n, 4);
+        String::new()
+    });
+    let (result, took) = read_pdf(bytes, None, &markdown_request());
+    eprintln!(
+        "deep_array_nesting: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    assert_eq!(
+        result.completeness,
+        Completeness::Partial,
+        "{:?}",
+        losses(&result)
+    );
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l == "Damaged object 4 0 values are nested too deeply"),
+        "{:?}",
+        losses(&result)
+    );
+    // The page does not depend on the deep object and is read.
+    assert!(result.markdown_pages.join("").contains("Before the bomb."));
+    assert!(took < Duration::from_secs(10), "took {took:?}");
+    assert_rss_bounded("deep_array_nesting_stops_at_depth");
+}
+
+#[cfg(unix)]
+#[test]
+fn huge_script_is_bounded() {
+    // A document script of 64 MiB in the JavaScript name tree. Its text varies enough that it
+    // packs at less than 100:1, so the stream guard lets it pass and the script cap must hold:
+    // a script over its cap is listed without its text and is never unpacked whole.
+    let packed = {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut x: u64 = 12345;
+        let mut line = Vec::with_capacity(64);
+        let mut written = 0;
+        while written < 64 * MB {
+            line.clear();
+            line.extend_from_slice(b"app.alert(\"");
+            for _ in 0..24 {
+                x = x
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                line.push(b'a' + (x >> 59) as u8 % 26);
+            }
+            line.extend_from_slice(b"\");\n");
+            z.write_all(&line).unwrap();
+            written += line.len();
+        }
+        z.finish().unwrap()
+    };
+    assert!(packed.len() > 64 * MB / 100, "{}", packed.len());
+    let bytes = pdf_page(HELLO, "", "/Names << /JavaScript 4 0 R >>", |b| {
+        let names = b.reserve();
+        assert_eq!(names, 4);
+        let js = b.stream("/Filter /FlateDecode", &packed);
+        let action = b.add(format!("<< /S /JavaScript /JS {js} 0 R >>"));
+        b.set(names, format!("<< /Names [(Huge) {action} 0 R] >>"));
+        String::new()
+    });
+    let (result, took) = read_pdf(bytes, None, &markdown_request());
+    eprintln!(
+        "huge_script: {:?} in {took:?}: {:?}",
+        result.completeness,
+        losses(&result)
+    );
+    let doc = result.document.as_ref().expect("a document");
+    assert_eq!(doc.properties.facts.has_javascript, Some(true));
+    let scripts: Vec<_> = doc
+        .facets
+        .embedded
+        .iter()
+        .filter(|e| e.kind == "script")
+        .collect();
+    assert_eq!(scripts.len(), 1, "{scripts:?}");
+    assert_eq!(scripts[0].text, None);
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit") && l.contains("script")),
+        "{:?}",
+        losses(&result)
+    );
+    let md = result.markdown_pages.join("");
+    assert!(md.contains("Before the bomb."));
+    assert!(!md.contains("app.alert("));
+    assert!(took < Duration::from_secs(30), "took {took:?}");
+    assert_rss_bounded("huge_script_is_bounded");
 }

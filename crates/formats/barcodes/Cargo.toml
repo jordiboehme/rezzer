@@ -1,0 +1,34 @@
+[package]
+name = "barcodes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded barcode and QR code reading from untrusted pictures: tiles, a time limit and payload caps"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/barcodes"
+readme = "README.md"
+keywords = ["barcode", "qrcode", "datamatrix", "pdf417", "decoder"]
+categories = ["multimedia::images", "parser-implementations"]
+
+[features]
+# Writes codes into pictures, for tests that need a code to read.
+encode = ["rxing/encoders"]
+
+[dependencies]
+rxing.workspace = true
+
+[dev-dependencies]
+# Only for the allocator of the binary in the memory tests; the library itself depends on no
+# Rezzer crate.
+rezzer-limits = { path = "../../rezzer-limits" }
+rxing = { workspace = true, features = ["encoders"] }
+libc.workspace = true
+
+[[test]]
+name = "decode"
+required-features = ["encode"]
+
+[[test]]
+name = "hostile"
+required-features = ["encode"]

@@ -1,0 +1,805 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Small PDF files written by hand for the tests, with a classic cross-reference table.
+
+#![allow(dead_code)]
+
+use std::alloc::{GlobalAlloc, Layout};
+use std::io::Write;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// One page of a generated file.
+#[derive(Default, Clone)]
+pub struct Page {
+    /// The content stream, uncompressed.
+    pub content: String,
+    /// Annotation dictionaries, each written as its own object.
+    pub annots: Vec<String>,
+    /// A stream that the page's font reads as its `/ToUnicode` CMap, already deflated.
+    pub packed_cmap: Option<Vec<u8>>,
+}
+
+impl Page {
+    pub fn text(content: impl Into<String>) -> Page {
+        Page {
+            content: content.into(),
+            ..Page::default()
+        }
+    }
+}
+
+/// A file being written: object `n` is `objects[n - 1]`.
+#[derive(Default)]
+pub struct Builder {
+    objects: Vec<Vec<u8>>,
+}
+
+impl Builder {
+    /// Reserves the next object number.
+    pub fn reserve(&mut self) -> u32 {
+        self.objects.push(Vec::new());
+        self.objects.len() as u32
+    }
+
+    pub fn set(&mut self, n: u32, body: impl Into<Vec<u8>>) {
+        self.objects[n as usize - 1] = body.into();
+    }
+
+    pub fn add(&mut self, body: impl Into<Vec<u8>>) -> u32 {
+        let n = self.reserve();
+        self.set(n, body);
+        n
+    }
+
+    pub fn stream(&mut self, dict: &str, data: &[u8]) -> u32 {
+        let mut body = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
+        body.extend(data);
+        body.extend(b"\nendstream");
+        self.add(body)
+    }
+
+    pub fn finish(self, root: u32) -> Vec<u8> {
+        self.finish_with(root, "")
+    }
+
+    /// The file with `trailer_extra` (for example `/Info 5 0 R`) in its trailer.
+    pub fn finish_with(self, root: u32, trailer_extra: &str) -> Vec<u8> {
+        let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in self.objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n", i + 1).as_bytes());
+            out.extend(body);
+            out.extend(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend(
+            format!(
+                "trailer\n<< /Size {} /Root {root} 0 R {trailer_extra} >>\nstartxref\n{xref}\n%%EOF\n",
+                self.objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        out
+    }
+}
+
+/// Appends an incremental update to `file`: the objects `(number, body)`, a classic table and
+/// a trailer with `keys` (for example `/Size 9 /Root 1 0 R`) and `/Prev`.
+pub fn append_update(file: &mut Vec<u8>, objects: &[(u32, Vec<u8>)], keys: &str) {
+    let at = file
+        .windows(9)
+        .rposition(|w| w == b"startxref")
+        .expect("startxref")
+        + 9;
+    let prev: String = file[at..]
+        .iter()
+        .skip_while(|c| c.is_ascii_whitespace())
+        .take_while(|c| c.is_ascii_digit())
+        .map(|c| char::from(*c))
+        .collect();
+    if !file.ends_with(b"\n") {
+        file.push(b'\n');
+    }
+    let mut offsets = Vec::new();
+    for (n, body) in objects {
+        offsets.push((*n, file.len()));
+        file.extend(format!("{n} 0 obj\n").as_bytes());
+        file.extend(body);
+        file.extend(b"\nendobj\n");
+    }
+    let xref = file.len();
+    file.extend(b"xref\n");
+    for (n, off) in offsets {
+        file.extend(format!("{n} 1\n{off:010} 00000 n \n").as_bytes());
+    }
+    file.extend(
+        format!("trailer\n<< {keys} /Prev {prev} >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+}
+
+/// A file with the given pages (A4, Helvetica as `/F1`, Helvetica-Bold as `/F2`).
+/// `catalog_extra` goes into the catalog dictionary.
+pub fn pdf(pages: &[Page], catalog_extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let mut kids = Vec::new();
+    for page in pages {
+        let font = match &page.packed_cmap {
+            Some(packed) => {
+                let cmap = b.stream("/Filter /FlateDecode", packed);
+                b.add(format!(
+                    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode {cmap} 0 R >>"
+                ))
+            }
+            None => b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+        };
+        let content = b.stream("", page.content.as_bytes());
+        let annots: Vec<String> = page
+            .annots
+            .iter()
+            .map(|a| format!("{} 0 R", b.add(a.as_bytes())))
+            .collect();
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> \
+             /Contents {content} 0 R /Annots [{}] >>",
+            annots.join(" ")
+        ));
+        kids.push(format!("{kid} 0 R"));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            kids.len()
+        ),
+    );
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R {catalog_extra} >>"),
+    );
+    b.finish(catalog)
+}
+
+/// A text object that shows `text` with font `font` at size `size` at `(x, y)`.
+pub fn show(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
+    format!("BT /{font} {size} Tf {x} {y} Td ({text}) Tj ET\n")
+}
+
+/// `n` bytes of zeros, deflated.
+pub fn zeros_packed(n: usize) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let chunk = vec![0u8; 1 << 20];
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(chunk.len());
+        z.write_all(&chunk[..k]).expect("deflate");
+        left -= k;
+    }
+    z.finish().expect("deflate")
+}
+
+/// Bytes the test process holds on the heap now. The counters move only in a test binary
+/// whose `#[global_allocator]` is [`Counting`]; elsewhere they stay at zero.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// The highest `LIVE` since the last `reset_heap_peak`. Nextest runs every test in its own
+/// process, so one global peak is the figure of one test.
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+fn grow(n: usize) {
+    let now = LIVE.fetch_add(n, Ordering::Relaxed) + n;
+    PEAK.fetch_max(now, Ordering::Relaxed);
+}
+
+fn shrink(n: usize) {
+    LIVE.fetch_sub(n, Ordering::Relaxed);
+}
+
+/// `rezzer_limits::Allocator`, counting the live bytes and their peak. A block that grows is
+/// counted with its old and its new size until the call returns, as the allocator holds both
+/// while it moves a large block; for a block grown in place that is more than it holds, so
+/// the peak errs high, never low.
+pub struct Counting;
+
+// SAFETY: every call goes to `rezzer_limits::Allocator` unchanged; the counters only add and
+// take away the sizes of the blocks.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.alloc(layout) };
+        if !p.is_null() {
+            grow(layout.size());
+        }
+        p
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.alloc_zeroed(layout) };
+        if !p.is_null() {
+            grow(layout.size());
+        }
+        p
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        shrink(layout.size());
+        // SAFETY: forwarded unchanged.
+        unsafe { rezzer_limits::Allocator.dealloc(ptr, layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        grow(new_size);
+        // SAFETY: forwarded unchanged.
+        let p = unsafe { rezzer_limits::Allocator.realloc(ptr, layout, new_size) };
+        // On failure the old block stays and the new one never was.
+        shrink(if p.is_null() { new_size } else { layout.size() });
+        p
+    }
+}
+
+/// Starts a new peak at what the heap holds now.
+pub fn reset_heap_peak() {
+    PEAK.store(LIVE.load(Ordering::Relaxed), Ordering::Relaxed);
+}
+
+/// The heap peak since the last reset, or since the process started.
+pub fn heap_peak_bytes() -> usize {
+    PEAK.load(Ordering::Relaxed)
+}
+
+/// Runs `f` with a new heap peak and returns its result with that peak.
+pub fn peak_of<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    reset_heap_peak();
+    let out = f();
+    (out, heap_peak_bytes())
+}
+
+/// Maximum resident set size of the process. It is the figure of one test only under nextest,
+/// which runs every test in its own process.
+#[cfg(unix)]
+pub fn max_rss_bytes() -> u64 {
+    // SAFETY: getrusage fills the struct we pass.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let v = ru.ru_maxrss as u64;
+    if cfg!(target_os = "macos") {
+        v
+    } else {
+        v * 1024
+    }
+}
+
+#[cfg(not(unix))]
+pub fn max_rss_bytes() -> u64 {
+    0
+}
+
+/// One tall tagged page of `n` lines 40 points apart, `w0.` to `w<n-1>.`, each in its own
+/// structure element: `kind` is `table` (one row of one cell per line), `list` (one item per
+/// line) or `p`. With `uri`, one link with that URI lies over the page.
+pub fn tagged_lines(n: usize, kind: &str, uri: Option<&str>) -> Vec<u8> {
+    let gap = 40usize;
+    let h = (n + 2) * gap;
+    let mut c = b"BT /F1 12 Tf ".to_vec();
+    for i in 0..n {
+        c.extend(
+            format!(
+                "/P <</MCID {i}>> BDC 1 0 0 1 72 {} Tm (w{i}.) Tj EMC ",
+                h - (i + 1) * gap
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let annots = match uri {
+        Some(u) => {
+            let a = b.add(format!(
+                "<< /Type /Annot /Subtype /Link /Rect [0 0 595 {h}] /A << /S /URI /URI ({u}) >> >>"
+            ));
+            format!("/Annots [{a} 0 R]")
+        }
+        None => String::new(),
+    };
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    z.write_all(&c).expect("deflate");
+    let cs = b.stream("/Filter /FlateDecode", &z.finish().expect("deflate"));
+    let root = b.reserve();
+    let doc = b.reserve();
+    let mut leaves = Vec::with_capacity(n);
+    let mut top = Vec::new();
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    match kind {
+        "table" | "list" => {
+            let (group, row, leaf) = if kind == "table" {
+                ("Table", "TR", "TD")
+            } else {
+                ("L", "LI", "LBody")
+            };
+            let parent = b.reserve();
+            let mut rows = Vec::with_capacity(n);
+            for i in 0..n {
+                let r = b.reserve();
+                let l = b.add(format!(
+                    "<< /Type /StructElem /S /{leaf} /P {r} 0 R /Pg {kid} 0 R /K {i} >>"
+                ));
+                b.set(
+                    r,
+                    format!("<< /Type /StructElem /S /{row} /P {parent} 0 R /K [{l} 0 R] >>"),
+                );
+                rows.push(r);
+                leaves.push(l);
+            }
+            b.set(
+                parent,
+                format!(
+                    "<< /Type /StructElem /S /{group} /P {doc} 0 R /K [{}] >>",
+                    refs(&rows)
+                ),
+            );
+            top.push(parent);
+        }
+        _ => {
+            for i in 0..n {
+                let e = b.add(format!(
+                    "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K {i} >>"
+                ));
+                leaves.push(e);
+                top.push(e);
+            }
+        }
+    }
+    b.set(
+        doc,
+        format!(
+            "<< /Type /StructElem /S /Document /P {root} 0 R /K [{}] >>",
+            refs(&top)
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            refs(&leaves)
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 {h}] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> {annots} /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// One tagged table of one row with `n` cells, cell `i` (text `w<i>`) on page `i + 1`.
+pub fn wide_row(n: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let table = b.reserve();
+    let tr = b.reserve();
+    let mut kids = Vec::new();
+    let mut tds = Vec::new();
+    let mut nums = String::new();
+    for i in 0..n {
+        let kid = b.reserve();
+        let cs = b.stream(
+            "",
+            format!("/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (w{i}) Tj ET EMC").as_bytes(),
+        );
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {i} \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        let td = b.add(format!(
+            "<< /Type /StructElem /S /TD /P {tr} 0 R /Pg {kid} 0 R /K 0 >>"
+        ));
+        nums.push_str(&format!("{i} [{td} 0 R] "));
+        kids.push(kid);
+        tds.push(td);
+    }
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    b.set(
+        tr,
+        format!(
+            "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+            refs(&tds)
+        ),
+    );
+    b.set(
+        table,
+        format!("<< /Type /StructElem /S /Table /P {doc} 0 R /K [{tr} 0 R] >>"),
+    );
+    b.set(
+        doc,
+        format!("<< /Type /StructElem /S /Document /P {root} 0 R /K [{table} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", refs(&kids)),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// One tagged row of `c` cells over `p` pages: cell `i < p` has the word `w` on page `i + 1`,
+/// the other cells have no content. Without `table` the same objects are a `Div` of `Div`s.
+pub fn row_pages(p: usize, c: usize, table: bool) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let group = b.reserve();
+    let row = b.reserve();
+    let mut kids = Vec::new();
+    let mut cells = Vec::new();
+    let mut nums = String::new();
+    let cs = b.stream(
+        "",
+        b"/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (w) Tj ET EMC",
+    );
+    for i in 0..p {
+        let kid = b.reserve();
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {i} \
+                 /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        let td = b.add(format!("<< /S /TD /P {row} 0 R /Pg {kid} 0 R /K 0 >>"));
+        nums.push_str(&format!("{i} [{td} 0 R] "));
+        kids.push(kid);
+        cells.push(td);
+    }
+    for _ in p..c {
+        cells.push(b.add(format!("<< /S /TD /P {row} 0 R >>")));
+    }
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    let (g, r) = if table {
+        ("Table", "TR")
+    } else {
+        ("Div", "Div")
+    };
+    b.set(
+        row,
+        format!("<< /S /{r} /P {group} 0 R /K [{}] >>", refs(&cells)),
+    );
+    b.set(group, format!("<< /S /{g} /P {doc} 0 R /K [{row} 0 R] >>"));
+    b.set(
+        doc,
+        format!("<< /S /Document /P {root} 0 R /K [{group} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count {p} >>", refs(&kids)),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// A deflate stream written bit by bit, with fixed Huffman codes (RFC 1951, 3.2.6), for
+/// streams no encoder writes.
+#[derive(Default)]
+pub struct Deflate {
+    out: Vec<u8>,
+    acc: u64,
+    bits: u32,
+}
+
+impl Deflate {
+    /// A zlib stream: the two header bytes come first.
+    pub fn zlib() -> Deflate {
+        Deflate {
+            out: vec![0x78, 0x9c],
+            ..Deflate::default()
+        }
+    }
+
+    /// `len` bits of `v`, least significant first.
+    pub fn bits(&mut self, v: u32, len: u32) {
+        self.acc |= u64::from(v) << self.bits;
+        self.bits += len;
+        while self.bits >= 8 {
+            self.out.push(self.acc as u8);
+            self.acc >>= 8;
+            self.bits -= 8;
+        }
+    }
+
+    /// A Huffman code of `len` bits, most significant first.
+    fn code(&mut self, code: u32, len: u32) {
+        let mut r = 0;
+        for i in 0..len {
+            r |= ((code >> i) & 1) << (len - 1 - i);
+        }
+        self.bits(r, len);
+    }
+
+    /// Starts a block with fixed codes.
+    pub fn fixed_block(&mut self, last: bool) {
+        self.bits(u32::from(last), 1);
+        self.bits(1, 2);
+    }
+
+    /// A literal byte or the end of the block (256), or a length code (257 to 287).
+    pub fn symbol(&mut self, s: u32) {
+        match s {
+            0..=143 => self.code(0x30 + s, 8),
+            144..=255 => self.code(0x190 + s - 144, 9),
+            256..=279 => self.code(s - 256, 7),
+            _ => self.code(0xC0 + s - 280, 8),
+        }
+    }
+
+    /// A copy of 258 bytes from 1 byte back.
+    pub fn run(&mut self) {
+        self.symbol(285);
+        self.code(0, 5);
+    }
+
+    /// A copy of 3 bytes from 32,768 bytes back: past the start of any output so far.
+    pub fn far_copy(&mut self) {
+        self.symbol(257);
+        self.code(29, 5);
+        self.bits(8191, 13);
+    }
+
+    /// A length code that does not exist (286): every inflater stops at it.
+    pub fn bad_symbol(&mut self) {
+        self.symbol(286);
+    }
+
+    /// A stored block with `data` (at most 65,535 bytes).
+    pub fn stored(&mut self, last: bool, data: &[u8]) {
+        self.bits(u32::from(last), 1);
+        self.bits(0, 2);
+        if self.bits > 0 {
+            self.bits(0, 8 - self.bits);
+        }
+        let n = data.len() as u16;
+        self.out.extend(n.to_le_bytes());
+        self.out.extend((!n).to_le_bytes());
+        self.out.extend(data);
+    }
+
+    pub fn finish(mut self) -> Vec<u8> {
+        if self.bits > 0 {
+            self.bits(0, 8 - self.bits);
+        }
+        self.out
+    }
+}
+
+/// A zlib stream that inflate stops on at once (a copy from before the start), followed by
+/// `runs` copies of 258 bytes that a lenient decoder goes on to unpack.
+pub fn lenient_bomb(runs: usize) -> Vec<u8> {
+    let mut d = Deflate::zlib();
+    d.fixed_block(true);
+    d.far_copy();
+    d.symbol(u32::from(b' '));
+    for _ in 0..runs {
+        d.run();
+    }
+    d.symbol(256);
+    d.finish()
+}
+
+/// A one-page file of `content` on a page of `width` by `height` points, with `extra` (for
+/// example `/Rotate 90`) in the page dictionary; Helvetica as `/F1`, Helvetica-Bold as `/F2`.
+pub fn sized_page(content: &str, width: f32, height: f32, extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {width} {height}] {extra} \
+         /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The width of `text` in Helvetica at `size` (the font's standard widths for letters,
+/// digits, the space and common signs), for setting text flush right.
+pub fn helvetica_width(text: &str, size: f32) -> f32 {
+    const LOWER: [u32; 26] = [
+        556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333,
+        500, 278, 556, 500, 722, 500, 500, 500,
+    ];
+    const UPPER: [u32; 26] = [
+        667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722,
+        667, 611, 722, 667, 944, 667, 667, 611,
+    ];
+    let units: u32 = text
+        .chars()
+        .map(|c| match c {
+            'a'..='z' => LOWER[c as usize - 'a' as usize],
+            'A'..='Z' => UPPER[c as usize - 'A' as usize],
+            '0'..='9' => 556,
+            '-' => 333,
+            _ => 278,
+        })
+        .sum();
+    units as f32 * size / 1000.0
+}
+
+/// A page of 10,000 by 10,000 points with a line of text and `n` different small pictures
+/// of 30 by 30 points (each over 1 cm2, all of them under 2 % of the page) on a grid in the
+/// middle: no band, no corner, so each needs vision and is cut out of the page's render.
+/// Each picture is an inline picture of one RGB pixel of its own color, so the file and its
+/// objects stay small.
+pub fn small_pictures_twin(n: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut content = String::from("BT /F1 12 Tf 3000 8500 Td (Many small pictures.) Tj ET\n");
+    let mut state = 7u32;
+    for k in 0..n {
+        state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        let color = (state >> 8) & 0xff_ffff;
+        let (x, y) = (2500 + 100 * (k % 50), 2500 + 100 * (k / 50));
+        content.push_str(&format!(
+            "q 30 0 0 30 {x} {y} cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID {color:06x}> EI Q\n"
+        ));
+    }
+    let c = b.stream("/Filter /FlateDecode", &deflated(content.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 10000 10000] \
+         /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// `data` deflated.
+fn deflated(data: &[u8]) -> Vec<u8> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    z.write_all(data).expect("deflate");
+    z.finish().expect("deflate")
+}
+
+/// A square page with a line of text and one gray picture of 4 by 4 pixels drawn `n` times at
+/// 29 by 29 points (each over 1 cm2) on a grid in its middle. The page is large enough that
+/// all places together stay under 2 % of it, so each place is a small picture of one shared
+/// asset.
+pub fn many_places_twin(n: usize) -> Vec<u8> {
+    let area = n as f64 * 29.0 * 29.0 / 0.015;
+    let side = area.sqrt().max(1_000.0).ceil() as usize;
+    let cols = (n as f64).sqrt().ceil().max(1.0) as usize;
+    let (x0, y0) = (side / 2 - cols * 20, side / 2 - cols * 20);
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let image = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        &[
+            10, 40, 70, 100, 130, 160, 190, 220, 20, 50, 80, 110, 140, 170, 200, 230,
+        ],
+    );
+    let mut content = format!(
+        "BT /F1 12 Tf {} {} Td (Many places of one picture.) Tj ET\n",
+        x0,
+        y0 + cols * 40 + 100
+    );
+    for k in 0..n {
+        let (x, y) = (x0 + 40 * (k % cols), y0 + 40 * (k / cols));
+        content.push_str(&format!("q 29 0 0 29 {x} {y} cm /Im1 Do Q\n"));
+    }
+    let c = b.stream("/Filter /FlateDecode", &deflated(content.as_bytes()));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {side} {side}] \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /Im1 {image} 0 R >> >> \
+         /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// `pages` A4 pages, each with a line of text and `per_page` different inline pictures of 30
+/// by 30 points in a row in the middle of the page: small pictures that need vision, each an
+/// asset of its own.
+pub fn small_picture_pages(pages: usize, per_page: usize) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = String::new();
+    let mut state = 11u32;
+    for n in 0..pages {
+        let mut c = format!("BT /F1 12 Tf 72 700 Td (Page {n}.) Tj ET\n");
+        for k in 0..per_page {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            let color = (state >> 8) & 0xff_ffff;
+            let x = 140 + 40 * k;
+            c.push_str(&format!(
+                "q 30 0 0 30 {x} 400 cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID {color:06x}> EI Q\n"
+            ));
+        }
+        let cs = b.stream("", c.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {pages} >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}

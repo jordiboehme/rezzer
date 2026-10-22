@@ -1,0 +1,17 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/title",
+    "equals": "habibi"
+  },
+  {
+    "contains": "حَبيبي habibi"
+  }
+]

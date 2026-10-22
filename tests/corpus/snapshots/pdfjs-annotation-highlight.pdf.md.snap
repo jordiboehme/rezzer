@@ -1,0 +1,55 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "pdfjs-annotation-highlight.pdf"
+resource: "<corpus>/pdf/pdfjs-annotation-highlight.pdf"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "72b6387356ccfdfb95a0a5eff5e1ceb9b7667019807d7b04abaf64dad7ea143a"
+source_size: 92397
+format: pdf
+detected_by: "pdf header %PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 1
+tagged: true
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+authors: ["Tim van der Meij"]
+language: "nl-NL"
+created: "2015-12-30T15:21:22+01:00"
+modified: "2015-12-30T15:22:49+01:00"
+---
+
+# pdfjs-annotation-highlight.pdf
+
+## Overview
+
+- Pages: 1
+- Annotations: 1
+- Last changed: 2015-12-30T15:22:49+01:00
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| creator | Microsoft® Word 2013 |
+| pdf\_version | 1.5 |
+| producer | Microsoft® Word 2013 |
+
+:status[Page 1]{grey}
+
+Highlight
+
+Lorem ipsum dolor sit amet
+
+> [!NOTE] Highlight by Tim van der Meij, 2015-12-30T15:22:48+01:00
+> > Lorem ipsum dolor sit amet
+>
+> Highlight content

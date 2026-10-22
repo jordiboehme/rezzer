@@ -1,0 +1,42 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "pdf"
+  },
+  {
+    "pointer": "/properties/facts/pages",
+    "equals": 1
+  },
+  {
+    "pointer": "/properties/facts/form_fields",
+    "equals": 10
+  },
+  {
+    "pointer": "/properties/facts/has_javascript",
+    "equals": true
+  },
+  {
+    "pointer": "/facets/embedded",
+    "len": 14
+  },
+  {
+    "pointer": "/facets/embedded/0/name",
+    "equals": "document"
+  },
+  {
+    "pointer": "/facets/embedded/0/text",
+    "contains": "function callback(x)"
+  },
+  {
+    "pointer": "/facets/embedded/0/kind",
+    "equals": "script"
+  },
+  {
+    "pointer": "/facets/fields/9/name",
+    "equals": "Button3"
+  },
+  {
+    "pointer": "/facets/fields/9/kind",
+    "equals": "button"
+  }
+]

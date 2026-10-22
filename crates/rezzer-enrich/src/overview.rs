@@ -5,7 +5,8 @@
 //! Pass `overview`: builds `doc.overview` from the body and the facets.
 //!
 //! Parts are the top-level sections. Footnote sections (anchor `fn:...`) are definitions of
-//! the text, not parts, so they are left out. A formula
+//! the text, not parts, so they are left out, and so are page sections: the pages of a PDF
+//! are counted as a fact, as a list of pages says nothing a reader needs. A formula
 //! belongs to the part that holds its anchor; for a spreadsheet reference such as
 //! `Costs!A1:B9` it is the sheet part. A part with formulas is a `result`; a part that other
 //! parts read from and that has no formulas is an `input`.
@@ -31,7 +32,7 @@ impl Pass for Overview {
         let sections: Vec<&Block> = doc
             .body
             .iter()
-            .filter(|b| !is_footnote_section(b))
+            .filter(|b| !is_footnote_section(b) && !is_page(b))
             .collect();
         let mut parts: Vec<OverviewPart> = Vec::new();
         let mut owner: HashMap<&str, usize> = HashMap::new();
@@ -135,6 +136,16 @@ impl Pass for Overview {
             facts: facts(doc),
         });
     }
+}
+
+fn is_page(block: &Block) -> bool {
+    matches!(
+        block,
+        Block::Section {
+            kind: SectionKind::Page,
+            ..
+        }
+    )
 }
 
 fn is_footnote_anchor(block: &Block) -> bool {
@@ -351,6 +362,7 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             out.push((label.to_string(), n.to_string()));
         }
     };
+    count("Pages", doc.body.iter().filter(|b| is_page(b)).count());
     if !workbook {
         count("Formulas", doc.facets.formulas.len());
         count("Graphs", doc.facets.graphs.len());
@@ -364,13 +376,62 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .filter(|e| e.kind == "links_to")
             .count(),
     );
-    count("Images", images(doc));
+    let (places, distinct) = images(doc);
+    count("Images", places);
+    // Barcodes and QR codes read, by kind; a picture that looks like one but gave none.
+    let mut kinds: Vec<(&str, usize)> = Vec::new();
+    for c in doc.assets.iter().flat_map(|a| &a.codes) {
+        match kinds.iter_mut().find(|(k, _)| *k == c.symbology) {
+            Some((_, n)) => *n += 1,
+            None => kinds.push((&c.symbology, 1)),
+        }
+    }
+    let unread = doc.assets.iter().filter(|a| a.code_unread).count();
     if !workbook {
         count("Annotations", doc.facets.annotations.len());
     }
+    count("Form fields", doc.facets.fields.len());
+    count(
+        "Scripts",
+        doc.facets
+            .embedded
+            .iter()
+            .filter(|e| e.kind == "script")
+            .count(),
+    );
+    count("Signatures", doc.facets.signatures.len());
     count("Changes", doc.facets.timeline.len());
-    count("Embedded", doc.facets.embedded.len());
+    // Scripts have their own count.
+    count(
+        "Embedded",
+        doc.facets
+            .embedded
+            .iter()
+            .filter(|e| e.kind != "script")
+            .count(),
+    );
     count("Not read", doc.losses.len());
+    // The codes stand right after the pictures they were read from.
+    let mut codes: Vec<(String, String)> = Vec::new();
+    if !kinds.is_empty() {
+        let total: usize = kinds.iter().map(|(_, n)| n).sum();
+        let each: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
+        codes.push(("Codes".into(), format!("{total} ({})", each.join(", "))));
+    }
+    if unread > 0 {
+        codes.push(("Codes not decoded".into(), unread.to_string()));
+    }
+    let at = ["Images", "Links", "Graphs", "Formulas", "Pages"]
+        .iter()
+        .find_map(|k| out.iter().position(|(l, _)| l == k))
+        .map_or(0, |i| i + 1);
+    out.splice(at..at, codes);
+    // One picture drawn at several places (a logo on every page) is one file.
+    if distinct < places
+        && let Some((_, v)) = out.iter_mut().find(|(k, _)| k == "Images")
+    {
+        *v = format!("{places} ({distinct} distinct)");
+    }
     let changed = [&doc.properties.modified, &doc.properties.created]
         .into_iter()
         .flatten()
@@ -390,14 +451,16 @@ fn date_text(v: &Value) -> Option<String> {
     }
 }
 
-/// Media blocks whose asset is an image, plus image inlines in the body.
-fn images(doc: &Document) -> usize {
+/// Media blocks whose asset is an image, plus image inlines in the body: how many places,
+/// and how many distinct pictures (assets, and image inlines by their target).
+fn images(doc: &Document) -> (usize, usize) {
     let mime: HashMap<&str, &str> = doc
         .assets
         .iter()
         .map(|a| (a.id.as_str(), a.mime.as_str()))
         .collect();
     let mut n = 0;
+    let mut seen: HashSet<String> = HashSet::new();
     walk::blocks(&doc.body, |b| {
         if let Block::Media { asset, .. } = b
             && mime
@@ -405,15 +468,21 @@ fn images(doc: &Document) -> usize {
                 .is_some_and(|m| m.starts_with("image/"))
         {
             n += 1;
+            if !seen.contains(asset.as_str()) {
+                seen.insert(asset.clone());
+            }
         }
         walk::block_inlines(b, |list| {
             walk::inlines(list, |i| {
-                if matches!(i, Inline::Image { .. }) {
+                if let Inline::Image { target, .. } = i {
                     n += 1;
+                    if !seen.contains(target.as_str()) {
+                        seen.insert(target.clone());
+                    }
                 }
             });
         });
         true
     });
-    n
+    (n, seen.len())
 }

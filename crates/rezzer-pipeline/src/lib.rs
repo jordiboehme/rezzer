@@ -16,6 +16,7 @@ mod config;
 mod panics;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -23,7 +24,7 @@ use std::time::SystemTime;
 use rezzer_detect::OpenError;
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Block, Completeness, Confidence, Detection, Document, FormatId, Inline, Loss, LossReason,
+    Blob, Block, Completeness, Confidence, Detection, Document, FormatId, Inline, Loss, LossReason,
     ReadOptions, ReaderInfo, Registry, Severity, Source, source_info,
 };
 use rezzer_render::RenderOptions;
@@ -74,6 +75,10 @@ pub struct Request {
     /// Used for encrypted files. A run with a password is never cached, so no decrypted
     /// content lands in the cache.
     pub password: Option<String>,
+    /// Where extracted assets (rendered pages, pictures) are written, in the bundle
+    /// `<bundle_name>.assets/`. When set, readers are asked to extract assets and the read
+    /// neither looks up nor stores the cache (blobs are never cached).
+    pub output_dir: Option<PathBuf>,
     /// RFC 3339 time for `generated.at`. When None: [`GENERATED_AT_ENV`], else now.
     pub generated_at: Option<String>,
     /// Cancelling it stops the reader at its next budget check; the result is then partial
@@ -88,6 +93,7 @@ impl Default for Request {
             sections: None,
             math: true,
             password: None,
+            output_dir: None,
             generated_at: None,
             cancel: CancelToken::default(),
         }
@@ -101,6 +107,7 @@ impl fmt::Debug for Request {
             .field("sections", &self.sections)
             .field("math", &self.math)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("output_dir", &self.output_dir)
             .field("generated_at", &self.generated_at)
             .field("cancelled", &self.cancel.is_cancelled())
             .finish()
@@ -329,7 +336,10 @@ impl Pipeline {
             .registry
             .for_format(src.format)
             .map(|r| (r.id(), r.version()));
-        let cache = self.cache.as_ref().filter(|_| req.password.is_none());
+        let cache = self
+            .cache
+            .as_ref()
+            .filter(|_| req.password.is_none() && req.output_dir.is_none());
         let key = cache.map(|_| cache::key(src, reader, &self.config));
         if let (Some(cache), Some(key)) = (cache, &key)
             && let Some((mut document, completeness)) = cache.get(key, src)
@@ -341,7 +351,7 @@ impl Pipeline {
             document.source.detection = fresh.detection;
             return (document, completeness, None);
         }
-        let (mut document, mut completeness, message, cacheable) = self.read(src, req);
+        let (mut document, mut completeness, message, cacheable, blobs) = self.read(src, req);
         let enriched =
             panics::contained(|| rezzer_enrich::enrich(&mut document, &self.config.enrich));
         if let Err(panic) = enriched {
@@ -361,34 +371,47 @@ impl Pipeline {
         } else if cacheable && let (Some(cache), Some(key)) = (cache, &key) {
             cache.put(key, &document, completeness);
         }
+        if let Some(dir) = &req.output_dir {
+            let before = document.losses.len();
+            write_bundle(&mut document, blobs, dir, &bundle_name(&src.name));
+            if document.losses.len() > before && completeness == Completeness::Complete {
+                completeness = Completeness::Partial;
+            }
+        }
         (document, completeness, message)
     }
 
-    /// Reads `src`. The last value says whether the result may be cached: not when the time
-    /// limit cut the read short, because a time cut depends on the machine's load.
-    fn read(&self, src: &Source, req: &Request) -> (Document, Completeness, Option<String>, bool) {
+    /// Reads `src`. The last value says whether the result may be cached: not when a time
+    /// stop cut the read short (the time limit, a reader's own share of it or a timeout of
+    /// one call), because a time cut depends on the machine's load.
+    fn read(&self, src: &Source, req: &Request) -> ReadResult {
         if src.format == FormatId::Empty {
             let mut document = Document::new(source_info(src));
             document.body.push(paragraph(EMPTY_TEXT));
-            return (document, Completeness::Complete, None, true);
+            return (document, Completeness::Complete, None, true, Vec::new());
         }
         let Some(reader) = self.registry.for_format(src.format) else {
-            return (unsupported(src), Completeness::Partial, None, true);
+            return (
+                unsupported(src),
+                Completeness::Partial,
+                None,
+                true,
+                Vec::new(),
+            );
         };
         let budget = Budget::with_cancel(self.config.limits.clone(), req.cancel.clone());
         let opts = ReadOptions {
+            extract_assets: req.output_dir.is_some(),
             password: req.password.clone(),
         };
         match panics::contained(|| reader.read(src, &opts, &budget)) {
-            Ok(outcome) => {
-                let time_cut = budget.check_time().is_err()
-                    && outcome
-                        .document
-                        .losses
-                        .iter()
-                        .any(|l| l.why == LossReason::Limit);
-                (outcome.document, outcome.completeness, None, !time_cut)
-            }
+            Ok(outcome) => (
+                outcome.document,
+                outcome.completeness,
+                None,
+                !budget.time_stopped(),
+                outcome.blobs,
+            ),
             Err(panic) => {
                 let message = format!(
                     "the {} reader stopped with an internal error: {}",
@@ -407,10 +430,185 @@ impl Pipeline {
                     why: LossReason::Internal,
                     severity: Severity::Error,
                 });
-                (document, Completeness::Failed, Some(message), false)
+                (
+                    document,
+                    Completeness::Failed,
+                    Some(message),
+                    false,
+                    Vec::new(),
+                )
             }
         }
     }
+}
+
+/// What a read gives: the document, its completeness, a failure message, whether the result
+/// may be cached and the asset blobs.
+type ReadResult = (Document, Completeness, Option<String>, bool, Vec<Blob>);
+
+/// The longest bundle name, in bytes.
+const BUNDLE_NAME_MAX: usize = 120;
+
+/// The directory name stem for the assets of `source_name`: the last path component (split at
+/// `/` and a backslash), every char outside `[A-Za-z0-9._-]` replaced by `_`, a leading `.` replaced
+/// by `_`, `file` when empty, at most 120 bytes. It never holds a separator, so the bundle
+/// stays inside the output directory.
+pub fn bundle_name(source_name: &str) -> String {
+    let last = source_name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let mut name: String = last
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(BUNDLE_NAME_MAX)
+        .collect();
+    if name.starts_with('.') {
+        name.replace_range(..1, "_");
+    }
+    if name.is_empty() {
+        name.push_str("file");
+    }
+    name
+}
+
+/// Whether `id` is safe as a file name stem: `^[a-z0-9-]{1,64}$`.
+fn safe_asset_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+fn asset_extension(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "application/pdf" => "pdf",
+        _ => "bin",
+    }
+}
+
+/// Writes each blob to `<dir>/<bundle>.assets/<asset id>.<ext>` and sets the asset's path
+/// (relative to `dir`). A bad asset id or a write error is a loss, never a failed read; an
+/// asset without a written blob keeps no path. A blob without an asset is dropped. Files an
+/// earlier run left in the folder that this run does not write are removed (see
+/// [`remove_stale`]), so the folder holds what the Markdown names.
+fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &str) {
+    let folder = format!("{bundle}.assets");
+    let mut losses = Vec::new();
+    let mut written_names: HashSet<std::ffi::OsString> = HashSet::new();
+    let folder_ready = if blobs.is_empty() {
+        Ok(())
+    } else {
+        prepare_folder(dir, &folder)
+    };
+    for blob in blobs {
+        let Some(asset) = document.assets.iter_mut().find(|a| a.id == blob.asset) else {
+            continue;
+        };
+        let location = format!("asset {}", one_line(&asset.id));
+        if !safe_asset_id(&asset.id) {
+            losses.push(Loss {
+                location,
+                what: "the picture was not written: its id is not a safe file name".into(),
+                why: LossReason::Internal,
+                severity: Severity::Warning,
+            });
+            continue;
+        }
+        let relative = format!("{folder}/{}.{}", asset.id, asset_extension(&asset.mime));
+        let target = dir.join(&relative);
+        let written = match &folder_ready {
+            Ok(()) => write_new(&target, &blob.bytes),
+            Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
+        };
+        let name = target.file_name().map(std::ffi::OsStr::to_os_string);
+        match written {
+            Ok(()) => {
+                asset.path = Some(relative);
+                written_names.extend(name);
+            }
+            Err(e) => losses.push(Loss {
+                location,
+                what: format!("the picture was not written: {}", one_line(&e.to_string())),
+                why: LossReason::Internal,
+                severity: Severity::Warning,
+            }),
+        }
+    }
+    if folder_ready.is_ok()
+        && let Err(e) = remove_stale(&dir.join(&folder), &written_names)
+    {
+        losses.push(Loss {
+            location: "assets".into(),
+            what: format!(
+                "files of an earlier run in {} were not all removed: {}",
+                one_line(&folder),
+                one_line(&e.to_string())
+            ),
+            why: LossReason::Internal,
+            severity: Severity::Warning,
+        });
+    }
+    document.losses.extend(losses);
+}
+
+/// Removes the regular files in `folder` whose names are not in `keep`: what an earlier run
+/// wrote there and this one does not. Symlinks and folders inside are left alone and never
+/// followed. A folder that is missing, or not a plain directory, is left as it is.
+fn remove_stale(folder: &Path, keep: &HashSet<std::ffi::OsString>) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(folder) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    }
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        // The entry's own type: a symlink is a symlink here, never what it points at.
+        if entry.file_type()?.is_file() && !keep.contains(&entry.file_name()) {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Makes `<dir>/<folder>`, a real directory: an existing symlink or file there is refused, so
+/// nothing lands outside `dir`.
+fn prepare_folder(dir: &Path, folder: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(folder);
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::other(
+            "the assets folder exists and is not a plain directory",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes a new file at `path`. An existing entry (also a symlink) is removed without being
+/// followed, and the file is created exclusively, so a symlink is never written through.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            return Err(std::io::Error::other("a directory is in the way"));
+        }
+        Ok(_) => std::fs::remove_file(path)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)
 }
 
 /// The canonical absolute form of `path`, so the same file read from two working directories

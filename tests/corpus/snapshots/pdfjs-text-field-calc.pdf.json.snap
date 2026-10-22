@@ -1,0 +1,195 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "p1",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 1",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p2",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 2",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    },
+    {
+      "anchor": "p3",
+      "blocks": [
+        {
+          "inlines": [
+            {
+              "color": "grey",
+              "text": "Page 3",
+              "type": "status"
+            }
+          ],
+          "role": "page",
+          "type": "paragraph"
+        }
+      ],
+      "kind": "page",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "embedded": [
+      {
+        "detail": "javascript",
+        "kind": "script",
+        "name": "field Mirror calculate",
+        "text": "event.value = this.getField(\"Source\").value;"
+      }
+    ],
+    "fields": [
+      {
+        "anchor": "field:Source",
+        "kind": "text",
+        "name": "Source",
+        "pages": [
+          1
+        ],
+        "role": "input"
+      },
+      {
+        "actions": [
+          {
+            "script": "event.value = this.getField(\"Source\").value;",
+            "trigger": "calculate"
+          }
+        ],
+        "anchor": "field:Mirror",
+        "calc_order": 1,
+        "flags": [
+          "read-only"
+        ],
+        "kind": "text",
+        "name": "Mirror",
+        "pages": [
+          3
+        ],
+        "role": "result"
+      }
+    ],
+    "formulas": [
+      {
+        "anchor": "field:Mirror",
+        "dialect": "pdf-js",
+        "expression": "event.value = this.getField(\"Source\").value;",
+        "references": [
+          "field:Source"
+        ],
+        "role": "result"
+      }
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "f2",
+            "kind": "reads",
+            "to": "f1"
+          }
+        ],
+        "id": "form",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "field:Source",
+            "id": "f1",
+            "label": "Source (input)"
+          },
+          {
+            "anchor": "field:Mirror",
+            "id": "f2",
+            "label": "Mirror (result, calc 1)"
+          }
+        ]
+      }
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Pages",
+        "3"
+      ],
+      [
+        "Formulas",
+        "1"
+      ],
+      [
+        "Graphs",
+        "1"
+      ],
+      [
+        "Form fields",
+        "2"
+      ],
+      [
+        "Scripts",
+        "1"
+      ]
+    ]
+  },
+  "properties": {
+    "custom": {
+      "pdf_version": {
+        "type": "text",
+        "value": "1.7"
+      }
+    },
+    "facts": {
+      "encrypted": false,
+      "form_fields": 2,
+      "has_javascript": true,
+      "pages": 3,
+      "revisions": 1,
+      "signed": false,
+      "tagged": false
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "pdf header %PDF-"
+    },
+    "format": "pdf",
+    "modified": "<modified>",
+    "name": "pdfjs-text-field-calc.pdf",
+    "path": "<corpus>/pdf/pdfjs-text-field-calc.pdf",
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    },
+    "sha256": "b307ec462e469e7fdc7acc2630641f41ef9da4dadf8dd5c736720c60ee19248c",
+    "size": 1797
+  }
+}
