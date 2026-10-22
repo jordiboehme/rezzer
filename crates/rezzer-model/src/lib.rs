@@ -12,6 +12,7 @@ mod document;
 mod facet;
 mod format;
 mod inline;
+mod layout;
 mod loss;
 mod reader;
 mod registry;
@@ -28,6 +29,10 @@ pub use facet::{
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
+pub use layout::{
+    Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, TableLayout, a1_position,
+    split_rows, table_key,
+};
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;

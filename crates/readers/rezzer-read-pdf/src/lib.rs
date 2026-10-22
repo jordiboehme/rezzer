@@ -1495,6 +1495,7 @@ mod tests {
             rows: vec![vec![cell("a")]],
             alignments: Vec::new(),
             anchor: None,
+            layout: None,
         };
         let mut body = vec![Block::Section {
             kind: SectionKind::Page,

@@ -336,6 +336,7 @@ impl Reader for CsvReader {
                 rows,
                 alignments: Vec::new(),
                 anchor: None,
+                layout: None,
             });
         }
 
@@ -415,6 +416,7 @@ impl Reader for CsvReader {
             rows: col_rows,
             alignments: Vec::new(),
             anchor: None,
+            layout: None,
         });
         doc.body.push(sheet_of(&sheet, blocks));
 

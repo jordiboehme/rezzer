@@ -384,6 +384,7 @@ pub(crate) fn value_table(
         rows,
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     };
     (Some(table), notes)
 }

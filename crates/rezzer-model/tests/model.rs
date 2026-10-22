@@ -7,11 +7,12 @@ use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
-    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
-    Detection, Document, Edge, Embedded, Event, FieldAction, FileFacts, FormField, FormatId,
-    Formula, FormulaKind, Graph, Inline, Loss, LossReason, MODEL_VERSION, Node, Parameter,
-    Properties, ReadOptions, ReaderInfo, Role, Rule, SectionKind, Severity, Signature, Source,
-    SourceInfo, StatusColor, TaskState, Value,
+    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
+    Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
+    FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
+    MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role, RowKind, RowNote,
+    Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor, TableLayout,
+    TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -135,6 +136,83 @@ fn full_document() -> Document {
             }]],
             alignments: vec![Align::Right],
             anchor: Some(Anchor("table:1".into())),
+            layout: None,
+        },
+        Block::Table {
+            caption: Some("Sales".into()),
+            header_rows: 1,
+            role: None,
+            rows: vec![vec![Cell::new(vec![text("Region")])]],
+            alignments: Vec::new(),
+            anchor: Some(Anchor("Costs!A3:F68".into())),
+            layout: Some(Box::new(TableLayout {
+                kind: LayoutKind::Table,
+                key: "table:Sales".into(),
+                range: "A1:F68".into(),
+                data: Some("A5:F62".into()),
+                header_rows: vec![3, 4],
+                header_paths: vec!["Region".into(), "Population / 2021".into()],
+                label_cols: 1,
+                certainty: Certainty::Unsure,
+                found_by: vec![
+                    Evidence::ListObject {
+                        name: "Sales".into(),
+                    },
+                    Evidence::DatabaseRange { name: "db".into() },
+                    Evidence::Pivot {
+                        name: "PivotTable1".into(),
+                    },
+                    Evidence::Autofilter,
+                    Evidence::PrintTitles,
+                    Evidence::FrozenPanes,
+                    Evidence::DefinedName {
+                        name: "_NST01".into(),
+                    },
+                    Evidence::Rule {
+                        id: "H1".into(),
+                        detail: "header by type change".into(),
+                    },
+                ],
+                unsure: vec!["H1 and H2 disagree".into()],
+                rows: vec![
+                    RowNote {
+                        row: 5,
+                        kind: RowKind::Group,
+                        level: Some(1),
+                        parent: None,
+                        why: "label row before data".into(),
+                    },
+                    RowNote {
+                        row: 6,
+                        kind: RowKind::Data,
+                        level: Some(2),
+                        parent: Some(5),
+                        why: String::new(),
+                    },
+                    RowNote {
+                        row: 7,
+                        kind: RowKind::Subtotal,
+                        level: None,
+                        parent: None,
+                        why: "SUBTOTAL".into(),
+                    },
+                    RowNote {
+                        row: 8,
+                        kind: RowKind::Total,
+                        level: None,
+                        parent: None,
+                        why: "SUM over all groups".into(),
+                    },
+                    RowNote {
+                        row: 9,
+                        kind: RowKind::Blank,
+                        level: None,
+                        parent: None,
+                        why: String::new(),
+                    },
+                ],
+                hidden_header: true,
+            })),
         },
         Block::Code {
             lang: Some("rust".into()),
@@ -324,6 +402,75 @@ fn document_roundtrips_through_json() {
     let json = serde_json::to_string(&doc).unwrap();
     let back: Document = serde_json::from_str(&json).unwrap();
     assert_eq!(doc, back);
+    // The layout's tags and field names as spec 12.1 writes them.
+    for key in [
+        r#""layout":{"kind":"table","key":"table:Sales","range":"A1:F68","data":"A5:F62""#,
+        r#""header_rows":[3,4]"#,
+        r#""label_cols":1"#,
+        r#""certainty":"unsure""#,
+        r#"{"kind":"list_object","name":"Sales"}"#,
+        r#"{"kind":"database_range","name":"db"}"#,
+        r#"{"kind":"pivot","name":"PivotTable1"}"#,
+        r#"{"kind":"autofilter"}"#,
+        r#"{"kind":"print_titles"}"#,
+        r#"{"kind":"frozen_panes"}"#,
+        r#"{"kind":"defined_name","name":"_NST01"}"#,
+        r#"{"kind":"rule","id":"H1","detail":"header by type change"}"#,
+        r#"{"row":5,"kind":"group","level":1,"why":"label row before data"}"#,
+        r#"{"row":6,"kind":"data","level":2,"parent":5}"#,
+        r#""kind":"subtotal""#,
+        r#""kind":"total""#,
+        r#""kind":"blank""#,
+        r#""hidden_header":true"#,
+    ] {
+        assert!(json.contains(key), "{key} missing in {json}");
+    }
+    // The first table has no layout, and no key for it.
+    assert_eq!(json.matches("\"layout\"").count(), 1, "{json}");
+}
+
+#[test]
+fn layout_kinds_serialize_snake_case() {
+    let kinds = [
+        (LayoutKind::Table, "table"),
+        (LayoutKind::KeyValue, "key_value"),
+        (LayoutKind::Title, "title"),
+        (LayoutKind::Text, "text"),
+        (LayoutKind::Grid, "grid"),
+    ];
+    for (kind, name) in kinds {
+        assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{name}\""));
+    }
+    for (c, name) in [
+        (Certainty::Exact, "exact"),
+        (Certainty::Rule, "rule"),
+        (Certainty::Unsure, "unsure"),
+    ] {
+        assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{name}\""));
+    }
+}
+
+#[test]
+fn minimal_layout_json_reads_and_skips_empty_fields() {
+    let json = r#"{"kind":"grid","key":"'S'!B2","range":"B2:C3","certainty":"rule"}"#;
+    let layout: TableLayout = serde_json::from_str(json).unwrap();
+    assert_eq!(layout.kind, LayoutKind::Grid);
+    assert_eq!(layout.data, None);
+    assert!(layout.header_rows.is_empty() && layout.found_by.is_empty() && layout.rows.is_empty());
+    assert_eq!(layout.label_cols, 0);
+    assert!(!layout.hidden_header);
+    let back = serde_json::to_string(&layout).unwrap();
+    for key in [
+        "data",
+        "header_rows",
+        "header_paths",
+        "found_by",
+        "unsure",
+        "\"rows\"",
+        "hidden_header",
+    ] {
+        assert!(!back.contains(key), "{key} leaked into {back}");
+    }
 }
 
 #[test]
@@ -699,7 +846,7 @@ fn old_json_without_new_fields_still_reads() {
     assert!(doc.facets.parameters.is_empty());
     assert!(doc.facets.rules.is_empty());
     let back = serde_json::to_string(&doc).unwrap();
-    for key in ["parameters", "rules", "original", "\"range\""] {
+    for key in ["parameters", "rules", "original", "\"range\"", "layout"] {
         assert!(!back.contains(key), "{key} leaked into {back}");
     }
 }

@@ -443,6 +443,7 @@ fn table_alignment_merged_cells_and_pipes() {
         ],
         alignments: vec![Align::Left, Align::Center, Align::Right],
         anchor: None,
+        layout: None,
     }]);
     let expected = "**Costs**\n\n\
 | A | B | C |\n\
@@ -477,6 +478,7 @@ fn sheet_tables_keep_a1_merge_notes() {
         ],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains(
@@ -742,6 +744,7 @@ fn rich_document() -> Document {
             ],
             alignments: vec![Align::None, Align::Right],
             anchor: None,
+            layout: None,
         },
         Block::Callout {
             kind: CalloutKind::Tip,
@@ -1085,6 +1088,7 @@ fn hostile_spans_stay_bounded() {
         rows: vec![row(), vec![huge], row()],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains("| h | \u{2190} |") && md.contains("| \u{3003} | \u{3003} |"),
@@ -1343,6 +1347,7 @@ fn table_cells_keep_links_images_and_footnotes_intact() {
         ],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     let body = after_frontmatter(&md);
     assert_eq!(cells_of_rows(body), vec![3, 3], "{body}");
@@ -1379,6 +1384,7 @@ fn wide_spans_stay_small() {
         rows,
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(md.len() < 100_000, "{}", md.len());
     assert!(md.contains("| r399 |"), "{}", &md[md.len() - 300..]);
@@ -1398,6 +1404,7 @@ fn table_grid_is_capped_in_rows_and_columns() {
         rows: (0..300).map(|_| row(1000)).collect(),
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains("100 more rows not shown (see the model JSON)."),
@@ -1411,6 +1418,7 @@ fn table_grid_is_capped_in_rows_and_columns() {
         rows: vec![row(1200), row(3)],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains("200 more columns not shown (see the model JSON)."),
@@ -1669,6 +1677,7 @@ fn merge_note_names_only_shown_rows() {
         rows,
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     // The cell merged down stands in the header; each shown row below says "same as above".
     assert_eq!(
@@ -1936,6 +1945,7 @@ fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
         ]],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }];
     let md = render(&d, Completeness::Complete, &opts());
     assert!(!md.contains("[[x|y]]"), "{md}");
@@ -3408,6 +3418,7 @@ fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
         ],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains(
@@ -3429,6 +3440,7 @@ fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
         ],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(md.contains("\n| \u{3003} |\n"), "{md}");
     assert!(!md.contains("Merged cells"), "{md}");
@@ -3457,6 +3469,7 @@ fn header_rows_join_into_one_header_line() {
         ],
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     }]);
     assert!(
         md.contains(

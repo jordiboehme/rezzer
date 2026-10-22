@@ -89,6 +89,7 @@ fn sheet(name: &str, rows: usize, cols: usize) -> Block {
                 .collect(),
             alignments: vec![],
             anchor: None,
+            layout: None,
         }],
     }
 }
@@ -460,6 +461,7 @@ fn numeric_table_gets_no_language() {
         rows,
         alignments: vec![],
         anchor: None,
+        layout: None,
     }];
     enrich(&mut d, &only(&[]));
     assert_eq!(d.properties.language, None);
@@ -659,6 +661,7 @@ fn a_summary_table_is_not_the_sheet_data() {
             rows: vec![vec![Cell::new(vec![txt("Column")])]; 5],
             alignments: vec![],
             anchor: None,
+            layout: None,
         }],
     });
     custom_number(&mut d, "rows", 4094.0);

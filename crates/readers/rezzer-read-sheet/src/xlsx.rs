@@ -872,6 +872,7 @@ fn objects(blocks: &mut Vec<Block>, q: &str, parts: &SheetParts) {
         rows,
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     };
     if !parts.tables.is_empty() {
         let mut rows = vec![head(&["Table", "Range", "Columns"])];
