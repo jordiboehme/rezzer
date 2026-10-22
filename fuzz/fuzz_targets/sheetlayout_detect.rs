@@ -5,7 +5,8 @@
 //! The sheet layout detector on an input built from the bytes: cells, merges, layout facts
 //! and defined names, each from one record of 8 bytes. Nothing may panic, and every cell with
 //! content lies in exactly one region (in a caption, header, note or heading row or in the
-//! data area), apart from overlapping facts that the detector states.
+//! data area), apart from overlapping facts that the detector states. The detector's and the
+//! reader's rule for which region holds a cell agree.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -280,6 +281,27 @@ fn check(input: &Input, layout: &Layout) {
     }
 }
 
+/// The detector's rule for which region holds a cell (`sheetlayout::locate`) and the
+/// reader's (`rezzer_model::locate_cells`) agree on the regions found.
+fn same_owner(input: &Input, layout: &Layout) {
+    let rects: Vec<Rect> = layout.regions.iter().map(|r| r.rect).collect();
+    let areas: Vec<rezzer_model::CellArea> = rects
+        .iter()
+        .map(|r| rezzer_model::CellArea {
+            top: r.top,
+            left: r.left,
+            bottom: r.bottom,
+            right: r.right,
+        })
+        .collect();
+    let pos: Vec<Pos> = input.cells.iter().map(|c| c.pos).collect();
+    let points: Vec<(u32, u32)> = pos.iter().map(|p| (p.row, p.col)).collect();
+    assert_eq!(
+        sheetlayout::locate(&rects, &pos),
+        rezzer_model::locate_cells(&areas, &points)
+    );
+}
+
 fuzz_target!(|data: &[u8]| {
     // At most 512 records: the check is quadratic in cells and regions.
     if data.len() > RECORD * 513 {
@@ -290,4 +312,5 @@ fuzz_target!(|data: &[u8]| {
     };
     let layout = detect(&input, &limits, &|| false);
     check(&input, &layout);
+    same_owner(&input, &layout);
 });
