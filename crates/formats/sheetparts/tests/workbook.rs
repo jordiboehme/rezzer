@@ -595,6 +595,19 @@ fn white_solid_and_gray125_are_not_filled() {
         fill("lightGray", "<fgColor rgb=\"FFFFFF00\"/>"),
         fill("solid", "<fgColor theme=\"4\"/>"),
         fill("solid", ""),
+        // 11..: white with a tint. Below -0.05 is a visible grey; at or above stays white.
+        fill(
+            "solid",
+            "<fgColor theme=\"0\" tint=\"-0.14999847407452621\"/>",
+        ),
+        fill("solid", "<fgColor rgb=\"FFFFFFFF\" tint=\"-0.1\"/>"),
+        fill("solid", "<fgColor indexed=\"1\" tint=\"-0.0501\"/>"),
+        fill("solid", "<fgColor indexed=\"9\" tint=\"-0.05\"/>"),
+        fill("solid", "<fgColor theme=\"0\" tint=\"-0.04\"/>"),
+        fill("solid", "<fgColor theme=\"0\" tint=\"0.5\"/>"),
+        fill("solid", "<fgColor indexed=\"65\" tint=\"-0.2\"/>"),
+        fill("solid", "<fgColor indexed=\"64\" tint=\"-0.2\"/>"),
+        fill("solid", "<fgColor auto=\"1\" tint=\"-0.2\"/>"),
     ];
     let list: Vec<String> = (0..fills.len())
         .map(|i| format!("<xf fillId=\"{i}\"/>"))
@@ -612,9 +625,30 @@ fn white_solid_and_gray125_are_not_filled() {
     assert_eq!(
         filled,
         vec![
-            false, false, false, false, false, false, false, true, false, true, false
+            false, false, false, false, false, false, false, true, false, true,
+            false, // 0..=10
+            true, true, true, false, false, false, true, false, false
         ]
     );
+}
+
+#[test]
+fn dxf_fonts_fills_and_borders_do_not_enter_the_lists() {
+    let styles = styles_from(&format!(
+        "<dxfs count=\"1\"><dxf><font><b/></font>\
+         <fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFFF0000\"/></patternFill></fill>\
+         <border><top style=\"thick\"/><bottom style=\"thick\"/></border></dxf></dxfs>\
+         <fonts count=\"2\"><font/><font><b/></font></fonts>\
+         <fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>\
+         <borders count=\"1\"><border><top/><bottom/></border></borders>{}",
+        xfs(&[
+            "<xf fontId=\"0\" fillId=\"0\" borderId=\"0\"/>",
+            "<xf fontId=\"1\"/>"
+        ])
+    ));
+    let a = styles.look(0).unwrap();
+    assert!(!a.bold && !a.filled && !a.rule_above && !a.rule_below);
+    assert!(styles.look(1).unwrap().bold);
 }
 
 #[test]

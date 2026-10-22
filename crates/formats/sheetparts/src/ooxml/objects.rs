@@ -164,7 +164,15 @@ pub(super) fn read_pivot(
 ) -> Option<Pivot> {
     let mut found: Option<Pivot> = None;
     let mut cache_id = String::new();
+    let cap = u32::try_from(ctx.limits.max_items).unwrap_or(u32::MAX);
+    // 1 inside rowFields, 2 inside colFields: their `field` children are counted.
+    let mut axis = 0u8;
     ctx.scan(part, true, &mut |ev, _| {
+        if let Ev::End(name) = ev
+            && matches!(name, "rowFields" | "colFields")
+        {
+            axis = 0;
+        }
         if let Ev::Start(e) | Ev::Empty(e) = ev {
             let number = |key: &str| e.attr(key).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
             // The grand totals are on unless the file says `0` or `false`.
@@ -193,14 +201,16 @@ pub(super) fn read_pivot(
                         p.first_data_col = number("firstDataCol");
                     }
                 }
-                "rowFields" => {
+                "rowFields" if matches!(ev, Ev::Start(_)) => axis = 1,
+                "colFields" if matches!(ev, Ev::Start(_)) => axis = 2,
+                "field" if axis != 0 => {
                     if let Some(p) = found.as_mut() {
-                        p.row_fields = number("count");
-                    }
-                }
-                "colFields" => {
-                    if let Some(p) = found.as_mut() {
-                        p.col_fields = number("count");
+                        let n = if axis == 1 {
+                            &mut p.row_fields
+                        } else {
+                            &mut p.col_fields
+                        };
+                        *n = n.saturating_add(1).min(cap);
                     }
                 }
                 _ => {}

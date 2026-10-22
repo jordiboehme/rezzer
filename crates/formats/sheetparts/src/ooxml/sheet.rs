@@ -113,12 +113,14 @@ pub struct Pivot {
     pub first_header_row: u32,
     pub first_data_row: u32,
     pub first_data_col: u32,
-    /// Whether the table shows a grand total row (`rowGrandTotals`) and a grand total
-    /// column (`colGrandTotals`). Both default to true.
+    /// `rowGrandTotals`: grand totals for the rows. The band drawn is the grand total COLUMN
+    /// at the right edge of the table (each row gets a total). Defaults to true.
     pub row_grand_totals: bool,
+    /// `colGrandTotals`: grand totals for the columns. The band drawn is the grand total ROW
+    /// at the bottom edge of the table (each column gets a total). Defaults to true.
     pub col_grand_totals: bool,
-    /// The number of fields on the row axis and on the column axis (the `count` of
-    /// `rowFields` and `colFields`, 0 when absent). A column axis may include the values
+    /// The number of fields on the row axis and on the column axis (the `field` children of
+    /// `rowFields` and `colFields`, 0 when absent; the `count` attribute is not trusted). A column axis may include the values
     /// pseudo field.
     pub row_fields: u32,
     pub col_fields: u32,
@@ -287,7 +289,8 @@ impl Scan<'_> {
             }
             "sheetView" if !self.in_custom_views => self.views += 1,
             "pane" if !self.in_custom_views && self.views == 1 => {
-                if e.attr("state") == Some("frozen") {
+                // `frozenSplit` is a split pane that was then frozen (ECMA-376: frozen split).
+                if matches!(e.attr("state"), Some("frozen" | "frozenSplit")) {
                     let split = |key: &str, max: u32| {
                         e.attr(key)
                             .and_then(|v| v.trim().parse::<f64>().ok())

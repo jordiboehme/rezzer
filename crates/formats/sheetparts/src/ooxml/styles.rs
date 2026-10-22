@@ -42,19 +42,29 @@ fn is_rule(style: Option<&str>) -> bool {
     matches!(style, Some("thin" | "medium" | "thick" | "double"))
 }
 
-/// White (also by palette index and theme color 0) and automatic colors are no fill.
+/// White (also by palette index and theme color 0) and automatic colors are no fill. White
+/// with a tint below -0.05 is a visible grey (for example "White, Background 1, Darker 15%"),
+/// so it counts as filled.
 fn is_visible_color(e: &Elem) -> bool {
     if e.flag("auto") {
         return false;
     }
+    let darkened = e
+        .attr("tint")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .is_some_and(|t| t < -0.05);
     if let Some(rgb) = e.attr("rgb") {
-        return !rgb.to_ascii_uppercase().ends_with("FFFFFF");
+        return !rgb.to_ascii_uppercase().ends_with("FFFFFF") || darkened;
     }
     if let Some(i) = e.attr("indexed") {
-        return !matches!(i, "1" | "9" | "64" | "65");
+        return match i {
+            "64" => false,
+            "1" | "9" | "65" => darkened,
+            _ => true,
+        };
     }
     if let Some(t) = e.attr("theme") {
-        return t != "0";
+        return t != "0" || darkened;
     }
     false
 }

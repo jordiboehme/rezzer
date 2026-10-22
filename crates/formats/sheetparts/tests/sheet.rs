@@ -684,6 +684,8 @@ fn frozen_pane_rows_and_cols() {
     let s = view("<pane xSplit=\"2\" state=\"frozen\"/>");
     assert_eq!(s.frozen, Some(Frozen { rows: 0, cols: 2 }));
     assert_eq!(view("<pane ySplit=\"4\" state=\"split\"/>").frozen, None);
+    let s = view("<pane xSplit=\"1\" ySplit=\"2\" state=\"frozenSplit\"/>");
+    assert_eq!(s.frozen, Some(Frozen { rows: 2, cols: 1 }));
     assert_eq!(view("<pane ySplit=\"4\"/>").frozen, None);
     assert_eq!(view("").frozen, None);
     // Hostile numbers are clamped to the sheet size.
@@ -713,6 +715,12 @@ fn pivot_location_attributes() {
         assert!(p.first_data_row > 0 || p.first_data_col > 0, "{p:?}");
         assert!(p.row_fields + p.col_fields > 0, "{p:?}");
     }
+    // ExcelPivotTableSample.xlsx: two tables, offsets (header row, data row, data col).
+    let offsets: Vec<(u32, u32, u32)> = pivots
+        .iter()
+        .map(|p| (p.first_header_row, p.first_data_row, p.first_data_col))
+        .collect();
+    assert_eq!(offsets, vec![(1, 2, 1), (1, 1, 1)], "{pivots:?}");
 
     let rel = |t: &str| {
         format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{t}")
@@ -748,6 +756,16 @@ fn pivot_location_attributes() {
     assert!(!p.col_grand_totals);
     assert_eq!((p.row_fields, p.col_fields), (2, 1));
 
+    // A count that lies or is missing does not matter: the field children are counted.
+    let s = pivot_with(
+        "",
+        "<rowFields count=\"9\"><field x=\"0\"/></rowFields>\
+         <colFields><field x=\"1\"/><field x=\"-2\"/></colFields>",
+    );
+    assert_eq!((s.pivots[0].row_fields, s.pivots[0].col_fields), (1, 2));
+    let s = pivot_with("", "<rowFields count=\"3\"/>");
+    assert_eq!(s.pivots[0].row_fields, 0);
+
     // Absent attributes: grand totals on, no fields, offsets 0.
     let s = pivot_source("sheet=\"A\" ref=\"A1:B2\"");
     let p = &s.pivots[0];
@@ -757,4 +775,43 @@ fn pivot_location_attributes() {
         (0, 0, 0)
     );
     assert_eq!((p.row_fields, p.col_fields), (0, 0));
+}
+
+/// A sheet with one pivot table whose definition has these extra attributes and children.
+fn pivot_with(attrs: &str, children: &str) -> sheetparts::ooxml::SheetParts {
+    let rel = |t: &str| {
+        format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{t}")
+    };
+    let bytes = fixture_full(
+        &format!("<worksheet xmlns=\"{MAIN}\"/>"),
+        "<pivotCaches><pivotCache cacheId=\"7\" r:id=\"w0\"/></pivotCaches>",
+        &[(&rel("pivotCacheDefinition"), "pc.xml")],
+        &[(&rel("pivotTable"), "../pt.xml")],
+        &[
+            (
+                "xl/pt.xml",
+                &format!(
+                    "<pivotTableDefinition xmlns=\"{MAIN}\" name=\"P\" cacheId=\"7\" {attrs}>\
+                     <location ref=\"A1:C5\"/>{children}</pivotTableDefinition>"
+                ),
+            ),
+            (
+                "xl/pc.xml",
+                &format!("<pivotCacheDefinition xmlns=\"{MAIN}\"/>"),
+            ),
+        ],
+    );
+    sheet_of(&bytes, "S", &Limits::default())
+}
+
+#[test]
+fn pivot_total_bands_follow_the_flags() {
+    // rowGrandTotals is the grand total column at the right; colGrandTotals is the grand
+    // total row at the bottom.
+    let p = &pivot_with("rowGrandTotals=\"0\"", "").pivots[0];
+    assert!(!p.row_grand_totals && p.col_grand_totals);
+    let p = &pivot_with("colGrandTotals=\"0\"", "").pivots[0];
+    assert!(p.row_grand_totals && !p.col_grand_totals);
+    let p = &pivot_with("rowGrandTotals=\"false\" colGrandTotals=\"false\"", "").pivots[0];
+    assert!(!p.row_grand_totals && !p.col_grand_totals);
 }
