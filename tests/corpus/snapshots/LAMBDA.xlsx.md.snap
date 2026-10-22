@@ -49,19 +49,25 @@ modified: "2026-04-29T12:02:54Z"
 
 ### Table A1:B2
 
-|  |  |
+Table A1:B2, found by rules: empty-row and empty-column gaps, no header found.
+
+| A | B |
 | --- | --- |
 | 6 | &lt;= on cell |
 | 5 | &lt;=more complex lambda |
 
 ### Table D1:F2
 
-|  |  |  |
+Table D1:F2, found by rules: empty-row and empty-column gaps, no header found.
+
+| D | E | F |
 | --- | --- | --- |
 | 7 | 6 | Because it's in the Impossible that you find reality |
 |  |  | 9 |
 
 ### Table A4:B8
+
+Table A4:B8 (data A5:B8), header row 4, found by rules: empty-row and empty-column gaps, header row 4 by type change.
 
 | Temps | Fahrenheit |
 | --- | --- |
@@ -72,7 +78,9 @@ modified: "2026-04-29T12:02:54Z"
 
 ### Table F4:G4
 
-|  |  |
+Table F4:G4, found by rules: empty-row and empty-column gaps, no header found.
+
+| F | G |
 | --- | --- |
 | 42 | &lt;= this was the question all along! |
 

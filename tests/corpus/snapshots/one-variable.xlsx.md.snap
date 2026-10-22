@@ -47,13 +47,17 @@ modified: "2013-11-01T13:48:39Z"
 
 ### Table A1:C2
 
+Table A1:C2 (data A2:C2), header row 1, found by rules: empty-row gaps, header row 1 by type change.
+
 | A | B | =A\*B |
 | --- | --- | --- |
 | 1 | 2 | 2 |
 
 ### Table A4:B11
 
-|  |  |
+Table A4:B11, found by rules: empty-row and empty-column gaps, no header found.
+
+| A | B |
 | --- | --- |
 | Var A | 2 |
 | 1 | 2 |
@@ -66,7 +70,9 @@ modified: "2013-11-01T13:48:39Z"
 
 ### Table D4:I5
 
-|  |  |  |  |  |  |
+Table D4:I5, found by rules: empty-row and empty-column gaps, no header found.
+
+| D | E | F | G | H | I |
 | --- | --- | --- | --- | --- | --- |
 | Var B | 10 | 20 | 30 | 40 | 50 |
 | 2 | 10 | 20 | 30 | 40 | 50 |

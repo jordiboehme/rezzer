@@ -3758,3 +3758,714 @@ fn codes_are_written_once_at_the_first_place() {
         "{md}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Sheet layout tables
+
+use rezzer_model::{Certainty, Evidence, LayoutKind, RowKind, RowNote, TableLayout};
+
+/// A cell of sheet `S` at an A1 address.
+fn at(text: &str, a1: &str) -> Cell {
+    let mut c = Cell::new(if text.is_empty() {
+        Vec::new()
+    } else {
+        vec![txt(text)]
+    });
+    c.anchor = Some(Anchor(format!("S!{a1}")));
+    c
+}
+
+fn spans(mut c: Cell, rows: u32, cols: u32) -> Cell {
+    c.row_span = rows;
+    c.col_span = cols;
+    c
+}
+
+fn rule(id: &str, detail: &str) -> Evidence {
+    Evidence::Rule {
+        id: id.into(),
+        detail: detail.into(),
+    }
+}
+
+fn lay(kind: LayoutKind, range: &str, data: Option<&str>) -> TableLayout {
+    TableLayout {
+        kind,
+        key: format!("S!{}", range.split(':').next().unwrap_or(range)),
+        range: range.into(),
+        data: data.map(Into::into),
+        header_rows: Vec::new(),
+        header_paths: Vec::new(),
+        label_cols: 0,
+        certainty: Certainty::Rule,
+        found_by: vec![rule("G", "empty-row gaps")],
+        unsure: Vec::new(),
+        rows: Vec::new(),
+        hidden_header: false,
+    }
+}
+
+/// A layout table; its `caption` is set so a test sees that it is not printed.
+fn ltable(rows: Vec<Vec<Cell>>, header_rows: usize, layout: TableLayout) -> Block {
+    Block::Table {
+        caption: Some("Joined caption text".into()),
+        header_rows,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: Some(Anchor(format!("S!{}", layout.range))),
+        layout: Some(Box::new(layout)),
+    }
+}
+
+fn row_note(row: u32, kind: RowKind, parent: Option<u32>, why: &str) -> RowNote {
+    RowNote {
+        row,
+        kind,
+        level: parent.map(|_| 2),
+        parent,
+        why: why.into(),
+    }
+}
+
+fn heading(level: u8, text: &str, anchor: Option<&str>) -> Block {
+    Block::Heading {
+        level,
+        inlines: vec![txt(text)],
+        anchor: anchor.map(|a| Anchor(a.into())),
+    }
+}
+
+fn role_para(role: &str, text: &str, anchor: &str) -> Block {
+    Block::Paragraph {
+        inlines: vec![txt(text)],
+        role: Some(role.into()),
+        anchor: Some(Anchor(anchor.into())),
+    }
+}
+
+fn sheet_doc(blocks: Vec<Block>) -> String {
+    let mut d = doc();
+    d.source.format = FormatId::Xlsx;
+    d.source.name = "book.xlsx".into();
+    d.body = vec![Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("S".into()),
+        anchor: Some(Anchor("S".into())),
+        blocks,
+    }];
+    render(&d, Completeness::Complete, &opts())
+}
+
+/// The rendered content of sheet `S`, without its `## S` line.
+fn sheet_md(blocks: Vec<Block>) -> String {
+    let md = sheet_doc(blocks);
+    let start = md.find("## S\n\n").expect("the sheet") + 6;
+    let rest = &md[start..];
+    rest[..rest.find("\n## ").unwrap_or(rest.len())]
+        .trim_end()
+        .to_string()
+}
+
+#[test]
+fn markdown_and_pdf_tables_unchanged() {
+    // A table without sheet anchors (Markdown, PDF): bold caption, several header rows
+    // joined with a space, and the merge legend without "Ranges:" (P4-B).
+    let md = body_of(vec![Block::Table {
+        caption: Some("Costs".into()),
+        header_rows: 2,
+        role: None,
+        rows: vec![
+            vec![
+                Cell::new(vec![txt("Name")]),
+                spans(Cell::new(vec![txt("Sales")]), 1, 2),
+            ],
+            vec![
+                Cell::new(Vec::new()),
+                Cell::new(vec![txt("2024")]),
+                Cell::new(vec![txt("2025")]),
+            ],
+            vec![
+                Cell::new(vec![txt("x")]),
+                spans(Cell::new(vec![txt("1")]), 2, 1),
+                Cell::new(vec![txt("2")]),
+            ],
+            vec![Cell::new(vec![txt("y")]), Cell::new(vec![txt("3")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }]);
+    let expected = "**Costs**\n\n\
+| Name | Sales 2024 | Sales 2025 |\n\
+| --- | --- | --- |\n\
+| x | 1 | 2 |\n\
+| y | \u{3003} | 3 |\n\
+\n\
+Merged cells: \u{3003} same as above, \u{2190} same as left.\n";
+    assert!(md.contains(expected), "{md}");
+    assert!(!md.contains("Ranges:"), "{md}");
+}
+
+#[test]
+fn layout_merge_note_uses_sheet_addresses_beside_a_parent_column() {
+    // A layout table at B2 with a merge B3:C3 and a Parent column: the range comes from the
+    // anchor, not from the place in the table, so the extra column does not shift it.
+    let mut l = lay(LayoutKind::Table, "B2:D4", Some("B3:D4"));
+    l.header_rows = vec![2];
+    l.header_paths = vec!["Region".into(), "Q1".into(), "Q2".into()];
+    l.label_cols = 1;
+    l.rows = vec![row_note(4, RowKind::Data, Some(3), "indent 1")];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Region", "B2"), at("Q1", "C2"), at("Q2", "D2")],
+            vec![spans(at("North", "B3"), 1, 2), at("5", "D3")],
+            vec![at("Oslo", "B4"), at("1", "C4"), at("2", "D4")],
+        ],
+        1,
+        l,
+    )]);
+    assert!(
+        md.contains(
+            "| Parent | Region | Q1 | Q2 |\n| --- | --- | --- | --- |\n\
+             |  | North | \u{2190} | 5 |\n| North | Oslo | 1 | 2 |\n\n\
+             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B3:C3"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn multi_row_header_renders_paths() {
+    let mut l = lay(LayoutKind::Table, "A1:C3", Some("A3:C3"));
+    l.header_rows = vec![1, 2];
+    l.header_paths = vec![
+        "Region".into(),
+        "Sales / 2024".into(),
+        "Sales / 2025".into(),
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![
+                spans(at("Region", "A1"), 2, 1),
+                spans(at("Sales", "B1"), 1, 2),
+            ],
+            vec![at("2024", "B2"), at("2025", "C2")],
+            vec![at("North", "A3"), at("1", "B3"), at("2", "C3")],
+        ],
+        2,
+        l,
+    )]);
+    assert!(
+        md.contains(
+            "| Region | Sales / 2024 | Sales / 2025 |\n| --- | --- | --- |\n| North | 1 | 2 |\n"
+        ),
+        "{md}"
+    );
+    // The band rows are the header, not body rows; there is no Parent column.
+    assert!(!md.contains("| 2024 |"), "{md}");
+    assert!(!md.contains("Parent"), "{md}");
+    assert!(md.contains("Ranges: A1:A2, B1:C1"), "{md}");
+}
+
+#[test]
+fn header_path_with_pipe_stays_one_cell() {
+    let mut l = lay(LayoutKind::Table, "A1:C2", Some("A2:C2"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["a | b".into(), "c\nd".into(), "[[e]] / - f".into()];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("a | b", "A1"), at("c", "B1"), at("e", "C1")],
+            vec![at("1", "A2"), at("2", "B2"), at("3", "C2")],
+        ],
+        1,
+        l,
+    )]);
+    assert_eq!(cells_of_rows(&md), [3, 3], "{md}");
+    assert!(
+        md.contains("| a \\| b | c d | \\[\\[e\\]\\] / - f |"),
+        "{md}"
+    );
+}
+
+#[test]
+fn group_row_text_written_once() {
+    let mut l = lay(LayoutKind::Table, "A1:C3", Some("A2:C3"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Source".into(), "Q1".into(), "Q2".into()];
+    l.rows = vec![row_note(
+        2,
+        RowKind::Group,
+        None,
+        "one merged area across the table",
+    )];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Source", "A1"), at("Q1", "B1"), at("Q2", "C1")],
+            vec![spans(at("Year 2024", "A2"), 1, 3)],
+            vec![at("Coal", "A3"), at("1", "B3"), at("2", "C3")],
+        ],
+        1,
+        l,
+    )]);
+    assert_eq!(md.matches("Year 2024").count(), 1, "{md}");
+    assert!(md.contains("| Year 2024 | \u{2190} | \u{2190} |"), "{md}");
+    assert!(
+        md.contains("Group row: 2 (one merged area across the table)."),
+        "{md}"
+    );
+}
+
+#[test]
+fn parent_column_when_hierarchy() {
+    let mut l = lay(LayoutKind::Table, "A1:B4", Some("A2:B4"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Area".into(), "Pop".into()];
+    l.label_cols = 1;
+    l.rows = vec![
+        row_note(3, RowKind::Data, Some(2), "indent 1"),
+        row_note(4, RowKind::Data, Some(2), "indent 1"),
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Area", "A1"), at("Pop", "B1")],
+            vec![at("West", "A2"), at("10", "B2")],
+            vec![at("Oregon", "A3"), at("4", "B3")],
+            vec![at("Utah", "A4"), at("3", "B4")],
+        ],
+        1,
+        l,
+    )]);
+    assert!(
+        md.contains(
+            "| Parent | Area | Pop |\n| --- | --- | --- |\n|  | West | 10 |\n\
+             | West | Oregon | 4 |\n| West | Utah | 3 |"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn unsure_region_is_grid_with_letters() {
+    let mut l = lay(LayoutKind::Grid, "B5:C6", None);
+    l.certainty = Certainty::Unsure;
+    l.unsure = vec!["H1 and H2 disagree".into()];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("a", "B5"), at("b", "C5")],
+            vec![at("c", "B6"), at("d", "C6")],
+        ],
+        0,
+        l,
+    )]);
+    assert_eq!(
+        md,
+        "Grid B5:C6, header unsure: H1 and H2 disagree, found by rules: empty-row gaps.\n\n\
+         |  | B | C |\n| --- | --- | --- |\n| 5 | a | b |\n| 6 | c | d |"
+    );
+}
+
+#[test]
+fn headerless_table_has_letter_header_and_no_row_numbers() {
+    let rows = || {
+        vec![
+            vec![at("1", "B2"), at("2", "C2")],
+            vec![at("3", "B3"), at("4", "C3")],
+        ]
+    };
+    let mut l = lay(LayoutKind::Table, "B2:C3", Some("B2:C3"));
+    l.header_paths = vec!["B".into(), "C".into()];
+    l.found_by.push(rule("H0", "no header found"));
+    let md = sheet_md(vec![ltable(rows(), 0, l.clone())]);
+    assert_eq!(
+        md,
+        "Table B2:C3, found by rules: empty-row gaps, no header found.\n\n\
+         | B | C |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |"
+    );
+    // Without the rule's words the line still says so.
+    l.found_by.pop();
+    let md = sheet_md(vec![ltable(rows(), 0, l)]);
+    assert!(
+        md.starts_with("Table B2:C3, no header found, found by rules: empty-row gaps.\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn layout_line_names_range_header_and_evidence() {
+    let mut l = lay(LayoutKind::Table, "A1:F68", Some("A5:F62"));
+    l.header_rows = vec![3, 4];
+    l.header_paths = vec!["Area".into(), String::new(), "Pop".into()];
+    l.label_cols = 1;
+    l.found_by = vec![
+        Evidence::DefinedName {
+            name: "_NST01".into(),
+        },
+        Evidence::ListObject {
+            name: "Sales".into(),
+        },
+        rule("G", "empty-row gaps"),
+        rule("H1", "type change at row 5"),
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Area", "A3"), at("", "B3"), at("Pop", "C3")],
+            vec![at("", "A4"), at("", "B4"), at("", "C4")],
+            vec![at("West", "A5"), at("x", "B5"), at("1", "C5")],
+        ],
+        2,
+        l,
+    )]);
+    assert!(
+        md.starts_with(
+            "Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, \
+             1 column without a header: B, found by: defined name \\_NST01, Excel table Sales; \
+             rules: empty-row gaps, type change at row 5.\n\n\
+             | Area | Column B | Pop |\n"
+        ),
+        "{md}"
+    );
+    // Every fact word, no rules, one header row, a hidden header and several label columns.
+    let mut l = lay(LayoutKind::Table, "A2:E3", Some("A2:E3"));
+    l.header_rows = vec![2];
+    l.hidden_header = true;
+    l.label_cols = 3;
+    l.header_paths = vec![
+        "a".into(),
+        "b".into(),
+        "c".into(),
+        " ".into(),
+        String::new(),
+    ];
+    l.found_by = vec![
+        Evidence::DatabaseRange { name: "D".into() },
+        Evidence::Pivot { name: "P".into() },
+        Evidence::Autofilter,
+        Evidence::PrintTitles,
+        Evidence::FrozenPanes,
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![vec![
+            at("1", "A3"),
+            at("2", "B3"),
+            at("3", "C3"),
+            at("4", "D3"),
+            at("5", "E3"),
+        ]],
+        0,
+        l,
+    )]);
+    assert!(
+        md.starts_with(
+            "Table A2:E3, header row 2, header row hidden in the file, row labels in A to C, \
+             2 columns without a header: D, E, found by: database range D, pivot table P, \
+             filter range, print titles, frozen panes.\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn row_kinds_note_under_table() {
+    let mut l = lay(LayoutKind::Table, "A1:B6", Some("A2:B6"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Item".into(), "Sum".into()];
+    l.rows = vec![
+        row_note(2, RowKind::Group, None, "one text in the first column"),
+        row_note(3, RowKind::Subtotal, None, "SUBTOTAL formula in B3"),
+        row_note(4, RowKind::Group, None, "one text in the first column"),
+        row_note(5, RowKind::Subtotal, None, "SUBTOTAL formula in B5"),
+        row_note(6, RowKind::Total, None, "Excel table totals row"),
+    ];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("Item", "A1"), at("Sum", "B1")],
+            vec![at("North", "A2"), at("", "B2")],
+            vec![at("x", "A3"), at("1", "B3")],
+            vec![at("South", "A4"), at("", "B4")],
+            vec![at("y", "A5"), at("2", "B5")],
+            vec![at("All", "A6"), at("3", "B6")],
+        ],
+        1,
+        l,
+    )]);
+    assert!(
+        md.ends_with(
+            "| All | 3 |\n\nSubtotal rows: 3 (SUBTOTAL formula in B3), 5 (SUBTOTAL formula in B5). \
+             Total row: 6 (Excel table totals row). \
+             Group rows: 2, 4 (one text in the first column)."
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn caption_and_note_blocks_keep_anchors() {
+    let mut l = lay(LayoutKind::Table, "A1:B9", Some("A5:B8"));
+    l.header_rows = vec![4];
+    l.header_paths = vec!["a".into(), "b".into()];
+    let md = sheet_md(vec![
+        heading(3, "Sales", Some("S!A1")),
+        role_para("caption", "In thousands", "S!A2"),
+        role_para("caption", "Sum of Size", "S!A3"),
+        role_para("caption", "Column Labels", "S!B3"),
+        ltable(
+            vec![
+                vec![at("a", "A4"), at("b", "B4")],
+                vec![at("1", "A5"), at("2", "B5")],
+            ],
+            1,
+            l,
+        ),
+        role_para("note", "Source: survey", "S!A9"),
+        role_para("caption", "Other sheet", "'A!B'!C2"),
+    ]);
+    assert!(md.starts_with("### Sales\n\nIn thousands (A2)\n\n"), "{md}");
+    assert!(
+        md.contains("\n\nSum of Size (A3) | Column Labels (B3)\n\nTable A1:B9"),
+        "{md}"
+    );
+    assert!(md.contains("\n\nSource: survey (A9)\n\n"), "{md}");
+    // A sheet name with a `!`: the address is what follows the last one.
+    assert!(md.ends_with("\n\nOther sheet (C2)"), "{md}");
+    // Outside a sheet nothing is added.
+    let md = body_of(vec![role_para("caption", "Plain", "S!A2")]);
+    assert!(md.contains("\nPlain\n"), "{md}");
+    assert!(!md.contains("(A2)"), "{md}");
+}
+
+#[test]
+fn title_region_renders_heading() {
+    let md = sheet_md(vec![
+        heading(3, "Overview", Some("S!A1")),
+        Block::Table {
+            caption: None,
+            header_rows: 0,
+            role: None,
+            rows: Vec::new(),
+            alignments: Vec::new(),
+            anchor: Some(Anchor("S!A1".into())),
+            layout: Some(Box::new(lay(LayoutKind::Title, "A1", None))),
+        },
+    ]);
+    assert_eq!(md, "### Overview");
+    // Its caption, should a reader set one, is not printed either.
+    let md = sheet_doc(vec![ltable(
+        Vec::new(),
+        0,
+        lay(LayoutKind::Title, "A1", None),
+    )]);
+    assert!(md.ends_with("## S\n"), "{md}");
+    assert!(!md.contains("Joined caption text"), "{md}");
+}
+
+#[test]
+fn single_table_sheet_has_no_region_heading() {
+    let mut l = lay(LayoutKind::Table, "A1:B2", Some("A2:B2"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["a".into(), "b".into()];
+    let md = sheet_md(vec![ltable(
+        vec![
+            vec![at("a", "A1"), at("b", "B1")],
+            vec![at("1", "A2"), at("2", "B2")],
+        ],
+        1,
+        l,
+    )]);
+    assert!(!md.contains('#'), "{md}");
+    assert!(!md.contains("Joined caption text"), "{md}");
+    assert!(
+        md.starts_with(
+            "Table A1:B2 (data A2:B2), header row 1, found by rules: empty-row gaps.\n\n| a | b |"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn key_value_and_text_render_as_lists() {
+    let kv = ltable(
+        vec![
+            vec![
+                at("Excavated diameter", "A5"),
+                at("10", "B5"),
+                at("m", "C5"),
+            ],
+            vec![at("Prepared by", "A6"), at("Alok", "B6"), at("", "C6")],
+            vec![at("Note", "A7"), at("", "B7"), at("", "C7")],
+        ],
+        0,
+        lay(LayoutKind::KeyValue, "A4:C7", Some("A5:C7")),
+    );
+    let mut two_lines = at("Two", "A20");
+    two_lines.inlines.extend([Inline::LineBreak, txt("lines")]);
+    let text = ltable(
+        vec![
+            vec![at("Line one", "A19")],
+            vec![two_lines],
+            vec![at("", "A21")],
+        ],
+        0,
+        lay(LayoutKind::Text, "A18:C21", Some("A19:A21")),
+    );
+    let md = sheet_md(vec![kv, text]);
+    assert_eq!(
+        md,
+        "Label and value pairs A5:C7:\n\n\
+         - Excavated diameter: 10 m (B5)\n\
+         - Prepared by: Alok (B6)\n\
+         - Note (A7)\n\n\
+         Text A19:A21:\n\n\
+         - Line one (A19)\n\
+         - Two\\\n  lines (A20)"
+    );
+}
+
+#[test]
+fn leading_dash_in_key_value_is_escaped() {
+    let kv = ltable(
+        vec![
+            vec![at("- Prepared by", "A5"), at("- 5", "B5")],
+            vec![at("# Tools", "A6"), at("1. CAD", "B6")],
+        ],
+        0,
+        lay(LayoutKind::KeyValue, "A5:B6", None),
+    );
+    let text = ltable(
+        vec![vec![at("- IS 4880", "A19")], vec![at("> quote", "A20")]],
+        0,
+        lay(LayoutKind::Text, "A19:A20", None),
+    );
+    let md = sheet_md(vec![kv, text]);
+    assert!(md.contains("- \\- Prepared by: - 5 (B5)\n"), "{md}");
+    assert!(md.contains("- \\# Tools: 1. CAD (B6)"), "{md}");
+    assert!(
+        md.contains("- \\- IS 4880 (A19)\n- \\> quote (A20)"),
+        "{md}"
+    );
+    // Two flat lists of two items each: nothing nests, nothing turns into a heading.
+    let mut lists = 0;
+    let mut items = 0;
+    for e in Parser::new_ext(&md, Options::empty()) {
+        match e {
+            Event::Start(Tag::List(_)) => lists += 1,
+            Event::Start(Tag::Item) => items += 1,
+            Event::Start(Tag::Heading { .. } | Tag::BlockQuote(_)) => panic!("{md}"),
+            _ => {}
+        }
+    }
+    assert_eq!((lists, items), (2, 4), "{md}");
+}
+
+#[test]
+fn row_under_merge_from_above_renders() {
+    // Row 4 holds no cell of its own: A2 and B3 cover it from above (Task 9).
+    let rows = || {
+        vec![
+            vec![at("a", "A1"), at("b", "B1")],
+            vec![spans(at("x", "A2"), 3, 1), at("1", "B2")],
+            vec![spans(at("2", "B3"), 2, 1)],
+            Vec::new(),
+        ]
+    };
+    let mut l = lay(LayoutKind::Table, "A1:B4", Some("A2:B4"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["a".into(), "b".into()];
+    let md = sheet_md(vec![ltable(rows(), 1, l)]);
+    assert!(
+        md.contains("| x | 1 |\n| \u{3003} | 2 |\n| \u{3003} | \u{3003} |\n\n"),
+        "{md}"
+    );
+    assert!(md.contains("Ranges: A2:A4, B3:B4"), "{md}");
+    let mut g = lay(LayoutKind::Grid, "A1:B4", None);
+    g.certainty = Certainty::Unsure;
+    let md = sheet_md(vec![ltable(rows(), 0, g)]);
+    assert!(
+        md.contains("| 3 | \u{3003} | 2 |\n| 4 | \u{3003} | \u{3003} |"),
+        "{md}"
+    );
+}
+
+#[test]
+fn long_caption_heading_is_cut_and_kept_in_full() {
+    let long = format!("{} end", "word ".repeat(30));
+    let md = sheet_md(vec![heading(3, &long, Some("S!A1"))]);
+    let cut: String = long.chars().take(120).collect();
+    assert_eq!(md, format!("### {}...\n\n{long} (A1)", cut.trim_end()));
+    // A short heading stays as it is, with no line under it.
+    let md = sheet_md(vec![heading(3, "Short", Some("S!A1"))]);
+    assert_eq!(md, "### Short");
+}
+
+#[test]
+fn layout_line_kept_with_table() {
+    let filler = "word ".repeat(30);
+    let mut blocks = Vec::new();
+    for (n, top) in [1u32, 20, 40, 60].into_iter().enumerate() {
+        let a = |col: &str, row: u32| format!("{col}{row}");
+        let mut l = lay(
+            LayoutKind::Table,
+            &format!("A{top}:B{}", top + 3),
+            Some(&format!("A{}:B{}", top + 1, top + 3)),
+        );
+        l.header_rows = vec![top];
+        l.header_paths = vec!["a".into(), "b".into()];
+        l.rows = vec![row_note(top + 3, RowKind::Total, None, "SUM over B in B")];
+        blocks.push(heading(
+            3,
+            &format!("Region {n}"),
+            Some(&format!("S!A{}", top)),
+        ));
+        blocks.push(role_para("caption", &filler, &format!("S!C{top}")));
+        // Half the tables have a merge, so the row kinds stand also right under a table.
+        let (x, second) = if n % 2 == 0 {
+            (
+                spans(at("x", &a("A", top + 1)), 2, 1),
+                vec![at("2", &a("B", top + 2))],
+            )
+        } else {
+            (
+                at("x", &a("A", top + 1)),
+                vec![at("y", &a("A", top + 2)), at("2", &a("B", top + 2))],
+            )
+        };
+        blocks.push(ltable(
+            vec![
+                vec![at("a", &a("A", top)), at("b", &a("B", top))],
+                vec![x, at("1", &a("B", top + 1))],
+                second,
+                vec![at("t", &a("A", top + 3)), at("3", &a("B", top + 3))],
+            ],
+            1,
+            l,
+        ));
+        blocks.push(role_para("note", &filler, &format!("S!A{}", top + 4)));
+        blocks.push(ltable(
+            vec![vec![at("k", &a("D", top)), at("v", &a("E", top))]],
+            0,
+            lay(LayoutKind::KeyValue, &format!("D{top}:E{top}"), None),
+        ));
+    }
+    let md = sheet_doc(blocks);
+    for size in [10, 30, 60, 120] {
+        let pages = paginate(&md, size);
+        assert!(pages.len() > 1, "{size}");
+        assert_eq!(pages.concat(), md);
+        for page in &pages[1..] {
+            for start in [
+                "|",
+                "Merged cells:",
+                "Total row",
+                "Subtotal row",
+                "Group row",
+                "Table ",
+                "Grid ",
+                "Label and value pairs ",
+                "Text ",
+                "- ",
+            ] {
+                assert!(!page.starts_with(start), "{size}: {page:?}");
+            }
+        }
+    }
+}

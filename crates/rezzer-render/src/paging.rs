@@ -8,7 +8,9 @@
 //! lines, and a part still too large at a blank line. Breaks never fall inside a fence, the
 //! frontmatter or the title, never before an indented line (it would turn into code) and
 //! never before a `---` line (it would look like frontmatter), and a heading stays with the
-//! block after it. Joining the pages gives the input back unchanged.
+//! block after it. A table stays with what comes before it and its notes with it; a sheet
+//! region's layout line stays with what comes before it and with the table or list after
+//! it. Joining the pages gives the input back unchanged.
 
 /// The token estimate: characters divided by four.
 pub(crate) fn tokens(text: &str) -> usize {
@@ -33,6 +35,37 @@ fn fence_run(line: &str) -> Option<(char, usize, &str)> {
     let ch = rest.chars().next().filter(|c| *c == '`' || *c == '~')?;
     let run = rest.chars().take_while(|c| *c == ch).count();
     (run >= 3).then(|| (ch, run, &rest[run..]))
+}
+
+/// The starts of the row kind line under a sheet table.
+const ROW_KINDS: [&str; 3] = ["Subtotal row", "Total row", "Group row"];
+
+/// The words that start a sheet region's layout line or lead line, before its range.
+const REGION_WORDS: [&str; 4] = ["Table ", "Grid ", "Label and value pairs ", "Text "];
+
+/// A cell address such as `B12` at the start of `text`: what follows it.
+fn after_cell(text: &str) -> Option<&str> {
+    let letters = text.bytes().take_while(u8::is_ascii_uppercase).count();
+    let digits = text[letters..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    ((1..=3).contains(&letters) && (1..=7).contains(&digits)).then(|| &text[letters + digits..])
+}
+
+/// True for the layout line of a sheet region (`Table A1:F9, header row 1, ...`) or the
+/// lead line of a label and value or text region (`Text A19:A25:`).
+fn layout_line(text: &str) -> bool {
+    REGION_WORDS.iter().any(|word| {
+        let Some(rest) = text.strip_prefix(word).and_then(after_cell) else {
+            return false;
+        };
+        let rest = match rest.strip_prefix(':').and_then(after_cell) {
+            Some(after) => after,
+            None => rest,
+        };
+        rest.starts_with([',', '.', ':']) || rest.starts_with(" (data ")
+    })
 }
 
 /// The border before each line, and each line's start offset.
@@ -79,6 +112,10 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             // A table stays with its caption, and a merge note with its table.
             && !text.starts_with('|')
             && !text.starts_with("Merged cells: ")
+            // A sheet region's layout line stays with what comes before it, and its row
+            // kinds with its table.
+            && !layout_line(text)
+            && !ROW_KINDS.iter().any(|k| text.starts_with(k))
             && !text.ends_with("not shown (see the model JSON).")
         {
             Border::Blank
@@ -106,7 +143,8 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
         }
         prev_blank = text.trim().is_empty();
         if !prev_blank {
-            after_heading = fence.is_none() && text.starts_with('#');
+            // A layout line stays with the table or list under it, like a heading.
+            after_heading = fence.is_none() && (text.starts_with('#') || layout_line(text));
         }
     }
     (starts, kinds)

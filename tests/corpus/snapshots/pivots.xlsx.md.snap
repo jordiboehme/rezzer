@@ -54,22 +54,28 @@ modified: "2025-11-24T17:58:07Z"
 
 ### Grid A1:B1
 
-|  |  |
-| --- | --- |
-| Date | (Multiple Items) |
+Grid A1:B1, header unsure: no header found, found by rules: empty-row gaps.
+
+|  | A | B |
+| --- | --- | --- |
+| 1 | Date | (Multiple Items) |
 
 ### Table A3:E5
+
+Table A3:E5 (data A4:E5), header row 3, row labels in A, found by: pivot table PivotTable1.
 
 | Row Labels | Sum of Size | Average of Value | Count of Size | Sum of Value x 2 |
 | --- | --- | --- | --- | --- |
 | yellow | 6.25552 | 8.333333333 | 3 | 25.54830581 |
 | Grand Total | 6.25552 | 8.333333333 | 3 | 25.54830581 |
 
+Total row: 5 (pivot total row).
+
 ### Text F3
 
-|  |
-| --- |
-| &lt;------------ calculated field |
+Text F3:
+
+- &lt;------------ calculated field (F3)
 
 **Pivot tables**
 
@@ -81,25 +87,29 @@ modified: "2025-11-24T17:58:07Z"
 
 ### Grid A1:B1
 
-|  |  |
-| --- | --- |
-| Name | (All) |
+Grid A1:B1, header unsure: no header found, found by rules: no gaps.
+
+|  | A | B |
+| --- | --- | --- |
+| 1 | Name | (All) |
 
 ### Table A3:D11
 
-Sum of Size
+Sum of Size (A3) | Column Labels (B3)
 
-Column Labels
+Table A3:D11 (data A5:D11), header row 4, row labels in A, found by: pivot table PivotTable2.
 
-| Row Labels | blue | yellow | Grand Total |
-| --- | --- | --- | --- |
-| 5 |  | 2.22452 | 2.22452 |
-| 5 |  | 2.22452 | 2.22452 |
-| Group1 | 11.067 | 5.0731 | 16.1401 |
-| 10 | 4.882 | 0 | 4.882 |
-| 15 | 3.121 | 5.0731 | 8.1941 |
-| 20 | 3.064 |  | 3.064 |
-| Grand Total | 11.067 | 7.29762 | 18.36462 |
+| Parent | Row Labels | blue | yellow | Grand Total |
+| --- | --- | --- | --- | --- |
+|  | 5 |  | 2.22452 | 2.22452 |
+| 5 | 5 |  | 2.22452 | 2.22452 |
+|  | Group1 | 11.067 | 5.0731 | 16.1401 |
+| Group1 | 10 | 4.882 | 0 | 4.882 |
+| Group1 | 15 | 3.121 | 5.0731 | 8.1941 |
+| Group1 | 20 | 3.064 |  | 3.064 |
+|  | Grand Total | 11.067 | 7.29762 | 18.36462 |
+
+Total row: 11 (pivot total row; base level).
 
 **Pivot tables**
 
@@ -111,11 +121,15 @@ Column Labels
 
 ### Grid A1:B1
 
-|  |  |
-| --- | --- |
-| Date | (Multiple Items) |
+Grid A1:B1, header unsure: no header found, found by rules: empty-row gaps.
+
+|  | A | B |
+| --- | --- | --- |
+| 1 | Date | (Multiple Items) |
 
 ### Table A3:B7
+
+Table A3:B7 (data A4:B7), header row 3, row labels in A, found by: pivot table PivotTable1.
 
 | Row Labels | Count of Value2 |
 | --- | --- |
@@ -124,11 +138,13 @@ Column Labels
 | j | 1 |
 | Grand Total | 3 |
 
+Total row: 7 (pivot total row).
+
 ### Text C3
 
-|  |
-| --- |
-| &lt;--------  grouped field as value |
+Text C3:
+
+- &lt;--------  grouped field as value (C3)
 
 **Pivot tables**
 
@@ -140,19 +156,27 @@ Column Labels
 
 ### Table A1:B4
 
+Table A1:B4 (data A2:B4), header row 1, row labels in A, found by: pivot table PivotTable5.
+
 | Row Labels | Sum of Value |
 | --- | --- |
 | blue | 75 |
 | yellow | 40 |
 | Grand Total | 115 |
 
+Total row: 4 (pivot total row).
+
 ### Table A6:B9
+
+Table A6:B9 (data A7:B9), header row 6, row labels in A, found by: pivot table PivotTable6.
 
 | Row Labels | Sum of Value |
 | --- | --- |
 | blue | 75 |
 | yellow | 50 |
 | Grand Total | 125 |
+
+Total row: 9 (pivot total row).
 
 **Pivot tables**
 
@@ -162,6 +186,8 @@ Column Labels
 | PivotTable6 | A6:B9 | DataSheet!A1:J11 |
 
 ## DataSheet
+
+Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header row 1 by type change.
 
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -177,6 +203,8 @@ Column Labels
 | 10 | j | yellow | 5 | 1.20452 | 01-01-24 | 4.151031116 | FALSE |  | blue |
 
 ## DataSheet2
+
+Table A1:J11 (data A2:J11), header row 1, found by rules: no gaps, header row 1 by type change.
 
 | Id | Name | Category | Value | Size | Date | Value / Size | IsBlue | Null | Misc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -47,7 +47,9 @@ modified: "2017-03-10T14:58:49Z"
 
 ### Table A1:E17
 
-| String | This is a string |  |  |  |
+Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a header: C, D, E, found by rules: empty-row gaps, header row 1 by type change, label column A.
+
+| String | This is a string | Column C | Column D | Column E |
 | --- | --- | --- | --- | --- |
 | integer | 13 |  |  |  |
 | float | 13.12112313 |  |  |  |
@@ -68,9 +70,9 @@ modified: "2017-03-10T14:58:49Z"
 
 ### Text C21
 
-|  |
-| --- |
-| text test |
+Text C21:
+
+- text test (C21)
 
 ### the
 
@@ -78,15 +80,15 @@ modified: "2017-03-10T14:58:49Z"
 
 ### Text D33
 
-|  |
-| --- |
-| quick |
+Text D33:
+
+- quick (D33)
 
 ### Text B35
 
-|  |
-| --- |
-| comment6 |
+Text B35:
+
+- comment6 (B35)
 
 ## Logic
 

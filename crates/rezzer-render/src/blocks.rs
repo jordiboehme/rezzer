@@ -6,7 +6,8 @@
 //!
 //! Text from files is escaped so that it can never add structure: no headings, lists, quotes,
 //! tables, code, HTML (and so no HTML comments), math or frontmatter. Anchors are not printed:
-//! the model JSON keeps them, and a heading anchor is the heading's own slug anyway.
+//! the model JSON keeps them, and a heading anchor is the heading's own slug anyway. The one
+//! exception is a sheet section, whose cell lines end with their cell's address (`layout`).
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -1081,9 +1082,14 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                 (None, Some(label)) => footnote(label, inner, ctx, depth),
                 (Some(title), _) => {
                     let head = heading_line(level.min(6), &line_text(title.trim()));
-                    let body = blocks(inner, ctx, depth + 1, level.saturating_add(1), false);
+                    let body = if sheet {
+                        crate::layout::sheet_blocks(inner, ctx, depth + 1, level.saturating_add(1))
+                    } else {
+                        blocks(inner, ctx, depth + 1, level.saturating_add(1), false)
+                    };
                     join2(head, body)
                 }
+                (None, None) if sheet => crate::layout::sheet_blocks(inner, ctx, depth + 1, level),
                 (None, None) => blocks(inner, ctx, depth + 1, level, false),
             };
             if sheet {
@@ -1112,8 +1118,20 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             header_rows,
             rows,
             alignments,
+            layout,
             ..
-        } => model_table(caption.as_deref(), *header_rows, rows, alignments),
+        } => match layout {
+            Some(layout) => crate::layout::layout_table(
+                layout,
+                *header_rows,
+                rows,
+                alignments,
+                ctx,
+                depth,
+                level,
+            ),
+            None => model_table(caption.as_deref(), *header_rows, rows, alignments),
+        },
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
         Block::Quote { blocks: inner, .. } => {
             let body = blocks(inner, ctx, depth + 1, level, false);
@@ -1223,7 +1241,7 @@ fn hang(first: &str, body: &str, indent: usize) -> String {
     out
 }
 
-fn list_block(
+pub(crate) fn list_block(
     ordered: bool,
     items: &[Vec<Block>],
     alt: bool,
@@ -1583,7 +1601,7 @@ pub(crate) fn pipe_table(header: &[String], aligns: &[Align], rows: &[Vec<String
 }
 
 /// A table shows at most this many columns.
-const MAX_COLUMNS: usize = 1_000;
+pub(crate) const MAX_COLUMNS: usize = 1_000;
 
 /// A table's rendered grid (rows times width) holds at most this many cells.
 const MAX_CELLS: usize = 200_000;
@@ -1597,14 +1615,14 @@ const SAME_AS_LEFT: &str = "\u{2190}";
 /// What a grid position of a rendered table shows: the cell that starts there, or a mark for
 /// a position a merged cell covers. Each names the cell by its place in the table's texts.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Spot {
+pub(crate) enum Spot {
     Own(usize),
     Above(usize),
     Left(usize),
 }
 
 impl Spot {
-    fn cell(self) -> usize {
+    pub(crate) fn cell(self) -> usize {
         match self {
             Spot::Own(k) | Spot::Above(k) | Spot::Left(k) => k,
         }
@@ -1620,6 +1638,250 @@ struct Merged {
     at: Option<(u32, u32)>,
 }
 
+/// Where a cell of a rendered table stands: its first grid row and column, and the 0-based
+/// sheet (row, column) of its anchor when it has a sheet anchor.
+#[derive(Clone, Copy)]
+struct Place {
+    r: usize,
+    c: usize,
+    at: Option<(u32, u32)>,
+}
+
+/// The 0-based sheet (row, column) of a cell's `Sheet!A1` anchor. The sheet name may hold a
+/// `!` itself, so the address is what follows the last one.
+fn sheet_position(cell: &Cell) -> Option<(u32, u32)> {
+    cell.anchor
+        .as_ref()
+        .and_then(|a| a.0.rsplit_once('!'))
+        .and_then(|(_, at)| a1_position(at))
+}
+
+/// A table's cells placed on a grid, the one grid every table is written from. A merged
+/// cell's text stands once, in its first position; the other positions of its first row say
+/// "same as left", every position below its first row "same as above". Rows stop once the
+/// grid would pass MAX_CELLS; the first row is always shown.
+pub(crate) struct Grid {
+    /// The escaped one-line text of each cell, in reading order.
+    texts: Vec<String>,
+    places: Vec<Place>,
+    /// The shown rows.
+    pub(crate) spots: Vec<Vec<Option<Spot>>>,
+    /// The rows of the model table.
+    pub(crate) rows: usize,
+    /// The widest shown row.
+    pub(crate) width: usize,
+    /// The columns the cells ask for, past MAX_COLUMNS too.
+    wanted: usize,
+    merged: Vec<Merged>,
+    /// True when a cell carries a sheet anchor: the table is a sheet's.
+    sheet: bool,
+}
+
+impl Grid {
+    pub(crate) fn new(rows: &[Vec<Cell>]) -> Grid {
+        // The real column count: per row the sum of its spans where that is plausible, else
+        // its number of cells. Spans never reach past it.
+        let real = rows
+            .iter()
+            .map(|row| {
+                let sum = row
+                    .iter()
+                    .map(|c| c.col_span.max(1) as usize)
+                    .fold(0usize, usize::saturating_add);
+                if sum <= MAX_COLUMNS { sum } else { row.len() }
+            })
+            .max()
+            .unwrap_or(1)
+            .clamp(1, MAX_COLUMNS);
+        let mut grid: Vec<Vec<Option<Spot>>> = vec![Vec::new(); rows.len()];
+        let mut texts: Vec<String> = Vec::new();
+        let mut places: Vec<Place> = Vec::new();
+        let mut merged: Vec<Merged> = Vec::new();
+        let mut filled = 0usize;
+        let mut width = 0usize;
+        let mut wanted = 0usize;
+        let mut shown = rows.len();
+        for (r, row) in rows.iter().enumerate() {
+            let mut c = 0;
+            for cell in row {
+                while grid[r].get(c).is_some_and(Option::is_some) {
+                    c += 1;
+                }
+                if c >= MAX_COLUMNS {
+                    wanted = wanted.max(c + 1);
+                    c += 1;
+                    continue;
+                }
+                let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
+                let cs = (cell.col_span.max(1) as usize)
+                    .min(real.saturating_sub(c).max(1))
+                    .min(MAX_COLUMNS - c);
+                // Past the cell budget a span fills only its own cell; the note still names
+                // it.
+                let (fill_rows, fill_cols) = if filled.saturating_add(rs * cs) > MAX_CELLS {
+                    (1, 1)
+                } else {
+                    (rs, cs)
+                };
+                filled += fill_rows * fill_cols;
+                let k = texts.len();
+                texts.push(inlines(&cell.inlines, Mode::Cell).trim().to_string());
+                let at = sheet_position(cell);
+                places.push(Place { r, c, at });
+                for (dr, grid_row) in grid[r..r + fill_rows].iter_mut().enumerate() {
+                    if grid_row.len() < c + fill_cols {
+                        grid_row.resize(c + fill_cols, None);
+                    }
+                    for (dc, slot) in grid_row[c..c + fill_cols].iter_mut().enumerate() {
+                        *slot = Some(match (dr, dc) {
+                            (0, 0) => Spot::Own(k),
+                            (0, _) => Spot::Left(k),
+                            _ => Spot::Above(k),
+                        });
+                    }
+                }
+                if rs > 1 || cs > 1 {
+                    merged.push(Merged { r, cs, rs, at });
+                }
+                c += cs;
+                wanted = wanted.max(c);
+            }
+            width = width.max(grid[r].len());
+            if r > 0 && (r + 1).saturating_mul(width.max(1)) > MAX_CELLS {
+                shown = r;
+                break;
+            }
+        }
+        grid.truncate(shown);
+        let sheet = rows
+            .iter()
+            .flatten()
+            .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
+        Grid {
+            texts,
+            places,
+            spots: grid,
+            rows: rows.len(),
+            width,
+            wanted,
+            merged,
+            sheet,
+        }
+    }
+
+    /// A sheet's table (its cells carry sheet anchors) names its merged ranges as the sheet
+    /// does, from each merged cell's own anchor and its spans; only rows that are shown are
+    /// named, a range into hidden rows ends at the last one, and a merged cell without a
+    /// sheet anchor is not named. Other tables name none.
+    pub(crate) fn ranges(&self) -> Vec<String> {
+        if !self.sheet {
+            return Vec::new();
+        }
+        let shown = self.spots.len();
+        self.merged
+            .iter()
+            .filter(|m| m.r < shown)
+            .filter_map(|m| {
+                let (row, col) = m.at?;
+                let (row, col) = (row as usize, col as usize);
+                Some(format!(
+                    "{}{}:{}{}",
+                    column_letter(col),
+                    row + 1,
+                    column_letter(col + m.cs - 1),
+                    row + m.rs.min(shown - m.r)
+                ))
+            })
+            .collect()
+    }
+
+    /// True when a shown row from `from` on holds a mark.
+    pub(crate) fn marked(&self, from: usize) -> bool {
+        self.spots.iter().skip(from).any(|row| {
+            row.iter()
+                .any(|s| matches!(s, Some(Spot::Above(_) | Spot::Left(_))))
+        })
+    }
+
+    /// The text of cell `k`. A real cell whose whole text is a mark is escaped where the
+    /// table carries marks (`legend`), so it is never read as one; elsewhere it is written as
+    /// it is.
+    pub(crate) fn own(&self, k: usize, legend: bool) -> String {
+        let t = &self.texts[k];
+        if legend && (t == SAME_AS_ABOVE || t == SAME_AS_LEFT) {
+            format!("\\{t}")
+        } else {
+            t.clone()
+        }
+    }
+
+    /// The cells of shown row `r` as written.
+    pub(crate) fn line(&self, r: usize, legend: bool) -> Vec<String> {
+        self.spots[r]
+            .iter()
+            .map(|spot| match spot {
+                None => String::new(),
+                Some(Spot::Own(k)) => self.own(*k, legend),
+                Some(Spot::Above(_)) => SAME_AS_ABOVE.to_string(),
+                Some(Spot::Left(_)) => SAME_AS_LEFT.to_string(),
+            })
+            .collect()
+    }
+
+    /// The 1-based sheet row of shown row `r`, from the anchor of a cell that starts in or
+    /// covers it (a merged cell covers consecutive sheet rows). `None` when nothing there has
+    /// a sheet anchor.
+    pub(crate) fn sheet_row(&self, r: usize) -> Option<u32> {
+        self.spots[r].iter().flatten().find_map(|spot| {
+            let p = self.places[spot.cell()];
+            let (row, _) = p.at?;
+            let offset = u32::try_from(r - p.r).ok()?;
+            row.checked_add(offset)?.checked_add(1)
+        })
+    }
+
+    /// The 0-based sheet column of the grid's first column, from the anchor of a placed cell.
+    pub(crate) fn left_column(&self) -> Option<u32> {
+        self.places.iter().find_map(|p| {
+            let (_, col) = p.at?;
+            col.checked_sub(u32::try_from(p.c).ok()?)
+        })
+    }
+
+    /// The legend of the marks, with the merged ranges when there are any.
+    pub(crate) fn merge_note(&self, legend: bool, ranges: &[String]) -> Option<String> {
+        if !legend {
+            return None;
+        }
+        let mut note =
+            format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
+        if !ranges.is_empty() {
+            note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
+        }
+        Some(note)
+    }
+
+    /// The notes on rows and columns the grid does not show.
+    pub(crate) fn cut_notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if self.spots.len() < self.rows {
+            notes.push(format!(
+                "{} more rows not shown (see the model JSON).",
+                self.rows - self.spots.len()
+            ));
+        }
+        if self.wanted > MAX_COLUMNS {
+            notes.push(format!(
+                "{} more columns not shown (see the model JSON).",
+                self.wanted - MAX_COLUMNS
+            ));
+        }
+        notes
+    }
+}
+
+/// A table without a sheet layout: a Markdown, PDF or CSV table, or one of a sheet read
+/// without layout.
 fn model_table(
     caption: Option<&str>,
     header_rows: usize,
@@ -1632,152 +1894,23 @@ fn model_table(
             .map(|c| format!("**{}** (empty table)", line_text(c.trim())))
             .unwrap_or_default();
     }
-    // The real column count: per row the sum of its spans where that is plausible, else
-    // its number of cells. Spans never reach past it.
-    let real = rows
-        .iter()
-        .map(|row| {
-            let sum = row
-                .iter()
-                .map(|c| c.col_span.max(1) as usize)
-                .fold(0usize, usize::saturating_add);
-            if sum <= MAX_COLUMNS { sum } else { row.len() }
-        })
-        .max()
-        .unwrap_or(1)
-        .clamp(1, MAX_COLUMNS);
-    // Place every cell on a grid; a merged cell's text stands once, in its first position.
-    // The other positions of its first row say "same as left", every position below its
-    // first row "same as above". Rows stop once the grid would pass MAX_CELLS; the header
-    // row is always shown.
-    let mut grid: Vec<Vec<Option<Spot>>> = vec![Vec::new(); rows.len()];
-    let mut texts: Vec<String> = Vec::new();
-    let mut merged: Vec<Merged> = Vec::new();
-    let mut filled = 0usize;
-    let mut width = 0usize;
-    let mut wanted = 0usize;
-    let mut shown = rows.len();
-    for (r, row) in rows.iter().enumerate() {
-        let mut c = 0;
-        for cell in row {
-            while grid[r].get(c).is_some_and(Option::is_some) {
-                c += 1;
-            }
-            if c >= MAX_COLUMNS {
-                wanted = wanted.max(c + 1);
-                c += 1;
-                continue;
-            }
-            let rs = (cell.row_span.max(1) as usize).min(rows.len() - r);
-            let cs = (cell.col_span.max(1) as usize)
-                .min(real.saturating_sub(c).max(1))
-                .min(MAX_COLUMNS - c);
-            // Past the cell budget a span fills only its own cell; the note still names it.
-            let (fill_rows, fill_cols) = if filled.saturating_add(rs * cs) > MAX_CELLS {
-                (1, 1)
-            } else {
-                (rs, cs)
-            };
-            filled += fill_rows * fill_cols;
-            let k = texts.len();
-            texts.push(inlines(&cell.inlines, Mode::Cell).trim().to_string());
-            for (dr, grid_row) in grid[r..r + fill_rows].iter_mut().enumerate() {
-                if grid_row.len() < c + fill_cols {
-                    grid_row.resize(c + fill_cols, None);
-                }
-                for (dc, slot) in grid_row[c..c + fill_cols].iter_mut().enumerate() {
-                    *slot = Some(match (dr, dc) {
-                        (0, 0) => Spot::Own(k),
-                        (0, _) => Spot::Left(k),
-                        _ => Spot::Above(k),
-                    });
-                }
-            }
-            if rs > 1 || cs > 1 {
-                let at = cell
-                    .anchor
-                    .as_ref()
-                    .and_then(|a| a.0.rsplit_once('!'))
-                    .and_then(|(_, at)| a1_position(at));
-                merged.push(Merged { r, cs, rs, at });
-            }
-            c += cs;
-            wanted = wanted.max(c);
-        }
-        width = width.max(grid[r].len());
-        if r > 0 && (r + 1).saturating_mul(width.max(1)) > MAX_CELLS {
-            shown = r;
-            break;
-        }
-    }
-    grid.truncate(shown);
-    // A sheet's table (its cells carry sheet anchors) also names its merged ranges as the
-    // sheet does, from each merged cell's own anchor and its spans; only rows that are shown
-    // are named, a range into hidden rows ends at the last one, and a merged cell without a
-    // sheet anchor is not named.
-    let sheet = rows
-        .iter()
-        .flatten()
-        .any(|c| c.anchor.as_ref().is_some_and(|a| a.0.contains('!')));
-    let ranges: Vec<String> = if sheet {
-        merged
-            .into_iter()
-            .filter(|m| m.r < shown)
-            .filter_map(|Merged { r, cs, rs, at }| {
-                let (row, col) = at?;
-                let (row, col) = (row as usize, col as usize);
-                Some(format!(
-                    "{}{}:{}{}",
-                    column_letter(col),
-                    row + 1,
-                    column_letter(col + cs - 1),
-                    row + rs.min(shown - r)
-                ))
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let grid = Grid::new(rows);
+    let ranges = grid.ranges();
     // Several header rows are one header line, so their marks are never shown; the marks of
     // the other rows are, and then the legend explains them.
-    let head = header_rows.min(grid.len());
-    let marked = grid.iter().enumerate().any(|(r, row)| {
-        (head < 2 || r >= head)
-            && row
-                .iter()
-                .any(|s| matches!(s, Some(Spot::Above(_) | Spot::Left(_))))
-    });
+    let head = header_rows.min(grid.spots.len());
+    let marked = grid.marked(if head < 2 { 0 } else { head });
     let legend = marked || !ranges.is_empty();
-    // A real cell whose whole text is a mark is escaped where the table carries marks, so it
-    // is never read as one; elsewhere it is written as it is.
-    let own = |k: usize| -> String {
-        let t = &texts[k];
-        if legend && (t == SAME_AS_ABOVE || t == SAME_AS_LEFT) {
-            format!("\\{t}")
-        } else {
-            t.clone()
-        }
-    };
-    let line = |row: &[Option<Spot>]| -> Vec<String> {
-        row.iter()
-            .map(|spot| match spot {
-                None => String::new(),
-                Some(Spot::Own(k)) => own(*k),
-                Some(Spot::Above(_)) => SAME_AS_ABOVE.to_string(),
-                Some(Spot::Left(_)) => SAME_AS_LEFT.to_string(),
-            })
-            .collect()
-    };
     // Several header rows are one header line: per column the texts of the cells over it,
     // top down, a cell over several rows once.
     let header: Vec<String> = match head {
         0 => Vec::new(),
-        1 => line(&grid[0]),
-        _ => (0..width)
+        1 => grid.line(0, legend),
+        _ => (0..grid.width)
             .map(|c| {
                 let mut parts: Vec<String> = Vec::new();
                 let mut last = None;
-                for row in &grid[..head] {
+                for row in &grid.spots[..head] {
                     let Some(spot) = row.get(c).copied().flatten() else {
                         continue;
                     };
@@ -1785,7 +1918,7 @@ fn model_table(
                         continue;
                     }
                     last = Some(spot.cell());
-                    let t = own(spot.cell());
+                    let t = grid.own(spot.cell(), legend);
                     if !t.is_empty() {
                         parts.push(t);
                     }
@@ -1794,33 +1927,17 @@ fn model_table(
             })
             .collect(),
     };
-    let body: Vec<Vec<String>> = grid[head..].iter().map(|row| line(row)).collect();
+    let body: Vec<Vec<String>> = (head..grid.spots.len())
+        .map(|r| grid.line(r, legend))
+        .collect();
     let mut out = String::new();
     if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
     }
     out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    if legend {
-        let mut note =
-            format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
-        if !ranges.is_empty() {
-            note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
-        }
-        notes.push(note);
-    }
-    if shown < rows.len() {
-        notes.push(format!(
-            "{} more rows not shown (see the model JSON).",
-            rows.len() - shown
-        ));
-    }
-    if wanted > MAX_COLUMNS {
-        notes.push(format!(
-            "{} more columns not shown (see the model JSON).",
-            wanted - MAX_COLUMNS
-        ));
-    }
+    notes.extend(grid.merge_note(legend, &ranges));
+    notes.extend(grid.cut_notes());
     if !notes.is_empty() {
         out.push_str("\n\n");
         out.push_str(&notes.join("\n"));

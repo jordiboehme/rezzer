@@ -61,7 +61,9 @@ flowchart LR
 
 ## indiceOrga
 
-|  |
+Table A1:A2, found by rules: no gaps, no header found.
+
+| A |
 | --- |
 | 1.4965 |
 | -0.1459 |
@@ -70,7 +72,9 @@ flowchart LR
 
 ### Table A1:E7
 
-| Semi // | Colonne a bas (1) L | Colonne a haut (n) L | Colonne b bas (1) L | Colonne b haut (n) L |
+Table A1:E7 (data A4:E7), header rows 1 to 3, row labels in A, found by rules: empty-row and empty-column gaps, header rows 1 to 3 by type change, label column A.
+
+| Semi // | Colonne a / bas (1) / L | Colonne a / haut (n) / L | Colonne b / bas (1) / L | Colonne b / haut (n) / L |
 | --- | --- | --- | --- | --- |
 | Indice | 1.4666 | 1.4870 |  | 1.4907 |
 | titre | 20.49% | 6.51% | 6.51% | 3.98% |
@@ -81,26 +85,34 @@ Merged cells: 〃 same as above, ← same as left. Ranges: B1:C1, D1:E1
 
 ### Table G1:G2
 
-|  |
+Table G1:G2, found by rules: empty-row and empty-column gaps, no header found.
+
+| G |
 | --- |
 | 1.4965 |
 | -0.1459 |
 
 ### Table A9:B9
 
-|  |  |
+Table A9:B9, row labels in A, found by rules: empty-row and empty-column gaps, no header found, label column A.
+
+| A | B |
 | --- | --- |
 | Aexp | 10 |
 
 ### Table D9
 
-|  |
+Table D9, found by rules: empty-row and empty-column gaps, no header found.
+
+| D |
 | --- |
 | 10 |
 
 ## Data
 
-|  |  |  |  |
+Table A1:D4, found by rules: no gaps, no header found.
+
+| A | B | C | D |
 | --- | --- | --- | --- |
 | 66 | 170 | (b) | 107 |
 | L0a | Lna | L0b | Lnb |

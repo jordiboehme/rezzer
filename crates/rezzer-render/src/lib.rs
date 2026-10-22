@@ -12,10 +12,16 @@
 //! - Text from files is escaped so it never adds structure, HTML or frontmatter
 //! - Anchors are not printed. A heading anchor is the heading's slug already; every other
 //!   anchor stays in the model JSON (`--json`). Footnote sections (`fn:<label>`) become
-//!   footnote definitions
+//!   footnote definitions. One exception: in a sheet section, caption and note lines and the
+//!   items of label and value pairs and of text regions end with their cell's address, for
+//!   example `(A2)`; headings show none
+//! - A sheet region with a layout starts with a line that says where it is and how it was
+//!   found; a table region's header is its header paths, a grid shows the sheet's column
+//!   letters and row numbers
 //! - A hard line break is a backslash at the line end
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
-//!   end of its page section. Only the others are listed in `## Annotations`
+//!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
+//!   sheet take none: a cell comment stays in the list
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 
@@ -23,6 +29,7 @@ mod blocks;
 mod facets;
 mod form;
 mod frontmatter;
+mod layout;
 mod mermaid;
 mod overview;
 mod paging;
