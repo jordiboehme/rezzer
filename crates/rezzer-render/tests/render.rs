@@ -4747,13 +4747,18 @@ fn book(sheets: Vec<Block>) -> Document {
     d
 }
 
-/// The rendered content of sheet `S` with these options, without its `## S` line.
-fn sheet_md_as(blocks: Vec<Block>, o: &RenderOptions) -> String {
-    let md = render(
+/// The whole output for a book with sheet `S`, with these options.
+fn sheet_doc_as(blocks: Vec<Block>, o: &RenderOptions) -> String {
+    render(
         &book(vec![named_sheet("S", "S", blocks)]),
         Completeness::Complete,
         o,
-    );
+    )
+}
+
+/// The rendered content of sheet `S` with these options, without its `## S` line.
+fn sheet_md_as(blocks: Vec<Block>, o: &RenderOptions) -> String {
+    let md = sheet_doc_as(blocks, o);
     let start = md.find("## S\n\n").expect("the sheet") + 6;
     let rest = &md[start..];
     rest[..rest.find("\n## ").unwrap_or(rest.len())]
@@ -4955,6 +4960,22 @@ fn records_mark_subtotals() {
     assert!(!md.contains("Subtotal row"), "{md}");
     assert!(!md.contains("Parent"), "{md}");
 
+    // A parent row whose first cell is empty: no label, as in table mode's Parent column.
+    let mut l = lay(LayoutKind::Table, "A1:B3", Some("A2:B3"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Region".into(), "Sales".into()];
+    l.rows = vec![row_note(3, RowKind::Data, Some(2), "indent 1")];
+    let rows = vec![
+        vec![at("Region", "A1"), at("Sales", "B1")],
+        vec![at("", "A2"), at("7", "B2")],
+        vec![at("Bergen", "A3"), at("3", "B3")],
+    ];
+    let md = sheet_md_as(vec![ltable(rows.clone(), 1, l.clone())], &records());
+    assert!(md.contains("- Row 3 (S!A3:B3)\n"), "{md}");
+    assert!(!md.contains("parent"), "{md}");
+    let table = sheet_md_as(vec![ltable(rows, 1, l)], &opts());
+    assert!(table.contains("|  | Bergen | 3 |"), "{table}");
+
     // Nested group rows name both groups; a total row belongs to no group.
     let mut l = lay(LayoutKind::Table, "A1:B5", Some("A2:B5"));
     l.header_rows = vec![1];
@@ -5098,6 +5119,29 @@ fn records_blocks_of_fifty() {
     assert!(!md.lines().any(|l| l.starts_with("* ")), "{md}");
     // Every record is one item; the blank lines between blocks are page borders.
     assert_eq!(list_shape(&md).0, [120, 120], "{md}");
+    let whole = sheet_doc_as(
+        {
+            let mut l = lay(LayoutKind::Table, "A1:A121", Some("A2:A121"));
+            l.header_rows = vec![1];
+            l.header_paths = vec!["N".into()];
+            let mut rows = vec![vec![at("N", "A1")]];
+            for r in 2..=121 {
+                rows.push(vec![at(&format!("v{r}"), &format!("A{r}"))]);
+            }
+            vec![ltable(rows, 1, l)]
+        },
+        &records(),
+    );
+    let pages = paginate(&whole, 400);
+    assert!(pages.len() > 2, "{}", pages.len());
+    assert_eq!(pages.concat(), whole);
+    for page in &pages[1..] {
+        let first = page.trim_start_matches('\n');
+        assert!(
+            !first.starts_with("  ") && !first.starts_with("- N:"),
+            "a page starts inside a record: {page}"
+        );
+    }
 }
 
 #[test]
@@ -5254,6 +5298,19 @@ fn sheet_named_like_position_wins() {
         "{message}"
     );
     assert!(!message.contains("\"S51\""), "{message}");
+    // Names with combining marks stay as they are in messages.
+    let marks = book(vec![
+        named_sheet("ข้อมูล", "ข้อมูล", vec![para("x")]),
+        named_sheet("Cafe\u{301}", "Cafe\u{301}", vec![para("y")]),
+    ]);
+    assert_eq!(resolve_sheets(&marks, &sel(&["ข้อมูล"])), Ok(sel(&["ข้อมูล"])));
+    assert_eq!(
+        resolve_sheets(&marks, &sel(&["कार्य"])),
+        Err(
+            "unknown sheet \"कार्य\"; the workbook has these sheets: \"ข้อมูล\", \"Cafe\u{301}\""
+                .to_string()
+        )
+    );
     // A file without sheets.
     let mut text = doc();
     text.body = vec![para("words")];

@@ -798,10 +798,12 @@ fn records(
         if kind != RowKind::Total && !group.is_empty() {
             head_line.push_str(&format!(", group: {}", group.join(" / ")));
         }
+        // The parent's label is the first cell of its row, as table mode's Parent column.
         if let Some(parent) = note
             .and_then(|n| n.parent)
             .and_then(|p| shown_at.get(&p))
-            .map(|&p| row_text(p))
+            .and_then(|&p| grid.spots[p].first().copied().flatten())
+            .map(|spot| cell_words(cell(spot.cell())))
             .filter(|t| !t.is_empty())
         {
             head_line.push_str(&format!(", parent: {parent}"));

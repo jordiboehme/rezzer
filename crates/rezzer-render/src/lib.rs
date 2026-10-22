@@ -204,7 +204,8 @@ pub fn resolve_sheets(doc: &Document, selectors: &[String]) -> Result<Vec<String
                     .map(|i| vec![i])
                     .ok_or_else(|| {
                         format!(
-                            "unknown sheet {selector:?}; the workbook has these sheets: {}",
+                            "unknown sheet {}; the workbook has these sheets: {}",
+                            frontmatter::quote(selector),
                             sheet_list(&titles)
                         )
                     })?,
@@ -212,7 +213,8 @@ pub fn resolve_sheets(doc: &Document, selectors: &[String]) -> Result<Vec<String
                 _ => {
                     let names: Vec<String> = any_case.iter().map(|&i| titles[i].clone()).collect();
                     return Err(format!(
-                        "sheet {selector:?} matches more than one sheet: {}",
+                        "sheet {} matches more than one sheet: {}",
+                        frontmatter::quote(selector),
                         sheet_list(&names)
                     ));
                 }
@@ -239,12 +241,13 @@ fn position(selector: &str, count: usize) -> Option<usize> {
     (1..=count).contains(&n).then(|| n - 1)
 }
 
-/// The names quoted and joined by commas, at most 50, then `and <n> more`.
+/// The names quoted (only `"`, `\` and controls escaped) and joined by commas, at most 50,
+/// then `and <n> more`.
 fn sheet_list(names: &[String]) -> String {
     let shown: Vec<String> = names
         .iter()
         .take(MAX_NAMED_SHEETS)
-        .map(|n| format!("{n:?}"))
+        .map(|n| frontmatter::quote(n))
         .collect();
     let mut out = shown.join(", ");
     if names.len() > MAX_NAMED_SHEETS {
