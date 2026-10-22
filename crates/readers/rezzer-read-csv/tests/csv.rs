@@ -1062,11 +1062,19 @@ fn ragged_title_and_note_lines_are_not_damaged() {
 
 #[test]
 fn csv_records_use_column_numbers() {
-    // Without a header the fields are named by column numbers.
+    // Without a header the rows stay a table with numbered columns: records would name every
+    // field by a number.
     let out = read(b"1,2.5,x\n2,3.5,y\n3,4.5,z\n");
     let md = markdown(&out, TableStyle::Records);
-    assert!(md.contains("- Row 1 (data!A1:C1)"), "{md}");
-    assert!(md.contains("  - 1: 1\n  - 2: 2.5\n  - 3: x"), "{md}");
+    assert!(!md.contains("- Row 1"), "{md}");
+    assert!(
+        md.contains("shown as a table, not as records: there is no header to name the fields."),
+        "{md}"
+    );
+    assert!(
+        md.contains("| 1 | 2 | 3 |\n| --- | --- | --- |\n| 1 | 2.5 | x |"),
+        "{md}"
+    );
     // With a header shorter than the rows, the fields past it are named `Column <number>`.
     let out = read(ragged_input().as_bytes());
     let (_, blocks) = tables(&out);

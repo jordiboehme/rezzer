@@ -220,12 +220,24 @@ pub(crate) fn layout_table(
         }
         LayoutKind::Grid => grid(layout, rows, aligns),
         LayoutKind::Table
-            if ctx.table_style == TableStyle::Records && layout.certainty != Certainty::Unsure =>
+            if ctx.table_style == TableStyle::Records
+                && layout.certainty != Certainty::Unsure
+                && !headerless(layout) =>
         {
             records(layout, header_rows, rows, ctx, depth, level)
         }
-        LayoutKind::Table => table(layout, header_rows, rows, aligns, ctx.column_numbers),
+        LayoutKind::Table => {
+            let kept = ctx.table_style == TableStyle::Records && headerless(layout);
+            table(layout, header_rows, rows, aligns, ctx.column_numbers, kept)
+        }
     }
+}
+
+/// A table without a header in the file: no header rows, and no column names stated for
+/// hidden ones. Its records would name every field by a column letter or number and look
+/// more certain than they are, so it stays a table in the records style, like a grid.
+fn headerless(layout: &TableLayout) -> bool {
+    layout.header_rows.is_empty() && !layout.hidden_header
 }
 
 fn is_empty(c: &Cell) -> bool {
@@ -392,6 +404,13 @@ fn fact_words(e: &Evidence) -> Option<String> {
         Evidence::DefinedName { name } => format!("defined name {}", line_text(name)),
         Evidence::Rule { .. } => return None,
     })
+}
+
+/// The layout line of a table without a header in the records style: it stays a table, and
+/// the line says why before its closing period.
+fn kept_as_table(line: String) -> String {
+    let base = line.strip_suffix('.').unwrap_or(&line);
+    format!("{base}; shown as a table, not as records: there is no header to name the fields.")
 }
 
 /// The line that says where a table or grid region is and how it was found (spec 7.2). For
@@ -594,17 +613,22 @@ fn shifted(aligns: &[Align]) -> Vec<Align> {
 }
 
 /// A `table` region: the header paths as the header, the rows after the header band as the
-/// body, a `Parent` column when a row has a parent (R5).
+/// body, a `Parent` column when a row has a parent (R5). `kept`: records were asked for but
+/// the table has no header, and its layout line says so.
 fn table(
     layout: &TableLayout,
     header_rows: usize,
     rows: &[Vec<Cell>],
     aligns: &[Align],
     numbers: bool,
+    kept: bool,
 ) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, false, numbers);
+    let mut line = layout_line(layout, left, false, numbers);
+    if kept {
+        line = kept_as_table(line);
+    }
     if rows.is_empty() {
         return line;
     }

@@ -4987,6 +4987,28 @@ fn records_skip_empty_cells() {
 }
 
 #[test]
+fn headerless_table_stays_a_table_in_records() {
+    // No header in the file: records would name each field by a column letter, so the rows
+    // stay a table and the layout line says why.
+    let mut l = lay(LayoutKind::Table, "A1:C2", None);
+    l.header_paths = vec!["A".into(), "B".into(), "C".into()];
+    let rows = vec![
+        vec![at("Radius", "A1"), at("5.00", "B1"), at("m", "C1")],
+        vec![at("Width", "A2"), at("7.89", "B2"), at("m", "C2")],
+    ];
+    let md = sheet_md_as(vec![ltable(rows.clone(), 0, l.clone())], &records());
+    assert_eq!(
+        md,
+        "Table A1:C2, no header found, found by rules: empty-row gaps; shown as a table, not as records: \
+         there is no header to name the fields.\n\n\
+         | A | B | C |\n| --- | --- | --- |\n| Radius | 5.00 | m |\n| Width | 7.89 | m |"
+    );
+    // The table style is unchanged.
+    let table = sheet_md_as(vec![ltable(rows, 0, l)], &opts());
+    assert!(!table.contains("not as records"), "{table}");
+}
+
+#[test]
 fn records_mark_subtotals() {
     let mut l = lay(LayoutKind::Table, "A1:B5", Some("A2:B5"));
     l.header_rows = vec![1];
