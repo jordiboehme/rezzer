@@ -1537,3 +1537,35 @@ fn second_merge_inside_the_caption_rows_stops_the_caption_line() {
     // else the data).
     assert_eq!(r.body.or(r.data).map(|b| b.top), Some(1), "{r:?}");
 }
+
+#[test]
+fn header_rule_details_name_their_rows_in_fixed_words() {
+    // The renderer leaves the header rows out of a rule detail when the layout line already
+    // says them: it looks for exactly "header row N" or "header rows A to B" (1-based). Keep
+    // this wording in H1, H2 and H3, or change the renderer with it.
+    // One row: H1 and H2.
+    let layout = Sheet::styled()
+        .rows("A1", &["*Name|*Size", "a|1", "b|2"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(header(r), [1]);
+    assert_eq!(rule_detail(r, "H1"), "header row 1 by type change");
+    assert_eq!(rule_detail(r, "H2"), "bold header row 1");
+    // Several rows: H1 and H2.
+    let layout = eia(true).detect();
+    let r = only(&layout);
+    assert_eq!(header(r), [3, 4]);
+    assert_eq!(rule_detail(r, "H1"), "header rows 3 to 4 by type change");
+    assert_eq!(rule_detail(r, "H2"), "bold header rows 3 to 4");
+    // H3 finds one row only.
+    let layout = Sheet::styled()
+        .rows("A1", &["*Name|*City", "Ann|Rome", "Bob|Oslo"])
+        .detect();
+    let r = only(&layout);
+    assert_eq!(header(r), [1]);
+    assert!(
+        rule_detail(r, "H3").starts_with("all-text header row 1, "),
+        "{}",
+        rule_detail(r, "H3")
+    );
+}
