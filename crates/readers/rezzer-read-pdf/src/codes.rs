@@ -62,12 +62,48 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+/// About the bytes [`vector_codes`] holds for `cells`: its copy of them, the grid entries and
+/// the grid's buckets, at most for [`MAX_ENTRIES`].
+pub(crate) fn search_bytes(cells: &[[f32; 4]]) -> u64 {
+    let n = cells.len() as u64;
+    // Each cell lies in a few grid cells; the grid is bounded by MAX_ENTRIES.
+    let entries = (n * 4).min(MAX_ENTRIES as u64);
+    n * (16 + 8 + 8) + entries * (8 + 48)
+}
+
+/// How a rectangle may belong to a code: a bar of a linear code standing up, a bar lying
+/// down (a linear code turned a quarter), or a module (or a run of modules) of a matrix code.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Up,
+    Flat,
+    Module,
+}
+
+fn shape(c: &[f32; 4]) -> Shape {
+    let (w, h) = (c[2] - c[0], c[3] - c[1]);
+    if h >= 4.0 * w {
+        Shape::Up
+    } else if w >= 4.0 * h {
+        Shape::Flat
+    } else {
+        Shape::Module
+    }
+}
+
+/// Groups of at least this many rectangles are looked at for merging, at most this many.
+const MERGE_CELLS: usize = 8;
+const MERGE_GROUPS: usize = 2_000;
+
 /// The regions among `cells` (filled axis-aligned rectangles: x0, y0, x1, y1) that look like
-/// a code: at least [`MIN_CELLS`] small rectangles close to each other, that cover between a
-/// quarter and three quarters of their box, the box at least 8 modules on its short side for
-/// a matrix code, or bars of one height for a linear code. At most [`MAX_REGIONS`], the ones
-/// with the most rectangles first. `Err` says why the page was not searched: its work would
-/// pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
+/// a code: at least [`MIN_CELLS`] small rectangles on one module lattice, close to each
+/// other, that make the pattern of a code. A matrix code shows its finder (QR Code and Micro
+/// QR Code: the corner squares, Data Matrix: the solid L, Aztec: the bullseye, PDF417: the
+/// start bars). A linear code has bars of one height and at least two widths, standing up or
+/// lying down, with a quiet zone of 5 modules at both ends. Groups in one row band a few
+/// modules apart are one region (a PDF417 has light columns through all its rows). At most
+/// [`MAX_REGIONS`], the ones with the most rectangles first. `Err` says why the page was not
+/// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
@@ -108,9 +144,9 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     }
     let mut parent: Vec<usize> = (0..cells.len()).collect();
     // Modules of a matrix code touch or nearly touch. Bars of a linear code stand up to four
-    // modules apart (its widest space), next to bars of the same height.
-    let bar = |c: &[f32; 4]| c[3] - c[1] >= 4.0 * (c[2] - c[0]);
-    let reach_of = |c: &[f32; 4]| short(c) * if bar(c) { 4.5 } else { 1.5 } + 0.01;
+    // modules apart (its widest space), next to bars of the same rows (or columns).
+    let reach_of =
+        |c: &[f32; 4]| short(c) * if shape(c) == Shape::Module { 1.5 } else { 4.5 } + 0.01;
     let mut pairs = 0u64;
     for (i, c) in cells.iter().enumerate() {
         let reach = reach_of(c);
@@ -134,15 +170,24 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
                     let d = cells[j];
                     let gap_x = (d[0] - c[2]).max(c[0] - d[2]);
                     let gap_y = (d[1] - c[3]).max(c[1] - d[3]);
-                    let joined = if bar(c) && bar(&d) {
-                        // Bars side by side: the same rows, a space between.
-                        let same = (c[1] - d[1]).abs() <= 0.1 * (c[3] - c[1])
-                            && (c[3] - d[3]).abs() <= 0.1 * (c[3] - c[1]);
-                        same && gap_x <= reach.max(reach_of(&d))
-                    } else {
-                        let near = reach.min(reach_of(&d));
-                        gap_x <= near && gap_y <= near
-                    };
+                    let near = (short(c).min(short(&d))) * 1.5 + 0.01;
+                    let mut joined = gap_x <= near && gap_y <= near;
+                    let far = reach.max(reach_of(&d));
+                    match (shape(c), shape(&d)) {
+                        (Shape::Up, Shape::Up) => {
+                            let hh = c[3] - c[1];
+                            let same =
+                                (c[1] - d[1]).abs() <= 0.1 * hh && (c[3] - d[3]).abs() <= 0.1 * hh;
+                            joined |= same && gap_x <= far;
+                        }
+                        (Shape::Flat, Shape::Flat) => {
+                            let ww = c[2] - c[0];
+                            let same =
+                                (c[0] - d[0]).abs() <= 0.1 * ww && (c[2] - d[2]).abs() <= 0.1 * ww;
+                            joined |= same && gap_y <= far;
+                        }
+                        _ => {}
+                    }
                     if joined {
                         let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
                         if ri != rj {
@@ -153,18 +198,26 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
             }
         }
     }
-    drop(grid_of);
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..cells.len() {
         let r = find(&mut parent, i);
         groups.entry(r).or_default().push(i);
     }
+    let mut groups: Vec<Vec<usize>> = groups
+        .into_values()
+        .filter(|g| g.len() >= MERGE_CELLS)
+        .collect();
+    groups.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    groups.truncate(MERGE_GROUPS);
+    let groups = merge_bands(&cells, groups);
     let mut found: Vec<(usize, VectorCode)> = Vec::new();
-    for members in groups.into_values() {
+    for members in groups {
         if members.len() < MIN_CELLS {
             continue;
         }
-        if let Some(code) = region(&cells, &members) {
+        if let Some(code) = region(&cells, &members, &|b| {
+            quiet(&cells, &grid_of, &members, b, &key)
+        }) {
             found.push((members.len(), code));
         }
     }
@@ -177,12 +230,10 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     Ok(found.into_iter().map(|(_, c)| c).collect())
 }
 
-/// The code region of `members` of `cells`, when it looks like one.
-fn region(cells: &[[f32; 4]], members: &[usize]) -> Option<VectorCode> {
+/// The box and the narrowest side of `members` of `cells`.
+fn bounds(cells: &[[f32; 4]], members: &[usize]) -> ([f32; 4], f32) {
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-    let mut area = 0.0f32;
-    let mut module = f32::MAX;
-    let mut bars = 0usize;
+    let mut m = f32::MAX;
     for &i in members {
         let c = cells[i];
         b = [
@@ -191,32 +242,119 @@ fn region(cells: &[[f32; 4]], members: &[usize]) -> Option<VectorCode> {
             b[2].max(c[2]),
             b[3].max(c[3]),
         ];
-        let (w, h) = (c[2] - c[0], c[3] - c[1]);
-        area += w * h;
-        module = module.min(w.min(h));
-        if h >= 4.0 * w {
-            bars += 1;
+        m = m.min((c[2] - c[0]).min(c[3] - c[1]));
+    }
+    (b, m)
+}
+
+/// Groups that share their row band (bottom and top within a module) and stand at most 5
+/// modules apart side by side, or share their column band and stand at most 5 modules apart
+/// one above the other, merged.
+fn merge_bands(cells: &[[f32; 4]], groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+    let mut parent: Vec<usize> = (0..groups.len()).collect();
+    let info: Vec<([f32; 4], f32)> = groups.iter().map(|g| bounds(cells, g)).collect();
+    for i in 0..groups.len() {
+        for j in i + 1..groups.len() {
+            let ((a, ma), (b, mb)) = (info[i], info[j]);
+            let m = ma.min(mb);
+            let rows = (a[1] - b[1]).abs() <= m && (a[3] - b[3]).abs() <= m;
+            let cols = (a[0] - b[0]).abs() <= m && (a[2] - b[2]).abs() <= m;
+            let gap_x = (b[0] - a[2]).max(a[0] - b[2]);
+            let gap_y = (b[1] - a[3]).max(a[1] - b[3]);
+            if (rows && gap_x <= 5.0 * m) || (cols && gap_y <= 5.0 * m) {
+                let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
+                if ri != rj {
+                    parent[ri.max(rj)] = ri.min(rj);
+                }
+            }
         }
     }
+    let mut merged: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (i, g) in groups.into_iter().enumerate() {
+        let r = find(&mut parent, i);
+        merged.entry(r).or_default().extend(g);
+    }
+    merged.into_values().collect()
+}
+
+/// Whether no rectangle but `members` lies in box `b`: the quiet zone of a linear code.
+fn quiet(
+    cells: &[[f32; 4]],
+    grid_of: &HashMap<(i32, i32), Vec<usize>>,
+    members: &[usize],
+    b: [f32; 4],
+    key: &dyn Fn(f32, f32) -> (i32, i32),
+) -> bool {
+    let (a, z) = (key(b[0], b[1]), key(b[2], b[3]));
+    let inside = |c: &[f32; 4]| c[0] < b[2] && c[2] > b[0] && c[1] < b[3] && c[3] > b[1];
+    for gx in a.0..=z.0.min(a.0 + 4 * SPAN) {
+        for gy in a.1..=z.1.min(a.1 + 4 * SPAN) {
+            if let Some(list) = grid_of.get(&(gx, gy))
+                && list
+                    .iter()
+                    .any(|&k| inside(&cells[k]) && !members.contains(&k))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// The most modules a side of a matrix code has.
+const MAX_MODULES: usize = 200;
+
+/// The code region of `members` of `cells`, when they make the pattern of a code (see
+/// [`vector_codes`]). `quiet` says whether a box holds no other rectangle.
+fn region(
+    cells: &[[f32; 4]],
+    members: &[usize],
+    quiet: &dyn Fn([f32; 4]) -> bool,
+) -> Option<VectorCode> {
+    let (b, module) = bounds(cells, members);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     if w.max(h) > MAX_SIDE || module < MIN_MODULE {
         return None;
     }
+    let area: f32 = members
+        .iter()
+        .map(|&i| (cells[i][2] - cells[i][0]) * (cells[i][3] - cells[i][1]))
+        .sum();
     let cover = area / (w * h).max(f32::MIN_POSITIVE);
-    if !(0.25..=0.75).contains(&cover) {
+    if !(0.15..=0.85).contains(&cover) {
         return None;
     }
-    // A linear code: most rectangles are bars, and the bars are about as high as the region.
-    let linear = bars * 10 >= members.len() * 8;
-    if linear {
-        let tall = members
-            .iter()
-            .filter(|&&i| cells[i][3] - cells[i][1] >= 0.6 * h)
-            .count();
-        if tall * 10 < members.len() * 8 {
-            return None;
-        }
-    } else if w.min(h) < 8.0 * module {
+    // Every edge on one lattice of the module size, from the region's corner.
+    let on = |v: f32, o: f32| {
+        let k = (v - o) / module;
+        (k - k.round()).abs() <= 0.2
+    };
+    let lattice = members
+        .iter()
+        .filter(|&&i| {
+            let c = cells[i];
+            on(c[0], b[0]) && on(c[2], b[0]) && on(c[1], b[1]) && on(c[3], b[1])
+        })
+        .count();
+    if lattice * 10 < members.len() * 9 {
+        return None;
+    }
+    let up = members
+        .iter()
+        .filter(|&&i| shape(&cells[i]) == Shape::Up)
+        .count();
+    let flat = members
+        .iter()
+        .filter(|&&i| shape(&cells[i]) == Shape::Flat)
+        .count();
+    let kind_ok = if up * 10 >= members.len() * 8 {
+        linear(cells, members, b, module, false, quiet)
+    } else if flat * 10 >= members.len() * 8 && linear(cells, members, b, module, true, quiet) {
+        true
+    } else {
+        matrix(cells, members, b, module)
+    };
+    if !kind_ok {
         return None;
     }
     let mut hasher = DefaultHasher::new();
@@ -237,6 +375,145 @@ fn region(cells: &[[f32; 4]], members: &[usize]) -> Option<VectorCode> {
         module,
         id: hasher.finish(),
     })
+}
+
+/// Whether bars `members` (standing up, or lying down with `flat`) in box `b` are a linear
+/// code: about as long as the region, of at least two widths, with 5 modules free at both
+/// ends.
+fn linear(
+    cells: &[[f32; 4]],
+    members: &[usize],
+    b: [f32; 4],
+    module: f32,
+    flat: bool,
+    quiet: &dyn Fn([f32; 4]) -> bool,
+) -> bool {
+    let sides = |c: &[f32; 4]| {
+        if flat {
+            (c[2] - c[0], c[3] - c[1])
+        } else {
+            (c[3] - c[1], c[2] - c[0])
+        }
+    };
+    let long = |c: &[f32; 4]| sides(c).0;
+    let across = |c: &[f32; 4]| sides(c).1;
+    let span = if flat { b[2] - b[0] } else { b[3] - b[1] };
+    let tall = members
+        .iter()
+        .filter(|&&i| long(&cells[i]) >= 0.6 * span)
+        .count();
+    if tall * 10 < members.len() * 8 {
+        return false;
+    }
+    // Bars drawn a module at a time are joined first: a bar is a run of touching ones.
+    let start = |c: &[f32; 4]| if flat { c[1] } else { c[0] };
+    let mut spans: Vec<(f32, f32)> = members
+        .iter()
+        .map(|&i| (start(&cells[i]), start(&cells[i]) + across(&cells[i])))
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut runs: Vec<(f32, f32)> = Vec::new();
+    for (a, z) in spans {
+        match runs.last_mut() {
+            Some(last) if a <= last.1 + 0.2 * module => last.1 = last.1.max(z),
+            _ => runs.push((a, z)),
+        }
+    }
+    let mut widths: Vec<i32> = runs
+        .iter()
+        .map(|(a, z)| ((z - a) / module).round() as i32)
+        .collect();
+    widths.sort_unstable();
+    widths.dedup();
+    if widths.len() < 2 {
+        return false;
+    }
+    let q = 5.0 * module;
+    if flat {
+        quiet([b[0], b[1] - q, b[2], b[1] - 0.01]) && quiet([b[0], b[3] + 0.01, b[2], b[3] + q])
+    } else {
+        quiet([b[0] - q, b[1], b[0] - 0.01, b[3]]) && quiet([b[2] + 0.01, b[1], b[2] + q, b[3]])
+    }
+}
+
+/// Whether `members` in box `b` on a lattice of `module` make a matrix code's finder: QR Code
+/// (three corner squares), Micro QR Code (one), Data Matrix (the solid L of its left column
+/// and bottom row), Aztec (the bullseye) or PDF417 (8 dark modules starting every row). Also
+/// for white modules on dark (the pattern inverted).
+fn matrix(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -> bool {
+    let n = ((b[2] - b[0]) / module).round() as usize;
+    let m = ((b[3] - b[1]) / module).round() as usize;
+    if n < 8 || m < 3 || n > MAX_MODULES || m > MAX_MODULES {
+        return false;
+    }
+    // Row 0 is the top row.
+    let mut dark = vec![false; n * m];
+    for &i in members {
+        let c = cells[i];
+        let col = |v: f32| (((v - b[0]) / module).round().max(0.0) as usize).min(n);
+        let row = |v: f32| (((b[3] - v) / module).round().max(0.0) as usize).min(m);
+        for r in row(c[3])..row(c[1]) {
+            for k in col(c[0])..col(c[2]) {
+                dark[r * n + k] = true;
+            }
+        }
+    }
+    for invert in [false, true] {
+        let at = |r: usize, k: usize| dark[r * n + k] != invert;
+        let share = |hits: usize, all: usize| hits * 100 >= all * 90;
+        let finder = |r0: usize, k0: usize| {
+            let mut hits = 0;
+            for r in 0..7 {
+                for k in 0..7 {
+                    let ring = r.min(k).min(6 - r).min(6 - k);
+                    hits += usize::from(at(r0 + r, k0 + k) == (ring != 1));
+                }
+            }
+            share(hits, 49)
+        };
+        if n == m {
+            if (21..=177).contains(&n) && (n - 21).is_multiple_of(4) {
+                let corners = [finder(0, 0), finder(0, n - 7), finder(n - 7, 0)];
+                if corners.iter().filter(|&&f| f).count() >= 3 {
+                    return true;
+                }
+            }
+            if (11..=17).contains(&n) && !n.is_multiple_of(2) && finder(0, 0) {
+                return true;
+            }
+            if !n.is_multiple_of(2) && n >= 15 {
+                let c = n / 2;
+                let mut hits = 0;
+                for r in c - 4..=c + 4 {
+                    for k in c - 4..=c + 4 {
+                        let ring = r.abs_diff(c).max(k.abs_diff(c));
+                        hits += usize::from(at(r, k) == ring.is_multiple_of(2));
+                    }
+                }
+                if share(hits, 81) {
+                    return true;
+                }
+            }
+        }
+        // Data Matrix: a solid left column and bottom row.
+        if n >= 8 && m >= 8 && n.is_multiple_of(2) && m.is_multiple_of(2) {
+            let left = (0..m).filter(|&r| at(r, 0)).count();
+            let bottom = (0..n).filter(|&k| at(m - 1, k)).count();
+            if left * 100 >= m * 95 && bottom * 100 >= n * 95 {
+                return true;
+            }
+        }
+        // PDF417: every row starts with 8 dark modules and a light one.
+        if n >= 17 {
+            let rows = (0..m)
+                .filter(|&r| (0..8).all(|k| at(r, k)) && !at(r, 8))
+                .count();
+            if rows * 100 >= m * 95 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -324,5 +601,76 @@ mod tests {
             }
         }
         assert!(vector_codes(&solid).expect("searched").is_empty());
+    }
+
+    #[test]
+    fn drawings_that_are_not_codes_are_not_regions() {
+        let none = |name: &str, cells: Vec<[f32; 4]>| {
+            assert!(vector_codes(&cells).expect("searched").is_empty(), "{name}");
+        };
+        // A checkerboard of 12 by 12 cells of 10 points.
+        let mut checker = Vec::new();
+        for r in 0..12 {
+            for c in 0..12 {
+                if (r + c) % 2 == 0 {
+                    let (x, y) = (50.0 + c as f32 * 10.0, 50.0 + r as f32 * 10.0);
+                    checker.push([x, y, x + 10.0, y + 10.0]);
+                }
+            }
+        }
+        none("checkerboard", checker);
+        // A heatmap of 20 by 20 cells of 8 points, about half filled.
+        let mut heat = Vec::new();
+        let mut state = 7u32;
+        for r in 0..20 {
+            for c in 0..20 {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                if state.is_multiple_of(2) {
+                    let (x, y) = (50.0 + c as f32 * 8.0, 50.0 + r as f32 * 8.0);
+                    heat.push([x, y, x + 8.0, y + 8.0]);
+                }
+            }
+        }
+        none("heatmap", heat);
+        // 40 bars of one width and one height.
+        none(
+            "equal bars",
+            (0..40)
+                .map(|k| [50.0 + k as f32 * 2.0, 100.0, 51.0 + k as f32 * 2.0, 140.0])
+                .collect(),
+        );
+        // The rules of a table: 10 columns and 30 rows of thin lines.
+        let mut rules: Vec<[f32; 4]> = (0..11)
+            .map(|k| [50.0 + k as f32 * 25.0, 100.0, 50.5 + k as f32 * 25.0, 250.0])
+            .collect();
+        rules
+            .extend((0..31).map(|k| [50.0, 100.0 + k as f32 * 5.0, 300.0, 100.5 + k as f32 * 5.0]));
+        none("ruled table", rules);
+        // A bar chart: bars of one width, of many heights.
+        none(
+            "bar chart",
+            (0..30)
+                .map(|k| {
+                    let x = 50.0 + k as f32 * 6.0;
+                    [x, 100.0, x + 4.0, 110.0 + (k * 37 % 50) as f32]
+                })
+                .collect(),
+        );
+    }
+
+    #[test]
+    fn bars_lying_down_are_a_linear_region() {
+        let mut cells = Vec::new();
+        let mut y = 50.0;
+        for k in 0..30 {
+            let h = if k % 3 == 0 { 1.0 } else { 0.5 };
+            cells.push([100.0, y, 130.0, y + h]);
+            y += h + 0.5 + (k % 2) as f32 * 0.5;
+        }
+        let found = vector_codes(&cells).expect("searched");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].module, 0.5);
     }
 }

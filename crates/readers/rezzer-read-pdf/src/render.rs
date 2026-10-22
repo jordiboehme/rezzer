@@ -228,9 +228,14 @@ pub(crate) struct Small {
     /// How it is rendered again to be read for codes when its crop gives none: a likely code
     /// picture at its own resolution, a code drawn as paths at whole pixels a module.
     pub how: Option<How>,
-    /// It is not a picture but a region of paths that may be a code: its asset stays only
-    /// when a code is read from it.
+    /// It looks like a code: a picture of 1-bit pixels or a region of paths that passed the
+    /// code-shape test. One that gives no code says so.
+    pub hint: bool,
+    /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
+    /// It is page furniture (a picture at one place on many pages): its asset stays only when
+    /// a code is read from it, named once at its first place.
+    pub furniture: bool,
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
@@ -318,14 +323,11 @@ pub(crate) fn vision(
         / area)
         .min(1.0);
     // Furniture is small: a picture over a quarter of the page is content wherever it is.
-    let shown_at: Vec<usize> = drawn
-        .into_iter()
-        .filter(|&k| {
-            let b = &items.images[k];
-            let id = items.images_id.get(k).copied().unwrap_or(0);
-            !(skip.holds(b, id) && visible(b) < FURNITURE_SHARE * area)
-        })
-        .collect();
+    let (shown_at, furniture): (Vec<usize>, Vec<usize>) = drawn.into_iter().partition(|&k| {
+        let b = &items.images[k];
+        let id = items.images_id.get(k).copied().unwrap_or(0);
+        !(skip.holds(b, id) && visible(b) < FURNITURE_SHARE * area)
+    });
     let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();
     let pictured = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
     let visible_text = items.mapped > 0;
@@ -369,7 +371,8 @@ pub(crate) fn vision(
             first = Some(items.images[k]);
             words.push(small_pictures(items, &small));
         }
-        // Codes drawn as paths first, then pictures that look like codes, then the largest.
+        // The page render is read cheaply; the likely codes are looked at again finer: codes
+        // drawn as paths, then pictures that look like codes.
         let mut regions: Vec<Region> = vectors
             .iter()
             .map(|c| Region {
@@ -377,19 +380,18 @@ pub(crate) fn vision(
                 how: How::Modules(c.module),
             })
             .collect();
-        let mut pictures: Vec<usize> = shown_at.clone();
-        pictures.sort_by(|&a, &b| {
-            looks_like_code(items, b)
-                .cmp(&looks_like_code(items, a))
-                .then(visible(&items.images[b]).total_cmp(&visible(&items.images[a])))
-        });
-        regions.extend(pictures.into_iter().filter_map(|k| {
-            let (pw, ph) = items.images_px.get(k).copied()?;
-            Some(Region {
-                b: items.images[k],
-                how: How::Picture(pw, ph),
-            })
-        }));
+        regions.extend(
+            shown_at
+                .iter()
+                .filter(|&&k| looks_like_code(items, k))
+                .filter_map(|&k| {
+                    let (pw, ph) = items.images_px.get(k).copied()?;
+                    Some(Region {
+                        b: items.images[k],
+                        how: How::Picture(pw, ph),
+                    })
+                }),
+        );
         regions.truncate(PAGE_REGIONS);
         return Some(Seen::Page(Vision {
             alt: words.join(", "),
@@ -397,11 +399,17 @@ pub(crate) fn vision(
             regions,
         }));
     }
-    if small.is_empty() && vectors.is_empty() {
+    // Page furniture of at least 1 cm2 is read for codes too, once: a code on every page is
+    // named at its first place.
+    let furniture: Vec<usize> = furniture
+        .into_iter()
+        .filter(|&k| visible(&items.images[k]) >= SMALL_PICTURE)
+        .collect();
+    if small.is_empty() && vectors.is_empty() && furniture.is_empty() {
         return None;
     }
     // Past `cap` the work for each picture is more than the caller may take.
-    let more = (small.len() + vectors.len()).saturating_sub(cap);
+    let more = (small.len() + vectors.len() + furniture.len()).saturating_sub(cap);
     let mut small = small;
     small.truncate(cap);
     let (fw, fh) = items.turn.size(width, height);
@@ -413,11 +421,9 @@ pub(crate) fn vision(
             let id = items.images_id.get(k).copied().unwrap_or(0);
             let code = looks_like_code(items, k);
             let logo = !code && (in_logo_place(&framed, fw, fh) || everywhere.contains(&id));
-            let how = items
-                .images_px
-                .get(k)
-                .filter(|_| code)
-                .map(|&(pw, ph)| How::Picture(pw, ph));
+            // Rendered again at its own resolution when its crop gives no code, if that is
+            // finer than the page's render.
+            let how = items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph));
             Small {
                 b,
                 framed,
@@ -425,7 +431,9 @@ pub(crate) fn vision(
                 logo,
                 mcid: items.images_mcid.get(k).copied().flatten(),
                 how,
+                hint: code,
                 vector: false,
+                furniture: false,
             }
         })
         .collect();
@@ -437,7 +445,24 @@ pub(crate) fn vision(
         logo: false,
         mcid: None,
         how: Some(How::Modules(c.module)),
+        hint: true,
         vector: true,
+        furniture: false,
+    }));
+    let room = cap.saturating_sub(list.len());
+    list.extend(furniture.into_iter().take(room).map(|k| {
+        let b = items.images[k];
+        Small {
+            b,
+            framed: items.turn.place_box(b, width, height),
+            id: items.images_id.get(k).copied().unwrap_or(0),
+            logo: true,
+            mcid: items.images_mcid.get(k).copied().flatten(),
+            how: items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph)),
+            hint: looks_like_code(items, k),
+            vector: false,
+            furniture: true,
+        }
     }));
     if list.is_empty() {
         return None;
@@ -468,6 +493,9 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
 /// What a picture that looks like a code but gives none is called, after its box.
 const UNREAD_WORDS: &str = ", barcode or QR code found, not decoded";
 
+/// What a drawing of paths that passed the code-shape test is called.
+const DRAWING: &str = "a drawing that looks like a barcode or QR code";
+
 /// `box 40, 760 to 100, 800`: a box in whole points.
 fn box_words(b: &[f32; 4]) -> String {
     let r = |v: f32| v.round() as i64;
@@ -492,12 +520,21 @@ pub(crate) fn place_alt(s: &Small) -> String {
 }
 
 /// The words of one place `alt` (from [`place_alt`]) once its picture was read for codes:
-/// named after the codes read, or marked as a code not decoded.
-fn reread_place(alt: &str, read: &Reread) -> String {
+/// named after the codes read, or marked as a code not decoded or not scanned; `more` follows.
+fn reread_place(alt: &str, read: &Reread, more: &str) -> String {
     let rest = alt.find(", box ").map_or(alt, |i| &alt[i + 2..]);
     match read {
-        Reread::Codes(name) => format!("{name}, {rest}"),
-        Reread::Unread => format!("{alt}{UNREAD_WORDS}"),
+        Reread::Codes(name) => format!("{name}, {rest}{more}"),
+        Reread::Unread => format!("{alt}{UNREAD_WORDS}{more}"),
+        Reread::Drawing(scanned) => format!("{DRAWING}, {rest}, {}{more}", drawing_words(*scanned)),
+    }
+}
+
+fn drawing_words(scanned: bool) -> &'static str {
+    if scanned {
+        "not decoded"
+    } else {
+        "not scanned"
     }
 }
 
@@ -507,6 +544,9 @@ enum Reread {
     Codes(String),
     /// It looks like a code, but none was read.
     Unread,
+    /// A drawing of paths that looks like a code gave none (`true`), or was not rendered
+    /// again to be read (`false`, a loss says why).
+    Drawing(bool),
 }
 
 /// The places of one small picture asset: the page and box of each of the first
@@ -526,6 +566,8 @@ pub(crate) struct Places {
     vector: bool,
     /// One of its places looks like a code.
     hint: bool,
+    /// Every place is page furniture.
+    furniture: bool,
     /// What reading it for codes changed.
     read: Option<Reread>,
 }
@@ -536,6 +578,7 @@ impl Places {
         let mut p = Places {
             logo: true,
             vector: s.vector,
+            furniture: true,
             ..Places::default()
         };
         p.add(n, s);
@@ -558,18 +601,44 @@ impl Places {
         }
         self.count += 1;
         self.logo &= s.logo;
-        self.hint |= s.how.is_some();
+        self.hint |= s.hint;
+        self.furniture &= s.furniture;
     }
 
     /// The asset's alt text: the place's words for one place; for more, the pages and the
     /// box of each place listed, then how many more places there are.
+    /// The pages it is on, as words: `1, 2, 3` or `1, 2, 3 and 7 more`.
+    fn page_words(&self) -> String {
+        let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
+        if self.more_pages > 0 {
+            pages.push(format!("{} more", self.more_pages));
+        }
+        pages.join(", ")
+    }
+
+    /// Every place is page furniture.
+    fn furniture_pages(&self) -> bool {
+        self.furniture
+    }
+
+    /// The page of its first place.
+    fn first_page(&self) -> u32 {
+        self.pages.first().copied().unwrap_or(0)
+    }
+
     pub(crate) fn alt(&self) -> String {
         let name = match &self.read {
             Some(Reread::Codes(name)) => name.as_str(),
+            Some(Reread::Drawing(_)) => DRAWING,
             _ => small_name(self.logo, self.vector),
+        };
+        let drawing = match self.read {
+            Some(Reread::Drawing(scanned)) => format!(", {}", drawing_words(scanned)),
+            _ => String::new(),
         };
         let code = match self.read {
             Some(Reread::Unread) => UNREAD_WORDS,
+            Some(Reread::Drawing(_)) => drawing.as_str(),
             _ => "",
         };
         if self.count == 1 {
@@ -949,11 +1018,11 @@ pub(crate) fn render_pages(
                 continue;
             }
             if !scans.stopped() && scans.past() {
-                scans.halt(n, "barcode scan stopped: time limit".into());
+                scans.halt(n, "barcode scan stopped: time limit".into(), false);
                 continue;
             }
             if scans.stopped() {
-                scans.skip(n, todo.len().max(1));
+                scans.skip(n);
                 continue;
             }
         }
@@ -1029,24 +1098,9 @@ pub(crate) fn render_pages(
         rendered += 1;
         match need.whole {
             Some(asset) => {
-                // A picture over most of the page (a scan) is read at its own finer scale
-                // instead of the page render; the page render only when that is not rendered.
-                let (pw, ph) = need.size;
-                let covering = need.regions.iter().position(|r| {
-                    matches!(r.how, How::Picture(..))
-                        && (r.b[2] - r.b[0]) * (r.b[3] - r.b[1]) >= 0.9 * pw * ph
-                });
-                let held = u64::from(page.pixmap.width()) * u64::from(page.pixmap.height()) * 4;
-                let finer = covering
-                    .and_then(|k| pages.region(n, need, &need.regions[k], held, &mut scans));
-                match finer {
-                    Some(r) => {
-                        scans.read(n, asset, &r, Some(need), budget);
-                    }
-                    None => {
-                        scans.read(n, asset, &page, Some(need), budget);
-                    }
-                }
+                // The page render is read cheaply at its own scale; the likely codes on it
+                // are looked at again finer below.
+                scans.read(n, asset, &page, Some(need), budget, true);
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -1059,15 +1113,12 @@ pub(crate) fn render_pages(
                 } else {
                     drop(page);
                 }
-                for (k, region) in need.regions.iter().enumerate() {
+                for region in &need.regions {
                     if scans.stopped() {
                         break;
                     }
-                    if Some(k) == covering {
-                        continue;
-                    }
-                    if let Some(r) = pages.region(n, need, region, 0, &mut scans) {
-                        scans.read(n, asset, &r, Some(need), budget);
+                    if let Ok(r) = pages.region(n, need, region, 0, &mut scans) {
+                        scans.read(n, asset, &r, Some(need), budget, false);
                     }
                 }
             }
@@ -1305,20 +1356,24 @@ impl Cut<'_> {
                     b: c.b,
                     how: How::Picture(0, 0),
                 };
-                if let Some(fine) = pages.region_at(n, need, &at, SCALE, held) {
+                if let Ok(fine) = pages.region_at(n, need, &at, SCALE, held, scans) {
                     picture = fine;
                 }
             }
-            let found = scans.read(n, c.asset, &picture, None, budget);
+            let found = scans.read(n, c.asset, &picture, None, budget, false);
             if found == Some(0)
                 && let Some(how) = c.how
             {
+                // Finer, when that is finer than the crop: a gap when it cannot be rendered.
                 let at = Region { b: c.b, how };
-                let again = pages
-                    .region(n, need, &at, held, scans)
-                    .and_then(|fine| scans.read(n, c.asset, &fine, None, budget));
-                if again == Some(0) || again.is_none() {
-                    scans.unread(c.asset);
+                match pages.region(n, need, &at, held, scans) {
+                    Ok(fine) => {
+                        scans.read(n, c.asset, &fine, None, budget, false);
+                    }
+                    Err(true) => {
+                        scans.unscanned.insert(c.asset);
+                    }
+                    Err(false) => {}
                 }
             }
             if !files {
@@ -1446,6 +1501,43 @@ const MODULE_PIXELS: f64 = 3.0;
 /// The margin around a part of a page rendered again, in pixels: the quiet zone.
 const REGION_MARGIN: f64 = 12.0;
 
+/// The scale a part of a page is rendered again at, in pixels per point: 3 pixels a module
+/// for a code drawn as paths (the region's corner on a whole pixel makes every module edge
+/// fall on one), 300 dpi when its module size is not known; a picture at its own pixels per
+/// point (three times that when it has at most 400 pixels a side, for codes of one pixel a
+/// module), at most 300 dpi. `None` when that is not finer than the page's render.
+pub(crate) fn region_scale(region: &Region) -> Option<f64> {
+    let (bw, bh) = (
+        f64::from(region.b[2] - region.b[0]),
+        f64::from(region.b[3] - region.b[1]),
+    );
+    if !(bw > 0.0 && bh > 0.0) {
+        return None;
+    }
+    match region.how {
+        How::Picture(pw, ph) => {
+            let own = (f64::from(pw) / bw).max(f64::from(ph) / bh);
+            let want = if pw.max(ph) <= 400 {
+                own * MODULE_PIXELS
+            } else {
+                own
+            };
+            Some(want.min(REGION_SCALE)).filter(|&s| s > SCALE * 1.01)
+        }
+        How::Modules(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
+        How::Modules(_) => Some(REGION_SCALE),
+    }
+}
+
+/// Why a part of a page was not rendered again to be read for codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Unrendered {
+    Cap,
+    Room,
+    Damaged,
+    Time,
+}
+
 /// The renderer on the pages of one file, with what it checked already.
 struct Pages<'p> {
     doc: &'p hayro_syntax::Pdf,
@@ -1503,37 +1595,16 @@ impl<'p> Pages<'p> {
         region: &Region,
         held: u64,
         scans: &mut Scans,
-    ) -> Option<Rendered> {
-        let (bw, bh) = (
-            f64::from(region.b[2] - region.b[0]),
-            f64::from(region.b[3] - region.b[1]),
-        );
-        if !(bw > 0.0 && bh > 0.0) {
-            return None;
+    ) -> Result<Rendered, bool> {
+        if let How::Picture(pw, ph) = region.how
+            && u64::from(pw) * u64::from(ph) > barcodes::Limits::default().max_pixels
+        {
+            scans.too_large(n);
+            return Err(true);
         }
-        let scale = match region.how {
-            How::Picture(pw, ph) => {
-                if u64::from(pw) * u64::from(ph) > barcodes::Limits::default().max_pixels {
-                    scans.too_large(n);
-                    return None;
-                }
-                // Its own pixels per point; a small picture three render pixels to each.
-                let own = (f64::from(pw) / bw).max(f64::from(ph) / bh);
-                let want = if pw.max(ph) <= 400 {
-                    own * MODULE_PIXELS
-                } else {
-                    own
-                };
-                want.min(REGION_SCALE)
-            }
-            How::Modules(m) if m > 0.0 => MODULE_PIXELS / f64::from(m),
-            How::Modules(_) => REGION_SCALE,
-        };
         // Finer than the page's own render, or there is nothing to gain.
-        if scale <= SCALE * 1.01 && matches!(region.how, How::Picture(..)) {
-            return None;
-        }
-        self.region_at(n, need, region, scale, held)
+        let scale = region_scale(region).ok_or(false)?;
+        self.region_at(n, need, region, scale, held, scans)
     }
 
     /// Renders `region` of page `n` at `scale` pixels per point, its top left corner
@@ -1546,12 +1617,24 @@ impl<'p> Pages<'p> {
         region: &Region,
         scale: f64,
         held: u64,
-    ) -> Option<Rendered> {
-        if self.clips >= MAX_REGIONS || self.budget.check_time().is_err() {
-            return None;
+        scans: &mut Scans,
+    ) -> Result<Rendered, bool> {
+        let mut gap = |why: Unrendered| {
+            scans.unrendered(n, why);
+            Err(true)
+        };
+        if self.clips >= MAX_REGIONS {
+            return gap(Unrendered::Cap);
         }
-        let room = self.room.checked_sub(held)?;
-        let p = self.find(n).ok()?;
+        if self.budget.check_time().is_err() {
+            return gap(Unrendered::Time);
+        }
+        let Some(room) = self.room.checked_sub(held) else {
+            return gap(Unrendered::Room);
+        };
+        let Ok(p) = self.find(n) else {
+            return gap(Unrendered::Damaged);
+        };
         let init = p.initial_transform(true).to_kurbo();
         let (ox, oy) = (f64::from(need.origin.0), f64::from(need.origin.1));
         let b = region.b.map(f64::from);
@@ -1581,14 +1664,19 @@ impl<'p> Pages<'p> {
         }
         let (w, h) = size(s);
         if !(w >= 1.0 && h >= 1.0 && w <= f64::from(u16::MAX) && h <= f64::from(u16::MAX)) {
-            return None;
+            return gap(Unrendered::Damaged);
         }
         let transform = Affine::translate((REGION_MARGIN - s * min_x, REGION_MARGIN - s * min_y))
             * Affine::scale(s)
             * init;
         self.clips += 1;
-        let pixmap = self.draw(p, transform, (w as u16, h as u16), held).ok()?;
-        Some(Rendered {
+        let pixmap = match self.draw(p, transform, (w as u16, h as u16), held) {
+            Ok(pixmap) => pixmap,
+            Err(Failed::Room(_)) => return gap(Unrendered::Room),
+            Err(Failed::Limit(_)) => return gap(Unrendered::Time),
+            Err(Failed::Damaged(_)) => return gap(Unrendered::Damaged),
+        };
+        Ok(Rendered {
             pixmap,
             transform,
             scale: s,
@@ -1671,8 +1759,6 @@ const FILE_CODES: usize = 500;
 #[derive(Debug, Default)]
 pub(crate) struct Found {
     pub codes: Vec<Barcode>,
-    /// A picture that looks like a code was read, and gave none.
-    pub unread: bool,
     /// It was read.
     pub read: bool,
 }
@@ -1688,22 +1774,46 @@ pub(crate) struct Scans {
     kept: usize,
     /// What each asset holds.
     pub found: HashMap<usize, Found>,
+    /// Small pictures whose finer look was not rendered (a loss says why).
+    pub unscanned: HashSet<usize>,
     /// Why reading stopped, and on which page.
     stop: Option<(u32, String)>,
-    /// Pictures and pages not read after the stop.
-    skipped: usize,
+    /// The stop is a bound of the file's own (its code cap or the bytes it may keep), not
+    /// the time for reading codes.
+    stop_limit: bool,
+    /// Pages with pictures or a render not read after the stop.
+    skipped: Vec<u32>,
     /// Pages with a picture that holds more codes than are kept, too large a picture, or an
     /// internal error of the decoder; codes whose payload is only counted.
     capped: Vec<u32>,
     too_large: Vec<u32>,
     internal: Vec<u32>,
     large_payloads: usize,
+    /// Pages with parts not rendered again to be read finer, by why.
+    unrendered: HashMap<Unrendered, Vec<u32>>,
 }
 
 #[cfg(test)]
 thread_local! {
     /// Decoder runs in this thread, for tests.
     pub(crate) static SCAN_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Pages as words: `page 3`, or `pages 3, 4` with the first ten, then how many more.
+fn page_list(list: &[u32]) -> String {
+    let mut v: Vec<String> = list.iter().take(10).map(u32::to_string).collect();
+    if list.len() > 10 {
+        v.push(format!("{} more", list.len() - 10));
+    }
+    let word = if list.len() == 1 { "page" } else { "pages" };
+    format!("{word} {}", v.join(", "))
+}
+
+/// `pages` with `n` added once (pages come in order).
+fn add_page(pages: &mut Vec<u32>, n: u32) {
+    if pages.last() != Some(&n) && !pages.contains(&n) {
+        pages.push(n);
+    }
 }
 
 impl Scans {
@@ -1720,12 +1830,15 @@ impl Scans {
             tile_pixels: 4_000_000u64.min(room / 48).max(10_000),
             kept: 0,
             found: HashMap::new(),
+            unscanned: HashSet::new(),
             stop: None,
-            skipped: 0,
+            stop_limit: false,
+            skipped: Vec::new(),
             capped: Vec::new(),
             too_large: Vec::new(),
             internal: Vec::new(),
             large_payloads: 0,
+            unrendered: HashMap::new(),
         }
     }
 
@@ -1738,31 +1851,33 @@ impl Scans {
         Instant::now() >= self.until
     }
 
-    fn halt(&mut self, n: u32, why: String) {
-        self.stop.get_or_insert((n, why));
-        self.skipped += 1;
+    /// Stops reading codes on page `n` for `why`; `limit` when it is a bound of the file
+    /// (codes or kept bytes) rather than the time for reading codes.
+    fn halt(&mut self, n: u32, why: String, limit: bool) {
+        if self.stop.is_none() {
+            self.stop = Some((n, why));
+            self.stop_limit = limit;
+        }
+        add_page(&mut self.skipped, n);
     }
 
-    /// `count` pictures of page `n` are not read: reading stopped.
-    fn skip(&mut self, _n: u32, count: usize) {
-        self.skipped += count;
+    /// Page `n` is not read for codes: reading stopped.
+    fn skip(&mut self, n: u32) {
+        add_page(&mut self.skipped, n);
     }
 
     fn too_large(&mut self, n: u32) {
-        self.too_large.push(n);
+        add_page(&mut self.too_large, n);
     }
 
-    /// The likely code `asset` gave no code.
-    fn unread(&mut self, asset: usize) {
-        let f = self.found.entry(asset).or_default();
-        if f.codes.is_empty() {
-            f.unread = true;
-        }
+    fn unrendered(&mut self, n: u32, why: Unrendered) {
+        add_page(self.unrendered.entry(why).or_default(), n);
     }
 
-    /// Reads `picture` (of page `n`, for asset `asset`) for codes. With `need`, the picture
-    /// is the page or a part of it, and each code gets its box on the page. Returns how many
-    /// new codes it gave, `None` when it was not read.
+    /// Reads `picture` (of page `n`, for asset `asset`) for codes, with the cheap attempts
+    /// only when `quick`. With `need`, the picture is the page or a part of it, and each code
+    /// gets its box on the page. Returns how many new codes it gave, `None` when it was not
+    /// read.
     fn read(
         &mut self,
         n: u32,
@@ -1770,27 +1885,30 @@ impl Scans {
         picture: &Rendered,
         need: Option<&Need>,
         budget: &Budget,
+        quick: bool,
     ) -> Option<usize> {
         if self.stopped() {
-            self.skipped += 1;
+            self.skip(n);
             return None;
         }
         if self.kept >= FILE_CODES {
             self.halt(
                 n,
                 format!("the file holds more than {FILE_CODES} codes, the most that are read"),
+                true,
             );
             return None;
         }
         let now = Instant::now();
         if now >= self.until || budget.check_time().is_err() {
-            self.halt(n, "barcode scan stopped: time limit".into());
+            self.halt(n, "barcode scan stopped: time limit".into(), false);
             return None;
         }
         let limits = barcodes::Limits {
             time: self.per_picture.min(self.until - now),
             tile_pixels: self.tile_pixels,
             max_codes: PICTURE_CODES,
+            quick,
             ..barcodes::Limits::default()
         };
         let p = &picture.pixmap;
@@ -1806,20 +1924,20 @@ impl Scans {
         let codes = match barcodes::Worker::global().decode(&scan, &limits) {
             Ok(s) => {
                 if s.capped {
-                    self.capped.push(n);
+                    add_page(&mut self.capped, n);
                 }
                 s.codes
             }
             Err(barcodes::Stop::Time(s)) => {
-                self.halt(n, "barcode scan stopped: time limit".into());
+                self.halt(n, "barcode scan stopped: time limit".into(), false);
                 s.codes
             }
             Err(barcodes::Stop::TooLarge { .. }) => {
-                self.too_large.push(n);
+                self.too_large(n);
                 return None;
             }
             Err(barcodes::Stop::Internal | barcodes::Stop::BadSize) => {
-                self.internal.push(n);
+                add_page(&mut self.internal, n);
                 return None;
             }
         };
@@ -1829,6 +1947,7 @@ impl Scans {
                 self.halt(
                     n,
                     format!("the file holds more than {FILE_CODES} codes, the most that are read"),
+                    true,
                 );
                 break;
             }
@@ -1852,11 +1971,11 @@ impl Scans {
                 self.halt(
                     n,
                     format!("the codes read take more than the file may keep: {hit}"),
+                    true,
                 );
                 break;
             }
             found.codes.push(b);
-            found.unread = false;
             self.kept += 1;
             added += 1;
         }
@@ -1864,34 +1983,32 @@ impl Scans {
     }
 
     /// Says in losses what was not read: one for a stop, one for each kind of other gap.
+    /// What only the time or a render bound left out is Info: its pictures and pages keep
+    /// their need of vision, so the read stays complete.
     pub(crate) fn finish(&self, out: &mut Out) {
-        let pages = |list: &[u32]| {
-            let mut v: Vec<String> = list.iter().take(10).map(u32::to_string).collect();
-            if list.len() > 10 {
-                v.push(format!("{} more", list.len() - 10));
-            }
-            v.join(", ")
-        };
         if let Some((n, why)) = &self.stop {
-            let k = self.skipped;
-            let what = if k == 1 {
-                "1 picture or page is".to_string()
+            let (reason, severity) = if self.stop_limit {
+                (LossReason::Limit, Severity::Warning)
             } else {
-                format!("{k} pictures or pages are")
+                (LossReason::Unsupported, Severity::Info)
             };
             out.loss(
                 format!("p{n}"),
-                format!("{why}; {what} not read for codes, from page {n} on"),
-                LossReason::Limit,
-                Severity::Warning,
+                format!(
+                    "{why}: codes are not read on {}; their pictures keep their need of vision",
+                    page_list(&self.skipped)
+                ),
+                reason,
+                severity,
             );
         }
         if let Some(first) = self.capped.first() {
             out.loss(
                 format!("p{first}"),
                 format!(
-                    "pictures on pages {} hold more than {PICTURE_CODES} codes each; the codes                      past the first {PICTURE_CODES} of a picture are not read",
-                    pages(&self.capped)
+                    "pictures on {} hold more than {PICTURE_CODES} codes each; the codes past \
+                     the first {PICTURE_CODES} of a picture are not read",
+                    page_list(&self.capped)
                 ),
                 LossReason::Limit,
                 Severity::Warning,
@@ -1901,8 +2018,8 @@ impl Scans {
             out.loss(
                 format!("p{first}"),
                 format!(
-                    "pictures on pages {} are too large to scan for codes: more than {} pixels",
-                    pages(&self.too_large),
+                    "pictures on {} are too large to scan for codes: more than {} pixels",
+                    page_list(&self.too_large),
                     barcodes::Limits::default().max_pixels
                 ),
                 LossReason::Limit,
@@ -1913,8 +2030,8 @@ impl Scans {
             out.loss(
                 format!("p{first}"),
                 format!(
-                    "the barcode reader stopped with an internal error on pages {}",
-                    pages(&self.internal)
+                    "the barcode reader stopped with an internal error on {}",
+                    page_list(&self.internal)
                 ),
                 LossReason::Internal,
                 Severity::Warning,
@@ -1930,6 +2047,37 @@ impl Scans {
                 ),
                 LossReason::Limit,
                 Severity::Warning,
+            );
+        }
+        for why in [
+            Unrendered::Cap,
+            Unrendered::Room,
+            Unrendered::Damaged,
+            Unrendered::Time,
+        ] {
+            let Some(pages) = self.unrendered.get(&why).filter(|p| !p.is_empty()) else {
+                continue;
+            };
+            let words = match why {
+                Unrendered::Cap => {
+                    format!("a file renders at most {MAX_REGIONS} parts of pages again")
+                }
+                Unrendered::Room => {
+                    "their render would take more than a render may take (a quarter of the memory \
+                     limit)"
+                        .to_string()
+                }
+                Unrendered::Damaged => "the renderer could not draw them".to_string(),
+                Unrendered::Time => "the time limit was reached".to_string(),
+            };
+            out.loss(
+                format!("p{}", pages[0]),
+                format!(
+                    "codes in parts of {} are not looked for at a finer scale: {words}",
+                    page_list(pages)
+                ),
+                LossReason::Unsupported,
+                Severity::Info,
             );
         }
     }
@@ -1948,23 +2096,23 @@ fn same_code(a: &Barcode, b: &Barcode) -> bool {
         }
 }
 
-/// The model's code for `c`: its payload as text, else as base64, else only its size.
+/// The model's code for `c`: its payload as text, else as base64, else only its size (the
+/// payload's own bytes, as the code holds them).
 fn barcode(c: &barcodes::Code) -> Barcode {
     use base64::Engine;
-    let (text, base64, bytes) = match &c.payload {
-        barcodes::Payload::Text(t) => (Some(t.clone()), None, t.len()),
+    let (text, base64) = match &c.payload {
+        barcodes::Payload::Text(t) => (Some(t.clone()), None),
         barcodes::Payload::Bytes(b) => (
             None,
             Some(base64::engine::general_purpose::STANDARD.encode(b)),
-            b.len(),
         ),
-        barcodes::Payload::TooLarge(n) => (None, None, *n),
+        barcodes::Payload::TooLarge(_) => (None, None),
     };
     Barcode {
         symbology: c.symbology.name().to_string(),
         text,
         base64,
-        bytes: bytes as u64,
+        bytes: c.bytes as u64,
         bounds: None,
     }
 }
@@ -1989,46 +2137,84 @@ fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
     b.map(|v| (v * 10.0).round() / 10.0)
 }
 
-/// Puts what the scans read into the model: the codes of each asset; a small picture a code
-/// was read from needs no vision and is named after its codes at every place; a likely code
-/// that gave none says so; a region of paths no code was read from is taken out with its
-/// places and file. `places` are the small picture assets with their places; their alt texts
-/// are written here.
+/// The new words of the places of one asset after it was read for codes.
+struct Renamed {
+    read: Reread,
+    /// The page of its first place: later places point there for the codes.
+    first: u32,
+    /// The pages it is on, said at the first place of page furniture.
+    pages: Option<String>,
+    codes: bool,
+}
+
+/// Puts what the scans read into the model:
+/// - the codes of each asset; a small picture a code was read from needs no vision and is
+///   named after its codes at every place; its codes are listed at its first place only
+///   (later places point there);
+/// - a likely code picture that gave none says so;
+/// - a drawing of paths that passed the code-shape test and gave none is listed as a drawing
+///   that looks like a code, not decoded (or not scanned, when it was not rendered again),
+///   and needs vision;
+/// - page furniture that gave no code is taken out with its place and file.
+///
+/// `places` are the small picture assets with their places; their alt texts are written
+/// here.
 pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, out: &mut Out) {
-    let mut found = match scans {
+    let (mut found, unscanned) = match scans {
         Some(scans) => {
             scans.finish(out);
-            scans.found
+            (scans.found, scans.unscanned)
         }
-        None => HashMap::new(),
+        None => (HashMap::new(), HashSet::new()),
     };
     // The new words of each place by asset id, or `None` to take it out.
-    let mut places_of: HashMap<String, Option<Reread>> = HashMap::new();
+    let mut places_of: HashMap<String, Option<Renamed>> = HashMap::new();
     let mut gone: HashSet<usize> = HashSet::new();
     for (asset, mut p) in places {
         let f = found.remove(&asset).unwrap_or_default();
         let a = &mut out.doc.assets[asset];
         a.needs_vision = !p.logo;
-        if !f.codes.is_empty() {
+        let read = if !f.codes.is_empty() {
             let mut names: Vec<&str> = Vec::new();
             for c in &f.codes {
                 if !names.contains(&c.symbology.as_str()) {
                     names.push(&c.symbology);
                 }
             }
-            let name = names.join(" and ");
-            p.read = Some(Reread::Codes(name.clone()));
-            places_of.insert(a.id.clone(), Some(Reread::Codes(name)));
             a.needs_vision = false;
-            a.codes = f.codes;
-        } else if p.vector {
+            a.codes = f.codes.clone();
+            Some(Reread::Codes(names.join(" and ")))
+        } else if p.furniture {
             places_of.insert(a.id.clone(), None);
             gone.insert(asset);
             continue;
-        } else if f.unread || (p.hint && f.read) {
-            p.read = Some(Reread::Unread);
-            places_of.insert(a.id.clone(), Some(Reread::Unread));
+        } else if p.vector {
+            a.needs_vision = true;
             a.code_unread = true;
+            Some(Reread::Drawing(f.read && !unscanned.contains(&asset)))
+        } else if p.hint && f.read {
+            a.code_unread = true;
+            Some(Reread::Unread)
+        } else {
+            None
+        };
+        if let Some(read) = read {
+            let again = match &read {
+                Reread::Codes(name) => Reread::Codes(name.clone()),
+                Reread::Unread => Reread::Unread,
+                Reread::Drawing(s) => Reread::Drawing(*s),
+            };
+            places_of.insert(
+                a.id.clone(),
+                Some(Renamed {
+                    read: again,
+                    first: p.first_page(),
+                    pages: (p.furniture_pages() && p.pages.len() + p.more_pages > 1)
+                        .then(|| p.page_words()),
+                    codes: !a.codes.is_empty(),
+                }),
+            );
+            p.read = Some(read);
         }
         a.alt = Some(p.alt());
     }
@@ -2041,7 +2227,11 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
     if places_of.is_empty() {
         return;
     }
-    fn walk(blocks: &mut Vec<Block>, places: &HashMap<String, Option<Reread>>) {
+    fn walk(
+        blocks: &mut Vec<Block>,
+        places: &HashMap<String, Option<Renamed>>,
+        seen: &mut HashSet<String>,
+    ) {
         blocks.retain(|b| match b {
             Block::Media { asset, .. } => !matches!(places.get(asset), Some(None)),
             _ => true,
@@ -2049,23 +2239,34 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         for b in blocks.iter_mut() {
             match b {
                 Block::Media { asset, alt, .. } => {
-                    if let (Some(Some(read)), Some(words)) = (places.get(asset), alt.as_mut()) {
-                        *words = reread_place(words, read);
+                    if let (Some(Some(r)), Some(words)) = (places.get(asset), alt.as_mut()) {
+                        let first = seen.insert(asset.clone());
+                        let more = match (&r.pages, first, r.codes) {
+                            (Some(pages), true, _) => format!(", on pages {pages}"),
+                            (_, false, true) => {
+                                format!(
+                                    ", its codes are listed at its first place on page {}",
+                                    r.first
+                                )
+                            }
+                            _ => String::new(),
+                        };
+                        *words = reread_place(words, &r.read, &more);
                     }
                 }
                 Block::Section { blocks, .. }
                 | Block::Quote { blocks, .. }
-                | Block::Callout { blocks, .. } => walk(blocks, places),
+                | Block::Callout { blocks, .. } => walk(blocks, places, seen),
                 Block::List { items, .. } => {
                     for item in items {
-                        walk(item, places);
+                        walk(item, places, seen);
                     }
                 }
                 _ => {}
             }
         }
     }
-    walk(&mut out.doc.body, &places_of);
+    walk(&mut out.doc.body, &places_of, &mut HashSet::new());
     if !gone.is_empty() {
         let ids: HashSet<String> = gone.iter().map(|&k| out.doc.assets[k].id.clone()).collect();
         let mut k = 0;
@@ -2128,6 +2329,25 @@ mod tests {
         assert!(on_every_page(read.iter(), 3).is_empty());
         // One page is not every page.
         assert!(on_every_page(read[..1].iter(), 1).is_empty());
+    }
+
+    #[test]
+    fn regions_render_at_three_pixels_a_module() {
+        let at = |how| {
+            region_scale(&Region {
+                b: [0.0, 0.0, 60.0, 60.0],
+                how,
+            })
+        };
+        // A module of 1.2 points on 3 whole pixels: 2.5 pixels a point.
+        let near = |got: Option<f64>, want: f64| got.is_some_and(|g| (g - want).abs() < 1e-5);
+        assert!(near(at(How::Modules(1.2)), 2.5));
+        assert!(near(at(How::Modules(0.5)), 6.0));
+        assert_eq!(at(How::Modules(0.0)), Some(300.0 / 72.0));
+        // A picture of 29 pixels on 60 points is coarser than the page render even at three
+        // times: not rendered again. One of 300 pixels is, capped at 300 dpi.
+        assert_eq!(at(How::Picture(29, 29)), None);
+        assert_eq!(at(How::Picture(300, 300)), Some(300.0 / 72.0));
     }
 
     #[test]

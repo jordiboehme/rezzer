@@ -16,7 +16,7 @@ use common::{Builder, lenient_bomb};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Block, Bytes, Completeness, Confidence, Detection, FormatId, Loss, LossReason, ReadOptions,
-    ReadOutcome, Reader, Source, plain_text,
+    ReadOutcome, Reader, Severity, Source, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -1588,8 +1588,12 @@ fn five_thousand_finder_patterns_stop_at_the_time_limit() {
         .iter()
         .find(|l| l.what.starts_with("barcode scan stopped: time limit"))
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
-    assert_eq!(loss.why, LossReason::Limit);
-    assert_eq!(out.completeness, Completeness::Partial);
+    // The page keeps its need of vision, so the read stays complete (R14e-C).
+    assert_eq!(
+        (loss.why, loss.severity),
+        (LossReason::Unsupported, Severity::Info)
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
     // The scan stops waiting at 3 seconds a picture; the page still needs vision.
     assert!(took < twin_time + Duration::from_secs(8), "{took:?}");
     assert!(
@@ -1603,7 +1607,8 @@ fn five_thousand_finder_patterns_stop_at_the_time_limit() {
 
 #[test]
 fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
-    // The dictionary says 20,000 by 20,000 pixels; the data is short. The twin says 2,000.
+    // A 1-bit picture (it looks like a code, so it is read again at its own resolution): the
+    // dictionary says 20,000 by 20,000 pixels; the data is short. The twin says 2,000.
     let file = |side: u32| {
         let mut b = Builder::default();
         let catalog = b.reserve();
@@ -1611,7 +1616,7 @@ fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
         let image = b.stream(
             &format!(
                 "/Type /XObject /Subtype /Image /Width {side} /Height {side} \
-                 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode"
+                 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /FlateDecode"
             ),
             &deflate(&[200u8; 4096]),
         );
@@ -1634,14 +1639,21 @@ fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
         common::max_rss_bytes() >> 20
     );
     assert!(took < Duration::from_secs(5), "{took:?}");
-    // The picture is not scanned on its own: its size alone says it is too large.
+    // Nothing decodes it: the page render is refused by what it would take, before any
+    // decoding, and says so.
     let loss = out
         .document
         .losses
         .iter()
-        .find(|l| l.what.contains("too large to scan for codes"))
+        .find(|l| {
+            l.what.contains("too large to scan for codes")
+                || l.what.starts_with("page 1 is not scanned for barcodes")
+        })
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
-    assert_eq!(loss.why, LossReason::Limit);
+    assert!(matches!(
+        loss.why,
+        LossReason::Limit | LossReason::Unsupported
+    ));
     assert_rss_under_256_mib();
 }
 
@@ -1825,3 +1837,328 @@ fn many_small_filled_rectangles_are_searched_within_bounds() {
     }
     assert_rss_under_256_mib();
 }
+
+/// A version 10 QR code of one pixel a module (57 pixels a side): drawn at 30 points it
+/// reads only when rendered again finer than the page.
+fn small_qr() -> (u32, u32, Vec<u8>) {
+    let m = code::text(
+        Symbology::QrCode,
+        &"spc 0200 1 ch4431999123000889012 ".repeat(7),
+        &Options::default(),
+    )
+    .expect("encode");
+    let (g, w, h) = m.gray(1, 0, 0);
+    (w, h, g)
+}
+
+#[test]
+fn a_finer_look_that_does_not_fit_the_memory_is_named() {
+    // The QR code in a corner and a picture of 2,000 by 2,000 pixels drawn small: at 24 MiB
+    // the page renders, the finer look at the code does not. The twin at 128 MiB reads it.
+    let file = picture_file(
+        595,
+        842,
+        &[vec![
+            (500.0, 30.0, 30.0, 30.0, 0),
+            (300.0, 400.0, 30.0, 30.0, 1),
+        ]],
+        &[small_qr(), (2000, 2000, block_noise(2000, 2000, 50))],
+    );
+    let at = |mib: u64| {
+        let start = Instant::now();
+        let out = read_with_limits(
+            &file,
+            false,
+            Limits {
+                max_memory_bytes: mib << 20,
+                ..scan_limits()
+            },
+        );
+        (out, start.elapsed())
+    };
+    let (twin, twin_time) = at(128);
+    assert_eq!(
+        twin.document
+            .assets
+            .iter()
+            .map(|a| a.codes.len())
+            .sum::<usize>(),
+        1
+    );
+    let (out, took) = at(24);
+    eprintln!(
+        "twin {twin_time:?}, 24 MiB {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    assert!(out.document.assets.iter().all(|a| a.codes.is_empty()));
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| {
+            l.what
+                .starts_with("codes in parts of page 1 are not looked for at a finer scale")
+        })
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert_eq!(
+        (loss.why, loss.severity),
+        (LossReason::Unsupported, Severity::Info)
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+/// The modules of a QR code with its middle spoiled: it keeps its finders and gives no code.
+fn spoiled_qr(text: &str) -> code::Modules {
+    let mut m = code::text(Symbology::QrCode, text, &Options::default()).expect("encode");
+    let n = m.width as usize;
+    // Every module outside the three finder corners flipped in a checker pattern.
+    for r in 0..n {
+        for c in 0..n {
+            let corner = (r < 8 && c < 8) || (r < 8 && c >= n - 8) || (r >= n - 8 && c < 8);
+            if !corner && (r + c) % 2 == 0 {
+                m.dark[r * n + c] = !m.dark[r * n + c];
+            }
+        }
+    }
+    m
+}
+
+/// A code drawn as one `re` a dark module, `module` points each, its corner at (x, y).
+fn vector_modules(m: &code::Modules, x: f32, y: f32, module: f32) -> String {
+    let mut out = String::from("q 0 g\n");
+    for row in 0..m.height {
+        for col in 0..m.width {
+            if m.dark[(row * m.width + col) as usize] {
+                let mx = x + col as f32 * module;
+                let my = y + (m.height - 1 - row) as f32 * module;
+                out += &format!("{mx:.3} {my:.3} {module:.3} {module:.3} re\n");
+            }
+        }
+    }
+    out + "f Q\n"
+}
+
+fn content_pages(contents: &[String]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let mut kids = String::new();
+    for c in contents {
+        let cs = b.stream("/Filter /FlateDecode", &deflate(c.as_bytes()));
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {} >>",
+            contents.len()
+        ),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn drawings_past_the_region_cap_are_named() {
+    // 63 pages of 8 drawings that look like QR codes and give none (504 parts of pages), then
+    // a real QR code drawn at 0.6 points a module: past the cap of 500 it is not looked at
+    // finer, and says so. Alone it is read.
+    let real = code::text(
+        Symbology::QrCode,
+        "https://example.org/after-the-cap",
+        &Options::default(),
+    )
+    .expect("encode");
+    let last = vector_modules(&real, 300.0, 300.0, 0.6);
+    let mut pages: Vec<String> = (0..63)
+        .map(|p| {
+            (0..8)
+                .map(|k| {
+                    let m = spoiled_qr(&format!("page {p} drawing {k}"));
+                    vector_modules(
+                        &m,
+                        40.0 + (k % 4) as f32 * 130.0,
+                        100.0 + (k / 4) as f32 * 300.0,
+                        1.0,
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    pages.push(last.clone());
+    let (twin, twin_time) = timed(&content_pages(&[last]), false, hostile());
+    assert_eq!(
+        twin.document
+            .assets
+            .iter()
+            .map(|a| a.codes.len())
+            .sum::<usize>(),
+        1
+    );
+    let (out, took) = timed(&content_pages(&pages), false, hostile());
+    eprintln!(
+        "twin {twin_time:?}, 505 drawings {took:?}, max RSS {} MiB",
+        common::max_rss_bytes() >> 20
+    );
+    assert!(out.document.assets.iter().all(|a| a.codes.is_empty()));
+    let last = out
+        .document
+        .assets
+        .iter()
+        .find(|a| a.id == "page-64-code-1")
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert!(
+        last.alt
+            .as_deref()
+            .is_some_and(|t| t.ends_with(", not scanned")),
+        "{last:#?}"
+    );
+    assert!(last.needs_vision);
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| {
+            l.what
+                .contains("a file renders at most 500 parts of pages again")
+        })
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert!(loss.what.contains("pages 63, 64"), "{}", loss.what);
+    assert_eq!(loss.severity, Severity::Info);
+    // The drawings that were read are listed as not decoded.
+    assert_eq!(
+        out.document
+            .assets
+            .iter()
+            .filter(|a| a
+                .alt
+                .as_deref()
+                .is_some_and(|t| t.ends_with(", not decoded")))
+            .count(),
+        500
+    );
+    assert_rss_under_256_mib();
+}
+
+#[test]
+fn running_out_of_scan_time_keeps_the_read_complete() {
+    // 12 pages of scanned text at 150 dpi with a time limit of 4 seconds: the second of
+    // scan time runs out; the pages not read for codes are named in an Info loss and keep
+    // their need of vision.
+    let (w, h) = (1240u32, 1754u32);
+    let mut state = 7u32;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    };
+    let scan: Vec<u8> = (0..w * h)
+        .map(|i| {
+            let (x, y) = (i % w, i / w);
+            let ink =
+                y % 25 < 14 && x > 100 && x < w - 100 && y > 100 && y < h - 100 && next() % 3 == 0;
+            if ink { 30 } else { 245 }
+        })
+        .collect();
+    let pages: Vec<Vec<Draw>> = (0..12).map(|_| vec![(0.0, 0.0, 595.0, 842.0, 0)]).collect();
+    let file = picture_file(595, 842, &pages, &[(w, h, scan)]);
+    let (out, took) = timed(
+        &file,
+        false,
+        Limits {
+            max_time: Duration::from_secs(4),
+            ..hostile()
+        },
+    );
+    eprintln!(
+        "12 scanned pages, 4 s limit: {took:?}, losses {:?}",
+        out.document.losses
+    );
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| {
+            l.what
+                .starts_with("barcode scan stopped: time limit: codes are not read on pages")
+        })
+        .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
+    assert_eq!(
+        (loss.why, loss.severity),
+        (LossReason::Unsupported, Severity::Info)
+    );
+    assert!(out.document.assets.iter().all(|a| a.needs_vision));
+}
+
+#[test]
+fn a_shared_code_is_written_once_whatever_its_places() {
+    // One QR code picture at 5 places on each of 800 pages (4,000 places) at 256 MiB, against
+    // the same file with a picture that holds no code: the Markdown grows by a few bytes a
+    // place, and the payload is written once.
+    let (w, h, g) = small_qr();
+    let payload = "spc 0200 1 ch4431999123000889012 ".repeat(7);
+    let blank = vec![200u8; (w * h) as usize];
+    let pages = |n: usize| -> Vec<Vec<Draw>> {
+        (0..n)
+            .map(|p| {
+                (0..5)
+                    .map(|k| {
+                        (
+                            40.0 + k as f32 * 100.0,
+                            100.0 + (p % 50) as f32 * 12.0,
+                            30.0,
+                            30.0,
+                            0,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    };
+    let limits = Limits {
+        max_memory_bytes: 256 << 20,
+        ..hostile()
+    };
+    let md = |file: &[u8]| {
+        let start = Instant::now();
+        let out = read_with_limits(file, false, limits.clone());
+        let md = rezzer_render::render(
+            &out.document,
+            out.completeness,
+            &rezzer_render::RenderOptions::default(),
+        );
+        (out, md, start.elapsed())
+    };
+    let (twin, twin_md, twin_time) = md(&picture_file(595, 842, &pages(800), &[(w, h, blank)]));
+    let (out, coded, took) = md(&picture_file(595, 842, &pages(800), &[(w, h, g)]));
+    eprintln!(
+        "twin {twin_time:?} {} B, coded {took:?} {} B, max RSS {} MiB",
+        twin_md.len(),
+        coded.len(),
+        common::max_rss_bytes() >> 20
+    );
+    assert_eq!(
+        out.document
+            .assets
+            .iter()
+            .map(|a| a.codes.len())
+            .sum::<usize>(),
+        1
+    );
+    assert_eq!(twin.document.assets.len(), 1);
+    assert_eq!(coded.matches(payload.as_str()).count(), 1);
+    let per_place = (coded.len() as f64 - twin_md.len() as f64) / 4_000.0;
+    assert!(per_place < 80.0, "{per_place} bytes a place");
+    assert_rss_under_256_mib();
+}
+

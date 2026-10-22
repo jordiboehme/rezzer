@@ -2006,9 +2006,18 @@ fn shared_code_decoded_once_at_every_place() {
                 _ => None,
             })
             .collect();
+        // The codes stand at the first place; later places point there.
+        let more = if n == 1 {
+            String::new()
+        } else {
+            ", its codes are listed at its first place on page 1".to_string()
+        };
         assert_eq!(
             alts,
-            [format!("Data Matrix, box 260, {y} to 320, {}", y + 60)],
+            [format!(
+                "Data Matrix, box 260, {y} to 320, {}{more}",
+                y + 60
+            )],
             "page {n}"
         );
     }
@@ -2207,4 +2216,332 @@ fn dense_vector_codes_are_found() {
             out.document.assets
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Fix round 1
+
+/// `m` with its data modules flipped in a band through the middle (the finders kept): it
+/// keeps the look of a code and no longer decodes.
+fn spoiled(m: &code::Modules) -> code::Modules {
+    let mut out = m.clone();
+    let n = m.width as usize;
+    // Every module outside the three finder corners flipped in a checker pattern.
+    for r in 0..n {
+        for c in 0..n {
+            let corner = (r < 8 && c < 8) || (r < 8 && c >= n - 8) || (r >= n - 8 && c < 8);
+            if !corner && (r + c) % 2 == 0 {
+                out.dark[r * n + c] = !out.dark[r * n + c];
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_drawing_that_looks_like_a_code_but_gives_none_is_listed() {
+    let m = spoiled(&modules(Symbology::QrCode, TICKET_URL));
+    let content = format!("{INVOICE}{}", vector_code(&m, 300.0, 400.0, 2.0));
+    let out = read_opts(&code_page(&content, &[]), true, Limits::default());
+    let a = asset(&out, "page-1-code-1");
+    assert!(a.codes.is_empty());
+    assert!(a.needs_vision);
+    assert!(a.code_unread);
+    assert_eq!(
+        a.alt.as_deref(),
+        Some(
+            "a drawing that looks like a barcode or QR code, box 300, 400 to 350, 450, not decoded"
+        )
+    );
+    assert!(blob(&out, "page-1-code-1").starts_with(PNG_SIGNATURE));
+    let md = markdown(&out);
+    assert!(md.contains("Needs vision"), "{md}");
+}
+
+/// A page with `content` drawn in one path filled with `color` (`0 g` for black).
+fn drawing_page(content: &str) -> Vec<u8> {
+    code_page(&format!("{INVOICE}{content}"), &[])
+}
+
+#[test]
+fn drawings_that_are_not_codes_are_not_listed() {
+    let cells = |list: Vec<(f32, f32, f32, f32)>, color: &str| {
+        let mut c = format!("q {color}\n");
+        for (x, y, w, h) in list {
+            c += &format!("{x} {y} {w} {h} re\n");
+        }
+        c + "f Q\n"
+    };
+    let mut cases: Vec<(&str, String)> = Vec::new();
+    // A ruled table: thin lines as filled rectangles.
+    let mut rules: Vec<(f32, f32, f32, f32)> = (0..11)
+        .map(|k| (50.0 + k as f32 * 25.0, 100.0, 0.5, 150.0))
+        .collect();
+    rules.extend((0..31).map(|k| (50.0, 100.0 + k as f32 * 5.0, 250.0, 0.5)));
+    cases.push(("ruled table", cells(rules, "0 g")));
+    // A checkerboard of 12 by 12 cells of 10 points.
+    let checker: Vec<(f32, f32, f32, f32)> = (0..144)
+        .filter(|k| (k / 12 + k % 12) % 2 == 0)
+        .map(|k| {
+            (
+                50.0 + (k % 12) as f32 * 10.0,
+                100.0 + (k / 12) as f32 * 10.0,
+                10.0,
+                10.0,
+            )
+        })
+        .collect();
+    cases.push(("checkerboard", cells(checker.clone(), "0 g")));
+    // The same in white.
+    cases.push(("white squares", cells(checker, "1 g")));
+    // Zebra rows of a table.
+    cases.push((
+        "zebra rows",
+        cells(
+            (0..20)
+                .map(|k| (50.0, 100.0 + k as f32 * 24.0, 480.0, 12.0))
+                .collect(),
+            "0.9 g",
+        ),
+    ));
+    // A heatmap of 20 by 20 cells of 8 points, half filled.
+    let mut state = 11u32;
+    let heat: Vec<(f32, f32, f32, f32)> = (0..400)
+        .filter(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state.is_multiple_of(2)
+        })
+        .map(|k| {
+            (
+                50.0 + (k % 20) as f32 * 8.0,
+                100.0 + (k / 20) as f32 * 8.0,
+                8.0,
+                8.0,
+            )
+        })
+        .collect();
+    cases.push(("heatmap", cells(heat, "0.2 g")));
+    // A bar chart and 40 equal bars.
+    cases.push((
+        "bar chart",
+        cells(
+            (0..30)
+                .map(|k| {
+                    (
+                        50.0 + k as f32 * 6.0,
+                        100.0,
+                        4.0,
+                        10.0 + (k * 37 % 50) as f32,
+                    )
+                })
+                .collect(),
+            "0 g",
+        ),
+    ));
+    cases.push((
+        "equal bars",
+        cells(
+            (0..40)
+                .map(|k| (50.0 + k as f32 * 2.0, 100.0, 1.0, 40.0))
+                .collect(),
+            "0 g",
+        ),
+    ));
+    for (name, content) in cases {
+        let out = read(&drawing_page(&content));
+        assert!(
+            out.document.assets.is_empty(),
+            "{name}: {:#?}",
+            out.document.assets
+        );
+    }
+}
+
+#[test]
+fn vertical_code_128_is_read() {
+    // A Code 128 picture turned a quarter by its matrix, and the same code drawn as bars lying
+    // down.
+    let m = modules(Symbology::Code128, "RZ-2026-1021");
+    let (dict, data) = code_picture(&m, 3, 10);
+    let content = format!("{INVOICE}q 0 200 -60 0 300 300 cm /P0 Do Q\n");
+    let out = read(&code_page(&content, &[(dict, data)]));
+    let got: Vec<(String, String)> = out
+        .document
+        .assets
+        .iter()
+        .flat_map(|a| {
+            a.codes
+                .iter()
+                .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [("Code 128".to_string(), "RZ-2026-1021".to_string())],
+        "picture"
+    );
+    let mut bars = String::from("q 0 g\n");
+    for col in 0..m.width {
+        if m.dark[col as usize] {
+            bars += &format!("200 {:.2} 40 0.8 re\n", 300.0 + col as f32 * 0.8);
+        }
+    }
+    bars += "f Q\n";
+    let out = read(&drawing_page(&bars));
+    assert_eq!(
+        codes_of(&out, "page-1-code-1"),
+        [("Code 128".to_string(), "RZ-2026-1021".to_string())],
+        "paths"
+    );
+}
+
+#[test]
+fn pdf417_drawn_as_paths_is_read() {
+    // A boarding pass code drawn at 0.9 points a module, rows 3 modules high.
+    const BCBP: &str = "M1DOE/JOHN            EABC123 FRAJFKLH 0400 290Y012A0012 100";
+    let m = modules(Symbology::Pdf417, BCBP);
+    let module = 0.9f32;
+    let mut c = String::from("q 0 g\n");
+    for row in 0..m.height {
+        // Runs of dark modules in a row, as rectangles.
+        let mut col = 0;
+        while col < m.width {
+            if m.dark[(row * m.width + col) as usize] {
+                let start = col;
+                while col < m.width && m.dark[(row * m.width + col) as usize] {
+                    col += 1;
+                }
+                let x = 100.0 + start as f32 * module;
+                let y = 500.0 + (m.height - 1 - row) as f32 * module;
+                c += &format!(
+                    "{x:.3} {y:.3} {:.3} {module:.3} re\n",
+                    (col - start) as f32 * module
+                );
+            } else {
+                col += 1;
+            }
+        }
+    }
+    c += "f Q\n";
+    let out = read(&drawing_page(&c));
+    assert_eq!(
+        codes_of(&out, "page-1-code-1"),
+        [("PDF417".to_string(), BCBP.to_string())]
+    );
+}
+
+#[test]
+fn a_code_in_the_page_furniture_is_named_once() {
+    // The same Data Matrix at the same place on four pages: page furniture, read once and
+    // named once, at its first place, with its pages.
+    let m = modules(Symbology::DataMatrix, "DOC-ID 2026-114");
+    let content = format!("{INVOICE}q 40 0 0 40 520 20 cm /P0 Do Q\n");
+    let out = read(&code_pages(
+        &[&content, &content, &content, &content],
+        &[code_picture(&m, 4, 2)],
+    ));
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-code-1"]);
+    assert_eq!(
+        codes_of(&out, "page-1-code-1"),
+        [("Data Matrix".to_string(), "DOC-ID 2026-114".to_string())]
+    );
+    let media: Vec<String> = (1..=4)
+        .flat_map(|n| lines(page(&out, n)))
+        .filter(|l| l.starts_with("[media"))
+        .collect();
+    assert_eq!(media, ["[media page-1-code-1]"]);
+    let alt = page(&out, 1)
+        .iter()
+        .find_map(|b| match b {
+            Block::Media { alt, .. } => alt.clone(),
+            _ => None,
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        alt,
+        "Data Matrix, box 520, 20 to 560, 60, on pages 1, 2, 3, 4"
+    );
+}
+
+#[test]
+fn a_small_8_bit_code_finer_than_the_page_render_is_read_again() {
+    // A version 10 QR code of one pixel a module drawn at 30 points: 1 pixel a module at the
+    // page's 144 dpi, which does not read; at its own resolution three times, it does.
+    let m = modules(
+        Symbology::QrCode,
+        &"spc 0200 1 ch4431999123000889012 ".repeat(7),
+    );
+    let (dict, data) = code_picture(&m, 1, 0);
+    let content = format!("{INVOICE}q 30 0 0 30 300 400 cm /P0 Do Q\n");
+    let out = read(&code_page(&content, &[(dict, data)]));
+    assert_eq!(
+        codes_of(&out, "page-1-pic-1").len(),
+        1,
+        "{:#?}",
+        out.document.assets
+    );
+}
+
+#[test]
+fn many_codes_in_one_picture_stop_at_the_picture_cap() {
+    // A page picture with 60 different QR codes: 50 are kept, one loss says so.
+    let codes: Vec<(Vec<u8>, u32, u32)> = (0..60)
+        .map(|k| modules(Symbology::QrCode, &format!("CODE-{k:02}")).gray(3, 4, 0))
+        .collect();
+    let (cw, ch) = (codes[0].1, codes[0].2);
+    let (w, h) = (cw * 6, ch * 10);
+    let mut sheet = vec![255u8; (w * h) as usize];
+    for (k, (g, gw, gh)) in codes.iter().enumerate() {
+        let (ox, oy) = ((k as u32 % 6) * cw, (k as u32 / 6) * ch);
+        for row in 0..*gh {
+            let to = ((oy + row) * w + ox) as usize;
+            sheet[to..to + *gw as usize]
+                .copy_from_slice(&g[(row * gw) as usize..((row + 1) * gw) as usize]);
+        }
+    }
+    let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, content, w, h, &sheet));
+    let a = asset(&out, "page-1");
+    assert_eq!(a.codes.len(), 50, "{:#?}", out.document.losses);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("hold more than 50 codes each") && l.why == LossReason::Limit),
+        "{:#?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn page_furniture_does_not_move_figure_texts() {
+    // A logo at one place on three pages is page furniture. The Figure of page 2 marks text,
+    // not a picture: its alt text stays at the end of the page, as without the logo.
+    let page = |n: u32| {
+        format!(
+            "q 30 0 0 30 500 790 cm /L Do Q\n\
+             BT /F1 12 Tf 72 700 Td (Body of page {n}.) Tj ET\n\
+             /P << /MCID 0 >> BDC BT /F1 12 Tf 72 650 Td (A note.) Tj ET EMC\n"
+        )
+    };
+    let (p1, p2, p3) = (page(1), page(2), page(3));
+    let out = read(&tagged_pages(&[
+        (&p1, &[]),
+        (&p2, &["A chart of sales."]),
+        (&p3, &[]),
+    ]));
+    let shown = lines(page_blocks(&out, 2));
+    assert_eq!(
+        shown.last().map(String::as_str),
+        Some("Figure (not matched to a picture): A chart of sales."),
+        "{shown:?}"
+    );
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+}
+
+fn page_blocks(out: &ReadOutcome, n: u32) -> &[Block] {
+    page(out, n)
 }

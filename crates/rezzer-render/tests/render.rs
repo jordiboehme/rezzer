@@ -3467,3 +3467,91 @@ fn header_rows_join_into_one_header_line() {
     );
     assert!(!md.contains("Merged cells"), "{md}");
 }
+
+// ---------------------------------------------------------------------------------------
+// Barcodes and QR codes
+
+/// A document with one picture holding codes of `texts`, drawn at `places` places.
+fn coded(texts: &[&str], places: usize) -> String {
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1-pic-1".into(),
+        path: Some("assets/page-1-pic-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("QR Code".into()),
+        needs_vision: false,
+        codes: texts
+            .iter()
+            .map(|t| rezzer_model::Barcode {
+                symbology: "QR Code".into(),
+                text: Some((*t).to_string()),
+                base64: None,
+                bytes: t.len() as u64,
+                bounds: None,
+            })
+            .collect(),
+        code_unread: false,
+    }];
+    d.body = (0..places)
+        .map(|k| Block::Media {
+            asset: "page-1-pic-1".into(),
+            alt: Some(format!("QR Code, box {k}, 0 to 10, 10")),
+            anchor: None,
+        })
+        .collect();
+    render(&d, Completeness::Complete, &opts())
+}
+
+#[test]
+fn only_web_addresses_become_links() {
+    let md = coded(
+        &[
+            "file:///etc/passwd",
+            "data:text/html,x",
+            "ftp://example.org/a",
+            "https://example.org/b",
+        ],
+        1,
+    );
+    assert!(md.contains("QR Code: file:///etc/passwd"), "{md}");
+    assert!(!md.contains("](file:"), "{md}");
+    assert!(!md.contains("](data:"), "{md}");
+    assert!(!md.contains("](ftp:"), "{md}");
+    assert!(md.contains("](https://example.org/b)"), "{md}");
+}
+
+#[test]
+fn control_and_format_characters_in_codes_show() {
+    let md = coded(
+        &[
+            "(01)0950\u{1d}(10)ABC",
+            "https://example.org/\u{202e}gpj.exe",
+            "pay\u{200b}pal.com",
+        ],
+        1,
+    );
+    // GS as its symbol, format characters by their code point, and no link with one.
+    assert!(md.contains("(01)0950\u{241d}(10)ABC"), "{md}");
+    assert!(md.contains("&lt;U+202E>gpj.exe"), "{md}");
+    assert!(!md.contains("\u{202e}"), "{md}");
+    assert!(!md.contains("](https://example.org/"), "{md}");
+    assert!(md.contains("pay&lt;U+200B>pal.com"), "{md}");
+}
+
+#[test]
+fn codes_are_written_once_at_the_first_place() {
+    let md = coded(&["https://example.org/once"], 5);
+    assert_eq!(
+        md.matches("QR Code: [https://example.org/once]").count(),
+        1,
+        "{md}"
+    );
+    let first = md.find("box 0, 0").expect("first place");
+    let code = md.find("QR Code: [").expect("code");
+    assert!(
+        code > first && code < md.find("box 1, 0").expect("second place"),
+        "{md}"
+    );
+}

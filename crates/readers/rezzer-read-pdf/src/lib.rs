@@ -898,7 +898,14 @@ impl Pictures {
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
-            let known = self.known.get(&p.id).copied();
+            // Page furniture is an asset of its own, apart from places of the same picture
+            // in the text: it stays only when a code is read from it.
+            let key = if p.furniture {
+                p.id ^ 0x9e37_79b9_7f4a_7c15
+            } else {
+                p.id
+            };
+            let known = self.known.get(&key).copied();
             let checked = if k % PICTURES_PER_CHECK == PICTURES_PER_CHECK - 1 {
                 budget.check_time()
             } else {
@@ -918,8 +925,14 @@ impl Pictures {
                 self.unlist(order.len() - k, n, hit.to_string());
                 break;
             }
-            let figure = p.mcid.and_then(|m| by_mcid.get(&m)).copied();
-            let name = if p.vector {
+            // Page furniture is not listed unless it holds a code: it takes no Figure.
+            let figure = p
+                .mcid
+                .filter(|_| !p.furniture)
+                .and_then(|m| by_mcid.get(&m))
+                .copied();
+            // Regions of paths and page furniture stay only as codes: they are named as codes.
+            let name = if p.vector || p.furniture {
                 codes += 1;
                 format!("page-{n}-code-{codes}")
             } else {
@@ -927,6 +940,11 @@ impl Pictures {
                 format!("page-{n}-pic-{pics}")
             };
             let asset = match known {
+                // Page furniture is named once, at its first place.
+                Some(at) if p.furniture => {
+                    self.assets[at].1.add(n, p);
+                    continue;
+                }
                 Some(at) => {
                     self.assets[at].1.add(n, p);
                     let asset = self.assets[at].0;
@@ -952,9 +970,9 @@ impl Pictures {
                         caption,
                         !p.logo,
                     ));
-                    self.known.insert(p.id, self.assets.len());
+                    self.known.insert(key, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
-                    if !p.vector {
+                    if !p.vector && !p.furniture {
                         new.push(asset);
                     }
                     asset
@@ -984,7 +1002,12 @@ impl Pictures {
             out.doc.assets[*only].caption = Some(figures[f].alt.clone());
             taken[f] = true;
         }
-        let first = order.first().map(|&i| spots[i]).unwrap_or_default();
+        let first = order
+            .iter()
+            .find(|&&i| !list[i].furniture)
+            .map(|&i| spots[i])
+            // Only page furniture: the end of the page, as on a page without pictures.
+            .unwrap_or(usize::MAX);
         for (f, figure) in figures.iter().enumerate().filter(|(f, _)| !taken[*f]) {
             unmatched.push((marks[f].unwrap_or(first), figure.alt.clone()));
         }
@@ -1538,7 +1561,9 @@ mod tests {
                     framed: b,
                     id: k,
                     how: None,
+                    hint: false,
                     vector: false,
+                    furniture: false,
                     logo: false,
                     mcid: None,
                 }

@@ -41,6 +41,9 @@ pub(crate) struct Ctx<'a> {
     pub heading_offset: u8,
     /// Annotations to show at their passage; only the content has them.
     pub notes: Option<&'a Notes<'a>>,
+    /// The assets whose codes were written already: a code is written once, at the first
+    /// place of its picture.
+    pub codes_shown: RefCell<std::collections::HashSet<String>>,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
@@ -1396,7 +1399,14 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
         }
     }
     let mut out = paragraph(&parts);
-    for c in found.map_or(&[][..], |a| a.codes.as_slice()) {
+    let first = found.is_some_and(|a| !a.codes.is_empty())
+        && ctx.codes_shown.borrow_mut().insert(id.to_string());
+    let codes = if first {
+        found.map_or(&[][..], |a| a.codes.as_slice())
+    } else {
+        &[][..]
+    };
+    for c in codes {
         out.push_str("\n\n");
         out.push_str(&code_lines(c));
     }
@@ -1448,28 +1458,59 @@ fn code_lines(c: &Barcode) -> String {
     paragraph(&parts)
 }
 
-/// Whether `t` is an `http` or `https` address without spaces or control characters: only
-/// those become links.
+/// Whether `t` is an `http` or `https` address without spaces, control or format
+/// characters: only those become links.
 fn web_address(t: &str) -> bool {
     let lower = t.to_ascii_lowercase();
     (lower.starts_with("https://") || lower.starts_with("http://"))
         && t.len() > 8
-        && !t
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>'))
+        && !t.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || format_char(c) || matches!(c, '<' | '>')
+        })
+}
+
+/// Whether `c` is a Unicode format character (category Cf): invisible, and some turn the
+/// text around (U+202E) or hide in a word (U+200B).
+fn format_char(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0xad | 0x600..=0x605
+            | 0x61c
+            | 0x6dd
+            | 0x70f
+            | 0x890..=0x891
+            | 0x8e2
+            | 0x180e
+            | 0x200b..=0x200f
+            | 0x202a..=0x202e
+            | 0x2060..=0x2064
+            | 0x2066..=0x206f
+            | 0xfeff
+            | 0xfff9..=0xfffb
+            | 0x110bd
+            | 0x110cd
+            | 0x13430..=0x1343f
+            | 0x1bca0..=0x1bca3
+            | 0x1d173..=0x1d17a
+            | 0xe0001
+            | 0xe0020..=0xe007f
+    )
 }
 
 /// `t` with its control characters other than tab and line breaks as their Unicode symbols
-/// (U+2400 on), so a separator such as GS shows.
+/// (U+2400 on), so a separator such as GS shows, and format characters as `<U+XXXX>`.
 fn visible_controls(t: &str) -> String {
-    t.chars()
-        .map(|c| match c {
-            '\t' | '\n' | '\r' => c,
-            '\u{0}'..='\u{1f}' => char::from_u32(0x2400 + c as u32).unwrap_or(c),
-            '\u{7f}' => '\u{2421}',
-            _ => c,
-        })
-        .collect()
+    let mut out = String::with_capacity(t.len());
+    for c in t.chars() {
+        match c {
+            '\t' | '\n' | '\r' => out.push(c),
+            '\u{0}'..='\u{1f}' => out.push(char::from_u32(0x2400 + c as u32).unwrap_or(c)),
+            '\u{7f}' => out.push('\u{2421}'),
+            c if format_char(c) => out.push_str(&format!("<U+{:04X}>", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------

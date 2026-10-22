@@ -59,16 +59,17 @@ Built on (versions as used in the development version):
 
 ### Barcodes and QR codes
 
-- Rezzer reads QR Code, Micro QR Code, Data Matrix, Aztec, PDF417, Code 128, Code 39, EAN-13, UPC-A and ITF. It reads them with and without an output directory
-- It looks in small pictures (logos too), in pages that need vision, in large pictures at their own resolution (at most 300 dpi) and in codes drawn as paths (many small filled squares or bars). A code drawn as paths is rendered again with each module on 3 whole pixels. Its crop is written as `page-<N>-code-<K>.png`
-- A small picture with a code is named after the code, for example "QR Code, box 480, 40 to 570, 130". It does not need vision and is not in the list of pictures that need vision. Below the picture, each code has a line with its kind and its content: `QR Code: https://example.org/t/dNuKThV1`
-- The content is data from the file. It is escaped for Markdown and never run or followed. Only `http` and `https` addresses become links. Content of several lines is a code block. Bytes that are not text are shown as their size and in base64
+- Rezzer reads QR Code, Data Matrix, Aztec, PDF417, Code 128, Code 39, EAN-13, UPC-A and ITF, also turned a quarter or a little. It reads them with and without an output directory
+- It looks in small pictures (logos and page furniture too), in pages that need vision and in codes drawn as paths (many small filled squares or bars on one module grid, with the pattern of a code). A page that needs vision is read once at its own scale with two quick attempts; the likely codes on it are looked at again finer. A small picture that gives no code is looked at again at its own resolution when that is finer than the page render. A code drawn as paths is rendered again with each module on 3 whole pixels. Its crop is written as `page-<N>-code-<K>.png`
+- A small picture with a code is named after the code, for example "QR Code, box 480, 40 to 570, 130". It does not need vision and is not in the list of pictures that need vision. Below its first place, each code has a line with its kind and its content: `QR Code: https://example.org/t/dNuKThV1`. Later places of the same picture say "its codes are listed at its first place on page N"
+- The content is data from the file. It is escaped for Markdown and never run or followed. Only `http` and `https` addresses without hidden characters become links. Content of several lines is a code block. Control and format characters show as their symbols or as `<U+XXXX>`. Bytes that are not text are shown as their size and in base64
 - A code read from a page that needs vision is listed below the page picture with its box in points. The page still needs vision for the rest of it
-- A picture that looks like a code but gives none keeps "Needs vision" and says "barcode or QR code found, not decoded". Paths that look like a code but give none are not listed
-- Equal pictures are read once. The code shows at every place of the picture
+- A picture that looks like a code but gives none keeps "Needs vision" and says "barcode or QR code found, not decoded". A drawing that looks like a code but gives none is listed with its crop as "a drawing that looks like a barcode or QR code" and "not decoded", and needs vision. Ruled tables, checkerboards, zebra rows, heatmaps and bar charts are not taken for codes
+- A code in the page furniture (the same picture at one place on many pages) is read once and named once, at its first place, with its pages. Furniture without a code stays unlisted
+- Equal pictures are read once
 - The overview counts the codes by kind, and the pictures that look like a code but gave none
-- In the JSON, the codes are in `codes` of their asset: kind, text or base64, size in bytes and the box on the page for a page picture
-- Bounds: 10 seconds a picture, a quarter of the time limit for the file, 50 codes a picture, 500 a file, 64 KiB a code, pictures up to 100 million pixels, read in tiles of up to 4 million pixels. What is not read because of a bound is named in the output
+- In the JSON, the codes are in `codes` of their asset: kind, text or base64, the size of the payload in bytes and the box on the page for a page picture
+- Bounds: 10 seconds a picture, a quarter of the time limit for the file, 50 codes a picture, 500 a file, 64 KiB a code, 500 parts of pages rendered again a file, pictures up to 100 million pixels, read in tiles of up to 4 million pixels. What is not read because of a bound is named in the output. When the time for codes runs out, the pages not read for codes are named in an info note and the read stays complete: their pictures keep their need of vision
 - A PDF with a user password is read with `--password-stdin` (command line) or the `password` option (MCP). The password never shows up in the output, in the logs or in the cache
 
 ## Example
@@ -157,7 +158,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - A page render cannot stop in the middle of a page. A page whose pictures would take too much memory is not rendered, and the output says so
 - A small picture in a corner or in the top or bottom band is taken as a logo, even when it shows content. It is listed with its box, but not marked as needing vision
 - A QR code with a logo over more than about 15 % of its area cannot be read. The error correction does not reach that far
-- Aztec codes in scans and turned codes are read less well than codes that are drawn straight
+- Aztec codes in scans, and codes turned by an angle other than a quarter, are read less well than codes that are drawn straight. Micro QR Code is looked for but not tested
 - EAN-8, UPC-E and MaxiCode are not read. The first two give too many false hits, the last one can take minutes on a small picture
 - Codes are read as text or bytes. What a ticket, a payment or a boarding pass code means (EPC QR, Swiss QR bill, UIC 918, IATA BCBP) is read in a later plan
 - A code drawn as one outline path, not as squares or bars, is only found when its page is rendered for vision

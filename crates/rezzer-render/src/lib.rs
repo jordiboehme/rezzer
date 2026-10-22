@@ -160,6 +160,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         parts.extend(facets::logic(doc, opts.math));
     }
     let ctx = Ctx {
+        codes_shown: Default::default(),
         assets: &doc.assets,
         heading_offset: 0,
         notes: None,
@@ -219,6 +220,7 @@ fn content(doc: &Document, title: &str, notes: &Notes) -> String {
     }
     let min = min_heading(body, 0).unwrap_or(2).max(1);
     let ctx = Ctx {
+        codes_shown: Default::default(),
         assets: &doc.assets,
         heading_offset: 2u8.saturating_sub(min),
         notes: Some(notes),

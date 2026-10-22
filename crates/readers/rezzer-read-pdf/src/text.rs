@@ -803,6 +803,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             images_mcid: Vec::new(),
             cells: Vec::new(),
             cells_cut: false,
+            cells_held: 0,
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -974,7 +975,18 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images = std::mem::take(&mut dev.images);
         items.images_code = std::mem::take(&mut dev.images_code);
         items.images_px = std::mem::take(&mut dev.images_px);
-        match crate::codes::vector_codes(&dev.cells) {
+        // The search holds its grid in the object pool while it runs.
+        let search = crate::codes::search_bytes(&dev.cells);
+        let found = if self.origin.reserve_copy(search) {
+            let found = crate::codes::vector_codes(&dev.cells);
+            self.origin.release_copy(search);
+            found
+        } else {
+            Err(format!(
+                "the search would take about {search} bytes, more than the object limit leaves"
+            ))
+        };
+        match found {
             Ok(codes) => items.codes = codes,
             Err(why) => notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are not looked for: {why}"
@@ -983,11 +995,12 @@ impl<'p, 'a> PageReader<'p, 'a> {
         if dev.cells_cut {
             notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are looked for only among the first {} small \
-                 filled rectangles",
-                crate::codes::MAX_CELLS
+                 filled rectangles: there are more, or the object limit holds no more",
+                dev.cells.len()
             )));
         }
         dev.cells = Vec::new();
+        self.origin.release_copy(dev.cells_held);
         items.images_id = std::mem::take(&mut dev.images_id);
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
@@ -2510,6 +2523,8 @@ struct TextDevice<'d> {
     cells: Vec<[f32; 4]>,
     /// More filled rectangles were drawn than are kept.
     cells_cut: bool,
+    /// What the cells hold of the object pool.
+    cells_held: u64,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -2829,6 +2844,10 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
     }
 }
 
+/// What one kept filled rectangle takes, and how many are reserved at a time.
+const CELL_BYTES: u64 = 16;
+const CELL_BLOCK: u64 = 8_192;
+
 /// The filled subpaths of `path` that are rectangles with horizontal and vertical sides, as
 /// boxes: the modules or bars of a code drawn as paths.
 fn cells_of(path: &BezPath, transform: Affine, keep: &mut dyn FnMut([f32; 4])) {
@@ -2994,14 +3013,31 @@ impl<'a> Device<'a> for TextDevice<'_> {
             return;
         }
         let stroke = !matches!(mode, DrawMode::Fill(_));
-        if !stroke && !self.cells_cut {
-            let (cells, cut) = (&mut self.cells, &mut self.cells_cut);
+        // Modules and bars are dark: white or light fills (and patterns) are not looked at.
+        let dark = match &props.paint {
+            hayro_interpret::Paint::Color(c) => {
+                let [r, g, b, a] = c.to_rgba().to_rgba8();
+                let luma =
+                    (u32::from(r) * 2126 + u32::from(g) * 7152 + u32::from(b) * 722) / 10_000;
+                a > 127 && luma < 160
+            }
+            _ => false,
+        };
+        if !stroke && dark && !self.cells_cut {
+            let origin = self.origin;
+            let (cells, cut, held) = (&mut self.cells, &mut self.cells_cut, &mut self.cells_held);
             cells_of(path, props.transform, &mut |c| {
-                if cells.len() < crate::codes::MAX_CELLS {
-                    cells.push(c);
-                } else {
-                    *cut = true;
+                // The cells are held in the object pool, a block at a time.
+                if cells.len() as u64 * CELL_BYTES >= *held {
+                    if cells.len() >= crate::codes::MAX_CELLS
+                        || !origin.reserve_copy(CELL_BLOCK * CELL_BYTES)
+                    {
+                        *cut = true;
+                        return;
+                    }
+                    *held += CELL_BLOCK * CELL_BYTES;
                 }
+                cells.push(c);
             });
         }
         let (rules, cap) = (&mut self.rules, self.cap);
