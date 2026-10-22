@@ -862,7 +862,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:F1092",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -1284,68 +1284,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "no",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "no",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "Column 7",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "empty",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "1091",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "yes",
                     "type": "text"
                   }
                 ],

@@ -125,7 +125,7 @@ Table A1:D83, row labels in A to C, found by rules: no gaps, no header found.
 | FR.32 | Hauts-de-France | Hauts-de-France | 11071624 |
 | FR.84 | Auvergne-Rhône-Alpes | Auvergne-Rhone-Alpes | 11071625 |
 
-**Columns**
+**Columns A1:D83**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |

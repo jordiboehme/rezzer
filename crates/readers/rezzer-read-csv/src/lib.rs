@@ -250,9 +250,8 @@ impl Reader for CsvReader {
         let mut texts: Vec<CellText> = Vec::new();
         let mut input: Vec<CellIn> = Vec::new();
         let mut guess_row: Option<u32> = None;
-        // Which fields past the known columns the record at `lead` fills: it counts as data
-        // or as the header, as the layout decides.
-        let mut lead_extra: Vec<bool> = Vec::new();
+        // The sheet row and the first byte of each record read, in order.
+        let mut starts: Vec<(u32, usize)> = Vec::new();
         // Records read, the sheet row of the next one (0-based) and where the last one ended.
         let (mut read, mut row) = (0usize, 0u32);
         let mut after: Option<usize> = None;
@@ -316,14 +315,8 @@ impl Reader for CsvReader {
             }
             if read == lead {
                 guess_row = Some(row);
-                lead_extra = rec
-                    .iter()
-                    .enumerate()
-                    .take(MAX_FACT_ROWS)
-                    .skip(known)
-                    .map(|(_, v)| !value_empty(v))
-                    .collect();
             }
+            starts.push((row, rec.position().map_or(0, |p| p.byte() as usize)));
             if let Some(line) = rec.position().map(|p| p.line() as usize)
                 && ragged_lines.contains(&line)
             {
@@ -346,7 +339,7 @@ impl Reader for CsvReader {
             read += 1;
             row = row.saturating_add(1);
         }
-        let mut data_shown = read.saturating_sub(skip);
+        let data_shown = read.saturating_sub(skip);
         if let Some((n, what)) = stopped {
             partial = true;
             doc.losses.push(Loss {
@@ -383,6 +376,9 @@ impl Reader for CsvReader {
         // The layout decides titles, headers and blocks; csvsniff's header guess is one of
         // its signals.
         let mut blocks = Vec::new();
+        // The Columns tables of the table regions with their derived relations; `None` keeps
+        // the one table of the whole file.
+        let mut by_region: Option<RegionFacts> = None;
         if timed_out {
             place_ragged(&mut doc, ragged_at, ragged, |_| true);
         } else {
@@ -401,6 +397,10 @@ impl Reader for CsvReader {
             };
             let stop = || budget.check_time().is_err();
             let layout = sheetlayout::detect(&input, &rezzer_layout::limits(budget), &stop);
+            // The cells with text, in reading order: the Columns tables count the fields of
+            // columns that only ragged rows have from them.
+            let filled: Vec<(u32, u32)> =
+                input.cells.iter().map(|c| (c.pos.row, c.pos.col)).collect();
             drop(input);
             let mapped = rezzer_layout::blocks(
                 &sheet_q,
@@ -422,28 +422,16 @@ impl Reader for CsvReader {
             partial |= mapped.partial || mapped.elements_out;
             doc.losses.extend(mapped.losses);
             blocks = mapped.blocks;
-            // The column facts follow the header the layout found (C8): when it differs from
-            // csvsniff's guess, the analysis runs again with it.
-            if let Some(header) = layout_header(&layout, guess_row)
-                && header != dialect.has_header
-            {
-                match facts_with_header(text, &dialect, header, &out_of_time, &sheet_q) {
-                    Err(loss) => doc.losses.push(loss),
-                    Ok(again) => {
-                        analysis = again;
-                        for (j, &filled) in lead_extra.iter().enumerate() {
-                            if filled && let Some(n) = extra_filled.get_mut(j) {
-                                if header {
-                                    *n = n.saturating_sub(1);
-                                } else {
-                                    *n += 1;
-                                }
-                            }
-                        }
-                        data_shown = read.saturating_sub(lead + usize::from(header));
-                    }
-                }
-            }
+            // The column facts follow the layout (C8): one Columns table per table region,
+            // from its header and data rows.
+            let part = Records {
+                text,
+                dialect: &dialect,
+                starts: &starts,
+                filled: &filled,
+                widest,
+            };
+            by_region = region_facts(&part, &layout, &sheet_q, &out_of_time);
             // The layout decides the header and so the data rows: the rows of every region
             // table without its header rows, plus the records not shown.
             let placed: usize = blocks
@@ -481,103 +469,47 @@ impl Reader for CsvReader {
         // The column facts. The column count is the widest record, also columns not shown.
         let ncols_total = if timed_out { known } else { widest.max(known) };
         custom_columns(&mut doc, ncols_total);
-        let extra = ncols_total > known;
-        let mut head = vec!["Column", "Type", "Unit", "Missing", "Unique", "Key"];
-        if extra {
-            head.push("Note");
-        }
-        let mut col_rows = vec![
-            head.iter()
-                .map(|h| Cell::new(vec![Inline::plain(*h)]))
-                .collect::<Vec<_>>(),
-        ];
-        for c in analysis.columns.iter().take(MAX_FACT_ROWS) {
-            let unique = if c.unique {
-                "yes"
-            } else if c.unique_exhausted {
-                "not checked"
-            } else {
-                "no"
-            };
-            let mut values = vec![
-                c.name.clone(),
-                kind_label(&c.kind),
-                c.unit.clone().unwrap_or_default(),
-                c.missing.to_string(),
-                unique.to_string(),
-                if c.key_like { "yes" } else { "no" }.to_string(),
-            ];
-            if extra {
-                values.push(String::new());
+        match by_region {
+            Some(found) => {
+                blocks.extend(found.tables);
+                doc.losses.extend(found.losses);
+                doc.facets.formulas.extend(found.formulas);
             }
-            col_rows.push(
-                values
+            None => {
+                // The whole file as one table, with csvsniff's header guess: after a time
+                // cut, or when the layout found no table.
+                let mut facts: Vec<(Vec<String>, bool)> = analysis
+                    .columns
                     .iter()
-                    .map(|v| Cell::new(vec![Inline::plain(v)]))
-                    .collect(),
-            );
+                    .take(MAX_FACT_ROWS)
+                    .map(|c| (fact_row(c, c.name.clone()), false))
+                    .collect();
+                // Columns that exist only because some rows have more fields than the rest.
+                for j in known..ncols_total.min(MAX_FACT_ROWS) {
+                    let filled = extra_filled.get(j - known).copied().unwrap_or(0);
+                    facts.push((ragged_row(j, filled, data_shown), true));
+                }
+                if ncols_total > MAX_FACT_ROWS {
+                    doc.losses.push(Loss {
+                        location: sheet_q.clone(),
+                        what: format!(
+                            "columns {} to {ncols_total} not listed in the Columns table",
+                            MAX_FACT_ROWS + 1
+                        ),
+                        why: LossReason::Limit,
+                        severity: Severity::Info,
+                    });
+                }
+                blocks.push(columns_block("Columns".into(), facts));
+                let name = |j: usize| analysis.columns[j].name.clone();
+                for d in &analysis.derived {
+                    doc.facets
+                        .formulas
+                        .push(derived_formula(&sheet_q, d, &name));
+                }
+            }
         }
-        // Columns that exist only because some rows have more fields than the rest.
-        for j in known..ncols_total.min(MAX_FACT_ROWS) {
-            let filled = extra_filled.get(j - known).copied().unwrap_or(0);
-            let values = [
-                format!("Column {}", j + 1),
-                if filled > 0 { "unknown" } else { "empty" }.to_string(),
-                String::new(),
-                (data_shown - filled).to_string(),
-                "not checked".to_string(),
-                "no".to_string(),
-                "only in ragged rows".to_string(),
-            ];
-            col_rows.push(
-                values
-                    .iter()
-                    .map(|v| Cell::new(vec![Inline::plain(v)]))
-                    .collect(),
-            );
-        }
-        if ncols_total > MAX_FACT_ROWS {
-            doc.losses.push(Loss {
-                location: sheet_q.clone(),
-                what: format!(
-                    "columns {} to {ncols_total} not listed in the Columns table",
-                    MAX_FACT_ROWS + 1
-                ),
-                why: LossReason::Limit,
-                severity: Severity::Info,
-            });
-        }
-        blocks.push(Block::Table {
-            caption: Some("Columns".into()),
-            header_rows: 1,
-            role: Some("summary".into()),
-            rows: col_rows,
-            alignments: Vec::new(),
-            anchor: None,
-            layout: None,
-        });
         doc.body.push(sheet_of(&sheet, &sheet_q, blocks));
-
-        // Observed sum relations.
-        let col_anchor = |j: usize| Anchor(format!("{sheet_q}!{0}:{0}", column_letter(j)));
-        let name = |j: usize| analysis.columns[j].name.as_str();
-        for d in &analysis.derived {
-            let parts: Vec<&str> = d.parts.iter().map(|&j| name(j)).collect();
-            doc.facets.formulas.push(Formula {
-                anchor: col_anchor(d.target),
-                expression: format!("{} = {}", name(d.target), parts.join(" + ")),
-                dialect: "derived".into(),
-                references: d.parts.iter().map(|&j| col_anchor(j)).collect(),
-                cached: None,
-                role: Some(Role::Result),
-                pattern: None,
-                latex: None,
-                note: Some(format!("holds {} of {} rows", d.holds, d.checked)),
-                kind: None,
-                range: None,
-                original: None,
-            });
-        }
 
         finish(doc, partial)
     }
@@ -669,49 +601,276 @@ fn blank_line_after(text: &str, end: usize) -> bool {
     rest.starts_with(['\n', '\r'])
 }
 
-/// The column facts again, with the header the layout found. When this second analysis is
-/// cut by `stop`, the first one stays and the loss says that the facts follow csvsniff's
-/// header guess.
-fn facts_with_header(
-    text: &str,
-    dialect: &Dialect,
-    header: bool,
-    stop: &dyn Fn() -> bool,
-    sheet_q: &str,
-) -> Result<csvsniff::Analysis, Loss> {
-    let mut d = dialect.clone();
-    d.has_header = header;
-    let again = csvsniff::analyze_until(text, &d, MAX_TABLE_ROWS, stop);
-    if !again.truncated {
-        return Ok(again);
-    }
-    let guess = if dialect.has_header {
-        "with a header row"
-    } else {
-        "without a header row"
-    };
-    Err(Loss {
-        location: sheet_q.to_string(),
-        what: format!(
-            "time limit reached while the column facts were counted again for the header the layout found; the Columns table follows the first header guess ({guess})"
-        ),
-        why: LossReason::Uncertain,
-        severity: Severity::Info,
-    })
+/// The records a CSV reader read, for the column facts of its table regions.
+struct Records<'a> {
+    text: &'a str,
+    dialect: &'a Dialect,
+    /// The sheet row and the first byte of each record read, in order.
+    starts: &'a [(u32, usize)],
+    /// The positions of the cells with text, in reading order.
+    filled: &'a [(u32, u32)],
+    /// The field count of the widest record read.
+    widest: usize,
 }
 
-/// The header the layout found at the first table: `true` when it is the one row
-/// `guess_row` (the record csvsniff judged), `false` when the table has no header row, `None`
-/// for any other band or when there is no table.
-fn layout_header(layout: &Layout, guess_row: Option<u32>) -> Option<bool> {
-    let table = layout
+/// The Columns tables of a file's table regions, the losses of those that could not be
+/// made and the derived relations found in them.
+struct RegionFacts {
+    tables: Vec<Block>,
+    losses: Vec<Loss>,
+    formulas: Vec<Formula>,
+}
+
+/// One Columns table per table region, in region order, from the region's header and data
+/// rows (C8): a title, caption or note line is never counted as data, and a second table in
+/// the file gets its own facts. The records from the region's last header row to its last
+/// data row are analyzed on their own; the last region of a file whose rows were not all
+/// shown reaches to the end of the file. A region whose analysis the time limit cuts gets an
+/// Uncertain loss instead of a table. `None` when the layout found no table region.
+fn region_facts(
+    part: &Records,
+    layout: &Layout,
+    sheet_q: &str,
+    stop: &dyn Fn() -> bool,
+) -> Option<RegionFacts> {
+    let regions: Vec<&sheetlayout::Region> = layout
         .regions
         .iter()
-        .find(|r| r.kind == Kind::Table && r.data.is_some())?;
-    match table.header_rows.as_slice() {
-        [] => Some(false),
-        [row] if Some(*row) == guess_row => Some(true),
-        _ => None,
+        .filter(|r| r.kind == Kind::Table && r.data.is_some())
+        .collect();
+    if regions.is_empty() {
+        return None;
+    }
+    let mut out = RegionFacts {
+        tables: Vec::new(),
+        losses: Vec::new(),
+        formulas: Vec::new(),
+    };
+    let mut not_counted: Vec<String> = Vec::new();
+    // Tables side by side share their records: the last analysis is kept for the next.
+    let mut last: Option<((usize, usize, bool), csvsniff::Analysis)> = None;
+    for region in regions {
+        let Some(data) = region.data else {
+            continue;
+        };
+        let range = region.rect.a1();
+        if !not_counted.is_empty() || stop() {
+            not_counted.push(range);
+            continue;
+        }
+        let first = region.header_rows.last().copied().unwrap_or(data.top);
+        let at = |row: u32| part.starts.partition_point(|s| s.0 < row);
+        let from = at(first);
+        let to = part.starts.partition_point(|s| s.0 <= data.bottom);
+        let Some(&(_, start)) = part.starts.get(from) else {
+            continue;
+        };
+        // The last region of the file also counts the records that were not shown.
+        let end = part.starts.get(to).map_or(part.text.len(), |s| s.1);
+        let shown = to.saturating_sub(at(data.top));
+        let has_header = !region.header_rows.is_empty();
+        let slice = (start, end, has_header);
+        if last.as_ref().is_none_or(|(at, _)| *at != slice) {
+            let dialect = Dialect {
+                lead_records: 0,
+                has_header,
+                ..part.dialect.clone()
+            };
+            let found =
+                csvsniff::analyze_until(&part.text[start..end], &dialect, MAX_TABLE_ROWS, stop);
+            last = Some((slice, found));
+        }
+        let Some((_, analysis)) = last.as_ref() else {
+            continue;
+        };
+        if analysis.truncated {
+            out.losses.push(Loss {
+                location: format!("{sheet_q}!{range}"),
+                what: format!(
+                    "time limit reached while the column facts of the table {range} were counted; it has no Columns table"
+                ),
+                why: LossReason::Uncertain,
+                severity: Severity::Info,
+            });
+            continue;
+        }
+        let body = region.body.unwrap_or(data);
+        let left = body.left as usize;
+        // A table that reaches the last shown column also has the fields not shown.
+        let mut right = body.right as usize;
+        if right + 1 >= MAX_TABLE_COLUMNS {
+            right = right.max(part.widest.saturating_sub(1));
+        }
+        let known = analysis.columns.len();
+        // A header band of several rows names the columns by their paths.
+        let path = |j: usize| -> Option<String> {
+            if region.header_rows.len() < 2 {
+                return None;
+            }
+            let p = region.header_paths.get(j.checked_sub(left)?)?;
+            let p = p.split(['\n', '\r']).collect::<Vec<_>>().join(" ");
+            let p = p.trim();
+            (!p.is_empty()).then(|| p.to_string())
+        };
+        let name = |j: usize| -> String {
+            path(j).unwrap_or_else(|| match analysis.columns.get(j) {
+                Some(c) => c.name.clone(),
+                None => format!("Column {}", j + 1),
+            })
+        };
+        // Fields of columns that only ragged rows have, counted in the data rows shown.
+        let mut extra = vec![0usize; right.saturating_add(1).saturating_sub(known.max(left))];
+        let lo = part.filled.partition_point(|p| p.0 < data.top);
+        let hi = part.filled.partition_point(|p| p.0 <= data.bottom);
+        for &(_, col) in &part.filled[lo..hi] {
+            let col = col as usize;
+            if col >= known.max(left)
+                && col <= right
+                && let Some(n) = extra.get_mut(col - known.max(left))
+            {
+                *n += 1;
+            }
+        }
+        let listed = right.min(left + MAX_FACT_ROWS - 1);
+        let facts: Vec<(Vec<String>, bool)> = (left..=listed)
+            .map(|j| match analysis.columns.get(j) {
+                Some(c) => (fact_row(c, name(j)), false),
+                None => {
+                    let filled = extra.get(j - known.max(left)).copied().unwrap_or(0);
+                    (ragged_row(j, filled, shown), true)
+                }
+            })
+            .collect();
+        let caption = format!("Columns {range}");
+        if listed < right {
+            out.losses.push(Loss {
+                location: sheet_q.to_string(),
+                what: format!(
+                    "columns {} to {} not listed in {caption}",
+                    listed + 2,
+                    right + 1
+                ),
+                why: LossReason::Limit,
+                severity: Severity::Info,
+            });
+        }
+        out.tables.push(columns_block(caption, facts));
+        let inside = |j: usize| (left..=right).contains(&j);
+        for d in &analysis.derived {
+            if inside(d.target) && d.parts.iter().all(|&j| inside(j)) {
+                out.formulas.push(derived_formula(sheet_q, d, &name));
+            }
+        }
+    }
+    if !not_counted.is_empty() {
+        let n = not_counted.len();
+        let mut named: Vec<String> = not_counted.into_iter().take(10).collect();
+        if n > named.len() {
+            named.push(format!("{} more", n - named.len()));
+        }
+        out.losses.push(Loss {
+            location: sheet_q.to_string(),
+            what: format!(
+                "time limit reached before the column facts were counted; no Columns table for the tables {}",
+                named.join(", ")
+            ),
+            why: LossReason::Uncertain,
+            severity: Severity::Info,
+        });
+    }
+    Some(out)
+}
+
+/// The Columns table row of a column csvsniff analyzed, named `name`.
+fn fact_row(c: &csvsniff::Column, name: String) -> Vec<String> {
+    let unique = if c.unique {
+        "yes"
+    } else if c.unique_exhausted {
+        "not checked"
+    } else {
+        "no"
+    };
+    vec![
+        name,
+        kind_label(&c.kind),
+        c.unit.clone().unwrap_or_default(),
+        c.missing.to_string(),
+        unique.to_string(),
+        if c.key_like { "yes" } else { "no" }.to_string(),
+    ]
+}
+
+/// The Columns table row of column `j` (0-based) that only ragged rows have: `filled` of the
+/// `rows` data rows have a field there.
+fn ragged_row(j: usize, filled: usize, rows: usize) -> Vec<String> {
+    vec![
+        format!("Column {}", j + 1),
+        if filled > 0 { "unknown" } else { "empty" }.to_string(),
+        String::new(),
+        rows.saturating_sub(filled).to_string(),
+        "not checked".to_string(),
+        "no".to_string(),
+    ]
+}
+
+/// A Columns table with `caption`. Each fact says whether its column is only in ragged rows;
+/// when one is, the table has a Note column that says so.
+fn columns_block(caption: String, facts: Vec<(Vec<String>, bool)>) -> Block {
+    let note = facts.iter().any(|(_, ragged)| *ragged);
+    let mut head = vec!["Column", "Type", "Unit", "Missing", "Unique", "Key"];
+    if note {
+        head.push("Note");
+    }
+    let cells = |values: &[String]| -> Vec<Cell> {
+        values
+            .iter()
+            .map(|v| Cell::new(vec![Inline::plain(v)]))
+            .collect()
+    };
+    let mut rows = vec![
+        head.iter()
+            .map(|h| Cell::new(vec![Inline::plain(*h)]))
+            .collect::<Vec<_>>(),
+    ];
+    for (mut values, ragged) in facts {
+        if note {
+            values.push(if ragged { "only in ragged rows" } else { "" }.to_string());
+        }
+        rows.push(cells(&values));
+    }
+    Block::Table {
+        caption: Some(caption),
+        header_rows: 1,
+        role: Some("summary".into()),
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }
+}
+
+/// An observed sum relation as a formula on whole columns; `name` names a column by its
+/// 0-based index.
+fn derived_formula(
+    sheet_q: &str,
+    d: &csvsniff::Derived,
+    name: &dyn Fn(usize) -> String,
+) -> Formula {
+    let col_anchor = |j: usize| Anchor(format!("{sheet_q}!{0}:{0}", column_letter(j)));
+    let parts: Vec<String> = d.parts.iter().map(|&j| name(j)).collect();
+    Formula {
+        anchor: col_anchor(d.target),
+        expression: format!("{} = {}", name(d.target), parts.join(" + ")),
+        dialect: "derived".into(),
+        references: d.parts.iter().map(|&j| col_anchor(j)).collect(),
+        cached: None,
+        role: Some(Role::Result),
+        pattern: None,
+        latex: None,
+        note: Some(format!("holds {} of {} rows", d.holds, d.checked)),
+        kind: None,
+        range: None,
+        original: None,
     }
 }
 
@@ -851,28 +1010,122 @@ fn kind_label(kind: &ColumnKind) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell as Count;
+
+    use sheetlayout::{Certainty, Rect, Region};
+
     use super::*;
 
+    /// A table region with header row `header` (0-based) over the rows to `bottom`.
+    fn table(header: u32, bottom: u32) -> Region {
+        let rect = Rect {
+            top: header,
+            left: 0,
+            bottom,
+            right: 1,
+        };
+        Region {
+            kind: Kind::Table,
+            rect,
+            data: Some(Rect {
+                top: header + 1,
+                ..rect
+            }),
+            captions: Vec::new(),
+            caption_heading: None,
+            notes: Vec::new(),
+            heading: None,
+            above_header: Vec::new(),
+            header_rows: vec![header],
+            body: Some(rect),
+            header_paths: vec!["a".into(), "b".into()],
+            label_cols: 0,
+            total_cols: Vec::new(),
+            certainty: Certainty::Rule,
+            evidence: Vec::new(),
+            unsure: Vec::new(),
+            rows: Vec::new(),
+            hidden_header: false,
+            rest: false,
+        }
+    }
+
     #[test]
-    fn a_cut_second_analysis_keeps_the_first_with_a_loss() {
+    fn a_cut_region_analysis_gives_a_loss_per_region() {
+        // Two tables: rows 0 to 5000, a blank line, then rows 5002 to 5004.
         let mut text = String::from("a,b\n");
-        for i in 0..5_000 {
+        let mut starts = vec![(0u32, 0usize)];
+        for i in 1..=5_000u32 {
+            starts.push((i, text.len()));
             text.push_str(&format!("{i},{i}\n"));
         }
+        text.push('\n');
+        for (k, line) in ["c,d\n", "1,2\n", "3,4\n"].iter().enumerate() {
+            starts.push((5_002 + k as u32, text.len()));
+            text.push_str(line);
+        }
         let dialect = csvsniff::sniff(&text).unwrap();
-        assert!(dialect.has_header);
-        let loss = facts_with_header(&text, &dialect, false, &|| true, "data").unwrap_err();
-        assert_eq!(loss.location, "data");
-        assert_eq!(loss.why, LossReason::Uncertain);
-        assert_eq!(loss.severity, Severity::Info);
-        assert!(
-            loss.what
-                .ends_with("the Columns table follows the first header guess (with a header row)"),
-            "{}",
-            loss.what
+        let layout = Layout {
+            regions: vec![table(0, 5_000), table(5_002, 5_004)],
+            issues: Vec::new(),
+        };
+        let part = Records {
+            text: &text,
+            dialect: &dialect,
+            starts: &starts,
+            filled: &[],
+            widest: 2,
+        };
+        // The first analysis is cut inside, the second region is not started.
+        let calls = Count::new(0);
+        let stop = || {
+            calls.set(calls.get() + 1);
+            calls.get() > 1
+        };
+        let found = region_facts(&part, &layout, "data", &stop).unwrap();
+        assert!(found.tables.is_empty());
+        let losses: Vec<(&str, &str)> = found
+            .losses
+            .iter()
+            .map(|l| (l.location.as_str(), l.what.as_str()))
+            .collect();
+        assert_eq!(
+            losses,
+            [
+                (
+                    "data!A1:B5001",
+                    "time limit reached while the column facts of the table A1:B5001 were counted; it has no Columns table"
+                ),
+                (
+                    "data",
+                    "time limit reached before the column facts were counted; no Columns table for the tables A5003:B5005"
+                ),
+            ]
         );
-        let again = facts_with_header(&text, &dialect, false, &|| false, "data").unwrap();
-        assert_eq!(again.rows, 5_001);
-        assert_eq!(again.columns[0].name, "Column 1");
+        assert!(
+            found
+                .losses
+                .iter()
+                .all(|l| l.why == LossReason::Uncertain && l.severity == Severity::Info)
+        );
+        // Without a stop each region has its table, the second one from its own rows.
+        let found = region_facts(&part, &layout, "data", &|| false).unwrap();
+        assert!(found.losses.is_empty());
+        let captions: Vec<Option<&str>> = found
+            .tables
+            .iter()
+            .map(|t| match t {
+                Block::Table { caption, .. } => caption.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            captions,
+            [Some("Columns A1:B5001"), Some("Columns A5003:B5005")]
+        );
+        let Block::Table { rows, .. } = &found.tables[1] else {
+            panic!()
+        };
+        assert_eq!(rows.len(), 3);
     }
 }

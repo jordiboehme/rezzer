@@ -294,7 +294,7 @@ fn wide_file_is_capped_by_cells() {
             ("row 200 not shown", Severity::Info),
             ("2000 columns after column 1000 not shown", Severity::Info),
             (
-                "columns 501 to 3000 not listed in the Columns table",
+                "columns 501 to 3000 not listed in Columns A1:ALL200",
                 Severity::Info
             ),
         ]
@@ -417,7 +417,7 @@ fn columns_table_is_marked_as_summary() {
         .collect();
     assert_eq!(
         roles,
-        vec![(None, None), (Some("Columns"), Some("summary"))]
+        vec![(None, None), (Some("Columns A1:B3"), Some("summary"))]
     );
 }
 
@@ -1147,4 +1147,120 @@ fn quoted_key_and_records_anchor_parse_back() {
         }
         other => panic!("{anchor}: {other:?}"),
     }
+}
+
+/// The Columns facts tables of the sheet section: caption and rows.
+fn columns_tables(out: &ReadOutcome) -> Vec<(String, Vec<Vec<String>>)> {
+    let (_, blocks) = tables(out);
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                caption,
+                role: Some(role),
+                ..
+            } if role == "summary" => Some((caption.clone().unwrap_or_default(), rows_of(b))),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn csv_one_title_line_over_the_header() {
+    for csv in [
+        &b"Sales report 2024\nName,Qty,Price\nApple,1,2.5\nPear,3,1.5\nPlum,2,0.5\n"[..],
+        &b"Sales report 2024\n\nName,Qty,Price\nApple,1,2.5\nPear,3,1.5\nPlum,2,0.5\n"[..],
+    ] {
+        let out = read(csv);
+        let (_, blocks) = tables(&out);
+        let l = layout_of(data_tables(&blocks)[0]);
+        let header = *l.header_rows.last().unwrap();
+        let facts = columns_tables(&out);
+        assert_eq!(facts.len(), 1, "{facts:?}");
+        let (caption, rows) = &facts[0];
+        assert_eq!(*caption, format!("Columns {}", l.range));
+        assert_eq!(
+            rows[1..]
+                .iter()
+                .map(|r| r[..4].to_vec())
+                .collect::<Vec<_>>(),
+            [
+                ["Name", "text", "", "0"],
+                ["Qty", "integer", "", "0"],
+                ["Price", "decimal (1 place)", "", "0"],
+            ],
+            "header row {header}"
+        );
+        // The title is no data: the name column holds three unique keys.
+        assert_eq!(rows[1][4..], ["yes", "yes"]);
+    }
+}
+
+#[test]
+fn csv_two_blocks_get_a_columns_table_each() {
+    let out = read(
+        b"Name,Qty\nApple,1\nPear,2\nPlum,3\n\nCity,Pop,Area\nBonn,3,1.5\nKoeln,4,2.5\nEssen,5,3.5\n",
+    );
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<String> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.clone())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "A6:C9"]);
+    let facts = columns_tables(&out);
+    let summary: Vec<(String, Vec<Vec<String>>)> = facts
+        .into_iter()
+        .map(|(caption, rows)| (caption, rows[1..].iter().map(|r| r[..4].to_vec()).collect()))
+        .collect();
+    let row = |v: [&str; 4]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        [
+            (
+                "Columns A1:B4".to_string(),
+                vec![
+                    row(["Name", "text", "", "0"]),
+                    row(["Qty", "integer", "", "0"]),
+                ]
+            ),
+            (
+                "Columns A6:C9".to_string(),
+                vec![
+                    row(["City", "text", "", "0"]),
+                    row(["Pop", "integer", "", "0"]),
+                    row(["Area", "decimal (1 place)", "", "0"]),
+                ]
+            ),
+        ]
+    );
+    // The Columns tables follow the data tables, in region order.
+    let Block::Table { caption, .. } = blocks.last().unwrap() else {
+        panic!()
+    };
+    assert_eq!(caption.as_deref(), Some("Columns A6:C9"));
+}
+
+#[test]
+fn csv_tables_side_by_side_get_their_own_columns() {
+    let out = read(b"id,qty,,city,area\n1,5,,Bonn,1.5\n2,6,,Koeln,2.5\n3,7,,Essen,3.5\n");
+    let facts = columns_tables(&out);
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<String> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.clone())
+        .collect();
+    let captions: Vec<String> = facts.iter().map(|(c, _)| c.clone()).collect();
+    assert_eq!(
+        captions,
+        ranges
+            .iter()
+            .map(|r| format!("Columns {r}"))
+            .collect::<Vec<_>>()
+    );
+    let names: Vec<Vec<String>> = facts
+        .iter()
+        .map(|(_, rows)| rows[1..].iter().map(|r| r[0].clone()).collect())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "D1:E4"]);
+    assert_eq!(names, [vec!["id", "qty"], vec!["city", "area"]]);
 }

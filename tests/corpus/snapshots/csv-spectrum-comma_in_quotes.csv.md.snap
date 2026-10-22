@@ -43,7 +43,7 @@ Table A1:E2 (data A2:E2), header row 1, row labels in A to C, found by rules: no
 | --- | --- | --- | --- | --- |
 | John | Doe | 120 any st. | Anytown, WW | 08123 |
 
-**Columns**
+**Columns A1:E2**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |

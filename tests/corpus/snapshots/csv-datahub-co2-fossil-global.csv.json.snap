@@ -864,7 +864,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:H276",
           "header_rows": 1,
           "role": "summary",
           "rows": [

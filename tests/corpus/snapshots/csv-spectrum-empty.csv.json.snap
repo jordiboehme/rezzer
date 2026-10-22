@@ -135,7 +135,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:C3",
           "header_rows": 1,
           "role": "summary",
           "rows": [

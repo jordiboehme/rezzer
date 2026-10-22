@@ -44,7 +44,7 @@ Table A1:C3 (data A2:C3), header row 1, found by rules: no gaps, header by type 
 | 1 |  |  |
 | 2 | 3 | 4 |
 
-**Columns**
+**Columns A1:C3**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |

@@ -1134,7 +1134,7 @@ Table A1:F1092 (data A2:F1092), header row 1, found by rules: no gaps, header by
 | 19647 | Eberbach/Neckar | 49.454703 | 8.979441 | 178 | Baden-Württemberg |
 | 19781 | Ingolstadt | 48.742909 | 11.423324 | 367 | Bayern |
 
-**Columns**
+**Columns A1:F1092**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |
@@ -1144,4 +1144,3 @@ Table A1:F1092 (data A2:F1092), header row 1, found by rules: no gaps, header by
 | geogr. Laenge | decimal (6 places) |  | 0 | no | no |
 | Stationshoehe | decimal (1 place) |  | 0 | no | no |
 | Bundesland | text |  | 0 | no | no |
-| Column 7 | empty |  | 1091 | yes | no |
