@@ -16,4 +16,5 @@ zipguard = { path = "../zipguard" }
 quick-xml.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

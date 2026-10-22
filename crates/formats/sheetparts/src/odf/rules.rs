@@ -148,7 +148,7 @@ pub(super) fn parse_condition(condition: &str) -> Option<Rule> {
 }
 
 /// Quote-aware split at a character.
-fn split_char(text: &str, sep: char) -> Vec<&str> {
+pub(super) fn split_char(text: &str, sep: char) -> Vec<&str> {
     let mut out = Vec::new();
     let mut quote = false;
     let mut start = 0;
@@ -165,7 +165,7 @@ fn split_char(text: &str, sep: char) -> Vec<&str> {
 }
 
 /// `$'My Sheet'.$A$1` as (`My Sheet`, `$A$1`). A part without a sheet gives an empty name.
-fn sheet_and_cell(part: &str) -> Option<(String, &str)> {
+pub(super) fn sheet_and_cell(part: &str) -> Option<(String, &str)> {
     let dot = {
         let mut quote = false;
         let mut found = None;
