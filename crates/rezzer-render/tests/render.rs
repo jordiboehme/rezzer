@@ -6163,3 +6163,13 @@ fn csv_layout_line_names_label_columns_by_number() {
     let md = sheet_md(vec![ltable(rows, 0, l)]);
     assert!(md.contains(", row labels in A.\n"), "{md}");
 }
+
+#[test]
+fn trailing_spaces_stay_out_of_the_address() {
+    let md = sheet_md(vec![role_para(
+        "note",
+        "Source: survey (CBDRB-FY24-0085).   ",
+        "S!A63",
+    )]);
+    assert_eq!(md, "Source: survey (CBDRB-FY24-0085). (A63)");
+}

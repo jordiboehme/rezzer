@@ -50,11 +50,14 @@ fn column_of(cell: &Cell) -> Option<u32> {
     a1_position(address(cell.anchor.as_ref())?).map(|(_, col)| col)
 }
 
-/// `text` with ` (<address>)` after it; empty text stays empty.
+/// `text` with ` (<address>)` after it, without the spaces the text ends with; empty text
+/// stays empty.
 fn with_address(text: String, at: Option<&str>) -> String {
+    let shown = text.trim_end_matches([' ', '\t']);
     match at {
-        Some(at) if !text.is_empty() => format!("{text} ({})", line_text(at)),
-        _ => text,
+        Some(at) if !shown.is_empty() => format!("{shown} ({})", line_text(at)),
+        Some(_) => String::new(),
+        None => text,
     }
 }
 
