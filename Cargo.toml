@@ -16,6 +16,7 @@ members = [
     "crates/formats/sheetparts",
     "crates/formats/pdfparts",
     "crates/formats/barcodes",
+    "crates/formats/fileattrs",
     "crates/readers/rezzer-read-text",
     "crates/readers/rezzer-read-markdown",
     "crates/readers/rezzer-read-csv",
