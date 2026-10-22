@@ -1422,8 +1422,8 @@ const UNIT_SYMBOLS: &[&str] = &[
 ];
 
 /// Words that count things (`nos` for numbers, `pcs` for pieces). They read as a unit only
-/// in a column that also holds a real unit symbol: a column of `no` alone is a yes/no
-/// column.
+/// in a column that also holds a unit symbol of two or more characters: a column of `no`
+/// alone is a yes/no column, and `N`, `no` a flag column.
 const COUNT_WORDS: &[&str] = &["nos", "no", "pcs", "ea"];
 
 /// Whether `t` is one of [`UNIT_SYMBOLS`] or a quotient of two of them, like `m/s` or
@@ -1449,17 +1449,15 @@ fn unit_column_of(texts: Vec<&str>) -> UnitColumn {
     }
     let counted: Vec<&str> = texts.into_iter().filter(|t| *t != "-").collect();
     // Every text is a unit symbol or a count word: units, also when none is marked by a
-    // digit or a sign. One-letter symbols alone (`A`, `N`, `m` and `d`) are as often classes,
-    // flags or codes, so the column needs a symbol of two or more characters, or a count
-    // word beside a real symbol.
+    // digit or a sign. One-letter symbols (`A`, `N`, `m` and `d`) are as often classes, flags
+    // or codes, also beside a count word (`N`, `no`), so the column needs a symbol of two or
+    // more characters (`kPa`, or a quotient like `m/s`).
     let count = |t: &str| COUNT_WORDS.contains(&t);
-    if counted.len() >= 2 && counted.iter().all(|t| is_unit_symbol(t) || count(t)) {
-        let real = || counted.iter().filter(|t| !count(t));
-        let long = real().any(|t| t.chars().count() >= 2);
-        let counts = counted.iter().any(|t| count(t)) && real().next().is_some();
-        if long || counts {
-            return UnitColumn::Likely;
-        }
+    if counted.len() >= 2
+        && counted.iter().all(|t| is_unit_symbol(t) || count(t))
+        && counted.iter().any(|t| !count(t) && t.chars().count() >= 2)
+    {
+        return UnitColumn::Likely;
     }
     let known: Vec<&str> = counted
         .iter()
@@ -1813,7 +1811,9 @@ mod tests {
         // Count words beside a real symbol (the tunnel jet fan block).
         assert!(is_unit_column_texts(&["Pa", "N", "nos"]));
         assert!(is_unit_column_texts(&["kg", "pcs"]));
-        assert!(is_unit_column_texts(&["m", "ea"]));
+        assert!(is_unit_column_texts(&["m/s", "ea"]));
+        // A quotient of two lower case symbols is a unit: metres per day.
+        assert!(is_unit_column_texts(&["m/d", "m/d"]));
         // Words, codes and a single symbol are not a unit column.
         assert!(!is_unit_column_texts(&["m"]));
         assert!(!is_unit_column_texts(&["OK", "N/A", "yes"]));
@@ -1828,6 +1828,9 @@ mod tests {
         assert!(!is_unit_column_texts(&["m", "d", "m", "d"]));
         assert!(!is_unit_column_texts(&["no", "no"]));
         assert!(!is_unit_column_texts(&["yes", "no", "no"]));
+        // A one-letter symbol beside count words is a flag column.
+        assert!(!is_unit_column_texts(&["N", "no", "no"]));
+        assert!(!is_unit_column_texts(&["m", "ea"]));
     }
 
     use rezzer_limits::Limits;
