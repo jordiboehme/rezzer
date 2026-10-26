@@ -195,6 +195,12 @@ impl Geo {
     }
 }
 
+/// About the width of a template label (see [`label`]): Helvetica at 90 %, half a size a
+/// character on the average.
+fn label_width(text: &str, size: f32) -> f32 {
+    0.9 * 0.55 * size * text.chars().count() as f32
+}
+
 /// F1: a strip of seven fields (`left` to `right` in data columns) between two rules, all
 /// labels on one baseline, all values on one data line, dividers over half of the row. The
 /// rate field holds `rate` (its first two digits and the next ones parted by a drawn decimal
@@ -225,9 +231,11 @@ pub(crate) fn strip_f1(g: &Geo, b: &mut Built, top: f32, overflow: bool, one_run
     ] {
         b.page.template += &label(lab(k), base, g.label, l);
     }
-    // The raised footnote marker of the rate's label.
+    // The raised footnote marker of the rate's label, right after it and inside its field, as
+    // a template sets it.
+    let marker_w = 0.556 * 0.71 * g.label;
     b.page.template += &plain(
-        lab(g.k(43)) + 0.6 * g.label * 3.0,
+        (lab(g.k(43)) + label_width("Satz %", g.label)).min(g.col(g.k(47)) - 0.3 - marker_w),
         base + 0.29 * g.label,
         0.71 * g.label,
         "8",
@@ -586,7 +594,7 @@ pub(crate) fn header_grid(g: &Geo, b: &mut Built, top: f32) -> f32 {
             b.page.template += &label(lab(k), base, g.label, l);
             if l == "Stkl" {
                 b.page.template += &plain(
-                    lab(k) + 0.6 * g.label * 4.0,
+                    lab(k) + label_width(l, g.label),
                     base + 0.29 * g.label,
                     0.71 * g.label,
                     "1",
@@ -735,6 +743,38 @@ pub(crate) fn label_block(g: &Geo, b: &mut Built, top: f32) -> f32 {
         b.expect(l, v);
     }
     bank
+}
+
+/// Rows of a narrow name field (six data columns) and a number field, a divider between them:
+/// in the first row a name of two words runs on into the empty number field, its word gap at
+/// the divider; in the other rows the number field holds numbers. The name is one value, and
+/// the number field of the first row is empty.
+pub(crate) fn overflow_rows(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    let rows = [
+        ("Name", "Erika Mustermann", "Nr", ""),
+        ("Ruf", "Max", "Haus", "12"),
+        ("Kurz", "Udo", "Zi", "34"),
+    ];
+    for k in 0..=rows.len() {
+        b.page.template += &g.hrule(g.col(0) - 0.12, g.col(30), top - h * k as f32);
+    }
+    let lab = |k: usize| g.col(k) + 0.18 * g.label;
+    for (n, (l1, v1, l2, v2)) in rows.iter().enumerate() {
+        let rule = top - h * n as f32;
+        b.page.template += &g.divider(g.col(6) - 0.06, rule, rule - h);
+        let base = rule - 0.86 * g.data;
+        b.page.template += &label(lab(0), base, g.label, l1);
+        b.page.template += &label(lab(6), base, g.label, l2);
+        let mut parts = vec![(0, *v1)];
+        if !v2.is_empty() {
+            parts.push((6, *v2));
+        }
+        g.values(b, rule - 2.23 * g.data, &parts);
+        b.expect(l1, v1);
+        b.expect(l2, v2);
+    }
+    top - h * rows.len() as f32
 }
 
 /// A page of one shape drawn by `draw` from the top, with the address under it.

@@ -1197,6 +1197,9 @@ pub(super) fn field_cuts(flow: &Flow, frames: &[Frame]) -> Vec<(usize, Vec<usize
         }
         let edges = field_edges(flow, fr, &ids);
         let inner = &edges[1..edges.len() - 1];
+        if !holds_fields(flow, fr, &ids, inner) {
+            continue;
+        }
         for &i in &ids {
             let r = &flow.runs[i];
             for &e in inner.iter().filter(|&&e| across(r, e)) {
@@ -1232,6 +1235,49 @@ pub(super) fn field_cuts(flow: &Flow, frames: &[Frame]) -> Vec<(usize, Vec<usize
         .collect();
     out.sort_by_key(|c| c.0);
     out
+}
+
+/// Whether the frame `fr` with the runs `ids` holds fields, judged before its runs are cut at
+/// its field edges `inner`: its cells between dividers, without the runs that stand across an
+/// edge, read as fields (see [`parse`]; labels alone are fields here) that are short, and each
+/// run that stands across an edge is in pieces between the edges no longer than a value may
+/// be. A line of prose under a smaller caption is too long for values, so it is not cut.
+fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
+    let how = Reading {
+        one_field: false,
+        smaller: true,
+        small: i32::MAX,
+        labels: &[],
+    };
+    let crossed =
+        |r: &Run| -> Vec<f32> { inner.iter().copied().filter(|&e| across(r, e)).collect() };
+    let mut rest = Vec::new();
+    for &i in ids {
+        let r = &flow.runs[i];
+        let edges = crossed(r);
+        if edges.is_empty() {
+            rest.push(i);
+            continue;
+        }
+        let chars = r.text.chars().count().max(1);
+        let per = r.w.max(0.0) / chars as f32;
+        let mut cuts = vec![r.x];
+        cuts.extend(edges);
+        cuts.push(r.x + r.w);
+        if cuts
+            .windows(2)
+            .any(|w| per > 0.0 && (w[1] - w[0]) / per > VALUE_CHARS as f32)
+        {
+            return false;
+        }
+    }
+    let mut xs = vec![fr.x0];
+    xs.extend(&fr.dividers);
+    xs.push(fr.x1);
+    cells_of(flow, &xs, &rest)
+        .iter()
+        .filter(|c| !c.is_empty())
+        .all(|c| matches!(parse(flow, c, how), Parsed::Fields(f) if f.iter().all(|f| short(flow, f))))
 }
 
 /// Fields between drawn rules, in the `frames` of the page. A frame's dividers part it into
@@ -1389,6 +1435,9 @@ pub(super) fn field_strips(
         }
         last = Some((s.top, s.bottom));
     }
+    for g in &groups {
+        overflow_back(flow, &mut strips, g);
+    }
     // Runs beyond a group that a group took.
     let mut outside: HashSet<usize> = HashSet::new();
     for g in groups {
@@ -1429,6 +1478,83 @@ pub(super) fn field_strips(
             }
         }
         tables.push(p);
+    }
+}
+
+/// What a value is, to tell the values of a column of fields apart: a number (digits with
+/// separators), words (no digit), or a code of both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Number,
+    Words,
+    Code,
+}
+
+fn kind_of(text: &str) -> Kind {
+    let t = text.trim();
+    if !t.chars().any(|c| c.is_ascii_digit()) {
+        Kind::Words
+    } else if t
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '/' | ' ' | '%'))
+    {
+        Kind::Number
+    } else {
+        Kind::Code
+    }
+}
+
+/// Puts back whole a value that runs on into the empty next field of its row of the group `g`
+/// of `strips`: a value cut at its word gap at a divider pairs its last piece with the next
+/// field when the dividers part it there. When the other rows of the group hold values in that
+/// field's column (its label within a character of the same place) and none of them is of the
+/// piece's kind, while the piece is of the kind of the value before it, the piece is that
+/// value's overflow: it goes back to its field, and the next field is empty.
+fn overflow_back(flow: &Flow, strips: &mut [Strip], g: &[usize]) {
+    let column = |f: &Field| f.label.first().map(|&i| &flow.runs[i]);
+    // The kinds of the values of the group by the place and size of their labels.
+    let mut seen: Vec<(f32, f32, usize, Kind)> = Vec::new();
+    for &k in g {
+        for f in &strips[k].fields {
+            if let (Some(l), false) = (column(f), f.value.is_empty()) {
+                seen.push((l.x, l.size, k, kind_of(&words(flow, &f.value))));
+            }
+        }
+    }
+    for &k in g {
+        let dividers = strips[k].dividers.clone();
+        let fields = &mut strips[k].fields;
+        for i in 1..fields.len() {
+            let (before, after) = fields.split_at_mut(i);
+            let (a, b) = (&mut before[i - 1], &mut after[0]);
+            let (Some(&va), [vb]) = (a.value.last(), b.value.as_slice()) else {
+                continue;
+            };
+            let (ra, rb) = (&flow.runs[va], &flow.runs[*vb]);
+            let ch = CHAR * ra.size.max(1.0);
+            let end = ra.x + ra.w;
+            let touching = (ra.y - rb.y).abs() <= 0.3 * ra.size
+                && rb.x - end <= 1.5 * ch
+                && rb.x - end >= -ch
+                && dividers.iter().any(|&d| d > end - ch && d < rb.x + ch);
+            let Some(l) = column(b) else {
+                continue;
+            };
+            let piece = kind_of(&rb.text);
+            let others: Vec<Kind> = seen
+                .iter()
+                .filter(|s| s.2 != k && (s.0 - l.x).abs() <= CHAR * l.size.max(1.0))
+                .map(|s| s.3)
+                .collect();
+            if touching
+                && !others.is_empty()
+                && !others.contains(&piece)
+                && kind_of(&ra.text) == piece
+            {
+                a.value.push(*vb);
+                b.value.clear();
+            }
+        }
     }
 }
 
@@ -1834,4 +1960,101 @@ fn label_starts(flow: &Flow, cell: &[usize]) -> Vec<f32> {
             r.x - (CHAR * r.size).min(0.5 * (r.x - end))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A run of `text` at `x` on the baseline `y` in `size`, 0.6 of the size a character,
+    /// with a gap at each space.
+    fn run(text: &str, x: f32, y: f32, size: f32) -> Run {
+        let ch = 0.6 * size;
+        let mut gaps = Vec::new();
+        let mut words = 0u32;
+        for (k, c) in text.char_indices() {
+            if c == ' ' {
+                words += 1;
+                gaps.push(crate::layout::Gap {
+                    words,
+                    from: x + ch * k as f32,
+                    to: x + ch * (k + 1) as f32,
+                });
+            }
+        }
+        Run {
+            page: 1,
+            text: text.into(),
+            x,
+            y,
+            w: ch * text.chars().count() as f32,
+            h: size,
+            size,
+            bold: false,
+            italic: false,
+            mcid: None,
+            uri: None,
+            line: 0,
+            off_axis: false,
+            note: false,
+            gaps: crate::layout::Gaps::new(gaps),
+        }
+    }
+
+    fn flow_of(runs: Vec<Run>) -> Flow {
+        let n = runs.len();
+        Flow {
+            runs,
+            slots: vec![crate::layout::Slot::Free; n],
+            at: (0..n).collect(),
+        }
+    }
+
+    fn frame() -> Frame {
+        Frame {
+            x0: 0.0,
+            x1: 700.0,
+            bottom: 80.0,
+            top: 130.0,
+            dividers: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+
+    /// A prose line between two rules under a smaller caption line of two parts is no row of
+    /// fields: it is too long for values, so it is not cut where the caption's second part
+    /// starts.
+    #[test]
+    fn a_prose_line_under_a_caption_is_not_cut() {
+        let mut caption = run("Abb. 1", 10.0, 120.0, 6.0);
+        caption.line = 0;
+        let mut source = run("Quelle: Muster", 200.0, 120.0, 6.0);
+        source.line = 0;
+        let mut prose = run(
+            "Die Werte steigen im Lauf des Jahres stark an und fallen erst im Herbst wieder auf \
+             den Stand des Vorjahres zurueck",
+            10.0,
+            100.0,
+            10.0,
+        );
+        prose.line = 1;
+        let flow = flow_of(vec![caption, source, prose]);
+        assert!(field_cuts(&flow, &[frame()]).is_empty());
+    }
+
+    /// Guard: a value line of two fields under their labels is cut where the second label
+    /// starts.
+    #[test]
+    fn a_value_line_under_two_labels_is_cut() {
+        let flow = flow_of(vec![
+            run("Name", 10.0, 120.0, 6.0),
+            run("Ort", 100.0, 120.0, 6.0),
+            {
+                let mut r = run("Erika Mustermann Musterstadt", 10.0, 100.0, 10.0);
+                r.line = 1;
+                r
+            },
+        ]);
+        assert_eq!(field_cuts(&flow, &[frame()]), [(2, vec![1])]);
+    }
 }

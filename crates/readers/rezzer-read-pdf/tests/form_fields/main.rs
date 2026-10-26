@@ -27,7 +27,7 @@ use draw::{Stroke, bar_h, bar_v, mark_b};
 use rezzer_model::{Block, plain_text};
 use shapes::{
     Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row, header_grid,
-    label_block, page, rows_page, shape_page, total_column,
+    label_block, overflow_rows, page, rows_page, shape_page, total_column,
 };
 
 #[global_allocator]
@@ -229,6 +229,26 @@ fn a_number_in_boxes_of_its_digits_stays_whole() {
     let (text, kept) = kept_whole(&b);
     assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
     assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
+/// A label with a raised footnote marker after it, on a page with the legend of that marker:
+/// the label pairs as its own text, and the marker is a reference to its footnote after it.
+#[test]
+fn a_marked_label_pairs_as_its_text_with_its_reference() {
+    let mut b = page(&REAL, true, true);
+    b.page.template += &draw::plain(42.52, 60.0, 6.0, "8 Satz in Prozent des Bruttos");
+    let out = read_pages(&[&b]);
+    let label = blocks(&out).iter().find_map(|bl| match bl {
+        Block::Table { rows, .. } => rows
+            .iter()
+            .find(|r| plain_text(&r[0].inlines).starts_with("Satz"))
+            .map(|r| r[0].inlines.clone()),
+        _ => None,
+    });
+    assert!(
+        matches!(label.as_deref(), Some([rezzer_model::Inline::Text { text, .. }, rezzer_model::Inline::FootnoteRef { .. }]) if text == "Satz %"),
+        "{label:?}"
+    );
 }
 
 /// Labels printed under the rule their value stands on (a signature line) pair with the
@@ -522,6 +542,9 @@ fn shapes() -> Vec<(&'static str, Shape)> {
         ("column of totals", |g| shape_page(g, total_column)),
         ("boxed fields", |g| shape_page(g, boxed_row)),
         ("label block and bank row", |g| shape_page(g, label_block)),
+        ("overflow into an empty field", |g| {
+            shape_page(g, overflow_rows)
+        }),
         ("rows", |g| rows_page(g, &ROWS, &THREE_ROWS, &[])),
         ("labels under values", |g| {
             let s = Rows {
