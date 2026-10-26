@@ -33,6 +33,9 @@ mod text;
 #[cfg(test)]
 #[path = "../tests/common/mod.rs"]
 mod fixtures;
+/// The test fixtures name this crate as the integration tests do.
+#[cfg(test)]
+extern crate self as rezzer_read_pdf;
 
 use std::collections::{HashMap, HashSet};
 

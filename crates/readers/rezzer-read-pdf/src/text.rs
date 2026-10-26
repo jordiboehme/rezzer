@@ -2554,7 +2554,8 @@ struct TextDevice<'d> {
     stop: &'d dyn Fn() -> bool,
     calls: u64,
     cap: usize,
-    /// The glyph run drawn last, to read a run that is filled and then stroked once.
+    /// The key (glyphs and place on the page) of the glyph run drawn last, to read a run that
+    /// is filled and then stroked once.
     last: Option<u64>,
     unmapped: u64,
     unmapped_visible: u64,
@@ -3069,6 +3070,9 @@ impl<'a> Device<'a> for TextDevice<'_> {
         };
         let mut h = DefaultHasher::new();
         glyphs.len().hash(&mut h);
+        // The place is the text matrix and the CTM: a print run moves each line with its own
+        // `cm` and shows it at the text origin, so two equal lines differ only in the CTM.
+        props.transform.as_coeffs().map(f64::to_bits).hash(&mut h);
         first.transform().as_coeffs().map(f64::to_bits).hash(&mut h);
         for g in glyphs {
             match &**g {
@@ -3079,6 +3083,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let key = h.finish();
         if self.last == Some(key) {
             // Fill and stroke of one text show, or the same glyphs drawn twice in one place.
+            // A copy drawn a little apart (a fake bold) is kept here and dropped in order.rs.
             return;
         }
         self.last = Some(key);

@@ -8,7 +8,14 @@
 
 use std::alloc::{GlobalAlloc, Layout};
 use std::io::Write;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use rezzer_limits::{Budget, Limits};
+use rezzer_model::{
+    Bytes, Confidence, Detection, FormatId, ReadOptions, ReadOutcome, Reader, Source,
+};
+use rezzer_read_pdf::PdfReader;
 
 /// One page of a generated file.
 #[derive(Default, Clone)]
@@ -169,6 +176,174 @@ pub fn pdf(pages: &[Page], catalog_extra: &str) -> Vec<u8> {
         format!("<< /Type /Catalog /Pages {tree} 0 R {catalog_extra} >>"),
     );
     b.finish(catalog)
+}
+
+/// `bytes` read as `file.pdf` with the default options and limits. Tests read through this
+/// one helper, so a new field of `Source` is set in one place.
+pub fn read(bytes: &[u8]) -> ReadOutcome {
+    let src = Source {
+        path: None,
+        name: "file.pdf".into(),
+        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
+        sha256: "00".repeat(32),
+        size: bytes.len() as u64,
+        format: FormatId::Pdf,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "%PDF-".into(),
+        },
+        modified: None,
+    };
+    PdfReader.read(
+        &src,
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+/// One line of the data layer of a print-run form.
+#[derive(Clone)]
+pub struct DataLine {
+    pub y: f32,
+    /// The line as the business system prints it, padding included.
+    pub text: String,
+}
+
+/// One page of a print-run form: a template drawn as a Form XObject, then the data lines,
+/// each moved into place by its own `cm`.
+#[derive(Clone)]
+pub struct FormPage {
+    /// The content of the Form XObject drawn with `/Tpl Do` (labels, rules, boxes, marks).
+    pub template: String,
+    /// The x where every data line starts (40.0 on the forms this models).
+    pub left: f32,
+    /// The size of the data font (9.5 on the forms this models).
+    pub size: f32,
+    pub lines: Vec<DataLine>,
+    /// Annotation dictionaries, each written as its own object.
+    pub annots: Vec<String>,
+}
+
+impl Default for FormPage {
+    fn default() -> FormPage {
+        FormPage {
+            template: String::new(),
+            left: 40.0,
+            size: 9.5,
+            lines: Vec::new(),
+            annots: Vec::new(),
+        }
+    }
+}
+
+/// A file of A4 print-run form pages. The page and the template have the fonts `/FL`
+/// (Helvetica, for labels), `/FD` (Courier, for data lines) and `/FB` (Helvetica-Bold).
+/// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
+/// the file has none. `catalog_extra` goes into the catalog dictionary, where `{annots}`
+/// stands for the references of every annotation of every page, in page order (for example
+/// `/AcroForm << /Fields [{annots}] >>`).
+pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let label = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let data = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let fonts = format!("/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R >>");
+    let mut kids = Vec::new();
+    let mut all_annots = Vec::new();
+    for page in pages {
+        let tpl = b.stream(
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Resources << {fonts} >>"),
+            page.template.as_bytes(),
+        );
+        let mut content = String::from("q /Tpl Do Q\n");
+        for line in &page.lines {
+            content.push_str(&data_line(page.left, line.y, page.size, &line.text));
+        }
+        let content = b.stream("", content.as_bytes());
+        let annots: Vec<String> = page
+            .annots
+            .iter()
+            .map(|a| format!("{} 0 R", b.add(a.as_bytes())))
+            .collect();
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << {fonts} /XObject << /Tpl {tpl} 0 R >> >> \
+             /Contents {content} 0 R /Annots [{}] >>",
+            annots.join(" ")
+        ));
+        all_annots.extend(annots);
+        kids.push(format!("{kid} 0 R"));
+    }
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            kids.len()
+        ),
+    );
+    let extra = catalog_extra.replace("{annots}", &all_annots.join(" "));
+    b.set(
+        catalog,
+        format!("<< /Type /Catalog /Pages {tree} 0 R {extra} >>"),
+    );
+    if info.is_empty() {
+        b.finish(catalog)
+    } else {
+        let info = b.add(format!("<< {info} >>"));
+        b.finish_with(catalog, &format!("/Info {info} 0 R"))
+    }
+}
+
+/// `text` as a PDF literal string, with `\`, `(` and `)` escaped.
+fn literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('(');
+    for c in text.chars() {
+        if matches!(c, '\\' | '(' | ')') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push(')');
+    out
+}
+
+/// One data line as a print run writes it: moved to `(x, y)` by `cm`, shown at the text
+/// origin in Courier (`/FD`).
+pub fn data_line(x: f32, y: f32, size: f32, text: &str) -> String {
+    format!(
+        "q 1 0 0 1 {x} {y} cm BT /FD {size} Tf 0 0 Td {} Tj ET Q\n",
+        literal(text)
+    )
+}
+
+/// A template label in Helvetica (`/FL`), scaled to 90 % and kerned in its middle, as form
+/// templates set their small labels.
+pub fn label(x: f32, y: f32, size: f32, text: &str) -> String {
+    let mid = text
+        .char_indices()
+        .nth(text.chars().count() / 2)
+        .map_or(text.len(), |(i, _)| i);
+    let (first, second) = text.split_at(mid);
+    format!(
+        "BT /FL {size} Tf 90 Tz {x} {y} Td [{} -20 {}] TJ ET\n",
+        literal(first),
+        literal(second)
+    )
+}
+
+/// A stroked box of `w` by `h` points with its lower left corner at `(x, y)`.
+pub fn boxed(x: f32, y: f32, w: f32, h: f32) -> String {
+    format!("{x} {y} {w} {h} re S\n")
+}
+
+/// A drawn separator: a filled rectangle of 0.24 by 2 points at `(x, y)`, as boxed number
+/// fields print their decimal and date separators.
+pub fn mark(x: f32, y: f32) -> String {
+    format!("{x} {y} 0.24 2 re f\n")
 }
 
 /// A text object that shows `text` with font `font` at size `size` at `(x, y)`.
