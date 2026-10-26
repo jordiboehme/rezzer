@@ -15,19 +15,25 @@
 //! 10, then 5 again. As a last resort the other lists are left out and a line says so, and
 //! the title and the description are cut.
 //!
-//! A `## Not read` list that is cut links the `not-read` part, which holds the whole list.
-//! The `not-read` and `contents` parts are parts like the others: they follow the content's
-//! parts in this order, each in the `follows` chain. A `contents` part lists every part but
-//! the `contents` parts.
+//! Nothing the main document shortens is in no file (P5-V): when `## Overview` drops rows,
+//! facts or arrows, cuts a text, or is left out, it links the `overview` part, which holds
+//! the whole overview; when `## Not read` drops losses or cuts a text, it links the
+//! `not-read` part, which holds the whole list. These parts and the `contents` parts are
+//! parts like the others: they follow the content's parts in the order `overview`,
+//! `not-read`, `contents`, each in the `follows` chain. A `contents` part lists every part
+//! but the `contents` parts, and each one but the last links the next.
 //!
 //! A part file: the frontmatter with the part keys, `# <part title>`, the unit, then
 //! `- part_of [<document title>](../<main name>)` and, from the second part on,
 //! `- follows [<title of the part before>](<its file>.md)`. Crystalline 0.29.0 reads these
 //! lines as relations and no other line of ours.
 
+use std::borrow::Cow;
+
 use rezzer_model::{Block, Completeness, Document, Inline, Loss};
 
 use crate::blocks;
+use crate::bullets;
 use crate::describe::{self, Counts, Measure, body_tokens, counted};
 use crate::split::{
     self, Names, TITLE_CAP, Unit, capped, family_title, part_budget, part_measure, pieces,
@@ -65,6 +71,16 @@ const CAPS: [usize; 3] = [20, 10, 5];
 
 /// The description in the main document of the last resort is cut to this many characters.
 const DESCRIPTION_CAP: usize = 500;
+
+/// Room a `contents` part keeps for the line that links the next one.
+const GOES_ON_ROOM: usize = 128;
+
+/// The whole texts the main document may shorten, cut into part pieces.
+struct Trailing<'t> {
+    overview: Option<&'t str>,
+    overview_pieces: Vec<String>,
+    not_read_pieces: Vec<String>,
+}
 
 /// Renders `doc` as one file when its body fits `part_size` tokens (or `part_size` is 0),
 /// else as a main document and parts (spec 5). `main_name` is the main document's file name
@@ -154,7 +170,10 @@ impl Writer<'_> {
                 title: self.part_title(&u.title),
                 file: u.file,
                 location: u.location,
-                markdown: u.markdown,
+                markdown: match bullets::guard(&u.markdown) {
+                    Cow::Borrowed(_) => u.markdown,
+                    Cow::Owned(guarded) => guarded,
+                },
             })
             .collect();
         let losses = &self.doc.losses;
@@ -163,17 +182,17 @@ impl Writer<'_> {
         } else {
             Vec::new()
         };
-        let shapes = [false, true].into_iter().flat_map(|contents| {
-            CAPS.into_iter().map(move |cap| Shape {
-                cap,
-                contents,
-                last_resort: false,
-            })
-        });
-        let last = Shape {
-            cap: CAPS[CAPS.len() - 1],
-            contents: true,
-            last_resort: true,
+        let overview = self
+            .want(OutputSection::Overview)
+            .then(|| overview::render(self.doc, self.selection.as_ref()))
+            .flatten();
+        let trailing = Trailing {
+            overview: overview.as_deref(),
+            overview_pieces: overview
+                .as_deref()
+                .map(|text| pieces(text, self.budget, self.measure))
+                .unwrap_or_default(),
+            not_read_pieces,
         };
         let note_path_len = self
             .main_name
@@ -181,29 +200,74 @@ impl Writer<'_> {
             .unwrap_or(self.main_name)
             .chars()
             .count();
-        for shape in shapes.chain(std::iter::once(last)) {
-            let mut names = Names::taken(content.iter().map(|e| e.file.as_str()));
-            let not_read_cut =
-                !not_read_pieces.is_empty() && (losses.len() > shape.cap || shape.last_resort);
-            let mut listed = content.clone();
-            if not_read_cut {
-                listed.extend(self.family(&not_read_pieces, "not-read", "Not read", &mut names));
-            }
-            let contents = if shape.contents {
-                let text = self.contents_text(&listed);
-                let list = pieces(&text, self.budget, self.measure);
-                self.family(&list, "contents", "Contents", &mut names)
-            } else {
-                Vec::new()
-            };
-            let count = listed.len() + contents.len();
-            let main = self.main(shape, &listed, count, not_read_cut);
-            if shape.last_resort || body_tokens(&main, note_path_len) <= self.part_size {
-                listed.extend(contents);
-                return self.finish(main, &listed);
+        for contents in [false, true] {
+            for cap in CAPS {
+                let shape = Shape {
+                    cap,
+                    contents,
+                    last_resort: false,
+                };
+                let (main, extra) = self.layout(shape, &content, &trailing);
+                if body_tokens(&main, note_path_len) <= self.part_size {
+                    return self.finish(main, &content, &extra);
+                }
             }
         }
-        unreachable!("the last resort is always taken")
+        let last = Shape {
+            cap: CAPS[CAPS.len() - 1],
+            contents: true,
+            last_resort: true,
+        };
+        let (main, extra) = self.layout(last, &content, &trailing);
+        self.finish(main, &content, &extra)
+    }
+
+    /// The main document for `shape` and the parts that follow the content's: `overview`
+    /// and `not-read` when the main document shortens them (P5-V), `contents` when the list
+    /// of the parts moves there.
+    fn layout(
+        &self,
+        shape: Shape,
+        content: &[Entry],
+        trailing: &Trailing<'_>,
+    ) -> (String, Vec<Entry>) {
+        let mut names = Names::taken(content.iter().map(|e| e.file.as_str()));
+        let mut extra: Vec<Entry> = Vec::new();
+        let overview = self.overview_section(shape, trailing.overview);
+        if overview.as_ref().is_some_and(|(_, cut)| *cut) {
+            extra.extend(self.family(
+                &trailing.overview_pieces,
+                "overview",
+                "Overview",
+                &mut names,
+            ));
+        }
+        let not_read = self.not_read_section(shape);
+        if not_read.as_ref().is_some_and(|(_, cut)| *cut) {
+            extra.extend(self.family(
+                &trailing.not_read_pieces,
+                "not-read",
+                "Not read",
+                &mut names,
+            ));
+        }
+        let listed: Vec<&Entry> = content.iter().chain(&extra).collect();
+        let contents = if shape.contents {
+            self.contents(&listed, &mut names)
+        } else {
+            Vec::new()
+        };
+        let parts = self.parts_section(&listed, contents.len());
+        let count = listed.len() + contents.len();
+        let main = self.main(
+            shape,
+            count,
+            overview.map(|(text, _)| text),
+            not_read.map(|(text, _)| text),
+            parts,
+        );
+        extra.extend(contents);
+        (main, extra)
     }
 
     /// The parts of a trailing list cut into `list`: `<base>`, then `<base>-2` and so on
@@ -225,18 +289,30 @@ impl Writer<'_> {
             .collect()
     }
 
-    /// The list of `listed` as a `contents` part writes it: links in the same folder.
-    fn contents_text(&self, listed: &[Entry]) -> String {
-        let mut out = String::from("## Parts\n");
-        for e in listed {
-            out.push('\n');
-            out.push_str(&list_line(e, &format!("{}.md", e.file)));
+    /// The `contents` parts: the list of `listed` with links in the same folder, each piece
+    /// but the last ending with a link to the next one.
+    fn contents(&self, listed: &[&Entry], names: &mut Names) -> Vec<Entry> {
+        let text = format!("## Parts\n\n{}", list_lines(listed, ""));
+        let budget = self
+            .budget
+            .saturating_sub(GOES_ON_ROOM)
+            .max(self.budget / 2);
+        let list = pieces(&text, budget, self.measure);
+        let mut parts = self.family(&list, "contents", "Contents", names);
+        for k in 1..parts.len() {
+            let goes_on = format!(
+                "\n\nThe list goes on in [{}]({}).",
+                label(&family_title("Contents", k + 1), false),
+                destination(&format!("{}.md", parts[k].file))
+            );
+            parts[k - 1].markdown.push_str(&goes_on);
         }
-        out
+        parts
     }
 
-    /// Every part file, in order, with its relations.
-    fn finish(&self, main: String, listed: &[Entry]) -> Output {
+    /// Every part file, in order, with its relations: the content's parts, then `extra`.
+    fn finish(&self, main: String, content: &[Entry], extra: &[Entry]) -> Output {
+        let listed: Vec<&Entry> = content.iter().chain(extra).collect();
         let count = listed.len();
         let part_of = format!(
             "- part_of [{}]({})\n",
@@ -262,7 +338,7 @@ impl Writer<'_> {
                 md.push_str(&e.markdown);
                 md.push_str("\n\n## Relations\n\n");
                 md.push_str(&part_of);
-                if let Some(before) = k.checked_sub(1).map(|b| &listed[b]) {
+                if let Some(before) = k.checked_sub(1).map(|b| listed[b]) {
                     md.push_str(&format!(
                         "- follows [{}]({})\n",
                         label(&before.title, false),
@@ -280,8 +356,16 @@ impl Writer<'_> {
         Output { main, parts }
     }
 
-    /// The main document for `shape`, with `count` parts in all.
-    fn main(&self, shape: Shape, listed: &[Entry], count: usize, not_read_cut: bool) -> String {
+    /// The main document for `shape`, with `count` parts in all and its `## Overview`,
+    /// `## Not read` and `## Parts` sections.
+    fn main(
+        &self,
+        shape: Shape,
+        count: usize,
+        overview: Option<String>,
+        not_read: Option<String>,
+        parts: String,
+    ) -> String {
         let mut opts = self.opts.clone();
         opts.part = None;
         opts.parts = Some(count);
@@ -305,14 +389,9 @@ impl Writer<'_> {
         };
         sections.push(blocks::paragraph(&[Inline::plain(description)]));
         sections.extend(stats(&self.counts));
+        sections.extend(overview);
         // The extracts, each with the name the last resort gives when it leaves it out.
-        let extracts: [(&str, Option<String>); 5] = [
-            (
-                "Overview",
-                self.want(OutputSection::Overview)
-                    .then(|| overview::render_capped(self.doc, self.selection.as_ref(), shape.cap))
-                    .flatten(),
-            ),
+        let extracts: [(&str, Option<String>); 4] = [
             ("Outline", self.outline(shape.cap)),
             ("Tables", self.tables(shape.cap)),
             ("Form", self.form()),
@@ -326,8 +405,8 @@ impl Writer<'_> {
                 None => {}
             }
         }
-        sections.extend(self.not_read(shape, not_read_cut));
-        sections.push(self.parts_section(shape, listed, count));
+        sections.extend(not_read);
+        sections.push(parts);
         if !left_out.is_empty() {
             sections.push(format!(
                 "These lists are left out to keep this file within the size limit: {}.",
@@ -340,6 +419,25 @@ impl Writer<'_> {
             out.push('\n');
         }
         out
+    }
+
+    /// `## Overview` for `shape` (`full` is the whole one), and whether it is shortened: rows,
+    /// facts or arrows past the cap, a text cut, or the whole section at the last resort. A
+    /// shortened overview links the `overview` part, which holds it whole.
+    fn overview_section(&self, shape: Shape, full: Option<&str>) -> Option<(String, bool)> {
+        let full = full?;
+        let link = format!(
+            "[Overview]({})",
+            destination(&format!("{}/overview.md", self.bundle))
+        );
+        if shape.last_resort {
+            return Some((format!("## Overview\n\nThe overview is in {link}."), true));
+        }
+        let text = overview::render_capped(self.doc, self.selection.as_ref(), shape.cap)?;
+        if text == full {
+            return Some((text, false));
+        }
+        Some((format!("{text}\n\nThe whole overview is in {link}."), true))
     }
 
     /// `## Outline`: the top two levels of the outline, at most `cap` entries.
@@ -451,9 +549,10 @@ impl Writer<'_> {
         (!lines.is_empty()).then(|| format!("## Dates and people\n\n{}", lines.join("\n")))
     }
 
-    /// `## Not read`: at most `cap` losses; with `cut` a line links the `not-read` part,
-    /// which holds them all. The last resort writes only that line.
-    fn not_read(&self, shape: Shape, cut: bool) -> Option<String> {
+    /// `## Not read` for `shape`, and whether it is shortened: losses past the cap, a text
+    /// cut, or the list at the last resort. A shortened list links the `not-read` part, which
+    /// holds it whole (P5-V).
+    fn not_read_section(&self, shape: Shape) -> Option<(String, bool)> {
         let losses = &self.doc.losses;
         if !self.want(OutputSection::NotRead) || losses.is_empty() {
             return None;
@@ -463,44 +562,63 @@ impl Writer<'_> {
             destination(&format!("{}/not-read.md", self.bundle))
         );
         if shape.last_resort {
-            return Some(format!(
-                "## Not read\n\nThe list of the {} entries is in {link}.",
-                losses.len()
+            return Some((
+                format!(
+                    "## Not read\n\nThe list of the {} entries is in {link}.",
+                    losses.len()
+                ),
+                true,
             ));
         }
+        let mut text_cut = false;
         let shown: Vec<Loss> = losses
             .iter()
             .take(shape.cap)
-            .map(|l| Loss {
-                location: capped(&l.location, TITLE_CAP),
-                what: capped(&l.what, TITLE_CAP),
-                ..l.clone()
+            .map(|l| {
+                let location = capped(&l.location, TITLE_CAP);
+                let what = capped(&l.what, TITLE_CAP);
+                text_cut |= location != l.location || what != l.what;
+                Loss {
+                    location,
+                    what,
+                    ..l.clone()
+                }
             })
             .collect();
         let mut text = facets::not_read_list(&shown);
-        if cut {
-            text.push_str(&format!(
-                "\n\nAnd {} more in {link}.",
-                losses.len() - shown.len()
-            ));
+        let more = losses.len() - shown.len();
+        if more > 0 {
+            text.push_str(&format!("\n\nAnd {more} more in {link}."));
+        } else if text_cut {
+            text.push_str(&format!("\n\nThe whole texts are in {link}."));
         }
-        Some(text)
+        Some((text, more > 0 || text_cut))
     }
 
-    /// `## Parts`: every part in order, or the link to the first `contents` part.
-    fn parts_section(&self, shape: Shape, listed: &[Entry], count: usize) -> String {
-        if shape.contents {
-            return format!(
-                "## Parts\n\nThe list of the {count} parts is in [Contents]({}).",
+    /// `## Parts`: every part in order, or the link to the first of `contents` parts.
+    fn parts_section(&self, listed: &[&Entry], contents: usize) -> String {
+        let link = |text: &str| {
+            format!(
+                "[{text}]({})",
                 destination(&format!("{}/contents.md", self.bundle))
-            );
+            )
+        };
+        match contents {
+            0 => format!(
+                "## Parts\n\n{}",
+                list_lines(listed, &format!("{}/", self.bundle))
+            ),
+            1 => format!(
+                "## Parts\n\nThe {} parts are listed in {}.",
+                listed.len(),
+                link("Contents")
+            ),
+            k => format!(
+                "## Parts\n\nThe {} parts are listed in {k} contents parts, starting with {}.",
+                listed.len(),
+                link("Contents")
+            ),
         }
-        let mut out = String::from("## Parts\n");
-        for e in listed {
-            out.push('\n');
-            out.push_str(&list_line(e, &format!("{}/{}.md", self.bundle, e.file)));
-        }
-        out
     }
 }
 
@@ -535,14 +653,20 @@ fn more(lines: &mut Vec<String>, total: usize, cap: usize) {
     }
 }
 
-/// `- [<title>](<path>): <location>`, the line of one part in a list of parts.
-fn list_line(e: &Entry, path: &str) -> String {
-    format!(
-        "- [{}]({}): {}",
-        label(&e.title, true),
-        destination(path),
-        blocks::line_text(&one_line(&e.location))
-    )
+/// The list of the parts, one `- [<title>](<prefix><file>.md): <location>` line each.
+fn list_lines(listed: &[&Entry], prefix: &str) -> String {
+    let lines: Vec<String> = listed
+        .iter()
+        .map(|e| {
+            format!(
+                "- [{}]({}): {}",
+                label(&e.title, true),
+                destination(&format!("{prefix}{}.md", e.file)),
+                blocks::line_text(&one_line(&e.location))
+            )
+        })
+        .collect();
+    lines.join("\n")
 }
 
 /// Text from the file on one line: every control character a space.
@@ -588,8 +712,9 @@ fn label(text: &str, bracket_entity: bool) -> String {
 }
 
 /// A relative path as a link destination that CommonMark and Crystalline 0.29.0 read back as
-/// written: `%` and `#` encoded as in asset paths, then `<`, `>`, `\`, a backtick, `&` and
-/// control characters. A path with a space, `(`, `)` or `<` stands in angle brackets.
+/// written: `%` and `#` encoded as in asset paths, then `<`, `>`, `\`, a backtick, `&`, `[`,
+/// `]` and control characters. A path with whitespace of any other kind (Crystalline cuts a
+/// bare destination at the first one), `(`, `)` or `<` stands in angle brackets.
 fn destination(path: &str) -> String {
     let mut out = String::with_capacity(path.len() + 8);
     for c in path.chars() {
@@ -601,6 +726,8 @@ fn destination(path: &str) -> String {
             '\\' => out.push_str("%5C"),
             '`' => out.push_str("%60"),
             '&' => out.push_str("%26"),
+            '[' => out.push_str("%5B"),
+            ']' => out.push_str("%5D"),
             c if c.is_control() => {
                 let mut buf = [0u8; 4];
                 for b in c.encode_utf8(&mut buf).bytes() {
@@ -610,7 +737,10 @@ fn destination(path: &str) -> String {
             c => out.push(c),
         }
     }
-    if path.contains([' ', '(', ')', '<']) {
+    if path
+        .chars()
+        .any(|c| (c.is_whitespace() && !c.is_control()) || matches!(c, '(' | ')' | '<'))
+    {
         format!("<{out}>")
     } else {
         out
@@ -646,5 +776,8 @@ mod tests {
         assert_eq!(destination("a%b>c\\d`e&f.md"), "a%25b%3Ec%5Cd%60e%26f.md");
         assert_eq!(destination("a<b.md"), "<a%3Cb.md>");
         assert_eq!(destination("a\tb.md"), "a%09b.md");
+        assert_eq!(destination("a\u{3000}b.md"), "<a\u{3000}b.md>");
+        assert_eq!(destination("a\u{a0}b.md"), "<a\u{a0}b.md>");
+        assert_eq!(destination("[[x]].md"), "%5B%5Bx%5D%5D.md");
     }
 }

@@ -71,7 +71,7 @@ fn render_with(
             .collect();
         let mut table = pipe_table(&header, &[], &rows);
         if cap.is_some() && parts.len() > shown {
-            table.push_str(&format!("\n\nAnd {} more parts.", parts.len() - shown));
+            table.push_str(&format!("\n\nAnd {} more rows.", parts.len() - shown));
         } else if parts.len() > MAX_PARTS {
             table.push_str(&format!(
                 "\n\nOnly the first {MAX_PARTS} of {} parts are shown.",

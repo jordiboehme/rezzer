@@ -25,6 +25,9 @@
 //!   marks the other parts of the overview. The frontmatter names a chosen style and
 //!   selection
 //! - A hard line break is a backslash at the line end
+//! - A list item that Crystalline would read as an observation or a relation (a bullet that
+//!   opens with `[category]`, or one word before a link to a `.md` file) gets the `* `
+//!   bullet, so it stays text (P5-S)
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list
@@ -40,6 +43,7 @@
 //!   a main document with the stats, capped extracts and the list of the parts
 
 mod blocks;
+mod bullets;
 mod describe;
 mod facets;
 mod form;
@@ -418,7 +422,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     out.push_str(&heading);
     for part in parts.iter().filter(|p| !p.is_empty()) {
         out.push('\n');
-        out.push_str(part);
+        out.push_str(&bullets::guard(part));
         out.push('\n');
     }
     out

@@ -1389,10 +1389,14 @@ fn assert_files_within(out: &Output, part_size: usize) {
 /// or the lists of the `contents` parts it leads to, then the `contents` parts themselves.
 fn listed_order(out: &Output, bundle: &str) -> Vec<String> {
     let mut order: Vec<String> = Vec::new();
+    // The destination as written: in angle brackets up to the `>`, else up to the `)`.
     let link_target = |line: &str| -> Option<String> {
         let at = line.find("](")?;
         let rest = &line[at + 2..];
-        Some(rest[..rest.find(')')?].to_string())
+        match rest.strip_prefix('<') {
+            Some(inner) => Some(inner[..inner.find('>')?].to_string()),
+            None => Some(rest[..rest.find(')')?].to_string()),
+        }
     };
     let lines = section_lines(&out.main, "Parts");
     let contents: Vec<&PartFile> = out
@@ -1643,10 +1647,25 @@ fn main_document_within_limit_with_many_parts() {
     assert_eq!(
         parts,
         [format!(
-            "The list of the {} parts is in [Contents](report-md/contents.md).",
-            out.parts.len()
+            "The 2000 parts are listed in {} contents parts, starting with \
+             [Contents](report-md/contents.md).",
+            contents.len()
         )]
     );
+    // Each contents part but the last leads on to the next one.
+    for (k, c) in contents.iter().enumerate() {
+        let goes_on = format!(
+            "The list goes on in [Contents, part {}](contents-{}.md).",
+            k + 2,
+            k + 2
+        );
+        assert_eq!(
+            c.markdown.contains(&goes_on),
+            k + 1 < contents.len(),
+            "{}",
+            c.path
+        );
+    }
     assert_eq!(key(&out.main, "parts"), Some(&*out.parts.len().to_string()));
     // The lists name every other part once, in the order of the follows chain.
     let order = listed_order(&out, "report-md");
@@ -1771,10 +1790,12 @@ fn starts_list_item(t: &str) -> bool {
 
 fn continues_bullet(line: &str) -> bool {
     let t = line.trim();
-    let thematic = t.len() >= 3
-        && ['-', '*', '_']
-            .iter()
-            .any(|m| t.chars().all(|c| c == *m || c == ' ' || c == '\t'));
+    // Three or more of one of `-`, `*` or `_`, with only spaces and tabs between.
+    let thematic = t.chars().next().is_some_and(|m| {
+        matches!(m, '-' | '*' | '_')
+            && t.chars().all(|c| c == m || c == ' ' || c == '\t')
+            && t.chars().filter(|c| *c == m).count() >= 3
+    });
     !(t.is_empty()
         || is_heading(line)
         || fence_marker(t).is_some()
@@ -1884,22 +1905,25 @@ fn read_destination(line: &str, open: usize) -> Option<(String, usize)> {
         }
         unescaped.push(c);
     }
+    // Strict: a `%` without two hex digits, or bytes that are no UTF-8, keep the raw path.
     let bytes = unescaped.as_bytes();
+    let nibble = |b: Option<&u8>| b.and_then(|b| (*b as char).to_digit(16)).map(|d| d as u8);
     let mut decoded = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let Some(hex) = unescaped.get(i + 1..i + 3)
-            && let Ok(v) = u8::from_str_radix(hex, 16)
-        {
-            decoded.push(v);
+        if bytes[i] == b'%' {
+            let (Some(hi), Some(lo)) = (nibble(bytes.get(i + 1)), nibble(bytes.get(i + 2))) else {
+                return Some((unescaped, close));
+            };
+            decoded.push(hi * 16 + lo);
             i += 3;
             continue;
         }
         decoded.push(bytes[i]);
         i += 1;
     }
-    Some((String::from_utf8_lossy(&decoded).into_owned(), close))
+    let path = String::from_utf8(decoded).unwrap_or(unescaped);
+    Some((path, close))
 }
 
 fn relation_type(before: &str) -> Option<String> {
@@ -2014,9 +2038,15 @@ fn crystalline_reads(body: &str) -> Vec<Read> {
         if !open_category {
             let mut end = i;
             for (j, next) in lines.iter().enumerate().skip(i + 1) {
-                let inside_link = lines[end]
+                // The last `[[` outside inline code has no `]]` after it.
+                let mut masked = lines[end].as_bytes().to_vec();
+                for (a, b) in code_spans(lines[end]) {
+                    masked[a..b].fill(b' ');
+                }
+                let masked = String::from_utf8_lossy(&masked).into_owned();
+                let inside_link = masked
                     .rfind("[[")
-                    .is_some_and(|o| !lines[end][o + 2..].contains("]]"));
+                    .is_some_and(|o| !masked[o + 2..].contains("]]"));
                 if in_fence[j] || !continues_bullet(next) || inside_link {
                     break;
                 }
@@ -2146,6 +2176,102 @@ fn relation_lines_parse_like_crystalline() {
         assert_eq!(reads.len(), want.len(), "{}: {reads:?}", p.path);
         previous = Some(file);
     }
+    // List items from the file that Crystalline would read (P5-S): a link to a heading in
+    // another part becomes a link to that part's file, and a footnote at the start of an item
+    // looks like an observation category.
+    let out = output(&list_items_doc(), 2_500, "r.md", "r");
+    let first = &out.parts[0].markdown;
+    assert!(
+        first.contains("\n* See [Three](chapter-3.md#chapter-3)\n"),
+        "{first}"
+    );
+    assert!(first.contains("\n* [^1] noted\n"), "{first}");
+    assert!(first.contains("\n- plain item\n"), "{first}");
+    assert!(
+        first.contains("\n* Wrapped\\\n  [Two](chapter-2.md#chapter-2)\n"),
+        "{first}"
+    );
+    for p in &out.parts {
+        let reads = crystalline_reads(body(&p.markdown));
+        assert!(
+            reads.iter().all(|r| matches!(
+                r,
+                Read::Relation(k, _) if k == "part_of" || k == "follows"
+            )),
+            "{}: {reads:?}",
+            p.path
+        );
+    }
+}
+
+/// Three chapters; the first holds list items that Crystalline would read as a relation or
+/// an observation once the document is split.
+fn list_items_doc() -> Document {
+    let mut d = chapters_doc(3, 6_000);
+    let link = |text: &str, target: &str| Inline::Link {
+        target: target.into(),
+        title: None,
+        internal: true,
+        wiki: false,
+        inlines: vec![Inline::plain(text)],
+    };
+    let item = |inlines: Vec<Inline>| {
+        vec![Block::Paragraph {
+            inlines,
+            role: None,
+            anchor: None,
+        }]
+    };
+    d.body.insert(
+        2,
+        Block::List {
+            ordered: false,
+            items: vec![
+                item(vec![Inline::plain("See "), link("Three", "#chapter-3")]),
+                item(vec![
+                    Inline::FootnoteRef { id: "1".into() },
+                    Inline::plain(" noted"),
+                ]),
+                item(vec![Inline::plain("plain item")]),
+                item(vec![
+                    Inline::plain("Wrapped"),
+                    Inline::LineBreak,
+                    link("Two", "#chapter-2"),
+                ]),
+            ],
+            anchor: None,
+        },
+    );
+    d
+}
+
+#[test]
+fn list_items_crystalline_would_read_get_a_star_in_one_file_too() {
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(Block::List {
+        ordered: false,
+        items: vec![
+            vec![Block::Paragraph {
+                inlines: vec![
+                    Inline::plain("See "),
+                    Inline::Link {
+                        target: "other.md".into(),
+                        title: None,
+                        internal: false,
+                        wiki: false,
+                        inlines: vec![Inline::plain("other")],
+                    },
+                ],
+                role: None,
+                anchor: None,
+            }],
+            vec![para("plain")],
+        ],
+        anchor: None,
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\n* See [other](other.md)\n- plain\n"), "{md}");
+    assert_eq!(crystalline_reads(body(&md)), []);
 }
 
 #[test]
@@ -2181,6 +2307,25 @@ fn relation_targets_with_spaces_and_hash() {
     let out = output(&plain, 2_500, "a.md", "a");
     assert!(out.main.contains("- [A&#93; b: Chapter 1](a/chapter-1.md)"));
     assert_eq!(crystalline_reads(body(&out.main)), []);
+    // Any whitespace puts the destination in angle brackets: Crystalline cuts a bare one at
+    // the first whitespace character.
+    for odd in [
+        "日本\u{3000}報告.pdf.md",
+        "Rechnung\u{a0}12.pdf.md",
+        "[[x]].md",
+    ] {
+        let out = output(&d, 2_500, odd, "x");
+        assert_eq!(
+            relations(&out.parts[0].markdown),
+            [("part_of".to_string(), format!("../{odd}"))],
+            "{odd}"
+        );
+    }
+    assert!(
+        output(&d, 2_500, "[[x]].md", "x").parts[0]
+            .markdown
+            .contains("(../%5B%5Bx%5D%5D.md)")
+    );
     // `%`, `>` and a backslash are encoded too, so the name reads back as written.
     let odd = "a%b>c\\d`e.md";
     let out = output(&d, 2_500, odd, "x");
@@ -2310,10 +2455,76 @@ fn overview_is_capped_at_20() {
     });
     let out = output(&d, 2_500, "report.md.md", "b");
     let lines = section_lines(&out.main, "Overview");
-    // The header, its separator, 20 rows and the line that counts the rest.
-    assert_eq!(lines.len(), 23, "{lines:?}");
+    // The header, its separator, 20 rows, the line that counts the rest and the link.
+    assert_eq!(lines.len(), 24, "{lines:?}");
     assert!(lines[21].contains("Part 20 "));
-    assert_eq!(lines[22], "And 10 more parts.");
+    assert_eq!(lines[22], "And 10 more rows.");
+    assert_eq!(
+        lines[23],
+        "The whole overview is in [Overview](b/overview.md)."
+    );
+    // The overview part holds every row, and is listed after the content's parts.
+    let part = out
+        .parts
+        .iter()
+        .find(|p| p.path == "b/overview.md")
+        .expect("an overview part");
+    assert_eq!(part.title, "report.md: Overview");
+    assert!(part.markdown.contains("| Part 30 |"));
+    assert_eq!(
+        section_lines(&out.main, "Parts").last().copied(),
+        Some("- [report.md: Overview](b/overview.md): Overview")
+    );
+    // An overview within the cap is whole in the main document, with no part.
+    d.overview.as_mut().expect("overview").parts.truncate(5);
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_eq!(section_lines(&out.main, "Overview").len(), 7);
+    assert!(out.parts.iter().all(|p| p.path != "b/overview.md"));
+    // A cut name is a shortened overview too.
+    d.overview.as_mut().expect("overview").parts[0].name = words(300);
+    let out = output(&d, 2_500, "report.md.md", "b");
+    let part = out.parts.iter().find(|p| p.path == "b/overview.md");
+    assert!(
+        part.expect("an overview part")
+            .markdown
+            .contains(&words(300))
+    );
+}
+
+#[test]
+fn not_read_with_a_cut_text_writes_the_part() {
+    let mut d = chapters_doc(4, 6_000);
+    for i in 1..=15 {
+        d.losses.push(loss(&format!("thing {i}")));
+    }
+    d.losses[3].what = words(500);
+    let out = output(&d, 2_500, "report.md.md", "b");
+    let lines = section_lines(&out.main, "Not read");
+    assert_eq!(lines.len(), 18, "{lines:?}");
+    assert_eq!(
+        lines[17],
+        "The whole texts are in [Not read](b/not-read.md)."
+    );
+    let part = out
+        .parts
+        .iter()
+        .find(|p| p.path == "b/not-read.md")
+        .expect("a not-read part");
+    assert!(part.markdown.contains(&words(500)));
+}
+
+#[test]
+fn pieces_of_a_unit_are_numbered_in_order() {
+    let list = units(&counted_doc(1, 0), 2_500);
+    let s1: Vec<(&str, &str)> = list
+        .iter()
+        .filter(|u| u.file.starts_with("s1"))
+        .map(|u| (u.file.as_str(), u.title.as_str()))
+        .collect();
+    assert_eq!(
+        s1,
+        [("s1", "S1"), ("s1-2", "S1, part 2"), ("s1-3", "S1, part 3")]
+    );
 }
 
 #[test]
