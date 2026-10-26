@@ -41,7 +41,8 @@ use crate::{OutputSection, RenderOptions, Selection, chosen_sheets, facets, fron
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unit {
     /// The part's file name without `.md` (decision 9): lowercase `[a-z0-9-]`, at most 60
-    /// bytes, unique in the document, never `index`, `log`, `not-read` or `contents`.
+    /// bytes, unique in the document, never `index`, `log`, `overview`, `not-read` or
+    /// `contents`.
     pub file: String,
     /// The unit's own title (at most [`TITLE_CAP`] characters and `, part <n>`), else its
     /// location.
@@ -65,8 +66,8 @@ const NAME_CAP: usize = 60;
 const KEY_CAP: usize = 24;
 
 /// The names a part never takes: Crystalline reserves `index` and `log`, the main document
-/// writer `not-read` and `contents`.
-const RESERVED: [&str; 4] = ["index", "log", "not-read", "contents"];
+/// writer `overview`, `not-read` and `contents`.
+const RESERVED: [&str; 5] = ["index", "log", "overview", "not-read", "contents"];
 
 /// `split_rows` gets its `max_tokens` halved at most this often.
 const ROW_RETRIES: usize = 8;
@@ -1299,12 +1300,20 @@ impl<'a> Splitter<'a> {
     /// Names the units, renders them with their links and adds the trailing sections.
     fn write(&self, specs: Vec<Spec<'a>>) -> Vec<Unit> {
         let mut names = Names::new();
-        // Each unit's first name comes first, in document order: the anchors lead to it. A
-        // further piece gets its name when it is written, so a piece fewer leaves no gap.
+        // Every piece the plan expects is named up front, in document order (P5-T): the
+        // anchors lead to a unit's first piece, and the pieces of one unit are numbered in
+        // order. A piece more than planned gets the next free name when it is written; a
+        // piece fewer leaves its name unused.
         let mut order = 0usize;
         let mut files: Vec<String> = Vec::with_capacity(specs.len());
+        let mut further: Vec<Vec<String>> = Vec::with_capacity(specs.len());
         for s in &specs {
             files.push(names.take(&s.item.base, &s.suffix, order + 1));
+            further.push(
+                (1..s.pieces.max(1))
+                    .map(|p| names.take(&s.item.base, &s.suffix, order + p + 1))
+                    .collect(),
+            );
             order += s.pieces.max(1);
         }
         // The unit of each anchor: the first unit that holds it. A section cut into units
@@ -1343,10 +1352,12 @@ impl<'a> Splitter<'a> {
             let lone = pieces.len() == 1 && s.item.family.is_none();
             let family = s.item.family.unwrap_or(usize::MAX - k);
             for (p, piece) in pieces.into_iter().enumerate() {
-                let file = if p == 0 {
-                    files[k].clone()
-                } else {
-                    names.take(&s.item.base, &s.suffix, units.len() + 1)
+                let file = match p {
+                    0 => files[k].clone(),
+                    _ => match further[k].get(p - 1) {
+                        Some(name) => name.clone(),
+                        None => names.take(&s.item.base, &s.suffix, units.len() + 1),
+                    },
                 };
                 let n = families.entry(family).or_insert(0);
                 *n += 1;
