@@ -2379,3 +2379,93 @@ fn a_note_across_an_open_row_stays_whole() {
     assert_eq!(found[0][1], ["Muster", "ABCD", "11", "", ""], "{found:#?}");
     assert_no_loss(&out);
 }
+
+/// A name of four words that runs on into the next field inside a word, on a line with its
+/// code and flags, is a value: it is no note, goes by its middle, and the code and flags keep
+/// their columns.
+#[test]
+fn a_long_name_beside_its_code_is_no_note() {
+    let page = hanging_section(
+        &[66.0, 150.0, 250.0, 300.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae", "Af"],
+        vec![columns_line(
+            675.0,
+            &[
+                (1, "045 Zulage fuer Muster Bezug"),
+                (40, "Z"),
+                (46, "X"),
+                (56, "Y"),
+            ],
+        )],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0][1],
+        ["045", "Zulage fuer Muster Bezug", "", "Z", "X", "Y"],
+        "{found:#?}"
+    );
+    assert_no_loss(&out);
+}
+
+/// A sentence whose every crossed column rule falls in a gap between its words is cut there:
+/// only text that runs over a rule inside a word can be a note, as a value line padded into
+/// its fields has a space at each rule.
+#[test]
+fn a_sentence_with_a_gap_at_each_rule_is_cut() {
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![columns_line(
+            675.0,
+            &[(
+                1,
+                "bitte nur die Hinweise beim Ausfuellen am Ende eine Zeile",
+            )],
+        )],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0][1],
+        [
+            "bitte nur die",
+            "Hinweise beim",
+            "Ausfuellen am",
+            "Ende eine",
+            "Zeile"
+        ],
+        "{found:#?}"
+    );
+}
+
+/// A note of two lines across an open row is one cell: its second line, alone on its line in
+/// its style one line below, goes on it.
+#[test]
+fn a_note_of_two_lines_is_one_cell() {
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![
+            columns_line(682.0, &[(1, "Muster"), (22, "ABCD"), (40, "11")]),
+            columns_line(
+                673.0,
+                &[(1, "Bitte die Hinweise auf der Rueckseite beachten")],
+            ),
+            columns_line(664.0, &[(1, "und die Frist einhalten")]),
+        ],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].len(), 3, "{found:#?}");
+    assert_eq!(found[0][1], ["Muster", "ABCD", "11", "", ""], "{found:#?}");
+    assert_eq!(
+        found[0][2],
+        ["Bitte die Hinweise auf der Rueckseite beachten und die Frist einhalten"],
+        "{found:#?}"
+    );
+    assert_no_loss(&out);
+}

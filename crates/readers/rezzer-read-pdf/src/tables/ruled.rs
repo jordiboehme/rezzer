@@ -473,7 +473,7 @@ pub(super) fn ruled(
             if !is_open[r] {
                 continue;
             }
-            if note_across(run, &xs) {
+            if alone_on_line(flow, i) && note_across(run, &xs) {
                 spanned.insert((r, sub_of(r, run)));
             }
         }
@@ -934,54 +934,86 @@ fn open_anchors(
 
 /// The baselines, going up, of the lines that start a row in an open row (lines without
 /// rules under a header of hanging rules) that holds `runs`, in lines by baseline, by the
-/// rule of a body under a header band ([`row_starts`]) in the columns of `xs`.
+/// rule of a body under a header band ([`row_starts`]) in the columns of `xs`. A note across
+/// the columns (see [`note_across`]) is a row of its own; a line that goes on with it (the
+/// only run on its line, in its style, one line pitch below) joins it, and the line after the
+/// note starts a row.
 fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
     let cols = xs.len() - 1;
-    let mut runs: Vec<(f32, f32, usize, &str, bool)> = runs
+    let mut runs: Vec<(usize, usize)> = runs
         .iter()
         .map(|&i| {
-            let r = &flow.runs[i];
-            let (cx, _) = middle(r);
+            let (cx, _) = middle(&flow.runs[i]);
             let c = xs
                 .partition_point(|e| *e < cx)
                 .saturating_sub(1)
                 .min(cols - 1);
-            (r.y, r.size.max(1.0), c, r.text.as_str(), note_across(r, xs))
+            (i, c)
         })
         .collect();
-    runs.sort_by(|a, b| b.0.total_cmp(&a.0));
-    // Lines from the top, each the text of its columns, and whether it holds a note.
-    let mut lines: Vec<(f32, Vec<(usize, String)>)> = Vec::new();
-    let mut notes: Vec<bool> = Vec::new();
-    for (y, size, c, text, note) in runs {
-        if lines.last().is_none_or(|(ly, _)| *ly - y > 0.3 * size) {
-            lines.push((y, Vec::new()));
-            notes.push(false);
+    runs.sort_by(|a, b| flow.runs[b.0].y.total_cmp(&flow.runs[a.0].y));
+    // Lines from the top: each its baseline, the text of its columns and its runs.
+    struct Line {
+        y: f32,
+        cells: Vec<(usize, String)>,
+        runs: Vec<usize>,
+    }
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, c) in runs {
+        let r = &flow.runs[i];
+        if lines
+            .last()
+            .is_none_or(|l| l.y - r.y > 0.3 * r.size.max(1.0))
+        {
+            lines.push(Line {
+                y: r.y,
+                cells: Vec::new(),
+                runs: Vec::new(),
+            });
         }
-        let (Some((_, line)), Some(noted)) = (lines.last_mut(), notes.last_mut()) else {
+        let Some(line) = lines.last_mut() else {
             continue;
         };
-        *noted |= note;
-        match line.iter_mut().find(|p| p.0 == c) {
-            Some(p) => p.1.push_str(text),
-            None => line.push((c, text.to_string())),
+        line.runs.push(i);
+        match line.cells.iter_mut().find(|p| p.0 == c) {
+            Some(p) => p.1.push_str(&r.text),
+            None => line.cells.push((c, r.text.clone())),
         }
     }
-    let mut used: Vec<usize> = lines.iter().flat_map(|l| l.1.iter().map(|p| p.0)).collect();
+    let mut used: Vec<usize> = lines
+        .iter()
+        .flat_map(|l| l.cells.iter().map(|p| p.0))
+        .collect();
     used.sort_unstable();
     used.dedup();
     let pieces: Vec<Vec<(usize, bool)>> = lines
         .iter()
-        .map(|l| l.1.iter().map(|(c, t)| (*c, numeric(t))).collect())
+        .map(|l| l.cells.iter().map(|(c, t)| (*c, numeric(t))).collect())
         .collect();
-    // A note across the columns is a row of its own, and so is the line after it.
     let mut starting = row_starts(&pieces, used.len());
-    for k in 0..lines.len() {
-        if notes[k] {
+    // The run of a line that is its only run.
+    let only = |l: &Line| match l.runs.as_slice() {
+        [i] => Some(&flow.runs[*i]),
+        _ => None,
+    };
+    let mut in_note: Option<&Run> = None;
+    for (k, line) in lines.iter().enumerate() {
+        let run = only(line);
+        let goes_on = match (in_note, run) {
+            (Some(note), Some(r)) => goes_on_note(note, r),
+            _ => false,
+        };
+        if goes_on {
+            starting[k] = false;
+            in_note = run;
+        } else if let Some(r) = run.filter(|r| note_across(r, xs)) {
             starting[k] = true;
-            if let Some(next) = starting.get_mut(k + 1) {
-                *next = true;
+            in_note = Some(r);
+        } else {
+            if in_note.is_some() {
+                starting[k] = true;
             }
+            in_note = None;
         }
     }
     // Kept going up, for a search by baseline.
@@ -989,20 +1021,47 @@ fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
         .iter()
         .zip(starting)
         .filter(|(_, starts)| *starts)
-        .map(|(l, _)| l.0)
+        .map(|(l, _)| l.y)
         .collect();
     starts.reverse();
     starts
 }
 
 /// Whether `run` is a note across the columns of `xs`: a sentence over at least one inner
-/// column edge (see [`prose_like`]).
+/// column edge (see [`prose_like`]). The caller checks that it is the only run on its line.
 fn note_across(run: &Run, xs: &[f32]) -> bool {
     let across = xs[1..xs.len() - 1]
         .iter()
         .filter(|&&e| e > run.x + SNAP && e < run.x + run.w - SNAP)
         .count();
     across > 0 && prose_like(&run.text, across + 1)
+}
+
+/// Whether `run` goes on with the line of a note `note` above it: in its size and weight,
+/// one line pitch below, and no number. The caller checks that it is alone on its line.
+fn goes_on_note(note: &Run, run: &Run) -> bool {
+    let pitch = note.y - run.y;
+    (run.size - note.size).abs() <= 0.05 * note.size.max(1.0)
+        && run.bold == note.bold
+        && pitch > 0.3 * note.size
+        && pitch <= 1.6 * note.size.max(1.0)
+        && !numeric(&run.text)
+}
+
+/// Whether run `i` is the only run with text on its line.
+fn alone_on_line(flow: &Flow, i: usize) -> bool {
+    let line = flow.runs[i].line;
+    let texted = |r: &Run| r.line == line && !r.text.trim().is_empty();
+    let before = flow.runs[..i]
+        .iter()
+        .rev()
+        .take_while(|r| r.line == line)
+        .any(texted);
+    let after = flow.runs[i + 1..]
+        .iter()
+        .take_while(|r| r.line == line)
+        .any(texted);
+    !before && !after
 }
 
 /// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
@@ -1072,10 +1131,11 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// two of its words, so each part stands in its own column: a value line padded into its
 /// fields often has only one or two spaces between two fields. A rule cuts at the heights it
 /// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
-/// their section (see [`hanging_feet`]), but not a sentence that runs over them as words
-/// (a note across the section, see [`prose_like`]). A rule within a tenth of the text size of a gap cuts there;
-/// a rule inside a word cuts nothing. A cut part keeps the run's place in the reading order.
-/// False when more than `budget` steps were needed: the runs past them stay whole.
+/// their section (see [`hanging_feet`]), but not a sentence alone on its line that runs over
+/// them as words (a note across the section, see [`prose_like`]). A rule within a tenth of
+/// the text size of a gap cuts there; a rule inside a word cuts nothing. A cut part keeps
+/// the run's place in the reading order. False when more than `budget` steps were needed:
+/// the runs past them stay whole.
 fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
     // The rules as drawn, and the inner column edges of hanging headers below their feet.
     let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
@@ -1104,7 +1164,19 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
     let mut done = true;
     // The runs to cut, each with the gaps it is cut at.
     let mut cuts: Vec<(usize, Vec<usize>)> = Vec::new();
+    // The last line of a note, which the next line may go on: such a line is not cut either.
+    let mut note: Option<&Run> = None;
     'runs: for (i, r) in flow.runs.iter().enumerate() {
+        if r.text.trim().is_empty() {
+            continue;
+        }
+        if let Some(n) = note.filter(|n| n.line != r.line) {
+            if goes_on_note(n, r) && alone_on_line(flow, i) {
+                note = Some(r);
+                continue;
+            }
+            note = None;
+        }
         if r.off_axis || r.gaps.is_empty() {
             continue;
         }
@@ -1145,8 +1217,11 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
                 }
             }
         }
-        // A sentence that runs over the hanging edges as words (a note) is not cut there.
-        if !(in_word && prose_like(&r.text, crossed + 1)) {
+        // A sentence alone on its line that runs over the hanging edges as words (a note)
+        // is not cut there.
+        if in_word && prose_like(&r.text, crossed + 1) && alone_on_line(flow, i) {
+            note = Some(r);
+        } else {
             at.extend(below);
         }
         at.sort_unstable();
@@ -1387,11 +1462,12 @@ fn open_bands(
     }
 }
 
-/// For each grid row (`is_open` says which are rows under a header of hanging rules), the baselines of the lines that
-/// start a row in it, going up: empty when the band is one row. A band of the body whose cells are each one square and of
-/// which at least two hold text is cut when at least two of its lines are anchors: lines
-/// with text in at least half of the cells that hold text in the band (an empty first cell
-/// included). No band is cut when the rules part most bands into one record each.
+/// For each grid row (`is_open` says which are rows under a header of hanging rules), the
+/// baselines of the lines that start a row in it, going up: empty when the band is one row.
+/// A band of the body whose cells are each one square and of which at least two hold text
+/// is cut when at least two of its lines are anchors: lines with text in at least half of
+/// the cells that hold text in the band (an empty first cell included). No band is cut when
+/// the rules part most bands into one record each.
 #[allow(clippy::too_many_arguments)]
 fn anchor_rows(
     flow: &Flow,
