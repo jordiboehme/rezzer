@@ -501,6 +501,8 @@ fn padded_values_stand_in_their_box() {
 }
 
 /// A template label and a data line padded onto its baseline read as one line, label first.
+/// One row only, so the column search does not run: the rows of a label column are
+/// `padded_values_beside_long_labels_read_row_by_row`.
 #[test]
 fn label_then_value_on_one_row() {
     let page = FormPage {
@@ -517,4 +519,135 @@ fn label_then_value_on_one_row() {
         text.lines().any(|l| l == "Auszahlungsbetrag 1.234,56"),
         "{text:?}"
     );
+}
+
+/// Whether each of `order` stands in `text`, each after the one before it; else which one
+/// does not.
+fn in_order(text: &str, order: &[&str]) -> Result<(), String> {
+    let mut from = 0;
+    for t in order {
+        let at = text[from..]
+            .find(t)
+            .ok_or_else(|| format!("no {t:?} after byte {from} in {text}"))?;
+        from += at + t.len();
+    }
+    Ok(())
+}
+
+/// A column of long labels with their values on the same baselines, the values padded from
+/// the left margin far to the right (as a tax notice prints them): read row by row, each
+/// label with its value. Padding is no text, so the values do not read as a column of prose.
+#[test]
+fn padded_values_beside_long_labels_read_row_by_row() {
+    let rows = [
+        ("Zu versteuerndes Einkommen", "12.345"),
+        ("Festgesetzte Einkommensteuer", "1.234,56"),
+        ("Solidaritaetszuschlag", "0,00"),
+        ("Kirchensteuer evangelisch", "123,45"),
+        ("Anzurechnende Lohnsteuer", "1.000,00"),
+    ];
+    let order: Vec<&str> = rows.iter().flat_map(|(l, v)| [*l, *v]).collect();
+    // Labels left of the data margin and right of it, and values padded at the end to a fixed
+    // record width too.
+    let mut failed = Vec::new();
+    for (x, width) in [(30.0, 0), (45.0, 0), (30.0, 90)] {
+        let mut template = String::new();
+        let mut lines = Vec::new();
+        for (k, (l, v)) in rows.iter().enumerate() {
+            let y = 600.0 - 14.0 * k as f32;
+            template += &label(x, y, 8.0, l);
+            lines.push(DataLine {
+                y,
+                text: format!("{:<width$}", padded(50, v)),
+            });
+        }
+        let page = FormPage {
+            template,
+            lines,
+            ..FormPage::default()
+        };
+        let out = read(&print_form(&[page], "", ""));
+        if let Err(e) = in_order(&all_text(&out), &order) {
+            failed.push(format!("labels at x {x}, width {width}: {e}"));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// The fields of a header grid in the right half of the page: (x, label) for each field of
+/// each grid row, with its value.
+const HEADER_FIELDS: [[(f32, &str, &str); 3]; 2] = [
+    [
+        (320.0, "Personalnr", "00001"),
+        (400.0, "Eintritt", "01.04.2020"),
+        (480.0, "Kostenstelle", "4711"),
+    ],
+    [
+        (320.0, "Geburtsdatum", "01.01.1970"),
+        (400.0, "Austritt", "31.12.2030"),
+        (480.0, "Abteilung", "Muster"),
+    ],
+];
+
+/// The spaces of the data font from the data margin to `x`.
+fn pad_to(x: f32) -> usize {
+    ((x - 40.0) / 5.7).round() as usize
+}
+
+/// A header grid read row by row: the labels of a grid row, then its values, left to right;
+/// `one_line` prints the values of a grid row as one data line, else one line per field.
+fn header_grid(one_line: bool) {
+    let mut template = String::new();
+    let mut lines = Vec::new();
+    for (row, y) in HEADER_FIELDS.iter().zip([700.0f32, 676.0]) {
+        let mut line = String::new();
+        for &(x, l, v) in row {
+            template += &label(x, y + 4.0, 6.0, l);
+            if one_line {
+                line = format!("{line:<0$}{v}", pad_to(x));
+            } else {
+                lines.push(DataLine {
+                    y: y - 6.0,
+                    text: padded(pad_to(x), v),
+                });
+            }
+        }
+        if one_line {
+            lines.push(DataLine {
+                y: y - 6.0,
+                text: line,
+            });
+        }
+    }
+    let page = FormPage {
+        template,
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let order: Vec<&str> = HEADER_FIELDS
+        .iter()
+        .flat_map(|row| {
+            row.iter()
+                .map(|f| f.1)
+                .chain(row.iter().map(|f| f.2))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    if let Err(e) = in_order(&all_text(&out), &order) {
+        panic!("{e}");
+    }
+}
+
+/// A header field grid whose values are padded from the left margin, one data line per field:
+/// read grid row by grid row, not in column bands.
+#[test]
+fn header_field_grid_reads_row_by_row() {
+    header_grid(false);
+}
+
+/// Guard: the same grid with the values of a grid row in one data line.
+#[test]
+fn header_field_grid_of_one_line_a_row_reads_row_by_row() {
+    header_grid(true);
 }

@@ -92,6 +92,8 @@ struct Frag {
     /// The drawn box the run's middle lies in, the innermost one, as an index into the
     /// page's boxes: a reading region.
     region: Option<u32>,
+    /// The characters of the text from the first ink to the last, word spaces inside
+    /// counted, padding before and after not: what [`gutter`] weighs as prose.
     chars: usize,
     /// Where the text of each glyph (and each space put in) starts in `text`: the units
     /// right-to-left reordering moves as a whole.
@@ -206,7 +208,6 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                     f.units.push(f.text.len() as u32);
                 }
                 f.text.push_str(t);
-                f.chars += t.chars().count();
                 f.pen = f.pen.max(x + adv);
                 if pad {
                     if !f.padded {
@@ -248,9 +249,14 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             mcid: g.mcid,
             link: g.link,
             region: None,
-            chars: t.chars().count(),
+            chars: 0,
             units: vec![0],
         });
+    }
+    // Padding is no text: only the characters from the first ink to the last count, so a
+    // value padded to its place does not read as a line of prose.
+    for f in &mut out {
+        f.chars = f.text.trim_matches(is_pad).chars().count();
     }
     out
 }
@@ -272,6 +278,7 @@ struct Piece {
     /// The baseline of the piece's first fragment.
     y: f32,
     size: f32,
+    /// The characters of its fragments (see [`Frag::chars`]): padding is not counted.
     chars: usize,
     frags: Vec<usize>,
     /// The piece stands in for the text of a drawn box (the index of the box's group), read
@@ -855,7 +862,8 @@ fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece
 }
 
 /// The fragments of a line from the first one with ink on: runs of white space only before
-/// it are padding, not text. A line without ink stays whole.
+/// it are padding, not text. A line without ink stays whole. The padding inside the first
+/// fragment with ink is trimmed in [`line_runs`].
 fn from_first_ink<'a>(frags: &[Frag], ids: &'a [usize]) -> &'a [usize] {
     let first = ids.iter().position(|&i| frags[i].inked).unwrap_or(0);
     &ids[first..]
@@ -1476,6 +1484,20 @@ mod tests {
         assert!(runs[0].off_axis, "{runs:?}");
         assert!((runs[0].x - 100.0).abs() < 0.01, "{runs:?}");
         assert!((runs[0].y - 74.2).abs() < 0.01, "{runs:?}");
+    }
+
+    #[test]
+    fn padding_is_not_counted_as_text() {
+        // A value padded on both sides: only its six characters count as text.
+        let (text, glyphs) = pitched(&[("      12.345      ", false)], 40.0, 700.0, 9.5, 5.7);
+        let texts = Texts {
+            text: &text,
+            actuals: &[],
+        };
+        let frags = fragments(&glyphs, &texts, Turn::None, Turn::None);
+        assert_eq!(frags.len(), 1, "{frags:?}");
+        assert_eq!(frags[0].chars, 6);
+        assert_eq!(pieces(&frags)[0].chars, 6);
     }
 
     /// Guard: a run cut at a change of style that begins with a word space goes on the run
