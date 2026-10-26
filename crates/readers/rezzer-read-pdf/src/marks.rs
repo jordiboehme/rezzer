@@ -257,7 +257,8 @@ fn kinds(lens: &[usize]) -> Option<Vec<Kind>> {
 }
 
 /// `text` with the placeholders of each number replaced by the separators of `style`, or
-/// removed when a character is not known or the digit groups fit no kind. `seen` is told
+/// removed when a character is not known or the digit groups fit no kind. Placeholders next
+/// to each other count as one. `seen` is told
 /// each number with placeholders: its digit count and its kinds, or why it is not read.
 fn fix(
     text: &str,
@@ -317,6 +318,12 @@ fn fix(
         number.clear();
     };
     for c in text.chars() {
+        // A text drawn twice on top of itself (a fake bold) gets a placeholder from each copy;
+        // where both copies meet in one text (a quote), they stand next to each other and
+        // count once.
+        if c == SEP && number.ends_with(SEP) {
+            continue;
+        }
         if c.is_ascii_digit() || c == SEP {
             number.push(c);
         } else {
@@ -544,6 +551,9 @@ mod tests {
         assert_eq!(seen[0], (4, Ok(vec![Kind::Decimal])));
         assert_eq!(seen[1].0, 8);
         assert!(seen[1].1.is_err());
+        // The placeholders of two copies drawn on top of each other count once.
+        let text = format!("1234{SEP}{SEP}56");
+        assert_eq!(fix(&text, &style, &mut |_, _| {}), "1234,56");
     }
 
     #[test]

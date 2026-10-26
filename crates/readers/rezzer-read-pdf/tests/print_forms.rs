@@ -1033,3 +1033,39 @@ fn style_from_another_page() {
     );
     assert_eq!(found_by(&out).len(), 2);
 }
+
+/// An amount with a drawn decimal mark printed twice 0.3 points apart (a fake bold) reads
+/// once with one separator, in the body and in a quote over it. The field has no boxes here:
+/// with per-digit boxes the two copies are read twice even without a mark (reported apart).
+#[test]
+fn overprinted_boxed_amount_reads_once() {
+    let mut page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
+    let x = 40.0 + 20.0 * PITCH;
+    page.template = label(40.0, 712.0, 6.0, "Betrag") + &mark(x + 4.0 * PITCH - 0.12, 699.5);
+    // The labels of the template leave a horizontal scaling of 90 % set.
+    page.template += "100 Tz\n";
+    page.template += &data_line(40.3, 700.0, 9.5, &padded(20, "123456"));
+    let (x1, y0, y1) = (x + 6.0 * PITCH, 697.0, 709.0);
+    page.annots.push(format!(
+        "<< /Type /Annot /Subtype /Highlight /Rect [{x} {y0} {x1} {y1}] \
+         /QuadPoints [{x} {y1} {x1} {y1} {x} {y0} {x1} {y0}] >>"
+    ));
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert_eq!(text.matches("1234,56").count(), 1, "{text}");
+    assert!(!text.contains(",,") && !text.contains("123456"), "{text}");
+    let list = &out.document.facets.annotations;
+    assert_eq!(list[0].quoted.as_deref(), Some("1234,56"), "{list:?}");
+    assert!(
+        separator_losses(&out).is_empty(),
+        "{:?}",
+        out.document.losses
+    );
+    assert_eq!(
+        found_by(&out),
+        [
+            "Found by: 1 decimal separator on this page is a drawn mark, not text; it is \
+          written as \",\" as in 2 amounts written as text in this file."
+        ]
+    );
+}
