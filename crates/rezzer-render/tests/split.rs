@@ -1970,11 +1970,9 @@ fn read_bullet(content: &str) -> Option<Read> {
         let image = content[..start].ends_with('!');
         let note = path.to_ascii_lowercase().ends_with(".md");
         let in_code = spans.iter().any(|(s, e)| (*s..*e).contains(&close_text));
-        if !image && note && relative(&path) && !in_code && !reserved(&path) {
-            if start == open {
-                return relation_type(&content[..open]).map(|k| Read::Relation(k, path));
-            }
-            return None;
+        // Every note link counts; the one that starts at the first `[` is the target.
+        if !image && note && relative(&path) && !in_code && !reserved(&path) && start == open {
+            return relation_type(&content[..open]).map(|k| Read::Relation(k, path));
         }
     }
     None
