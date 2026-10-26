@@ -58,6 +58,7 @@ pub(crate) fn locate_until(
     order.sort_unstable_by_key(|&i| (points[i].row, points[i].col));
     let mut next = 0;
     for i in order {
+        crate::work::add(1);
         if stop() {
             return None;
         }
