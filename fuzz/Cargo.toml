@@ -30,7 +30,7 @@ barcodes = { path = "../crates/formats/barcodes", features = ["encode"] }
 rezzer-read-pdf = { path = "../crates/readers/rezzer-read-pdf" }
 fileattrs = { path = "../crates/formats/fileattrs" }
 # Builds the small packages of the part reader targets (stored entries only).
-zip = { version = "=9.0.5", default-features = false }
+zip = { version = "=9.1.2", default-features = false }
 
 # Not part of the workspace: cargo-fuzz needs nightly.
 [workspace]
