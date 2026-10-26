@@ -81,11 +81,13 @@ brotli-decompressor = "=6.2.0"
 hayro = "=0.8.0"
 hayro-interpret = "=0.8.0"
 hayro-syntax = "=0.8.0"
-# The versions hayro-interpret 0.8.0 uses, so its glyph and font types are the same types.
+# The version hayro-interpret 0.8.0 uses, so its glyph types are the same types.
 kurbo = "=0.13.1"
-skrifa = "=0.46.2"
+# Newer than the skrifa 0.46 of hayro-interpret 0.8.0. Rezzer gives skrifa only font bytes and
+# no skrifa type comes from hayro, so the two copies stay apart until hayro moves.
+skrifa = "=0.49.0"
 # skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
-read-fonts = { version = "=0.43.3", features = ["agl"] }
+read-fonts = { version = "=0.46.0", features = ["agl"] }
 unicode-bidi = "=0.3.18"
 # Barcode and QR code reading. Its default features pull in the image crate and the encoders;
 # Rezzer hands it Luma8 pixels. MaxiCode stays off through the formats each pass asks for.
