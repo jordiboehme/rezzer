@@ -111,8 +111,10 @@ pub(crate) fn style_in(pages: &[PageItems]) -> (SeparatorStyle, Votes) {
 struct Evidence {
     /// Amounts with `,` and with `.` before their last two digits.
     decimal: [u32; 2],
-    /// Amounts with groups of three digits after `,` and after `.`.
-    group: [u32; 2],
+    /// Amounts with groups of three digits after `,` and after `.`, by the decimal character
+    /// of the amount (`,` then `.`): only the amounts with the decimal character the vote
+    /// sets vote for the group character.
+    group: [[u32; 2]; 2],
     /// Dates with `.`, `/` and `-`.
     date: [u32; 3],
 }
@@ -144,22 +146,30 @@ impl Evidence {
             if rate_follows(&text[a.end..]) {
                 continue;
             }
-            if let Some(k) = AMOUNT_SEPS.iter().position(|&c| c == a.decimal) {
-                self.decimal[k] += 1;
-            }
-            if let Some(k) = a
+            let Some(d) = AMOUNT_SEPS.iter().position(|&c| c == a.decimal) else {
+                continue;
+            };
+            self.decimal[d] += 1;
+            if let Some(g) = a
                 .group
                 .and_then(|g| AMOUNT_SEPS.iter().position(|&c| c == g))
             {
-                self.group[k] += 1;
+                self.group[d][g] += 1;
             }
         }
     }
 
     /// Per kind, the character the vote of [`vote`] gives.
+    /// The group character is voted for only by the amounts with the decimal character that
+    /// won, and is never that character: the minority of a mixed decimal vote cannot set it.
     fn style(&self) -> (SeparatorStyle, Votes) {
         let decimal = vote(&self.decimal, &AMOUNT_SEPS);
-        let group = vote(&self.group, &AMOUNT_SEPS);
+        let group = decimal
+            .and_then(|(d, _)| {
+                let k = AMOUNT_SEPS.iter().position(|&c| c == d)?;
+                vote(&self.group[k], &AMOUNT_SEPS)
+            })
+            .filter(|(g, _)| decimal.is_some_and(|(d, _)| d != *g));
         let date = vote(&self.date, &DATE_SEPS);
         let style = SeparatorStyle {
             decimal: decimal.map(|(c, _)| c),
@@ -529,7 +539,7 @@ pub(crate) fn insert(
             && g.len == 1
             && bytes.get(g.start as usize).is_some_and(u8::is_ascii_digit)
     };
-    let mut after: Vec<(usize, char)> = Vec::new();
+    let mut after: Vec<(usize, char, (f32, f32))> = Vec::new();
     let mut work = 0usize;
     let mut whole = true;
     'pairs: for i in 0..glyphs.len() - 1 {
@@ -542,22 +552,43 @@ pub(crate) fn insert(
         if !same_way || (b.size - a.size).abs() > 0.05 * size {
             continue;
         }
-        // The glyph's own frame: along the baseline and up from it.
-        let (d, up) = ((a.dx, a.dy), (-a.dy, a.dx));
+        // The glyph's own frame: along the baseline and up from it. Vertical writing goes on
+        // down the column, across its baseline.
+        let (d, up) = if a.vertical {
+            ((a.dy, -a.dx), (a.dx, a.dy))
+        } else {
+            ((a.dx, a.dy), (-a.dy, a.dx))
+        };
         let along = |x: f32, y: f32| (x - a.x) * d.0 + (y - a.y) * d.1;
         let across = |x: f32, y: f32| (x - a.x) * up.0 + (y - a.y) * up.1;
         if across(b.x, b.y).abs() > 0.1 * size {
             continue;
         }
-        let (adv_a, adv_b) = (a.adv.unwrap_or(0.5 * size), b.adv.unwrap_or(0.5 * size));
-        let (from, to) = (adv_a / 2.0, along(b.x, b.y) + adv_b / 2.0);
-        // Neighbours: the second digit follows the first within a font size.
-        if to <= from || along(b.x, b.y) - adv_a > size {
-            continue;
-        }
-        // Where a mark's middle may be: between the digit middles, from 0.3 sizes under the
-        // baseline to the top of the highest mark that may stand on it.
-        let (t0, t1) = (-0.3 * size, 0.3 * size + 0.25 * size.min(2.0 * MARK_LONG));
+        let step = along(b.x, b.y);
+        let (from, to, t0, t1) = if a.vertical {
+            // Where a glyph of vertical writing has its origin depends on the font, so the
+            // mark is looked for around the step from one digit to the next, across the
+            // column.
+            if step <= 0.0 || step > 2.0 * size {
+                continue;
+            }
+            (0.25 * step, 1.25 * step, -0.6 * size, 0.6 * size)
+        } else {
+            let (adv_a, adv_b) = (a.adv.unwrap_or(0.5 * size), b.adv.unwrap_or(0.5 * size));
+            let (from, to) = (adv_a / 2.0, step + adv_b / 2.0);
+            // Neighbours: the second digit follows the first within a font size.
+            if to <= from || step - adv_a > size {
+                continue;
+            }
+            // Where a mark's middle may be: between the digit middles, from 0.3 sizes under
+            // the baseline to the top of the highest mark that may stand on it.
+            (
+                from,
+                to,
+                -0.3 * size,
+                0.3 * size + 0.25 * size.min(2.0 * MARK_LONG),
+            )
+        };
         let corners = [(from, t0), (from, t1), (to, t0), (to, t1)]
             .map(|(s, t)| (a.x + s * d.0 + t * up.0, a.y + s * d.1 + t * up.1));
         let lo = |k: fn(&(f32, f32)) -> f32| corners.iter().map(k).fold(f32::MAX, f32::min);
@@ -585,14 +616,28 @@ pub(crate) fn insert(
                     .map(|(x, y)| across(x, y));
                 let bottom = ts.iter().copied().fold(f32::MAX, f32::min);
                 let top = ts.iter().copied().fold(f32::MIN, f32::max);
-                if s > from && s < to && bottom.abs() <= 0.3 * size && top - bottom <= 0.5 * size {
-                    after.push((i, if readable { SEP } else { SEP_TURNED }));
+                let fits = if a.vertical {
+                    // Anywhere across the column: such a number is never read anyway.
+                    bottom >= t0 && top <= t1
+                } else {
+                    bottom.abs() <= 0.3 * size && top - bottom <= 0.5 * size
+                };
+                if s > from && s < to && fits {
+                    // The placeholder stands just after the first digit, on its way to the
+                    // second one, so it stays between them in reading order.
+                    let ahead = if a.vertical {
+                        0.1 * step
+                    } else {
+                        0.75 * a.adv.unwrap_or(0.5 * size)
+                    };
+                    let at = (a.x + ahead * d.0, a.y + ahead * d.1);
+                    after.push((i, if readable { SEP } else { SEP_TURNED }, at));
                     continue 'pairs;
                 }
             }
         }
     }
-    let (Some(&(last, _)), Ok(at)) = (after.last(), u32::try_from(text.len())) else {
+    let (Some(&(last, ..)), Ok(at)) = (after.last(), u32::try_from(text.len())) else {
         return whole;
     };
     // Each placeholder has its text once at the end of the page's text.
@@ -604,34 +649,36 @@ pub(crate) fn insert(
     let n = glyphs.len();
     glyphs.resize(n + after.len(), glyphs[last]);
     let (mut src, mut dst) = (n, glyphs.len());
-    for &(i, c) in after.iter().rev() {
+    for &(i, c, (x, y)) in after.iter().rev() {
         while src > i + 1 {
             src -= 1;
             dst -= 1;
             glyphs[dst] = glyphs[src];
         }
-        let a = glyphs[i];
-        let adv = a.adv.unwrap_or(0.5 * a.size.max(0.1));
         dst -= 1;
-        // Inside the first digit with no advance, so it joins the digits without a space.
+        // With no advance, so it joins the digits without a space.
         glyphs[dst] = Gl {
             start: start(c),
             len,
-            x: a.x + 0.75 * adv * a.dx,
-            y: a.y + 0.75 * adv * a.dy,
+            x,
+            y,
             adv: Some(0.0),
-            ..a
+            ..glyphs[i]
         };
     }
     whole
 }
 
+/// Marks of one line lie within this many points of each other across it.
+const DASH_SNAP: f32 = 0.1;
+
 /// Lines drawn as rows of marks: dashed or dotted rules of filled dashes, which are marks by
-/// shape. Marks of one direction on one line (their middles within 0.1 points across it, the
-/// same thickness), each at most its own length after the one before, make one line when
-/// they are at least three. `marks` come back sorted by direction, line and start.
-pub(crate) fn dashed_rules(marks: &mut [[f32; 4]]) -> Vec<Rule> {
-    // Along the long side: (across, start, end, thickness).
+/// shape. Marks of one direction on one line (their middles within [`DASH_SNAP`] across it,
+/// the same thickness), each at most its own length after the one before, make one line when
+/// they are at least three. The marks of such lines are taken out of `marks`: they are
+/// rules, not separators.
+pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
+    // Along the long side: (upright, across, start, end, thickness).
     let flat = |m: &[f32; 4]| {
         let (w, h) = (m[2] - m[0], m[3] - m[1]);
         if w >= h {
@@ -642,52 +689,66 @@ pub(crate) fn dashed_rules(marks: &mut [[f32; 4]]) -> Vec<Rule> {
     };
     marks.sort_by(|a, b| {
         let (fa, fb) = (flat(a), flat(b));
-        fa.0.cmp(&fb.0)
-            .then(fa.1.total_cmp(&fb.1))
-            .then(fa.2.total_cmp(&fb.2))
+        fa.0.cmp(&fb.0).then(fa.1.total_cmp(&fb.1))
     });
     let mut out = Vec::new();
+    let mut dashed = vec![false; marks.len()];
     let mut i = 0;
     while i < marks.len() {
-        let (upright, across, start, mut end, thick) = flat(&marks[i]);
-        let mut count = 1;
-        let mut j = i + 1;
-        while let Some(m) = marks.get(j) {
-            let (u, c, s, e, t) = flat(m);
-            let gap = s - end;
-            if u != upright
-                || (c - across).abs() > 0.1
-                || (t - thick).abs() > 0.1
-                || gap < 0.0
-                || gap > e - s
-            {
-                break;
+        // One line: marks of one direction whose middles lie within the snap of the first,
+        // so a little float noise across it neither loses nor splits it.
+        let (upright, across, ..) = flat(&marks[i]);
+        let n = marks[i..]
+            .iter()
+            .take_while(|m| {
+                let (u, c, ..) = flat(m);
+                u == upright && c - across <= DASH_SNAP
+            })
+            .count();
+        let line = &mut marks[i..i + n];
+        line.sort_by(|a, b| flat(a).2.total_cmp(&flat(b).2));
+        let mut k = 0;
+        while k < n {
+            let (_, _, start, mut end, thick) = flat(&line[k]);
+            let mut sum = flat(&line[k]).1;
+            let mut j = k + 1;
+            while let Some(m) = line.get(j) {
+                let (_, c, s, e, t) = flat(m);
+                let gap = s - end;
+                if (t - thick).abs() > 0.1 || gap < 0.0 || gap > e - s {
+                    break;
+                }
+                end = e;
+                sum += c;
+                j += 1;
             }
-            end = e;
-            count += 1;
-            j += 1;
+            if j - k >= 3 {
+                let at = sum / (j - k) as f32;
+                dashed[i + k..i + j].iter_mut().for_each(|d| *d = true);
+                out.push(if upright {
+                    Rule {
+                        x0: at,
+                        y0: start,
+                        x1: at,
+                        y1: end,
+                        kind: RuleKind::Line,
+                    }
+                } else {
+                    Rule {
+                        x0: start,
+                        y0: at,
+                        x1: end,
+                        y1: at,
+                        kind: RuleKind::Line,
+                    }
+                });
+            }
+            k = j;
         }
-        if count >= 3 {
-            out.push(if upright {
-                Rule {
-                    x0: across,
-                    y0: start,
-                    x1: across,
-                    y1: end,
-                    kind: RuleKind::Line,
-                }
-            } else {
-                Rule {
-                    x0: start,
-                    y0: across,
-                    x1: end,
-                    y1: across,
-                    kind: RuleKind::Line,
-                }
-            });
-        }
-        i = j;
+        i += n;
     }
+    let mut keep = dashed.iter().map(|d| !d);
+    marks.retain(|_| keep.next().unwrap_or(true));
     out
 }
 
@@ -896,6 +957,93 @@ mod tests {
         let r = &rules[0];
         assert_eq!((r.x0, r.x1, r.kind), (100.0, 111.5, RuleKind::Line));
         assert!((r.y0 - 600.15).abs() < 0.01 && r.y0 == r.y1);
+        // The dashes of the rule are no separators; the two marks stay.
+        assert_eq!(marks.len(), 2, "{marks:?}");
+    }
+
+    #[test]
+    fn a_little_noise_across_a_dashed_line_keeps_it_whole() {
+        // Middles across the line at 600.15, 600.1499, 600.1501 and 600.16, as a transform or
+        // a writer leaves them: still one line from the first dash to the last.
+        let jitter = [0.0, -0.0001, 0.0001, 0.01];
+        let mut marks: Vec<[f32; 4]> = (0..12)
+            .map(|k| {
+                let (x, y) = (100.0 + 2.5 * k as f32, 600.0 + jitter[k % 4]);
+                [x, y, x + 1.5, y + 0.3]
+            })
+            .collect();
+        let rules = dashed_rules(&mut marks);
+        assert_eq!(rules.len(), 1, "{rules:?}");
+        assert_eq!((rules[0].x0, rules[0].x1), (100.0, 129.0));
+        assert!(marks.is_empty());
+    }
+
+    #[test]
+    fn a_group_never_comes_from_the_minority_of_the_decimal_vote() {
+        // The decimal comma wins 3 to 1; the one grouped amount has a decimal point, so its
+        // comma is no group character.
+        let (style, votes) = style_of(&["1,50 2,50 3,50", "1,234.56"]);
+        assert_eq!((style.decimal, style.group), (Some(','), None));
+        assert_eq!(votes.group, Vote::default());
+        let mut why = Vec::new();
+        let text = format!("1{SEP}234{SEP}56");
+        let fixed = fix(&text, &style, &mut |_, r| why.push(r));
+        assert_eq!(fixed, "123456");
+        assert_eq!(why, [Err(NO_GROUP)]);
+    }
+
+    /// One glyph of `text[k]` at (x, y), 9.5 points, reading along +x.
+    fn digit(k: u32, x: f32, y: f32, vertical: bool) -> Gl {
+        Gl {
+            start: k,
+            len: 1,
+            x,
+            y,
+            dx: 1.0,
+            dy: 0.0,
+            size: 9.5,
+            adv: Some(5.7),
+            bold: false,
+            italic: false,
+            mcid: None,
+            invisible: false,
+            layer: None,
+            vertical,
+            joined: false,
+            actual: None,
+            link: None,
+        }
+    }
+
+    #[test]
+    fn a_mark_between_vertical_digits_is_never_read() {
+        // Six digits down a column of vertical writing, 9.5 points apart, and a mark across
+        // the column between the fourth and the fifth.
+        let mut text = String::from("123456");
+        let mut glyphs: Vec<Gl> = (0..6)
+            .map(|k| digit(k, 100.0, 700.0 - 9.5 * k as f32, true))
+            .collect();
+        let mut marks = vec![[99.88, 665.0, 100.12, 667.0]];
+        assert!(insert(&mut glyphs, &mut text, &mut marks, Turn::None));
+        assert_eq!(glyphs.len(), 7);
+        let placed = &glyphs[4];
+        assert_eq!(&text[placed.start as usize..][..3], SEP_TURNED.to_string());
+        // Between the fourth digit and the fifth, down the column.
+        assert!(
+            placed.y < glyphs[3].y && placed.y > glyphs[5].y,
+            "{placed:?}"
+        );
+        let texts: String = glyphs
+            .iter()
+            .map(|g| &text[g.start as usize..(g.start + g.len) as usize])
+            .collect();
+        let mut why = Vec::new();
+        let style = SeparatorStyle {
+            decimal: Some(','),
+            ..SeparatorStyle::default()
+        };
+        assert_eq!(fix(&texts, &style, &mut |_, r| why.push(r)), "123456");
+        assert_eq!(why, [Err(TURNED)]);
     }
 
     #[test]

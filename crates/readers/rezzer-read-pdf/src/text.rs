@@ -909,6 +909,16 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  object limit allows; their glyphs count as unmapped"
             )));
         }
+        // Dashed rules drawn as rows of marks are rules all the same, and their
+        // marks are no separators.
+        let kept_marks = dev.drawn_marks.len();
+        for r in crate::marks::dashed_rules(&mut dev.drawn_marks) {
+            if dev.rules.len() < dev.cap {
+                dev.rules.push(r);
+            } else {
+                dev.rules_cut = true;
+            }
+        }
         // A separator drawn as a mark between two digits puts a placeholder between them, read
         // once the whole file is (`marks::resolve`). The quotes below are taken with it.
         let turn = page_turn(
@@ -922,19 +932,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  too many marks near its digits"
             )));
         }
-        // Dashed rules drawn as rows of marks are rules all the same.
-        for r in crate::marks::dashed_rules(&mut dev.drawn_marks) {
-            if dev.rules.len() < dev.cap {
-                dev.rules.push(r);
-            } else {
-                dev.rules_cut = true;
-            }
-        }
         if dev.drawn_marks_cut {
             notes.push(Note::Limit(format!(
-                "only the first {} drawn marks on page {n} are looked at as separators: the page \
-                 draws more than it may keep",
-                dev.drawn_marks.len()
+                "only the first {kept_marks} drawn marks on page {n} are looked at as separators: \
+                 the page draws more than it may keep"
             )));
         }
         let texts = Texts {
