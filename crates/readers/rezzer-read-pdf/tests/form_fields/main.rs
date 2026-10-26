@@ -26,8 +26,9 @@ use common::{all_text, label};
 use draw::{Stroke, bar_h, bar_v, mark_b};
 use rezzer_model::{Block, plain_text};
 use shapes::{
-    Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row, header_grid,
-    label_block, overflow_rows, page, rows_page, shape_page, short_value_rows, total_column,
+    Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row,
+    grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page, rows_page,
+    shape_page, short_value_rows, total_column,
 };
 
 #[global_allocator]
@@ -299,6 +300,32 @@ fn mixed_directions_in_a_row_give_a_loss() {
         1,
     );
     assert_fields(&b);
+}
+
+/// A grid of fields beside the header grid on the same top rule, with rows of another pitch:
+/// the rules of the two grids interleave, yet each grid is one table whose fields all pair
+/// right, with one field or two in each row of the grid beside it.
+#[test]
+fn a_grid_beside_another_of_another_row_pitch_pairs_both() {
+    for two in [true, false] {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let b = grids_side_by_side(&g, two);
+            let out = read_pages(&[&b]);
+            let broken = check_fields(&out, &b);
+            assert!(
+                broken.is_empty(),
+                "{look}, two {two}: {broken:#?}\n{:#?}",
+                blocks(&out)
+            );
+        }
+    }
+}
+
+/// One field alone between two rules is not paired (a caption over a line between rules reads
+/// the same), and a loss names it: it is never left out without a word.
+#[test]
+fn a_lone_field_between_rules_is_named() {
+    assert_fields(&shape_page(&REAL, lone_field));
 }
 
 /// Two rows of two fields each without dividers, the second field narrow.

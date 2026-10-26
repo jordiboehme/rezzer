@@ -823,6 +823,72 @@ fn field_pair_rows(
     top - h * rows.len() as f32
 }
 
+/// The rows of [`beside_grid`]: a label and its value, and a second field of each.
+const BESIDE: [(&str, &str, &str, &str); 4] = [
+    ("Zeitraum", "10.2026", "Blatt", "9"),
+    ("Steuer-Nr", "00000000000", "Kz", "A"),
+    ("SV-Nr", "00000000X000", "Gruppe", "1111"),
+    ("Bank", "Musterbank", "Konto", "4321"),
+];
+
+/// A grid of fields beside the header grid on its top rule (data columns 62 to 96), one row of
+/// [`BESIDE`] for each of `heights` (in data sizes), each a label at the top of its row over a
+/// value on its lower rule, with the second field from column 82 behind a divider when `two`:
+/// rows of another pitch than the grid beside it, so the rules of the two grids interleave.
+/// Returns its bottom.
+pub(crate) fn beside_grid(g: &Geo, b: &mut Built, top: f32, heights: &[f32], two: bool) -> f32 {
+    let (x0, x1) = (g.col(62) - 0.12, g.col(if two { 96 } else { 82 }));
+    let lab = |k: usize| g.col(k) + 0.18 * g.label;
+    let mut rule = top;
+    b.page.template += &g.hrule(x0, x1, rule);
+    for (&(l, v, l2, v2), &h) in BESIDE.iter().zip(heights) {
+        let h = h * g.data;
+        b.page.template += &label(lab(62), rule - 0.86 * g.data, g.label, l);
+        let mut parts = vec![(62, v)];
+        b.expect(l, v);
+        if two {
+            b.page.template += &label(lab(82), rule - 0.86 * g.data, g.label, l2);
+            b.page.template += &g.divider(g.col(82) - 0.06, rule, rule - h);
+            parts.push((82, v2));
+            b.expect(l2, v2);
+        }
+        g.values(b, rule - h + 0.17 * g.data, &parts);
+        rule -= h;
+        b.page.template += &g.hrule(x0, x1, rule);
+    }
+    rule
+}
+
+/// The header grid with a grid beside it on the same top rule whose rows are of another
+/// pitch, of one field or of two fields a row.
+pub(crate) fn grids_side_by_side(g: &Geo, two: bool) -> Built {
+    let mut b = Built::new(g);
+    let top = 760.0 + g.dy;
+    header_grid(g, &mut b, top);
+    beside_grid(g, &mut b, top, &[3.2, 2.0, 3.2, 2.0], two);
+    b.address(g);
+    b
+}
+
+/// One field alone between two rules: a label over its value, nothing beside it or under it;
+/// a vertical rule far from it, so the page has rules of both directions.
+pub(crate) fn lone_field(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    b.page.template += &g.vrule(30.0 + g.dx, 200.0 + g.dy, 300.0 + g.dy);
+    b.page.template += &g.hrule(g.col(0) - 0.12, g.col(20), top);
+    b.page.template += &g.hrule(g.col(0) - 0.12, g.col(20), top - h);
+    b.page.template += &label(
+        g.col(0) + 0.18 * g.label,
+        top - 0.86 * g.data,
+        g.label,
+        "Kundennr",
+    );
+    g.values(b, top - 2.23 * g.data, &[(0, "98765")]);
+    b.values.push("98765".into());
+    b.fields.push(("Kundennr", Err(())));
+    top - h
+}
+
 /// A page of one shape drawn by `draw` from the top, with the address under it.
 pub(crate) fn shape_page(g: &Geo, draw: fn(&Geo, &mut Built, f32) -> f32) -> Built {
     let mut b = Built::new(g);

@@ -169,8 +169,8 @@ pub(in crate::tables) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Optio
 
 /// Why fields between rules are not paired: a value over a field edge, a value under none of
 /// the labels of its part of the row or under two, labels that do not stand over or beside
-/// their values, and labels under the rule their values stand on whose values are not all
-/// clear.
+/// their values, labels under the rule their values stand on whose values are not all clear,
+/// and one field alone.
 const ACROSS: &str = "a value stands across two fields";
 
 const UNDER_NONE: &str = "a value stands under none of the labels of its field or under two";
@@ -179,6 +179,9 @@ const NOT_FIELDS: &str = "its labels do not all stand over or beside their value
 
 const UNDER_UNCLEAR: &str = "its labels stand under the rule their values stand on, and not \
      every value's label is clear";
+
+const LONE: &str = "it is one field alone between its rules, which a caption over a line of \
+     text between rules looks like";
 
 /// The width of a character of a data font, as a share of its size: a value line padded
 /// into its fields has one to three of them between two fields.
@@ -344,9 +347,9 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
 /// the strip is a row of fields. A cell a run stands across (a value line the dividers could
 /// not cut at a word gap) or a value under no label of its own leaves its fields as text, and
 /// a strip whose labels do not all stand over or beside their values leaves all of them as
-/// text; a loss in `unsure` names them. Strips at the same heights are one row; rows one under
-/// the other, each starting at the rule the one above ends at, make one table, when it has two
-/// fields or more and one of them a value. Text just beyond such a group can show that its
+/// text; a loss in `unsure` names them. Strips joined by their rules (see [`connected`]) make
+/// one table, when it has two fields or more and one of them a value; one field alone with a
+/// value is named in a loss. Text just beyond such a group can show that its
 /// labels stand under the rule their values stand on (see [`beyond`]): its fields are then
 /// read that way (see [`pair_under`]), or left as text with a loss when that is not clear.
 /// Runs `busy` names are not looked at. The runs of each table found go to `claimed` under
@@ -477,21 +480,8 @@ pub(in crate::tables) fn field_strips(
             left_out: !left_out.is_empty(),
         });
     }
-    // Rows of strips at the same heights, top first, each left to right; rows one under the
-    // other make a table.
     strips.sort_by(|a, b| b.top.total_cmp(&a.top).then(a.x0.total_cmp(&b.x0)));
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut last: Option<(f32, f32)> = None;
-    for (k, s) in strips.iter().enumerate() {
-        let same_row =
-            last.is_some_and(|(t, b)| (t - s.top).abs() <= SNAP && (b - s.bottom).abs() <= SNAP);
-        let below = last.is_some_and(|(_, b)| (b - s.top).abs() <= SNAP);
-        match groups.last_mut() {
-            Some(g) if same_row || below => g.push(k),
-            _ => groups.push(vec![k]),
-        }
-        last = Some((s.top, s.bottom));
-    }
+    let groups = connected(&strips);
     for g in &groups {
         overflow_back(flow, &mut strips, g);
     }
@@ -499,7 +489,14 @@ pub(in crate::tables) fn field_strips(
     let mut outside: HashSet<usize> = HashSet::new();
     for g in groups {
         let list: Vec<&Field> = g.iter().flat_map(|&k| &strips[k].fields).collect();
-        if list.len() < 2 || list.iter().all(|f| f.value.is_empty()) {
+        if list.iter().all(|f| f.value.is_empty()) {
+            continue;
+        }
+        // One field alone between its rules reads like a caption over a line: it is not
+        // paired, and that is said.
+        if list.len() < 2 {
+            let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+            say(unsure, &names, LONE);
             continue;
         }
         let free = |i: usize| !busy(i) && !outside.contains(&i);
@@ -528,6 +525,49 @@ pub(in crate::tables) fn field_strips(
         claim(claimed, tables.len(), &list);
         tables.push(p);
     }
+}
+
+/// The groups of `strips` (sorted top first, then left to right) that make one table each, in
+/// that order: strips at the same heights are one row, and a strip whose top rule is the
+/// bottom rule of another over a stretch both share goes on under it. Strips are joined by
+/// their rules, not by their order on the page, so a grid beside another one with rows of
+/// another pitch, whose strips interleave with its own, splits neither.
+fn connected(strips: &[Strip]) -> Vec<Vec<usize>> {
+    let mut root: Vec<usize> = (0..strips.len()).collect();
+    fn find(root: &mut [usize], mut k: usize) -> usize {
+        while root[k] != k {
+            root[k] = root[root[k]];
+            k = root[k];
+        }
+        k
+    }
+    for (a, s) in strips.iter().enumerate() {
+        // The strips after it in the order start no higher; past its bottom rule none meets it.
+        for (b, t) in strips.iter().enumerate().skip(a + 1) {
+            if t.top < s.bottom - SNAP {
+                break;
+            }
+            let same_row = (s.top - t.top).abs() <= SNAP && (s.bottom - t.bottom).abs() <= SNAP;
+            let under = (s.bottom - t.top).abs() <= SNAP && s.x0 < t.x1 && t.x0 < s.x1;
+            if same_row || under {
+                let (ra, rb) = (find(&mut root, a), find(&mut root, b));
+                root[ra.max(rb)] = ra.min(rb);
+            }
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut at: HashMap<usize, usize> = HashMap::new();
+    for k in 0..strips.len() {
+        let r = find(&mut root, k);
+        match at.get(&r) {
+            Some(&g) => groups[g].push(k),
+            None => {
+                at.insert(r, groups.len());
+                groups.push(vec![k]);
+            }
+        }
+    }
+    groups
 }
 
 /// What a value is, to tell the values of a column of fields apart: a number (digits with
