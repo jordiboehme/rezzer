@@ -408,15 +408,16 @@ fn lay_out(
             })
         })
         .collect();
-    let style = Style::new(&texts);
-    drop(texts);
-    let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
-    // The pages whose text was laid out.
-    let mut read_pages: HashSet<u32> = HashSet::new();
     let tree = match pdf {
         Some(pdf) if pdf.tagged() => pdf.struct_tree(),
         _ => None,
     };
+    // The layout reads a page by its tags only with a structure tree.
+    let style = Style::learn(&texts, tree.is_some());
+    drop(texts);
+    let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
+    // The pages whose text was laid out.
+    let mut read_pages: HashSet<u32> = HashSet::new();
     let figures = pdf.map(render::page_figures).unwrap_or_default();
     let furniture = render::furniture(read.values());
     let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);

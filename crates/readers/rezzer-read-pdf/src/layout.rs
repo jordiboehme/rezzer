@@ -231,6 +231,8 @@ pub(crate) struct Style {
     /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
     /// height, with digits replaced.
     furniture: HashMap<Furniture, Vec<(f32, f32)>>,
+    /// The footnote legend of each untagged page that has one, by the page's runs.
+    legends: HashMap<u32, footnotes::Found>,
 }
 
 /// One visual line.
@@ -332,8 +334,15 @@ fn size_key(size: f32) -> i32 {
 }
 
 impl Style {
-    /// Learns body size, heading sizes and running headers and footers from every page.
+    /// [`Style::learn`] for an untagged file.
+    #[cfg(test)]
     pub(crate) fn new(pages: &[PageText<'_>]) -> Style {
+        Style::learn(pages, false)
+    }
+
+    /// Learns body size, heading sizes, running headers and footers and, for an untagged
+    /// file (`tagged` false), the footnote legends from every page.
+    pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
         let mut seen: HashMap<Furniture, Vec<(f32, u32)>> = HashMap::new();
         // Texts that stand in the middle of some page are content, wherever else they stand.
         // A bare page number is not held against: numbers fill tables too.
@@ -387,21 +396,40 @@ impl Style {
         for p in pages {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
-            // A legend of footnotes is no body text: a dense legend in a tiny size would make
-            // every line a heading.
-            let legend = footnotes::legend_runs(p.runs);
+            // The lines without running headers and footers, as the layout of the page sees
+            // them, and where each starts among the page's runs.
+            let mut body = Vec::with_capacity(all.len());
+            let mut starts = Vec::with_capacity(all.len());
             let mut at = 0;
-            for (l, b) in all.iter().zip(&bands) {
-                let first = at;
-                at += l.runs.len();
-                if b.is_some() {
-                    continue;
+            for (l, b) in all.into_iter().zip(&bands) {
+                if b.is_none() {
+                    starts.push(at);
                 }
+                at += l.runs.len();
+                if b.is_none() {
+                    body.push(l);
+                }
+            }
+            // A legend of footnotes is no body text: a dense legend in a tiny size would make
+            // every line a heading. A tagged file says its notes.
+            let legend = if tagged {
+                None
+            } else {
+                footnotes::find_lines(&body, &starts)
+            };
+            let in_legend: HashSet<usize> = legend
+                .as_ref()
+                .map(|f| f.legend_runs().collect())
+                .unwrap_or_default();
+            for (l, first) in body.iter().zip(&starts) {
                 for (k, r) in l.runs.iter().enumerate() {
-                    if !legend.contains(&(first + k)) {
+                    if !in_legend.contains(&(first + k)) {
                         *chars.entry(size_key(r.size)).or_default() += ink(&r.text);
                     }
                 }
+            }
+            if let Some(found) = legend {
+                style.legends.insert(p.page, found);
             }
         }
         // The most ink characters wins; on a tie the smaller size. Padding is no text: a data
@@ -899,7 +927,7 @@ pub(crate) fn page_blocks_at(
     // Footnotes are found before tables and lists: a legend set in columns is no table, and
     // a star that opens a footnote is no bullet. A tagged file says its notes.
     let legend = if cx.tree.is_none() {
-        footnotes::take(page, &mut flow)
+        footnotes::take(page, &mut flow, cx.style.legends.get(&page))
     } else {
         footnotes::Legend::default()
     };
@@ -3458,6 +3486,32 @@ mod tests {
         assert_eq!(laid.cut, Some(Cut::Item { block: 1, item: 3 }));
     }
 
+    /// The legend leaves the body size only in an untagged file, where the layout takes it
+    /// too; a tagged file counts it, as the text sizes of its pages do.
+    #[test]
+    fn only_an_untagged_legend_leaves_the_body_size() {
+        let mut runs = vec![run("Wert1) und Wert2) gemeldet", 0, 700.0, 9.0)];
+        runs.extend((1..=2).map(|k| {
+            run(
+                &format!("{k}) Muster der Erklaerung zu diesem Wert mit vielen Worten"),
+                k,
+                140.0 - 8.0 * k as f32,
+                6.0,
+            )
+        }));
+        let pages = [PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }];
+        let untagged = Style::learn(&pages, false);
+        assert_eq!(untagged.body_size, 9.0);
+        assert!(untagged.legends.contains_key(&1));
+        let tagged = Style::learn(&pages, true);
+        assert_eq!(tagged.body_size, 6.0);
+        assert!(tagged.legends.is_empty());
+    }
+
     /// A stop inside the legend: the references to the footnotes it cut are text again, so
     /// no reference is left without its footnote, whatever the limit.
     #[test]
@@ -3480,7 +3534,12 @@ mod tests {
                 6.0,
             )
         }));
-        let style = Style::default();
+        // The style pass finds the legend the layout takes.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
         let mut cut = 0;
         for max_elements in 1..60 {
             let budget = Budget::new(rezzer_limits::Limits {

@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 
 use rezzer_model::{Block, Inline};
 
-use super::{EDGE, Flow, GAP_RATIO, Line, Run, SIZE_SLACK, ink, lines};
+use super::{EDGE, Flow, GAP_RATIO, Line, Run, SIZE_SLACK, ink};
 
 /// A run of digits opens a legend line raised when it is this many times the size of the
 /// text after it or smaller, or its baseline stands this many times that size higher.
@@ -75,6 +75,7 @@ pub(super) struct Legend {
 }
 
 /// One footnote while the legend is read.
+#[derive(Debug, Clone)]
 struct Entry {
     mark: NoteMark,
     /// The bytes of its first piece's trimmed text the marker takes.
@@ -190,16 +191,48 @@ struct Raised {
     place: Place,
 }
 
-/// What [`find`] reads: the entries, and the raised reference numbers above them.
-struct Found {
+/// What [`find`] reads: the entries, and the raised reference numbers above them. Run
+/// indices are of the page's runs as the style pass sees them.
+#[derive(Debug, Clone)]
+pub(super) struct Found {
     entries: Vec<Entry>,
     raised: Vec<Raised>,
 }
 
-/// Finds the legend of the untagged page `page`, marks the raised references to it in `flow`
-/// and takes the legend's runs out of `flow`.
-pub(super) fn take(page: u32, flow: &mut Flow) -> Legend {
-    let Some(found) = find(&flow.runs) else {
+impl Found {
+    /// The runs of the legend.
+    pub(super) fn legend_runs(&self) -> impl Iterator<Item = usize> + '_ {
+        self.entries.iter().flat_map(|e| e.ids.iter().copied())
+    }
+
+    /// `self` with every run index moved to where `place` puts it; `None` when a run is not
+    /// there.
+    fn placed(&self, place: impl Fn(usize) -> Option<usize>) -> Option<Found> {
+        let mut found = self.clone();
+        for e in &mut found.entries {
+            for i in &mut e.ids {
+                *i = place(*i)?;
+            }
+        }
+        for r in &mut found.raised {
+            r.run = place(r.run)?;
+            match &mut r.place {
+                Place::End => {}
+                Place::Inside { word, .. } | Place::Above { word } => *word = place(*word)?,
+            }
+        }
+        Some(found)
+    }
+}
+
+/// Marks the raised references of the untagged page `page` to the legend `found` (by the
+/// style pass, which saw the page's runs `flow` keeps by their place) in `flow`, and takes
+/// the legend's runs out of `flow`.
+pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend {
+    let at = std::mem::take(&mut flow.at);
+    let found = found.and_then(|f| f.placed(|i| at.binary_search(&i).ok()));
+    flow.at = at;
+    let Some(found) = found else {
         return Legend::default();
     };
     let mut entries = found.entries;
@@ -423,14 +456,6 @@ pub(super) fn note(page: u32, n: usize, linked: usize) -> Option<String> {
     Some(what + &refs)
 }
 
-/// The runs of the legend of `runs` (a page in its line order), by index; none when the
-/// page has none.
-pub(super) fn legend_runs(runs: &[Run]) -> HashSet<usize> {
-    find(runs)
-        .map(|f| f.entries.into_iter().flat_map(|e| e.ids).collect())
-        .unwrap_or_default()
-}
-
 /// The labels of the footnote references of `blocks`.
 pub(super) fn referenced(blocks: &mut [Block]) -> HashSet<String> {
     let mut found = HashSet::new();
@@ -472,26 +497,39 @@ fn raised_ref(run: &Run, word: &Run) -> Option<(u8, Option<Split>)> {
         return None;
     }
     let no_digit = |w: &str| w.chars().next_back().is_some_and(|c| !c.is_ascii_digit());
+    let lead = REF_LEAD * size;
     let end = word.x + word.w;
-    if run.x >= end - REF_LEAD * size
-        && run.x - end <= REF_GAP * size
-        && no_digit(word.text.trim_end())
-    {
-        return Some((n, None));
+    // The word end nearest to the number among those it may follow.
+    let mut best: Option<(f32, Option<Split>)> = None;
+    let mut offer = |dist: f32, at: Option<Split>| {
+        if best.is_none_or(|b| dist < b.0) {
+            best = Some((dist, at));
+        }
+    };
+    if run.x >= end - lead && run.x - end <= REF_GAP * size && no_digit(word.text.trim_end()) {
+        offer((run.x - end).abs(), None);
     }
-    // A space by the share of characters may end early after wide letters: the number may
-    // stand past it, up to a little before the end of the next word.
     let spaces = splits(word);
-    spaces.iter().enumerate().find_map(|(k, g)| {
-        let before = word.text[..g.byte].trim_end();
-        let next_end = spaces.get(k + 1).map_or(end, |s| s.from);
-        let last = match g.gap {
-            Some(_) => g.to,
-            None => (next_end - REF_LEAD * size).max(g.to),
+    for (k, g) in spaces.iter().enumerate() {
+        if !no_digit(word.text[..g.byte].trim_end()) {
+            continue;
+        }
+        let (low, high) = match g.gap {
+            Some(_) => (g.from - lead, g.to),
+            // A space by the share of characters may sit off by some letters either way: the
+            // number may stand from the start of the word before to a little before the end
+            // of the word after, and goes after the word end nearest to it.
+            None => {
+                let start = k.checked_sub(1).map_or(word.x, |p| spaces[p].to);
+                let next_end = spaces.get(k + 1).map_or(end, |s| s.from);
+                (start.min(g.from - lead), (next_end - lead).max(g.to))
+            }
         };
-        (run.x >= g.from - REF_LEAD * size && run.x <= last && no_digit(before))
-            .then_some((n, Some(*g)))
-    })
+        if run.x >= low && run.x <= high {
+            offer((run.x - g.from).abs(), Some(*g));
+        }
+    }
+    best.map(|b| (n, b.1))
 }
 
 /// The value of one or two superscript digits.
@@ -587,17 +625,18 @@ fn opening(runs: &[Run]) -> Option<(NoteMark, usize)> {
     opens_text(rest).then(|| (NoteMark::Raised(value), cut(rest)))
 }
 
-/// The references of line `k` of `all`, whose first run is run `start` of the page:
+/// The references of line `k` of `all`, whose first run is run `starts[k]` of the page:
 /// markers that end a word go to `marks`, numbers raised right after a word are returned. A
 /// number that opens the line belongs to the last word of the line before when it stands
 /// raised, smaller and close at that word's end.
 fn references(
     all: &[Line<'_>],
+    starts: &[usize],
     k: usize,
-    start: usize,
     marks: &mut HashSet<NoteMark>,
 ) -> Vec<Raised> {
     let l = &all[k];
+    let start = starts[k];
     marks.extend(l.text.split_whitespace().filter_map(word_mark).map(|m| m.0));
     let mut raised = Vec::new();
     let mut word: Option<(usize, &Run)> = None;
@@ -616,7 +655,7 @@ fn references(
                 };
                 (n, place)
             }),
-            None => above(all, k, start, r),
+            None => above(all, starts, k, r),
         };
         match found {
             Some((n, place)) => {
@@ -636,8 +675,9 @@ fn references(
 
 /// The reference `r`, the first run of line `k`, makes at the end of the line before, with
 /// the index of that line's last run with ink.
-fn above(all: &[Line<'_>], k: usize, start: usize, r: &Run) -> Option<(u8, Place)> {
-    let prev = all.get(k.checked_sub(1)?)?;
+fn above(all: &[Line<'_>], starts: &[usize], k: usize, r: &Run) -> Option<(u8, Place)> {
+    let p = k.checked_sub(1)?;
+    let prev = &all[p];
     let (i, word) = prev
         .runs
         .iter()
@@ -648,8 +688,12 @@ fn above(all: &[Line<'_>], k: usize, start: usize, r: &Run) -> Option<(u8, Place
         return None;
     }
     let (n, gap) = raised_ref(r, word)?;
-    let word = start - prev.runs.len() + i;
-    gap.is_none().then_some((n, Place::Above { word }))
+    gap.is_none().then_some((
+        n,
+        Place::Above {
+            word: starts[p] + i,
+        },
+    ))
 }
 
 /// The pieces of a line: its runs cut where a piece gap parts two runs with ink.
@@ -681,14 +725,21 @@ fn pieces<'a>(l: &Line<'a>) -> Vec<(usize, &'a [Run])> {
 /// of a legend line (cut at piece gaps, so columns side by side stay apart) opens a footnote
 /// with a marker or goes on the footnote of its column on the line above. Pieces that go on
 /// nothing stay text; when they outnumber the footnotes there is no legend.
+#[cfg(test)]
 fn find(runs: &[Run]) -> Option<Found> {
-    let all = lines(runs);
+    let all = super::lines(runs);
     let mut starts = Vec::with_capacity(all.len());
     let mut at = 0;
     for l in &all {
         starts.push(at);
         at += l.runs.len();
     }
+    find_lines(&all, &starts)
+}
+
+/// [`find`] over the lines `all` of a page, line `k` starting at run `starts[k]`: the lines
+/// of the page without its running headers and footers.
+pub(super) fn find_lines(all: &[Line<'_>], starts: &[usize]) -> Option<Found> {
     // Top down by baseline; lines on one baseline keep their order.
     let mut order: Vec<usize> = (0..all.len())
         .filter(|&k| !all[k].text.is_empty())
@@ -717,7 +768,7 @@ fn find(runs: &[Run]) -> Option<Found> {
             break;
         }
         raised.extend(
-            references(&all, k, starts[k], &mut marks)
+            references(all, starts, k, &mut marks)
                 .into_iter()
                 .map(|r| (l.y, r)),
         );
@@ -1009,8 +1060,9 @@ mod tests {
             run("3 C = Chor", 6, 40.0, 54.0, 6.0),
         ];
         let n = runs.len();
+        let found = find(&runs);
         let mut flow = Flow::new(runs, vec![super::super::Slot::Free; n]);
-        let legend = take(1, &mut flow);
+        let legend = take(1, &mut flow, found.as_ref());
         assert_eq!(legend.notes.len(), 3);
         let texts: Vec<(&str, u32, bool)> = flow
             .runs
@@ -1086,6 +1138,18 @@ mod tests {
     }
 
     #[test]
+    fn a_marker_after_a_narrow_word_goes_after_it() {
+        // `Xa ii Yb` by the share of characters: `Xa` ends at 50, `ii` at 65, the run at 80.
+        // The number at 61 stands after the narrow `ii`, nearer its end than the end of `Xa`.
+        let mut word = run("Xa ii Yb", 0, 40.0, 720.0, 9.0);
+        word.w = 40.0;
+        let found = raised_ref(&run("4", 0, 61.0, 722.5, 6.0), &word);
+        assert_eq!(found.and_then(|f| f.1).map(|s| s.byte), Some(6));
+        let first = raised_ref(&run("4", 0, 51.0, 722.5, 6.0), &word);
+        assert_eq!(first.and_then(|f| f.1).map(|s| s.byte), Some(3));
+    }
+
+    #[test]
     fn two_markers_after_one_word_follow_each_other() {
         let mut word = run(" Xa Xb", 0, 40.0, 700.0, 6.6);
         word.w = 15.0;
@@ -1098,8 +1162,9 @@ mod tests {
             run("3 C = Chor", 3, 40.0, 54.0, 6.0),
         ];
         let n = runs.len();
+        let found = find(&runs);
         let mut flow = Flow::new(runs, vec![super::super::Slot::Free; n]);
-        take(1, &mut flow);
+        take(1, &mut flow, found.as_ref());
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).take(4).collect();
         assert_eq!(texts, [" Xa", "p1-2", "p1-3", " Xb"]);
     }
