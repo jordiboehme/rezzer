@@ -8,7 +8,7 @@ File types: `.md`, `.markdown`. Rezzer detects the format by content, not by ext
 
 Built on (versions as tested on 2026-10-19):
 
-- [pulldown-cmark](https://crates.io/crates/pulldown-cmark) 0.13.4 for the structure, with source positions, YAML and TOML frontmatter blocks and wikilinks
+- [pulldown-cmark](https://crates.io/crates/pulldown-cmark) 0.13.5 for the structure, with source positions, YAML and TOML frontmatter blocks and wikilinks
 - Rezzer's own reader for the frontmatter values and the link table
 
 ## What Rezzer reads

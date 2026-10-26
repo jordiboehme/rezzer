@@ -8,7 +8,7 @@ File types: `.pdf`. Rezzer detects the format by content, not by extension.
 
 Built on (versions as used in the development version):
 
-- Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.45.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
+- Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.46.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
 - [hayro](https://crates.io/crates/hayro) 0.8.0 (with hayro-interpret and hayro-syntax) for the text with its position on the page, the exact glyph boxes under an annotation, page renders and as a fallback parser for broken files
 - Rezzer's own crate barcodes for barcodes and QR codes. It uses [rxing](https://crates.io/crates/rxing) 0.9.3 (Apache-2.0) with bounds of its own
 - Rezzer's own reader for the interpretation: reading order, headings, tables, the form logic, field formats in words and revision diffs
