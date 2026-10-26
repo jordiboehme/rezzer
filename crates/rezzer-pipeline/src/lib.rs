@@ -319,7 +319,7 @@ impl Pipeline {
         {
             return RunResult::failed(message);
         }
-        let (document, completeness, message) = match detect_panic {
+        let (mut document, mut completeness, message, planned) = match detect_panic {
             Some(message) => {
                 let mut document = Document::new(source_info(src));
                 document.losses.push(Loss {
@@ -328,7 +328,7 @@ impl Pipeline {
                     why: LossReason::Internal,
                     severity: Severity::Error,
                 });
-                (document, Completeness::Failed, Some(message))
+                (document, Completeness::Failed, Some(message), Vec::new())
             }
             None => self.document(src, req),
         };
@@ -355,69 +355,108 @@ impl Pipeline {
             parts: None,
         };
         let page_tokens = self.config.limits.page_tokens;
+        let stem = folder_stem(&src.name);
         let names = req
             .output_dir
             .as_ref()
-            .map(|_| (main_name(&src.name), parts_folder(&folder_stem(&src.name))));
-        let rendered = panics::contained(|| match &names {
-            Some((main, stem)) => {
-                let main_file = format!("{main}.md");
-                let output = rezzer_render::render_output(
-                    &document,
-                    completeness,
-                    &opts,
-                    part_size,
-                    &main_file,
-                    stem,
-                );
-                let pages = rezzer_render::paginate(&output.main, page_tokens);
-                (pages, output.parts, output.main)
-            }
-            None => {
-                let markdown = rezzer_render::render(&document, completeness, &opts);
-                (
-                    rezzer_render::paginate(&markdown, page_tokens),
-                    Vec::new(),
-                    String::new(),
+            .map(|_| (main_name(&src.name), parts_folder(&stem)));
+        let render = |document: &Document, completeness: Completeness| {
+            panics::contained(|| match &names {
+                Some((main, folder)) => {
+                    let main_file = format!("{main}.md");
+                    let output = rezzer_render::render_output(
+                        document,
+                        completeness,
+                        &opts,
+                        part_size,
+                        &main_file,
+                        folder,
+                    );
+                    let pages = rezzer_render::paginate(&output.main, page_tokens);
+                    (pages, output.parts, output.main)
+                }
+                None => {
+                    let markdown = rezzer_render::render(document, completeness, &opts);
+                    (
+                        rezzer_render::paginate(&markdown, page_tokens),
+                        Vec::new(),
+                        String::new(),
+                    )
+                }
+            })
+            .map_err(|panic| {
+                format!(
+                    "rendering stopped with an internal error: {}",
+                    one_line(&panic)
                 )
-            }
-        });
-        let (markdown_pages, part_files, main_markdown) = match rendered {
-            Ok(rendered) => rendered,
-            Err(panic) => {
-                return RunResult {
-                    completeness: Completeness::Failed,
-                    document: Some(document),
-                    markdown_pages: Vec::new(),
-                    json: None,
-                    message: Some(format!(
-                        "rendering stopped with an internal error: {}",
-                        one_line(&panic)
-                    )),
-                    parts: Vec::new(),
-                    main_file: None,
-                };
-            }
+            })
         };
-        let json = match req.output {
+        let json_of = |document: &Document| match req.output {
             OutputKind::Json => {
-                Some(serde_json::to_string_pretty(&document).expect("the model serializes"))
+                Some(serde_json::to_string_pretty(document).expect("the model serializes"))
             }
             OutputKind::Markdown => None,
         };
+        let mut rendered = render(&document, completeness);
         let mut main_file = None;
-        if let (Some(dir), Some((main, folder))) = (&req.output_dir, &names) {
-            let files = files::Files {
+        if let (Some(dir), Some((main, folder)), Ok(first)) = (&req.output_dir, &names, &rendered) {
+            // Writes the rendered files; the part paths are checked first.
+            let write = |(_, parts, main_markdown): &Rendered, json: Option<&str>| {
+                let files = files::Files {
+                    main,
+                    folder,
+                    main_markdown,
+                    parts: parts
+                        .iter()
+                        .map(|p| (p.path.as_str(), p.markdown.as_str()))
+                        .collect(),
+                    json,
+                };
+                files::write_files(dir, &files)
+            };
+            // A part path held by a file Rezzer did not write fails the run before a
+            // picture is written (ruling P5-AB).
+            let check = files::Files {
                 main,
                 folder,
-                main_markdown: &main_markdown,
-                parts: part_files
-                    .iter()
-                    .map(|p| (p.path.as_str(), p.markdown.as_str()))
-                    .collect(),
-                json: json.as_deref(),
+                main_markdown: "",
+                parts: first.1.iter().map(|p| (p.path.as_str(), "")).collect(),
+                json: None,
             };
-            if let Err(message) = files::write_files(dir, &files) {
+            let mut outcome = if check.parts.is_empty() {
+                Ok(())
+            } else {
+                files::check_part_paths(dir, &dir.join(folder), &check)
+            };
+            if outcome.is_ok() {
+                let (written, lost) = files::write_assets(&mut document, planned, dir, &stem);
+                if lost {
+                    // A picture without a file: the Markdown says so.
+                    completeness = at_most_partial(completeness);
+                    rendered = render(&document, completeness);
+                }
+                outcome = match &rendered {
+                    Ok(r) => write(r, json_of(&document).as_deref()),
+                    Err(e) => Err(e.clone()),
+                };
+                if outcome.is_ok()
+                    && let Err(what) = files::clean_assets(dir, &stem, &written)
+                {
+                    document.losses.push(Loss {
+                        location: "assets".into(),
+                        what,
+                        why: LossReason::Internal,
+                        severity: Severity::Warning,
+                    });
+                    completeness = at_most_partial(completeness);
+                    rendered = render(&document, completeness);
+                    outcome = match &rendered {
+                        Ok(r) => write(r, json_of(&document).as_deref()),
+                        Err(e) => Err(e.clone()),
+                    };
+                }
+            }
+            if let Err(message) = outcome {
                 // The read worked: its document (losses, pictures) stays in the result.
                 return RunResult {
                     completeness: Completeness::Failed,
@@ -431,6 +470,21 @@ impl Pipeline {
             }
             main_file = Some(dir.join(format!("{main}.md")));
         }
+        let (markdown_pages, part_files, _) = match rendered {
+            Ok(rendered) => rendered,
+            Err(message) => {
+                return RunResult {
+                    completeness: Completeness::Failed,
+                    document: Some(document),
+                    markdown_pages: Vec::new(),
+                    json: None,
+                    message: Some(message),
+                    parts: Vec::new(),
+                    main_file: None,
+                };
+            }
+        };
+        let json = json_of(&document);
         let parts = part_files
             .into_iter()
             .map(|p| PartInfo {
@@ -451,7 +505,9 @@ impl Pipeline {
     }
 
     /// The enriched document, from the cache or freshly read.
-    fn document(&self, src: &Source, req: &Request) -> (Document, Completeness, Option<String>) {
+    /// With an output directory the pictures are planned, not written yet (see
+    /// [`files::plan_assets`]).
+    fn document(&self, src: &Source, req: &Request) -> DocumentResult {
         let reader = self
             .registry
             .for_format(src.format)
@@ -472,7 +528,7 @@ impl Pipeline {
             document.source.downloaded_from = fresh.downloaded_from;
             document.source.file_tags = fresh.file_tags;
             document.source.detection = fresh.detection;
-            return (document, completeness, None);
+            return (document, completeness, None, Vec::new());
         }
         let (mut document, mut completeness, message, cacheable, blobs) = self.read(src, req);
         let enriched =
@@ -494,14 +550,15 @@ impl Pipeline {
         } else if cacheable && let (Some(cache), Some(key)) = (cache, &key) {
             cache.put(key, &document, completeness);
         }
-        if let Some(dir) = &req.output_dir {
+        let mut planned = Vec::new();
+        if req.output_dir.is_some() {
             let before = document.losses.len();
-            files::write_bundle(&mut document, blobs, dir, &folder_stem(&src.name));
-            if document.losses.len() > before && completeness == Completeness::Complete {
-                completeness = Completeness::Partial;
+            planned = files::plan_assets(&mut document, blobs, &folder_stem(&src.name));
+            if document.losses.len() > before {
+                completeness = at_most_partial(completeness);
             }
         }
-        (document, completeness, message)
+        (document, completeness, message, planned)
     }
 
     /// Reads `src`. The last value says whether the result may be cached: not when a time
@@ -568,6 +625,20 @@ impl Pipeline {
 /// What a read gives: the document, its completeness, a failure message, whether the result
 /// may be cached and the asset blobs.
 type ReadResult = (Document, Completeness, Option<String>, bool, Vec<Blob>);
+
+/// The enriched document, its completeness, a failure message and the pictures to write.
+type DocumentResult = (Document, Completeness, Option<String>, Vec<files::Planned>);
+
+/// A complete result becomes partial; partial and failed stay.
+fn at_most_partial(completeness: Completeness) -> Completeness {
+    match completeness {
+        Completeness::Complete => Completeness::Partial,
+        other => other,
+    }
+}
+
+/// The rendered pages, the part files and the whole main document.
+type Rendered = (Vec<String>, Vec<rezzer_render::PartFile>, String);
 
 /// The canonical absolute form of `path`, so the same file read from two working directories
 /// has one `resource`. The directory is canonicalized and the file name kept: a symlink keeps

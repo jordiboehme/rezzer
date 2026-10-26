@@ -54,7 +54,8 @@ pub struct Output {
 /// One part file of a split document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartFile {
-    /// Where it is written, next to the main document: `<bundle>/<file>.md`.
+    /// Where it is written, next to the main document: `<bundle>/<file>.md`, with `bundle`
+    /// the parts folder that [`render_output`] gets (`<stem>.parts` when the pipeline writes).
     pub path: String,
     /// Its title: `<document title>: <unit title or location>`.
     pub title: String,

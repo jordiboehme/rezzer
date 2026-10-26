@@ -28,12 +28,12 @@
 //! and the removal of its files are separate steps, so a folder that is swapped for a
 //! symlink in between is a known gap (planned for the known-issues plan).
 //!
-//! Order: the pictures are written while the document is read, because the Markdown links
-//! name them; then the parts, the main document and the JSON; the stale parts go last. A
-//! failure after the pictures leaves them in place: they are in Rezzer's own assets folder,
-//! which the next run rewrites and cleans up, and no other file has been touched. A failure
-//! while writing the parts or the main document leaves the new files written so far and
-//! keeps the stale parts, which the next run removes.
+//! Order: the pictures are planned while the document is read, because the Markdown links
+//! name them. After the render the part paths are checked, so a run that fails there has
+//! written and removed nothing. Then the pictures, the parts, the main document and the
+//! JSON are written; the stale parts and the stale pictures go last. A write error on the
+//! way leaves the new files written so far and keeps every old file, so the old links of an
+//! earlier run still resolve; the next run that works cleans up.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -101,7 +101,7 @@ fn ends_with_ignore_case(name: &str, suffix: &str) -> bool {
         && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
 
-/// The stem of the parts folder `<stem>/` and the assets folder `<stem>.assets/` of
+/// The stem of the parts folder `<stem>.parts/` and the assets folder `<stem>.assets/` of
 /// `source_name` (decision 8): [`bundle_name`] of the NFC name, plus `-<name hash>` when
 /// `bundle_name` changed the name (also a leading `.`), or when the name ends in `.md`,
 /// `.json`, `.assets` or `.parts` (any case). So `a b.pdf` and `a_b.pdf` never share a
@@ -209,27 +209,28 @@ fn asset_extension(mime: &str) -> &'static str {
     }
 }
 
-/// Writes each blob to `<dir>/<stem>.assets/<asset id>.<ext>` and sets the asset's path
-/// (relative to `dir`). A bad asset id or a write error is a loss, never a failed read; an
-/// asset without a written blob keeps no path. A blob without an asset is dropped. Files an
-/// earlier run left in the folder that this run does not write are removed (see
-/// [`remove_stale`]), so the folder holds what the Markdown names.
-pub(crate) fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, stem: &str) {
+/// A picture to write: its file name in `<stem>.assets/` and its bytes.
+pub(crate) struct Planned {
+    asset: usize,
+    file: String,
+    bytes: Vec<u8>,
+}
+
+/// Plans the pictures of a run without writing them: each blob of a known asset with a safe
+/// id gets the path `<stem>.assets/<asset id>.<ext>` (relative to the output directory),
+/// so the Markdown can link it. A bad asset id is a loss and keeps no path; a blob without
+/// an asset is dropped. [`write_assets`] writes them once the part paths are checked.
+pub(crate) fn plan_assets(document: &mut Document, blobs: Vec<Blob>, stem: &str) -> Vec<Planned> {
     let folder = format!("{stem}.assets");
-    let mut losses = Vec::new();
-    let mut written_names: HashSet<OsString> = HashSet::new();
-    let folder_ready = if blobs.is_empty() {
-        Ok(())
-    } else {
-        prepare_folder(dir, &folder)
-    };
+    let mut planned = Vec::new();
     for blob in blobs {
-        let Some(asset) = document.assets.iter_mut().find(|a| a.id == blob.asset) else {
+        let Some(index) = document.assets.iter().position(|a| a.id == blob.asset) else {
             continue;
         };
-        let location = format!("asset {}", one_line(&asset.id));
+        let asset = &mut document.assets[index];
         if !safe_asset_id(&asset.id) {
-            losses.push(Loss {
+            let location = format!("asset {}", one_line(&asset.id));
+            document.losses.push(Loss {
                 location,
                 what: "the picture was not written: its id is not a safe file name".into(),
                 why: LossReason::Internal,
@@ -237,41 +238,77 @@ pub(crate) fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path
             });
             continue;
         }
-        let relative = format!("{folder}/{}.{}", asset.id, asset_extension(&asset.mime));
-        let target = dir.join(&relative);
-        let written = match &folder_ready {
-            Ok(()) => write_new(&target, &blob.bytes),
-            Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
-        };
-        let name = target.file_name().map(std::ffi::OsStr::to_os_string);
-        match written {
-            Ok(()) => {
-                asset.path = Some(relative);
-                written_names.extend(name);
-            }
-            Err(e) => losses.push(Loss {
-                location,
-                what: format!("the picture was not written: {}", one_line(&e.to_string())),
-                why: LossReason::Internal,
-                severity: Severity::Warning,
-            }),
-        }
-    }
-    if folder_ready.is_ok()
-        && let Err(e) = remove_stale(&dir.join(&folder), &written_names, Stale::Assets)
-    {
-        losses.push(Loss {
-            location: "assets".into(),
-            what: format!(
-                "files of an earlier run in {} were not all removed: {}",
-                one_line(&folder),
-                one_line(&e.to_string())
-            ),
-            why: LossReason::Internal,
-            severity: Severity::Warning,
+        let file = format!("{}.{}", asset.id, asset_extension(&asset.mime));
+        asset.path = Some(format!("{folder}/{file}"));
+        planned.push(Planned {
+            asset: index,
+            file,
+            bytes: blob.bytes,
         });
     }
-    document.losses.extend(losses);
+    planned
+}
+
+/// Writes the planned pictures to `<dir>/<stem>.assets/`. A picture that cannot be written
+/// loses its path and is a loss, never a failed read. Returns the names written, for
+/// [`clean_assets`], and whether a loss was added (the Markdown must then be rendered
+/// again).
+pub(crate) fn write_assets(
+    document: &mut Document,
+    planned: Vec<Planned>,
+    dir: &Path,
+    stem: &str,
+) -> (HashSet<OsString>, bool) {
+    let folder = format!("{stem}.assets");
+    let mut written = HashSet::new();
+    let mut lost = false;
+    let ready = if planned.is_empty() {
+        Ok(())
+    } else {
+        prepare_folder(dir, &folder)
+    };
+    for p in planned {
+        let result = match &ready {
+            Ok(()) => write_new(&dir.join(&folder).join(&p.file), &p.bytes),
+            Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
+        };
+        match result {
+            Ok(()) => {
+                written.insert(OsString::from(&p.file));
+            }
+            Err(e) => {
+                let asset = &mut document.assets[p.asset];
+                asset.path = None;
+                let location = format!("asset {}", one_line(&asset.id));
+                document.losses.push(Loss {
+                    location,
+                    what: format!("the picture was not written: {}", one_line(&e.to_string())),
+                    why: LossReason::Internal,
+                    severity: Severity::Warning,
+                });
+                lost = true;
+            }
+        }
+    }
+    (written, lost)
+}
+
+/// Removes the pictures an earlier run left in `<dir>/<stem>.assets/` that this run did not
+/// write ([`remove_stale`]). Runs last, after every file of the run is written, so a run
+/// that fails earlier leaves the old output whole.
+pub(crate) fn clean_assets(
+    dir: &Path,
+    stem: &str,
+    written: &HashSet<OsString>,
+) -> Result<(), String> {
+    let folder = format!("{stem}.assets");
+    remove_stale(&dir.join(&folder), written, Stale::Assets).map_err(|e| {
+        format!(
+            "files of an earlier run in {} were not all removed: {}",
+            one_line(&folder),
+            one_line(&e.to_string())
+        )
+    })
 }
 
 /// What the files of one run are: the main document, its parts and the JSON.
@@ -338,7 +375,7 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
 
 /// Checks the parts folder and every part path before anything is written: the folder must
 /// be missing or a plain directory, and each path missing or a part Rezzer wrote.
-fn check_part_paths(dir: &Path, folder: &Path, files: &Files<'_>) -> Result<(), String> {
+pub(crate) fn check_part_paths(dir: &Path, folder: &Path, files: &Files<'_>) -> Result<(), String> {
     match std::fs::symlink_metadata(folder) {
         Ok(meta) if meta.is_dir() => {}
         Ok(_) => {

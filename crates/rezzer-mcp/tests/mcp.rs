@@ -1128,15 +1128,39 @@ async fn rez_json_names_parts() {
     assert!(out.path().join("book.markdown.md").is_file());
 }
 
-/// A paged result without output_dir, fixed as a snapshot: the second page of a long
-/// document, which holds no frontmatter, plus its paging line.
+/// A paged result without output_dir, fixed as a snapshot: page 2 of a short document at a
+/// small page size, which holds no frontmatter, plus its paging line.
 #[tokio::test(flavor = "multi_thread")]
 async fn rez_without_output_dir_page_snapshot() {
     let dir = tempfile::tempdir().unwrap();
-    let path = write(dir.path(), "book.markdown", &book());
-    let client = connect(config()).await;
+    let mut garden = String::from("# Garden\n\n");
+    for (name, plants) in [
+        ("Spring", "Tulips, crocus and snowdrops come first."),
+        ("Summer", "Roses and lavender need sun and little water."),
+        (
+            "Autumn",
+            "Asters bloom late, and the leaves go on the compost.",
+        ),
+        ("Winter", "The beds rest under straw until March."),
+    ] {
+        garden.push_str(&format!("## {name}\n\n"));
+        for _ in 0..12 {
+            garden.push_str(plants);
+            garden.push(' ');
+        }
+        garden.push_str("\n\n");
+    }
+    let path = write(dir.path(), "garden.md", &garden);
+    let mut cfg = config();
+    cfg.limits.page_tokens = 300;
+    let client = connect(cfg).await;
     let result = call(&client, "rez", json!({ "path": path, "page": 2 })).await;
     let s = structured(&result);
-    assert_eq!(s["pages"], 2, "{s}");
-    insta::assert_snapshot!(text(&result));
+    assert!(s["pages"].as_u64().unwrap() > 2, "{s}");
+    let page = text(&result);
+    assert!(
+        !page.contains("\n---\n") && !page.starts_with("---"),
+        "{page}"
+    );
+    insta::assert_snapshot!(page);
 }

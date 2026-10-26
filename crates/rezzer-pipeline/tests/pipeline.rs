@@ -1347,7 +1347,8 @@ fn selection_applies_to_a_cached_document() {
 // Writing files: the main document, its parts and the part size (decisions 8, 11 and 12)
 
 /// A reader that makes chapters from its input `<chapters> <chars per chapter>`: a heading,
-/// paragraphs and, in every third chapter, a picture with a blob. It reads text, CSV and
+/// paragraphs and, in every third chapter, a picture with a blob whose last byte is the
+/// chapter count. It reads text, CSV and
 /// Markdown, so any source name reaches it.
 struct Chapters;
 
@@ -1401,7 +1402,7 @@ impl Reader for Chapters {
                 });
                 blobs.push(Blob {
                     asset: id,
-                    bytes: vec![1, 2, 3],
+                    bytes: vec![1, 2, chapters as u8],
                 });
             }
         }
@@ -1710,7 +1711,7 @@ fn similar_names_keep_their_own_bundles() {
         let doc = res.document.as_ref().unwrap();
         for asset in &doc.assets {
             let path = asset.path.as_ref().unwrap();
-            assert_eq!(std::fs::read(out.path().join(path)).unwrap(), [1, 2, 3]);
+            assert_eq!(std::fs::read(out.path().join(path)).unwrap(), [1, 2, 30]);
         }
         let assets = doc.assets[0].path.as_ref().unwrap();
         assert!(asset_folders.insert(assets.split('/').next().unwrap().to_string()));
@@ -2212,4 +2213,61 @@ fn hostile_names_are_written_end_to_end() {
             "{name:?}"
         );
     }
+}
+
+/// The bytes of every file under `dir`, by path.
+fn snapshot_files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    files_under(dir)
+        .into_iter()
+        .map(|p| {
+            let bytes = std::fs::read(&p).unwrap();
+            (p, bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn a_run_that_fails_the_part_check_changes_nothing() {
+    // A failed run leaves the old pictures and parts as they were, so every old link still
+    // resolves: the part paths are checked before a picture is written, and stale pictures
+    // go only after every file is written.
+    let out = tempfile::tempdir().unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    let first = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(out.path()));
+    assert_eq!(first.completeness, Completeness::Complete);
+    let in_the_way = out.path().join(&first.parts[0].path);
+    std::fs::write(&in_the_way, "# My own start\n").unwrap();
+    let before = snapshot_files(out.path());
+    // Fewer chapters: fewer pictures and parts, so a working run would remove some.
+    let res = pipeline.run_bytes("notes.txt", b"12 4000".to_vec(), None, &written(out.path()));
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert!(
+        res.message
+            .as_deref()
+            .unwrap()
+            .contains("is not a part Rezzer wrote"),
+        "{:?}",
+        res.message
+    );
+    assert_eq!(snapshot_files(out.path()), before);
+    assert!(names_in(&out.path().join("notes.txt.assets")).len() > 4);
+    assert_links_resolve(out.path());
+}
+
+#[test]
+fn a_write_error_keeps_the_old_pictures() {
+    // Stale pictures go only after every file is written.
+    let out = tempfile::tempdir().unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(out.path()));
+    let assets = out.path().join("notes.txt.assets");
+    let pictures = names_in(&assets);
+    assert_eq!(pictures.len(), 10);
+    // The main document cannot be written: a folder is in the way.
+    let main = out.path().join("notes.txt.md");
+    std::fs::remove_file(&main).unwrap();
+    std::fs::create_dir(&main).unwrap();
+    let res = pipeline.run_bytes("notes.txt", b"12 4000".to_vec(), None, &written(out.path()));
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert_eq!(names_in(&assets), pictures);
 }
