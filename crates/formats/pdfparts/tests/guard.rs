@@ -9,7 +9,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, dictionary};
-use pdfparts::{Limits, OpenError, Pdf};
+use pdfparts::{IssueKind, Limits, OpenError, Pdf};
 
 mod common;
 
@@ -297,8 +297,16 @@ fn duplicate_kid_numbers_pages_like_lopdf() {
     assert_eq!(doc.get_pages().len(), 4);
 }
 
+/// Whether an issue of the document says `what`.
+fn has_issue(pdf: &Pdf, what: &str) -> bool {
+    pdf.issues()
+        .iter()
+        .any(|i| i.kind == IssueKind::Damaged && i.what.contains(what))
+}
+
 #[test]
-fn untyped_page_is_skipped_like_lopdf() {
+fn untyped_page_counts_like_lopdf_and_hayro() {
+    // lopdf 0.46 and hayro both count a kid without /Type as a page, in /Kids order.
     let bytes = save(|doc, pages| {
         let untyped = doc.add_object(dictionary! {
             "Parent" => pages,
@@ -308,8 +316,49 @@ fn untyped_page_is_skipped_like_lopdf() {
         vec![untyped.into(), p2.into()]
     });
     let pdf = open(&bytes).unwrap();
+    assert_eq!(pdf.pages(&never).len(), 2);
+    assert!(pdf.unsafe_page_tree());
+    assert!(
+        has_issue(&pdf, "has no /Type and counts as a page"),
+        "{:?}",
+        pdf.issues()
+    );
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    assert_eq!(doc.get_pages().len(), 2);
+}
+
+#[test]
+fn missing_kid_is_an_empty_page_like_lopdf() {
+    // lopdf keeps the slot of a kid it cannot load; hayro skips it. The tree is unsafe, so
+    // no other parser gets the file.
+    let bytes = save(|doc, pages| {
+        let p1 = page(doc, pages, dictionary! {});
+        let p3 = page(doc, pages, dictionary! {});
+        vec![p1.into(), Object::Reference((900, 0)), p3.into()]
+    });
+    let pdf = open(&bytes).unwrap();
+    assert_eq!(pdf.pages(&never).len(), 3);
+    assert!(pdf.unsafe_page_tree());
+    assert!(
+        has_issue(&pdf, "counts as an empty page"),
+        "{:?}",
+        pdf.issues()
+    );
+    let doc = Document::load_mem(pdf.canonical()).unwrap();
+    assert_eq!(doc.get_pages().len(), 3);
+}
+
+#[test]
+fn kid_of_another_type_is_skipped_like_lopdf() {
+    let bytes = save(|doc, pages| {
+        let other = doc.add_object(dictionary! { "Type" => "Annot", "Parent" => pages });
+        let p2 = page(doc, pages, dictionary! {});
+        vec![other.into(), p2.into()]
+    });
+    let pdf = open(&bytes).unwrap();
     assert_eq!(pdf.pages(&never).len(), 1);
     assert!(pdf.unsafe_page_tree());
+    assert!(has_issue(&pdf, "is skipped"), "{:?}", pdf.issues());
 }
 
 #[test]

@@ -169,8 +169,8 @@ fn extract(
     if pdf.unsafe_page_tree() {
         out.loss(
             "document",
-            "text not read on any page: the page tree has a loop, a shared node or an untyped \
-             node, so the text parser could number the pages differently",
+            "text not read on any page: the page tree has a loop, a shared node or a missing \
+             or untyped node, so the text parser could number the pages differently",
             LossReason::Damaged,
             Severity::Error,
         );

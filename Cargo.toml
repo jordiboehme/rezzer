@@ -71,7 +71,7 @@ unicode-normalization = "=0.1.26"
 formualizer-parse = { version = "=4.1.0", default-features = false }
 quick-xml = "=0.42.0"
 calamine = { version = "=0.37.0", default-features = false }
-lopdf = { version = "=0.45.0", default-features = false }
+lopdf = { version = "=0.46.0", default-features = false }
 weezl = "=0.2.1"
 # The Adler-32 of zlib streams; already in the tree through miniz_oxide.
 adler2 = { version = "=2.0.1", default-features = false }
