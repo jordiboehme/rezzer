@@ -1330,3 +1330,1039 @@ fn a_table_without_layout_is_cut_again_with_its_own_row_numbers() {
     assert_eq!(next, 42);
     assert!(list.len() >= 4, "{:?}", names(&list));
 }
+
+// ---------------------------------------------------------------------------------------
+// The main document and the part files (plan 5 Task 6, spec 5 and 7, decisions 10 and 13).
+
+use rezzer_model::{FieldAction, FormField, Loss, LossReason, OverviewPart, Severity, Signature};
+use rezzer_render::{Output, PartFile, render_output};
+
+fn output(d: &Document, part_size: usize, main: &str, bundle: &str) -> Output {
+    render_output(d, Completeness::Complete, &opts(), part_size, main, bundle)
+}
+
+/// A Markdown document with `n` chapters of `chars` characters each, titled `Chapter <i>`.
+fn chapters_doc(n: usize, chars: usize) -> Document {
+    let mut d = doc(FormatId::Markdown);
+    for i in 1..=n {
+        d.body.push(heading(1, &format!("Chapter {i}")));
+        d.body.push(para(&words(chars)));
+    }
+    d
+}
+
+/// The lines of the section `## <title>` in `md`, without the heading and blank lines.
+fn section_lines<'a>(md: &'a str, title: &str) -> Vec<&'a str> {
+    let head = format!("\n## {title}\n");
+    let Some(at) = md.find(&head) else {
+        return Vec::new();
+    };
+    let rest = &md[at + head.len()..];
+    let end = rest.find("\n## ").unwrap_or(rest.len());
+    rest[..end]
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect()
+}
+
+/// The value of a top-level frontmatter key, as written.
+fn key<'a>(md: &'a str, name: &str) -> Option<&'a str> {
+    let front = md.strip_prefix("---\n")?;
+    let front = &front[..front.find("\n---\n")?];
+    front
+        .lines()
+        .find_map(|l| l.strip_prefix(name)?.strip_prefix(": "))
+}
+
+/// Every written file within the part size: the body after the frontmatter, characters / 4,
+/// as Crystalline's Q002 counts it.
+fn assert_files_within(out: &Output, part_size: usize) {
+    let tokens = body(&out.main).chars().count() / 4;
+    assert!(tokens <= part_size, "main has {tokens} tokens");
+    for p in &out.parts {
+        let tokens = body(&p.markdown).chars().count() / 4;
+        assert!(tokens <= part_size, "{} has {tokens} tokens", p.path);
+    }
+}
+
+/// The part files in the order the reader finds them: the main document's `## Parts` list,
+/// or the lists of the `contents` parts it leads to, then the `contents` parts themselves.
+fn listed_order(out: &Output, bundle: &str) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let link_target = |line: &str| -> Option<String> {
+        let at = line.find("](")?;
+        let rest = &line[at + 2..];
+        Some(rest[..rest.find(')')?].to_string())
+    };
+    let lines = section_lines(&out.main, "Parts");
+    let contents: Vec<&PartFile> = out
+        .parts
+        .iter()
+        .filter(|p| {
+            let file = p.path.rsplit('/').next().unwrap_or("");
+            file == "contents.md" || file.starts_with("contents-")
+        })
+        .collect();
+    if contents.is_empty() {
+        for line in lines {
+            order.push(link_target(line).expect("a link"));
+        }
+        return order;
+    }
+    for c in &contents {
+        for line in body(&c.markdown).lines().filter(|l| l.starts_with("- [")) {
+            order.push(format!("{bundle}/{}", link_target(line).expect("a link")));
+        }
+    }
+    order.extend(contents.iter().map(|c| c.path.clone()));
+    order
+}
+
+#[test]
+fn no_split_gives_the_whole_render() {
+    let d = chapters_doc(2, 100);
+    let out = output(&d, 10_000, "report.md.md", "report-md");
+    assert_eq!(out.main, render(&d, Completeness::Complete, &opts()));
+    assert!(out.parts.is_empty());
+    assert!(
+        output(&chapters_doc(40, 6_000), 0, "r.md", "r")
+            .parts
+            .is_empty()
+    );
+}
+
+#[test]
+fn main_document_lists_parts_in_order() {
+    let d = chapters_doc(6, 6_000);
+    let out = output(&d, 2_500, "report.md.md", "report-md");
+    assert_files_within(&out, 2_500);
+    let files: Vec<&str> = out.parts.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(
+        files,
+        [
+            "report-md/chapter-1.md",
+            "report-md/chapter-2.md",
+            "report-md/chapter-3.md",
+            "report-md/chapter-4.md",
+            "report-md/chapter-5.md",
+            "report-md/chapter-6.md",
+        ]
+    );
+    assert_eq!(key(&out.main, "parts"), Some("6"));
+    assert!(body(&out.main).starts_with("\n# report.md\n\n"));
+    let lines = section_lines(&out.main, "Parts");
+    let want: Vec<String> = (1..=6)
+        .map(|i| format!("- [report.md: Chapter {i}](report-md/chapter-{i}.md): Chapter {i}"))
+        .collect();
+    assert_eq!(lines, want);
+    for (i, p) in out.parts.iter().enumerate() {
+        assert_eq!(p.title, format!("report.md: Chapter {}", i + 1));
+        assert_eq!(p.location, format!("Chapter {}", i + 1));
+    }
+    // The main document holds no content of its own beyond the extracts.
+    assert!(!out.main.contains("lorem ipsum"));
+}
+
+fn field(name: &str, calc: bool) -> FormField {
+    FormField {
+        anchor: Anchor(format!("field:{name}")),
+        name: name.into(),
+        label: None,
+        kind: "text".into(),
+        value: None,
+        role: None,
+        format: None,
+        calc_order: None,
+        actions: if calc {
+            vec![FieldAction {
+                trigger: "calculate".into(),
+                script: "AFSimple_Calculate(\"SUM\", [\"a\"]);".into(),
+                words: None,
+            }]
+        } else {
+            Vec::new()
+        },
+        flags: Vec::new(),
+        options: Vec::new(),
+        pages: Vec::new(),
+    }
+}
+
+fn formula(at: &str) -> Formula {
+    Formula {
+        anchor: Anchor(at.into()),
+        expression: "A1 + 1".into(),
+        dialect: "excel".into(),
+        references: Vec::new(),
+        cached: None,
+        role: None,
+        pattern: None,
+        latex: None,
+        note: None,
+        kind: None,
+        range: None,
+        original: None,
+    }
+}
+
+fn loss(what: &str) -> Loss {
+    Loss {
+        location: "p1".into(),
+        what: what.into(),
+        why: LossReason::Unsupported,
+        severity: Severity::Warning,
+    }
+}
+
+/// A document with every count of the stats line set to `n` (formulas to `formulas`), and
+/// enough text to be split at 2,500 tokens.
+fn counted_doc(n: usize, formulas: usize) -> Document {
+    let mut d = doc(FormatId::Pdf);
+    d.properties.facts.pages = Some(n as u32);
+    d.properties.facts.revisions = Some(n as u32);
+    for i in 1..=n {
+        let name = format!("S{i}");
+        let mut table = sheet_table(&name, 4);
+        if let Block::Table { layout, .. } = &mut table {
+            layout.as_mut().expect("layout").key = format!("table:T{i}");
+        }
+        d.body.push(sheet(&name, vec![para(&words(12_000)), table]));
+        d.facets.fields.push(field(&format!("f{i}"), false));
+        d.facets.signatures.push(Signature {
+            anchor: None,
+            kind: "field".into(),
+            signer: Some("Ann".into()),
+            date: None,
+            reason: None,
+            location: None,
+            sub_filter: None,
+            covers_whole_file: true,
+            later_revisions: 0,
+        });
+        d.assets.push(Asset {
+            id: format!("a{i}"),
+            path: Some(format!("b.assets/pic{i}.png")),
+            sha256: "00".into(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: None,
+            needs_vision: true,
+            codes: Vec::new(),
+            code_unread: false,
+        });
+        d.losses.push(loss(&format!("thing {i}")));
+    }
+    for i in 1..=formulas {
+        d.facets.formulas.push(formula(&format!("S1!C{i}")));
+    }
+    d
+}
+
+#[test]
+fn stats_line_names_each_count() {
+    let out = output(&counted_doc(2, 2), 2_500, "report.pdf.md", "report-pdf");
+    assert_files_within(&out, 2_500);
+    assert_eq!(
+        section_lines(&out.main, "Stats"),
+        [
+            "2 pages, 2 sheets, 2 tables, 2 formulas, 2 form fields, 2 signatures, \
+             2 revisions, 2 pictures that need vision, 2 parts not read."
+        ]
+    );
+    let out = output(&counted_doc(2, 0), 2_500, "report.pdf.md", "report-pdf");
+    let stats = section_lines(&out.main, "Stats").join("\n");
+    assert!(!stats.contains("formula"), "{stats}");
+    assert!(stats.contains("2 form fields"), "{stats}");
+    // One of each is singular.
+    let out = output(&counted_doc(1, 1), 2_500, "report.pdf.md", "report-pdf");
+    assert_eq!(
+        section_lines(&out.main, "Stats"),
+        [
+            "1 page, 1 sheet, 1 table, 1 formula, 1 form field, 1 signature, 1 revision, \
+             1 picture that needs vision, 1 part not read."
+        ]
+    );
+    // The form line and the tables list come from the same facts.
+    assert_eq!(
+        section_lines(&out.main, "Form"),
+        ["1 form field, 1 signature."]
+    );
+    assert_eq!(section_lines(&out.main, "Tables"), ["- table:T1 S1!A1:B4"]);
+}
+
+#[test]
+fn form_and_dates_and_people() {
+    let mut d = counted_doc(3, 0);
+    d.facets.fields[0] = field("total", true);
+    d.facets.fields[1].calc_order = Some(1);
+    d.properties.authors = vec!["Ann".into(), "Bob".into()];
+    d.properties.created = Some(Value::Date {
+        value: "2020-01-02".into(),
+    });
+    d.properties.modified = Some(Value::Date {
+        value: "2021-03-04".into(),
+    });
+    let out = output(&d, 2_500, "report.pdf.md", "report-pdf");
+    assert_eq!(
+        section_lines(&out.main, "Form"),
+        ["3 form fields, 2 calculated, 3 signatures."]
+    );
+    assert_eq!(
+        section_lines(&out.main, "Dates and people"),
+        [
+            "- Authors: Ann, Bob",
+            "- Created: 2020-01-02",
+            "- Modified: 2021-03-04"
+        ]
+    );
+    // Without fields and properties the sections are left out.
+    let out = output(&chapters_doc(6, 6_000), 2_500, "r.md", "r");
+    assert!(!out.main.contains("## Form"));
+    assert!(!out.main.contains("## Dates and people"));
+    assert!(!out.main.contains("## Stats"), "no count, no stats");
+}
+
+#[test]
+fn main_document_within_limit_with_many_parts() {
+    let d = chapters_doc(2_000, 5_000);
+    let out = output(&d, 2_500, "report.md.md", "report-md");
+    assert_files_within(&out, 2_500);
+    let contents: Vec<&PartFile> = out
+        .parts
+        .iter()
+        .filter(|p| p.path.starts_with("report-md/contents"))
+        .collect();
+    assert!(contents.len() > 1, "the list needs more than one part");
+    assert_eq!(contents[0].path, "report-md/contents.md");
+    assert_eq!(contents[1].path, "report-md/contents-2.md");
+    assert_eq!(contents[0].title, "report.md: Contents");
+    assert_eq!(contents[1].title, "report.md: Contents, part 2");
+    assert_eq!(contents[0].location, "Contents");
+    // The main document links the first one and lists none of the parts itself.
+    let parts = section_lines(&out.main, "Parts");
+    assert_eq!(
+        parts,
+        [format!(
+            "The list of the {} parts is in [Contents](report-md/contents.md).",
+            out.parts.len()
+        )]
+    );
+    assert_eq!(key(&out.main, "parts"), Some(&*out.parts.len().to_string()));
+    // The lists name every other part once, in the order of the follows chain.
+    let order = listed_order(&out, "report-md");
+    let paths: Vec<String> = out
+        .parts
+        .iter()
+        .map(|p| format!("report-md/{}", p.path.rsplit('/').next().unwrap_or("")))
+        .collect();
+    assert_eq!(order, paths);
+    assert_eq!(out.parts.len(), 2_000 + contents.len());
+    // Each part follows the one before it in that order.
+    for pair in out.parts.windows(2) {
+        let before = pair[0].path.rsplit('/').next().expect("file");
+        assert_eq!(
+            relations(&pair[1].markdown)[1],
+            ("follows".to_string(), before.to_string())
+        );
+    }
+}
+
+#[test]
+fn chosen_sections_shape_the_main_document() {
+    let mut d = chapters_doc(6, 6_000);
+    d.losses.push(loss("thing"));
+    d.overview = Some(rezzer_model::Overview {
+        parts: Vec::new(),
+        facts: vec![("Chapters".into(), "6".into())],
+    });
+    let mut o = opts();
+    o.sections = Some(vec![rezzer_render::OutputSection::Content]);
+    let out = render_output(&d, Completeness::Partial, &o, 2_500, "r.md", "r");
+    assert!(!out.main.contains("## Overview"));
+    assert!(!out.main.contains("## Not read"));
+    assert!(out.main.contains("## Parts"));
+    assert!(out.parts.iter().all(|p| !p.path.contains("not-read")));
+    assert_eq!(key(&out.main, "completeness"), Some("partial"));
+    assert_eq!(key(&out.parts[0].markdown, "completeness"), Some("partial"));
+    let all = output(&d, 2_500, "r.md", "r");
+    assert_eq!(section_lines(&all.main, "Overview"), ["- Chapters: 6"]);
+    assert_eq!(section_lines(&all.main, "Not read").len(), 3);
+}
+
+#[test]
+fn part_frontmatter_and_relations() {
+    let d = chapters_doc(5, 6_000);
+    let out = output(&d, 2_500, "report.md.md", "report-md");
+    assert_eq!(out.parts.len(), 5);
+    let third = &out.parts[2].markdown;
+    let front = &third[..third.find("\n---\n").expect("frontmatter end")];
+    let at = |k: &str| front.find(&format!("\n{k}: ")).expect(k);
+    assert!(at("parts") < at("part") && at("part") < at("location"));
+    assert_eq!(key(third, "parts"), Some("5"));
+    assert_eq!(key(third, "part"), Some("3"));
+    assert_eq!(key(third, "location"), Some("\"Chapter 3\""));
+    assert_eq!(key(third, "title"), Some("\"report.md: Chapter 3\""));
+    assert_eq!(
+        key(third, "description"),
+        Some("\"Part 3 of 5 of \\\"report.md\\\": Chapter 3.\"")
+    );
+    assert_eq!(key(third, "type"), Some("source"));
+    assert_eq!(key(third, "status"), Some("stable"));
+    assert!(body(third).starts_with("\n# report.md: Chapter 3\n"));
+    assert!(
+        third.ends_with(
+            "\n## Relations\n\n- part_of [report.md](../report.md.md)\n\
+             - follows [report.md: Chapter 2](chapter-2.md)\n"
+        ),
+        "{}",
+        &third[third.len() - 200..]
+    );
+    let first = &out.parts[0].markdown;
+    assert!(first.ends_with("\n## Relations\n\n- part_of [report.md](../report.md.md)\n"));
+    assert!(!first.contains("- follows"));
+    // The main document is no part.
+    assert_eq!(key(&out.main, "part"), None);
+    assert_eq!(key(&out.main, "location"), None);
+}
+
+// A reader of relation lines that follows what Crystalline 0.29.0 reads (`parse.rs`:
+// `scan_body`, `bullet_end`, `split_category`, `parse_relation`; `reflection/links.rs`:
+// `read_destination`, `code_spans`). Written from those facts, no code taken.
+
+#[derive(Debug, PartialEq)]
+enum Read {
+    Relation(String, String),
+    Observation(String),
+}
+
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return None;
+    }
+    let rest = &line[indent..];
+    let first = rest.chars().next().filter(|c| *c == '`' || *c == '~')?;
+    let count = rest.chars().take_while(|c| *c == first).count();
+    (count >= 3).then_some((first, count))
+}
+
+fn is_heading(line: &str) -> bool {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    let rest = &line[indent..];
+    let hashes = rest.chars().take_while(|c| *c == '#').count();
+    indent <= 3
+        && (1..=6).contains(&hashes)
+        && rest[hashes..]
+            .chars()
+            .next()
+            .is_none_or(|c| c == ' ' || c == '\t')
+}
+
+fn starts_list_item(t: &str) -> bool {
+    let gap = |r: &str| r.is_empty() || r.starts_with([' ', '\t']);
+    if let Some(r) = t.strip_prefix(['-', '*', '+']) {
+        return gap(r);
+    }
+    let digits = t.chars().take_while(char::is_ascii_digit).count();
+    (1..=9).contains(&digits)
+        && t[..digits].parse::<u32>() == Ok(1)
+        && t[digits..].strip_prefix(['.', ')']).is_some_and(gap)
+}
+
+fn continues_bullet(line: &str) -> bool {
+    let t = line.trim();
+    let thematic = t.len() >= 3
+        && ['-', '*', '_']
+            .iter()
+            .any(|m| t.chars().all(|c| c == *m || c == ' ' || c == '\t'));
+    !(t.is_empty()
+        || is_heading(line)
+        || fence_marker(t).is_some()
+        || starts_list_item(t)
+        || t.starts_with(['>', '<', '|'])
+        || thematic)
+}
+
+fn code_spans(line: &str) -> Vec<(usize, usize)> {
+    let b = line.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let run_end = i + b[i..].iter().take_while(|c| **c == b'`').count();
+        let run = run_end - i;
+        let mut k = run_end;
+        let mut closed = None;
+        while k < b.len() {
+            if b[k] == b'`' {
+                let m = k + b[k..].iter().take_while(|c| **c == b'`').count();
+                if m - k == run {
+                    closed = Some(m);
+                    break;
+                }
+                k = m;
+            } else {
+                k += 1;
+            }
+        }
+        match closed {
+            Some(end) => {
+                spans.push((i, end));
+                i = end;
+            }
+            None => i = run_end,
+        }
+    }
+    spans
+}
+
+/// The `[` that opens the link text closed by the `]` at `close`: the nearest one before it
+/// at depth zero; a bracket after a backslash does not count.
+fn link_text_start(line: &str, close: usize) -> Option<usize> {
+    let b = line.as_bytes();
+    let mut depth = 0usize;
+    let mut i = close;
+    while i > 0 {
+        i -= 1;
+        let escaped = i > 0 && b[i - 1] == b'\\';
+        match b[i] {
+            b']' if !escaped => depth += 1,
+            b'[' if !escaped => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn closing_paren(line: &str, from: usize) -> Option<usize> {
+    let b = line.as_bytes();
+    let mut depth = 1usize;
+    let mut i = from;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if matches!(b.get(i + 1), Some(b'(' | b')' | b'\\')) => i += 1,
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The destination after `](` at `open`, decoded: the raw `#` fragment cut off, backslash
+/// escapes before ASCII punctuation removed, percent codes decoded. With its closing `)`.
+fn read_destination(line: &str, open: usize) -> Option<(String, usize)> {
+    let (target, close) = if line[open..].starts_with('<') {
+        let gt = open + 1 + line[open + 1..].find('>')?;
+        (&line[open + 1..gt], closing_paren(line, gt + 1)?)
+    } else {
+        let close = closing_paren(line, open)?;
+        let inside = &line[open..close];
+        let end = inside.find(char::is_whitespace).unwrap_or(inside.len());
+        (&inside[..end], close)
+    };
+    let path = target.split('#').next().unwrap_or("");
+    let mut unescaped = String::new();
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek().is_some_and(char::is_ascii_punctuation) {
+            continue;
+        }
+        unescaped.push(c);
+    }
+    let bytes = unescaped.as_bytes();
+    let mut decoded = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let Some(hex) = unescaped.get(i + 1..i + 3)
+            && let Ok(v) = u8::from_str_radix(hex, 16)
+        {
+            decoded.push(v);
+            i += 3;
+            continue;
+        }
+        decoded.push(bytes[i]);
+        i += 1;
+    }
+    Some((String::from_utf8_lossy(&decoded).into_owned(), close))
+}
+
+fn relation_type(before: &str) -> Option<String> {
+    let before = before.trim();
+    if before.len() >= 2 && before.starts_with('"') && before.ends_with('"') {
+        Some(before[1..before.len() - 1].to_string())
+    } else if !before.is_empty()
+        && !before.contains(char::is_whitespace)
+        && !before.starts_with([':', '['])
+    {
+        Some(before.to_string())
+    } else {
+        None
+    }
+}
+
+fn reserved(path: &str) -> bool {
+    matches!(path.rsplit('/').next(), Some("index.md" | "log.md"))
+}
+
+fn relative(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with(['#', '/'])
+        && !path.contains("://")
+        && !path.starts_with("mailto:")
+}
+
+fn read_bullet(content: &str) -> Option<Read> {
+    // An observation first: `[category]` not followed by `(` or `[`.
+    if let Some(rest) = content.strip_prefix('[')
+        && let Some(close) = rest.find(']')
+    {
+        let category = &rest[..close];
+        let after = &rest[close + 1..];
+        if !category.is_empty()
+            && !category.contains('[')
+            && !matches!(category, " " | "x" | "X" | "~")
+            && !after.starts_with(['(', '['])
+        {
+            return Some(Read::Observation(category.to_string()));
+        }
+    }
+    // The wikilink form.
+    if let Some(open) = content.find("[[")
+        && let Some(close) = content[open + 2..].find("]]")
+        && let Some(kind) = relation_type(&content[..open])
+    {
+        let inner = &content[open + 2..open + 2 + close];
+        let target = inner.split('|').next().unwrap_or("").trim().to_string();
+        if !target.is_empty() && !reserved(&target) {
+            return Some(Read::Relation(kind, target));
+        }
+    }
+    // The relative form: the first `[` opens a link to a `.md` file.
+    let open = content.find('[')?;
+    let spans = code_spans(content);
+    let mut cursor = 0;
+    while let Some(found) = content[cursor..].find("](") {
+        let close_text = cursor + found;
+        cursor = close_text + 2;
+        let Some(start) = link_text_start(content, close_text) else {
+            continue;
+        };
+        let Some((path, close)) = read_destination(content, close_text + 2) else {
+            continue;
+        };
+        cursor = close;
+        let image = content[..start].ends_with('!');
+        let note = path.to_ascii_lowercase().ends_with(".md");
+        let in_code = spans.iter().any(|(s, e)| (*s..*e).contains(&close_text));
+        if !image && note && relative(&path) && !in_code && !reserved(&path) {
+            if start == open {
+                return relation_type(&content[..open]).map(|k| Read::Relation(k, path));
+            }
+            return None;
+        }
+    }
+    None
+}
+
+/// What Crystalline reads from the top-level bullets of `body`.
+fn crystalline_reads(body: &str) -> Vec<Read> {
+    let lines: Vec<&str> = body.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let mut fence: Option<(char, usize)> = None;
+    let in_fence: Vec<bool> = lines
+        .iter()
+        .map(|l| match fence {
+            None => {
+                fence = fence_marker(l);
+                fence.is_some()
+            }
+            Some((c, n)) => {
+                if let Some((c2, n2)) = fence_marker(l)
+                    && c2 == c
+                    && n2 >= n
+                    && l.trim_start().trim_start_matches(c).trim().is_empty()
+                {
+                    fence = None;
+                }
+                true
+            }
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if in_fence[i] || is_heading(line) {
+            continue;
+        }
+        let Some(first) = line.strip_prefix("- ") else {
+            continue;
+        };
+        let mut content = first.to_string();
+        let open_category = first.starts_with('[') && !first.contains(']');
+        if !open_category {
+            let mut end = i;
+            for (j, next) in lines.iter().enumerate().skip(i + 1) {
+                let inside_link = lines[end]
+                    .rfind("[[")
+                    .is_some_and(|o| !lines[end][o + 2..].contains("]]"));
+                if in_fence[j] || !continues_bullet(next) || inside_link {
+                    break;
+                }
+                content = format!("{} {}", content.trim_end(), next.trim());
+                end = j;
+            }
+        }
+        if let Some(read) = read_bullet(&content) {
+            out.push(read);
+        }
+    }
+    out
+}
+
+/// The relations Crystalline reads from a file, as (type, target).
+fn relations(md: &str) -> Vec<(String, String)> {
+    crystalline_reads(body(md))
+        .into_iter()
+        .filter_map(|r| match r {
+            Read::Relation(k, t) => Some((k, t)),
+            Read::Observation(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_test_reader_reads_what_crystalline_reads() {
+    let reads = |text: &str| crystalline_reads(text);
+    let rel = |k: &str, t: &str| Read::Relation(k.into(), t.into());
+    assert_eq!(reads("- part_of [A](../a.md)"), [rel("part_of", "../a.md")]);
+    assert_eq!(
+        reads("- \"two words\" [x](y.md)"),
+        [rel("two words", "y.md")]
+    );
+    assert_eq!(reads("- tok [[x]]"), [rel("tok", "x")]);
+    assert_eq!(
+        reads("- part_of [A](<../a b (c) %232.md>)"),
+        [rel("part_of", "../a b (c) #2.md")]
+    );
+    // A wrapped bullet is read over its continuation line.
+    assert_eq!(reads("- follows\n[A](a.md)"), [rel("follows", "a.md")]);
+    assert_eq!(reads("- [cat] text"), [Read::Observation("cat".into())]);
+    // Not relations: a bullet that opens with a link, an indented bullet, a fenced line,
+    // two words, an image, a web page, a reserved name, a link in code.
+    for text in [
+        "- [A](a.md): x",
+        "  - part_of [A](a.md)",
+        "```\n- part_of [A](a.md)\n```",
+        "- two words [A](a.md)",
+        "- part_of ![A](a.md)",
+        "- part_of [A](https://e.org/a.md)",
+        "- part_of [A](index.md)",
+        "- part_of `[A](a.md)`",
+        "- x \\[A\\](a.md)",
+    ] {
+        assert_eq!(reads(text), [], "{text}");
+    }
+}
+
+/// A document whose every written place holds text that reads like a relation, a wikilink or
+/// an observation.
+fn hostile_doc() -> Document {
+    let mut d = doc(FormatId::Pdf);
+    d.source.name = "Q3 report (final) #2.pdf".into();
+    d.properties.title = Some("Q3 `x` [y](z.md) [[w]] \"two words\" [x](y.md) a](b.md) c".into());
+    d.properties.description = Some("- part_of [d](e.md)\n- [cat] text".into());
+    d.properties.authors = vec!["part_of [x](y.md)".into(), "[[a]]".into()];
+    for i in 1..=4u32 {
+        d.facets.outline.push(OutlineEntry {
+            level: 1,
+            title: format!("tok [x](y{i}.md)"),
+            page: Some(i),
+        });
+    }
+    for i in 1..=4u32 {
+        d.body.push(page(
+            i,
+            vec![
+                heading(1, &format!("tok [[c{i}]] [k](l.md) x](m.md) `")),
+                para(&words(9_000)),
+                Block::Table {
+                    caption: None,
+                    header_rows: 1,
+                    role: None,
+                    rows: vec![vec![Cell::new(vec![Inline::plain("a")])]],
+                    alignments: Vec::new(),
+                    anchor: None,
+                    layout: None,
+                },
+            ],
+        ));
+    }
+    d.overview = Some(rezzer_model::Overview {
+        parts: vec![OverviewPart {
+            id: "p1".into(),
+            name: "rel [x](y.md)".into(),
+            kind: "page".into(),
+            size: "1 table".into(),
+            role: None,
+            reads: Vec::new(),
+        }],
+        facts: vec![("part_of [x](y.md)".into(), "[[z]]".into())],
+    });
+    for i in 0..30 {
+        d.losses.push(loss(&format!("part_of [x](y{i}.md) [[q]]")));
+    }
+    d
+}
+
+#[test]
+fn relation_lines_parse_like_crystalline() {
+    let main = "Q3 report (final) #2.pdf.md";
+    let out = output(&hostile_doc(), 2_500, main, "q3-report");
+    assert_files_within(&out, 2_500);
+    assert!(out.parts.len() >= 5, "{:?}", out.parts.len());
+    assert_eq!(crystalline_reads(body(&out.main)), [], "the main document");
+    let mut previous: Option<String> = None;
+    for p in &out.parts {
+        let file = p.path.rsplit('/').next().expect("file").to_string();
+        let mut want = vec![("part_of".to_string(), format!("../{main}"))];
+        if let Some(prev) = &previous {
+            want.push(("follows".to_string(), prev.clone()));
+        }
+        assert_eq!(relations(&p.markdown), want, "{}", p.path);
+        // Nothing else is read from the part: no other relation, no observation.
+        let reads = crystalline_reads(body(&p.markdown));
+        assert_eq!(reads.len(), want.len(), "{}: {reads:?}", p.path);
+        previous = Some(file);
+    }
+}
+
+#[test]
+fn relation_targets_with_spaces_and_hash() {
+    let main = "Q3 report (final) #2.pdf.md";
+    let mut d = chapters_doc(3, 6_000);
+    d.source.name = "Q3 report (final) #2.pdf".into();
+    d.properties.title = Some("Q3 `report".into());
+    let out = output(&d, 2_500, main, "Q3 report (final) #2");
+    let second = &out.parts[1].markdown;
+    assert!(
+        second.contains("\n- part_of [Q3 \\`report](<../Q3 report (final) %232.pdf.md>)\n"),
+        "{second}"
+    );
+    assert!(second.contains("\n- follows [Q3 \\`report: Chapter 1](chapter-1.md)\n"));
+    assert_eq!(
+        relations(second),
+        [
+            ("part_of".to_string(), format!("../{main}")),
+            ("follows".to_string(), "chapter-1.md".to_string())
+        ]
+    );
+    // The main document's links go into the folder, encoded the same way.
+    let parts = section_lines(&out.main, "Parts");
+    assert_eq!(
+        parts[0],
+        "- [Q3 \\`report: Chapter 1](<Q3 report (final) %232/chapter-1.md>): Chapter 1"
+    );
+    assert_eq!(out.parts[0].path, "Q3 report (final) #2/chapter-1.md");
+    // A `]` in a title never ends an observation category in a list of parts.
+    let mut plain = chapters_doc(3, 6_000);
+    plain.properties.title = Some("A] b".into());
+    let out = output(&plain, 2_500, "a.md", "a");
+    assert!(out.main.contains("- [A&#93; b: Chapter 1](a/chapter-1.md)"));
+    assert_eq!(crystalline_reads(body(&out.main)), []);
+    // `%`, `>` and a backslash are encoded too, so the name reads back as written.
+    let odd = "a%b>c\\d`e.md";
+    let out = output(&d, 2_500, odd, "x");
+    assert_eq!(relations(&out.parts[0].markdown)[0].1, format!("../{odd}"));
+}
+
+#[test]
+fn not_read_capped_with_link() {
+    let mut d = chapters_doc(4, 6_000);
+    for i in 1..=45 {
+        d.losses.push(loss(&format!("thing {i}")));
+    }
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_files_within(&out, 2_500);
+    let lines = section_lines(&out.main, "Not read");
+    // The header, its separator, 20 rows and the line with the link.
+    assert_eq!(lines.len(), 23, "{lines:?}");
+    assert!(lines[21].contains("thing 20"));
+    assert_eq!(lines[22], "And 25 more in [Not read](b/not-read.md).");
+    let not_read = out
+        .parts
+        .iter()
+        .find(|p| p.path == "b/not-read.md")
+        .expect("a not-read part");
+    assert_eq!(not_read.title, "report.md: Not read");
+    assert_eq!(not_read.location, "Not read");
+    for i in 1..=45 {
+        assert!(
+            not_read.markdown.contains(&format!("thing {i} ")),
+            "thing {i}"
+        );
+    }
+    // It is a part like the others: listed last and in the follows chain.
+    let parts = section_lines(&out.main, "Parts");
+    assert_eq!(
+        parts.last().copied(),
+        Some("- [report.md: Not read](b/not-read.md): Not read")
+    );
+    assert_eq!(
+        out.parts.last().map(|p| p.path.as_str()),
+        Some("b/not-read.md")
+    );
+    assert_eq!(
+        relations(&not_read.markdown)[1],
+        ("follows".to_string(), "chapter-4.md".to_string())
+    );
+    // Under the cap the list is whole and there is no not-read part.
+    let mut d = chapters_doc(4, 6_000);
+    for i in 1..=15 {
+        d.losses.push(loss(&format!("thing {i}")));
+    }
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_eq!(section_lines(&out.main, "Not read").len(), 17);
+    assert!(!out.main.contains("not-read.md"));
+    assert!(out.parts.iter().all(|p| !p.path.contains("not-read")));
+}
+
+#[test]
+fn outline_and_tables_capped_at_20() {
+    let mut d = doc(FormatId::Pdf);
+    for i in 1..=30u32 {
+        d.facets.outline.push(OutlineEntry {
+            level: 1,
+            title: format!("Chapter {i}"),
+            page: Some(i),
+        });
+        d.facets.outline.push(OutlineEntry {
+            level: 3,
+            title: format!("Deep {i}"),
+            page: Some(i),
+        });
+        d.body.push(page(
+            i,
+            vec![
+                para(&words(3_000)),
+                Block::Table {
+                    caption: None,
+                    header_rows: 1,
+                    role: None,
+                    rows: vec![vec![Cell::new(vec![Inline::plain("a")])]],
+                    alignments: Vec::new(),
+                    anchor: None,
+                    layout: None,
+                },
+            ],
+        ));
+    }
+    d.facets.outline.insert(
+        1,
+        OutlineEntry {
+            level: 2,
+            title: "Part 1.1".into(),
+            page: Some(1),
+        },
+    );
+    let out = output(&d, 2_500, "report.pdf.md", "b");
+    assert_files_within(&out, 2_500);
+    let outline = section_lines(&out.main, "Outline");
+    assert_eq!(outline.len(), 21, "{outline:?}");
+    assert_eq!(outline[0], "- Chapter 1, page 1");
+    assert_eq!(outline[1], "  - Part 1.1, page 1");
+    assert_eq!(outline[19], "- Chapter 19, page 19");
+    assert_eq!(outline[20], "- and 11 more");
+    assert!(!outline.iter().any(|l| l.contains("Deep")));
+    let tables = section_lines(&out.main, "Tables");
+    assert_eq!(tables.len(), 21, "{tables:?}");
+    assert_eq!(tables[0], "- Table 1 page 1");
+    assert_eq!(tables[19], "- Table 20 page 20");
+    assert_eq!(tables[20], "- and 10 more");
+}
+
+#[test]
+fn overview_is_capped_at_20() {
+    let mut d = chapters_doc(6, 6_000);
+    d.overview = Some(rezzer_model::Overview {
+        parts: (1..=30)
+            .map(|i| OverviewPart {
+                id: format!("p{i}"),
+                name: format!("Part {i}"),
+                kind: "chapter".into(),
+                size: "1 paragraph".into(),
+                role: None,
+                reads: Vec::new(),
+            })
+            .collect(),
+        facts: Vec::new(),
+    });
+    let out = output(&d, 2_500, "report.md.md", "b");
+    let lines = section_lines(&out.main, "Overview");
+    // The header, its separator, 20 rows and the line that counts the rest.
+    assert_eq!(lines.len(), 23, "{lines:?}");
+    assert!(lines[21].contains("Part 20 "));
+    assert_eq!(lines[22], "And 10 more parts.");
+}
+
+#[test]
+fn trailing_part_names_never_clash() {
+    // Headings named like the main document writer's parts take the next free names.
+    let mut d = doc(FormatId::Markdown);
+    for title in ["Contents", "Not read", "Contents"] {
+        d.body.push(heading(1, title));
+        d.body.push(para(&words(6_000)));
+    }
+    for i in 1..=2_000 {
+        d.losses.push(loss(&format!("thing {i}")));
+    }
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_files_within(&out, 2_500);
+    let mut seen = std::collections::HashSet::new();
+    for p in &out.parts {
+        assert!(seen.insert(p.path.clone()), "{} twice", p.path);
+    }
+    let files: Vec<&str> = out.parts.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(
+        &files[..3],
+        ["b/contents-2.md", "b/not-read-2.md", "b/contents-3.md"]
+    );
+    assert_eq!(files[3], "b/not-read.md");
+    assert!(files.contains(&"b/not-read-3.md"), "{files:?}");
+}
+
+#[test]
+fn main_document_fits_with_huge_own_texts() {
+    let mut d = chapters_doc(6, 6_000);
+    d.properties.title = Some("<".repeat(20_000));
+    d.properties.description = Some("*".repeat(100_000));
+    d.properties.authors = (0..5_000).map(|i| format!("Author {i}")).collect();
+    for i in 0..500 {
+        d.facets.outline.push(OutlineEntry {
+            level: 1,
+            title: "<".repeat(1_000) + &i.to_string(),
+            page: None,
+        });
+    }
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_files_within(&out, 2_500);
+    assert!(out.main.contains("## Parts"));
+    assert!(out.main.contains(
+        "These lists are left out to keep this file within the size limit: Outline, Dates and \
+         people."
+    ));
+    assert!(out.parts.iter().any(|p| p.path == "b/contents.md"));
+}

@@ -35,7 +35,9 @@
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 //! - A document whose body is over the part size is cut into units at its own borders by
-//!   [`split`] (spec 5); the units' links are written for their place one folder down
+//!   [`split`] (spec 5); the units' links are written for their place one folder down.
+//!   [`render_output`] writes them as part files with `part_of` and `follows` relations, and
+//!   a main document with the stats, capped extracts and the list of the parts
 
 mod blocks;
 mod describe;
@@ -46,6 +48,7 @@ mod layout;
 mod mermaid;
 mod overview;
 mod paging;
+mod parts;
 mod split;
 mod workbook;
 
@@ -55,6 +58,7 @@ use rezzer_model::{Block, Completeness, Document, Inline, SectionKind, plain_tex
 
 use crate::blocks::{Ctx, MAX_DEPTH, Notes};
 
+pub use crate::parts::{Output, PartFile, render_output};
 pub use crate::split::{Unit, split};
 
 /// A part of the output that a caller can ask for.

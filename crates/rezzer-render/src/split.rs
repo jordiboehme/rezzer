@@ -132,6 +132,16 @@ pub(crate) fn part_measure(bundle: &str) -> Measure {
     }
 }
 
+/// `text` cut into pieces of at most `budget` by `measure` ([`paging::cut`]), each without
+/// blank lines at its ends.
+pub(crate) fn pieces(text: &str, budget: usize, measure: Measure) -> Vec<String> {
+    paging::cut(text, budget, &|t: &str| measure.chars(t))
+        .into_iter()
+        .map(|p| p.trim_matches(['\n', '\r']).to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
 /// `text` cut to at most `max` characters: at the last space in its second half, else between
 /// characters, then `...`. Unchanged when it fits.
 pub(crate) fn capped(text: &str, max: usize) -> String {
@@ -195,6 +205,13 @@ impl Names {
             taken: RESERVED.iter().map(|r| (*r).to_string()).collect(),
             next: HashMap::new(),
         }
+    }
+
+    /// The names a split gave its units, so a later name never takes one of them.
+    pub(crate) fn taken<'n>(names: impl IntoIterator<Item = &'n str>) -> Names {
+        let mut out = Names::new();
+        out.taken.extend(names.into_iter().map(str::to_string));
+        out
     }
 
     /// A free name from `base` (slugged) and `suffix` (already a slug part, such as
@@ -323,7 +340,7 @@ struct Spec<'a> {
 }
 
 /// The names of a family's members: what the `n`-th of them (from 1) is titled.
-fn family_title(title: &str, n: usize) -> String {
+pub(crate) fn family_title(title: &str, n: usize) -> String {
     if n <= 1 {
         title.to_string()
     } else {
@@ -1362,12 +1379,7 @@ impl<'a> Splitter<'a> {
 
     /// `text` cut to the budget, each piece without blank lines at its ends.
     fn pieces(&self, text: &str) -> Vec<String> {
-        let measure = self.measure;
-        paging::cut(text, self.budget, &|t: &str| measure.chars(t))
-            .into_iter()
-            .map(|p| p.trim_matches(['\n', '\r']).to_string())
-            .filter(|p| !p.is_empty())
-            .collect()
+        pieces(text, self.budget, self.measure)
     }
 
     /// The trailing sections in order, each with its name and location: properties, logic,

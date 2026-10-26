@@ -161,15 +161,16 @@ pub(crate) fn shown_title<'a>(doc: &'a Document, opts: &'a RenderOptions) -> &'a
     }
 }
 
-/// The description of this output: for a part `Part <k> of <n> of "<title>": <location>.`,
-/// else the document's own or the template ([`crate::describe::description`]).
+/// The description of this output: for a part `Part <k> of <n> of "<title>": <location>.`
+/// with the title cut as in the part's title, else the document's own or the template
+/// ([`crate::describe::description`]).
 pub(crate) fn shown_description(doc: &Document, opts: &RenderOptions) -> String {
     match &opts.part {
         Some(part) => format!(
             "Part {} of {} of \"{}\": {}.",
             part.index,
             part.count,
-            title(doc).trim(),
+            crate::split::capped(title(doc), crate::split::TITLE_CAP),
             part.location
         ),
         None => crate::describe::description(doc),

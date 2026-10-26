@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 
 use rezzer_model::{
-    Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
+    Annotation, Block, Document, Formula, Inline, Loss, LossReason, Role, Severity, StatusColor,
+    Value,
 };
 
 use crate::Selection;
@@ -523,11 +524,12 @@ fn severity(s: Severity) -> &'static str {
 
 /// `## Not read`: every loss with where, what, why and how bad.
 pub(crate) fn not_read(doc: &Document) -> Option<String> {
-    if doc.losses.is_empty() {
-        return None;
-    }
-    let rows: Vec<Vec<String>> = doc
-        .losses
+    (!doc.losses.is_empty()).then(|| not_read_list(&doc.losses))
+}
+
+/// `## Not read` with the losses in `list`, as a table.
+pub(crate) fn not_read_list(list: &[Loss]) -> String {
+    let rows: Vec<Vec<String>> = list
         .iter()
         .map(|l| {
             vec![
@@ -538,8 +540,8 @@ pub(crate) fn not_read(doc: &Document) -> Option<String> {
             ]
         })
         .collect();
-    Some(format!(
+    format!(
         "## Not read\n\n{}",
         pipe_table(&header(&["Where", "What", "Why", "Severity"]), &[], &rows)
-    ))
+    )
 }

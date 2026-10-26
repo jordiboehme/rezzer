@@ -91,6 +91,10 @@ pub(crate) fn kind_words(doc: &Document) -> Vec<&'static str> {
 /// the `## Overview` facts, so both say the same.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Counts {
+    /// The pages the file says it has.
+    pub(crate) pages: usize,
+    /// The sheet sections.
+    pub(crate) sheets: usize,
     /// Tables without a role (a reader's summary has one); in a sheet only the table
     /// regions, not grids, label and value pairs or text.
     pub(crate) tables: usize,
@@ -100,6 +104,8 @@ pub(crate) struct Counts {
     pub(crate) formulas: usize,
     pub(crate) form_fields: usize,
     pub(crate) signatures: usize,
+    /// The revisions the file says it has.
+    pub(crate) revisions: usize,
     pub(crate) annotations: usize,
     /// Pictures (assets) that need a look by the calling agent.
     pub(crate) vision: usize,
@@ -108,7 +114,11 @@ pub(crate) struct Counts {
 }
 
 pub(crate) fn counts(doc: &Document) -> Counts {
+    let facts = &doc.properties.facts;
     let mut counts = Counts {
+        pages: facts.pages.map_or(0, |n| n as usize),
+        sheets: sheet_count(doc),
+        revisions: facts.revisions.map_or(0, |n| n as usize),
         formulas: doc.facets.formulas.iter().filter(|f| !f.is_name()).count(),
         form_fields: doc.facets.fields.len(),
         signatures: doc.facets.signatures.len(),
@@ -118,31 +128,84 @@ pub(crate) fn counts(doc: &Document) -> Counts {
         not_read: doc.losses.iter().filter(|l| l.is_not_read()).count(),
         ..Counts::default()
     };
-    count_blocks(&doc.body, 0, &mut counts);
+    each_table(&doc.body, &mut |_, _, _| counts.tables += 1);
     counts
 }
 
-/// Adds the tables in `list` to `counts`.
-fn count_blocks(list: &[Block], depth: usize, counts: &mut Counts) {
+/// The top-level sheet sections of a document.
+fn sheet_count(doc: &Document) -> usize {
+    doc.body
+        .iter()
+        .filter(|b| {
+            matches!(
+                b,
+                Block::Section {
+                    kind: SectionKind::Sheet,
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+/// Whether a block is a table the counts name: a table without a role (a reader's summary
+/// has one) that is no grid, label and value pairs or text region of a sheet.
+pub(crate) fn counted_table(b: &Block) -> bool {
+    match b {
+        Block::Table { role, layout, .. } => {
+            role.is_none() && layout.as_ref().is_none_or(|l| l.kind == LayoutKind::Table)
+        }
+        _ => false,
+    }
+}
+
+/// Calls `f` for every table the counts name ([`counted_table`]), in document order, with
+/// the sheet it stands in (its anchor, as a reference writes it) and its page.
+pub(crate) fn each_table<'d>(
+    list: &'d [Block],
+    f: &mut dyn FnMut(&'d Block, Option<&'d str>, Option<u32>),
+) {
+    walk_tables(list, 0, None, None, f);
+}
+
+fn walk_tables<'d>(
+    list: &'d [Block],
+    depth: usize,
+    sheet: Option<&'d str>,
+    page: Option<u32>,
+    f: &mut dyn FnMut(&'d Block, Option<&'d str>, Option<u32>),
+) {
     if depth > MAX_DEPTH {
         return;
     }
     for b in list {
         match b {
-            Block::Table { role, layout, .. } => {
-                let table_region = layout.as_ref().is_none_or(|l| l.kind == LayoutKind::Table);
-                if role.is_none() && table_region {
-                    counts.tables += 1;
-                }
+            Block::Table { .. } if counted_table(b) => f(b, sheet, page),
+            Block::Section {
+                kind,
+                title,
+                anchor,
+                blocks,
+            } => {
+                let anchor = anchor.as_ref().map(|a| a.0.as_str());
+                let sheet = match kind {
+                    SectionKind::Sheet => anchor.or(title.as_deref()),
+                    _ => sheet,
+                };
+                let page = match kind {
+                    SectionKind::Page => anchor
+                        .and_then(|a| a.strip_prefix('p')?.parse().ok())
+                        .or(page),
+                    _ => page,
+                };
+                walk_tables(blocks, depth + 1, sheet, page, f);
             }
-            Block::Section { blocks, .. }
-            | Block::Quote { blocks, .. }
-            | Block::Callout { blocks, .. } => {
-                count_blocks(blocks, depth + 1, counts);
+            Block::Quote { blocks, .. } | Block::Callout { blocks, .. } => {
+                walk_tables(blocks, depth + 1, sheet, page, f);
             }
             Block::List { items, .. } => {
                 for item in items {
-                    count_blocks(item, depth + 1, counts);
+                    walk_tables(item, depth + 1, sheet, page, f);
                 }
             }
             _ => {}
@@ -204,7 +267,7 @@ pub(crate) fn description(doc: &Document) -> String {
 }
 
 /// `1 page`, `2 pages`.
-fn counted(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn counted(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
@@ -218,19 +281,7 @@ fn size(doc: &Document) -> String {
         doc.source.format,
         FormatId::Xlsx | FormatId::Xlsm | FormatId::Xlsb | FormatId::Ods | FormatId::Xls
     );
-    let sheets = doc
-        .body
-        .iter()
-        .filter(|b| {
-            matches!(
-                b,
-                Block::Section {
-                    kind: SectionKind::Sheet,
-                    ..
-                }
-            )
-        })
-        .count();
+    let sheets = sheet_count(doc);
     if workbook && sheets > 0 {
         return counted(sheets, "sheet", "sheets");
     }
