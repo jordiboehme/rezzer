@@ -34,8 +34,8 @@ use crate::blocks;
 use crate::bullets;
 use crate::describe::{self, Counts, Measure, body_tokens, counted};
 use crate::split::{
-    self, LIST_TITLE, Names, TITLE_CAP, Unit, capped, family_title, part_budget, part_measure,
-    pieces,
+    self, LIST_TITLE, NOT_READ_TITLE, Names, TITLE_CAP, Unit, capped, family_title, part_budget,
+    part_measure, pieces,
 };
 use crate::{
     OutputSection, PartMeta, RenderOptions, Selection, chosen_sheets, facets, frontmatter,
@@ -244,7 +244,7 @@ impl Writer<'_> {
             extra.extend(self.family(
                 &trailing.not_read_pieces,
                 "not-read",
-                "Not read",
+                NOT_READ_TITLE,
                 &mut names,
             ));
         }

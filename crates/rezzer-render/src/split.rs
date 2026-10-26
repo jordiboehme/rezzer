@@ -332,6 +332,9 @@ struct Item<'a> {
     lead: usize,
     /// Only a heading: it goes with the item after it when it cannot be packed with it.
     heading_only: bool,
+    /// Rezzer made it and titled it itself (`Start`, `Footnotes`): its title is one of
+    /// [`OWN_TITLES`] and never changes for a clash.
+    rezzer: bool,
 }
 
 /// A unit as planned: the item, and how many pieces its text is cut into (more than one only
@@ -358,18 +361,33 @@ pub(crate) fn family_title(title: &str, n: usize) -> String {
 /// The title of Rezzer's own parts that list the other parts (ruling P5-AF), so a source
 /// chapter named `Contents` keeps its name.
 pub(crate) const LIST_TITLE: &str = "List of parts";
+/// The blocks before the first border.
+pub(crate) const START_TITLE: &str = "Start";
+/// The footnote definitions no unit cites.
+pub(crate) const FOOTNOTES_TITLE: &str = "Footnotes";
+pub(crate) const PROPERTIES_TITLE: &str = "Properties";
+pub(crate) const LOGIC_TITLE: &str = "Logic";
+pub(crate) const ANNOTATIONS_TITLE: &str = "Annotations";
+pub(crate) const CHANGES_TITLE: &str = "Changes";
+pub(crate) const EMBEDDED_TITLE: &str = "Embedded";
+pub(crate) const OUTLINE_TITLE: &str = "Outline";
+/// The whole `## Not read` list when the main document cuts it.
+pub(crate) const NOT_READ_TITLE: &str = "Not read";
 
-/// The titles of Rezzer's own parts, in lower case: a unit of the source titled like one of
-/// them (or like a piece of one, `Logic, part 2`) gets a word added.
-const OWN_TITLES: [&str; 8] = [
-    "list of parts",
-    "properties",
-    "logic",
-    "annotations",
-    "changes",
-    "embedded",
-    "outline",
-    "not read",
+/// The titles of Rezzer's own parts, the same constants the writers use: a unit of the
+/// source titled like one of them (or like a piece of one, `Logic, part 2`) gets its location
+/// or a word added.
+pub(crate) const OWN_TITLES: [&str; 10] = [
+    LIST_TITLE,
+    START_TITLE,
+    FOOTNOTES_TITLE,
+    PROPERTIES_TITLE,
+    LOGIC_TITLE,
+    ANNOTATIONS_TITLE,
+    CHANGES_TITLE,
+    EMBEDDED_TITLE,
+    OUTLINE_TITLE,
+    NOT_READ_TITLE,
 ];
 
 /// A title as Crystalline compares it (L003): trimmed, in lower case.
@@ -377,11 +395,14 @@ fn title_key(title: &str) -> String {
     title.trim().to_lowercase()
 }
 
-fn own_title(key: &str) -> bool {
+/// Whether `key` (see [`title_key`]) is the title of one of Rezzer's own parts or of a piece
+/// of one.
+pub(crate) fn own_title(key: &str) -> bool {
     OWN_TITLES.iter().any(|own| {
-        key == *own
+        let own = title_key(own);
+        key == own
             || key
-                .strip_prefix(own)
+                .strip_prefix(own.as_str())
                 .is_some_and(|rest| rest.starts_with(", "))
     })
 }
@@ -396,16 +417,20 @@ fn with_suffix(title: &str, suffix: &str) -> String {
 /// pieces are numbered (rulings P5-AE and P5-AF), as Crystalline compares titles (L003).
 /// Units that share a title get their location in words, `Abstract (pages 3 to 5)`; units
 /// that share title and location get ` (2)`, ` (3)` after the first. A unit titled like one
-/// of Rezzer's own parts gets its location, or the word `(section)`. Each title stays within
-/// [`TITLE_CAP`], so the pieces' `, part <n>` fits the part overhead.
-pub(crate) fn unit_titles(units: &[(&str, &str)]) -> Vec<String> {
+/// of Rezzer's own parts gets its location, or the word `(section)`; Rezzer's own units
+/// (`rezzer` true: `Start`, `Footnotes`) keep theirs. Each title stays within [`TITLE_CAP`],
+/// so the pieces' `, part <n>` fits the part overhead. A unit is (title, location, rezzer).
+pub(crate) fn unit_titles(units: &[(&str, &str, bool)]) -> Vec<String> {
     let mut count: HashMap<String, usize> = HashMap::new();
-    for (title, _) in units {
+    for (title, _, _) in units {
         *count.entry(title_key(title)).or_insert(0) += 1;
     }
     let located: Vec<String> = units
         .iter()
-        .map(|(title, location)| {
+        .map(|&(title, location, rezzer)| {
+            if rezzer {
+                return capped(title, TITLE_CAP);
+            }
             let key = title_key(title);
             let shared = count.get(&key).is_some_and(|&n| n > 1);
             let own = own_title(&key);
@@ -730,8 +755,8 @@ impl<'a> Splitter<'a> {
         }
         let start = Item {
             base: "start".into(),
-            title: "Start".into(),
-            location: "Start".into(),
+            title: START_TITLE.into(),
+            location: START_TITLE.into(),
             family: None,
             pages: None,
             page_names: false,
@@ -744,6 +769,7 @@ impl<'a> Splitter<'a> {
             expand: Expand::Chunk,
             lead: 0,
             heading_only: false,
+            rezzer: true,
             last: true,
         };
         let pages = body.iter().any(|b| page_number(b).is_some());
@@ -755,8 +781,8 @@ impl<'a> Splitter<'a> {
                 Run::Owned(section) => {
                     items.push(Item {
                         base: "footnotes".into(),
-                        title: "Footnotes".into(),
-                        location: "Footnotes".into(),
+                        title: FOOTNOTES_TITLE.into(),
+                        location: FOOTNOTES_TITLE.into(),
                         content: Content::Owned(vec![section]),
                         expand: Expand::Text,
                         ..start.clone()
@@ -821,6 +847,7 @@ impl<'a> Splitter<'a> {
                 expand: Expand::Group,
                 lead: 0,
                 heading_only: false,
+                rezzer: chapter.is_none(),
                 last: true,
             });
         };
@@ -902,6 +929,7 @@ impl<'a> Splitter<'a> {
             expand: Expand::Section,
             lead: 0,
             heading_only: false,
+            rezzer: parent.is_some_and(|p| p.rezzer),
             last,
         }
     }
@@ -967,6 +995,8 @@ impl<'a> Splitter<'a> {
         expand: Expand,
         last: bool,
     ) -> Item<'a> {
+        // A piece of a unit Rezzer titled itself keeps that title.
+        let rezzer = title.is_none() && parent.rezzer;
         let (base, title, location, family) = match title {
             Some(t) => {
                 let t = capped(t, TITLE_CAP);
@@ -995,6 +1025,7 @@ impl<'a> Splitter<'a> {
             expand,
             lead: 0,
             heading_only: false,
+            rezzer,
             last,
         }
     }
@@ -1378,6 +1409,7 @@ impl<'a> Splitter<'a> {
                 expand: Expand::Text,
                 lead: 0,
                 heading_only: false,
+                rezzer: false,
                 last: item.last && k + 1 == count,
             };
             let mut s = if cost > self.budget {
@@ -1439,12 +1471,13 @@ impl<'a> Splitter<'a> {
             .filter(|&k| seen.insert(family_of(k)))
             .map(|k| (family_of(k), k))
             .collect();
-        let pairs: Vec<(&str, &str)> = firsts
+        let pairs: Vec<(&str, &str, bool)> = firsts
             .iter()
             .map(|&(_, k)| {
                 (
                     specs[k].item.title.as_str(),
                     specs[k].item.location.as_str(),
+                    specs[k].item.rezzer,
                 )
             })
             .collect();
@@ -1528,12 +1561,12 @@ impl<'a> Splitter<'a> {
         if self.want(OutputSection::Properties)
             && let Some(text) = facets::properties(self.doc)
         {
-            out.push(("properties", "Properties", text));
+            out.push(("properties", PROPERTIES_TITLE, text));
         }
         if self.want(OutputSection::Logic)
             && let Some(text) = facets::logic(self.doc, self.opts.math, selection)
         {
-            out.push(("logic", "Logic", text));
+            out.push(("logic", LOGIC_TITLE, text));
         }
         if self.want(OutputSection::Annotations) {
             let mut ctx = self.ctx(notes);
@@ -1551,18 +1584,18 @@ impl<'a> Splitter<'a> {
                     Cow::Borrowed(list)
                 };
             if let Some(text) = facets::annotations(&list, &ctx, notes, selection) {
-                out.push(("annotations", "Annotations", text));
+                out.push(("annotations", ANNOTATIONS_TITLE, text));
             }
         }
         if self.want(OutputSection::Changes)
             && let Some(text) = facets::changes(self.doc)
         {
-            out.push(("changes", "Changes", text));
+            out.push(("changes", CHANGES_TITLE, text));
         }
         if self.want(OutputSection::Embedded)
             && let Some(text) = facets::embedded(self.doc, "../")
         {
-            out.push(("embedded", "Embedded", text));
+            out.push(("embedded", EMBEDDED_TITLE, text));
         }
         if self.want(OutputSection::Content)
             && let Some(outline) = self.doc.body.iter().find(|b| is_pdf_outline(self.doc, b))
@@ -1570,7 +1603,7 @@ impl<'a> Splitter<'a> {
             let ctx = self.ctx(notes);
             let text = blocks::blocks(std::slice::from_ref(outline), &ctx, 0, 2, false);
             if !text.is_empty() {
-                out.push(("outline", "Outline", text));
+                out.push(("outline", OUTLINE_TITLE, text));
             }
         }
         out
@@ -1760,6 +1793,7 @@ fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
         _ => None,
     };
     item.pages = pages;
+    item.rezzer = group.iter().all(|g| g.rezzer);
     let joined = |a: &str, b: &str| {
         if a == b {
             a.to_string()
@@ -2305,7 +2339,10 @@ fn heading_slug(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Names, capped, part_budget, part_measure, slug, split};
+    use super::{
+        Names, OWN_TITLES, START_TITLE, capped, own_title, part_budget, part_measure, slug, split,
+        title_key, unit_titles,
+    };
     use crate::RenderOptions;
     use crate::describe::body_tokens;
     use rezzer_model::{
@@ -2470,5 +2507,34 @@ mod tests {
             Some(PartStart::Continues(t)) if t == "Data"
         ));
         assert!(logic_part("## Logic\n\n> [!WARNING] Old\n\n### Data").is_none());
+    }
+
+    /// Every title Rezzer gives its own parts: a source unit titled like it, or like a piece
+    /// of it, in any letter case, gets its location, else `(section)`; Rezzer's own unit
+    /// keeps it.
+    #[test]
+    fn every_own_title_is_checked() {
+        for own in OWN_TITLES {
+            assert!(own_title(&title_key(own)), "{own}");
+            let lower = own.to_lowercase();
+            let piece = format!("{own}, part 2");
+            for title in [own, lower.as_str(), piece.as_str()] {
+                assert_eq!(
+                    unit_titles(&[(title, title, false)]),
+                    [format!("{title} (section)")]
+                );
+                assert_eq!(
+                    unit_titles(&[(title, "pages 1 to 2", false)]),
+                    [format!("{title} (pages 1 to 2)")]
+                );
+            }
+            assert_eq!(unit_titles(&[(own, own, true)]), [own.to_string()]);
+        }
+        // Rezzer's `Start` first, then a source chapter `Start`.
+        assert_eq!(
+            unit_titles(&[(START_TITLE, START_TITLE, true), ("Start", "Start", false)]),
+            ["Start", "Start (section)"]
+        );
+        assert!(!own_title("startup") && !own_title("logical"));
     }
 }
