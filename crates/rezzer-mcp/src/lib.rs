@@ -8,9 +8,10 @@
 //! Every call that runs answers with one text block (the page, the JSON or the message) and
 //! a structured object. Bad input is a result with status `failed` and `isError` set, never
 //! a protocol error. Only a message longer than the transport reads (see
-//! [`transport::max_message_bytes`]) gets a JSON-RPC error, since it is not read. The pipeline is synchronous and runs on tokio's blocking pool. A cancel
-//! from the client, or the end of the connection, stops a running read at its next budget
-//! check. Nothing but the protocol goes to stdout.
+//! [`transport::max_message_bytes`]) gets a JSON-RPC error, since it is not read. The
+//! pipeline is synchronous and runs on tokio's blocking pool. A cancel from the client, or
+//! the end of the connection, stops a running read at its next budget check. Nothing but the
+//! protocol goes to stdout.
 
 pub mod tools;
 pub mod transport;

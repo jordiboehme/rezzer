@@ -162,6 +162,9 @@ struct Guard<R> {
     filled: usize,
     /// Bytes of the current line so far, its line end included.
     line: usize,
+    /// The next line end in the chunk at or after `pos` (`filled` when there is none), so a
+    /// chunk is searched once even when the reader takes it in small pieces.
+    next_end: Option<usize>,
     max: usize,
     scan: IdScan,
     too_long: mpsc::UnboundedSender<TooLong>,
@@ -176,6 +179,7 @@ impl<R> Guard<R> {
             pos: 0,
             filled: 0,
             line: 0,
+            next_end: None,
             max,
             scan: IdScan::default(),
             too_long: tx,
@@ -204,11 +208,23 @@ impl<R: AsyncRead + Unpin> AsyncRead for Guard<R> {
                 }
                 this.pos = 0;
                 this.filled = n;
+                this.next_end = None;
             }
             let before = out.filled().len();
             while this.pos < this.filled && out.remaining() > 0 {
+                let next_end = match this.next_end {
+                    Some(at) if at >= this.pos => at,
+                    _ => {
+                        let at = this.chunk[this.pos..this.filled]
+                            .iter()
+                            .position(|&b| b == b'\n')
+                            .map_or(this.filled, |i| this.pos + i);
+                        this.next_end = Some(at);
+                        at
+                    }
+                };
                 let rest = &this.chunk[this.pos..this.filled];
-                let end = rest.iter().position(|&b| b == b'\n');
+                let end = (next_end < this.filled).then_some(next_end - this.pos);
                 let run = end.unwrap_or(rest.len());
                 let room = this.max.saturating_sub(this.line);
                 let pass = run.min(room).min(out.remaining());
