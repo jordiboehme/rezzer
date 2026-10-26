@@ -90,10 +90,6 @@ struct FsFacts {
     file_tags: Vec<String>,
 }
 
-/// At most this many file system tags are kept.
-#[cfg(unix)]
-const MAX_FILE_TAGS: usize = 64;
-
 /// macOS: the download addresses, a binary plist array (the file, then the page).
 #[cfg(unix)]
 const WHERE_FROMS: &str = "com.apple.metadata:kMDItemWhereFroms";
@@ -121,11 +117,15 @@ fn xattr(file: &File, name: &str) -> Option<Vec<u8>> {
 /// Only a safe address is kept, see [`safe_url`].
 #[cfg(unix)]
 fn downloaded_from(file: &File, _path: &Path) -> Option<String> {
-    if let Some(bytes) = xattr(file, WHERE_FROMS) {
-        // The first entry is the file itself; a later one (the page) is never taken instead.
-        let first = fileattrs::string_array(&bytes).ok()?.into_iter().next()?;
+    let first = xattr(file, WHERE_FROMS)
+        .and_then(|bytes| fileattrs::string_array(&bytes).ok())
+        .and_then(|entries| entries.into_iter().next());
+    if let Some(first) = first {
+        // The first entry is the file itself; a later one (the page) is never taken instead,
+        // and an unsafe first entry is not replaced by the other attribute.
         return safe_url(&first);
     }
+    // A missing, unreadable or empty WhereFroms value: the freedesktop attribute counts.
     let bytes = xattr(file, XDG_ORIGIN_URL)?;
     let text = std::str::from_utf8(&bytes).ok()?;
     safe_url(text.trim_matches(|c: char| c == '\0' || c.is_whitespace()))
@@ -160,19 +160,20 @@ fn zone_download(bytes: &[u8]) -> Option<String> {
     safe_url(&fileattrs::zone_host_url(&text)?)
 }
 
-/// The Finder tags, else the `user.xdg.tags`, as written: no empty names, no repeats, at
-/// most [`MAX_FILE_TAGS`].
+/// The Finder tags, else (when they are missing, broken or empty) the `user.xdg.tags`, as
+/// written: no empty names, no repeats, at most [`fileattrs::MAX_TAGS`].
 #[cfg(unix)]
 fn file_tags(file: &File) -> Vec<String> {
-    let mut tags = match xattr(file, FINDER_TAGS) {
-        Some(bytes) => fileattrs::finder_tags(&bytes),
-        None => xattr(file, XDG_TAGS)
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .map(|text| fileattrs::xdg_tags(&text))
-            .unwrap_or_default(),
-    };
-    tags.truncate(MAX_FILE_TAGS);
-    tags
+    let finder = xattr(file, FINDER_TAGS)
+        .map(|bytes| fileattrs::finder_tags(&bytes))
+        .unwrap_or_default();
+    if !finder.is_empty() {
+        return finder;
+    }
+    xattr(file, XDG_TAGS)
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .map(|text| fileattrs::xdg_tags(&text))
+        .unwrap_or_default()
 }
 
 #[cfg(not(unix))]
@@ -180,10 +181,19 @@ fn file_tags(_file: &File) -> Vec<String> {
     Vec::new()
 }
 
+/// Addresses longer than this are not kept.
+const MAX_URL_BYTES: usize = 2048;
+
 /// `raw` when it is an `http`, `https` or `ftp` address with a host, with any user and
-/// password removed; else None. Control characters and spaces make it unsafe too.
-pub(crate) fn safe_url(raw: &str) -> Option<String> {
-    if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+/// password removed; else None. An address over [`MAX_URL_BYTES`], or with white space, a
+/// backslash (which browsers read as `/`, so the host would be another), a control character
+/// or an invisible format character (Unicode Cf, for example U+202E) is unsafe too.
+fn safe_url(raw: &str) -> Option<String> {
+    if raw.len() > MAX_URL_BYTES
+        || raw
+            .chars()
+            .any(|c| c == '\\' || c.is_control() || c.is_whitespace() || is_format_char(c))
+    {
         return None;
     }
     let (scheme, rest) = raw.split_once("://")?;
@@ -200,6 +210,33 @@ pub(crate) fn safe_url(raw: &str) -> Option<String> {
         return None;
     }
     Some(format!("{scheme}://{host}{tail}"))
+}
+
+/// Unicode general category Cf (format characters), as of Unicode 16.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0xAD | 0x600..=0x605
+            | 0x61C
+            | 0x6DD
+            | 0x70F
+            | 0x890..=0x891
+            | 0x8E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+    )
 }
 
 /// Opens for reading. On Unix with `O_NONBLOCK`, so opening a FIFO returns at once instead of
@@ -365,9 +402,24 @@ mod tests {
             "https://example.org/\nx",
             "example.org/a.pdf",
             "",
+            "https://evil.example\\@good.example/x",
+            "https://example.org/a\\b",
+            "https://example.org/\u{202E}fdp.exe",
+            "https://exa\u{200B}mple.org/",
+            "https://example.org/\u{FEFF}",
+            "https://example.org/\u{7F}",
         ] {
             assert_eq!(safe_url(bad), None, "{bad:?}");
         }
+        let long = format!("https://example.org/{}", "a".repeat(64 * 1024));
+        assert_eq!(safe_url(&long), None);
+        let edge = format!("https://example.org/{}", "a".repeat(MAX_URL_BYTES - 20));
+        assert_eq!(edge.len(), MAX_URL_BYTES);
+        assert_eq!(safe_url(&edge).as_deref(), Some(edge.as_str()));
+        assert_eq!(
+            safe_url("https://example.org/Gr%C3%B6%C3%9Fe/日本.pdf").as_deref(),
+            Some("https://example.org/Gr%C3%B6%C3%9Fe/日本.pdf")
+        );
     }
 
     #[test]

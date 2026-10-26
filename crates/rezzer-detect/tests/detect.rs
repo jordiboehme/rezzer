@@ -1824,12 +1824,37 @@ fn created_time_when_the_system_has_one() {
     let path = dir.path().join("x.txt");
     std::fs::write(&path, b"hello\n").unwrap();
     let src = open(&path, &Limits::default()).unwrap();
-    if cfg!(target_os = "macos") {
+    #[cfg(target_os = "macos")]
+    {
+        let fs = fs_type(dir.path());
+        if fs != "apfs" {
+            eprintln!("skipped: the temporary folder is on {fs}, not APFS");
+            return;
+        }
         let created = src.created.as_deref().expect("APFS keeps a birth time");
         assert!(is_rfc3339_utc(created), "{created}");
-    } else if let Some(created) = src.created.as_deref() {
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(created) = src.created.as_deref() {
         assert!(is_rfc3339_utc(created), "{created}");
     }
+}
+
+/// The file system type of the volume that holds `path`, for example `apfs`.
+#[cfg(target_os = "macos")]
+fn fs_type(path: &std::path::Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: statfs only writes into the zeroed struct it is given; the path is a
+    // NUL-terminated string.
+    let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    let rc = unsafe { libc::statfs(path.as_ptr(), &raw mut stat) };
+    assert_eq!(rc, 0, "{}", std::io::Error::last_os_error());
+    // SAFETY: the kernel fills f_fstypename with a NUL-terminated name.
+    unsafe { std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[test]
@@ -1863,9 +1888,38 @@ mod xattrs {
     use rezzer_detect::open;
     use rezzer_limits::Limits;
 
+    #[cfg(target_os = "macos")]
     const WHERE_FROMS: &[u8] =
         include_bytes!("../../formats/fileattrs/tests/data/where_froms_plutil.bplist");
+    #[cfg(target_os = "macos")]
     const TAGS: &[u8] = include_bytes!("../../formats/fileattrs/tests/data/tags_plutil.bplist");
+
+    /// A binary plist holding an empty array: header, the array object (0xA0), a one-byte
+    /// offset table and the 32-byte trailer (one object, top 0, offset table at 9).
+    #[cfg(target_os = "macos")]
+    const EMPTY_ARRAY: &[u8] = &[
+        b'b', b'p', b'l', b'i', b's', b't', b'0', b'0', 0xA0, 8, //
+        0, 0, 0, 0, 0, 0, 1, 1, //
+        0, 0, 0, 0, 0, 0, 0, 1, //
+        0, 0, 0, 0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 9,
+    ];
+
+    /// A binary plist holding the array `["javascript:alert(1)"]`: the array (0xA1, ref 1)
+    /// at offset 8, the ASCII string (0x5F, length 19 as a one-byte integer) at offset 10,
+    /// the offset table at 32 and the trailer (two objects, top 0).
+    #[cfg(target_os = "macos")]
+    fn javascript_where_froms() -> Vec<u8> {
+        let mut bytes = b"bplist00".to_vec();
+        bytes.extend_from_slice(&[0xA1, 1, 0x5F, 0x10, 19]);
+        bytes.extend_from_slice(b"javascript:alert(1)");
+        bytes.extend_from_slice(&[8, 10]);
+        bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 1, 1]);
+        bytes.extend_from_slice(&2u64.to_be_bytes());
+        bytes.extend_from_slice(&0u64.to_be_bytes());
+        bytes.extend_from_slice(&32u64.to_be_bytes());
+        bytes
+    }
 
     /// Sets an extended attribute on a path, or returns the OS error.
     fn set(path: &Path, name: &str, value: &[u8]) -> std::io::Result<()> {
@@ -1958,6 +2012,69 @@ mod xattrs {
         let src = open(&path, &Limits::default()).unwrap();
         assert_eq!(src.downloaded_from, None);
         assert!(src.file_tags.is_empty(), "{:?}", src.file_tags);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn plists_built_here_read_as_meant() {
+        assert!(fileattrs::string_array(EMPTY_ARRAY).unwrap().is_empty());
+        assert_eq!(
+            fileattrs::string_array(&javascript_where_froms()).unwrap(),
+            ["javascript:alert(1)"]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn broken_or_empty_where_froms_fall_back_to_the_origin_url() {
+        for where_froms in [&WHERE_FROMS[..20], EMPTY_ARRAY, b"not a plist"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = file(&dir);
+            set(&path, "com.apple.metadata:kMDItemWhereFroms", where_froms).unwrap();
+            set(&path, "user.xdg.origin.url", b"https://example.org/a.pdf").unwrap();
+            let src = open(&path, &Limits::default()).unwrap();
+            assert_eq!(
+                src.downloaded_from.as_deref(),
+                Some("https://example.org/a.pdf"),
+                "{where_froms:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unsafe_first_where_from_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(
+            &path,
+            "com.apple.metadata:kMDItemWhereFroms",
+            &javascript_where_froms(),
+        )
+        .unwrap();
+        set(&path, "user.xdg.origin.url", b"https://example.org/a.pdf").unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.downloaded_from, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn broken_or_empty_finder_tags_fall_back_to_xdg_tags() {
+        for finder in [&TAGS[..20], EMPTY_ARRAY, b"not a plist"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = file(&dir);
+            set(&path, "com.apple.metadata:_kMDItemUserTags", finder).unwrap();
+            set(&path, "user.xdg.tags", b"Rot,Projekt").unwrap();
+            let src = open(&path, &Limits::default()).unwrap();
+            assert_eq!(src.file_tags, ["Rot", "Projekt"], "{finder:?}");
+        }
+        // Readable Finder tags win over the freedesktop ones.
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(&path, "com.apple.metadata:_kMDItemUserTags", TAGS).unwrap();
+        set(&path, "user.xdg.tags", b"Rot,Projekt").unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.file_tags, ["Größe", "Red", "日本"]);
     }
 
     #[test]
