@@ -1242,6 +1242,7 @@ mod tests {
             adv: Some(5.7),
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             invisible: false,
             layer: None,

@@ -537,6 +537,7 @@ mod tests {
             size: 12.0,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri: None,
             line,

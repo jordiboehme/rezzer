@@ -12,6 +12,7 @@
 
 use std::cell::Cell as Counter;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use pdfparts::StructTree;
@@ -42,8 +43,12 @@ pub(crate) struct Run {
     pub size: f32,
     pub bold: bool,
     pub italic: bool,
-    /// The marked content id the run is shown in, for the structure tree.
-    pub mcid: Option<u32>,
+    /// The family of the font of its first glyph (see [`crate::text::family_of`]), 0 when not
+    /// known: a data font told apart from a title font of the same size and weight.
+    pub family: u32,
+    /// The marked content id the run is shown in, for the structure tree, kept one up (see
+    /// [`Run::mcid`]): with no room taken for its absence the run stays 80 bytes.
+    pub mcid: Option<NonZeroU32>,
     /// The target of a URI link whose box holds the middle of the run, shared by all the
     /// runs of the link.
     pub uri: Option<Rc<UriTarget>>,
@@ -106,7 +111,21 @@ pub(crate) struct Gap {
     pub to: f32,
 }
 
+// The kept text of a file is bounded by the size of its runs: a field more costs every page.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<Run>() == 80);
+
+/// A marked content id as a run keeps it (see [`Run::mcid`]); an id of `u32::MAX` is none.
+pub(crate) fn kept_mcid(mcid: Option<u32>) -> Option<NonZeroU32> {
+    mcid.and_then(|m| NonZeroU32::new(m.wrapping_add(1)))
+}
+
 impl Run {
+    /// The marked content id the run is shown in.
+    pub(crate) fn mcid(&self) -> Option<u32> {
+        self.mcid.map(|m| m.get() - 1)
+    }
+
     /// The run cut at its gap `k`: the words before it, and the words after it as a run that
     /// starts a new word, each with its own extent and gaps. `None` when the text no longer
     /// has the words the gap was taken after.
@@ -2381,7 +2400,7 @@ fn classified(runs: Vec<Run>, tree: &StructTree, cx: &Context<'_>) -> (Vec<Run>,
     // ActualText of an element replaces the text of all its runs: the first run carries it.
     let mut replaced: HashSet<usize> = HashSet::new();
     for mut r in runs {
-        let (slot, actual) = match r.mcid.and_then(|m| (cx.roles)(m)) {
+        let (slot, actual) = match r.mcid().and_then(|m| (cx.roles)(m)) {
             Some(e) if e < tree.elems.len() => classify(tree, e),
             _ => (Slot::Free, None),
         };
@@ -2509,6 +2528,7 @@ mod tests {
             size,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri: None,
             line,
@@ -3117,7 +3137,7 @@ mod tests {
             .enumerate()
             .map(|(k, t)| {
                 let mut r = run(t, k as u32, top - 14.0 * k as f32, 10.0);
-                r.mcid = Some(k as u32);
+                r.mcid = kept_mcid(Some(k as u32));
                 r
             })
             .collect()
@@ -3742,7 +3762,7 @@ mod tests {
             }
             let mut r = run(t, 0, y, 10.0);
             r.line = (800.0 - y) as u32;
-            r.mcid = Some(i as u32);
+            r.mcid = kept_mcid(Some(i as u32));
             runs.push(r);
         }
         let style = Style::new(&[PageText {
@@ -3840,7 +3860,7 @@ mod tests {
             let runs: Vec<Run> = (0..PER_PAGE)
                 .map(|k| {
                     let mut r = run("cell", k as u32, 800.0 - k as f32 * 7.0, 6.0);
-                    r.mcid = Some(k as u32);
+                    r.mcid = kept_mcid(Some(k as u32));
                     r
                 })
                 .collect();

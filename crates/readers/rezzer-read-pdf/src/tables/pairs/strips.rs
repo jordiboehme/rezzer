@@ -349,10 +349,11 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
 /// a strip whose labels do not all stand over or beside their values leaves all of them as
 /// text; a loss in `unsure` names them. Strips joined by their rules (see [`connected`]) make
 /// one table, when it has two fields or more and one of them a value; one field alone with a
-/// value is named in a loss. Text just beyond such a group can show that its
-/// labels stand under the rule their values stand on (see [`beyond`]): its fields are then
-/// read that way (see [`pair_under`]), or left as text with a loss when that is not clear.
-/// Runs `busy` names are not looked at. The runs of each table found go to `claimed` under
+/// value is named in a loss. Text just beyond such a group, at both its ends, can show that
+/// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
+/// fields holds and no frame encloses counts): its fields are then read that way (see
+/// [`pair_under`]), or left as text with a loss when that is not clear. Runs `busy` names are
+/// not looked at. The runs of each table found go to `claimed` under
 /// its place in `tables`.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::tables) fn field_strips(
@@ -485,7 +486,21 @@ pub(in crate::tables) fn field_strips(
     for g in &groups {
         overflow_back(flow, &mut strips, g);
     }
-    // Runs beyond a group that a group took.
+    // Text beyond a group is only what no row of fields holds: every group is read the
+    // normal way first, and runs between the rules of any frame are part of no group's ends.
+    let held: HashSet<usize> = strips
+        .iter()
+        .flat_map(|s| &s.fields)
+        .flat_map(|f| f.label.iter().chain(&f.value))
+        .copied()
+        .collect();
+    let in_frame = |i: usize| {
+        let (cx, cy) = middle(&flow.runs[i]);
+        frames
+            .iter()
+            .any(|f| cx > f.x0 && cx < f.x1 && cy > f.bottom && cy < f.top)
+    };
+    // Runs beyond a group that a group read with its labels under their values took.
     let mut outside: HashSet<usize> = HashSet::new();
     for g in groups {
         let list: Vec<&Field> = g.iter().flat_map(|&k| &strips[k].fields).collect();
@@ -499,13 +514,12 @@ pub(in crate::tables) fn field_strips(
             say(unsure, &names, LONE);
             continue;
         }
-        let free = |i: usize| !busy(i) && !outside.contains(&i);
-        let (above, below) = beyond(flow, by_y, &free, &strips, &g);
+        let free =
+            |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i) && !in_frame(i);
         let under: Vec<Field>;
-        let list: Vec<&Field> = if above.is_empty() && below.is_empty() {
-            list
-        } else {
-            match pair_under(flow, &strips, &g, &above, &below) {
+        let list: Vec<&Field> = match ends(flow, by_y, &free, frames, &strips, &g) {
+            Ends::Over => list,
+            Ends::Under(above, below) => match pair_under(flow, &strips, &g, &above, &below) {
                 Some(f) if f.len() >= 2 && f.iter().all(|f| short(flow, f)) => {
                     under = f;
                     outside.extend(above.iter().chain(&below));
@@ -516,6 +530,14 @@ pub(in crate::tables) fn field_strips(
                     say(unsure, &names, UNDER_UNCLEAR);
                     continue;
                 }
+            },
+            Ends::Unclear(below) => {
+                let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+                for line in lines_of(flow, &below) {
+                    names.extend(labels_in_line(flow, &line).iter().map(|l| words(flow, l)));
+                }
+                say(unsure, &names, UNDER_UNCLEAR);
+                continue;
             }
         };
         let top = strips[g[0]].top;
@@ -675,111 +697,244 @@ fn two_lines(flow: &Flow, ids: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
     }
 }
 
-/// Text just beyond the group `g` of `strips` that shows its labels stand under the rule
-/// their values stand on (a signature line): runs in the style of the group's values just over
-/// its top rule, as far over it as its values stand over their lower rules, with no run in the
-/// style of its labels over them; and runs in the style of its labels just under its bottom
-/// rule, as far under it as its labels stand under their upper rules, with no value under
-/// them. Each within a strip at that rule, half a size of play, among the runs `free` allows.
-/// Only a group whose every strip is one line of labels over one line of values has such
-/// text; for the others both are empty.
-fn beyond(
+/// What the text just beyond a group of strips shows of where its labels stand.
+#[derive(Debug)]
+enum Ends {
+    /// Nothing that says the labels stand anywhere but over or beside their values.
+    Over,
+    /// The labels stand under the rule their values stand on: the values over the top rule
+    /// and the labels under the bottom rule, field for field.
+    Under(Vec<usize>, Vec<usize>),
+    /// The labels under the bottom rule show labels under values, but over the top rule stand
+    /// runs in the values' role that are not field for field: neither reading is clear. The
+    /// labels under the bottom rule, to name them.
+    Unclear(Vec<usize>),
+}
+
+/// Whether the run `r` is in one of the roles `set` (a style and a font family): of its style,
+/// and of its family where both families are known.
+fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
+    let s = style_of(r);
+    set.iter()
+        .any(|&(t, f)| t == s && (f == 0 || r.family == 0 || f == r.family))
+}
+
+/// The text just beyond the group `g` of `strips` that shows its labels stand under the rule
+/// their values stand on (a signature line). Only a group whose every strip is one line of
+/// labels over one line of values can show it, and only by evidence at both ends, among the
+/// runs `free` allows (the runs of no row of fields and of no frame):
+/// - under the bottom rule of every strip with values and no strip under it, runs in the role
+///   (style and font family) of the group's labels, as far under the rule as its labels stand
+///   under theirs (half a size of play), with no run in the values' role under them within one
+///   row pitch or up to the next rule of a frame; each label heads a field of that strip that
+///   holds one of its values, at the offset from label to value the group shows inside its
+///   strips (a character of play), and crosses no divider;
+/// - over the top rule of a strip with no strip over it, runs in the values' role as far over
+///   the rule as its values stand over theirs, with no label over them within the same reach;
+///   each value starts within a character of a field start of that strip (its left end, a
+///   divider, a label start), crosses no divider, and is the only one of its field.
+///
+/// Without the labels under the bottom rule the group reads labels over values, whatever
+/// stands over its top rule (a data line, a title, a date); with them and values over the top
+/// rule, field for field, its labels stand under their values; with them and runs over the top
+/// rule that are not field for field, it is not clear.
+fn ends(
     flow: &Flow,
     by_y: &ByY,
     free: &dyn Fn(usize) -> bool,
+    frames: &[Frame],
     strips: &[Strip],
     g: &[usize],
-) -> (Vec<usize>, Vec<usize>) {
-    let none = (Vec::new(), Vec::new());
+) -> Ends {
     let Some(rows) = g
         .iter()
         .map(|&k| strips[k].rows.as_ref().map(|r| (&strips[k], r)))
         .collect::<Option<Vec<_>>>()
     else {
-        return none;
+        return Ends::Over;
     };
-    let lines = rows.iter().map(|(_, r)| (&r.0, &r.1)).collect::<Vec<_>>();
     let marker = markers(
         flow,
-        &lines.iter().map(|(l, _)| (*l).clone()).collect::<Vec<_>>(),
+        &rows.iter().map(|(_, r)| r.0.clone()).collect::<Vec<_>>(),
     );
-    let mut ls: Vec<Style> = Vec::new();
-    let mut vs: Vec<Style> = Vec::new();
+    let role = |r: &Run| (style_of(r), r.family);
+    let mut ls: Vec<(Style, u32)> = Vec::new();
+    let mut vs: Vec<(Style, u32)> = Vec::new();
     // How far the labels stand under the rule over them, and the values over the rule under
     // them.
     let (mut a, mut b): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
     for (s, (labels, values)) in &rows {
         for &i in labels.iter().filter(|i| !marker.contains(i)) {
-            ls.push(style_of(&flow.runs[i]));
+            ls.push(role(&flow.runs[i]));
             a.push(s.top - flow.runs[i].y);
         }
         for &i in values {
-            vs.push(style_of(&flow.runs[i]));
+            vs.push(role(&flow.runs[i]));
             b.push(flow.runs[i].y - s.bottom);
         }
     }
-    if vs.is_empty() || ls.is_empty() {
-        return none;
+    // How far right of its label a value starts inside the strips.
+    let mut offset: Vec<f32> = rows
+        .iter()
+        .flat_map(|(s, _)| &s.fields)
+        .filter_map(|f| Some(flow.runs[*f.value.first()?].x - flow.runs[*f.label.first()?].x))
+        .collect();
+    if vs.is_empty() || ls.is_empty() || offset.is_empty() {
+        return Ends::Over;
     }
     let median = |v: &mut Vec<f32>| {
         v.sort_by(f32::total_cmp);
         v[v.len() / 2]
     };
-    let (a, b) = (median(&mut a), median(&mut b));
-    let top = rows.iter().map(|(s, _)| s.top).fold(f32::MIN, f32::max);
-    let bottom = rows.iter().map(|(s, _)| s.bottom).fold(f32::MAX, f32::min);
-    let height = rows
-        .iter()
-        .map(|(s, _)| s.top - s.bottom)
-        .fold(0.0f32, f32::max);
-    let within = |i: usize, at: f32, top_rule: bool| {
+    let (a, b, offset) = (median(&mut a), median(&mut b), median(&mut offset));
+    let near = |p: f32, q: f32| (p - q).abs() <= SNAP;
+    let overlaps = |s: &Strip, t: &Strip| s.x0 < t.x1 && t.x0 < s.x1;
+    let inside = |i: usize, s: &Strip| {
         let (cx, _) = middle(&flow.runs[i]);
-        rows.iter().any(|(s, _)| {
-            let rule = if top_rule { s.top } else { s.bottom };
-            (rule - at).abs() <= SNAP && cx > s.x0 && cx < s.x1
-        })
+        cx > s.x0 && cx < s.x1
     };
     let usable = |i: usize| {
         let r = &flow.runs[i];
         free(i) && inked(r) && !r.off_axis
     };
-    let band = |lo: f32, hi: f32| -> Vec<usize> {
-        by_y.runs_between(lo, hi)
-            .into_iter()
-            .filter(|&i| usable(i) && flow.runs[i].y > lo && flow.runs[i].y < hi)
-            .collect()
+    let side_by_side = |p: &Run, q: &Run| p.x < q.x + q.w && q.x < p.x + p.w;
+    // How far beyond the rule `at` of a strip of row pitch `pitch` text over (or under) the
+    // run `r` is looked at: one row pitch, up to the next rule of a frame over it.
+    let reach = |r: &Run, at: f32, pitch: f32, up: bool| {
+        let rules = frames
+            .iter()
+            .filter(|f| f.x0 < r.x + r.w && r.x < f.x1)
+            .flat_map(|f| [f.top, f.bottom]);
+        if up {
+            rules.filter(|&y| y > at + SNAP).fold(at + pitch, f32::min)
+        } else {
+            rules.filter(|&y| y < at - SNAP).fold(at - pitch, f32::max)
+        }
     };
-    let over = band(top, top + height);
-    let above: Vec<usize> = over
-        .iter()
-        .copied()
-        .filter(|&i| {
-            let r = &flow.runs[i];
-            vs.contains(&style_of(r))
-                && within(i, top, true)
-                && ((r.y - top) - b).abs() <= 0.5 * r.size
-                && !over.iter().any(|&j| {
-                    let o = &flow.runs[j];
-                    o.y > r.y && ls.contains(&style_of(o)) && within(j, top, true)
-                })
-        })
-        .collect();
-    let under = band(bottom - height, bottom);
-    let below: Vec<usize> = under
-        .iter()
-        .copied()
-        .filter(|&i| {
-            let r = &flow.runs[i];
-            ls.contains(&style_of(r))
-                && within(i, bottom, false)
-                && ((bottom - r.y) - a).abs() <= 0.5 * r.size
-                && !under.iter().any(|&j| {
-                    let o = &flow.runs[j];
-                    o.y < r.y && vs.contains(&style_of(o)) && within(j, bottom, false)
-                })
-        })
-        .collect();
-    (above, below)
+    let by_x = |mut v: Vec<usize>| {
+        v.sort_by(|&p, &q| flow.runs[p].x.total_cmp(&flow.runs[q].x));
+        v
+    };
+    // Under the bottom rule: labels under every strip with values and none under it.
+    let mut below = Vec::new();
+    for (s, (_, values)) in &rows {
+        let last = !rows
+            .iter()
+            .any(|(t, _)| near(t.top, s.bottom) && overlaps(s, t));
+        if !last || values.is_empty() {
+            continue;
+        }
+        let pitch = s.top - s.bottom;
+        let found: Vec<usize> = by_y
+            .runs_between(s.bottom - pitch, s.bottom)
+            .into_iter()
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                usable(i)
+                    && r.y < s.bottom
+                    && inside(i, s)
+                    && in_role(&ls, r)
+                    && ((s.bottom - r.y) - a).abs() <= 0.5 * r.size
+                    && !by_y
+                        .runs_between(reach(r, s.bottom, pitch, false), r.y)
+                        .into_iter()
+                        .any(|j| {
+                            let o = &flow.runs[j];
+                            usable(j) && o.y < r.y && in_role(&vs, o) && side_by_side(o, r)
+                        })
+            })
+            .collect();
+        if found.is_empty() {
+            return Ends::Over;
+        }
+        // Each label heads a field of the strip with one of its values in it.
+        let mut headed: HashSet<usize> = HashSet::new();
+        for label in labels_in_line(flow, &by_x(found.clone())) {
+            let l = &flow.runs[label[0]];
+            let value = values.iter().copied().find(|&v| {
+                let r = &flow.runs[v];
+                ((r.x - l.x) - offset).abs() <= CHAR * r.size.max(1.0) && !headed.contains(&v)
+            });
+            let crossed = label
+                .iter()
+                .any(|&i| s.dividers.iter().any(|&d| across(&flow.runs[i], d)));
+            match value {
+                Some(v) if !crossed => {
+                    headed.insert(v);
+                }
+                _ => return Ends::Over,
+            }
+        }
+        below.extend(found);
+    }
+    if below.is_empty() {
+        return Ends::Over;
+    }
+    // Over the top rule: values over every strip with none over it, field for field.
+    let mut above = Vec::new();
+    let mut clear = true;
+    for (s, (labels, _)) in &rows {
+        if rows
+            .iter()
+            .any(|(t, _)| near(t.bottom, s.top) && overlaps(s, t))
+        {
+            continue;
+        }
+        let pitch = s.top - s.bottom;
+        let found: Vec<usize> = by_y
+            .runs_between(s.top, s.top + pitch)
+            .into_iter()
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                usable(i)
+                    && r.y > s.top
+                    && inside(i, s)
+                    && in_role(&vs, r)
+                    && ((r.y - s.top) - b).abs() <= 0.5 * r.size
+                    && !by_y
+                        .runs_between(r.y, reach(r, s.top, pitch, true))
+                        .into_iter()
+                        .any(|j| {
+                            let o = &flow.runs[j];
+                            usable(j) && o.y > r.y && in_role(&ls, o) && side_by_side(o, r)
+                        })
+            })
+            .collect();
+        let mut starts = vec![s.x0];
+        starts.extend(&s.dividers);
+        starts.extend(
+            labels_in_line(flow, labels)
+                .iter()
+                .map(|l| flow.runs[l[0]].x),
+        );
+        let mut fields: HashSet<usize> = HashSet::new();
+        for value in labels_in_line(flow, &by_x(found.clone())) {
+            let r = &flow.runs[value[0]];
+            let field = starts
+                .iter()
+                .position(|&x| (r.x - x).abs() <= CHAR * r.size.max(1.0));
+            let crossed = value
+                .iter()
+                .any(|&i| s.dividers.iter().any(|&d| across(&flow.runs[i], d)));
+            // Two starts within a character are one field start.
+            let field = field.map(|k| {
+                starts
+                    .iter()
+                    .position(|&x| (x - starts[k]).abs() <= CHAR * r.size.max(1.0))
+                    .unwrap_or(k)
+            });
+            match field {
+                Some(k) if !crossed && fields.insert(k) => {}
+                _ => clear = false,
+            }
+        }
+        above.extend(found);
+    }
+    match (above.is_empty(), clear) {
+        (true, _) => Ends::Over,
+        (false, true) => Ends::Under(above, below),
+        (false, false) => Ends::Unclear(below),
+    }
 }
 
 /// The fields of the group `g` of `strips` read with each label under the rule its value
@@ -1085,6 +1240,7 @@ mod tests {
             size,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri: None,
             line: 0,

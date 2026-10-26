@@ -584,6 +584,8 @@ enum Abort {
 struct FontInfo {
     bold: bool,
     italic: bool,
+    /// The font's family (see [`family_of`]).
+    family: u32,
     /// A Type0 font that writes top to bottom.
     vertical: bool,
     /// The font program is in the file, so its own tables describe its glyphs.
@@ -1972,6 +1974,30 @@ fn tag_hash(tag: &[u8]) -> u64 {
     h.finish()
 }
 
+/// The family of a font by its name (in small letters, without a subset prefix): the name up
+/// to its first `-` or `,` (a style follows there), without the style words and the `mt` or
+/// `ps` marks it may end with, as a hash. A bold and a regular font of one family have the same
+/// one; 0 for a font without a name.
+pub(crate) fn family_of(name: &str) -> u32 {
+    let mut base = name.split(['-', ',']).next().unwrap_or_default();
+    while let Some(rest) = [
+        "mt", "ps", "bold", "italic", "oblique", "regular", "semibold", "demi", "black", "heavy",
+    ]
+    .iter()
+    .find_map(|w| base.strip_suffix(w).filter(|r| !r.is_empty()))
+    {
+        base = rest;
+    }
+    if base.is_empty() {
+        return 0;
+    }
+    // FNV-1a: no family hashes to 0.
+    let h = base.bytes().fold(0x811c_9dc5u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    });
+    h.max(1)
+}
+
 /// Whether a font name (in small letters, without a subset prefix) is a bold font of the TeX
 /// families, whose names give the series as letters (`cmbx12` is Computer Modern bold
 /// extended at 12 pt) and whose descriptors carry no weight.
@@ -2063,6 +2089,7 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
     FontInfo {
         bold,
         italic,
+        family: family_of(&name),
         vertical,
         embedded,
         program: None,
@@ -2230,6 +2257,8 @@ pub(crate) struct Gl {
     pub adv: Option<f32>,
     pub bold: bool,
     pub italic: bool,
+    /// The family of its font (see [`family_of`]), 0 when not known.
+    pub family: u32,
     pub mcid: Option<u32>,
     pub invisible: bool,
     /// The switched-off layer the glyph stands in.
@@ -3254,6 +3283,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 adv,
                 bold: info.bold,
                 italic: info.italic,
+                family: info.family,
                 mcid,
                 invisible,
                 layer,
@@ -3736,6 +3766,7 @@ mod tests {
             adv: None,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             invisible: false,
             layer: None,
@@ -3754,6 +3785,7 @@ mod tests {
             size: 10.0,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri,
             line: 0,
@@ -4191,5 +4223,21 @@ mod tests {
         for name in ["cmr10", "cmbright", "cmti10", "cmtt10", "helvetica"] {
             assert!(!tex_bold(name), "{name}");
         }
+    }
+
+    /// The bold and the regular font of a family are of one family; another family is not.
+    #[test]
+    fn fonts_of_one_family_by_name() {
+        for (a, b) in [
+            ("courier", "courier-bold"),
+            ("helvetica", "helvetica-boldoblique"),
+            ("arialmt", "arial-boldmt"),
+            ("timesnewromanpsmt", "timesnewromanps-bolditalicmt"),
+            ("verdana", "verdana,bold"),
+        ] {
+            assert_eq!(family_of(a), family_of(b), "{a} {b}");
+        }
+        assert_ne!(family_of("courier-bold"), family_of("helvetica-bold"));
+        assert_eq!(family_of(""), 0);
     }
 }

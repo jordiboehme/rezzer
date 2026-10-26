@@ -26,9 +26,10 @@ use common::{all_text, label};
 use draw::{Stroke, bar_h, bar_v, mark_b};
 use rezzer_model::{Block, plain_text};
 use shapes::{
-    Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row,
-    grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page, rows_page,
-    shape_page, short_value_rows, total_column,
+    Align, BLOCK_A, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, TitleBlock,
+    boxed_row, grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page,
+    rows_page, shape_page, short_value_rows, title_grid_labels, title_grid_page, title_over,
+    total_column,
 };
 
 #[global_allocator]
@@ -328,6 +329,153 @@ fn a_lone_field_between_rules_is_named() {
     assert_fields(&shape_page(&REAL, lone_field));
 }
 
+/// The shape file's variants a to d of text over the top rule of a header grid, by name.
+fn title_blocks() -> Vec<(&'static str, TitleBlock)> {
+    vec![
+        ("a", BLOCK_A),
+        (
+            "b",
+            TitleBlock {
+                blatt: None,
+                ..BLOCK_A
+            },
+        ),
+        (
+            "c",
+            TitleBlock {
+                title: None,
+                period: false,
+                date: false,
+                blatt: None,
+                code: false,
+                ..BLOCK_A
+            },
+        ),
+        (
+            "d, title at the values' depth",
+            TitleBlock {
+                title: Some(0.17),
+                ..BLOCK_A
+            },
+        ),
+        (
+            "d, label over the title",
+            TitleBlock {
+                blatt: Some(0.40),
+                ..BLOCK_A
+            },
+        ),
+    ]
+}
+
+/// The invariants of a grid whose fields must all pair as one table: those of
+/// [`check_fields`], no loss that names one of its `labels`, and one table that holds them all.
+fn check_one_table(out: &rezzer_model::ReadOutcome, b: &Built, labels: &[&str]) -> Vec<Broken> {
+    let mut broken = check_fields(out, b);
+    for l in &out.document.losses {
+        if let Some(name) = labels.iter().find(|n| l.what.contains(&format!(" {n}"))) {
+            broken.push(Broken(
+                Inv::ClearPairs,
+                format!("a loss names {name}: {}", l.what),
+            ));
+        }
+    }
+    let tables = blocks(out)
+        .iter()
+        .filter(|bl| match bl {
+            Block::Table { rows, .. } => rows
+                .iter()
+                .any(|r| labels.contains(&plain_text(&r[0].inlines).trim())),
+            _ => false,
+        })
+        .count();
+    if tables != 1 {
+        broken.push(Broken(
+            Inv::ClearPairs,
+            format!("the grid is {tables} tables"),
+        ));
+    }
+    broken
+}
+
+/// A header grid with the title block of a pay slip over its top rule (the shape file's
+/// variants a to d): a bold proportional title of the data size, a period line, a date and a
+/// page number in the data font that cross the dividers under them or start at no field, a
+/// label, a code line higher up, and an address window under part of its bottom rule. Text on
+/// one side of a grid only is no evidence that its labels stand under their values: every
+/// field pairs, labels over values, as one table, with no loss.
+#[test]
+fn a_title_block_over_a_header_grid_leaves_it_whole() {
+    let labels = title_grid_labels();
+    let mut reads = Vec::new();
+    for (variant, over) in title_blocks() {
+        for (geo, g) in geometries().into_iter().chain(looks()) {
+            let b = title_grid_page(&g, over);
+            let out = read_pages(&[&b]);
+            reads.push((
+                format!("{variant}, {geo}"),
+                check_one_table(&out, &b, &labels),
+            ));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Variant e: rows of fields with their labels under the rule their values stand on, and the
+/// document title over the top rule across a divider: the title is in no value's font, the
+/// first row's values stand over the top rule and the last row's labels under the bottom
+/// rule, so the rows still pair labels under values.
+#[test]
+fn labels_under_values_with_a_title_over_them_pair_across_the_rule() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let mut reads = Vec::new();
+    for (geo, g) in geometries().into_iter().chain(looks()) {
+        let mut b = rows_page(&g, &s, &THREE_ROWS, &[]);
+        title_over(&g, &mut b);
+        let out = read_pages(&[&b]);
+        reads.push((geo.to_string(), check_fields(&out, &b)));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Three rows of two fields, the first row's values empty.
+const EMPTY_FIRST: [&[FieldSpec]; 3] = [
+    &[(0, 30, "Name", ""), (30, 20, "Ort", "")],
+    &[(0, 30, "Strasse", "Musterweg 1"), (30, 20, "Hausnr", "12")],
+    &[(0, 30, "PLZ", "12345"), (30, 20, "Land", "DE")],
+];
+
+/// Variant f: rows of fields with their labels under the rule their values stand on, the
+/// first row's values empty, and a period line in the values' font over the top rule inside
+/// the first field, but not at its start. The labels under the bottom rule show labels under
+/// values, the period line stands where no value of a field starts: neither reading is clear,
+/// so no field pairs (never the first label with the period line, never a label with the
+/// value of the row under it), and a loss names them all.
+#[test]
+fn labels_under_values_with_a_line_over_an_empty_first_row_give_a_loss() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (geo, g) in geometries().into_iter().chain(looks()) {
+        let mut b = rows_page(&g, &s, &EMPTY_FIRST, &all);
+        let t = "fuer Muster 2026";
+        b.page.template += &draw::courier(g.col(8), 760.0 + g.dy + 0.17 * g.data, g.data, t);
+        b.values.push(t.to_string());
+        let out = read_pages(&[&b]);
+        reads.push((geo.to_string(), check_fields(&out, &b)));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Two rows of two fields each without dividers, the second field narrow.
 const NARROW: [&[FieldSpec]; 2] = [
     &[(0, 30, "Name", "Erika Mustermann"), (30, 12, "Nr", "30")],
@@ -372,11 +520,9 @@ fn right_aligned_values_without_dividers_never_pair_wrongly() {
     ));
 }
 
-/// The generated variants of F1 to F3, by name, each with whether its rate overflows and
-/// whether its last two labels are one run.
-fn variants() -> Vec<(String, Geo, bool, bool)> {
-    let mut out = Vec::new();
-    let geos = [
+/// The generated geometries of F1 to F3 besides the looks, by name.
+fn geometries() -> Vec<(&'static str, Geo)> {
+    vec![
         ("real", REAL),
         (
             "shifted",
@@ -465,8 +611,14 @@ fn variants() -> Vec<(String, Geo, bool, bool)> {
                 ..REAL
             },
         ),
-    ];
-    for (name, g) in geos.into_iter().chain(looks()) {
+    ]
+}
+
+/// The generated variants of F1 to F3, by name, each with whether its rate overflows and
+/// whether its last two labels are one run.
+fn variants() -> Vec<(String, Geo, bool, bool)> {
+    let mut out = Vec::new();
+    for (name, g) in geometries().into_iter().chain(looks()) {
         for overflow in [true, false] {
             let label = format!("{name}{}", if overflow { ", overflow" } else { "" });
             out.push((label, g, overflow, true));

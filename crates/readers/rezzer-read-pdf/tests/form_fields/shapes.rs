@@ -889,6 +889,187 @@ pub(crate) fn lone_field(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// What stands over the top rule of [`title_grid`] (the shape file's variants a to d): the
+/// document title's baseline over the rule (in data sizes), whether the period line, the date
+/// and the page number stand there, the label `Blatt:`'s baseline over it, and whether the
+/// code line stands over all of them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TitleBlock {
+    pub title: Option<f32>,
+    pub period: bool,
+    pub date: bool,
+    pub page_no: bool,
+    pub blatt: Option<f32>,
+    pub code: bool,
+}
+
+/// Variant a: everything as on the page.
+pub(crate) const BLOCK_A: TitleBlock = TitleBlock {
+    title: Some(0.33),
+    period: true,
+    date: true,
+    page_no: true,
+    blatt: Some(0.30),
+    code: true,
+};
+
+/// A field of [`title_grid`]: its first data column, its label and its value ("" for none).
+type GridField = (usize, &'static str, &'static str);
+
+/// The rows of [`title_grid`], each its fields left of column 61 and right of column 63; the
+/// dividers stand at the starts of the fields after the first of each part.
+const TITLE_GRID: [(&[GridField], &[GridField]); 4] = [
+    (
+        &[
+            (0, "Pers.-Nr.", "00000"),
+            (6, "Eintritt", "1.1.80"),
+            (13, "Kl", "3"),
+            (15, "Konf.", "rk"),
+            (20, "Ki", "0,5"),
+            (24, "Tage", "30"),
+            (30, "Kasse", "BKK7"),
+            (39, "Abt.", "Verkauf"),
+            (47, "Kst", "471"),
+            (51, "Datum", "1.2.26"),
+            (58, "Kz", "B"),
+        ],
+        &[
+            (63, "Nr", "123"),
+            (69, "Lfd", "001"),
+            (75, "Seite", ""),
+            (81, "Ref", "77"),
+        ],
+    ),
+    (
+        &[
+            (0, "Steuer-ID", "12345678A12"),
+            (13, "IBAN", "DE00 0000 0000 0000 0000 00"),
+            (43, "Gr", "12"),
+            (47, "Bz", "5"),
+            (51, "Std", "160"),
+            (56, "K", ""),
+            (58, "St", "7"),
+        ],
+        &[(63, "Kranken", "Muster BKK"), (75, "Mitglied", "99999")],
+    ),
+    (
+        &[(47, "Stunden", "160,00"), (54, "Satz", "12,34")],
+        &[(63, "Brutto", "1.234,56"), (75, "Netto", "2.345,67")],
+    ),
+    (
+        &[(47, "Steuer", "123,45")],
+        &[(63, "Auszahlung", "9.876,54")],
+    ),
+];
+
+/// The labels of [`title_grid`].
+pub(crate) fn title_grid_labels() -> Vec<&'static str> {
+    TITLE_GRID
+        .iter()
+        .flat_map(|(l, r)| l.iter().chain(r.iter()))
+        .map(|f| f.1)
+        .collect()
+}
+
+/// The shape file's header grid with a title block over its top rule: rows of labels over
+/// values between rules, a left part (data columns 0 to 61) that ends after the second row, a
+/// right part (63 to 87) for all four rows, the lower two rows of the left part only from
+/// column 47 on, dividers at other places in each row; over its top rule what `over` says (a
+/// bold proportional title of the data size, the period line, the date and the page number in
+/// the data font at the values' depth, the label `Blatt:`, a code line higher up), and under
+/// its bottom rule, left of the lower rows, two lines of an address window in bold. Every text
+/// over the rule is to be found once; the grid's fields all pair.
+pub(crate) fn title_grid(g: &Geo, b: &mut Built, top: f32, over: TitleBlock) -> f32 {
+    let h = 2.4 * g.data;
+    let d = g.data;
+    let lab = |k: usize| g.col(k) + 0.18 * g.label;
+    for k in 0..=TITLE_GRID.len() {
+        let y = top - h * k as f32;
+        let left = if k <= 2 { 0 } else { 47 };
+        let x0 = if left == 0 {
+            g.col(0) - 0.12
+        } else {
+            g.col(47) - 0.12
+        };
+        b.page.template += &g.hrule(x0, g.col(61), y);
+        b.page.template += &g.hrule(g.col(63) - 0.12, g.col(87), y);
+    }
+    for (n, (left, right)) in TITLE_GRID.iter().enumerate() {
+        let rule = top - h * n as f32;
+        let mut parts = Vec::new();
+        for part in [left, right] {
+            for (i, &(k, l, v)) in part.iter().enumerate() {
+                if i > 0 {
+                    b.page.template += &g.divider(g.col(k) - 0.06, rule, rule - h);
+                }
+                b.page.template += &label(lab(k), rule - 0.86 * d, g.label, l);
+                if !v.is_empty() {
+                    parts.push((k, v));
+                }
+                b.expect(l, v);
+            }
+        }
+        g.values(b, rule - 2.23 * d, &parts);
+    }
+    let find = |b: &mut Built, t: &str| b.values.push(t.to_string());
+    if let Some(at) = over.title {
+        let t = "Abrechnung der Muster/Muster-Bezuege";
+        b.page.template += &bold(g.col(0), top + at * d, 1.003 * d, t);
+        find(b, t);
+    }
+    let mut line = Vec::new();
+    for (on, k, t) in [
+        (over.period, 30, "fuer Muster 2026"),
+        (over.date, 69, "12.34.56"),
+        (over.page_no, 85, "1"),
+    ] {
+        if on {
+            line.push((k, t));
+            // The page number is the number of the page's own marker too.
+            if t != "1" {
+                find(b, t);
+            }
+        }
+    }
+    if !line.is_empty() {
+        g.values(b, top + 0.17 * d, &line);
+    }
+    if let Some(at) = over.blatt {
+        b.page.template += &label(
+            g.col(81) + 0.25 * g.pitch(),
+            top + at * d,
+            g.label,
+            "Blatt:",
+        );
+    }
+    if over.code {
+        let t = "00A/00B  00000/00000/000";
+        g.values(b, top + 1.37 * d, &[(62, t)]);
+        find(b, t);
+    }
+    let bottom = top - h * TITLE_GRID.len() as f32;
+    for (at, t) in [(1.56, "Muster GmbH"), (2.11, "Erika Mustermann")] {
+        b.page.template += &bold(g.col(0), bottom - at * d, 0.8 * d, t);
+    }
+    bottom
+}
+
+/// A page of the header grid with the title block `over` over it.
+pub(crate) fn title_grid_page(g: &Geo, over: TitleBlock) -> Built {
+    let mut b = Built::new(g);
+    title_grid(g, &mut b, 760.0 + g.dy, over);
+    b.address(g);
+    b
+}
+
+/// The document title of the shape file's variant a, over the top rule of rows of fields drawn
+/// by [`rows_page`].
+pub(crate) fn title_over(g: &Geo, b: &mut Built) {
+    let t = "Abrechnung der Muster/Muster-Bezuege";
+    b.page.template += &bold(g.col(0), 760.0 + g.dy + 0.33 * g.data, 1.003 * g.data, t);
+    b.values.push(t.to_string());
+}
+
 /// A page of one shape drawn by `draw` from the top, with the address under it.
 pub(crate) fn shape_page(g: &Geo, draw: fn(&Geo, &mut Built, f32) -> f32) -> Built {
     let mut b = Built::new(g);

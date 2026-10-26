@@ -63,6 +63,28 @@ pub(crate) fn pairs_of(blocks: &[Block]) -> Vec<(String, String)> {
     found
 }
 
+/// The label and value pairs of the tables of `blocks` read as pairs: tables of two columns
+/// without a header row (see [`pairs_of`]) with no row of two values of `b`. A row of two
+/// values is a line of values of a row of fields left as it stands: such a table is the text
+/// of the fields read as a grid row by row, its labels in rows of their own, which no reading
+/// of labels and values gives.
+fn pairs_read(blocks: &[Block], b: &Built) -> Vec<(String, String)> {
+    let value = |c: &rezzer_model::Cell| {
+        b.values
+            .contains(&plain_text(&c.inlines).trim().to_string())
+    };
+    blocks
+        .iter()
+        .filter(|bl| match bl {
+            Block::Table { rows, .. } => !rows
+                .iter()
+                .any(|r| matches!(r.as_slice(), [l, v] if value(l) && value(v))),
+            _ => true,
+        })
+        .flat_map(|bl| pairs_of(std::slice::from_ref(bl)))
+        .collect()
+}
+
 /// An invariant a read of a generated form must hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Inv {
@@ -100,14 +122,14 @@ pub(crate) fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<Broken> {
     check_page(out, 0, b)
 }
 
-/// The invariants on page `n` (from 0) of a read whose page `b` was built: every pair is a
-/// right pair, each clear field pairs (an empty one with `empty`), each unclear field does not
+/// The invariants on page `n` (from 0) of a read whose page `b` was built: every pair (see
+/// [`pairs_read`]) is a right pair, each clear field pairs (an empty one with `empty`), each unclear field does not
 /// pair and a loss of the page names it, every value stands once in the page's text, each
 /// column of totals joins its section, and each note stands once. Each broken one is listed.
 pub(crate) fn check_page(out: &ReadOutcome, n: usize, b: &Built) -> Vec<Broken> {
     let mut broken = Vec::new();
     let blocks = page_blocks(out, n);
-    let pairs = pairs_of(blocks);
+    let pairs = pairs_read(blocks, b);
     for (l, v) in &pairs {
         match b.fields.iter().find(|f| f.0 == bare(l, b)) {
             Some((_, Ok(Some(want)))) if v == want => {}
