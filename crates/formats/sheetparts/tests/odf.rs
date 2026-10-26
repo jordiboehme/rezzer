@@ -5,8 +5,9 @@
 use std::io::{Cursor, Write};
 use std::time::Instant;
 
-use sheetparts::odf::{self, OdsParts, OdsSheet};
-use sheetparts::{CellPos, IssueKind, Limits, PropValue, RowSpan};
+use sheetparts::odf::{self, DataPilot, DatabaseRange, OdsParts, OdsSheet};
+use sheetparts::ooxml::Frozen;
+use sheetparts::{CellPos, IssueKind, Limits, Look, PropValue, RowSpan};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 use zipguard::Archive;
@@ -567,4 +568,637 @@ fn bad_repeat_attributes_give_few_issues() {
     let parts = one_sheet("", &format!("<table:table-row>{cells}</table:table-row>"));
     assert!(parts.issues.len() <= 3, "{}", parts.issues.len());
     assert!(parts.issues.iter().any(|i| i.what.contains("1000")));
+}
+
+fn pos(row: u32, col: u32) -> CellPos {
+    CellPos { row, col }
+}
+
+/// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
+#[cfg(unix)]
+fn thread_cpu() -> std::time::Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+fn thread_cpu() -> std::time::Duration {
+    std::time::Duration::ZERO
+}
+
+fn with_parts(extra: &[(&str, &str)], styles: &str, tables: &str) -> OdsParts {
+    let xml = content(styles, tables);
+    let mut parts = vec![("content.xml", xml.as_str())];
+    parts.extend_from_slice(extra);
+    read_bytes(&package(&parts), &Limits::default())
+}
+
+#[test]
+fn ods_merges_read() {
+    let parts = read_file("merged_cells.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    // A cell spanned 1 x 2 (columns x rows) at A2 merges A2:A3; the covered cell adds nothing.
+    assert_eq!(parts.sheets[0].merges, vec![(pos(1, 0), pos(2, 0))]);
+
+    let parts = read_file("covered.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(parts.sheets[0].merges, vec![(pos(1, 0), pos(2, 0))]);
+
+    // Spans count from the position after repeats; a span of 1 x 1 is no merge.
+    let parts = one_sheet(
+        "",
+        "<table:table-row table:number-rows-repeated=\"3\"/>\
+         <table:table-row><table:table-cell table:number-columns-repeated=\"2\"/>\
+         <table:table-cell table:number-columns-spanned=\"3\" table:number-rows-spanned=\"2\"/>\
+         <table:covered-table-cell table:number-columns-repeated=\"2\"/>\
+         <table:table-cell table:number-columns-spanned=\"1\" table:number-rows-spanned=\"1\"/></table:table-row>",
+    );
+    assert_eq!(sheet(&parts, "S").merges, vec![(pos(3, 2), pos(4, 4))]);
+}
+
+#[test]
+fn database_ranges_with_header_footer_and_buttons() {
+    let parts = read_file("database.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(
+        parts.database_ranges,
+        vec![
+            DatabaseRange {
+                name: "database1".to_string(),
+                sheet: "Sheet2".to_string(),
+                range: "A1:C7".to_string(),
+                header: true,
+                footer: false,
+                filter_buttons: false,
+            },
+            DatabaseRange {
+                name: "__Anonymous_Sheet_DB__0".to_string(),
+                sheet: "Sheet1".to_string(),
+                range: "A1:D6".to_string(),
+                header: true,
+                footer: false,
+                filter_buttons: true,
+            },
+        ]
+    );
+
+    let parts = read_file("cool15769_minimal_DB_ranges.ods");
+    let by = |n: &str| {
+        parts
+            .database_ranges
+            .iter()
+            .find(|d| d.name == n)
+            .unwrap_or_else(|| panic!("no range {n}"))
+    };
+    assert_eq!(parts.database_ranges.len(), 4);
+    assert_eq!(by("singleheader").range, "C4");
+    assert!(by("singleheader").header);
+    assert!(!by("singlenoheader").header);
+    assert_eq!(by("singlenoheader").range, "A4");
+    assert_eq!(by("twowheader").range, "E4:E5");
+    assert!(!by("twowheader").footer);
+    assert!(by("twowheadertotals").footer);
+    assert!(parts.database_ranges.iter().all(|d| !d.filter_buttons));
+
+    let parts = read_file("autofilter-colbutton.ods");
+    assert_eq!(parts.database_ranges.len(), 1);
+    let d = &parts.database_ranges[0];
+    assert_eq!(d.name, "__Anonymous_Sheet_DB__0");
+    assert_eq!((d.sheet.as_str(), d.range.as_str()), ("Sheet1", "B1:C4"));
+    assert!(d.filter_buttons);
+
+    // Quoted sheet names with absolute markers, and an address that is none.
+    let parts = with_parts(
+        &[],
+        "",
+        "<table:table table:name=\"S\"/>\
+         <table:database-ranges>\
+         <table:database-range table:name=\"q\" table:target-range-address=\"$'My ''Sheet'.$A$1:.$C$10\" table:contains-header=\"false\"/>\
+         <table:database-range table:name=\"bad\" table:target-range-address=\"nonsense\"/>\
+         </table:database-ranges>",
+    );
+    assert_eq!(parts.database_ranges.len(), 1);
+    assert_eq!(parts.database_ranges[0].sheet, "My 'Sheet");
+    assert_eq!(parts.database_ranges[0].range, "A1:C10");
+    assert!(!parts.database_ranges[0].header);
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Damaged));
+}
+
+#[test]
+fn data_pilot_target_range() {
+    let parts = read_file("pivot-table-basic.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(
+        parts.data_pilots,
+        vec![DataPilot {
+            name: "DataPilot1".to_string(),
+            sheet: "Pivot".to_string(),
+            range: "A1:E10".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn header_rows_for_print() {
+    let parts = read_file("print-range.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(
+        sheet(&parts, "Sheet1").header_rows,
+        Some(RowSpan { first: 0, last: 1 })
+    );
+    // Two repeated rows, then a repeated pair and one more inside the header group.
+    assert_eq!(
+        sheet(&parts, "Sheet2").header_rows,
+        Some(RowSpan { first: 2, last: 4 })
+    );
+    let parts = one_sheet("", "<table:table-row/>");
+    assert_eq!(sheet(&parts, "S").header_rows, None);
+}
+
+#[test]
+fn row_groups_as_spans() {
+    let parts = read_file("outline.ods");
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let span = |first, last| RowSpan { first, last };
+    assert_eq!(
+        sheet(&parts, "OutlineSheet").outline,
+        vec![
+            (span(1, 1), 1),
+            (span(2, 3), 2),
+            (span(4, 5), 3),
+            (span(6, 20), 4),
+            (span(21, 23), 3),
+            (span(24, 26), 2),
+            (span(27, 29), 1),
+        ]
+    );
+
+    // Sibling groups stay apart; a repeat is one span.
+    let parts = one_sheet(
+        "",
+        "<table:table-row-group><table:table-row table:number-rows-repeated=\"1000000\"/></table:table-row-group>\
+         <table:table-row-group><table:table-row/></table:table-row-group>",
+    );
+    assert_eq!(
+        sheet(&parts, "S").outline,
+        vec![
+            (
+                RowSpan {
+                    first: 0,
+                    last: 999_999
+                },
+                1
+            ),
+            (
+                RowSpan {
+                    first: 1_000_000,
+                    last: 1_000_000
+                },
+                1
+            ),
+        ]
+    );
+}
+
+const STYLES_XML: &str = "<office:document-styles xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\"><office:styles>\
+    <style:style style:name=\"Default\" style:family=\"table-cell\"/>\
+    <style:style style:name=\"Heading\" style:family=\"table-cell\" style:parent-style-name=\"Default\">\
+    <style:text-properties fo:font-weight=\"bold\"/>\
+    <style:table-cell-properties fo:background-color=\"#dddddd\" fo:border-bottom=\"0.74pt solid #000000\"/></style:style>\
+    <style:style style:name=\"Sub\" style:family=\"table-cell\" style:parent-style-name=\"Heading\"/>\
+    </office:styles></office:document-styles>";
+
+#[test]
+fn bold_inherited_from_parent_style() {
+    let parts = with_parts(
+        &[("styles.xml", STYLES_XML)],
+        "<style:style style:name=\"ce1\" style:family=\"table-cell\" style:parent-style-name=\"Sub\"/>\
+         <style:style style:name=\"ce2\" style:family=\"table-cell\" style:parent-style-name=\"Heading\">\
+         <style:text-properties fo:font-weight=\"400\"/><style:table-cell-properties fo:background-color=\"transparent\" fo:border=\"0.25pt solid #000000\" fo:border-bottom=\"none\"/>\
+         <style:paragraph-properties fo:margin-left=\"0.4in\"/></style:style>\
+         <style:style style:name=\"ce3\" style:family=\"table-cell\" style:parent-style-name=\"Default\">\
+         <style:text-properties fo:font-weight=\"700\"/><style:table-cell-properties fo:background-color=\"#FFFFFF\" fo:border-top=\"1pt double #000000\"/>\
+         <style:paragraph-properties fo:margin-left=\"3pt\"/></style:style>\
+         <style:style style:name=\"co1\" style:family=\"table-column\"/>",
+        "<table:table table:name=\"S\">\
+         <table:table-column table:default-cell-style-name=\"ce3\"/>\
+         <table:table-column table:default-cell-style-name=\"Default\" table:number-columns-repeated=\"2\"/>\
+         <table:table-row>\
+         <table:table-cell table:style-name=\"ce1\" office:value-type=\"string\"/>\
+         <table:table-cell table:style-name=\"ce2\" office:value-type=\"string\"/>\
+         <table:table-cell office:value-type=\"string\"/></table:table-row>\
+         <table:table-row><table:table-cell office:value-type=\"string\"/>\
+         <table:table-cell table:style-name=\"ce3\"/></table:table-row></table:table>",
+    );
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    let s = sheet(&parts, "S");
+    assert!(s.has_looks);
+    let heading = Look {
+        bold: true,
+        filled: true,
+        rule_below: true,
+        ..Look::default()
+    };
+    let ce3 = Look {
+        bold: true,
+        indent: 1,
+        rule_above: true,
+        ..Look::default()
+    };
+    let ce2 = Look {
+        indent: 3,
+        ..Look::default()
+    };
+    // The third cell of row 1 takes the plain column default, so it has no look.
+    assert_eq!(
+        s.looks,
+        vec![
+            (pos(0, 0), heading),
+            (pos(0, 1), ce2),
+            (pos(1, 0), ce3),
+            (pos(1, 1), ce3),
+        ]
+    );
+
+    // A file without any cell style says nothing about looks.
+    let parts = one_sheet(
+        "",
+        "<table:table-row><table:table-cell office:value-type=\"string\"/></table:table-row>",
+    );
+    assert!(!sheet(&parts, "S").has_looks);
+    assert!(sheet(&parts, "S").looks.is_empty());
+}
+
+const SETTINGS: &str = "<office:document-settings xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:config=\"urn:oasis:names:tc:opendocument:xmlns:config:1.0\"><office:settings>\
+    <config:config-item-set config:name=\"ooo:view-settings\">\
+    <config:config-item config:name=\"VisibleAreaTop\" config:type=\"int\">0</config:config-item>\
+    <config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry>\
+    <config:config-item config:name=\"ViewId\" config:type=\"string\">view1</config:config-item>\
+    <config:config-item-map-named config:name=\"Tables\">\
+    <config:config-item-map-entry config:name=\"S\">\
+    <config:config-item config:name=\"HorizontalSplitMode\" config:type=\"short\">2</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">2</config:config-item>\
+    <config:config-item config:name=\"HorizontalSplitPosition\" config:type=\"int\">1</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitPosition\" config:type=\"int\">3</config:config-item>\
+    </config:config-item-map-entry>\
+    <config:config-item-map-entry config:name=\"Rows\">\
+    <config:config-item config:name=\"HorizontalSplitMode\" config:type=\"short\">0</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">2</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitPosition\" config:type=\"int\">2</config:config-item>\
+    </config:config-item-map-entry>\
+    <config:config-item-map-entry config:name=\"Dynamic\">\
+    <config:config-item config:name=\"HorizontalSplitMode\" config:type=\"short\">1</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">1</config:config-item>\
+    <config:config-item config:name=\"VerticalSplitPosition\" config:type=\"int\">2</config:config-item>\
+    </config:config-item-map-entry>\
+    </config:config-item-map-named>\
+    </config:config-item-map-entry></config:config-item-map-indexed>\
+    </config:config-item-set></office:settings></office:document-settings>";
+
+#[test]
+fn frozen_pane_from_settings() {
+    let tables = "<table:table table:name=\"S\"/><table:table table:name=\"Rows\"/>\
+                  <table:table table:name=\"Dynamic\"/><table:table table:name=\"None\"/>";
+    let parts = with_parts(&[("settings.xml", SETTINGS)], "", tables);
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(sheet(&parts, "S").frozen, Some(Frozen { rows: 3, cols: 1 }));
+    assert_eq!(
+        sheet(&parts, "Rows").frozen,
+        Some(Frozen { rows: 2, cols: 0 })
+    );
+    // Split mode 1 is a movable split, not a freeze.
+    assert_eq!(sheet(&parts, "Dynamic").frozen, None);
+    assert_eq!(sheet(&parts, "None").frozen, None);
+
+    // No settings part, or a damaged one, leaves the other parts alone.
+    let parts = with_parts(&[], "", tables);
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+    assert_eq!(sheet(&parts, "S").frozen, None);
+    let parts = with_parts(
+        &[("settings.xml", "<office:document-settings><oops")],
+        "",
+        tables,
+    );
+    assert_eq!(parts.sheets.len(), 4);
+    assert_eq!(sheet(&parts, "S").frozen, None);
+}
+
+#[test]
+fn repeated_spanned_cells_do_not_expand() {
+    if !cfg!(unix) {
+        eprintln!("skipped: this platform has no thread CPU clock here");
+        return;
+    }
+    let start = thread_cpu();
+    let parts = one_sheet(
+        "",
+        "<table:table-row table:number-rows-repeated=\"1048576\">\
+         <table:table-cell table:number-columns-repeated=\"16384\" table:number-columns-spanned=\"2\"/></table:table-row>",
+    );
+    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    let s = sheet(&parts, "S");
+    // The merges are bounded by the item limit, not by the sheet size.
+    assert!(s.merges.len() as u64 <= Limits::default().max_items as u64);
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+
+    // One spanned cell repeated across a row stays one entry per copy and is fast.
+    let start = thread_cpu();
+    let parts = one_sheet(
+        "",
+        "<table:table-row><table:table-cell table:number-columns-repeated=\"16384\" table:number-columns-spanned=\"2\"/></table:table-row>",
+    );
+    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    assert_eq!(sheet(&parts, "S").merges.len(), 16384);
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+}
+
+#[test]
+fn layout_lists_count_against_the_item_limit() {
+    let limits = Limits {
+        max_items: 20_000,
+        ..Limits::default()
+    };
+    let rows =
+        "<table:table-row><table:table-cell table:number-rows-spanned=\"2\"/></table:table-row>"
+            .repeat(300);
+    let xml = content(
+        "",
+        &format!("<table:table table:name=\"S\">{rows}</table:table>"),
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    assert_eq!(sheet(&parts, "S").merges.len(), 300);
+
+    let cells = "<table:table-cell table:number-rows-spanned=\"2\"/>".repeat(20);
+    let rows =
+        format!("<table:table-row table:number-rows-repeated=\"5000\">{cells}</table:table-row>");
+    let xml = content(
+        "",
+        &format!("<table:table table:name=\"S\">{rows}</table:table>"),
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    assert!(sheet(&parts, "S").merges.len() <= 20_000);
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
+}
+
+#[test]
+fn long_style_chain_resolves_in_linear_time() {
+    if !cfg!(unix) {
+        eprintln!("skipped: this platform has no thread CPU clock here");
+        return;
+    }
+    let n = 50_000;
+    let mut styles = String::from(
+        "<style:style style:name=\"s0\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+    );
+    let mut cells = String::new();
+    for i in 1..n {
+        styles.push_str(&format!(
+            "<style:style style:name=\"s{i}\" style:family=\"table-cell\" style:parent-style-name=\"s{}\"/>",
+            i - 1
+        ));
+    }
+    for i in 0..n {
+        cells.push_str(&format!(
+            "<table:table-cell table:style-name=\"s{i}\" office:value-type=\"float\"/>"
+        ));
+    }
+    let xml = content(
+        &styles,
+        &format!(
+            "<table:table table:name=\"S\"><table:table-row>{cells}</table:table-row></table:table>"
+        ),
+    );
+    let bytes = package(&[("content.xml", &xml)]);
+    let start = thread_cpu();
+    let parts = read_bytes(&bytes, &Limits::default());
+    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    let s = sheet(&parts, "S");
+    // Styles within the cap inherit; the chain past it is said, once.
+    assert!(s.looks.iter().any(|(p, l)| p.col == 10 && l.bold));
+    assert!(!s.looks.iter().any(|(p, _)| p.col == 40_000));
+    let deep: Vec<_> = parts
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("64 levels"))
+        .collect();
+    assert_eq!(deep.len(), 1, "{:?}", parts.issues);
+}
+
+#[test]
+fn looks_running_out_keep_merges_ranges_and_later_sheets() {
+    let limits = Limits {
+        max_items: 20_000,
+        ..Limits::default()
+    };
+    let xml = content(
+        "<style:style style:name=\"b\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+        "<table:table table:name=\"A\"><table:table-row table:number-rows-repeated=\"10\">\
+         <table:table-cell table:style-name=\"b\" table:number-columns-repeated=\"16000\"/></table:table-row></table:table>\
+         <table:table table:name=\"B\"><table:table-row>\
+         <table:table-cell table:number-columns-spanned=\"2\" office:value-type=\"float\"/></table:table-row></table:table>\
+         <table:database-ranges><table:database-range table:name=\"d\" table:target-range-address=\"B.A1:B.B2\"/></table:database-ranges>\
+         <table:data-pilots><table:data-pilot-table table:name=\"p\" table:target-range-address=\"B.D1:B.E2\"/></table:data-pilots>",
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    assert_eq!(sheet(&parts, "B").merges, vec![(pos(0, 0), pos(0, 1))]);
+    assert_eq!(parts.database_ranges.len(), 1);
+    assert_eq!(parts.data_pilots.len(), 1);
+    let limit_issues: Vec<_> = parts
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Limit)
+        .collect();
+    assert_eq!(limit_issues.len(), 1, "{limit_issues:?}");
+    assert!(limit_issues[0].what.contains("look"), "{limit_issues:?}");
+    assert!(!limit_issues[0].what.contains("merge"));
+}
+
+#[test]
+fn thresholds_of_bold_and_rules() {
+    let style = |name: &str, weight: &str, border: &str| {
+        format!(
+            "<style:style style:name=\"{name}\" style:family=\"table-cell\">\
+             <style:text-properties fo:font-weight=\"{weight}\"/>\
+             <style:table-cell-properties fo:border-bottom=\"{border}\"/></style:style>"
+        )
+    };
+    let styles = [
+        style("a", "599", "0.49pt solid #000000"),
+        style("b", "600", "0.5pt solid #000000"),
+        style("c", "normal", "0.0069in solid #000000"),
+        style("d", "normal", "0.0070in double #000000"),
+        style("e", "normal", "1pt dotted #000000"),
+    ]
+    .concat();
+    let cells: String = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|n| {
+            format!("<table:table-cell table:style-name=\"{n}\" office:value-type=\"float\"/>")
+        })
+        .collect();
+    let parts = one_sheet(
+        &styles,
+        &format!("<table:table-row>{cells}</table:table-row>"),
+    );
+    let got: Vec<(u32, bool, bool)> = sheet(&parts, "S")
+        .looks
+        .iter()
+        .map(|(p, l)| (p.col, l.bold, l.rule_below))
+        .collect();
+    // a and c are plain and not listed; e is no solid or double line.
+    assert_eq!(got, vec![(1, true, true), (3, false, true)]);
+}
+
+#[test]
+fn first_view_that_names_a_sheet_decides() {
+    let settings = SETTINGS.replace(
+        "<config:config-item-map-indexed config:name=\"Views\"><config:config-item-map-entry>",
+        "<config:config-item-map-indexed config:name=\"Views\">\
+         <config:config-item-map-entry><config:config-item-map-named config:name=\"Tables\">\
+         <config:config-item-map-entry config:name=\"S\">\
+         <config:config-item config:name=\"VerticalSplitMode\" config:type=\"short\">0</config:config-item>\
+         </config:config-item-map-entry></config:config-item-map-named></config:config-item-map-entry>\
+         <config:config-item-map-entry>",
+    );
+    let parts = with_parts(
+        &[("settings.xml", &settings)],
+        "",
+        "<table:table table:name=\"S\"/>",
+    );
+    assert_eq!(sheet(&parts, "S").frozen, None);
+}
+
+#[test]
+fn range_across_two_sheets_is_damaged() {
+    let parts = with_parts(
+        &[],
+        "",
+        "<table:table table:name=\"S\"/><table:database-ranges>\
+         <table:database-range table:name=\"x\" table:target-range-address=\"S.A1:T.B2\"/></table:database-ranges>",
+    );
+    assert!(parts.database_ranges.is_empty());
+    assert_eq!(
+        parts
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::Damaged)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn style_chain_cap_does_not_depend_on_cell_order() {
+    let mut styles = String::from(
+        "<style:style style:name=\"s0\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
+    );
+    for i in 1..100 {
+        styles.push_str(&format!(
+            "<style:style style:name=\"s{i}\" style:family=\"table-cell\" style:parent-style-name=\"s{}\"/>",
+            i - 1
+        ));
+    }
+    for order in [[99, 40, 20], [20, 40, 99]] {
+        let cells: String = order
+            .iter()
+            .map(|i| {
+                format!("<table:table-cell office:value-type=\"float\" table:style-name=\"s{i}\"/>")
+            })
+            .collect();
+        let parts = one_sheet(
+            &styles,
+            &format!("<table:table-row>{cells}</table:table-row>"),
+        );
+        let s = sheet(&parts, "S");
+        // s99 is cut at the cap and never reaches the bold root; s40 and s20 always do.
+        for (col, style) in order.iter().enumerate() {
+            let bold = s.looks.iter().any(|(p, l)| p.col == col as u32 && l.bold);
+            assert_eq!(bold, *style != 99, "order {order:?} style s{style}");
+        }
+    }
+}
+
+#[test]
+fn database_ranges_and_pivots_are_capped_at_ten_thousand() {
+    let ranges: String = (0..10_050)
+        .map(|i| {
+            format!(
+                "<table:database-range table:name=\"d{i}\" table:target-range-address=\"S.A{}:S.B{}\"/>",
+                i + 1,
+                i + 2
+            )
+        })
+        .collect();
+    let pilots: String = (0..10_050)
+        .map(|i| {
+            format!(
+                "<table:data-pilot-table table:name=\"p{i}\" table:target-range-address=\"S.D{}:S.E{}\"/>",
+                i + 1,
+                i + 2
+            )
+        })
+        .collect();
+    let parts = with_parts(
+        &[],
+        "",
+        &format!(
+            "<table:table table:name=\"S\"/><table:database-ranges>{ranges}</table:database-ranges><table:data-pilots>{pilots}</table:data-pilots>"
+        ),
+    );
+    assert_eq!(parts.database_ranges.len(), 10_000);
+    assert_eq!(parts.data_pilots.len(), 10_000);
+    let said = |what: &str| {
+        parts
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::Limit && i.what.contains(what))
+            .count()
+    };
+    assert_eq!(said("database ranges"), 1, "{:?}", parts.issues);
+    assert_eq!(said("pivot tables"), 1, "{:?}", parts.issues);
+}
+
+#[test]
+fn cells_without_layout_signals_keep_the_whole_total() {
+    // 1.6 million counted cells: past 40 % of the total, under all of it.
+    let parts = one_sheet(
+        "",
+        "<table:table-row table:number-rows-repeated=\"100\">\
+         <table:table-cell table:number-columns-repeated=\"16384\" office:value-type=\"float\"/></table:table-row>",
+    );
+    assert!(parts.issues.is_empty(), "{:?}", parts.issues);
+}
+
+#[test]
+fn long_range_names_are_bounded_by_bytes() {
+    let limits = Limits {
+        max_items: 20_000,
+        ..Limits::default()
+    };
+    let name = "n".repeat(2000);
+    let ranges: String = (0..100)
+        .map(|i| {
+            format!("<table:database-range table:name=\"{name}{i}\" table:target-range-address=\"S.A1:S.B2\"/>")
+        })
+        .collect();
+    let xml = content(
+        "",
+        &format!(
+            "<table:table table:name=\"S\"/><table:database-ranges>{ranges}</table:database-ranges>"
+        ),
+    );
+    let parts = read_bytes(&package(&[("content.xml", &xml)]), &limits);
+    // 20,000 / 16 bytes per unit: about 160 bytes of name per unit, so far fewer than 100 fit.
+    assert!(
+        parts.database_ranges.len() < 20,
+        "{}",
+        parts.database_ranges.len()
+    );
+    assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
 }

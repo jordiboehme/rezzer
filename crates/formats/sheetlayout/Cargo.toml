@@ -1,0 +1,17 @@
+[package]
+name = "sheetlayout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Finds tables, titles and blocks inside a spreadsheet sheet from its cells, merges and layout facts"
+repository = "https://github.com/jordiboehme/rezzer"
+documentation = "https://docs.rs/sheetlayout"
+readme = "README.md"
+keywords = ["spreadsheet", "table-detection", "layout", "xlsx", "ods"]
+categories = ["parser-implementations"]
+
+[dependencies]
+
+[dev-dependencies]
+libc.workspace = true

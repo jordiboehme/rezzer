@@ -1,0 +1,63 @@
+{
+  "cells": [
+    [
+      "FloatHeaders!A1",
+      "12.34"
+    ],
+    [
+      "FloatHeaders!A2",
+      "AB"
+    ],
+    [
+      "FloatHeaders!B1",
+      "34.56"
+    ],
+    [
+      "FloatHeaders!B2",
+      "CD"
+    ],
+    [
+      "IntHeaders!A1",
+      "12"
+    ],
+    [
+      "IntHeaders!A2",
+      "AB"
+    ],
+    [
+      "IntHeaders!B1",
+      "34"
+    ],
+    [
+      "IntHeaders!B2",
+      "CD"
+    ],
+    [
+      "NoExplicitHeaders!A1",
+      "Column1"
+    ],
+    [
+      "NoExplicitHeaders!A2",
+      "12"
+    ],
+    [
+      "NoExplicitHeaders!A3",
+      "AB"
+    ],
+    [
+      "NoExplicitHeaders!B1",
+      "Column2"
+    ],
+    [
+      "NoExplicitHeaders!B2",
+      "34"
+    ],
+    [
+      "NoExplicitHeaders!B3",
+      "CD"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

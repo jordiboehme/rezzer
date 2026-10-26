@@ -15,6 +15,7 @@
 
 mod biff12;
 mod grid;
+mod layout;
 mod logic;
 mod ods;
 mod odscan;
@@ -194,18 +195,5 @@ impl Out {
 
 /// Inlines of a text with line breaks: each line break becomes [`Inline::LineBreak`].
 pub(crate) fn text_inlines(text: &str) -> Vec<Inline> {
-    if !text.contains(['\n', '\r']) {
-        return vec![Inline::plain(text)];
-    }
-    let mut out = Vec::new();
-    for (i, line) in text.split('\n').enumerate() {
-        if i > 0 {
-            out.push(Inline::LineBreak);
-        }
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if !line.is_empty() {
-            out.push(Inline::plain(line));
-        }
-    }
-    out
+    rezzer_layout::text_inlines(text)
 }

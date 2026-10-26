@@ -216,6 +216,16 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
     ));
     out.push_str(&format!("losses: {}\n", doc.losses.len()));
     facts(&p.facts, &mut out);
+    // The render options that change what the output holds; left out at their defaults.
+    if opts.table_style != crate::TableStyle::Table {
+        out.push_str(&format!(
+            "table_style: {}\n",
+            quote(opts.table_style.name())
+        ));
+    }
+    if let Some(sheets) = crate::chosen_sheets(opts) {
+        out.push_str(&format!("sheets_selected: {}\n", quoted_list(sheets)));
+    }
     if !p.authors.is_empty() {
         out.push_str(&format!("authors: {}\n", quoted_list(&p.authors)));
     }

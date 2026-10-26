@@ -20,15 +20,15 @@ use rezzer_model::{
 use sheetparts::numfmt::{self, DateSystem, NumKind};
 use sheetparts::ooxml::{
     AttrKind, CalcMode, CalcSettings, CondFormat, DocProps, ExternalLink, FormulaAttr, SheetParts,
-    SheetState, Validation, WorkbookParts, read_sheet, read_workbook,
+    SheetState, Validation, WorkbookParts, print_title_rows, read_sheet, read_workbook,
 };
 use sheetparts::{DefinedName, Issue, IssueKind, PropValue};
 use zipguard::Archive;
 
-use crate::Out;
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
 use crate::logic::{FormulaProblem, Formulas, ReadState, SheetFacts};
 use crate::package::{self, Package, Refusal, zip_reason};
+use crate::{Out, layout};
 
 /// Formula problems listed one by one per sheet; the rest are counted in one loss.
 const LISTED_PROBLEMS: usize = 20;
@@ -269,20 +269,26 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         }
         problem_losses(&mut out, &q, problems);
 
-        // The value table.
-        let (table, notes) =
-            grid::value_table(&q, &cells.cells, &merges, budget, &|c| fmt.shown(c));
-        match table {
-            Some(t) => blocks.push(t),
-            None => blocks.push(note("The sheet is empty.")),
-        }
-        table_losses(&mut out, &q, &notes);
-        if notes.element_stop.is_some() {
+        // The regions of the sheet: tables, headers and report blocks.
+        let laid = sheet_layout(
+            &q,
+            &sheet.name,
+            &wb,
+            &parts,
+            &cells,
+            &merges,
+            &styles,
+            &fmt,
+            formulas.layout_facts(&sheet.name),
+            budget,
+        );
+        let (paths, elements_out) = laid.place(&q, &mut blocks, &mut out);
+        if elements_out {
             halted = Some("element limit reached");
         }
         format_losses(&mut out, &q, &fmt);
         drop(fmt);
-        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles));
+        facts.push(SheetFacts::new(&sheet.name, cells.cells, styles, paths));
         if !parts.hidden_rows.is_empty() {
             blocks.push(note(format!(
                 "Hidden rows: {}.",
@@ -566,57 +572,6 @@ pub(crate) fn cell_losses(out: &mut Out, q: &str, cells: &SheetCells) {
     }
 }
 
-pub(crate) fn table_losses(out: &mut Out, q: &str, notes: &grid::TableNotes) {
-    if let Some((first, last)) = notes.rows_cut {
-        let rows = if first == last {
-            format!("row {first}")
-        } else {
-            format!("rows {first} to {last}")
-        };
-        out.loss(
-            q,
-            format!("{rows} not shown in the value table (at most {} cells); their formulas are still listed", grid::MAX_TABLE_CELLS),
-            LossReason::Limit,
-            Severity::Info,
-        );
-    }
-    if let Some((first, last)) = notes.cols_cut {
-        out.loss(
-            q,
-            format!(
-                "columns {} to {} not shown in the value table (at most {} columns); their formulas are still listed",
-                rezzer_model::column_letter(first as usize),
-                rezzer_model::column_letter(last as usize),
-                grid::MAX_TABLE_COLUMNS
-            ),
-            LossReason::Limit,
-            Severity::Info,
-        );
-    }
-    if let Some(row) = notes.element_stop {
-        out.loss(
-            q,
-            format!(
-                "element limit reached, value table rows from row {} on not shown",
-                row + 1
-            ),
-            LossReason::Limit,
-            Severity::Warning,
-        );
-    }
-    if notes.merges_ignored > 0 {
-        out.loss(
-            q,
-            format!(
-                "{} merged areas overlap another one or are too large; shown as single cells",
-                notes.merges_ignored
-            ),
-            LossReason::Damaged,
-            Severity::Info,
-        );
-    }
-}
-
 pub(crate) fn problem_loss(out: &mut Out, p: FormulaProblem) {
     let why = if p.unreadable {
         LossReason::Unsupported
@@ -642,6 +597,129 @@ pub(crate) fn problem_losses(out: &mut Out, q: &str, problems: Vec<FormulaProble
             Severity::Warning,
         );
     }
+}
+
+/// The layout of an XLSX sheet: its cells with their classes and looks, its merges, Excel
+/// tables, pivots, autofilter, names, outline, panes and print titles.
+#[allow(clippy::too_many_arguments)]
+fn sheet_layout(
+    q: &str,
+    name: &str,
+    wb: &WorkbookParts,
+    parts: &SheetParts,
+    cells: &SheetCells,
+    merges: &[calamine::Dimensions],
+    styles: &HashMap<(u32, u32), u32>,
+    fmt: &Formatter,
+    formulas: HashMap<(u32, u32), sheetlayout::FormulaIn>,
+    budget: &Budget,
+) -> layout::SheetLayout {
+    let looks = wb.styles.has_looks();
+    let style = |row: u32, col: u32| {
+        if !looks {
+            return sheetlayout::Style::default();
+        }
+        let index = styles.get(&(row, col)).copied().unwrap_or(0);
+        wb.styles
+            .look(index)
+            .map(layout::style_of)
+            .unwrap_or_default()
+    };
+    let shown = |c: &RawCell| {
+        let (text, class, number) = match &c.val {
+            Val::Num(v) => {
+                let (text, kind) = fmt.number(c.row, c.col, *v);
+                let class = if matches!(kind, NumKind::Date | NumKind::Time) {
+                    sheetlayout::Class::Date
+                } else {
+                    sheetlayout::Class::Number
+                };
+                (text, class, Some(*v))
+            }
+            Val::Iso(_) => (fmt.shown(c), sheetlayout::Class::Date, None),
+            Val::Bool(_) => (fmt.shown(c), sheetlayout::Class::Bool, None),
+            Val::Error(_) => (fmt.shown(c), sheetlayout::Class::Error, None),
+            Val::Text(_) | Val::Empty => (fmt.shown(c), sheetlayout::Class::Text, None),
+        };
+        layout::Shown {
+            text,
+            class,
+            number,
+        }
+    };
+    let centered: Vec<(u32, u32)> = if looks {
+        let mut list: Vec<(u32, u32)> = parts
+            .cell_styles
+            .iter()
+            .filter(|(_, s)| wb.styles.look(*s).is_some_and(|l| l.center_across))
+            .map(|(p, _)| (p.row, p.col))
+            .collect();
+        list.sort_unstable();
+        list
+    } else {
+        Vec::new()
+    };
+    let mut facts = Vec::new();
+    for t in &parts.tables {
+        if let Some(area) = grid::parse_area(&t.range) {
+            facts.push(layout::table_fact(
+                area,
+                &t.name,
+                t.header_rows,
+                t.totals_rows,
+                &t.columns,
+            ));
+        }
+    }
+    for p in &parts.pivots {
+        if let Some(area) = grid::parse_area(&p.location) {
+            // Decision 13: `colGrandTotals` draws the total row at the bottom, when the pivot
+            // has row fields; `rowGrandTotals` the total column at the right, when it has
+            // column fields.
+            facts.push(sheetlayout::Fact {
+                rect: layout::rect_of(area),
+                kind: sheetlayout::FactKind::Pivot {
+                    name: p.name.clone(),
+                    first_header_row: p.first_header_row,
+                    first_data_row: p.first_data_row,
+                    first_data_col: p.first_data_col,
+                    total_row: p.col_grand_totals && p.row_fields > 0,
+                    total_col: p.row_grand_totals && p.col_fields > 0,
+                },
+            });
+        }
+    }
+    if let Some(area) = parts.auto_filter.as_deref().and_then(grid::parse_area) {
+        facts.push(sheetlayout::Fact {
+            rect: layout::rect_of(area),
+            kind: sheetlayout::FactKind::AutoFilter,
+        });
+    }
+    let (names, caption_names) = layout::sheet_names(&wb.names, name);
+    let signals = layout::Signals {
+        facts,
+        names,
+        outline: layout::outline_runs(&parts.outline_rows),
+        frozen: parts.frozen.map(|f| (f.rows, f.cols)),
+        print_titles: print_title_rows(&wb.names, name).map(|s| (s.first, s.last)),
+        styles_read: looks,
+    };
+    let merges: Vec<sheetlayout::Rect> = merges
+        .iter()
+        .map(|d| layout::rect_of((d.start, d.end)).normalized())
+        .collect();
+    layout::map_sheet(
+        q,
+        &cells.cells,
+        &shown,
+        &style,
+        &centered,
+        &merges,
+        formulas,
+        signals,
+        &caption_names,
+        budget,
+    )
 }
 
 /// Registers the Excel tables of a sheet with the logic index.
@@ -872,6 +950,7 @@ fn objects(blocks: &mut Vec<Block>, q: &str, parts: &SheetParts) {
         rows,
         alignments: Vec::new(),
         anchor: None,
+        layout: None,
     };
     if !parts.tables.is_empty() {
         let mut rows = vec![head(&["Table", "Range", "Columns"])];

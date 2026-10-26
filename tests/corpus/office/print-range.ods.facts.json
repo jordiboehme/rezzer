@@ -1,0 +1,9 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "ods"
+  },
+  {
+    "contains": "Sheet2"
+  }
+]

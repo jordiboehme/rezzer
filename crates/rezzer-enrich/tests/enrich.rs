@@ -89,6 +89,7 @@ fn sheet(name: &str, rows: usize, cols: usize) -> Block {
                 .collect(),
             alignments: vec![],
             anchor: None,
+            layout: None,
         }],
     }
 }
@@ -287,7 +288,7 @@ fn overview_lists_sections_and_counts() {
         location: "x".into(),
         what: "y".into(),
         why: LossReason::Unsupported,
-        severity: Severity::Info,
+        severity: Severity::Warning,
     });
     enrich(&mut d, &only(&[]));
     let o = d.overview.expect("overview");
@@ -460,6 +461,7 @@ fn numeric_table_gets_no_language() {
         rows,
         alignments: vec![],
         anchor: None,
+        layout: None,
     }];
     enrich(&mut d, &only(&[]));
     assert_eq!(d.properties.language, None);
@@ -659,6 +661,7 @@ fn a_summary_table_is_not_the_sheet_data() {
             rows: vec![vec![Cell::new(vec![txt("Column")])]; 5],
             alignments: vec![],
             anchor: None,
+            layout: None,
         }],
     });
     custom_number(&mut d, "rows", 4094.0);
@@ -733,6 +736,7 @@ fn parameter_rule_and_formula_range_anchors_are_checked() {
         unit: None,
         unit_source: None,
         read_by: 1,
+        path: Vec::new(),
     };
     let rule = |anchor: &str| Rule {
         kind: "validation".into(),
@@ -831,6 +835,7 @@ fn workbook_overview_counts() {
         unit: None,
         unit_source: None,
         read_by: 1,
+        path: Vec::new(),
     }];
     d.facets.annotations = vec![Annotation {
         kind: "comment".into(),
@@ -1053,4 +1058,211 @@ fn references_to_fields_the_form_did_not_keep_are_said_once() {
             "5 references point at form fields that were not kept (the form was cut), the first from field:a"
         ]
     );
+}
+
+/// A sheet table with a layout of this kind.
+fn region(name: &str, kind: rezzer_model::LayoutKind, rows: usize, cols: usize) -> Block {
+    let Block::Section { mut blocks, .. } = sheet(name, rows, cols) else {
+        unreachable!()
+    };
+    let mut table = blocks.remove(0);
+    if let Block::Table { layout, .. } = &mut table {
+        *layout = Some(Box::new(rezzer_model::TableLayout {
+            kind,
+            key: format!("{name}!A1"),
+            range: "A1".into(),
+            data: None,
+            header_rows: Vec::new(),
+            header_paths: Vec::new(),
+            label_cols: 0,
+            total_columns: Vec::new(),
+            certainty: rezzer_model::Certainty::Rule,
+            found_by: Vec::new(),
+            unsure: Vec::new(),
+            rows: Vec::new(),
+            hidden_header: false,
+        }));
+    }
+    table
+}
+
+#[test]
+fn reader_totals_count_the_rows_of_every_region() {
+    use rezzer_model::LayoutKind;
+    // A CSV split into two tables by a blank line: every region's data rows are shown.
+    let two = || Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("data".into()),
+        anchor: Some(a("data")),
+        blocks: vec![
+            region("data", LayoutKind::Table, 4, 2),
+            region("data", LayoutKind::Table, 5, 2),
+        ],
+    };
+    let mut d = doc();
+    d.body.push(two());
+    custom_number(&mut d, "rows", 7.0);
+    custom_number(&mut d, "columns", 2.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(
+        d.overview.unwrap().parts[0].size,
+        "7 rows x 2 columns, 2 regions"
+    );
+    // Rows the reader did not show are still noted.
+    let mut d = doc();
+    d.body.push(two());
+    custom_number(&mut d, "rows", 10.0);
+    custom_number(&mut d, "columns", 2.0);
+    enrich(&mut d, &only(&[]));
+    assert_eq!(
+        d.overview.unwrap().parts[0].size,
+        "10 rows x 2 columns (7 shown), 2 regions"
+    );
+}
+
+#[test]
+fn sheet_size_counts_regions() {
+    use rezzer_model::LayoutKind;
+    let mut d = doc();
+    // A title, a list of pairs, then the first table: its data rows and columns, and the
+    // regions counted.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Report".into()),
+        anchor: Some(a("Report")),
+        blocks: vec![
+            region("Report", LayoutKind::Title, 0, 0),
+            region("Report", LayoutKind::KeyValue, 5, 2),
+            region("Report", LayoutKind::Table, 8, 3),
+            region("Report", LayoutKind::Table, 20, 9),
+        ],
+    });
+    // One table region only: the size as before, no region count.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Data".into()),
+        anchor: Some(a("Data")),
+        blocks: vec![region("Data", LayoutKind::Table, 4, 2)],
+    });
+    // No table region: the regions are counted.
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Notes".into()),
+        anchor: Some(a("Notes")),
+        blocks: vec![
+            region("Notes", LayoutKind::Text, 3, 1),
+            region("Notes", LayoutKind::KeyValue, 2, 2),
+        ],
+    });
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    assert_eq!(o.parts[0].size, "7 rows x 3 columns, 4 regions");
+    assert_eq!(o.parts[1].size, "3 rows x 2 columns");
+    assert_eq!(o.parts[2].size, "2 regions");
+}
+
+#[test]
+fn not_read_counts_every_loss_but_uncertain_ones() {
+    let mut d = doc();
+    d.body.push(sheet("Data", 3, 2));
+    let loss = |why, severity| Loss {
+        location: "Data!A1:B3".into(),
+        what: "w".into(),
+        why,
+        severity,
+    };
+    // An unsure region is read, only not sure: listed, not counted as not read. A feature a
+    // reader does not read counts at any severity.
+    d.losses.push(loss(LossReason::Uncertain, Severity::Info));
+    d.losses
+        .push(loss(LossReason::Uncertain, Severity::Warning));
+    d.losses.push(loss(LossReason::Unsupported, Severity::Info));
+    d.losses.push(loss(LossReason::Damaged, Severity::Info));
+    d.losses.push(loss(LossReason::Limit, Severity::Warning));
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    let not_read = o
+        .facts
+        .iter()
+        .find(|(k, _)| k == "Not read")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(not_read, Some("3"));
+    assert_eq!(d.losses.len(), 5, "every loss stays listed");
+
+    let mut d = doc();
+    d.body.push(sheet("Data", 3, 2));
+    d.losses.push(loss(LossReason::Uncertain, Severity::Info));
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    assert!(
+        !o.facts.iter().any(|(k, _)| k == "Not read"),
+        "{:?}",
+        o.facts
+    );
+}
+
+#[test]
+fn generated_sheet_headings_are_not_sampled_for_the_language() {
+    // A sheet whose only English words are the region headings Rezzer generates (no anchor).
+    let mut blocks = Vec::new();
+    for i in 0..40 {
+        blocks.push(Block::Heading {
+            level: 3,
+            inlines: vec![txt(&format!("Label and value pairs A{i}:B{i}"))],
+            anchor: None,
+        });
+        blocks.push(Block::Heading {
+            level: 3,
+            inlines: vec![txt(&format!("Table with the rows of the text A{i}:C{i}"))],
+            anchor: None,
+        });
+    }
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("S".into()),
+        anchor: Some(a("S")),
+        blocks: blocks.clone(),
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language, None);
+    // A sheet section inside another section: its generated headings are left out too.
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Part,
+        title: Some("P".into()),
+        anchor: None,
+        blocks: vec![Block::Section {
+            kind: SectionKind::Sheet,
+            title: Some("S".into()),
+            anchor: Some(a("S")),
+            blocks: blocks.clone(),
+        }],
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language, None);
+    // The same headings in a chapter are the author's text.
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Chapter,
+        title: Some("C".into()),
+        anchor: None,
+        blocks,
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language.as_deref(), Some("en"));
+    // Author text with an anchor in a sheet, such as a caption name or a caption row, counts.
+    let mut d = doc();
+    d.body.push(Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("S".into()),
+        anchor: Some(a("S")),
+        blocks: vec![Block::Heading {
+            level: 3,
+            inlines: vec![txt(GERMAN)],
+            anchor: Some(a("name:Prices")),
+        }],
+    });
+    enrich(&mut d, &only(&[]));
+    assert_eq!(d.properties.language.as_deref(), Some("de"));
 }

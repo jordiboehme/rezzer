@@ -18,5 +18,28 @@
   {
     "pointer": "/body/1/title",
     "equals": "Structural_Lining"
+  },
+  {
+    "contains": "### PROJECT DESCRIPTION\n\nLabel and value pairs A5:B9:"
+  },
+  {
+    "pointer": "/body/0/blocks/7/layout/kind",
+    "equals": "text"
+  },
+  {
+    "pointer": "/body/0/blocks/7/layout/data",
+    "equals": "A19:A25"
+  },
+  {
+    "contains": "### JET FAN COUNT\n\nLabel and value pairs A37:C39:"
+  },
+  {
+    "contains": "### TERZAGHI LOOSENING PRESSURE\n\nLabel and value pairs A16:C23:"
+  },
+  {
+    "contains": "### LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)\n\nTable A47:F72 (data E49:F72)"
+  },
+  {
+    "contains": "### STANDARD PIPE SIZE CHECK\n\nTable A27:F38 (data E29:F38)"
   }
 ]

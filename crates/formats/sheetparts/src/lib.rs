@@ -90,6 +90,25 @@ pub struct RowSpan {
     pub last: u32,
 }
 
+/// How a cell looks, reduced to the signals that tell a heading from data. Shared by the OOXML
+/// and the ODF readers. A value of `false` or 0 means the look is plain, not that it is unknown:
+/// whether the signal exists at all is answered by the reader (`Styles::has_looks`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Look {
+    /// The font is bold after inheritance from the named cell style.
+    pub bold: bool,
+    /// A solid fill that is not white and not automatic.
+    pub filled: bool,
+    /// The indent level of the text.
+    pub indent: u8,
+    /// Horizontal alignment `centerContinuous` (center across selection).
+    pub center_across: bool,
+    /// A thin or thicker line on the top edge.
+    pub rule_above: bool,
+    /// A thin or thicker line on the bottom edge.
+    pub rule_below: bool,
+}
+
 /// The value of a custom document property, keeping the type the file gave it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropValue {

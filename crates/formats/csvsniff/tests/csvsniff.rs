@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use csvsniff::{ColumnKind, Derived, DerivedOp, RaggedRow, analyze, sniff};
+use csvsniff::{CellClass, ColumnKind, Derived, DerivedOp, RaggedRow, analyze, cell_class, sniff};
 
 fn full(text: &str) -> csvsniff::Analysis {
     let d = sniff(text).expect("dialect");
@@ -13,6 +13,7 @@ fn fixed(text: &str) -> csvsniff::Analysis {
     let d = csvsniff::Dialect {
         delimiter: b',',
         quote: b'"',
+        lead_records: 0,
         has_header: true,
         consistent_rows: 1.0,
     };
@@ -595,4 +596,85 @@ fn sniff_looks_only_at_the_first_mebibyte() {
     // Multi-byte text cut at the cap must not panic.
     let wide = "é,ö\n".repeat(400_000);
     assert!(sniff(&wide).is_some());
+}
+
+#[test]
+fn cell_class_matches_header_rule() {
+    let cases = [
+        ("", CellClass::Empty),
+        ("  ", CellClass::Empty),
+        ("12", CellClass::Number),
+        (" -1.5 ", CellClass::Number),
+        ("+3", CellClass::Number),
+        ("2024-01-31", CellClass::Date),
+        ("31-May-13", CellClass::Date),
+        ("2024-01-31T10:00:00Z", CellClass::Date),
+        ("yes", CellClass::Bool),
+        ("TRUE", CellClass::Bool),
+        ("abc", CellClass::Text),
+        ("1,5", CellClass::Text),
+        ("1.", CellClass::Text),
+    ];
+    for (cell, class) in cases {
+        assert_eq!(cell_class(cell), class, "{cell:?}");
+    }
+    // The header rule counts a bool cell as text: `yes` heads a column of numbers.
+    assert!(sniff("flag,yes\n1,2\n3,4\n5,6\n").unwrap().has_header);
+    // A number in the first row is no header, a date neither.
+    assert!(!sniff("a,1\nb,2\nc,3\n").unwrap().has_header);
+    assert!(
+        !sniff("x,2024-01-31\ny,2024-02-01\nz,2024-03-01\n")
+            .unwrap()
+            .has_header
+    );
+}
+
+#[test]
+fn sniff_skips_title_lines() {
+    let text = "Station report 2024\nSource: test data\nid,name,value\n1,alpha,10\n2,beta,20\n3,gamma,30\n";
+    let d = sniff(text).expect("dialect");
+    assert_eq!(d.delimiter, b',');
+    assert_eq!(d.lead_records, 2);
+    assert!(d.has_header);
+    let a = analyze(text, &d, 100_000);
+    let names: Vec<&str> = a.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["id", "name", "value"]);
+    assert_eq!(a.rows, 3);
+    assert!(a.ragged_rows.is_empty());
+    assert_eq!(a.columns[0].kind, ColumnKind::Integer);
+}
+
+#[test]
+fn plain_and_ragged_files_have_no_lead() {
+    assert_eq!(sniff("a,b,c\n1,2,3\n4,5,6\n").unwrap().lead_records, 0);
+    // A short header over wider rows passes as it is: no title line is taken off.
+    let mut text = String::from("a,b\n1,2,3\n");
+    for i in 0..12 {
+        text.push_str(&format!("{i},{i},{i}\n"));
+    }
+    let d = sniff(&text).unwrap();
+    assert_eq!(d.lead_records, 0);
+    // More than ten short lines are no title lines.
+    let mut text = String::new();
+    for i in 0..11 {
+        text.push_str(&format!("note {i}\n"));
+    }
+    text.push_str("a,b,c\n1,2,3\n4,5,6\n");
+    assert_eq!(sniff(&text), None);
+}
+
+#[test]
+fn prose_with_a_title_line_is_no_csv() {
+    let letter = "Dear Anna\nThank you for the letter, it was nice\nThe kids are fine, school is ok\nSee you soon, Jordi\n";
+    assert_eq!(sniff(letter), None);
+    let list = "Shopping list\nmilk, eggs\nbread, butter\njam, tea\n";
+    assert_eq!(sniff(list), None);
+    // Three fields per line are no table either when no column holds numbers or dates.
+    let three = "Hello all\nWe met, talked, and left early\nAnna came, saw it, and smiled\nBen wrote, read, and slept\n";
+    assert_eq!(sniff(three), None);
+    // Two columns under a title are a table when a header names a column of numbers.
+    let d =
+        sniff("Prices 2024\nSource: shop\nitem,price\nmilk,1.20\nbread,2.50\njam,3.10\n").unwrap();
+    assert_eq!(d.lead_records, 2);
+    assert!(d.has_header);
 }

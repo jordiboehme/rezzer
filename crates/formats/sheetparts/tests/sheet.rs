@@ -646,3 +646,173 @@ fn table_header_and_totals_rows() {
     assert_eq!(s.tables.len(), 1, "{:?}", s.issues);
     assert_eq!((s.tables[0].header_rows, s.tables[0].totals_rows), (0, 1));
 }
+
+const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+fn sheet_xml_of(inner: &str) -> SheetParts {
+    let bytes = fixture(&format!("<worksheet xmlns=\"{MAIN}\">{inner}</worksheet>"));
+    sheet_of(&bytes, "S", &Limits::default())
+}
+
+#[test]
+fn autofilter_ref_read() {
+    let s = sheet_xml_of(
+        "<sheetData/><autoFilter ref=\"A1:D20\"><filterColumn colId=\"0\"/></autoFilter>",
+    );
+    assert_eq!(s.auto_filter.as_deref(), Some("A1:D20"));
+    assert!(sheet_xml_of("<sheetData/>").auto_filter.is_none());
+    // A filter in a custom view or an extension is not the sheet's filter.
+    let s = sheet_xml_of(
+        "<sheetData/><customSheetViews><customSheetView guid=\"x\"><autoFilter ref=\"A1:B2\"/></customSheetView></customSheetViews>",
+    );
+    assert!(s.auto_filter.is_none());
+}
+
+#[test]
+fn frozen_pane_rows_and_cols() {
+    use sheetparts::ooxml::Frozen;
+    let view = |pane: &str| {
+        sheet_xml_of(&format!(
+            "<sheetViews><sheetView workbookViewId=\"0\">{pane}</sheetView></sheetViews><sheetData/>"
+        ))
+    };
+    let s =
+        view("<pane ySplit=\"4\" topLeftCell=\"A5\" activePane=\"bottomLeft\" state=\"frozen\"/>");
+    assert_eq!(s.frozen, Some(Frozen { rows: 4, cols: 0 }));
+    let s = view("<pane xSplit=\"2\" ySplit=\"1\" state=\"frozen\"/>");
+    assert_eq!(s.frozen, Some(Frozen { rows: 1, cols: 2 }));
+    let s = view("<pane xSplit=\"2\" state=\"frozen\"/>");
+    assert_eq!(s.frozen, Some(Frozen { rows: 0, cols: 2 }));
+    assert_eq!(view("<pane ySplit=\"4\" state=\"split\"/>").frozen, None);
+    let s = view("<pane xSplit=\"1\" ySplit=\"2\" state=\"frozenSplit\"/>");
+    assert_eq!(s.frozen, Some(Frozen { rows: 2, cols: 1 }));
+    assert_eq!(view("<pane ySplit=\"4\"/>").frozen, None);
+    assert_eq!(view("").frozen, None);
+    // Hostile numbers are clamped to the sheet size.
+    let s = view("<pane xSplit=\"99999999\" ySplit=\"99999999\" state=\"frozen\"/>");
+    assert_eq!(
+        s.frozen,
+        Some(Frozen {
+            rows: 1_048_576,
+            cols: 16_384
+        })
+    );
+}
+
+#[test]
+fn pivot_location_attributes() {
+    let bytes = corpus("ExcelPivotTableSample.xlsx");
+    let mut archive = Archive::open(&bytes, zipguard::Limits::default()).unwrap();
+    let limits = Limits::default();
+    let wb = read_workbook(&mut archive, &limits, &|| false);
+    let mut pivots = Vec::new();
+    for sheet in &wb.sheets {
+        pivots.extend(read_sheet(&mut archive, sheet, &wb, &limits, &|| false).pivots);
+    }
+    assert!(!pivots.is_empty());
+    for p in &pivots {
+        assert!(p.first_data_row >= p.first_header_row, "{p:?}");
+        assert!(p.first_data_row > 0 || p.first_data_col > 0, "{p:?}");
+        assert!(p.row_fields + p.col_fields > 0, "{p:?}");
+    }
+    // ExcelPivotTableSample.xlsx: two tables, offsets (header row, data row, data col).
+    let offsets: Vec<(u32, u32, u32)> = pivots
+        .iter()
+        .map(|p| (p.first_header_row, p.first_data_row, p.first_data_col))
+        .collect();
+    assert_eq!(offsets, vec![(1, 2, 1), (1, 1, 1)], "{pivots:?}");
+
+    let rel = |t: &str| {
+        format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{t}")
+    };
+    let bytes = fixture_full(
+        &format!("<worksheet xmlns=\"{MAIN}\"/>"),
+        "<pivotCaches><pivotCache cacheId=\"7\" r:id=\"w0\"/></pivotCaches>",
+        &[(&rel("pivotCacheDefinition"), "pc.xml")],
+        &[(&rel("pivotTable"), "../pt.xml")],
+        &[
+            (
+                "xl/pt.xml",
+                &format!(
+                    "<pivotTableDefinition xmlns=\"{MAIN}\" name=\"P\" cacheId=\"7\" colGrandTotals=\"0\">\
+                     <location ref=\"B3:F9\" firstHeaderRow=\"1\" firstDataRow=\"2\" firstDataCol=\"1\"/>\
+                     <rowFields count=\"2\"><field x=\"0\"/><field x=\"1\"/></rowFields>\
+                     <colFields count=\"1\"><field x=\"-2\"/></colFields></pivotTableDefinition>"
+                ),
+            ),
+            (
+                "xl/pc.xml",
+                &format!("<pivotCacheDefinition xmlns=\"{MAIN}\"/>"),
+            ),
+        ],
+    );
+    let p = &sheet_of(&bytes, "S", &Limits::default()).pivots[0];
+    assert_eq!(p.location, "B3:F9");
+    assert_eq!(
+        (p.first_header_row, p.first_data_row, p.first_data_col),
+        (1, 2, 1)
+    );
+    assert!(p.row_grand_totals);
+    assert!(!p.col_grand_totals);
+    // The values pseudo field alone on the column axis is no column field.
+    assert_eq!((p.row_fields, p.col_fields), (2, 0));
+
+    // A count that lies or is missing does not matter: the field children are counted.
+    let s = pivot_with(
+        "",
+        "<rowFields count=\"9\"><field x=\"0\"/></rowFields>\
+         <colFields><field x=\"1\"/><field x=\"-2\"/></colFields>",
+    );
+    assert_eq!((s.pivots[0].row_fields, s.pivots[0].col_fields), (1, 1));
+    let s = pivot_with("", "<rowFields count=\"3\"/>");
+    assert_eq!(s.pivots[0].row_fields, 0);
+
+    // Absent attributes: grand totals on, no fields, offsets 0.
+    let s = pivot_source("sheet=\"A\" ref=\"A1:B2\"");
+    let p = &s.pivots[0];
+    assert!(p.row_grand_totals && p.col_grand_totals);
+    assert_eq!(
+        (p.first_header_row, p.first_data_row, p.first_data_col),
+        (0, 0, 0)
+    );
+    assert_eq!((p.row_fields, p.col_fields), (0, 0));
+}
+
+/// A sheet with one pivot table whose definition has these extra attributes and children.
+fn pivot_with(attrs: &str, children: &str) -> sheetparts::ooxml::SheetParts {
+    let rel = |t: &str| {
+        format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{t}")
+    };
+    let bytes = fixture_full(
+        &format!("<worksheet xmlns=\"{MAIN}\"/>"),
+        "<pivotCaches><pivotCache cacheId=\"7\" r:id=\"w0\"/></pivotCaches>",
+        &[(&rel("pivotCacheDefinition"), "pc.xml")],
+        &[(&rel("pivotTable"), "../pt.xml")],
+        &[
+            (
+                "xl/pt.xml",
+                &format!(
+                    "<pivotTableDefinition xmlns=\"{MAIN}\" name=\"P\" cacheId=\"7\" {attrs}>\
+                     <location ref=\"A1:C5\"/>{children}</pivotTableDefinition>"
+                ),
+            ),
+            (
+                "xl/pc.xml",
+                &format!("<pivotCacheDefinition xmlns=\"{MAIN}\"/>"),
+            ),
+        ],
+    );
+    sheet_of(&bytes, "S", &Limits::default())
+}
+
+#[test]
+fn pivot_total_bands_follow_the_flags() {
+    // rowGrandTotals is the grand total column at the right; colGrandTotals is the grand
+    // total row at the bottom.
+    let p = &pivot_with("rowGrandTotals=\"0\"", "").pivots[0];
+    assert!(!p.row_grand_totals && p.col_grand_totals);
+    let p = &pivot_with("colGrandTotals=\"0\"", "").pivots[0];
+    assert!(p.row_grand_totals && !p.col_grand_totals);
+    let p = &pivot_with("rowGrandTotals=\"false\" colGrandTotals=\"false\"", "").pivots[0];
+    assert!(!p.row_grand_totals && !p.col_grand_totals);
+}

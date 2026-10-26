@@ -11,6 +11,7 @@ use rezzer_model::{
     Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
 };
 
+use crate::Selection;
 use crate::blocks::{self, Ctx, MAX_DEPTH, Mode, Notes, cell_text, code_span, pipe_table};
 use crate::form::{self, FORM_GRAPH, PDF_JS};
 use crate::mermaid;
@@ -107,9 +108,9 @@ fn formula_table(list: &[&Formula], math: bool) -> String {
 /// then not repeated), then formulas without a pattern (one table per dialect), then one table
 /// per pattern (in order of first appearance), then the graphs. Without `math` no LaTeX is
 /// written.
-pub(crate) fn logic(doc: &Document, math: bool) -> Option<String> {
+pub(crate) fn logic(doc: &Document, math: bool, selection: Option<&Selection>) -> Option<String> {
     if workbook::is_workbook(doc) {
-        return workbook::logic(doc, math);
+        return workbook::logic(doc, math, selection);
     }
     let form = form::section(doc);
     let with_form = form.is_some();
@@ -352,14 +353,24 @@ pub(crate) fn passage_note(a: &Annotation) -> Block {
 }
 
 /// `## Annotations`: comments, notes and highlights with author, date and passage; the ones
-/// the content showed at their passage (`notes`) are left out.
-pub(crate) fn annotations(doc: &Document, ctx: &Ctx, notes: &Notes) -> Option<String> {
+/// the content showed at their passage (`notes`) are left out, and so are those on sheets
+/// that are not selected.
+pub(crate) fn annotations(
+    doc: &Document,
+    ctx: &Ctx,
+    notes: &Notes,
+    selection: Option<&Selection>,
+) -> Option<String> {
     let items: Vec<Vec<Block>> = doc
         .facets
         .annotations
         .iter()
         .enumerate()
         .filter(|(i, _)| !notes.shown(*i))
+        .filter(|(_, a)| match (selection, &a.anchor) {
+            (Some(selection), Some(anchor)) => selection.keeps_anchor(&anchor.0),
+            _ => true,
+        })
         .map(|(_, a)| annotation_item(a, 0))
         .collect();
     if items.is_empty() {

@@ -33,6 +33,8 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
         math: !args.no_math,
         password,
         output_dir: args.output_dir.clone(),
+        table_style: args.table_style,
+        sheets: args.sheets.clone(),
         ..Request::default()
     };
     let result = pipeline.run_path(&args.path, &req);

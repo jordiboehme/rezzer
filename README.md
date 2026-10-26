@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. The other formats below follow one plan at a time. There is no release yet, so you build it from source. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -50,6 +50,8 @@ rezzer read notes.md              # Markdown with OKF frontmatter to stdout
 rezzer rez budget.xlsx -o out/    # writes out/budget.xlsx.md (rez is short for read)
 rezzer read data.csv --json       # the document model as JSON
 rezzer read calc.xlsx --sections logic   # only the formulas and what they read
+rezzer read report.xlsx --table-style records   # each table row as one list item with its headers
+rezzer read book.xlsx --sheet Summary --sheet '#3'   # only these sheets, by name or position
 rezzer read scan.pdf -o out/      # also writes pages that need vision to out/scan.pdf.assets/
 rezzer read locked.pdf --password-stdin < password.txt   # the password comes from stdin, never from the command line
 rezzer inspect mystery.bin        # what is it, how sure, which reader
@@ -62,7 +64,7 @@ Use it from an agent (Claude Code shown, any MCP client works):
 claude mcp add rezzer -- rezzer mcp
 ```
 
-The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages. `rez` also takes a `password` for a protected PDF and an `output_dir` for the pages that need vision.
+The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` for the pages that need vision, `table_style` for records and `sheets` to pick sheets.
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
 
@@ -98,7 +100,7 @@ A new format means one new reader. The rest of the pipeline stays the same.
 - **Structure:** headings, sections, lists, footnotes and cross references stay what they are. Tables become real Markdown tables, merged cells included.
 - **Metadata:** title, authors, dates, revisions, keywords and custom properties go into the frontmatter. Values keep their type: a date stays a date, 9 % stays a percentage.
 - **The logic behind the content:** every format has a layer that tells how it works. Rezzer reads it and shows it as tables and graphs:
-  - Spreadsheets: formulas with the cells they read, inputs with label and unit, results, named ranges, number formats, validation rules, data tables
+  - Spreadsheets: the tables, header rows, titles and totals inside each sheet, formulas with the cells they read, inputs with label and unit, results, named ranges, number formats, validation rules, data tables
   - PDF forms: which field is calculated from which, in what order, with what format
   - Documents: fields, cross references, mail merge sources, embedded data
   - Mail and web: reply threads, link graphs, structured data
@@ -159,6 +161,8 @@ flowchart LR
 
 ## Summary
 
+Table A1:D4 (data A2:D4), header row 1, row labels in A, found by rules: no gaps, header by type change.
+
 | Item | 2025 | 2026 | Change |
 | --- | --- | --- | --- |
 | Costs | 41,200 | 44,900 | 9.0 % |
@@ -186,9 +190,9 @@ Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB, ODS and PDF work today. The other fo
 | Format | What Rezzer gets | Built on |
 |---|---|---|
 | [PDF](docs/formats/pdf.md) | Text in reading order, tables, outline, annotations, forms with their calculations, scripts, signatures, revisions, pages that need vision | own reader on [lopdf](https://crates.io/crates/lopdf), [hayro](https://crates.io/crates/hayro) |
-| [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Values, formulas with references, inputs and results, names, number formats, validation, comments, tables, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
+| [XLSX, XLSM, XLSB](docs/formats/xlsx.md) | Tables, headers and titles inside each sheet, values, formulas with references, inputs and results, names, number formats, validation, comments, charts, pivots | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [XLS](docs/formats/xls.md) | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
-| [ODS](docs/formats/ods.md) | Values, formulas with references, inputs and results, names, comments, validation | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
+| [ODS](docs/formats/ods.md) | Tables, headers and titles inside each sheet, values, formulas with references, inputs and results, names, comments, validation | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse), own readers |
 | [DOCX](docs/formats/docx.md) | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
 | [DOC](docs/formats/doc.md) | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
 | [ODT](docs/formats/odt.md) | Structure, comments, tracked changes, footnotes | own reader |
@@ -199,7 +203,7 @@ Text, Markdown, CSV, TSV, XLSX, XLSM, XLSB, ODS and PDF work today. The other fo
 | [EPUB](docs/formats/epub.md) | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
 | [HTML](docs/formats/html.md) | Main content, landmarks, tables, forms, structured data, link graph | [scraper](https://crates.io/crates/scraper), [dom_smoothie](https://crates.io/crates/dom_smoothie) |
 | [PostScript, EPS](docs/formats/postscript.md) | Document facts from the header; text later | own reader |
-| [CSV, TSV](docs/formats/csv.md) | Delimiter, header, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
+| [CSV, TSV](docs/formats/csv.md) | Delimiter, header, titles and several tables, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
 | [Text](docs/formats/text.md) | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [CAD and engineering](docs/formats/cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |

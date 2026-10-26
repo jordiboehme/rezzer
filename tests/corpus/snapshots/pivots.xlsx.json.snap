@@ -7,7 +7,36 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "PivotSheet1",
       "blocks": [
         {
+          "inlines": [
+            {
+              "text": "Grid A1:B1",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet1!A1:B1",
           "header_rows": 0,
+          "layout": {
+            "certainty": "unsure",
+            "data": "A1:B1",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              }
+            ],
+            "key": "PivotSheet1!A1",
+            "kind": "grid",
+            "label_cols": 0,
+            "range": "A1:B1",
+            "unsure": [
+              "no header found"
+            ]
+          },
           "rows": [
             [
               {
@@ -31,60 +60,56 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A3:E5",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet1!A3:E5",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A4:E5",
+            "found_by": [
               {
-                "anchor": "PivotSheet1!C1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!D1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!E1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!F1",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "pivot",
+                "name": "PivotTable1"
               }
             ],
-            [
-              {
-                "anchor": "PivotSheet1!A2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!B2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!C2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!D2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!E2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!F2",
-                "col_span": 1,
-                "row_span": 1
-              }
+            "header_paths": [
+              "Row Labels",
+              "Sum of Size",
+              "Average of Value",
+              "Count of Size",
+              "Sum of Value x 2"
             ],
+            "header_rows": [
+              3
+            ],
+            "key": "pivot:PivotSheet1!PivotTable1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A3:E5",
+            "rows": [
+              {
+                "kind": "total",
+                "row": 5,
+                "why": "pivot total row"
+              }
+            ]
+          },
+          "rows": [
             [
               {
                 "anchor": "PivotSheet1!A3",
@@ -136,17 +161,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Sum of Value x 2",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!F3",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "<------------ calculated field",
                     "type": "text"
                   }
                 ],
@@ -208,11 +222,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet1!F4",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -270,10 +279,55 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text F3",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet1!F3",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "F3",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "PivotSheet1!F5",
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "PivotSheet1!F3",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "F3"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "PivotSheet1!F3",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "<------------ calculated field",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               }
             ]
@@ -362,7 +416,36 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "PivotSheet2",
       "blocks": [
         {
+          "inlines": [
+            {
+              "text": "Grid A1:B1",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet2!A1:B1",
           "header_rows": 0,
+          "layout": {
+            "certainty": "unsure",
+            "data": "A1:B1",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              }
+            ],
+            "key": "PivotSheet2!A1",
+            "kind": "grid",
+            "label_cols": 0,
+            "range": "A1:B1",
+            "unsure": [
+              "no header found"
+            ]
+          },
           "rows": [
             [
               {
@@ -386,74 +469,121 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A3:D11",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet2!A3",
+          "inlines": [
+            {
+              "text": "Sum of Size",
+              "type": "text"
+            }
+          ],
+          "role": "caption",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "PivotSheet2!B3",
+          "inlines": [
+            {
+              "text": "Column Labels",
+              "type": "text"
+            }
+          ],
+          "role": "caption",
+          "type": "paragraph"
+        },
+        {
+          "anchor": "PivotSheet2!A3:D11",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A5:D11",
+            "found_by": [
               {
-                "anchor": "PivotSheet2!C1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet2!D1",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "pivot",
+                "name": "PivotTable2"
               }
             ],
-            [
+            "header_paths": [
+              "Row Labels",
+              "blue",
+              "yellow",
+              "Grand Total"
+            ],
+            "header_rows": [
+              4
+            ],
+            "key": "pivot:PivotSheet2!PivotTable2",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A3:D11",
+            "rows": [
               {
-                "anchor": "PivotSheet2!A2",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "data",
+                "level": 0,
+                "row": 5,
+                "why": "base level"
               },
               {
-                "anchor": "PivotSheet2!B2",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "data",
+                "level": 1,
+                "parent": 5,
+                "row": 6,
+                "why": "indent 1"
               },
               {
-                "anchor": "PivotSheet2!C2",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "data",
+                "level": 0,
+                "row": 7,
+                "why": "base level"
               },
               {
-                "anchor": "PivotSheet2!D2",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "data",
+                "level": 1,
+                "parent": 7,
+                "row": 8,
+                "why": "indent 1"
+              },
+              {
+                "kind": "data",
+                "level": 1,
+                "parent": 7,
+                "row": 9,
+                "why": "indent 1"
+              },
+              {
+                "kind": "data",
+                "level": 1,
+                "parent": 7,
+                "row": 10,
+                "why": "indent 1"
+              },
+              {
+                "kind": "total",
+                "level": 0,
+                "row": 11,
+                "why": "pivot total row; base level"
               }
             ],
-            [
-              {
-                "anchor": "PivotSheet2!A3",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "Sum of Size",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet2!B3",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "Column Labels",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet2!C3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet2!D3",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
+            "total_columns": [
+              4
+            ]
+          },
+          "rows": [
             [
               {
                 "anchor": "PivotSheet2!A4",
@@ -889,7 +1019,36 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "PivotSheet3",
       "blocks": [
         {
+          "inlines": [
+            {
+              "text": "Grid A1:B1",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet3!A1:B1",
           "header_rows": 0,
+          "layout": {
+            "certainty": "unsure",
+            "data": "A1:B1",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              }
+            ],
+            "key": "PivotSheet3!A1",
+            "kind": "grid",
+            "label_cols": 0,
+            "range": "A1:B1",
+            "unsure": [
+              "no header found"
+            ]
+          },
           "rows": [
             [
               {
@@ -913,30 +1072,53 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A3:B7",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet3!A3:B7",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A4:B7",
+            "found_by": [
               {
-                "anchor": "PivotSheet3!C1",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "pivot",
+                "name": "PivotTable1"
               }
             ],
-            [
-              {
-                "anchor": "PivotSheet3!A2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!B2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!C2",
-                "col_span": 1,
-                "row_span": 1
-              }
+            "header_paths": [
+              "Row Labels",
+              "Count of Value2"
             ],
+            "header_rows": [
+              3
+            ],
+            "key": "pivot:PivotSheet3!PivotTable1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A3:B7",
+            "rows": [
+              {
+                "kind": "total",
+                "row": 7,
+                "why": "pivot total row"
+              }
+            ]
+          },
+          "rows": [
             [
               {
                 "anchor": "PivotSheet3!A3",
@@ -955,17 +1137,6 @@ source: crates/rezzer/tests/corpus.rs
                 "inlines": [
                   {
                     "text": "Count of Value2",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!C3",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "<--------  grouped field as value",
                     "type": "text"
                   }
                 ],
@@ -994,11 +1165,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!C4",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -1022,11 +1188,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!C5",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -1052,11 +1213,6 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet3!C6",
-                "col_span": 1,
-                "row_span": 1
               }
             ],
             [
@@ -1081,10 +1237,55 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Text C3",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet3!C3",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "C3",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "PivotSheet3!C7",
+                "detail": "one column of text",
+                "id": "X",
+                "kind": "rule"
+              }
+            ],
+            "key": "PivotSheet3!C3",
+            "kind": "text",
+            "label_cols": 0,
+            "range": "C3"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "PivotSheet3!C3",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "<--------  grouped field as value",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               }
             ]
@@ -1173,7 +1374,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "PivotSheet4",
       "blocks": [
         {
-          "header_rows": 0,
+          "inlines": [
+            {
+              "text": "Table A1:B4",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet4!A1:B4",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A2:B4",
+            "found_by": [
+              {
+                "kind": "pivot",
+                "name": "PivotTable5"
+              }
+            ],
+            "header_paths": [
+              "Row Labels",
+              "Sum of Value"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "pivot:PivotSheet4!PivotTable5",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A1:B4",
+            "rows": [
+              {
+                "kind": "total",
+                "row": 4,
+                "why": "pivot total row"
+              }
+            ]
+          },
           "rows": [
             [
               {
@@ -1270,19 +1510,52 @@ source: crates/rezzer/tests/corpus.rs
                 ],
                 "row_span": 1
               }
-            ],
-            [
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A6:B9",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "PivotSheet4!A6:B9",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A7:B9",
+            "found_by": [
               {
-                "anchor": "PivotSheet4!A5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "PivotSheet4!B5",
-                "col_span": 1,
-                "row_span": 1
+                "kind": "pivot",
+                "name": "PivotTable6"
               }
             ],
+            "header_paths": [
+              "Row Labels",
+              "Sum of Value"
+            ],
+            "header_rows": [
+              6
+            ],
+            "key": "pivot:PivotSheet4!PivotTable6",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A6:B9",
+            "rows": [
+              {
+                "kind": "total",
+                "row": 9,
+                "why": "pivot total row"
+              }
+            ]
+          },
+          "rows": [
             [
               {
                 "anchor": "PivotSheet4!A6",
@@ -1497,7 +1770,43 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "DataSheet",
       "blocks": [
         {
-          "header_rows": 0,
+          "anchor": "DataSheet!A1:J11",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:J11",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Id",
+              "Name",
+              "Category",
+              "Value",
+              "Size",
+              "Date",
+              "Value / Size",
+              "IsBlue",
+              "Null",
+              "Misc"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "DataSheet!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:J11"
+          },
           "rows": [
             [
               {
@@ -2677,7 +2986,43 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "DataSheet2",
       "blocks": [
         {
-          "header_rows": 0,
+          "anchor": "DataSheet2!A1:J11",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:J11",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Id",
+              "Name",
+              "Category",
+              "Value",
+              "Size",
+              "Date",
+              "Value / Size",
+              "IsBlue",
+              "Null",
+              "Misc"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "DataSheet2!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:J11"
+          },
           "rows": [
             [
               {
@@ -4128,6 +4473,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D2",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4137,6 +4485,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E2",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4146,6 +4497,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D3",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4155,6 +4509,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E3",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4164,6 +4521,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D4",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4173,6 +4533,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E4",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4182,6 +4545,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D5",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4191,6 +4557,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E5",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4200,6 +4569,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D6",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4209,6 +4581,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E6",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4218,6 +4593,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!D7",
         "label": "Value",
+        "path": [
+          "Value"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4227,6 +4605,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "DataSheet!E7",
         "label": "Size",
+        "path": [
+          "Size"
+        ],
         "read_by": 1,
         "value": {
           "type": "number",
@@ -4236,6 +4617,26 @@ source: crates/rezzer/tests/corpus.rs
       "<28 more items>"
     ]
   },
+  "losses": [
+    {
+      "location": "PivotSheet1!A1:B1",
+      "severity": "info",
+      "what": "no header found",
+      "why": "uncertain"
+    },
+    {
+      "location": "PivotSheet2!A1:B1",
+      "severity": "info",
+      "what": "no header found",
+      "why": "uncertain"
+    },
+    {
+      "location": "PivotSheet3!A1:B1",
+      "severity": "info",
+      "what": "no header found",
+      "why": "uncertain"
+    }
+  ],
   "model_version": 1,
   "overview": {
     "facts": [
@@ -4269,39 +4670,39 @@ source: crates/rezzer/tests/corpus.rs
         "id": "PivotSheet1",
         "kind": "sheet",
         "name": "PivotSheet1",
-        "size": "5 rows x 6 columns"
+        "size": "2 rows x 5 columns, 3 regions"
       },
       {
         "id": "PivotSheet2",
         "kind": "sheet",
         "name": "PivotSheet2",
-        "size": "11 rows x 4 columns"
+        "size": "7 rows x 4 columns, 2 regions"
       },
       {
         "id": "PivotSheet3",
         "kind": "sheet",
         "name": "PivotSheet3",
-        "size": "7 rows x 3 columns"
+        "size": "4 rows x 2 columns, 3 regions"
       },
       {
         "id": "PivotSheet4",
         "kind": "sheet",
         "name": "PivotSheet4",
-        "size": "9 rows x 2 columns"
+        "size": "3 rows x 2 columns, 2 regions"
       },
       {
         "id": "DataSheet",
         "kind": "sheet",
         "name": "DataSheet",
         "role": "result",
-        "size": "11 rows x 10 columns"
+        "size": "10 rows x 10 columns"
       },
       {
         "id": "DataSheet2",
         "kind": "sheet",
         "name": "DataSheet2",
         "role": "result",
-        "size": "11 rows x 10 columns"
+        "size": "10 rows x 10 columns"
       }
     ]
   },

@@ -9,15 +9,16 @@
 //! - from `workbook.bin`: the sheets (state, relationship id, name) and the defined names
 //!   with their formula tokens;
 //! - from a sheet part: where its formula records are, the cached error result of each
-//!   formula whose result is an error (calamine's cell reader skips those), and whether every
-//!   formula token stream is safe to hand to calamine's parser.
+//!   formula whose result is an error (calamine's cell reader skips those), whether every
+//!   formula token stream is safe to hand to calamine's parser, and the merged cells, which
+//!   calamine does not read for XLSB.
 //!
 //! calamine's formula parser recurses once per nested `PtgMemFunc` token and copies the text
 //! built so far on most operators, so a crafted token stream can overflow the stack or take
 //! quadratic time. The walk bounds the nesting, the text a token stream can produce and the
 //! bytes the parser moves, without building any text.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Nested `PtgMemFunc` levels allowed. Excel nests functions 64 deep.
 const MAX_NESTING: usize = 64;
@@ -134,6 +135,10 @@ pub(crate) struct Book {
     pub sheets: Vec<BookSheet>,
     /// Defined names with their formula tokens, as calamine parses them at open.
     pub names: Vec<(String, Vec<u8>)>,
+    /// The defined names whose `fHidden` bit is set, lower case.
+    pub hidden_names: HashSet<String>,
+    /// The defined names whose `fBuiltin` bit is set, lower case.
+    pub builtin_names: HashSet<String>,
     /// The most 3D reference entries (`BrtExternSheet`) one record lists; calamine copies a
     /// sheet name for each when it opens the workbook.
     pub extern_entries: u64,
@@ -199,6 +204,14 @@ pub(crate) fn read_book(bytes: &[u8]) -> Result<Book, String> {
                 let rgce = body
                     .get(13 + n..(13 + n).saturating_add(len))
                     .ok_or_else(bad)?;
+                // BrtName (MS-XLSB 2.4.718): bit A of its flags is fHidden, bit F fBuiltin.
+                let flags = u32_at(body, 0).unwrap_or(0);
+                if flags & 1 != 0 {
+                    book.hidden_names.insert(name.to_lowercase());
+                }
+                if flags & (1 << 5) != 0 {
+                    book.builtin_names.insert(name.to_lowercase());
+                }
                 book.names.push((name, rgce.to_vec()));
             }
             k if AFTER_NAMES.contains(&k) => return Ok(book),
@@ -387,7 +400,23 @@ pub(crate) struct SheetScan {
     pub error_results: HashMap<(u32, u32), &'static str>,
     /// Why calamine must not parse the formulas of this sheet, at which cell.
     pub unsafe_formula: Option<(Unsafe, (u32, u32))>,
+    /// The merged cells (`BrtMergeCell`, after the sheet data) as 0-based
+    /// (rwFirst, rwLast, colFirst, colLast), in the order of the part.
+    pub merges: Vec<(u32, u32, u32, u32)>,
+    /// Merge records left out: shorter than their 16 bytes, or past the last row or column
+    /// of a sheet.
+    pub merges_bad: u64,
+    /// Merge records past the cap, not listed.
+    pub merges_cut: u64,
+    /// The records calamine does not read (cell records past its last row, and those after
+    /// the sheet data) could not be walked to the end: the merges from there on are not
+    /// read. The cells are not affected.
+    pub merge_error: Option<String>,
 }
+
+/// The last 0-based row and column of a sheet.
+const LAST_ROW: u32 = 1_048_575;
+const LAST_COL: u32 = 16_383;
 
 /// The error text of a `BErr` code, as calamine writes it.
 fn error_text(code: u8) -> Option<&'static str> {
@@ -434,8 +463,14 @@ fn record_tokens(kind: u16, body: &[u8]) -> Option<&[u8]> {
 }
 
 /// Walks a sheet part the way calamine's cell reader does. An error means a record runs
-/// past the end of the part or the part ends before its cells.
-pub(crate) fn scan_sheet(bytes: &[u8], widths: Widths) -> Result<SheetScan, String> {
+/// past the end of the part or the part ends before its cells. After the cells the walk goes
+/// on to `BrtEndSheet` for the merged cells, at most `max_merges` of them; calamine reads
+/// none of those records.
+pub(crate) fn scan_sheet(
+    bytes: &[u8],
+    widths: Widths,
+    max_merges: u64,
+) -> Result<SheetScan, String> {
     let mut out = SheetScan::default();
     let mut r = Records::new(bytes);
     let early = || "the part ends before its cells".to_string();
@@ -463,6 +498,7 @@ pub(crate) fn scan_sheet(bytes: &[u8], widths: Widths) -> Result<SheetScan, Stri
         }
     }
     let mut row = 0u32;
+    let mut past_rows = false;
     while let Some(rec) = r.next() {
         let (kind, body) = rec?;
         // calamine reads the fields of a cell record from a buffer that keeps the bytes of
@@ -480,6 +516,8 @@ pub(crate) fn scan_sheet(bytes: &[u8], widths: Widths) -> Result<SheetScan, Stri
             0x0000 => {
                 row = u32_at(body, 0).unwrap_or(0);
                 if row > 0x0010_0000 {
+                    // calamine stops reading cells here; the merges come after the cells.
+                    past_rows = true;
                     break;
                 }
             }
@@ -504,7 +542,60 @@ pub(crate) fn scan_sheet(bytes: &[u8], widths: Widths) -> Result<SheetScan, Stri
             _ => {}
         }
     }
+    // Records calamine does not read never make the sheet unreadable: a problem there only
+    // ends the merges.
+    if past_rows && let Err(e) = skip_cells(&mut r) {
+        out.merge_error = Some(e);
+        return Ok(out);
+    }
+    merges(&mut r, &mut out, max_merges);
     Ok(out)
+}
+
+/// Walks on to the end of the sheet data (`BrtEndSheetData`).
+fn skip_cells(r: &mut Records) -> Result<(), String> {
+    while let Some(rec) = r.next() {
+        let (kind, _) = rec?;
+        if kind == 0x0092 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The `BrtMergeCell` records between the sheet data and `BrtEndSheet` (MS-XLSB 2.4.713:
+/// rwFirst, rwLast, colFirst, colLast, 4 bytes each). A record that runs past the end of the
+/// part ends the walk with `merge_error`.
+fn merges(r: &mut Records, out: &mut SheetScan, max_merges: u64) {
+    while let Some(rec) = r.next() {
+        let (kind, body) = match rec {
+            Ok(k) => k,
+            Err(e) => {
+                out.merge_error = Some(e);
+                return;
+            }
+        };
+        match kind {
+            0x00B0 => {
+                let field = |at| u32_at(body, at);
+                let (Some(r0), Some(r1), Some(c0), Some(c1)) =
+                    (field(0), field(4), field(8), field(12))
+                else {
+                    out.merges_bad += 1;
+                    continue;
+                };
+                if r0.max(r1) > LAST_ROW || c0.max(c1) > LAST_COL {
+                    out.merges_bad += 1;
+                } else if out.merges.len() as u64 >= max_merges {
+                    out.merges_cut += 1;
+                } else {
+                    out.merges.push((r0, r1, c0, c1));
+                }
+            }
+            0x0082 => return,
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -599,11 +690,102 @@ mod tests {
             b
         };
         // A real number needs 16 bytes, a shared string index 12.
-        assert!(scan_sheet(&sheet(vec![0x05, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W).is_err());
-        assert!(scan_sheet(&sheet(vec![0x07, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W).is_err());
+        assert!(scan_sheet(&sheet(vec![0x05, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W, 100).is_err());
+        assert!(scan_sheet(&sheet(vec![0x07, 8, 0, 0, 0, 0, 0, 0, 0, 0]), W, 100).is_err());
         let mut ok = vec![0x05, 16];
         ok.extend([0; 16]);
-        assert!(scan_sheet(&sheet(ok), W).is_ok());
+        assert!(scan_sheet(&sheet(ok), W, 100).is_ok());
+    }
+
+    /// A sheet part with one row record, then `tail` after BrtEndSheetData.
+    fn sheet_with_tail(tail: &[u8]) -> Vec<u8> {
+        let mut b = vec![0x94, 0x01, 16];
+        b.extend([0; 16]);
+        b.extend([0x91, 0x01, 0]);
+        b.extend([0x00, 4, 0, 0, 0, 0]);
+        b.extend([0x92, 0x01, 0]);
+        b.extend(tail);
+        b
+    }
+
+    /// BrtMergeCell: rwFirst, rwLast, colFirst, colLast.
+    fn merge(r0: u32, r1: u32, c0: u32, c1: u32) -> Vec<u8> {
+        let mut b = vec![0xB0, 0x01, 16];
+        for v in [r0, r1, c0, c1] {
+            b.extend(v.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn merges_after_the_sheet_data_are_read() {
+        let mut tail = vec![0xB1, 0x01, 4, 2, 0, 0, 0];
+        tail.extend(merge(0, 0, 1, 2));
+        tail.extend(merge(3, 5, 0, 0));
+        // Past the sheet's last row or column: not a merge.
+        tail.extend(merge(0, 1_048_576, 0, 0));
+        // Too short: skipped and counted.
+        tail.extend([0xB0, 0x01, 4, 0, 0, 0, 0]);
+        tail.extend([0xB2, 0x01, 0, 0x82, 0x01, 0]);
+        let scan = scan_sheet(&sheet_with_tail(&tail), W, 100).unwrap();
+        assert_eq!(scan.merges, [(0, 0, 1, 2), (3, 5, 0, 0)]);
+        assert_eq!(scan.merges_bad, 2);
+        assert!(scan.merge_error.is_none());
+        assert_eq!(scan.merges_cut, 0);
+    }
+
+    #[test]
+    fn merges_are_capped_and_a_broken_tail_keeps_the_sheet() {
+        let mut tail = Vec::new();
+        for r in 0..5 {
+            tail.extend(merge(r * 2, r * 2 + 1, 0, 0));
+        }
+        let scan = scan_sheet(&sheet_with_tail(&tail), W, 3).unwrap();
+        assert_eq!(scan.merges.len(), 3);
+        assert_eq!(scan.merges_cut, 2);
+
+        let mut tail = merge(0, 1, 0, 0);
+        tail.extend([0xB0, 0x01, 0x7F, 1, 2]);
+        let scan = scan_sheet(&sheet_with_tail(&tail), W, 100).unwrap();
+        assert_eq!(scan.merges, [(0, 1, 0, 0)]);
+        assert!(scan.merge_error.is_some());
+    }
+
+    #[test]
+    fn hidden_names_are_marked() {
+        let rec = |kind: u8, body: &[u8]| {
+            let mut b = vec![kind | 0x80, 0x01, body.len() as u8];
+            b.extend(body);
+            b
+        };
+        let wide = |s: &str| {
+            let mut b = (s.len() as u32).to_le_bytes().to_vec();
+            for u in s.encode_utf16() {
+                b.extend(u.to_le_bytes());
+            }
+            b
+        };
+        let mut sheet = vec![0; 8];
+        sheet.extend(wide("rId1"));
+        sheet.extend(wide("S"));
+        let mut bytes = rec(0x1C, &sheet); // BrtBundleSh, 0x009C
+        bytes.extend(rec(0x10, &[])); // BrtEndBundleShs, 0x0090
+        for (name, flags) in [("Shown", 0u32), ("Secret", 1), ("Print_Area", 1 << 5)] {
+            let mut body = flags.to_le_bytes().to_vec();
+            body.extend([0; 5]);
+            body.extend(wide(name));
+            body.extend(0u32.to_le_bytes());
+            bytes.extend([0x27, body.len() as u8]);
+            bytes.extend(body);
+        }
+        bytes.extend(rec(0x1D, &[0; 4])); // BrtCalcProp, 0x009D
+        let book = read_book(&bytes).unwrap();
+        assert_eq!(book.names.len(), 3);
+        assert!(book.hidden_names.contains("secret"));
+        assert!(!book.hidden_names.contains("shown"));
+        assert!(!book.hidden_names.contains("print_area"));
+        assert!(book.builtin_names.contains("print_area"));
+        assert!(!book.builtin_names.contains("secret"));
     }
 
     #[test]

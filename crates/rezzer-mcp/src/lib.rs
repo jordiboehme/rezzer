@@ -67,7 +67,7 @@ impl RezzerServer {
 
     #[tool(
         output_schema = rmcp::handler::server::common::schema_for_output::<tools::RezOutput>(),
-        description = "Read a file and return it as Markdown with frontmatter. Give exactly one of path (a local file), file (a data: URI) or source. Optional: page (starting at 1), sections (a list of section names), math (false leaves out the LaTeX form of formulas) and format (markdown or json). The result says the status, the page count, the format, the SHA-256 and how many parts could not be read. A result of several pages ends with a line that names the next page."
+        description = "Read a file and return it as Markdown with frontmatter. Give exactly one of path (a local file), file (a data: URI) or source. Optional: page (starting at 1), sections (a list of section names), math (false leaves out the LaTeX form of formulas), format (markdown or json), table_style (table or records: one list item per row) and sheets (sheet names or positions such as #2). The result says the status, the page count, the format, the SHA-256 and how many parts could not be read. A result of several pages ends with a line that names the next page."
     )]
     async fn rez(
         &self,

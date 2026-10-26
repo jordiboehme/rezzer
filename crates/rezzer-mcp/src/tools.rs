@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use rezzer_model::{Completeness, Confidence};
-use rezzer_pipeline::{CancelToken, OutputKind, OutputSection, Pipeline, Request, RunResult};
+use rezzer_pipeline::{
+    CancelToken, OutputKind, OutputSection, Pipeline, Request, RunResult, TableStyle,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -68,6 +70,25 @@ pub struct RezParams {
     /// The password of an encrypted file. It is never stored or cached.
     #[serde(default)]
     pub password: Option<String>,
+    /// How sheet tables are written: `table` (default) as Markdown tables, or `records` as
+    /// one list item per row with the column header of each value. Markdown only: `json`
+    /// gives the full model.
+    #[serde(default)]
+    #[schemars(schema_with = "table_style_schema", extend("default" = "table"))]
+    pub table_style: Option<String>,
+    /// Only these sheets, by name or by position as `#1`, `#2` and so on. Default all.
+    /// Markdown only: `json` gives all sheets.
+    #[serde(default)]
+    pub sheets: Option<Vec<String>>,
+}
+
+fn table_style_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "How sheet tables are written: `table` (default) as Markdown tables, or `records` as one list item per row with the column header of each value.",
+        "type": "string",
+        "enum": ["table", "records"],
+        "default": "table",
+    })
 }
 
 fn format_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -92,6 +113,8 @@ impl std::fmt::Debug for RezParams {
             .field("format", &self.format)
             .field("output_dir", &self.output_dir)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("table_style", &self.table_style)
+            .field("sheets", &self.sheets)
             .finish()
     }
 }
@@ -130,6 +153,27 @@ impl RezParams {
                 ));
             }
         };
+        let sheets = match take(&mut args, "sheets") {
+            None => None,
+            Some(Value::Array(items)) => Some(
+                items
+                    .into_iter()
+                    .map(|item| match item {
+                        Value::String(name) => Ok(name),
+                        other => Err(format!(
+                            "sheets must be a list of sheet names, but it holds {}",
+                            shown(&other)
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Some(other) => {
+                return Err(format!(
+                    "sheets must be a list of sheet names, not {}",
+                    shown(&other)
+                ));
+            }
+        };
         let math = match take(&mut args, "math") {
             None => None,
             Some(Value::Bool(b)) => Some(b),
@@ -149,6 +193,8 @@ impl RezParams {
             format: string(&mut args, "format")?,
             output_dir: string(&mut args, "output_dir")?,
             password: string(&mut args, "password")?,
+            table_style: string(&mut args, "table_style")?,
+            sheets,
         })
     }
 }
@@ -272,6 +318,13 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
             Err(message) => return rez_failed(message),
         },
     };
+    let table_style = match params.table_style.as_deref() {
+        None => None,
+        Some(text) => match text.parse::<TableStyle>() {
+            Ok(style) => Some(style),
+            Err(e) => return rez_failed(format!("table_style: {e}")),
+        },
+    };
     let output_dir = match params.output_dir.take() {
         None => None,
         Some(dir) => {
@@ -291,6 +344,8 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
         password: params.password.take(),
         output_dir,
         cancel,
+        table_style,
+        sheets: params.sheets.take().unwrap_or_default(),
         ..Request::default()
     };
     let result = if let Some(path) = &params.path {

@@ -1,0 +1,23 @@
+{
+  "cells": [
+    [
+      "'Feuille 1'!A3",
+      "a"
+    ],
+    [
+      "'Feuille 1'!A4",
+      "b"
+    ],
+    [
+      "'Feuille 1'!B3",
+      "0"
+    ],
+    [
+      "'Feuille 1'!B4",
+      "1"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

@@ -1187,6 +1187,7 @@ impl Built {
                     rows,
                     alignments: Vec::new(),
                     anchor: None,
+                    layout: None,
                 });
                 self.probes_found();
             }

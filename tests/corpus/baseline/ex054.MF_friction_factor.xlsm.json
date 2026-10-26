@@ -1,0 +1,3711 @@
+{
+  "cells": [
+    [
+      "Лист1!A1",
+      "Упражнения по работе с макросами Unifloc VBA"
+    ],
+    [
+      "Лист1!A2",
+      "Проверка расчета коэффициента трения для гидравлических корреляций с унифлок VBA"
+    ],
+    [
+      "Лист1!C13",
+      "e"
+    ],
+    [
+      "Лист1!C14",
+      "d"
+    ],
+    [
+      "Лист1!C15",
+      "ed"
+    ],
+    [
+      "Лист1!C16",
+      "Nr"
+    ],
+    [
+      "Лист1!C17",
+      "900"
+    ],
+    [
+      "Лист1!C18",
+      "1000"
+    ],
+    [
+      "Лист1!C19",
+      "1500"
+    ],
+    [
+      "Лист1!C20",
+      "2250"
+    ],
+    [
+      "Лист1!C21",
+      "3375"
+    ],
+    [
+      "Лист1!C22",
+      "5063"
+    ],
+    [
+      "Лист1!C23",
+      "7594"
+    ],
+    [
+      "Лист1!C24",
+      "11391"
+    ],
+    [
+      "Лист1!C25",
+      "17086"
+    ],
+    [
+      "Лист1!C26",
+      "25629"
+    ],
+    [
+      "Лист1!C27",
+      "38443"
+    ],
+    [
+      "Лист1!C28",
+      "57665"
+    ],
+    [
+      "Лист1!C29",
+      "86498"
+    ],
+    [
+      "Лист1!C30",
+      "129746"
+    ],
+    [
+      "Лист1!C31",
+      "194620"
+    ],
+    [
+      "Лист1!C32",
+      "291929"
+    ],
+    [
+      "Лист1!C33",
+      "437894"
+    ],
+    [
+      "Лист1!C34",
+      "656841"
+    ],
+    [
+      "Лист1!C35",
+      "985261"
+    ],
+    [
+      "Лист1!C36",
+      "1477892"
+    ],
+    [
+      "Лист1!C37",
+      "2216838"
+    ],
+    [
+      "Лист1!C38",
+      "3325257"
+    ],
+    [
+      "Лист1!C39",
+      "4987885"
+    ],
+    [
+      "Лист1!D13",
+      "0.0001"
+    ],
+    [
+      "Лист1!D14",
+      "62"
+    ],
+    [
+      "Лист1!D15",
+      "1.6129E-06"
+    ],
+    [
+      "Лист1!D16",
+      "ed=1.61E-06"
+    ],
+    [
+      "Лист1!D17",
+      "0.07111111111"
+    ],
+    [
+      "Лист1!D18",
+      "0.064"
+    ],
+    [
+      "Лист1!D19",
+      "0.04266666667"
+    ],
+    [
+      "Лист1!D20",
+      "0.04886062693"
+    ],
+    [
+      "Лист1!D21",
+      "0.04267192033"
+    ],
+    [
+      "Лист1!D22",
+      "0.03758873738"
+    ],
+    [
+      "Лист1!D23",
+      "0.0333626557"
+    ],
+    [
+      "Лист1!D24",
+      "0.02981131602"
+    ],
+    [
+      "Лист1!D25",
+      "0.02679841355"
+    ],
+    [
+      "Лист1!D26",
+      "0.02422042026"
+    ],
+    [
+      "Лист1!D27",
+      "0.02199756991"
+    ],
+    [
+      "Лист1!D28",
+      "0.02006761183"
+    ],
+    [
+      "Лист1!D29",
+      "0.01838140362"
+    ],
+    [
+      "Лист1!D30",
+      "0.01689975097"
+    ],
+    [
+      "Лист1!D31",
+      "0.0155911092"
+    ],
+    [
+      "Лист1!D32",
+      "0.01442989102"
+    ],
+    [
+      "Лист1!D33",
+      "0.01339520848"
+    ],
+    [
+      "Лист1!D34",
+      "0.0124699313"
+    ],
+    [
+      "Лист1!D35",
+      "0.01163998044"
+    ],
+    [
+      "Лист1!D36",
+      "0.01089379981"
+    ],
+    [
+      "Лист1!D37",
+      "0.01022196581"
+    ],
+    [
+      "Лист1!D38",
+      "0.009616903547"
+    ],
+    [
+      "Лист1!D39",
+      "0.009072682797"
+    ],
+    [
+      "Лист1!D6",
+      "множитель для оси х"
+    ],
+    [
+      "Лист1!D7",
+      "номер корреляции"
+    ],
+    [
+      "Лист1!D8",
+      "сглаживание"
+    ],
+    [
+      "Лист1!E13",
+      "0.001"
+    ],
+    [
+      "Лист1!E15",
+      "1.6129E-05"
+    ],
+    [
+      "Лист1!E16",
+      "ed=1.61E-05"
+    ],
+    [
+      "Лист1!E17",
+      "0.07111111111"
+    ],
+    [
+      "Лист1!E18",
+      "0.064"
+    ],
+    [
+      "Лист1!E19",
+      "0.04266666667"
+    ],
+    [
+      "Лист1!E20",
+      "0.04886632149"
+    ],
+    [
+      "Лист1!E21",
+      "0.04267889139"
+    ],
+    [
+      "Лист1!E22",
+      "0.0375973815"
+    ],
+    [
+      "Лист1!E23",
+      "0.03337349625"
+    ],
+    [
+      "Лист1!E24",
+      "0.02982504768"
+    ],
+    [
+      "Лист1!E25",
+      "0.02681596259"
+    ],
+    [
+      "Лист1!E26",
+      "0.02424302607"
+    ],
+    [
+      "Лист1!E27",
+      "0.02202689544"
+    ],
+    [
+      "Лист1!E28",
+      "0.02010589244"
+    ],
+    [
+      "Лист1!E29",
+      "0.01843164675"
+    ],
+    [
+      "Лист1!E30",
+      "0.01696600068"
+    ],
+    [
+      "Лист1!E31",
+      "0.01567879043"
+    ],
+    [
+      "Лист1!E32",
+      "0.01454624449"
+    ],
+    [
+      "Лист1!E33",
+      "0.01354981323"
+    ],
+    [
+      "Лист1!E34",
+      "0.01267528083"
+    ],
+    [
+      "Лист1!E35",
+      "0.01191201833"
+    ],
+    [
+      "Лист1!E36",
+      "0.01125222884"
+    ],
+    [
+      "Лист1!E37",
+      "0.01069003781"
+    ],
+    [
+      "Лист1!E38",
+      "0.01022034511"
+    ],
+    [
+      "Лист1!E39",
+      "0.009837528878"
+    ],
+    [
+      "Лист1!E6",
+      "1.5"
+    ],
+    [
+      "Лист1!E7",
+      "5"
+    ],
+    [
+      "Лист1!E8",
+      "0"
+    ],
+    [
+      "Лист1!E9",
+      "."
+    ],
+    [
+      "Лист1!F1",
+      "версия"
+    ],
+    [
+      "Лист1!F13",
+      "0.01"
+    ],
+    [
+      "Лист1!F15",
+      "0.0001612903226"
+    ],
+    [
+      "Лист1!F16",
+      "ed=1.61E-04"
+    ],
+    [
+      "Лист1!F17",
+      "0.07111111111"
+    ],
+    [
+      "Лист1!F18",
+      "0.064"
+    ],
+    [
+      "Лист1!F19",
+      "0.04266666667"
+    ],
+    [
+      "Лист1!F20",
+      "0.04893959914"
+    ],
+    [
+      "Лист1!F21",
+      "0.04276853408"
+    ],
+    [
+      "Лист1!F22",
+      "0.03770842142"
+    ],
+    [
+      "Лист1!F23",
+      "0.03351252452"
+    ],
+    [
+      "Лист1!F24",
+      "0.03000071523"
+    ],
+    [
+      "Лист1!F25",
+      "0.02703961258"
+    ],
+    [
+      "Лист1!F26",
+      "0.02452946421"
+    ],
+    [
+      "Лист1!F27",
+      "0.02239527076"
+    ],
+    [
+      "Лист1!F28",
+      "0.02058059218"
+    ],
+    [
+      "Лист1!F29",
+      "0.01904299125"
+    ],
+    [
+      "Лист1!F30",
+      "0.01775036175"
+    ],
+    [
+      "Лист1!F31",
+      "0.01667760752"
+    ],
+    [
+      "Лист1!F32",
+      "0.01580342159"
+    ],
+    [
+      "Лист1!F33",
+      "0.01510733411"
+    ],
+    [
+      "Лист1!F34",
+      "0.01456761262"
+    ],
+    [
+      "Лист1!F35",
+      "0.01416064399"
+    ],
+    [
+      "Лист1!F36",
+      "0.01386188437"
+    ],
+    [
+      "Лист1!F37",
+      "0.01364770291"
+    ],
+    [
+      "Лист1!F38",
+      "0.01349713455"
+    ],
+    [
+      "Лист1!F39",
+      "0.01339289089"
+    ],
+    [
+      "Лист1!G1",
+      "7.40"
+    ],
+    [
+      "Лист1!G13",
+      "0.1"
+    ],
+    [
+      "Лист1!G15",
+      "0.001612903226"
+    ],
+    [
+      "Лист1!G16",
+      "ed=1.61E-03"
+    ],
+    [
+      "Лист1!G17",
+      "0.07111111111"
+    ],
+    [
+      "Лист1!G18",
+      "0.064"
+    ],
+    [
+      "Лист1!G19",
+      "0.04266666667"
+    ],
+    [
+      "Лист1!G20",
+      "0.04987035218"
+    ],
+    [
+      "Лист1!G21",
+      "0.04389776357"
+    ],
+    [
+      "Лист1!G22",
+      "0.03908980576"
+    ],
+    [
+      "Лист1!G23",
+      "0.03521027225"
+    ],
+    [
+      "Лист1!G24",
+      "0.03208875375"
+    ],
+    [
+      "Лист1!G25",
+      "0.02959831285"
+    ],
+    [
+      "Лист1!G26",
+      "0.02763921349"
+    ],
+    [
+      "Лист1!G27",
+      "0.02612716483"
+    ],
+    [
+      "Лист1!G28",
+      "0.02498598258"
+    ],
+    [
+      "Лист1!G29",
+      "0.02414471666"
+    ],
+    [
+      "Лист1!G30",
+      "0.02353828651"
+    ],
+    [
+      "Лист1!G31",
+      "0.0231096358"
+    ],
+    [
+      "Лист1!G32",
+      "0.02281146553"
+    ],
+    [
+      "Лист1!G33",
+      "0.02260660933"
+    ],
+    [
+      "Лист1!G34",
+      "0.02246714707"
+    ],
+    [
+      "Лист1!G35",
+      "0.02237282497"
+    ],
+    [
+      "Лист1!G36",
+      "0.02230932514"
+    ],
+    [
+      "Лист1!G37",
+      "0.02226671097"
+    ],
+    [
+      "Лист1!G38",
+      "0.0222381748"
+    ],
+    [
+      "Лист1!G39",
+      "0.02221909381"
+    ],
+    [
+      "Лист1!H13",
+      "1"
+    ],
+    [
+      "Лист1!H15",
+      "0.01612903226"
+    ],
+    [
+      "Лист1!H16",
+      "ed=1.61E-02"
+    ],
+    [
+      "Лист1!H17",
+      "0.07111111111"
+    ],
+    [
+      "Лист1!H18",
+      "0.064"
+    ],
+    [
+      "Лист1!H19",
+      "0.04266666667"
+    ],
+    [
+      "Лист1!H20",
+      "0.06029538728"
+    ],
+    [
+      "Лист1!H21",
+      "0.05577239257"
+    ],
+    [
+      "Лист1!H22",
+      "0.05249452264"
+    ],
+    [
+      "Лист1!H23",
+      "0.05015446827"
+    ],
+    [
+      "Лист1!H24",
+      "0.04850873496"
+    ],
+    [
+      "Лист1!H25",
+      "0.04736666819"
+    ],
+    [
+      "Лист1!H26",
+      "0.04658278322"
+    ],
+    [
+      "Лист1!H27",
+      "0.04604929835"
+    ],
+    [
+      "Лист1!H28",
+      "0.04568850222"
+    ],
+    [
+      "Лист1!H29",
+      "0.04544559156"
+    ],
+    [
+      "Лист1!H30",
+      "0.04528256339"
+    ],
+    [
+      "Лист1!H31",
+      "0.04517338528"
+    ],
+    [
+      "Лист1!H32",
+      "0.0451003781"
+    ],
+    [
+      "Лист1!H33",
+      "0.04505160723"
+    ],
+    [
+      "Лист1!H34",
+      "0.04501904888"
+    ],
+    [
+      "Лист1!H35",
+      "0.04499732349"
+    ],
+    [
+      "Лист1!H36",
+      "0.04498283106"
+    ],
+    [
+      "Лист1!H37",
+      "0.04497316551"
+    ],
+    [
+      "Лист1!H38",
+      "0.04496672006"
+    ],
+    [
+      "Лист1!H39",
+      "0.04496242231"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Лист1!G1",
+      "cached": {
+        "type": "text",
+        "value": "7.40"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_version()",
+      "kind": "cell",
+      "latex": "\\text{[1]!unf\\_version}()",
+      "role": "constant"
+    },
+    {
+      "anchor": "Лист1!E13",
+      "cached": {
+        "type": "number",
+        "value": 0.001
+      },
+      "dialect": "excel",
+      "expression": "=D13*10",
+      "kind": "cell",
+      "latex": "\\mathrm{D13} \\cdot 10",
+      "pattern": "p1",
+      "range": "Лист1!E13:H13",
+      "references": [
+        "Лист1!D13"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!F13",
+      "cached": {
+        "type": "number",
+        "value": 0.01
+      },
+      "dialect": "excel",
+      "expression": "=E13*10",
+      "kind": "cell",
+      "latex": "\\mathrm{E13} \\cdot 10",
+      "pattern": "p1",
+      "range": "Лист1!E13:H13",
+      "references": [
+        "Лист1!E13"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!G13",
+      "cached": {
+        "type": "number",
+        "value": 0.1
+      },
+      "dialect": "excel",
+      "expression": "=F13*10",
+      "kind": "cell",
+      "latex": "\\mathrm{F13} \\cdot 10",
+      "pattern": "p1",
+      "range": "Лист1!E13:H13",
+      "references": [
+        "Лист1!F13"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!H13",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=G13*10",
+      "kind": "cell",
+      "latex": "\\mathrm{G13} \\cdot 10",
+      "pattern": "p1",
+      "range": "Лист1!E13:H13",
+      "references": [
+        "Лист1!G13"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D15",
+      "cached": {
+        "type": "number",
+        "value": 1.6129032258064516e-6
+      },
+      "dialect": "excel",
+      "expression": "=D13/$D$14",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{D13}}{\\mathrm{D14}}",
+      "pattern": "p2",
+      "range": "Лист1!D15:H15",
+      "references": [
+        "Лист1!D13",
+        "Лист1!D14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!E15",
+      "cached": {
+        "type": "number",
+        "value": 0.000016129032258064517
+      },
+      "dialect": "excel",
+      "expression": "=E13/$D$14",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{E13}}{\\mathrm{D14}}",
+      "pattern": "p2",
+      "range": "Лист1!D15:H15",
+      "references": [
+        "Лист1!E13",
+        "Лист1!D14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!F15",
+      "cached": {
+        "type": "number",
+        "value": 0.00016129032258064516
+      },
+      "dialect": "excel",
+      "expression": "=F13/$D$14",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{F13}}{\\mathrm{D14}}",
+      "pattern": "p2",
+      "range": "Лист1!D15:H15",
+      "references": [
+        "Лист1!F13",
+        "Лист1!D14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!G15",
+      "cached": {
+        "type": "number",
+        "value": 0.0016129032258064516
+      },
+      "dialect": "excel",
+      "expression": "=G13/$D$14",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{G13}}{\\mathrm{D14}}",
+      "pattern": "p2",
+      "range": "Лист1!D15:H15",
+      "references": [
+        "Лист1!G13",
+        "Лист1!D14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!H15",
+      "cached": {
+        "type": "number",
+        "value": 0.016129032258064516
+      },
+      "dialect": "excel",
+      "expression": "=H13/$D$14",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{H13}}{\\mathrm{D14}}",
+      "pattern": "p2",
+      "range": "Лист1!D15:H15",
+      "references": [
+        "Лист1!H13",
+        "Лист1!D14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D16",
+      "cached": {
+        "type": "text",
+        "value": "ed=1.61E-06"
+      },
+      "dialect": "excel",
+      "expression": "=\"ed=\"&TEXT(D15,\"0.00E+00\")",
+      "kind": "cell",
+      "latex": "\\text{\"ed=\"} \\mathbin{\\&} \\operatorname{TEXT}(\\mathrm{D15}, \\text{\"0.00E+00\"})",
+      "pattern": "p3",
+      "range": "Лист1!D16:H16",
+      "references": [
+        "Лист1!D15"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E16",
+      "cached": {
+        "type": "text",
+        "value": "ed=1.61E-05"
+      },
+      "dialect": "excel",
+      "expression": "=\"ed=\"&TEXT(E15,\"0.00E+00\")",
+      "kind": "shared",
+      "latex": "\\text{\"ed=\"} \\mathbin{\\&} \\operatorname{TEXT}(\\mathrm{E15}, \\text{\"0.00E+00\"})",
+      "pattern": "p3",
+      "range": "Лист1!D16:H16",
+      "references": [
+        "Лист1!E15"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F16",
+      "cached": {
+        "type": "text",
+        "value": "ed=1.61E-04"
+      },
+      "dialect": "excel",
+      "expression": "=\"ed=\"&TEXT(F15,\"0.00E+00\")",
+      "kind": "shared",
+      "latex": "\\text{\"ed=\"} \\mathbin{\\&} \\operatorname{TEXT}(\\mathrm{F15}, \\text{\"0.00E+00\"})",
+      "pattern": "p3",
+      "range": "Лист1!D16:H16",
+      "references": [
+        "Лист1!F15"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G16",
+      "cached": {
+        "type": "text",
+        "value": "ed=1.61E-03"
+      },
+      "dialect": "excel",
+      "expression": "=\"ed=\"&TEXT(G15,\"0.00E+00\")",
+      "kind": "shared",
+      "latex": "\\text{\"ed=\"} \\mathbin{\\&} \\operatorname{TEXT}(\\mathrm{G15}, \\text{\"0.00E+00\"})",
+      "pattern": "p3",
+      "range": "Лист1!D16:H16",
+      "references": [
+        "Лист1!G15"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H16",
+      "cached": {
+        "type": "text",
+        "value": "ed=1.61E-02"
+      },
+      "dialect": "excel",
+      "expression": "=\"ed=\"&TEXT(H15,\"0.00E+00\")",
+      "kind": "shared",
+      "latex": "\\text{\"ed=\"} \\mathbin{\\&} \\operatorname{TEXT}(\\mathrm{H15}, \\text{\"0.00E+00\"})",
+      "pattern": "p3",
+      "range": "Лист1!D16:H16",
+      "references": [
+        "Лист1!H15"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!D17",
+      "cached": {
+        "type": "number",
+        "value": 0.07111111111111111
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C17,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C17}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D17",
+      "references": [
+        "Лист1!C17",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E17",
+      "cached": {
+        "type": "number",
+        "value": 0.07111111111111111
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C17,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C17}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E17",
+      "references": [
+        "Лист1!C17",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F17",
+      "cached": {
+        "type": "number",
+        "value": 0.07111111111111111
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C17,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C17}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F17",
+      "references": [
+        "Лист1!C17",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G17",
+      "cached": {
+        "type": "number",
+        "value": 0.07111111111111111
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C17,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C17}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G17",
+      "references": [
+        "Лист1!C17",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H17",
+      "cached": {
+        "type": "number",
+        "value": 0.07111111111111111
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C17,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C17}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H17",
+      "references": [
+        "Лист1!C17",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!D18",
+      "cached": {
+        "type": "number",
+        "value": 0.064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C18,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C18}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D18",
+      "references": [
+        "Лист1!C18",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E18",
+      "cached": {
+        "type": "number",
+        "value": 0.064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C18,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C18}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E18",
+      "references": [
+        "Лист1!C18",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F18",
+      "cached": {
+        "type": "number",
+        "value": 0.064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C18,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C18}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F18",
+      "references": [
+        "Лист1!C18",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G18",
+      "cached": {
+        "type": "number",
+        "value": 0.064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C18,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C18}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G18",
+      "references": [
+        "Лист1!C18",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H18",
+      "cached": {
+        "type": "number",
+        "value": 0.064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C18,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C18}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H18",
+      "references": [
+        "Лист1!C18",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C19",
+      "cached": {
+        "type": "number",
+        "value": 1500.0
+      },
+      "dialect": "excel",
+      "expression": "=C18*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C18} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C18",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D19",
+      "cached": {
+        "type": "number",
+        "value": 0.042666666666666665
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C19,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C19}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D19",
+      "references": [
+        "Лист1!C19",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E19",
+      "cached": {
+        "type": "number",
+        "value": 0.042666666666666665
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C19,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C19}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E19",
+      "references": [
+        "Лист1!C19",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F19",
+      "cached": {
+        "type": "number",
+        "value": 0.042666666666666665
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C19,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C19}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F19",
+      "references": [
+        "Лист1!C19",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G19",
+      "cached": {
+        "type": "number",
+        "value": 0.042666666666666665
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C19,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C19}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G19",
+      "references": [
+        "Лист1!C19",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H19",
+      "cached": {
+        "type": "number",
+        "value": 0.042666666666666665
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C19,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C19}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H19",
+      "references": [
+        "Лист1!C19",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C20",
+      "cached": {
+        "type": "number",
+        "value": 2250.0
+      },
+      "dialect": "excel",
+      "expression": "=C19*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C19} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C19",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D20",
+      "cached": {
+        "type": "number",
+        "value": 0.04886062692750952
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C20,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C20}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D20",
+      "references": [
+        "Лист1!C20",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E20",
+      "cached": {
+        "type": "number",
+        "value": 0.04886632148745887
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C20,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C20}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E20",
+      "references": [
+        "Лист1!C20",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F20",
+      "cached": {
+        "type": "number",
+        "value": 0.04893959914302682
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C20,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C20}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F20",
+      "references": [
+        "Лист1!C20",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G20",
+      "cached": {
+        "type": "number",
+        "value": 0.04987035217651743
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C20,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C20}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G20",
+      "references": [
+        "Лист1!C20",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H20",
+      "cached": {
+        "type": "number",
+        "value": 0.06029538727580752
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C20,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C20}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H20",
+      "references": [
+        "Лист1!C20",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C21",
+      "cached": {
+        "type": "number",
+        "value": 3375.0
+      },
+      "dialect": "excel",
+      "expression": "=C20*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C20} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C20",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D21",
+      "cached": {
+        "type": "number",
+        "value": 0.04267192033234409
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C21,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C21}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D21",
+      "references": [
+        "Лист1!C21",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E21",
+      "cached": {
+        "type": "number",
+        "value": 0.04267889138940335
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C21,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C21}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E21",
+      "references": [
+        "Лист1!C21",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F21",
+      "cached": {
+        "type": "number",
+        "value": 0.04276853407862757
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C21,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C21}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F21",
+      "references": [
+        "Лист1!C21",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G21",
+      "cached": {
+        "type": "number",
+        "value": 0.043897763571951506
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C21,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C21}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G21",
+      "references": [
+        "Лист1!C21",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H21",
+      "cached": {
+        "type": "number",
+        "value": 0.055772392572569295
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C21,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C21}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H21",
+      "references": [
+        "Лист1!C21",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C22",
+      "cached": {
+        "type": "number",
+        "value": 5062.5
+      },
+      "dialect": "excel",
+      "expression": "=C21*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C21} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C21",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D22",
+      "cached": {
+        "type": "number",
+        "value": 0.037588737379496744
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C22,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C22}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D22",
+      "references": [
+        "Лист1!C22",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E22",
+      "cached": {
+        "type": "number",
+        "value": 0.037597381499215765
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C22,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C22}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E22",
+      "references": [
+        "Лист1!C22",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F22",
+      "cached": {
+        "type": "number",
+        "value": 0.037708421415840736
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C22,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C22}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F22",
+      "references": [
+        "Лист1!C22",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G22",
+      "cached": {
+        "type": "number",
+        "value": 0.039089805755997215
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C22,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C22}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G22",
+      "references": [
+        "Лист1!C22",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H22",
+      "cached": {
+        "type": "number",
+        "value": 0.052494522638638554
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C22,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C22}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H22",
+      "references": [
+        "Лист1!C22",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C23",
+      "cached": {
+        "type": "number",
+        "value": 7593.75
+      },
+      "dialect": "excel",
+      "expression": "=C22*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C22} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C22",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D23",
+      "cached": {
+        "type": "number",
+        "value": 0.033362655701030905
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C23,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C23}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D23",
+      "references": [
+        "Лист1!C23",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E23",
+      "cached": {
+        "type": "number",
+        "value": 0.03337349624533305
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C23,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C23}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E23",
+      "references": [
+        "Лист1!C23",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F23",
+      "cached": {
+        "type": "number",
+        "value": 0.03351252451545377
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C23,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C23}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F23",
+      "references": [
+        "Лист1!C23",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G23",
+      "cached": {
+        "type": "number",
+        "value": 0.035210272247749405
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C23,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C23}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G23",
+      "references": [
+        "Лист1!C23",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H23",
+      "cached": {
+        "type": "number",
+        "value": 0.05015446827241799
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C23,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C23}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H23",
+      "references": [
+        "Лист1!C23",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C24",
+      "cached": {
+        "type": "number",
+        "value": 11390.625
+      },
+      "dialect": "excel",
+      "expression": "=C23*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C23} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C23",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D24",
+      "cached": {
+        "type": "number",
+        "value": 0.02981131601607276
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C24,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C24}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D24",
+      "references": [
+        "Лист1!C24",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E24",
+      "cached": {
+        "type": "number",
+        "value": 0.02982504767847902
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C24,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C24}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E24",
+      "references": [
+        "Лист1!C24",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F24",
+      "cached": {
+        "type": "number",
+        "value": 0.030000715228768175
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C24,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C24}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F24",
+      "references": [
+        "Лист1!C24",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G24",
+      "cached": {
+        "type": "number",
+        "value": 0.03208875375321
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C24,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C24}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G24",
+      "references": [
+        "Лист1!C24",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H24",
+      "cached": {
+        "type": "number",
+        "value": 0.048508734960981896
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C24,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C24}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H24",
+      "references": [
+        "Лист1!C24",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C25",
+      "cached": {
+        "type": "number",
+        "value": 17085.9375
+      },
+      "dialect": "excel",
+      "expression": "=C24*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C24} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C24",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D25",
+      "cached": {
+        "type": "number",
+        "value": 0.026798413554177936
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C25,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C25}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D25",
+      "references": [
+        "Лист1!C25",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E25",
+      "cached": {
+        "type": "number",
+        "value": 0.026815962592808905
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C25,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C25}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E25",
+      "references": [
+        "Лист1!C25",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F25",
+      "cached": {
+        "type": "number",
+        "value": 0.027039612578946163
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C25,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C25}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F25",
+      "references": [
+        "Лист1!C25",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G25",
+      "cached": {
+        "type": "number",
+        "value": 0.02959831285117963
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C25,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C25}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G25",
+      "references": [
+        "Лист1!C25",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H25",
+      "cached": {
+        "type": "number",
+        "value": 0.04736666818618874
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C25,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C25}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H25",
+      "references": [
+        "Лист1!C25",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C26",
+      "cached": {
+        "type": "number",
+        "value": 25628.90625
+      },
+      "dialect": "excel",
+      "expression": "=C25*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C25} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C25",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D26",
+      "cached": {
+        "type": "number",
+        "value": 0.024220420258584223
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C26,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C26}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D26",
+      "references": [
+        "Лист1!C26",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E26",
+      "cached": {
+        "type": "number",
+        "value": 0.024243026071905285
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C26,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C26}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E26",
+      "references": [
+        "Лист1!C26",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F26",
+      "cached": {
+        "type": "number",
+        "value": 0.024529464210076672
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C26,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C26}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F26",
+      "references": [
+        "Лист1!C26",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G26",
+      "cached": {
+        "type": "number",
+        "value": 0.027639213486018176
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C26,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C26}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G26",
+      "references": [
+        "Лист1!C26",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H26",
+      "cached": {
+        "type": "number",
+        "value": 0.04658278322153099
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C26,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C26}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H26",
+      "references": [
+        "Лист1!C26",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C27",
+      "cached": {
+        "type": "number",
+        "value": 38443.359375
+      },
+      "dialect": "excel",
+      "expression": "=C26*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C26} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C26",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D27",
+      "cached": {
+        "type": "number",
+        "value": 0.021997569914383053
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C27,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C27}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D27",
+      "references": [
+        "Лист1!C27",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E27",
+      "cached": {
+        "type": "number",
+        "value": 0.02202689543519841
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C27,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C27}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E27",
+      "references": [
+        "Лист1!C27",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F27",
+      "cached": {
+        "type": "number",
+        "value": 0.02239527075825327
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C27,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C27}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F27",
+      "references": [
+        "Лист1!C27",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G27",
+      "cached": {
+        "type": "number",
+        "value": 0.026127164828728178
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C27,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C27}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G27",
+      "references": [
+        "Лист1!C27",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H27",
+      "cached": {
+        "type": "number",
+        "value": 0.04604929835323791
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C27,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C27}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H27",
+      "references": [
+        "Лист1!C27",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C28",
+      "cached": {
+        "type": "number",
+        "value": 57665.0390625
+      },
+      "dialect": "excel",
+      "expression": "=C27*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C27} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C27",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D28",
+      "cached": {
+        "type": "number",
+        "value": 0.020067611831664858
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C28,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C28}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D28",
+      "references": [
+        "Лист1!C28",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E28",
+      "cached": {
+        "type": "number",
+        "value": 0.02010589244361976
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C28,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C28}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E28",
+      "references": [
+        "Лист1!C28",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F28",
+      "cached": {
+        "type": "number",
+        "value": 0.02058059218246861
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C28,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C28}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F28",
+      "references": [
+        "Лист1!C28",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G28",
+      "cached": {
+        "type": "number",
+        "value": 0.024985982584453188
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C28,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C28}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G28",
+      "references": [
+        "Лист1!C28",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H28",
+      "cached": {
+        "type": "number",
+        "value": 0.04568850222351275
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C28,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C28}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H28",
+      "references": [
+        "Лист1!C28",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C29",
+      "cached": {
+        "type": "number",
+        "value": 86497.55859375
+      },
+      "dialect": "excel",
+      "expression": "=C28*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C28} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C28",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D29",
+      "cached": {
+        "type": "number",
+        "value": 0.01838140361996536
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C29,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C29}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D29",
+      "references": [
+        "Лист1!C29",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E29",
+      "cached": {
+        "type": "number",
+        "value": 0.01843164675474254
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C29,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C29}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E29",
+      "references": [
+        "Лист1!C29",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F29",
+      "cached": {
+        "type": "number",
+        "value": 0.019042991248976293
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C29,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C29}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F29",
+      "references": [
+        "Лист1!C29",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G29",
+      "cached": {
+        "type": "number",
+        "value": 0.024144716660911263
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C29,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C29}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G29",
+      "references": [
+        "Лист1!C29",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H29",
+      "cached": {
+        "type": "number",
+        "value": 0.04544559156213547
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C29,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C29}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H29",
+      "references": [
+        "Лист1!C29",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C30",
+      "cached": {
+        "type": "number",
+        "value": 129746.337890625
+      },
+      "dialect": "excel",
+      "expression": "=C29*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C29} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C29",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D30",
+      "cached": {
+        "type": "number",
+        "value": 0.01689975097455436
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C30,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C30}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D30",
+      "references": [
+        "Лист1!C30",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E30",
+      "cached": {
+        "type": "number",
+        "value": 0.01696600067748852
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C30,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C30}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E30",
+      "references": [
+        "Лист1!C30",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F30",
+      "cached": {
+        "type": "number",
+        "value": 0.01775036175028599
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C30,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C30}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F30",
+      "references": [
+        "Лист1!C30",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G30",
+      "cached": {
+        "type": "number",
+        "value": 0.02353828651378947
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C30,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C30}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G30",
+      "references": [
+        "Лист1!C30",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H30",
+      "cached": {
+        "type": "number",
+        "value": 0.04528256339308977
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C30,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C30}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H30",
+      "references": [
+        "Лист1!C30",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C31",
+      "cached": {
+        "type": "number",
+        "value": 194619.5068359375
+      },
+      "dialect": "excel",
+      "expression": "=C30*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C30} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C30",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D31",
+      "cached": {
+        "type": "number",
+        "value": 0.01559110920175482
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C31,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C31}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D31",
+      "references": [
+        "Лист1!C31",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E31",
+      "cached": {
+        "type": "number",
+        "value": 0.015678790430919517
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C31,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C31}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E31",
+      "references": [
+        "Лист1!C31",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F31",
+      "cached": {
+        "type": "number",
+        "value": 0.016677607515187244
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C31,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C31}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F31",
+      "references": [
+        "Лист1!C31",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G31",
+      "cached": {
+        "type": "number",
+        "value": 0.023109635804600567
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C31,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C31}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G31",
+      "references": [
+        "Лист1!C31",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H31",
+      "cached": {
+        "type": "number",
+        "value": 0.0451733852780985
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C31,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C31}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H31",
+      "references": [
+        "Лист1!C31",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C32",
+      "cached": {
+        "type": "number",
+        "value": 291929.26025390625
+      },
+      "dialect": "excel",
+      "expression": "=C31*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C31} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C31",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D32",
+      "cached": {
+        "type": "number",
+        "value": 0.014429891022250316
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C32,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C32}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D32",
+      "references": [
+        "Лист1!C32",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E32",
+      "cached": {
+        "type": "number",
+        "value": 0.01454624448570874
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C32,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C32}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E32",
+      "references": [
+        "Лист1!C32",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F32",
+      "cached": {
+        "type": "number",
+        "value": 0.015803421592779646
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C32,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C32}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F32",
+      "references": [
+        "Лист1!C32",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G32",
+      "cached": {
+        "type": "number",
+        "value": 0.02281146553457847
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C32,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C32}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G32",
+      "references": [
+        "Лист1!C32",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H32",
+      "cached": {
+        "type": "number",
+        "value": 0.04510037809608382
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C32,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C32}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H32",
+      "references": [
+        "Лист1!C32",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C33",
+      "cached": {
+        "type": "number",
+        "value": 437893.8903808594
+      },
+      "dialect": "excel",
+      "expression": "=C32*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C32} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C32",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D33",
+      "cached": {
+        "type": "number",
+        "value": 0.013395208478915056
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C33,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C33}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D33",
+      "references": [
+        "Лист1!C33",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E33",
+      "cached": {
+        "type": "number",
+        "value": 0.013549813232661549
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C33,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C33}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E33",
+      "references": [
+        "Лист1!C33",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F33",
+      "cached": {
+        "type": "number",
+        "value": 0.015107334110305636
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C33,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C33}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F33",
+      "references": [
+        "Лист1!C33",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G33",
+      "cached": {
+        "type": "number",
+        "value": 0.02260660932944856
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C33,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C33}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G33",
+      "references": [
+        "Лист1!C33",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H33",
+      "cached": {
+        "type": "number",
+        "value": 0.0450516072293899
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C33,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C33}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H33",
+      "references": [
+        "Лист1!C33",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C34",
+      "cached": {
+        "type": "number",
+        "value": 656840.8355712891
+      },
+      "dialect": "excel",
+      "expression": "=C33*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C33} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C33",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D34",
+      "cached": {
+        "type": "number",
+        "value": 0.012469931304470251
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C34,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C34}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D34",
+      "references": [
+        "Лист1!C34",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E34",
+      "cached": {
+        "type": "number",
+        "value": 0.012675280828799353
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C34,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C34}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E34",
+      "references": [
+        "Лист1!C34",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F34",
+      "cached": {
+        "type": "number",
+        "value": 0.014567612623334026
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C34,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C34}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F34",
+      "references": [
+        "Лист1!C34",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G34",
+      "cached": {
+        "type": "number",
+        "value": 0.02246714707098644
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C34,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C34}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G34",
+      "references": [
+        "Лист1!C34",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H34",
+      "cached": {
+        "type": "number",
+        "value": 0.04501904888131743
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C34,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C34}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H34",
+      "references": [
+        "Лист1!C34",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C35",
+      "cached": {
+        "type": "number",
+        "value": 985261.2533569336
+      },
+      "dialect": "excel",
+      "expression": "=C34*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C34} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C34",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D35",
+      "cached": {
+        "type": "number",
+        "value": 0.011639980435273114
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C35,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C35}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D35",
+      "references": [
+        "Лист1!C35",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E35",
+      "cached": {
+        "type": "number",
+        "value": 0.011912018328253586
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C35,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C35}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E35",
+      "references": [
+        "Лист1!C35",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F35",
+      "cached": {
+        "type": "number",
+        "value": 0.01416064398532216
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C35,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C35}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F35",
+      "references": [
+        "Лист1!C35",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G35",
+      "cached": {
+        "type": "number",
+        "value": 0.02237282497264377
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C35,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C35}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G35",
+      "references": [
+        "Лист1!C35",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H35",
+      "cached": {
+        "type": "number",
+        "value": 0.044997323490383594
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C35,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C35}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H35",
+      "references": [
+        "Лист1!C35",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C36",
+      "cached": {
+        "type": "number",
+        "value": 1477891.8800354004
+      },
+      "dialect": "excel",
+      "expression": "=C35*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C35} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C35",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D36",
+      "cached": {
+        "type": "number",
+        "value": 0.010893799808506237
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C36,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C36}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D36",
+      "references": [
+        "Лист1!C36",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E36",
+      "cached": {
+        "type": "number",
+        "value": 0.011252228844171607
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C36,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C36}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E36",
+      "references": [
+        "Лист1!C36",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F36",
+      "cached": {
+        "type": "number",
+        "value": 0.013861884373485045
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C36,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C36}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F36",
+      "references": [
+        "Лист1!C36",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G36",
+      "cached": {
+        "type": "number",
+        "value": 0.022309325139452996
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C36,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C36}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G36",
+      "references": [
+        "Лист1!C36",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H36",
+      "cached": {
+        "type": "number",
+        "value": 0.044982831062493865
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C36,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C36}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H36",
+      "references": [
+        "Лист1!C36",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C37",
+      "cached": {
+        "type": "number",
+        "value": 2216837.8200531006
+      },
+      "dialect": "excel",
+      "expression": "=C36*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C36} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C36",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D37",
+      "cached": {
+        "type": "number",
+        "value": 0.01022196581007515
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C37,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C37}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D37",
+      "references": [
+        "Лист1!C37",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E37",
+      "cached": {
+        "type": "number",
+        "value": 0.010690037813868784
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C37,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C37}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E37",
+      "references": [
+        "Лист1!C37",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F37",
+      "cached": {
+        "type": "number",
+        "value": 0.01364770291024128
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C37,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C37}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F37",
+      "references": [
+        "Лист1!C37",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G37",
+      "cached": {
+        "type": "number",
+        "value": 0.02226671097182099
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C37,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C37}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G37",
+      "references": [
+        "Лист1!C37",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H37",
+      "cached": {
+        "type": "number",
+        "value": 0.04497316551099486
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C37,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C37}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H37",
+      "references": [
+        "Лист1!C37",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C38",
+      "cached": {
+        "type": "number",
+        "value": 3325256.730079651
+      },
+      "dialect": "excel",
+      "expression": "=C37*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C37} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C37",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D38",
+      "cached": {
+        "type": "number",
+        "value": 0.009616903547482389
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C38,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C38}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D38",
+      "references": [
+        "Лист1!C38",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E38",
+      "cached": {
+        "type": "number",
+        "value": 0.010220345111375108
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C38,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C38}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E38",
+      "references": [
+        "Лист1!C38",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F38",
+      "cached": {
+        "type": "number",
+        "value": 0.013497134551445331
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C38,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C38}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F38",
+      "references": [
+        "Лист1!C38",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G38",
+      "cached": {
+        "type": "number",
+        "value": 0.02223817480412812
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C38,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C38}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G38",
+      "references": [
+        "Лист1!C38",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H38",
+      "cached": {
+        "type": "number",
+        "value": 0.04496672006004366
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C38,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C38}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H38",
+      "references": [
+        "Лист1!C38",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!C39",
+      "cached": {
+        "type": "number",
+        "value": 4987885.095119476
+      },
+      "dialect": "excel",
+      "expression": "=C38*mult",
+      "kind": "shared",
+      "latex": "\\mathrm{C38} \\cdot \\mathrm{mult}",
+      "pattern": "p5",
+      "range": "Лист1!C19:C39",
+      "references": [
+        "Лист1!C38",
+        "name:mult"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D39",
+      "cached": {
+        "type": "number",
+        "value": 0.00907268279659236
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C39,D$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C39}, \\mathrm{D15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!D39",
+      "references": [
+        "Лист1!C39",
+        "Лист1!D15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!E39",
+      "cached": {
+        "type": "number",
+        "value": 0.009837528877643064
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C39,E$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C39}, \\mathrm{E15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!E39",
+      "references": [
+        "Лист1!C39",
+        "Лист1!E15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!F39",
+      "cached": {
+        "type": "number",
+        "value": 0.0133928908924126
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C39,F$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C39}, \\mathrm{F15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!F39",
+      "references": [
+        "Лист1!C39",
+        "Лист1!F15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!G39",
+      "cached": {
+        "type": "number",
+        "value": 0.022219093809473584
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C39,G$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C39}, \\mathrm{G15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!G39",
+      "references": [
+        "Лист1!C39",
+        "Лист1!G15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Лист1!H39",
+      "cached": {
+        "type": "number",
+        "value": 0.044962422314394845
+      },
+      "dialect": "excel",
+      "expression": "=[1]!unf_friction_factor($C39,H$15,type,smooth_transition)",
+      "kind": "spill",
+      "latex": "\\text{[1]!unf\\_friction\\_factor}(\\mathrm{C39}, \\mathrm{H15}, \\mathrm{type}, \\mathrm{smooth\\_transition})",
+      "pattern": "p4",
+      "range": "Лист1!H39",
+      "references": [
+        "Лист1!C39",
+        "Лист1!H15",
+        "name:type",
+        "name:smooth_transition"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:mult",
+      "dialect": "excel",
+      "expression": "Лист1!$E$6",
+      "kind": "name",
+      "references": [
+        "Лист1!E6"
+      ]
+    },
+    {
+      "anchor": "name:smooth_transition",
+      "dialect": "excel",
+      "expression": "Лист1!$E$8",
+      "kind": "name",
+      "references": [
+        "Лист1!E8"
+      ]
+    },
+    {
+      "anchor": "name:type",
+      "dialect": "excel",
+      "expression": "Лист1!$E$7",
+      "kind": "name",
+      "references": [
+        "Лист1!E7"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Лист1!E6",
+      "label": "множитель для оси х",
+      "name": "mult",
+      "read_by": 21,
+      "value": {
+        "type": "number",
+        "value": 1.5
+      }
+    },
+    {
+      "anchor": "Лист1!E7",
+      "label": "номер корреляции",
+      "name": "type",
+      "read_by": 115,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "Лист1!E8",
+      "label": "сглаживание",
+      "name": "smooth_transition",
+      "read_by": 115,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!D13",
+      "label": "e",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 0.0001
+      }
+    },
+    {
+      "anchor": "Лист1!D14",
+      "label": "d",
+      "read_by": 5,
+      "value": {
+        "type": "number",
+        "value": 62.0
+      }
+    },
+    {
+      "anchor": "Лист1!C17",
+      "label": "Nr",
+      "read_by": 5,
+      "value": {
+        "type": "number",
+        "value": 900.0
+      }
+    },
+    {
+      "anchor": "Лист1!C18",
+      "label": "Nr",
+      "read_by": 6,
+      "value": {
+        "type": "number",
+        "value": 1000.0
+      }
+    }
+  ],
+  "rules": []
+}

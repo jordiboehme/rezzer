@@ -4,7 +4,9 @@
 
 //! Pass `language`: sets `properties.language` from the body text when it is empty.
 
-use rezzer_model::{Block, Document, Inline};
+use std::collections::HashSet;
+
+use rezzer_model::{Block, Document, Inline, SectionKind};
 
 use crate::{Pass, walk};
 
@@ -52,12 +54,36 @@ impl Pass for Language {
 /// Only words made of letters count (apostrophes and hyphens inside a word are fine, edge
 /// punctuation is dropped): numbers, dates and codes such as `A12-B7` say nothing about the
 /// language and make whatlang report a false, "reliable" answer. Code and formulas are left
-/// out too, and so are tables with a role: reader-generated summaries.
+/// out too, and so are tables with a role (reader-generated summaries) and the region
+/// headings a sheet reader generates.
 fn body_text(body: &[Block]) -> String {
+    // The region headings a reader generates in a sheet (`Table B3:D5`) are the only headings
+    // there without an anchor; caption rows and defined-name captions carry one.
+    // Sheet sections at any depth.
+    let mut generated: HashSet<*const Block> = HashSet::new();
+    walk::blocks(body, |b| {
+        if let Block::Section {
+            kind: SectionKind::Sheet,
+            blocks,
+            ..
+        } = b
+        {
+            generated.extend(
+                blocks
+                    .iter()
+                    .filter(|x| matches!(x, Block::Heading { anchor: None, .. }))
+                    .map(|x| x as *const Block),
+            );
+        }
+        true
+    });
     let mut text = String::new();
     walk::blocks(body, |b| {
         // A table with a role (a summary a reader generated) is not the author's text.
         if matches!(b, Block::Table { role: Some(_), .. }) {
+            return true;
+        }
+        if generated.contains(&(b as *const Block)) {
             return true;
         }
         walk::block_inlines(b, |list| {

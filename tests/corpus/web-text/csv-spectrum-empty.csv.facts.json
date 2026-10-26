@@ -8,8 +8,12 @@
     "equals": 3.0
   },
   {
-    "pointer": "/body/0/blocks/0/rows/1/1/inlines/0/text",
-    "equals": ""
+    "pointer": "/body/0/blocks/0/rows/1/1/anchor",
+    "equals": "'csv-spectrum-empty'!B2"
+  },
+  {
+    "pointer": "/body/0/blocks/0/rows/1/1/inlines",
+    "absent": true
   },
   {
     "pointer": "/body/0/blocks/0/rows/2/1/inlines/0/text",

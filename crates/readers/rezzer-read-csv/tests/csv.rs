@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Block, Bytes, Cell, Completeness, Confidence, Detection, FormatId, Inline, LossReason,
-    ReadOptions, ReadOutcome, Reader, Role, SectionKind, Severity, Source, Value,
+    Block, Bytes, Cell, Certainty, Completeness, Confidence, Detection, Evidence, FormatId, Inline,
+    LayoutKind, LossReason, ReadOptions, ReadOutcome, Reader, Role, RowKind, SectionKind, Severity,
+    Source, TableLayout, Value,
 };
 use rezzer_read_csv::CsvReader;
+use rezzer_render::{OutputSection, RenderOptions, TableStyle};
 
 fn source(name: &str, format: FormatId, bytes: &[u8]) -> Source {
     Source {
@@ -243,7 +245,12 @@ fn ragged_table_is_rectangular() {
     let w = widths(blocks[0]);
     assert!(w.iter().all(|&x| x == 4), "{w:?}");
     let rows = rows_of(blocks[0]);
-    assert_eq!(rows[0], ["id", "qty", "price", "Column 4"]);
+    // The header cell past the header record is empty, and so is its header path, as for
+    // sheets; the renderer names the column.
+    assert_eq!(rows[0], ["id", "qty", "price", ""]);
+    let paths = &layout_of(blocks[0]).header_paths;
+    assert_eq!(paths[..3], ["id", "qty", "price"]);
+    assert!(paths.iter().skip(3).all(String::is_empty), "{paths:?}");
     assert_eq!(rows[3], ["3", "4", "", ""]);
     assert_eq!(rows[4][3], "9");
     assert_eq!(out.completeness, Completeness::Partial);
@@ -287,7 +294,7 @@ fn wide_file_is_capped_by_cells() {
             ("row 200 not shown", Severity::Info),
             ("2000 columns after column 1000 not shown", Severity::Info),
             (
-                "columns 501 to 3000 not listed in the Columns table",
+                "columns 501 to 3000 not listed in Columns A1:ALL200",
                 Severity::Info
             ),
         ]
@@ -331,7 +338,9 @@ fn the_element_budget_stops_the_table_with_a_limit_loss() {
         "element limit reached, rest of the file not read"
     );
     assert_eq!(limits[0].severity, Severity::Warning);
-    assert_eq!(budget.elements(), 102);
+    // The record that would pass the limit is not charged, so the layout can still place
+    // the records read.
+    assert_eq!(budget.elements(), 100);
 }
 
 #[test]
@@ -408,7 +417,7 @@ fn columns_table_is_marked_as_summary() {
         .collect();
     assert_eq!(
         roles,
-        vec![(None, None), (Some("Columns"), Some("summary"))]
+        vec![(None, None), (Some("Columns A1:B3"), Some("summary"))]
     );
 }
 
@@ -543,4 +552,715 @@ fn a_budget_out_of_time_truncates_the_analysis_with_one_loss() {
         limits[0].what,
         "time limit reached during the analysis, only the first 4094 rows are counted, table not built"
     );
+}
+
+/// The layout of a table block.
+fn layout_of(block: &Block) -> &TableLayout {
+    match block {
+        Block::Table {
+            layout: Some(l), ..
+        } => l,
+        other => panic!("expected a table with a layout, got {other:?}"),
+    }
+}
+
+/// The table blocks of the sheet section, the Columns facts table left out.
+fn data_tables<'a>(blocks: &[&'a Block]) -> Vec<&'a Block> {
+    blocks
+        .iter()
+        .copied()
+        .filter(|b| {
+            matches!(
+                b,
+                Block::Table {
+                    layout: Some(_),
+                    ..
+                }
+            )
+        })
+        .collect()
+}
+
+fn inline_text(inlines: &[Inline]) -> String {
+    inlines
+        .iter()
+        .map(|i| match i {
+            Inline::Text { text, .. } => text.as_str(),
+            Inline::LineBreak => " ",
+            _ => "",
+        })
+        .collect()
+}
+
+/// The ragged-row losses (`row has N fields, expected M`).
+fn ragged_losses(out: &ReadOutcome) -> Vec<String> {
+    out.document
+        .losses
+        .iter()
+        .filter(|l| l.what.starts_with("row has "))
+        .map(|l| format!("{}: {}", l.location, l.what))
+        .collect()
+}
+
+fn markdown(out: &ReadOutcome, style: TableStyle) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &RenderOptions {
+            sections: Some(vec![OutputSection::Content]),
+            table_style: style,
+            ..RenderOptions::default()
+        },
+    )
+}
+
+#[test]
+fn csv_title_lines_above_header() {
+    let out = read(
+        b"Station report 2024\nSource: test data\nid,name,value\n1,alpha,10\n2,beta,20\n3,gamma,30\n",
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+    assert!(ragged_losses(&out).is_empty(), "{:?}", out.document.losses);
+    let (_, blocks) = tables(&out);
+    let Block::Heading {
+        inlines, anchor, ..
+    } = blocks[0]
+    else {
+        panic!("expected the title as heading, got {:?}", blocks[0]);
+    };
+    assert_eq!(inline_text(inlines), "Station report 2024");
+    assert_eq!(anchor.as_ref().unwrap().0, "data!A1");
+    let Block::Paragraph {
+        inlines,
+        role,
+        anchor,
+    } = blocks[1]
+    else {
+        panic!(
+            "expected the second title line as caption, got {:?}",
+            blocks[1]
+        );
+    };
+    assert_eq!(inline_text(inlines), "Source: test data");
+    assert_eq!(role.as_deref(), Some("caption"));
+    assert_eq!(anchor.as_ref().unwrap().0, "data!A2");
+    let shown = data_tables(&blocks);
+    assert_eq!(shown.len(), 1);
+    let l = layout_of(shown[0]);
+    assert_eq!(l.kind, LayoutKind::Table);
+    assert_eq!(l.range, "A1:C6");
+    assert_eq!(l.header_rows, [3]);
+    assert_eq!(l.header_paths, ["id", "name", "value"]);
+    let rows = rows_of(shown[0]);
+    assert_eq!(rows[0], ["id", "name", "value"]);
+    assert_eq!(rows[1], ["1", "alpha", "10"]);
+    let Block::Table { rows, .. } = shown[0] else {
+        panic!()
+    };
+    assert_eq!(rows[1][2].anchor.as_ref().unwrap().0, "data!C4");
+    // The Columns table names the columns by the header row, not by the title.
+    let facts = rows_of(blocks.last().unwrap());
+    assert_eq!(facts[1][..2], ["id", "integer"]);
+    assert_eq!(property(&out, "rows"), Value::number(3.0, None));
+}
+
+#[test]
+fn csv_blank_first_line() {
+    let out = read(b"\nid,name,value\n1,alpha,10\n2,beta,20\n3,gamma,30\n");
+    assert_eq!(out.completeness, Completeness::Complete);
+    let (_, blocks) = tables(&out);
+    let shown = data_tables(&blocks);
+    assert_eq!(shown.len(), 1);
+    let l = layout_of(shown[0]);
+    assert_eq!(l.header_rows, [1]);
+    assert_eq!(l.header_paths, ["id", "name", "value"]);
+    assert_eq!(l.range, "A1:C4");
+    assert_eq!(rows_of(shown[0])[3], ["3", "gamma", "30"]);
+}
+
+#[test]
+fn csv_two_blocks_split_by_blank_line() {
+    let out = read(b"id,value\n1,10\n2,20\n3,30\n\ncity,count\nBonn,3\nKoeln,4\nEssen,5\n");
+    let (_, blocks) = tables(&out);
+    let shown = data_tables(&blocks);
+    let found: Vec<(&str, &[u32], Vec<&str>)> = shown
+        .iter()
+        .map(|t| {
+            let l = layout_of(t);
+            (
+                l.range.as_str(),
+                l.header_rows.as_slice(),
+                l.header_paths.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("A1:B4", &[1][..], vec!["id", "value"]),
+            ("A6:B9", &[6][..], vec!["city", "count"]),
+        ]
+    );
+    let Block::Table { rows, .. } = shown[1] else {
+        panic!()
+    };
+    assert_eq!(rows[1][0].anchor.as_ref().unwrap().0, "data!A7");
+    assert_eq!(out.completeness, Completeness::Complete);
+    // The second header row is no data row.
+    assert_eq!(property(&out, "rows"), Value::number(6.0, None));
+}
+
+#[test]
+fn layout_header_sets_the_properties() {
+    // Two records are too few for csvsniff: the dialect is guessed without a header, and
+    // the layout finds one by the type change.
+    let out = read(b"key,val\n1,\"{\"\"a\"\": 1}\"\n");
+    let (_, blocks) = tables(&out);
+    assert_eq!(layout_of(data_tables(&blocks)[0]).header_rows, [1]);
+    assert_eq!(property(&out, "has_header"), Value::Bool { value: true });
+    assert_eq!(property(&out, "rows"), Value::number(1.0, None));
+    // The column facts follow the layout's header, not csvsniff's guess.
+    let facts = rows_of(blocks.last().unwrap());
+    assert_eq!(facts[1][..4], ["key", "integer", "", "0"]);
+    assert_eq!(facts[2][0], "val");
+}
+
+#[test]
+fn header_found_by_csvsniff_but_not_by_the_layout_is_data_in_the_facts() {
+    // All text and nothing repeats, so H3 needs the guess; csvsniff gives none here, but
+    // with a guess the layout must agree before the facts take a header.
+    let out = read(b"Ann,Berlin\nBob,Bonn\nCid,Koeln\n");
+    let (_, blocks) = tables(&out);
+    let facts = rows_of(blocks.last().unwrap());
+    assert_eq!(facts[1][0], "Column 1");
+    assert_eq!(facts[1][3], "0");
+}
+
+#[test]
+fn group_rows_are_not_ragged() {
+    let mut csv = String::from("Report\nid,qty,price\n");
+    for line in [
+        "North", "1,2,3", "2,4,6", "3,6,9", "South", "4,8,12", "5,10,15", "6,12,18",
+    ] {
+        csv.push_str(line);
+        csv.push('\n');
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    let l = layout_of(data_tables(&blocks)[0]);
+    let groups: Vec<u32> = l
+        .rows
+        .iter()
+        .filter(|n| n.kind == RowKind::Group)
+        .map(|n| n.row)
+        .collect();
+    assert_eq!(groups, [3, 7], "{:?}", l.rows);
+    assert!(ragged_losses(&out).is_empty(), "{:?}", ragged_losses(&out));
+    assert_eq!(out.completeness, Completeness::Complete);
+    // A short data row in the same file is still ragged.
+    let csv = csv.replace("2,4,6\n", "2,4\n");
+    let out = read(csv.as_bytes());
+    assert_eq!(
+        ragged_losses(&out),
+        ["record 5 (line 5): row has 2 fields, expected 3"]
+    );
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn short_header_record_is_not_ragged() {
+    let mut csv = String::from("id,qty\n");
+    for i in 1..=12 {
+        csv.push_str(&format!("{i},{},{}\n", i * 2, i * 3));
+    }
+    let out = read(csv.as_bytes());
+    let (_, blocks) = tables(&out);
+    assert_eq!(layout_of(data_tables(&blocks)[0]).header_rows, [1]);
+    assert!(ragged_losses(&out).is_empty(), "{:?}", ragged_losses(&out));
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn csv_key_and_records_anchor_quote_the_stem() {
+    let out = read_as("it's a!b-c.csv", FormatId::Csv, b"id,qty\n1,2\n3,4\n5,6\n");
+    let [Block::Section { anchor, title, .. }] = out.document.body.as_slice() else {
+        panic!()
+    };
+    assert_eq!(title.as_deref(), Some("it's a!b-c"));
+    assert_eq!(anchor.as_ref().unwrap().0, "'it''s a!b-c'");
+    let (_, blocks) = tables(&out);
+    let table = data_tables(&blocks)[0];
+    assert_eq!(layout_of(table).key, "'it''s a!b-c'!A1");
+    let Block::Table { rows, .. } = table else {
+        panic!()
+    };
+    assert_eq!(rows[1][1].anchor.as_ref().unwrap().0, "'it''s a!b-c'!B2");
+    let md = markdown(&out, TableStyle::Records);
+    assert!(md.contains("- Row 2 ('it''s a!b-c'!A2:B2)"), "{md}");
+}
+
+#[test]
+fn csv_header_from_layout_with_csvsniff_signal() {
+    // csvsniff guesses a header (values repeat below a unique first row): rule H3 takes it.
+    let out = read(b"name,city\nAnn,Berlin\nBob,Berlin\nCid,Bonn\n");
+    assert_eq!(property(&out, "has_header"), Value::Bool { value: true });
+    let (_, blocks) = tables(&out);
+    let shown = data_tables(&blocks);
+    assert_eq!(shown.len(), 1);
+    let l = layout_of(shown[0]);
+    assert_eq!(l.kind, LayoutKind::Table);
+    assert_eq!(l.header_rows, [1]);
+    assert_eq!(l.header_paths, ["name", "city"]);
+    assert!(
+        l.found_by.iter().any(|e| matches!(
+            e,
+            Evidence::Rule { id, detail } if id == "H3" && detail.contains("header guess")
+        )),
+        "{:?}",
+        l.found_by
+    );
+    // Without the guess the same kind of list has no header: label and value pairs or text.
+    let out = read(b"Ann,Berlin\nBob,Bonn\nCid,Koeln\n");
+    assert_eq!(property(&out, "has_header"), Value::Bool { value: false });
+    let (_, blocks) = tables(&out);
+    let kinds: Vec<LayoutKind> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).kind)
+        .collect();
+    assert!(
+        kinds
+            .iter()
+            .all(|k| matches!(k, LayoutKind::KeyValue | LayoutKind::Text)),
+        "{kinds:?}"
+    );
+    assert!(!kinds.is_empty());
+}
+
+/// The corpus files of the plan 2 CSV reader.
+fn corpus(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/corpus/web-text")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// Every cell text of the tables and paragraphs of the sheet, with its anchor.
+fn shown_cells(blocks: &[&Block]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for b in blocks {
+        match b {
+            Block::Table {
+                rows,
+                layout: Some(_),
+                ..
+            } => {
+                for row in rows {
+                    for c in row {
+                        let t = text(c);
+                        if !t.trim().is_empty() {
+                            out.push((c.anchor.as_ref().unwrap().0.clone(), t));
+                        }
+                    }
+                }
+            }
+            Block::Paragraph {
+                inlines,
+                anchor: Some(a),
+                ..
+            }
+            | Block::Heading {
+                inlines,
+                anchor: Some(a),
+                ..
+            } => out.push((a.0.clone(), inline_text(inlines))),
+            _ => {}
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn plain_csv_keeps_its_header() {
+    for name in [
+        "csv-datahub-co2-fossil-global.csv",
+        "csv-pandas-fdic-banklist.csv",
+        "csv-spectrum-comma_in_quotes.csv",
+        "csv-spectrum-escaped_quotes.csv",
+        "csv-spectrum-newlines_crlf.csv",
+        "csv-spectrum-quotes_and_newlines.csv",
+        "csv-semicolon-latin1-dwd-stations.txt",
+    ] {
+        let bytes = corpus(name);
+        let out = read_as(name, FormatId::Csv, &bytes);
+        assert_eq!(out.completeness, Completeness::Complete, "{name}");
+        assert_eq!(
+            property(&out, "has_header"),
+            Value::Bool { value: true },
+            "{name}"
+        );
+        let (sheet, blocks) = tables(&out);
+        let shown = data_tables(&blocks);
+        assert_eq!(shown.len(), 1, "{name}");
+        let l = layout_of(shown[0]);
+        assert_eq!(l.kind, LayoutKind::Table, "{name}");
+        assert_eq!(l.header_rows, [1], "{name}");
+        // The header and every value, each at its old anchor.
+        let text = textenc::decode(&bytes).text;
+        let delimiter = if name.contains("semicolon") {
+            b';'
+        } else {
+            b','
+        };
+        let mut reader = ::csv::ReaderBuilder::new()
+            .delimiter(delimiter)
+            .has_headers(false)
+            .flexible(true)
+            .from_reader(text.as_bytes());
+        let mut want = Vec::new();
+        for (i, rec) in reader.records().enumerate() {
+            let rec = rec.unwrap();
+            if i == 0 {
+                let head: Vec<&str> = rec.iter().filter(|f| !f.is_empty()).collect();
+                let paths: Vec<&str> = l.header_paths.iter().map(String::as_str).collect();
+                assert_eq!(paths[..head.len()], head[..], "{name}");
+            }
+            for (j, f) in rec.iter().enumerate() {
+                if !f.trim().is_empty() {
+                    want.push((
+                        format!(
+                            "{}!{}{}",
+                            sheetparts::quote_sheet(&sheet),
+                            rezzer_model::column_letter(j),
+                            i + 1
+                        ),
+                        f.split_whitespace().collect::<Vec<_>>().join(" "),
+                    ));
+                }
+            }
+        }
+        want.sort();
+        let got: Vec<(String, String)> = shown_cells(&blocks)
+            .into_iter()
+            .map(|(a, t)| (a, t.split_whitespace().collect::<Vec<_>>().join(" ")))
+            .collect();
+        assert_eq!(got, want, "{name}");
+    }
+}
+
+#[test]
+fn headerless_csv_is_plain_table() {
+    for (name, format) in [
+        ("csv-latin1-noheader-derived-geonames.csv", FormatId::Csv),
+        ("tsv-noheader-geonames-admin1.txt", FormatId::Tsv),
+    ] {
+        let out = read_as(name, format, &corpus(name));
+        assert_eq!(out.completeness, Completeness::Complete, "{name}");
+        assert!(
+            out.document.losses.is_empty(),
+            "{name}: {:?}",
+            out.document.losses
+        );
+        let (_, blocks) = tables(&out);
+        let shown = data_tables(&blocks);
+        assert_eq!(shown.len(), 1, "{name}");
+        assert!(
+            matches!(blocks[0], Block::Table { .. }),
+            "{name}: no heading"
+        );
+        let l = layout_of(shown[0]);
+        assert_eq!(l.kind, LayoutKind::Table, "{name}");
+        assert_eq!(l.certainty, Certainty::Rule, "{name}");
+        assert!(l.header_rows.is_empty(), "{name}");
+        let numbers: Vec<String> = (1..=l.header_paths.len()).map(|n| n.to_string()).collect();
+        assert_eq!(l.header_paths, numbers, "{name}");
+        assert!(l.header_paths.len() >= 4, "{name}");
+        let Block::Table {
+            header_rows, rows, ..
+        } = shown[0]
+        else {
+            panic!()
+        };
+        assert_eq!(*header_rows, 0, "{name}");
+        assert_eq!(
+            rows[0][0].anchor.as_ref().unwrap().0.split('!').nth(1),
+            Some("A1")
+        );
+        let md = markdown(&out, TableStyle::Table);
+        assert!(md.contains("| 1 | 2 | 3 | 4 |"), "{name}: {md}");
+    }
+}
+
+#[test]
+fn multi_line_field_is_no_gap() {
+    for bytes in [
+        &b"a,b\n1,\"x\n\ny\"\n3,4\n5,6\n"[..],
+        &b"a,b\r\n1,\"x\r\n\r\ny\"\r\n3,4\r\n5,6\r\n"[..],
+        &b"a,b\r\n1,2\r\n3,4\r\n5,6\r\n"[..],
+        &b"a,b\r1,2\r3,4\r5,6\r"[..],
+    ] {
+        let out = read(bytes);
+        let (_, blocks) = tables(&out);
+        let shown = data_tables(&blocks);
+        assert_eq!(shown.len(), 1, "{bytes:?}");
+        let l = layout_of(shown[0]);
+        assert_eq!(l.range, "A1:B4", "{bytes:?}");
+        let Block::Table { rows, .. } = shown[0] else {
+            panic!()
+        };
+        assert_eq!(rows[2][0].anchor.as_ref().unwrap().0, "data!A3");
+        assert_eq!(text(&rows[2][0]), "3");
+    }
+    // A blank line between CRLF records is a gap: the second block starts one row lower.
+    let out = read(b"a,b\r\n1,2\r\n3,4\r\n5,6\r\n\r\nc,d\r\n7,8\r\n9,10\r\n11,12\r\n");
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<&str> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.as_str())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "A6:B9"]);
+    // The same with CR-only line ends and two blank lines: one gap row.
+    let out = read(b"a,b\r1,2\r3,4\r5,6\r\r\rc,d\r7,8\r9,10\r11,12\r");
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<&str> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.as_str())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "A6:B9"]);
+}
+
+#[test]
+fn ragged_title_and_note_lines_are_not_damaged() {
+    // A title line and a note line with fewer fields are a caption and a note, not ragged
+    // rows; a short row inside the table still is one.
+    let mut csv = String::from("Report\nid,qty,price\n");
+    for i in 1..=10 {
+        if i == 4 {
+            csv.push_str("4,5\n");
+        } else {
+            csv.push_str(&format!("{i},{},{}\n", i * 2, i * 3));
+        }
+    }
+    csv.push_str("Source: test data\n");
+    let out = read(csv.as_bytes());
+    assert_eq!(
+        ragged_losses(&out),
+        ["record 6 (line 6): row has 2 fields, expected 3"]
+    );
+    let (_, blocks) = tables(&out);
+    let note = blocks.iter().find_map(|b| match b {
+        Block::Paragraph {
+            inlines,
+            role: Some(r),
+            ..
+        } if r == "note" => Some(inline_text(inlines)),
+        _ => None,
+    });
+    assert_eq!(note.as_deref(), Some("Source: test data"));
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+#[test]
+fn csv_records_use_column_numbers() {
+    // Without a header the rows stay a table with numbered columns: records would name every
+    // field by a number.
+    let out = read(b"1,2.5,x\n2,3.5,y\n3,4.5,z\n");
+    let md = markdown(&out, TableStyle::Records);
+    assert!(!md.contains("- Row 1"), "{md}");
+    assert!(
+        md.contains("shown as a table, not as records: there is no header to name the fields."),
+        "{md}"
+    );
+    assert!(
+        md.contains("| 1 | 2 | 3 |\n| --- | --- | --- |\n| 1 | 2.5 | x |"),
+        "{md}"
+    );
+    // With a header shorter than the rows, the fields past it are named `Column <number>`.
+    let out = read(ragged_input().as_bytes());
+    let (_, blocks) = tables(&out);
+    let l = layout_of(data_tables(&blocks)[0]);
+    assert!(
+        !l.header_paths.iter().any(|p| p.contains("Column ")),
+        "{:?}",
+        l.header_paths
+    );
+    let md = markdown(&out, TableStyle::Records);
+    assert!(md.contains("- Row 5 (data!A5:D5)"), "{md}");
+    assert!(md.contains("  - Column 4: 9"), "{md}");
+    assert!(!md.contains("Column D"), "{md}");
+    let md = markdown(&out, TableStyle::Table);
+    assert!(md.contains("| id | qty | price | Column 4 |"), "{md}");
+    assert!(!md.contains("Column D"), "{md}");
+}
+
+/// The one reference an anchor holds, read by the formula parser.
+fn parse_ref(anchor: &str) -> formulakit::Ref {
+    let a = formulakit::analyze(
+        &format!("={anchor}"),
+        formulakit::Dialect::Excel,
+        formulakit::CellPos { row: 0, col: 0 },
+    )
+    .unwrap_or_else(|e| panic!("{anchor}: {}", e.message));
+    assert_eq!(a.refs.len(), 1, "{anchor}: {:?}", a.refs);
+    a.refs[0].clone()
+}
+
+#[test]
+fn quoted_key_and_records_anchor_parse_back() {
+    let stem = "it's a!b c";
+    let out = read_as(
+        &format!("{stem}.csv"),
+        FormatId::Csv,
+        b"id,qty\n1,2\n3,4\n5,6\n",
+    );
+    let (_, blocks) = tables(&out);
+    let key = &layout_of(data_tables(&blocks)[0]).key;
+    let sheet = Some(formulakit::SheetSpan {
+        first: stem.to_string(),
+        last: None,
+    });
+    match parse_ref(key) {
+        formulakit::Ref::Cell { sheet: s, pos, .. } => {
+            assert_eq!(s, sheet);
+            assert_eq!((pos.row, pos.col), (0, 0));
+        }
+        other => panic!("{key}: {other:?}"),
+    }
+    let md = markdown(&out, TableStyle::Records);
+    let line = md
+        .lines()
+        .find(|l| l.starts_with("- Row 2 ("))
+        .unwrap_or_else(|| panic!("{md}"));
+    let anchor = line
+        .strip_prefix("- Row 2 (")
+        .and_then(|r| r.strip_suffix(')'))
+        .unwrap_or_else(|| panic!("{line}"));
+    match parse_ref(anchor) {
+        formulakit::Ref::Range {
+            sheet: s,
+            start,
+            end,
+            ..
+        } => {
+            assert_eq!(s, sheet);
+            assert_eq!((start.row, start.col, end.row, end.col), (1, 0, 1, 1));
+        }
+        other => panic!("{anchor}: {other:?}"),
+    }
+}
+
+/// The Columns facts tables of the sheet section: caption and rows.
+fn columns_tables(out: &ReadOutcome) -> Vec<(String, Vec<Vec<String>>)> {
+    let (_, blocks) = tables(out);
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                caption,
+                role: Some(role),
+                ..
+            } if role == "summary" => Some((caption.clone().unwrap_or_default(), rows_of(b))),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn csv_one_title_line_over_the_header() {
+    for csv in [
+        &b"Sales report 2024\nName,Qty,Price\nApple,1,2.5\nPear,3,1.5\nPlum,2,0.5\n"[..],
+        &b"Sales report 2024\n\nName,Qty,Price\nApple,1,2.5\nPear,3,1.5\nPlum,2,0.5\n"[..],
+    ] {
+        let out = read(csv);
+        let (_, blocks) = tables(&out);
+        let l = layout_of(data_tables(&blocks)[0]);
+        let header = *l.header_rows.last().unwrap();
+        let facts = columns_tables(&out);
+        assert_eq!(facts.len(), 1, "{facts:?}");
+        let (caption, rows) = &facts[0];
+        assert_eq!(*caption, format!("Columns {}", l.range));
+        assert_eq!(
+            rows[1..]
+                .iter()
+                .map(|r| r[..4].to_vec())
+                .collect::<Vec<_>>(),
+            [
+                ["Name", "text", "", "0"],
+                ["Qty", "integer", "", "0"],
+                ["Price", "decimal (1 place)", "", "0"],
+            ],
+            "header row {header}"
+        );
+        // The title is no data: the name column holds three unique keys.
+        assert_eq!(rows[1][4..], ["yes", "yes"]);
+    }
+}
+
+#[test]
+fn csv_two_blocks_get_a_columns_table_each() {
+    let out = read(
+        b"Name,Qty\nApple,1\nPear,2\nPlum,3\n\nCity,Pop,Area\nBonn,3,1.5\nKoeln,4,2.5\nEssen,5,3.5\n",
+    );
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<String> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.clone())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "A6:C9"]);
+    let facts = columns_tables(&out);
+    let summary: Vec<(String, Vec<Vec<String>>)> = facts
+        .into_iter()
+        .map(|(caption, rows)| (caption, rows[1..].iter().map(|r| r[..4].to_vec()).collect()))
+        .collect();
+    let row = |v: [&str; 4]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        [
+            (
+                "Columns A1:B4".to_string(),
+                vec![
+                    row(["Name", "text", "", "0"]),
+                    row(["Qty", "integer", "", "0"]),
+                ]
+            ),
+            (
+                "Columns A6:C9".to_string(),
+                vec![
+                    row(["City", "text", "", "0"]),
+                    row(["Pop", "integer", "", "0"]),
+                    row(["Area", "decimal (1 place)", "", "0"]),
+                ]
+            ),
+        ]
+    );
+    // The Columns tables follow the data tables, in region order.
+    let Block::Table { caption, .. } = blocks.last().unwrap() else {
+        panic!()
+    };
+    assert_eq!(caption.as_deref(), Some("Columns A6:C9"));
+}
+
+#[test]
+fn csv_tables_side_by_side_get_their_own_columns() {
+    let out = read(b"id,qty,,city,area\n1,5,,Bonn,1.5\n2,6,,Koeln,2.5\n3,7,,Essen,3.5\n");
+    let facts = columns_tables(&out);
+    let (_, blocks) = tables(&out);
+    let ranges: Vec<String> = data_tables(&blocks)
+        .iter()
+        .map(|t| layout_of(t).range.clone())
+        .collect();
+    let captions: Vec<String> = facts.iter().map(|(c, _)| c.clone()).collect();
+    assert_eq!(
+        captions,
+        ranges
+            .iter()
+            .map(|r| format!("Columns {r}"))
+            .collect::<Vec<_>>()
+    );
+    let names: Vec<Vec<String>> = facts
+        .iter()
+        .map(|(_, rows)| rows[1..].iter().map(|r| r[0].clone()).collect())
+        .collect();
+    assert_eq!(ranges, ["A1:B4", "D1:E4"]);
+    assert_eq!(names, [vec!["id", "qty"], vec!["city", "area"]]);
 }

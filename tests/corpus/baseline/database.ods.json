@@ -1,0 +1,579 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "Col1"
+    ],
+    [
+      "Sheet1!A2",
+      "1"
+    ],
+    [
+      "Sheet1!A3",
+      "8"
+    ],
+    [
+      "Sheet1!A4",
+      "9"
+    ],
+    [
+      "Sheet1!A5",
+      "16"
+    ],
+    [
+      "Sheet1!A6",
+      "17"
+    ],
+    [
+      "Sheet1!B1",
+      "Col2"
+    ],
+    [
+      "Sheet1!B2",
+      "2"
+    ],
+    [
+      "Sheet1!B3",
+      "7"
+    ],
+    [
+      "Sheet1!B4",
+      "10"
+    ],
+    [
+      "Sheet1!B5",
+      "15"
+    ],
+    [
+      "Sheet1!B6",
+      "18"
+    ],
+    [
+      "Sheet1!C1",
+      "Col3"
+    ],
+    [
+      "Sheet1!C2",
+      "3"
+    ],
+    [
+      "Sheet1!C3",
+      "6"
+    ],
+    [
+      "Sheet1!C4",
+      "11"
+    ],
+    [
+      "Sheet1!C5",
+      "14"
+    ],
+    [
+      "Sheet1!C6",
+      "19"
+    ],
+    [
+      "Sheet1!D1",
+      "Col4"
+    ],
+    [
+      "Sheet1!D2",
+      "4"
+    ],
+    [
+      "Sheet1!D3",
+      "5"
+    ],
+    [
+      "Sheet1!D4",
+      "12"
+    ],
+    [
+      "Sheet1!D5",
+      "13"
+    ],
+    [
+      "Sheet1!D6",
+      "20"
+    ],
+    [
+      "Sheet2!A1",
+      "Name"
+    ],
+    [
+      "Sheet2!A10",
+      "Using named db range"
+    ],
+    [
+      "Sheet2!A11",
+      "4"
+    ],
+    [
+      "Sheet2!A13",
+      "Name"
+    ],
+    [
+      "Sheet2!A16",
+      "Name"
+    ],
+    [
+      "Sheet2!A2",
+      "name1"
+    ],
+    [
+      "Sheet2!A3",
+      "name2"
+    ],
+    [
+      "Sheet2!A4",
+      "name3"
+    ],
+    [
+      "Sheet2!A5",
+      "name4"
+    ],
+    [
+      "Sheet2!A6",
+      "name5"
+    ],
+    [
+      "Sheet2!A7",
+      "name6"
+    ],
+    [
+      "Sheet2!B1",
+      "Age"
+    ],
+    [
+      "Sheet2!B11",
+      "2"
+    ],
+    [
+      "Sheet2!B13",
+      "Age"
+    ],
+    [
+      "Sheet2!B14",
+      ">2"
+    ],
+    [
+      "Sheet2!B16",
+      "Age"
+    ],
+    [
+      "Sheet2!B17",
+      ">=4"
+    ],
+    [
+      "Sheet2!B2",
+      "1"
+    ],
+    [
+      "Sheet2!B3",
+      "2"
+    ],
+    [
+      "Sheet2!B4",
+      "3"
+    ],
+    [
+      "Sheet2!B5",
+      "4"
+    ],
+    [
+      "Sheet2!B6",
+      "5"
+    ],
+    [
+      "Sheet2!B7",
+      "6"
+    ],
+    [
+      "Sheet2!C1",
+      "Children"
+    ],
+    [
+      "Sheet2!C13",
+      "Children"
+    ],
+    [
+      "Sheet2!C16",
+      "Children"
+    ],
+    [
+      "Sheet2!C17",
+      "2"
+    ],
+    [
+      "Sheet2!C2",
+      "2"
+    ],
+    [
+      "Sheet2!C3",
+      "3"
+    ],
+    [
+      "Sheet2!C4",
+      "1"
+    ],
+    [
+      "Sheet2!C5",
+      "0"
+    ],
+    [
+      "Sheet2!C6",
+      "2"
+    ],
+    [
+      "Sheet2!C7",
+      "2"
+    ],
+    [
+      "Sheet2!D10",
+      "Using unnamed db range"
+    ],
+    [
+      "Sheet2!D11",
+      "4"
+    ],
+    [
+      "Sheet2!E11",
+      "2"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet2!A11",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "openformula",
+      "expression": "=DCOUNT(database1, 2, A13:C14)",
+      "kind": "cell",
+      "latex": "\\operatorname{DCOUNT}(\\mathrm{database1}, 2, \\mathrm{A13{:}C14})",
+      "original": "of:=DCOUNT(database1; 2; [.A13:.C14])",
+      "references": [
+        "name:database1",
+        "Sheet2!A13:C14"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet2!B11",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "openformula",
+      "expression": "=DCOUNT(database1,0,A16:C17)",
+      "kind": "cell",
+      "latex": "\\operatorname{DCOUNT}(\\mathrm{database1}, 0, \\mathrm{A16{:}C17})",
+      "original": "of:=DCOUNT(database1;0;[.A16:.C17])",
+      "references": [
+        "name:database1",
+        "Sheet2!A16:C17"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet2!D11",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "openformula",
+      "expression": "=DCOUNT(A1:C7,2,A13:C14)",
+      "kind": "cell",
+      "latex": "\\operatorname{DCOUNT}(\\mathrm{A1{:}C7}, 2, \\mathrm{A13{:}C14})",
+      "original": "of:=DCOUNT([.A1:.C7];2;[.A13:.C14])",
+      "references": [
+        "Sheet2!A1:C7",
+        "Sheet2!A13:C14"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet2!E11",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "openformula",
+      "expression": "=DCOUNT(A1:C7,0,A16:C17)",
+      "kind": "cell",
+      "latex": "\\operatorname{DCOUNT}(\\mathrm{A1{:}C7}, 0, \\mathrm{A16{:}C17})",
+      "original": "of:=DCOUNT([.A1:.C7];0;[.A16:.C17])",
+      "references": [
+        "Sheet2!A1:C7",
+        "Sheet2!A16:C17"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet2!C17",
+      "cached": {
+        "type": "number",
+        "value": 2.0
+      },
+      "dialect": "openformula",
+      "expression": "=2",
+      "kind": "cell",
+      "original": "of:=2",
+      "role": "constant"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet2!A1",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Name"
+      }
+    },
+    {
+      "anchor": "Sheet2!B1",
+      "label": "Name",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Age"
+      }
+    },
+    {
+      "anchor": "Sheet2!C1",
+      "label": "Age",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Children"
+      }
+    },
+    {
+      "anchor": "Sheet2!A2",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name1"
+      }
+    },
+    {
+      "anchor": "Sheet2!B2",
+      "label": "name1",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C2",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A3",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name2"
+      }
+    },
+    {
+      "anchor": "Sheet2!B3",
+      "label": "name2",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C3",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A4",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name3"
+      }
+    },
+    {
+      "anchor": "Sheet2!B4",
+      "label": "name3",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 3.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C4",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A5",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name4"
+      }
+    },
+    {
+      "anchor": "Sheet2!B5",
+      "label": "name4",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 4.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C5",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A6",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name5"
+      }
+    },
+    {
+      "anchor": "Sheet2!B6",
+      "label": "name5",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C6",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A7",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "name6"
+      }
+    },
+    {
+      "anchor": "Sheet2!B7",
+      "label": "name6",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 6.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C7",
+      "label": "Children",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Sheet2!A13",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Name"
+      }
+    },
+    {
+      "anchor": "Sheet2!B13",
+      "label": "Name",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Age"
+      }
+    },
+    {
+      "anchor": "Sheet2!C13",
+      "label": "Age",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Children"
+      }
+    },
+    {
+      "anchor": "Sheet2!B14",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": ">2"
+      }
+    },
+    {
+      "anchor": "Sheet2!A16",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Name"
+      }
+    },
+    {
+      "anchor": "Sheet2!B16",
+      "label": "Name",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Age"
+      }
+    },
+    {
+      "anchor": "Sheet2!C16",
+      "label": "Age",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": "Children"
+      }
+    },
+    {
+      "anchor": "Sheet2!B17",
+      "read_by": 2,
+      "value": {
+        "type": "text",
+        "value": ">=4"
+      }
+    }
+  ],
+  "rules": []
+}

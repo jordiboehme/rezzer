@@ -108,6 +108,29 @@ pub struct Pivot {
     pub location: String,
     /// Where the data comes from, for example `Sheet1!A1:J11` or a table name.
     pub source: Option<String>,
+    /// Offsets inside `location` (0-based): the first row of the column headers, the first
+    /// row of data values and the first column of data values. 0 when not written.
+    pub first_header_row: u32,
+    pub first_data_row: u32,
+    pub first_data_col: u32,
+    /// `rowGrandTotals`: grand totals for the rows. The band drawn is the grand total COLUMN
+    /// at the right edge of the table (each row gets a total). Defaults to true.
+    pub row_grand_totals: bool,
+    /// `colGrandTotals`: grand totals for the columns. The band drawn is the grand total ROW
+    /// at the bottom edge of the table (each column gets a total). Defaults to true.
+    pub col_grand_totals: bool,
+    /// The number of fields on the row axis and on the column axis (the `field` children of
+    /// `rowFields` and `colFields`, 0 when absent; the `count` attribute is not trusted). The
+    /// values pseudo field (`x="-2"`) is not counted.
+    pub row_fields: u32,
+    pub col_fields: u32,
+}
+
+/// Rows and columns fixed at the top and left of a sheet by a frozen pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Frozen {
+    pub rows: u32,
+    pub cols: u32,
 }
 
 /// A chart, one per plot element (a combination chart gives several).
@@ -138,6 +161,10 @@ pub struct SheetParts {
     pub tables: Vec<TableInfo>,
     pub pivots: Vec<Pivot>,
     pub charts: Vec<Chart>,
+    /// The `ref` of the sheet's autoFilter.
+    pub auto_filter: Option<String>,
+    /// The frozen pane of the first view, `None` when the pane is split, not frozen or absent.
+    pub frozen: Option<Frozen>,
     pub issues: Vec<Issue>,
 }
 
@@ -210,6 +237,8 @@ struct Scan<'p> {
     cf: Option<(CondFormat, String)>,
     cf_range: String,
     warned_ext: [bool; 2],
+    in_custom_views: bool,
+    views: u32,
 }
 
 impl Scan<'_> {
@@ -254,6 +283,27 @@ impl Scan<'_> {
         }
         match name {
             "sheetData" => self.in_sheet_data = true,
+            "customSheetViews" => self.in_custom_views = true,
+            "autoFilter" if !self.in_custom_views && self.out.auto_filter.is_none() => {
+                self.out.auto_filter = e.attr("ref").map(str::to_string);
+            }
+            "sheetView" if !self.in_custom_views => self.views += 1,
+            "pane" if !self.in_custom_views && self.views == 1 => {
+                // `frozenSplit` is a split pane that was then frozen (ECMA-376: frozen split).
+                if matches!(e.attr("state"), Some("frozen" | "frozenSplit")) {
+                    let split = |key: &str, max: u32| {
+                        e.attr(key)
+                            .and_then(|v| v.trim().parse::<f64>().ok())
+                            .filter(|v| *v >= 0.0)
+                            .map_or(0, |v| (v as u32).min(max))
+                    };
+                    let rows = split("ySplit", 1_048_576);
+                    let cols = split("xSplit", 16_384);
+                    if rows > 0 || cols > 0 {
+                        self.out.frozen = Some(Frozen { rows, cols });
+                    }
+                }
+            }
             "col" => {
                 if e.flag("hidden") {
                     let min = e.attr("min").and_then(|v| v.parse::<u32>().ok());
@@ -402,6 +452,7 @@ impl Scan<'_> {
         }
         match name {
             "sheetData" => self.in_sheet_data = false,
+            "customSheetViews" => self.in_custom_views = false,
             "c" => {
                 self.at = None;
                 self.cm = None;
@@ -611,6 +662,8 @@ pub fn read_sheet(
         cf: None,
         cf_range: String::new(),
         warned_ext: [false; 2],
+        in_custom_views: false,
+        views: 0,
     };
     ctx.scan(&part, true, &mut |ev, _| scan.event(ev));
     let Scan {

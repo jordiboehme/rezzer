@@ -603,6 +603,7 @@ impl<'b> Builder<'b> {
                         rows: t.rows,
                         alignments: t.alignments,
                         anchor: None,
+                        layout: None,
                     });
                 }
             }
@@ -1096,6 +1097,7 @@ impl<'b> Builder<'b> {
                 rows: t.rows,
                 alignments: t.alignments,
                 anchor: None,
+                layout: None,
             });
         }
         while self.stack.len() > 1 {

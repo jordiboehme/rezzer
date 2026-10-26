@@ -37,11 +37,13 @@ losses: 0
 
 ## csv-spectrum-comma\_in\_quotes
 
+Table A1:E2 (data A2:E2), header row 1, row labels in columns 1 to 3, found by rules: no gaps, header by type change.
+
 | first | last | address | city | zip |
 | --- | --- | --- | --- | --- |
 | John | Doe | 120 any st. | Anytown, WW | 08123 |
 
-**Columns**
+**Columns A1:E2**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |

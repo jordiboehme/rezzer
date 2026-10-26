@@ -14,8 +14,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rezzer_model::{
-    Block, Document, FormatId, FormulaKind, Inline, Overview as Model, OverviewPart, Role,
-    SectionKind, Value,
+    Block, Document, FormatId, FormulaKind, Inline, LayoutKind, LossReason, Overview as Model,
+    OverviewPart, Role, SectionKind, Value,
 };
 
 use crate::anchors::{collect, sheet_prefixes};
@@ -187,24 +187,52 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 
 /// For a sheet: `<n> rows x <m> columns`, data rows without header rows, from the first table
 /// without a role (a table a reader generated, such as a summary, is not the sheet's data).
+/// When a layout split the sheet into regions, the first region of kind table counts, and
+/// `, <k> regions` follows when there is more than one; a sheet without a table region is
+/// `<k> regions`.
 /// When the document has only this one sheet and the reader gave `rows` and `columns`
-/// properties, those are the size and the rows in the table are noted as shown when fewer.
+/// properties, those are the size and the rows in the table (with regions: in all region
+/// tables, without their header rows) are noted as shown when fewer.
 /// For any other part: the paragraph count.
 fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
     let Block::Section { kind, blocks, .. } = section else {
         return String::new();
     };
     if *kind == SectionKind::Sheet {
+        // The sheet's regions, when a layout found them (decision 10): the first region of
+        // kind table gives the size, and the count is added when there are more.
+        let regions = blocks
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Table {
+                        layout: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
         let table = blocks.iter().find_map(|b| match b {
             Block::Table {
                 rows,
                 header_rows,
                 role: None,
+                layout,
                 ..
-            } => Some((rows, *header_rows)),
+            } if regions == 0 || layout.as_ref().is_some_and(|l| l.kind == LayoutKind::Table) => {
+                Some((rows, *header_rows))
+            }
             _ => None,
         });
-        let shown = table.map(|(rows, header)| {
+        let more = match regions {
+            0 | 1 => String::new(),
+            n => format!(", {n} regions"),
+        };
+        if regions > 0 && table.is_none() && totals.is_none() {
+            return plural(regions, "region", "regions");
+        }
+        let mut shown = table.map(|(rows, header)| {
             let columns = rows
                 .iter()
                 .map(|r| r.iter().map(|c| c.col_span.max(1) as usize).sum::<usize>())
@@ -212,6 +240,22 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
                 .unwrap_or(0);
             (rows.len().saturating_sub(header), columns)
         });
+        // Against the reader's totals, every region's rows count as shown.
+        if totals.is_some() && regions > 0 {
+            let rows = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Table {
+                        rows,
+                        header_rows,
+                        layout: Some(_),
+                        ..
+                    } => Some(rows.len().saturating_sub(*header_rows)),
+                    _ => None,
+                })
+                .sum();
+            shown = Some((rows, 0));
+        }
         match (totals, shown) {
             (Some((rows, columns)), shown) => {
                 let base = format!(
@@ -220,14 +264,14 @@ fn size(section: &Block, totals: Option<(usize, usize)>) -> String {
                     plural(columns, "column", "columns")
                 );
                 return match shown {
-                    Some((n, _)) if n >= rows => base,
-                    Some((n, _)) => format!("{base} ({n} shown)"),
+                    Some((n, _)) if n >= rows => format!("{base}{more}"),
+                    Some((n, _)) => format!("{base} ({n} shown){more}"),
                     None => format!("{base} (none shown)"),
                 };
             }
             (None, Some((rows, columns))) => {
                 return format!(
-                    "{} x {}",
+                    "{} x {}{more}",
                     plural(rows, "row", "rows"),
                     plural(columns, "column", "columns")
                 );
@@ -410,7 +454,16 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
             .filter(|e| e.kind != "script")
             .count(),
     );
-    count("Not read", doc.losses.len());
+    // Losses that say something was not read: every loss but an uncertain one. An
+    // uncertain loss (an unsure region, an overlap, a guessed dialect) stays listed with the
+    // losses, but its content was read.
+    count(
+        "Not read",
+        doc.losses
+            .iter()
+            .filter(|l| l.why != LossReason::Uncertain)
+            .count(),
+    );
     // The codes stand right after the pictures they were read from.
     let mut codes: Vec<(String, String)> = Vec::new();
     if !kinds.is_empty() {

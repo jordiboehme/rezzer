@@ -16,3 +16,9 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 [[profile.default.overrides]]
 filter = 'package(rezzer) & binary(hostile) & test(=hundred_thousand_pages_stop_in_time)'
 threads-required = "num-cpus"
+
+# The layout work bounds run with no time stop and check thread CPU time. A broken bound loops:
+# it is ended after 2 minutes and fails the run instead of hanging it.
+[[profile.default.overrides]]
+filter = 'package(sheetlayout)'
+slow-timeout = { period = "60s", terminate-after = 2 }

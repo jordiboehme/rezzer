@@ -7,11 +7,12 @@ use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
-    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Completeness, Confidence,
-    Detection, Document, Edge, Embedded, Event, FieldAction, FileFacts, FormField, FormatId,
-    Formula, FormulaKind, Graph, Inline, Loss, LossReason, MODEL_VERSION, Node, Parameter,
-    Properties, ReadOptions, ReaderInfo, Role, Rule, SectionKind, Severity, Signature, Source,
-    SourceInfo, StatusColor, TaskState, Value,
+    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
+    Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
+    FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
+    MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role, RowKind, RowNote,
+    Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor, TableLayout,
+    TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -135,6 +136,84 @@ fn full_document() -> Document {
             }]],
             alignments: vec![Align::Right],
             anchor: Some(Anchor("table:1".into())),
+            layout: None,
+        },
+        Block::Table {
+            caption: Some("Sales".into()),
+            header_rows: 1,
+            role: None,
+            rows: vec![vec![Cell::new(vec![text("Region")])]],
+            alignments: Vec::new(),
+            anchor: Some(Anchor("Costs!A3:F68".into())),
+            layout: Some(Box::new(TableLayout {
+                kind: LayoutKind::Table,
+                key: "table:Sales".into(),
+                range: "A1:F68".into(),
+                data: Some("A5:F62".into()),
+                header_rows: vec![3, 4],
+                header_paths: vec!["Region".into(), "Population / 2021".into()],
+                label_cols: 1,
+                total_columns: vec![6],
+                certainty: Certainty::Unsure,
+                found_by: vec![
+                    Evidence::ListObject {
+                        name: "Sales".into(),
+                    },
+                    Evidence::DatabaseRange { name: "db".into() },
+                    Evidence::Pivot {
+                        name: "PivotTable1".into(),
+                    },
+                    Evidence::Autofilter,
+                    Evidence::PrintTitles,
+                    Evidence::FrozenPanes,
+                    Evidence::DefinedName {
+                        name: "_NST01".into(),
+                    },
+                    Evidence::Rule {
+                        id: "H1".into(),
+                        detail: "header by type change".into(),
+                    },
+                ],
+                unsure: vec!["H1 and H2 disagree".into()],
+                rows: vec![
+                    RowNote {
+                        row: 5,
+                        kind: RowKind::Group,
+                        level: Some(1),
+                        parent: None,
+                        why: "label row before data".into(),
+                    },
+                    RowNote {
+                        row: 6,
+                        kind: RowKind::Data,
+                        level: Some(2),
+                        parent: Some(5),
+                        why: String::new(),
+                    },
+                    RowNote {
+                        row: 7,
+                        kind: RowKind::Subtotal,
+                        level: None,
+                        parent: None,
+                        why: "SUBTOTAL".into(),
+                    },
+                    RowNote {
+                        row: 8,
+                        kind: RowKind::Total,
+                        level: None,
+                        parent: None,
+                        why: "SUM over all groups".into(),
+                    },
+                    RowNote {
+                        row: 9,
+                        kind: RowKind::Blank,
+                        level: None,
+                        parent: None,
+                        why: String::new(),
+                    },
+                ],
+                hidden_header: true,
+            })),
         },
         Block::Code {
             lang: Some("rust".into()),
@@ -193,7 +272,7 @@ fn full_document() -> Document {
     doc.facets.parameters.push(Parameter {
         anchor: Anchor("Costs!B2".into()),
         name: Some("rate".into()),
-        label: Some("Rate (EUR/h)".into()),
+        label: Some("Costs / Rate (EUR/h)".into()),
         value: Some(Value::Number {
             value: 80.0,
             unit: Some("EUR/h".into()),
@@ -201,6 +280,7 @@ fn full_document() -> Document {
         unit: Some("EUR/h".into()),
         unit_source: Some("label".into()),
         read_by: 3,
+        path: vec!["Costs".into(), "Rate (EUR/h)".into()],
     });
     doc.facets.rules.push(Rule {
         kind: "validation".into(),
@@ -324,6 +404,78 @@ fn document_roundtrips_through_json() {
     let json = serde_json::to_string(&doc).unwrap();
     let back: Document = serde_json::from_str(&json).unwrap();
     assert_eq!(doc, back);
+    // The layout's tags and field names as spec 12.1 writes them.
+    for key in [
+        r#""layout":{"kind":"table","key":"table:Sales","range":"A1:F68","data":"A5:F62""#,
+        r#""header_rows":[3,4]"#,
+        r#""label_cols":1"#,
+        r#""total_columns":[6]"#,
+        r#""certainty":"unsure""#,
+        r#"{"kind":"list_object","name":"Sales"}"#,
+        r#"{"kind":"database_range","name":"db"}"#,
+        r#"{"kind":"pivot","name":"PivotTable1"}"#,
+        r#"{"kind":"autofilter"}"#,
+        r#"{"kind":"print_titles"}"#,
+        r#"{"kind":"frozen_panes"}"#,
+        r#"{"kind":"defined_name","name":"_NST01"}"#,
+        r#"{"kind":"rule","id":"H1","detail":"header by type change"}"#,
+        r#"{"row":5,"kind":"group","level":1,"why":"label row before data"}"#,
+        r#"{"row":6,"kind":"data","level":2,"parent":5}"#,
+        r#""kind":"subtotal""#,
+        r#""kind":"total""#,
+        r#""kind":"blank""#,
+        r#""hidden_header":true"#,
+    ] {
+        assert!(json.contains(key), "{key} missing in {json}");
+    }
+    // The first table has no layout, and no key for it.
+    assert_eq!(json.matches("\"layout\"").count(), 1, "{json}");
+}
+
+#[test]
+fn layout_kinds_serialize_snake_case() {
+    let kinds = [
+        (LayoutKind::Table, "table"),
+        (LayoutKind::KeyValue, "key_value"),
+        (LayoutKind::Title, "title"),
+        (LayoutKind::Text, "text"),
+        (LayoutKind::Grid, "grid"),
+    ];
+    for (kind, name) in kinds {
+        assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{name}\""));
+    }
+    for (c, name) in [
+        (Certainty::Exact, "exact"),
+        (Certainty::Rule, "rule"),
+        (Certainty::Unsure, "unsure"),
+    ] {
+        assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{name}\""));
+    }
+}
+
+#[test]
+fn minimal_layout_json_reads_and_skips_empty_fields() {
+    let json = r#"{"kind":"grid","key":"'S'!B2","range":"B2:C3","certainty":"rule"}"#;
+    let layout: TableLayout = serde_json::from_str(json).unwrap();
+    assert_eq!(layout.kind, LayoutKind::Grid);
+    assert_eq!(layout.data, None);
+    assert!(layout.header_rows.is_empty() && layout.found_by.is_empty() && layout.rows.is_empty());
+    assert_eq!(layout.label_cols, 0);
+    assert!(layout.total_columns.is_empty());
+    assert!(!layout.hidden_header);
+    let back = serde_json::to_string(&layout).unwrap();
+    for key in [
+        "data",
+        "header_rows",
+        "header_paths",
+        "total_columns",
+        "found_by",
+        "unsure",
+        "\"rows\"",
+        "hidden_header",
+    ] {
+        assert!(!back.contains(key), "{key} leaked into {back}");
+    }
 }
 
 #[test]
@@ -689,6 +841,35 @@ fn shared_helpers() {
 }
 
 #[test]
+fn parameter_path_roundtrips() {
+    let with_path = Parameter {
+        anchor: Anchor("Lining!C7".into()),
+        name: None,
+        label: Some("Lining / Loads / Dead".into()),
+        value: None,
+        unit: None,
+        unit_source: None,
+        read_by: 1,
+        path: vec!["Lining".into(), "Loads".into(), "Dead".into()],
+    };
+    let json = serde_json::to_value(&with_path).unwrap();
+    assert_eq!(json["path"], serde_json::json!(["Lining", "Loads", "Dead"]));
+    let back: Parameter = serde_json::from_value(json).unwrap();
+    assert_eq!(back, with_path);
+    // An empty path is left out, and JSON without one still reads.
+    let bare = Parameter {
+        path: Vec::new(),
+        ..with_path
+    };
+    let json = serde_json::to_string(&bare).unwrap();
+    assert!(!json.contains("path"), "{json}");
+    let old: Parameter =
+        serde_json::from_str(r#"{"anchor":"S!B2","label":"Span","read_by":2}"#).unwrap();
+    assert!(old.path.is_empty());
+    assert_eq!(old.label.as_deref(), Some("Span"));
+}
+
+#[test]
 fn old_json_without_new_fields_still_reads() {
     let json = include_str!("fixtures/plan1-document.json");
     let doc: Document = serde_json::from_str(json).expect("plan 1 document reads");
@@ -699,7 +880,7 @@ fn old_json_without_new_fields_still_reads() {
     assert!(doc.facets.parameters.is_empty());
     assert!(doc.facets.rules.is_empty());
     let back = serde_json::to_string(&doc).unwrap();
-    for key in ["parameters", "rules", "original", "\"range\""] {
+    for key in ["parameters", "rules", "original", "\"range\"", "layout"] {
         assert!(!back.contains(key), "{key} leaked into {back}");
     }
 }
@@ -718,4 +899,120 @@ fn formula_kinds_serialize_snake_case() {
     for (k, name) in kinds {
         assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
     }
+}
+
+#[test]
+fn locate_cells_finds_the_area_of_each_point() {
+    use rezzer_model::{CellArea, locate_cells};
+    let area = |top, left, bottom, right| CellArea {
+        top,
+        left,
+        bottom,
+        right,
+    };
+    // X ends above Z; Y lies left of where the point is; Z starts later with a smaller left.
+    let areas = [area(0, 0, 5, 10), area(10, 5, 20, 6), area(25, 0, 60, 9)];
+    let points = [(3, 7), (15, 5), (15, 7), (50, 7), (50, 20), (70, 0)];
+    assert_eq!(
+        locate_cells(&areas, &points),
+        [Some(0), Some(1), None, Some(2), None, None]
+    );
+    assert_eq!(locate_cells(&[], &[(0, 0)]), [None]);
+}
+
+#[test]
+fn locate_cells_finds_the_holder_past_many_overlapping_areas() {
+    use rezzer_model::{CellArea, locate_cells};
+    // An outer area A1:CA10 and 65 one-column areas in B, C, ... inside it. A point right of
+    // all of them still goes to the outer area.
+    let mut areas = vec![CellArea {
+        top: 0,
+        left: 0,
+        bottom: 9,
+        right: 78,
+    }];
+    for col in 1..=65u32 {
+        areas.push(CellArea {
+            top: 0,
+            left: col,
+            bottom: 9,
+            right: col,
+        });
+    }
+    assert_eq!(locate_cells(&areas, &[(4, 70), (4, 3)]), [Some(0), Some(3)]);
+}
+
+#[test]
+fn locate_cells_gives_overlapping_areas_to_the_innermost() {
+    use rezzer_model::{CellArea, locate_cells};
+    let area = |top, left, bottom, right| CellArea {
+        top,
+        left,
+        bottom,
+        right,
+    };
+    // A damaged file: an outer range, an inner one right of its left edge and one with the
+    // same left column. A point goes to the smallest area that holds it.
+    let areas = [area(0, 0, 20, 10), area(2, 3, 8, 5), area(12, 0, 14, 2)];
+    let points = [(4, 4), (4, 7), (13, 1), (16, 1), (30, 0)];
+    assert_eq!(
+        locate_cells(&areas, &points),
+        [Some(1), Some(0), Some(2), Some(0), None]
+    );
+}
+
+#[test]
+fn table_headings_follow_the_heading_nesting() {
+    use rezzer_model::table_headings;
+    let heading = |level, text: &str, anchor: Option<&str>| Block::Heading {
+        level,
+        inlines: vec![Inline::plain(text), Inline::Code { text: "x".into() }],
+        anchor: anchor.map(|a| Anchor(a.into())),
+    };
+    let table = |range: &str| Block::Table {
+        caption: None,
+        header_rows: 0,
+        role: None,
+        rows: Vec::new(),
+        alignments: Vec::new(),
+        anchor: None,
+        layout: Some(Box::new(TableLayout {
+            kind: LayoutKind::Table,
+            key: format!("S!{range}"),
+            range: range.into(),
+            data: None,
+            header_rows: Vec::new(),
+            header_paths: Vec::new(),
+            label_cols: 0,
+            total_columns: Vec::new(),
+            certainty: Certainty::Rule,
+            found_by: Vec::new(),
+            unsure: Vec::new(),
+            rows: Vec::new(),
+            hidden_header: false,
+        })),
+    };
+    let blocks = [
+        heading(3, "Lining ", Some("S!A1")),
+        table("A1:B2"),
+        heading(4, "Loads", Some("S!A3")),
+        heading(5, "Table A3:B4", None),
+        table("A3:B4"),
+        heading(3, "Table D1:E2", None),
+        table("D1:E2"),
+    ];
+    let found = table_headings(&blocks);
+    let found: Vec<(&str, Vec<&str>)> = found
+        .iter()
+        .map(|(r, h)| (*r, h.iter().map(String::as_str).collect()))
+        .collect();
+    // Code text is kept; a generated heading adds nothing and closes the deeper ones.
+    assert_eq!(
+        found,
+        [
+            ("A1:B2", vec!["Lining x"]),
+            ("A3:B4", vec!["Lining x", "Loadsx"]),
+            ("D1:E2", vec![]),
+        ]
+    );
 }

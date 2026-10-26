@@ -4,14 +4,42 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-json",
+      "anchor": "'csv-spectrum-json'",
       "blocks": [
         {
-          "header_rows": 0,
+          "anchor": "'csv-spectrum-json'!A1:B2",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:B2",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "key",
+              "val"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "'csv-spectrum-json'!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:B2"
+          },
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-json!A1",
+                "anchor": "'csv-spectrum-json'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -22,7 +50,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-json!B1",
+                "anchor": "'csv-spectrum-json'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -35,7 +63,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-json!A2",
+                "anchor": "'csv-spectrum-json'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -46,7 +74,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-json!B2",
+                "anchor": "'csv-spectrum-json'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -61,7 +89,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:B2",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -132,7 +160,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Column 1",
+                    "text": "key",
                     "type": "text"
                   }
                 ],
@@ -142,7 +170,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "text",
+                    "text": "integer",
                     "type": "text"
                   }
                 ],
@@ -182,7 +210,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "yes",
+                    "text": "no",
                     "type": "text"
                   }
                 ],
@@ -194,7 +222,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
-                    "text": "Column 2",
+                    "text": "val",
                     "type": "text"
                   }
                 ],
@@ -271,18 +299,12 @@ source: crates/rezzer/tests/corpus.rs
   ],
   "model_version": 1,
   "overview": {
-    "facts": [
-      [
-        "Not read",
-        "1"
-      ]
-    ],
     "parts": [
       {
-        "id": "csv-spectrum-json",
+        "id": "'csv-spectrum-json'",
         "kind": "sheet",
         "name": "csv-spectrum-json",
-        "size": "2 rows x 2 columns"
+        "size": "1 row x 2 columns"
       }
     ]
   },
@@ -298,11 +320,11 @@ source: crates/rezzer/tests/corpus.rs
       },
       "has_header": {
         "type": "bool",
-        "value": false
+        "value": true
       },
       "rows": {
         "type": "number",
-        "value": 2.0
+        "value": 1.0
       }
     }
   },

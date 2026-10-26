@@ -5,7 +5,9 @@
 //! XLSB: the binary workbook. calamine reads values, cached results, formula texts, defined
 //! names and VBA module names; the XML parts XLSB still has give the document properties.
 //! Before calamine sees a part, every entry is measured, the package structure is checked
-//! and the BIFF12 records are walked (see [`crate::biff12`]).
+//! and the BIFF12 records are walked (see [`crate::biff12`]); the walk also gives the merged
+//! cells and which defined names are hidden. The layout comes from the values and merges
+//! only: XLSB styles, tables and filters are not read.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
@@ -23,11 +25,12 @@ use zipguard::Archive;
 use crate::Out;
 use crate::biff12::{self, Book, SheetScan, Widths};
 use crate::grid::{self, RawCell, SheetCells, Stop, Val, note};
+use crate::layout;
 use crate::logic::{FormulaProblem, Formulas, ReadState, SheetFacts};
 use crate::package::{self, Package, Refusal, zip_reason};
 use crate::xlsx::{
     Vba, cell_losses, embedded, issues_to_losses, problem_losses, properties, refuse, section,
-    status, table_losses, vba_modules,
+    status, vba_modules,
 };
 
 /// The parts calamine reads by these fixed names.
@@ -36,7 +39,11 @@ const WORKBOOK_RELS: &str = "xl/_rels/workbook.bin.rels";
 const VBA_PART: &str = "xl/vbaProject.bin";
 
 /// What is not read from an XLSB workbook, said once per file.
-const NOT_READ: &str = "not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also merged cells, hidden rows and columns, Excel tables, pivot tables, charts and external links";
+const NOT_READ: &str = "not read for XLSB: validation, conditional formats, notes and threads, names with scope, calc settings, data tables, number formats beyond dates; also hidden rows and columns, Excel tables, pivot tables, charts and external links";
+
+/// The layout signals an XLSB sheet lacks, said once per sheet (spec 5).
+const VALUES_ONLY: &str =
+    "layout from values only: styles, tables and filters are not read for XLSB";
 
 /// The formats Rezzer gives the dates calamine finds, by format key.
 const DATE_CODES: [&str; 4] = ["yyyy-mm-dd", "yyyy-mm-dd hh:mm:ss", "hh:mm:ss", "[h]:mm:ss"];
@@ -399,7 +406,7 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             name: name.clone(),
             scope: None,
             refers_to: text.clone(),
-            hidden: false,
+            hidden: book.hidden_names.contains(&name.to_lowercase()),
             comment: None,
         })
         .collect();
@@ -420,6 +427,9 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         })
         .collect();
     let mut formulas = Formulas::new(&names, lim.max_text_bytes);
+    // Merged areas listed per sheet, at most a fifth of the item total (the share ODS
+    // gives them per file); the walk is also bounded by the bytes of the part.
+    let max_merges = lim.max_elements / 10 * 2;
     let mut halted: Option<&'static str> = None;
     let mut facts: Vec<SheetFacts> = Vec::new();
     let mut incomplete = false;
@@ -465,7 +475,9 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
         let scan = zip
             .read(&entry.part)
             .map_err(|e| (zip_reason(&e), e.to_string()))
-            .and_then(|b| biff12::scan_sheet(&b, widths).map_err(|e| (LossReason::Damaged, e)));
+            .and_then(|b| {
+                biff12::scan_sheet(&b, widths, max_merges).map_err(|e| (LossReason::Damaged, e))
+            });
         let scan = match scan {
             Ok(s) => s,
             Err((why, what)) => {
@@ -588,16 +600,32 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
             halted = Some("time limit reached");
         }
         problem_losses(&mut out, &q, problems);
-        let (table, notes) = grid::value_table(&q, &cells.cells, &[], budget, &shown);
-        match table {
-            Some(t) => blocks.push(t),
-            None => blocks.push(note("The sheet is empty.")),
-        }
-        table_losses(&mut out, &q, &notes);
-        if notes.element_stop.is_some() {
+
+        // The regions of the sheet, from the values and the merges only.
+        out.loss(
+            q.as_str(),
+            VALUES_ONLY,
+            LossReason::Unsupported,
+            Severity::Info,
+        );
+        merge_record_losses(&mut out, &q, &scan, max_merges);
+        let laid = sheet_layout(
+            &q,
+            &entry.name,
+            &names,
+            &book.builtin_names,
+            &cells,
+            &dates,
+            &scan,
+            &shown,
+            formulas.layout_facts(&entry.name),
+            budget,
+        );
+        let (paths, elements_out) = laid.place(&q, &mut blocks, &mut out);
+        if elements_out {
             halted = Some("element limit reached");
         }
-        facts.push(SheetFacts::new(&entry.name, cells.cells, dates));
+        facts.push(SheetFacts::new(&entry.name, cells.cells, dates, paths));
         out.doc.body.push(section(&entry.name, &q, blocks));
     }
     if caveat {
@@ -632,6 +660,105 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     };
     crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
+}
+
+/// The layout of an XLSB sheet: its cells with their classes, its merges and its defined
+/// names. Styles, tables, filters, outline, panes and print titles are not read, so every
+/// style flag is unknown.
+#[allow(clippy::too_many_arguments)]
+fn sheet_layout(
+    q: &str,
+    name: &str,
+    names: &[DefinedName],
+    builtin: &HashSet<String>,
+    cells: &SheetCells,
+    dates: &HashMap<(u32, u32), u32>,
+    scan: &SheetScan,
+    shown: &dyn Fn(&RawCell) -> String,
+    formulas: HashMap<(u32, u32), sheetlayout::FormulaIn>,
+    budget: &Budget,
+) -> layout::SheetLayout {
+    let shown = |c: &RawCell| {
+        let (class, number) = match &c.val {
+            Val::Num(v) if dates.contains_key(&(c.row, c.col)) => {
+                (sheetlayout::Class::Date, Some(*v))
+            }
+            Val::Num(v) => (sheetlayout::Class::Number, Some(*v)),
+            Val::Iso(_) => (sheetlayout::Class::Date, None),
+            Val::Bool(_) => (sheetlayout::Class::Bool, None),
+            Val::Error(_) => (sheetlayout::Class::Error, None),
+            Val::Text(_) | Val::Empty => (sheetlayout::Class::Text, None),
+        };
+        layout::Shown {
+            text: shown(c),
+            class,
+            number,
+        }
+    };
+    let style = |_: u32, _: u32| sheetlayout::Style::default();
+    // A name the file marks as built in is never a caption, with or without `_xlnm.`.
+    let (mut names, mut caption_names) = layout::sheet_names(names, name);
+    for n in &mut names {
+        n.builtin |= builtin.contains(&n.name.to_lowercase());
+    }
+    caption_names.retain(|c| !builtin.contains(&c.name.to_lowercase()));
+    let signals = layout::Signals {
+        names,
+        ..layout::Signals::default()
+    };
+    let merges: Vec<sheetlayout::Rect> = scan
+        .merges
+        .iter()
+        .map(|&(r0, r1, c0, c1)| layout::rect_of(((r0, c0), (r1, c1))).normalized())
+        .collect();
+    layout::map_sheet(
+        q,
+        &cells.cells,
+        &shown,
+        &style,
+        &[],
+        &merges,
+        formulas,
+        signals,
+        &caption_names,
+        budget,
+    )
+}
+
+/// The losses of merge records the walk could not use.
+fn merge_record_losses(out: &mut Out, q: &str, scan: &SheetScan, max_merges: u64) {
+    if scan.merges_bad > 0 {
+        out.loss(
+            q,
+            format!(
+                "{} merged-cell records are too short or reach past the last row or column; those areas are shown as single cells",
+                scan.merges_bad
+            ),
+            LossReason::Damaged,
+            Severity::Info,
+        );
+    }
+    if scan.merges_cut > 0 {
+        out.loss(
+            q,
+            format!(
+                "more than {max_merges} merged areas: {} not read; those areas are shown as single cells",
+                scan.merges_cut
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
+    }
+    if let Some(e) = &scan.merge_error {
+        out.loss(
+            q,
+            format!(
+                "merged cells not read past a damaged record: {e}; those areas are shown as single cells"
+            ),
+            LossReason::Damaged,
+            Severity::Info,
+        );
+    }
 }
 
 /// The format key of a date calamine found: date, date and time, time of day, duration.

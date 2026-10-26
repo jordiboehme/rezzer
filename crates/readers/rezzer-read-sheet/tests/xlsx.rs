@@ -17,8 +17,8 @@ fn values_and_number_formats() {
     assert_eq!(cell_text(doc, "S!E1").as_deref(), Some("12.3 m"));
     assert_eq!(cell_text(doc, "S!F1").as_deref(), Some("TRUE"));
     assert_eq!(cell_text(doc, "S!G1").as_deref(), Some("0.1"));
-    // The table runs from A1, so empty cells in between are there too.
-    assert_eq!(cell_text(doc, "S!A2").as_deref(), Some(""));
+    // The empty row 2 parts the regions A1:G1 and B3, so no table holds A2.
+    assert_eq!(cell_text(doc, "S!A2"), None);
     // A locale-dependent built-in format: the raw value, and one loss for both cells.
     assert_eq!(cell_text(doc, "S!D1").as_deref(), Some("1.5"));
     assert_eq!(cell_text(doc, "S!B3").as_deref(), Some("2.5"));
@@ -766,20 +766,18 @@ fn far_cell_keeps_the_table_within_the_caps() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(rows, 200);
+    // The merge makes one region of the whole sheet, but its table holds the one value: the
+    // other positions are covered by the merge, and nothing is built for them.
+    assert_eq!(rows, 1);
+    assert_eq!(cell_text(doc, "S!A1").as_deref(), Some("1"));
+    // The far formula's result lies under the merge: not shown, and said so.
     assert!(has_loss(
         doc,
-        LossReason::Limit,
-        "S",
-        "rows 201 to 1048576 not shown"
+        LossReason::Unsupported,
+        "S!XFD1048576",
+        "under the merged area A1:XFD1048576"
     ));
-    assert!(has_loss(
-        doc,
-        LossReason::Limit,
-        "S",
-        "columns ALM to XFD not shown"
-    ));
-    // The formula past the caps is still listed.
+    // The formula is still listed.
     assert_eq!(refs(formula(doc, "S!XFD1048576")), ["S!A1"]);
 }
 

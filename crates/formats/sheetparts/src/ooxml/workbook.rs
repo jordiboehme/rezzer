@@ -8,7 +8,7 @@ use super::props::{DocProps, read_props};
 use super::styles::{Styles, read_styles};
 use super::{Ctx, Rel};
 use crate::xml::Ev;
-use crate::{DefinedName, Issue, IssueKind, Limits};
+use crate::{DefinedName, Issue, IssueKind, Limits, RowSpan};
 
 /// Whether a sheet is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -376,4 +376,54 @@ fn read_external_link(ctx: &mut Ctx<'_, '_>, rels: &[Rel], rid: &str, index: u32
         },
     }
     link
+}
+
+/// The rows repeated at the top of each printed page on `sheet`: the row part (`$1:$2`) of the
+/// sheet's `_xlnm.Print_Titles` name (also written as `Print_Titles`). A column part is
+/// ignored. Only a name scoped to the sheet counts.
+pub fn print_title_rows(names: &[DefinedName], sheet: &str) -> Option<RowSpan> {
+    let name = names.iter().find(|n| {
+        n.scope.as_deref() == Some(sheet)
+            && (n.name.eq_ignore_ascii_case("_xlnm.Print_Titles")
+                || n.name.eq_ignore_ascii_case("Print_Titles"))
+    })?;
+    let mut parts: Vec<&str> = Vec::new();
+    let mut quoted = false;
+    let mut start = 0;
+    for (i, c) in name.refers_to.char_indices() {
+        match c {
+            '\'' => quoted = !quoted,
+            ',' if !quoted => {
+                parts.push(&name.refers_to[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&name.refers_to[start..]);
+    parts.into_iter().find_map(|part| {
+        // The reference follows the last `!` outside quotes.
+        let mut quoted = false;
+        let mut at = None;
+        for (i, c) in part.char_indices() {
+            match c {
+                '\'' => quoted = !quoted,
+                '!' if !quoted => at = Some(i + 1),
+                _ => {}
+            }
+        }
+        let reference = part[at.unwrap_or(0)..].trim();
+        let (a, b) = reference.split_once(':')?;
+        let row = |t: &str| {
+            let t = t.trim().strip_prefix('$').unwrap_or(t.trim());
+            t.parse::<u32>()
+                .ok()
+                .filter(|r| (1..=1_048_576).contains(r))
+        };
+        let (first, last) = (row(a)?, row(b)?);
+        (first <= last).then_some(RowSpan {
+            first: first - 1,
+            last: last - 1,
+        })
+    })
 }

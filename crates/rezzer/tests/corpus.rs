@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rezzer_model::Registry;
+use rezzer_model::{Block, Document, Registry, plain_text};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
 use serde_json::Value;
 
@@ -68,9 +68,14 @@ const PIPELINE_FOLDERS: [&str; 3] = ["web-text", "office", "pdf"];
 
 /// The spreadsheets with golden files: one of each format and the main kinds of logic
 /// (engineering chains, folded add-in calls, data tables, LAMBDA and spills, threaded
-/// comments, OpenFormula across sheets, pivot tables).
-const GOLDEN_OFFICE: [&str; 8] = [
+/// comments, OpenFormula across sheets, pivot tables) and the sheet layouts (titles and a
+/// two-row header, group rows, a named range beside a table, two tables on one sheet).
+const GOLDEN_OFFICE: [&str; 12] = [
     "tunnel_design_calculations.xlsx",
+    "NST-EST2023-POP.xlsx",
+    "table_1_01.xlsx",
+    "ExcelTables.xlsx",
+    "table-multiple.xlsx",
     "ex012.PVT_z_factor.xlsm",
     "one-variable.xlsx",
     "LAMBDA.xlsx",
@@ -386,7 +391,7 @@ fn office_corpus_matches_manifest() {
     }
     let mut listed = manifest_rows();
     listed.retain(|k, _| k.starts_with("office/"));
-    assert_eq!(listed.len(), 33, "expected 33 office rows");
+    assert_eq!(listed.len(), 51, "expected 51 office rows");
     let mut files = Vec::new();
     walk(&corpus_dir().join("office"), &mut files);
     files.sort();
@@ -485,6 +490,304 @@ fn office_markdown(name: &str) -> String {
     run(&pipeline(), &corpus_dir().join("office").join(name)).markdown
 }
 
+/// `Sheet!A1` shape: a sheet name (quoted or not), `!`, and one cell reference (letters, digits).
+fn is_cell_anchor(anchor: &str) -> bool {
+    anchor.rsplit_once('!').is_some_and(|(sheet, cell)| {
+        let letters = cell.chars().take_while(char::is_ascii_uppercase).count();
+        let digits = &cell[letters..];
+        !sheet.is_empty()
+            && letters > 0
+            && !digits.is_empty()
+            && digits.chars().all(|c| c.is_ascii_digit())
+    })
+}
+
+/// The cells of a sheet document as (anchor, shown text): every block is walked (inside
+/// sections, quotes, callouts and lists too); the cells of tables without a `role` (so the
+/// generated Excel table, pivot and chart summary tables are out), paragraphs and headings
+/// count when the anchor has the `Sheet!A1` shape and the plain text is not empty. Sorted by
+/// anchor. The layout baseline and the layout checks share this helper.
+fn collect_cells(doc: &Document) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut push = |anchor: &Option<rezzer_model::Anchor>, inlines: &[rezzer_model::Inline]| {
+        if let Some(anchor) = anchor
+            && is_cell_anchor(&anchor.0)
+        {
+            let text = plain_text(inlines);
+            if !text.is_empty() {
+                out.push((anchor.0.clone(), text));
+            }
+        }
+    };
+    let mut stack: Vec<&Block> = doc.body.iter().rev().collect();
+    while let Some(block) = stack.pop() {
+        match block {
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => stack.extend(blocks.iter().rev()),
+            Block::List { items, .. } => stack.extend(items.iter().flatten().rev()),
+            Block::Heading {
+                inlines, anchor, ..
+            }
+            | Block::Paragraph {
+                inlines, anchor, ..
+            } => push(anchor, inlines),
+            Block::Table {
+                role: None, rows, ..
+            } => {
+                for cell in rows.iter().flatten() {
+                    push(&cell.anchor, &cell.inlines);
+                }
+            }
+            _ => {}
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The baseline of `office/<name>` from before the layout change: `cells` as
+/// `[[anchor, text], ...]` plus the `formulas`, `parameters` and `rules` facets as model JSON.
+fn baseline(name: &str) -> Value {
+    let path = corpus_dir().join("baseline").join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: no baseline: {e}", path.display()));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The spreadsheet files right in `office/`, sorted.
+fn office_spreadsheets() -> Vec<PathBuf> {
+    corpus_files()
+        .into_iter()
+        .filter(|f| f.parent().is_some_and(|p| p.ends_with("office")))
+        .filter(|f| {
+            f.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| ["xlsx", "xlsm", "xlsb", "ods"].contains(&e))
+        })
+        .collect()
+}
+
+/// Writes `tests/corpus/baseline/<file>.json` for every spreadsheet in `office/` with the
+/// current reader. Run on demand:
+/// `cargo nextest run -p rezzer --test corpus --run-ignored only write_layout_baseline`.
+#[test]
+#[ignore = "writes tests/corpus/baseline; run on demand"]
+fn write_layout_baseline() {
+    let pipeline = pipeline();
+    let dir = corpus_dir().join("baseline");
+    std::fs::create_dir_all(&dir).unwrap();
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let json = run(&pipeline, &file).json;
+        let doc: Document = serde_json::from_value(json.clone()).unwrap();
+        let cells: Vec<Value> = collect_cells(&doc)
+            .into_iter()
+            .map(|(a, t)| serde_json::json!([a, t]))
+            .collect();
+        let facet = |n: &str| {
+            json.pointer(&format!("/facets/{n}"))
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new()))
+        };
+        let out = serde_json::json!({
+            "cells": cells,
+            "formulas": facet("formulas"),
+            "parameters": facet("parameters"),
+            "rules": facet("rules"),
+        });
+        let mut text = serde_json::to_string_pretty(&out).unwrap();
+        text.push('\n');
+        std::fs::write(dir.join(format!("{name}.json")), text).unwrap();
+    }
+}
+
+/// Every spreadsheet in `office/` has a baseline with its four parts.
+#[test]
+fn layout_baseline_covers_the_spreadsheets() {
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let b = baseline(&name);
+        for key in ["cells", "formulas", "parameters", "rules"] {
+            assert!(b[key].is_array(), "{name}: baseline lacks {key}");
+        }
+    }
+}
+
+/// The layout keeps every cell, value and piece of logic: for every spreadsheet with a
+/// baseline (XLSX, XLSM, XLSB, ODS), the cells the blocks hold are the baseline's cells, and
+/// the formulas, parameters and rules facets are equal. No cell is written as a stray line
+/// outside its region.
+///
+/// One change is allowed: a cell under a merged area that is not the area's top-left cell
+/// (calamine gives the values of ODS covered cells) is not shown. It must be stated as a
+/// loss: at its own anchor for the first ones of a sheet, then in the sheet's count loss.
+#[test]
+fn cells_and_logic_unchanged_on_corpus() {
+    let pipeline = pipeline();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let mut covered_total = 0;
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        checked += 1;
+        let base = baseline(&name);
+        let json = run(&pipeline, &file).json;
+        let doc: Document = serde_json::from_value(json.clone()).unwrap();
+        let now: Vec<(String, String)> = collect_cells(&doc);
+        let before: Vec<(String, String)> = base["cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c[0].as_str().unwrap().to_string(),
+                    c[1].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let now_set: std::collections::HashSet<&(String, String)> = now.iter().collect();
+        // A cell written twice is never allowed (every cell in exactly one block).
+        if now_set.len() != now.len() {
+            let mut seen = std::collections::HashSet::new();
+            let twice: Vec<_> = now.iter().filter(|c| !seen.insert(*c)).take(10).collect();
+            failures.push(format!("{name}: cells written twice: {twice:?}"));
+        }
+        let before_set: std::collections::HashSet<&(String, String)> = before.iter().collect();
+        let extra: Vec<_> = now.iter().filter(|c| !before_set.contains(c)).collect();
+        let missing: Vec<&(String, String)> =
+            before.iter().filter(|c| !now_set.contains(c)).collect();
+        // Missing cells stated as covered: by anchor, else by the count loss of their sheet.
+        let covered_at = |anchor: &str, text: &str| {
+            let value = format!("{text:?}");
+            doc.losses.iter().any(|l| {
+                l.location == anchor
+                    && l.what.contains("under the merged area")
+                    && l.what.contains(&value)
+            })
+        };
+        let mut unstated: Vec<&(String, String)> = Vec::new();
+        let mut counted: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for c in &missing {
+            if covered_at(&c.0, &c.1) {
+                covered_total += 1;
+                continue;
+            }
+            let sheet = c.0.rsplit_once('!').map(|(s, _)| s).unwrap_or("");
+            *counted.entry(sheet.to_string()).or_default() += 1;
+            unstated.push(c);
+        }
+        for (sheet, n) in counted {
+            let stated: u64 = doc
+                .losses
+                .iter()
+                .filter(|l| l.location == sheet)
+                .filter_map(|l| {
+                    l.what
+                        .strip_suffix(
+                            " more cells under merged areas hold a value that is not shown",
+                        )
+                        .and_then(|k| k.parse::<u64>().ok())
+                })
+                .sum();
+            if stated >= n {
+                covered_total += n;
+                unstated.retain(|c| !c.0.starts_with(&format!("{sheet}!")));
+            }
+        }
+        if !extra.is_empty() || !unstated.is_empty() {
+            failures.push(format!(
+                "{name}: cells differ ({} now, {} before); missing {:?}; extra {:?}",
+                now.len(),
+                before.len(),
+                unstated.iter().take(10).collect::<Vec<_>>(),
+                extra.iter().take(10).collect::<Vec<_>>()
+            ));
+        }
+        for facet in ["formulas", "parameters", "rules"] {
+            let now = json
+                .pointer(&format!("/facets/{facet}"))
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new()));
+            // The baseline went through one more print and parse; serde_json's float parse
+            // is not exact, so the facet takes the same way before the comparison.
+            let mut now: Value =
+                serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
+            let mut base_facet = base[facet].clone();
+            // Parameter labels are written as paths since spec 8.7 (D2); the rest is equal.
+            if facet == "parameters" {
+                now = without_label_and_path(&now);
+                base_facet = without_label_and_path(&base_facet);
+            }
+            let base = &base_facet;
+            if now != *base {
+                let (a, b) = (now.as_array().unwrap(), base.as_array().unwrap());
+                let first = a.iter().zip(b).find(|(x, y)| x != y);
+                failures.push(format!(
+                    "{name}: {facet} differ ({} now, {} before); first {first:?}",
+                    a.len(),
+                    b.len()
+                ));
+            }
+        }
+        let stray = json.to_string().matches("\"role\":\"cell\"").count();
+        if stray > 0 {
+            failures.push(format!("{name}: {stray} cells written as stray lines"));
+        }
+    }
+    eprintln!("{checked} files checked, {covered_total} covered cells stated as losses");
+    assert!(checked >= 48, "only {checked} files checked");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Parameters as model JSON without their `label` and `path`.
+fn without_label_and_path(list: &Value) -> Value {
+    let mut list = list.clone();
+    for p in list.as_array_mut().unwrap() {
+        let p = p.as_object_mut().unwrap();
+        p.remove("label");
+        p.remove("path");
+    }
+    list
+}
+
+/// For every corpus workbook the parameters equal the baseline of Task 1 in anchor, name,
+/// value, unit, unit source and read count, in the same order: only `label` and `path`
+/// may differ (spec 8.7, D2). A label is the path joined with " / ".
+#[test]
+fn parameter_values_and_cells_unchanged() {
+    let pipeline = pipeline();
+    let mut failures = Vec::new();
+    let mut total = 0;
+    for file in office_spreadsheets() {
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let base = baseline(&name);
+        let json = run(&pipeline, &file).json;
+        let now = json
+            .pointer("/facets/parameters")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new()));
+        let now: Value = serde_json::from_str(&serde_json::to_string(&now).unwrap()).unwrap();
+        total += now.as_array().unwrap().len();
+        if without_label_and_path(&now) != without_label_and_path(&base["parameters"]) {
+            failures.push(format!("{name}: parameters differ beyond label and path"));
+        }
+        for p in now.as_array().unwrap() {
+            let path: Vec<&str> = list(p, "/path").iter().filter_map(Value::as_str).collect();
+            let joined = (!path.is_empty()).then(|| path.join(" / "));
+            if p["label"].as_str() != joined.as_deref() {
+                failures.push(format!("{name}: label is not the joined path: {p}"));
+            }
+            if path.iter().any(|part| part.trim().is_empty()) {
+                failures.push(format!("{name}: empty path part: {p}"));
+            }
+        }
+    }
+    eprintln!("{total} parameters checked");
+    assert!(total >= 1_000, "only {total} parameters checked");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn list<'a>(doc: &'a Value, pointer: &str) -> &'a [Value] {
     doc.pointer(pointer)
         .and_then(Value::as_array)
@@ -561,24 +864,35 @@ fn tunnel_design_parameters_and_units() {
             .iter()
             .any(|f| f["anchor"].as_str().unwrap().starts_with("Design_Basis!"))
     );
-    // Inputs with their label and the unit in the cell beside them.
+    // Inputs with their label under the region's caption `INPUTS` and the unit in the cell
+    // beside them.
     for (anchor, label, value, unit) in [
-        ("Structural_Lining!B5", "Excavated diameter, D", 10.0, "m"),
+        (
+            "Structural_Lining!B5",
+            "INPUTS / Excavated diameter, D",
+            10.0,
+            "m",
+        ),
         (
             "Structural_Lining!B6",
-            "Trial lining thickness, t",
+            "INPUTS / Trial lining thickness, t",
             0.35,
             "m",
         ),
-        ("Structural_Lining!B7", "Overburden depth, H", 25.0, "m"),
+        (
+            "Structural_Lining!B7",
+            "INPUTS / Overburden depth, H",
+            25.0,
+            "m",
+        ),
         (
             "Structural_Lining!B8",
-            "Unit weight of ground, gamma",
+            "INPUTS / Unit weight of ground, gamma",
             22.0,
             "kN/m3",
         ),
-        ("Ventilation!B5", "Tunnel length, L", 800.0, "m"),
-        ("Drainage!B12", "Trial pipe diameter", 0.3, "m"),
+        ("Ventilation!B5", "INPUTS / Tunnel length, L", 800.0, "m"),
+        ("Drainage!B12", "INPUTS / Trial pipe diameter", 0.3, "m"),
     ] {
         let p = at(&doc, "parameters", anchor);
         assert_eq!(p["label"], label, "{anchor}");
@@ -586,14 +900,18 @@ fn tunnel_design_parameters_and_units() {
         assert_eq!(p["unit"], unit, "{anchor}");
         assert_eq!(p["unit_source"], "unit-cell", "{anchor}");
     }
-    // The trial thickness column takes label and unit from its header `t (m)`.
+    // The trial thickness column takes label and unit from its header `t (m)`, under the
+    // title of its table.
     let t = at(&doc, "parameters", "Structural_Lining!E49");
-    assert_eq!(t["label"], "t");
+    assert_eq!(
+        t["label"],
+        "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) / t"
+    );
     assert_eq!(t["unit"], "m");
     assert_eq!(t["unit_source"], "header");
     // A dimensionless input gets no unit.
     let fos = at(&doc, "parameters", "Structural_Lining!B13");
-    assert_eq!(fos["label"], "Target Factor of Safety");
+    assert_eq!(fos["label"], "INPUTS / Target Factor of Safety");
     assert!(fos.get("unit").is_none());
     // The safety check is a result, with the cached verdict.
     let status = at(&doc, "formulas", "Structural_Lining!B44");
@@ -724,6 +1042,7 @@ fn convert_units_found() {
     let c = at(&doc, "formulas", "Weight!C3");
     assert_eq!(c["expression"], "=CONVERT(1,B3,$B$2)");
     assert_eq!(refs(c), ["Weight!B3", "Weight!B2"]);
+    // The label is the column header, then the unit name on the left that names the row.
     for (anchor, label, code) in [
         ("Weight!B2", "Gram", "g"),
         ("Weight!B4", "Pound mass (avoirdupois)", "lbm"),
@@ -731,7 +1050,11 @@ fn convert_units_found() {
         ("distance!B6", "Foot", "ft"),
     ] {
         let p = at(&doc, "parameters", anchor);
-        assert_eq!(p["label"], label, "{anchor}");
+        assert_eq!(
+            p["label"],
+            format!("From_unit or to_unit / {label}"),
+            "{anchor}"
+        );
         assert_eq!(p["value"]["value"], code, "{anchor}");
     }
     assert!(at(&doc, "parameters", "Weight!B2")["read_by"].as_u64() > Some(1));
@@ -1060,7 +1383,7 @@ fn all_corpus_formulas_parse() {
          names without text: {names_without_text:?}",
         failures.len()
     );
-    assert_eq!(cells, 3_466, "cell formulas in the spreadsheet corpus");
+    assert_eq!(cells, 3_477, "cell formulas in the spreadsheet corpus");
     assert!(
         failures.is_empty(),
         "{} formulas do not parse ({limit_refusals} by the parser limits):\n{}",
@@ -1698,4 +2021,27 @@ fn multicolumn_reads_column_by_column() {
     assert!(end_left < start_right, "{text}");
     let abstract_at = text.find("This is a sample document").unwrap();
     assert!(abstract_at < end_left);
+}
+
+/// The Census caption is the group title of its sheet's parameters, written once: equal
+/// paths show the parts after the title, never the title again (spec 8.7). Its label
+/// column cells and header cells all have paths like `<caption> / Geographic Area`.
+#[test]
+fn census_caption_is_written_once_as_the_group_title() {
+    let md = office_markdown("NST-EST2023-POP.xlsx");
+    let caption = "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023";
+    let logic = &md[md.find("## Logic").expect("a Logic section")..];
+    let head = "#### Parameters\n";
+    let rest = &logic[logic.find(head).expect("a Parameters part") + head.len()..];
+    let part = &rest[..rest.find("\n#").map_or(rest.len(), |e| e + 1)];
+    let title = format!("Parameters in {caption}:");
+    assert_eq!(part.matches(title.as_str()).count(), 1, "{part}");
+    // No row's label repeats it (cell A2, whose value is the caption, shows it as a value).
+    let labels: Vec<&str> = part
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| Cell") && !l.starts_with("| ---"))
+        .map(|l| l.split(" | ").nth(2).unwrap_or(""))
+        .collect();
+    assert!(labels.len() > 300, "{part}");
+    assert!(!labels.iter().any(|l| l.contains(caption)), "{part}");
 }

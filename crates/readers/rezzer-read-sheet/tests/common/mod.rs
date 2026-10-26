@@ -55,6 +55,8 @@ pub struct Book {
     pub wb_rels_extra: String,
     /// More entries, written after the others.
     pub extra: Vec<(String, String)>,
+    /// The content of `xl/styles.xml` inside `styleSheet`, in place of [`STYLES`].
+    pub styles: Option<String>,
 }
 
 impl Book {
@@ -96,6 +98,12 @@ impl Book {
             .unwrap()
             .related
             .push((kind, part.into(), xml.into()));
+        self
+    }
+
+    /// Replaces the default `xl/styles.xml` content (inside `styleSheet`).
+    pub fn styles(mut self, xml: &str) -> Book {
+        self.styles = Some(xml.into());
         self
     }
 
@@ -178,7 +186,10 @@ impl Book {
         ));
         files.push((
             "xl/styles.xml".into(),
-            format!("<styleSheet xmlns=\"{MAIN}\">{STYLES}</styleSheet>"),
+            format!(
+                "<styleSheet xmlns=\"{MAIN}\">{}</styleSheet>",
+                self.styles.as_deref().unwrap_or(STYLES)
+            ),
         ));
         files.extend(self.extra.iter().cloned());
         let mut w = ZipWriter::new(Cursor::new(Vec::new()));
@@ -316,4 +327,58 @@ pub fn has_loss(doc: &Document, why: LossReason, location: &str, text: &str) -> 
     doc.losses
         .iter()
         .any(|l| l.why == why && l.location == location && l.what.contains(text))
+}
+
+// ODS and package fixtures, shared by the XLSB, ODS and layout tests.
+
+pub fn zip_of(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut w = ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        w.start_file(*name, opts).unwrap();
+        w.write_all(bytes).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+pub fn read_as(bytes: Vec<u8>, name: &str, format: FormatId, limits: Limits) -> ReadOutcome {
+    SheetReader.read(
+        &source(bytes, name, format),
+        &ReadOptions::default(),
+        &Budget::new(limits),
+    )
+}
+
+pub const ODS_MIME: &str = "application/vnd.oasis.opendocument.spreadsheet";
+pub const MANIFEST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><manifest:file-entry manifest:full-path=\"/\" manifest:media-type=\"application/vnd.oasis.opendocument.spreadsheet\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/></manifest:manifest>";
+
+/// content.xml with the standard namespaces around `body` (the inside of office:spreadsheet).
+pub fn content(body: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet>{body}</office:spreadsheet></office:body></office:document-content>"
+    )
+}
+
+pub fn ods_with(mime: &str, manifest: &str, content: &str) -> Vec<u8> {
+    zip_of(&[
+        ("mimetype", mime.as_bytes().to_vec()),
+        ("META-INF/manifest.xml", manifest.as_bytes().to_vec()),
+        ("content.xml", content.as_bytes().to_vec()),
+    ])
+}
+
+pub fn ods(content: &str) -> Vec<u8> {
+    ods_with(ODS_MIME, MANIFEST, content)
+}
+
+pub fn read_ods(bytes: Vec<u8>) -> ReadOutcome {
+    read_as(bytes, "book.ods", FormatId::Ods, Limits::default())
+}
+
+/// content.xml with automatic cell styles (`styles`, inside office:automatic-styles) and
+/// the tables (`body`); the `fo` namespace is declared for the style properties.
+pub fn content_styled(styles: &str, body: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\"><office:automatic-styles>{styles}</office:automatic-styles><office:body><office:spreadsheet>{body}</office:spreadsheet></office:body></office:document-content>"
+    )
 }

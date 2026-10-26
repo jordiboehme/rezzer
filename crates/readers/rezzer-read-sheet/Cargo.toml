@@ -18,10 +18,13 @@ rezzer-limits = { path = "../../rezzer-limits" }
 zipguard = { path = "../../formats/zipguard" }
 formulakit = { path = "../../formats/formulakit" }
 sheetparts = { path = "../../formats/sheetparts" }
+sheetlayout = { path = "../../formats/sheetlayout" }
+rezzer-layout = { path = "../../rezzer-layout" }
 calamine.workspace = true
 quick-xml.workspace = true
 cfb.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 rezzer-render = { path = "../../rezzer-render" }
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

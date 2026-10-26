@@ -4,14 +4,50 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-comma_in_quotes",
+      "anchor": "'csv-spectrum-comma_in_quotes'",
       "blocks": [
         {
+          "anchor": "'csv-spectrum-comma_in_quotes'!A1:E2",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:E2",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "first",
+              "last",
+              "address",
+              "city",
+              "zip"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "'csv-spectrum-comma_in_quotes'!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:E2"
+          },
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-comma_in_quotes!A1",
+                "anchor": "'csv-spectrum-comma_in_quotes'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -22,7 +58,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!B1",
+                "anchor": "'csv-spectrum-comma_in_quotes'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -33,7 +69,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!C1",
+                "anchor": "'csv-spectrum-comma_in_quotes'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -44,7 +80,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!D1",
+                "anchor": "'csv-spectrum-comma_in_quotes'!D1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -55,7 +91,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!E1",
+                "anchor": "'csv-spectrum-comma_in_quotes'!E1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -68,7 +104,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-comma_in_quotes!A2",
+                "anchor": "'csv-spectrum-comma_in_quotes'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -79,7 +115,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!B2",
+                "anchor": "'csv-spectrum-comma_in_quotes'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -90,7 +126,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!C2",
+                "anchor": "'csv-spectrum-comma_in_quotes'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -101,7 +137,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!D2",
+                "anchor": "'csv-spectrum-comma_in_quotes'!D2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -112,7 +148,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-comma_in_quotes!E2",
+                "anchor": "'csv-spectrum-comma_in_quotes'!E2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -127,7 +163,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:E2",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -517,7 +553,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-spectrum-comma_in_quotes",
+        "id": "'csv-spectrum-comma_in_quotes'",
         "kind": "sheet",
         "name": "csv-spectrum-comma_in_quotes",
         "size": "1 row x 5 columns"

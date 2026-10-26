@@ -2,8 +2,9 @@
 
 csvsniff looks at CSV text and tells you what is in it.
 
-- The dialect: delimiter, quote character and whether there is a header row
+- The dialect: delimiter, quote character and whether there is a header row. Short title lines above the table are skipped and counted
 - Per column: the type (integer, decimal, date, bool or text), a unit from the header, missing values and whether the values are unique
+- The class of one cell value (`cell_class`): empty, text, number, date or bool
 - Rows with an unexpected field count and quotes that are not closed
 - Derived columns: a column that is the sum of other columns, with how many rows match
 

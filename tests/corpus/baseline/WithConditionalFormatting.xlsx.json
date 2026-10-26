@@ -1,0 +1,189 @@
+{
+  "cells": [
+    [
+      "CF!A1",
+      "2"
+    ],
+    [
+      "CF!A2",
+      "2"
+    ],
+    [
+      "CF!A3",
+      "5"
+    ],
+    [
+      "CF!A4",
+      "-6"
+    ],
+    [
+      "CF!A5",
+      "4"
+    ],
+    [
+      "CF!A6",
+      "-1"
+    ],
+    [
+      "CF!A7",
+      "0"
+    ],
+    [
+      "CF!A8",
+      "6"
+    ],
+    [
+      "CF!A9",
+      "Status"
+    ],
+    [
+      "CF!B1",
+      "A"
+    ],
+    [
+      "CF!B2",
+      "AA"
+    ],
+    [
+      "CF!B3",
+      "AAA"
+    ],
+    [
+      "CF!B4",
+      "B"
+    ],
+    [
+      "CF!B5",
+      "AB"
+    ],
+    [
+      "CF!B6",
+      "ABC"
+    ],
+    [
+      "CF!B7",
+      "LOOONG"
+    ],
+    [
+      "CF!B9",
+      "A8 > 5"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "CF!A8",
+      "cached": {
+        "type": "number",
+        "value": 6.0
+      },
+      "dialect": "excel",
+      "expression": "=SUM(A1:A7)",
+      "kind": "cell",
+      "references": [
+        "CF!A1:A7"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "CF!A1",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "CF!A2",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "CF!A3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 5.0
+      }
+    },
+    {
+      "anchor": "CF!A4",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": -6.0
+      }
+    },
+    {
+      "anchor": "CF!A5",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 4.0
+      }
+    },
+    {
+      "anchor": "CF!A6",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": -1.0
+      }
+    },
+    {
+      "anchor": "CF!A7",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    }
+  ],
+  "rules": [
+    {
+      "anchor": "CF!A1:A8",
+      "detail": "cellIs greaterThan (priority 5)",
+      "formulas": [
+        "3"
+      ],
+      "kind": "conditional-format"
+    },
+    {
+      "anchor": "CF!A1:A8",
+      "detail": "cellIs lessThan (priority 6)",
+      "formulas": [
+        "-3"
+      ],
+      "kind": "conditional-format"
+    },
+    {
+      "anchor": "CF!B9",
+      "detail": "expression (priority 3)",
+      "formulas": [
+        "$A$8>5"
+      ],
+      "kind": "conditional-format"
+    },
+    {
+      "anchor": "CF!B1:B7",
+      "detail": "cellIs lessThanOrEqual (priority 1)",
+      "formulas": [
+        "\"AAA\""
+      ],
+      "kind": "conditional-format"
+    },
+    {
+      "anchor": "CF!B1:B7",
+      "detail": "cellIs between (priority 2)",
+      "formulas": [
+        "\"A\"",
+        "\"AAA\""
+      ],
+      "kind": "conditional-format"
+    }
+  ]
+}
