@@ -22,7 +22,7 @@ mod xattr;
 mod zone;
 
 pub use bplist::{BplistError, MAX_DEPTH, MAX_ITEMS, MAX_TEXT_BYTES, MAX_VISITS, string_array};
-pub use tags::{finder_tags, xdg_tags};
+pub use tags::{MAX_TAGS, finder_tags, xdg_tags};
 #[cfg(unix)]
 pub use xattr::read_xattr;
 pub use zone::{zone_host_url, zone_text};

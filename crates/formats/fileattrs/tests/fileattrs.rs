@@ -16,7 +16,8 @@
 //!   18446744073709551615 and -1
 
 use fileattrs::{
-    BplistError, MAX_ATTR_BYTES, finder_tags, string_array, xdg_tags, zone_host_url, zone_text,
+    BplistError, MAX_ATTR_BYTES, MAX_TAGS, finder_tags, string_array, xdg_tags, zone_host_url,
+    zone_text,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -481,6 +482,25 @@ fn finder_tags_of_broken_or_empty_values_are_empty() {
     assert!(finder_tags(b"").is_empty());
     assert!(finder_tags(&plist(&[array(&[0])], 0, 1, 1)).is_empty());
     assert!(finder_tags(&plist(&[array(&[])], 0, 1, 1)).is_empty());
+}
+
+#[test]
+fn tags_stop_at_the_cap_quickly() {
+    // A hostile 64 KiB value of distinct short names: only the first 64 are kept, and the
+    // work stays linear.
+    let names: Vec<String> = (0..20_000).map(|i| format!("{i:x}")).collect();
+    let mut text = names.join(",");
+    text.truncate(MAX_ATTR_BYTES);
+    let started = std::time::Instant::now();
+    for _ in 0..100 {
+        assert_eq!(xdg_tags(&text), names[..MAX_TAGS]);
+    }
+    let repeats = "a,".repeat(MAX_ATTR_BYTES / 2);
+    for _ in 0..100 {
+        assert_eq!(xdg_tags(&repeats), ["a"]);
+    }
+    let spent = started.elapsed();
+    assert!(spent < std::time::Duration::from_secs(2), "{spent:?}");
 }
 
 #[test]
