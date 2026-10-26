@@ -8,6 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
 use super::sections::{CUT_WORK, sections};
+use super::side::{
+    Beside, SIDE_FOUND_BY, SIDE_GAP, SIDE_WORK, Side, StripKind, side_columns, totals_table,
+};
 use super::*;
 use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
@@ -109,6 +112,56 @@ pub(super) fn ruled(
     let per_line = texted_per_line(flow);
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
+    let mut tables: Vec<Planned> = Vec::new();
+    // A column of totals beside the sections: its totals are pairs, taken first; its other
+    // strips join the section beside them, below.
+    let sides = {
+        let mut taken = vec![false; hs.len()];
+        for (gh, _) in &groups {
+            for &j in gh {
+                taken[j] = true;
+            }
+        }
+        let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
+        let beside: Vec<Beside<'_>> = edged
+            .iter()
+            .filter(|(xs, ys)| xs.len() >= 2 && ys.len() >= 2)
+            .map(|(xs, ys)| Beside {
+                left: xs[0],
+                right: xs[xs.len() - 1],
+                ys,
+            })
+            .collect();
+        let mut work = 0;
+        let sides = side_columns(flow, &by_y, &hs, &vs, &taken, &beside, &mut work);
+        if work > SIDE_WORK {
+            found.skipped.push(format!(
+                "columns of totals beside ruled tables on page {page} are not looked for: the \
+                 page has too many lines"
+            ));
+        }
+        sides
+    };
+    for strip in sides.iter().flat_map(|s| &s.strips) {
+        let StripKind::Totals(totals) = &strip.kind else {
+            continue;
+        };
+        let Some(table) = totals_table(flow, totals) else {
+            continue;
+        };
+        let t = tables.len();
+        for (r, (label, amount)) in totals.iter().enumerate() {
+            for &i in label {
+                claimed[i] = Some((t, r, 0));
+            }
+            for &i in amount {
+                claimed[i] = Some((t, r, 1));
+            }
+        }
+        tables.push(table);
+    }
+    // The tables of totals come first; they have no header row.
+    let pairs = tables.len();
     // Runs of grids refused with a note, and those grids: where each stands and why; and
     // the grids refused without a note.
     let mut held: Vec<bool> = vec![false; flow.runs.len()];
@@ -119,7 +172,6 @@ pub(super) fn ruled(
     let mut title_work = 0usize;
     let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
     let mut quiet: Vec<(usize, &'static str, Refused)> = Vec::new();
-    let mut tables: Vec<Planned> = Vec::new();
     let mut bands: Vec<Band> = Vec::new();
     // Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
     // the steps spent looking.
@@ -145,7 +197,7 @@ pub(super) fn ruled(
             ));
             break;
         }
-        let (xs, mut ys) = edges(&h, &v);
+        let (mut xs, mut ys) = edges(&h, &v);
         let mut title_above = pending.remove(&id).unwrap_or_default();
         if xs.len() >= 2 && ys.len() >= 2 {
             let mut place = TitlePlace {
@@ -199,6 +251,20 @@ pub(super) fn ruled(
                     at: foot,
                     from: xs[0],
                     to: xs[xs.len() - 1],
+                });
+            }
+        }
+        // A strip of a column of totals beside the section, headed on the baseline of its
+        // column titles, is one more column of it, parted at each of its row edges.
+        let side = joined(&sides, &xs, &ys);
+        if let Some(side) = side {
+            let right = xs[xs.len() - 1];
+            xs.push(side.x1);
+            for &y in &ys {
+                h.push(Seg {
+                    at: y,
+                    from: right,
+                    to: side.x1,
                 });
             }
         }
@@ -546,6 +612,7 @@ pub(super) fn ruled(
                         runs: Vec::new(),
                         row_span: 1,
                         col_span: cols as u32,
+                        status: None,
                     });
                     planned_rows.push(cells);
                     continue;
@@ -560,6 +627,7 @@ pub(super) fn ruled(
                         runs: Vec::new(),
                         row_span,
                         col_span,
+                        status: None,
                     });
                 }
                 planned_rows.push(cells);
@@ -613,6 +681,7 @@ pub(super) fn ruled(
             tagged: None,
             continues: false,
             caption: Vec::new(),
+            found_by: side.map(|_| SIDE_FOUND_BY),
         });
     }
     if title_work > TITLE_WORK {
@@ -690,12 +759,29 @@ pub(super) fn ruled(
             });
         }
     }
-    for mut t in tables {
-        if t.header_rows == 0 {
+    for (k, mut t) in tables.into_iter().enumerate() {
+        if t.header_rows == 0 && k >= pairs {
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
     }
+}
+
+/// The column of totals of `sides` that stands beside the section of column edges `xs` and
+/// row edges `ys` (from the top) with a strip that joins it: a strip that starts within the
+/// section.
+fn joined<'s>(sides: &'s [Side], xs: &[f32], ys: &[f32]) -> Option<&'s Side> {
+    let (right, top, bottom) = (*xs.last()?, *ys.first()?, *ys.last()?);
+    sides.iter().find(|s| {
+        let gap = s.x0 - right;
+        gap > SNAP
+            && gap <= SIDE_GAP
+            && s.strips.iter().any(|st| {
+                matches!(st.kind, StripKind::Joins)
+                    && st.top <= top + SNAP
+                    && st.top > bottom + SNAP
+            })
+    })
 }
 
 /// Lines a title may have.
@@ -707,16 +793,16 @@ const TITLE_WORK: usize = 1_000_000;
 
 /// One line of text: its baseline, its largest size, whether all of it is bold, and its
 /// runs.
-struct TextLine {
-    y: f32,
-    size: f32,
-    bold: bool,
-    runs: Vec<usize>,
+pub(super) struct TextLine {
+    pub y: f32,
+    pub size: f32,
+    pub bold: bool,
+    pub runs: Vec<usize>,
 }
 
 /// The lines of `runs` from the bottom: runs whose baselines lie within a third of their
 /// size of the line's first.
-fn lines_up(flow: &Flow, runs: &[usize]) -> Vec<TextLine> {
+pub(super) fn lines_up(flow: &Flow, runs: &[usize]) -> Vec<TextLine> {
     let mut sorted = runs.to_vec();
     sorted.sort_by(|&a, &b| flow.runs[a].y.total_cmp(&flow.runs[b].y));
     let mut out: Vec<TextLine> = Vec::new();

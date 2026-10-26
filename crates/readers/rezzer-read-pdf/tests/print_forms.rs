@@ -1896,60 +1896,72 @@ fn read_header_rows(out: &ReadOutcome) -> Vec<usize> {
 /// The tables of the pay slip: its sections E, T, S, the right middle and the bottom of L,
 /// each a header over its lines; no section is lost and none gives a loss. Each value of a
 /// value line stands in the column of its label, also where only one or two spaces part it
-/// from the next value across a column rule, and an empty field is an empty cell.
+/// from the next value across a column rule, and an empty field is an empty cell. The column
+/// of totals on the right joins each section beside it (its amounts in the section's rows),
+/// and each total label in it pairs with the amount under it (ruling P6-O).
 fn assert_pay_slip(out: &ReadOutcome) {
     let found = read_tables(out);
-    assert_eq!(found.len(), 5, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found.len(), 7, "{found:#?} {:?}", out.document.losses);
     let header = |t: &Vec<Vec<String>>| t[0].join("|");
     let body = |t: &Vec<Vec<String>>| t[1..].iter().map(|r| r.join("|")).collect::<Vec<_>>();
-    // Each section's label row is its table's header row.
-    assert_eq!(read_header_rows(out), [1, 1, 1, 1, 1], "{found:#?}");
-    // E: 8 columns, a row for each earning; the label over two columns and the three flags
-    // one character apart are cut at the column rules.
+    // Each section's label row is its table's header row; the totals have none.
+    assert_eq!(read_header_rows(out), [1, 0, 1, 1, 0, 1, 1], "{found:#?}");
+    // E: 8 columns and the amounts of the column on the right, a row for each earning; the
+    // label over two columns and the three flags one character apart are cut at the column
+    // rules.
     assert_eq!(
         header(&found[0]),
-        "Ea|Eb|Ec Ed|Ee|Ef|Eg|Eh|Ei",
+        "Ea|Eb|Ec Ed|Ee|Ef|Eg|Eh|Ei|Ej",
         "{found:#?}"
     );
     assert_eq!(
         body(&found[0]),
         [
-            "001|Gehalt||||X|X|Y",
-            "002|Zulage Muster||||X|X|Y",
-            "003|Beispiel Bezug||||Z|X|N",
-            "045|Zulage fuer Muster Bezug||||X|Y|Z"
+            "001|Gehalt||||X|X|Y|1.234,56",
+            "002|Zulage Muster||||X|X|Y|12,34",
+            "003|Beispiel Bezug||||Z|X|N|56,78",
+            "045|Zulage fuer Muster Bezug||||X|Y|Z|11,11"
         ]
     );
+    // The total under E's amounts, with its label.
+    assert_eq!(found[1], [["Ek", "1.302,90"]], "{found:#?}");
     // T and S: their headers and one row of values, the marks read as separators.
-    assert_eq!(header(&found[1]), "Ta|Tb|Tc|Td|Te|", "{found:#?}");
-    assert_eq!(body(&found[1]), ["X|12.345,67|1.234,00|||"], "{found:#?}");
-    assert_eq!(
-        header(&found[2]),
-        "Sa|Sb|Sc|Sd|Se|Sf|Sg|Sh|Si",
-        "{found:#?}"
-    );
+    assert_eq!(header(&found[2]), "Ta|Tb|Tc|Td|Te||Tf", "{found:#?}");
     assert_eq!(
         body(&found[2]),
-        ["X||1.111,00|2.222,00|||333,44|444,55|7"],
+        ["X|12.345,67|1.234,00||||1.234,00"],
         "{found:#?}"
     );
-    // L: the right middle Le | Lf over four rows, the bottom right Lk | Ll over a value.
-    assert_eq!(header(&found[3]), "Le|Lf", "{found:#?}");
+    assert_eq!(
+        header(&found[3]),
+        "Sa|Sb|Sc|Sd|Se|Sf|Sg|Sh|Si|Sj",
+        "{found:#?}"
+    );
     assert_eq!(
         body(&found[3]),
+        ["X||1.111,00|2.222,00|||333,44|444,55|7|555,66"],
+        "{found:#?}"
+    );
+    // The total in the band of L's titles, with its label.
+    assert_eq!(found[4], [["Ln", "8.765,43"]], "{found:#?}");
+    // L: the right middle Le | Lf | Lg over four rows, the bottom right Lk | Ll | Lm over a
+    // value.
+    assert_eq!(header(&found[5]), "Le|Lf|Lg", "{found:#?}");
+    assert_eq!(
+        body(&found[5]),
         [
-            "9001|Muster A",
-            "9002|Muster B",
-            "9003|Muster C",
-            "9004|Muster D"
+            "9001|Muster A|11,11",
+            "9002|Muster B|22,22-",
+            "9003|Muster C|33,33",
+            "9004|Muster D|4.444,44-"
         ]
     );
     // The left block (Lh, Li and their values) still reads into the first column here; Task
     // 9 reads it as label and value pairs and changes these two rows.
-    assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
+    assert!(header(&found[6]).ends_with("Lj|Lk|Ll|Lm"), "{found:#?}");
     assert_eq!(
-        body(&found[4]),
-        ["Li DE00 0000 0000 0000 0000 00 1.234,56||"],
+        body(&found[6]),
+        ["Li DE00 0000 0000 0000 0000 00 1.234,56|||9.876,54"],
         "{found:#?}"
     );
     // The title right above a section's top rule is that table's caption, never a row of
@@ -1959,11 +1971,23 @@ fn assert_pay_slip(out: &ReadOutcome) {
         read_captions(out),
         [
             Some("Bezuege A".to_string()),
+            None,
             Some("Abzuege B".to_string()),
+            None,
             None,
             Some("La Lb".to_string()),
             None
         ]
+    );
+    // The column of totals is said once, before the first table it adds to.
+    let notes = found_by(out);
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.contains("column of amounts"))
+            .count(),
+        1,
+        "{notes:?}"
     );
     assert_no_loss(out);
 }
@@ -2246,6 +2270,85 @@ fn hanging_section(dividers: &[f32], labels: &[&str], lines: Vec<DataLine>) -> F
         lines,
         ..FormPage::default()
     }
+}
+
+/// A section of five fields with a column of totals 6 points to its right at x 406 to 480:
+/// a strip at the section's rules titled "Af" on the section's label baseline over the
+/// amount of the value line, and a strip below with the total label "Ag" over its amount.
+/// `rules` are the heights of the column's rules, `sides` draws vertical rules at its ends.
+fn section_with_totals(rules: &[f32], sides: bool) -> FormPage {
+    let mut page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![
+            columns_line(675.0, &[(1, "Muster"), (16, "1234"), (66, "1.234,56")]),
+            columns_line(636.0, &[(68, "99,99")]),
+        ],
+    );
+    for &y in rules {
+        page.template += &bar_h(406.0, 480.0, y, 0.48);
+    }
+    if sides {
+        for x in [406.0, 480.0] {
+            page.template += &bar_v(x, 630.0, 700.0, 0.48);
+        }
+    }
+    page.template += &bold(410.0, 691.0, 6.66, "Af");
+    page.template += &bold(410.0, 650.0, 6.66, "Ag");
+    page
+}
+
+/// A column drawn with horizontal rules only whose rules line up with a section's rules
+/// joins the section: its title heads one more column and its amount stands in the row; a
+/// total label in it pairs with the amount under it (ruling P6-O). One note says so.
+#[test]
+fn a_column_of_totals_joins_its_section() {
+    let page = section_with_totals(&[700.0, 660.0, 630.0], false);
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0][0],
+        ["Aa", "Ab", "Ac", "Ad", "Ae", "Af"],
+        "{found:#?}"
+    );
+    assert_eq!(
+        found[0][1],
+        ["Muster", "1234", "", "", "", "1.234,56"],
+        "{found:#?}"
+    );
+    assert_eq!(found[1], [["Ag", "99,99"]], "{found:#?}");
+    assert_eq!(read_header_rows(&out), [1, 0]);
+    let notes = found_by(&out);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].contains("column of amounts beside a table"),
+        "{notes:?}"
+    );
+    assert_no_loss(&out);
+}
+
+/// Guard: a column with sides of its own is a box, not a column of the section.
+#[test]
+fn a_boxed_column_beside_a_section_stays_apart() {
+    let page = section_with_totals(&[700.0, 660.0, 630.0], true);
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert!(
+        found.iter().all(|t| !t[0].iter().any(|c| c == "Af")),
+        "{found:#?}"
+    );
+    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+}
+
+/// Guard: a column whose rules do not line up with the section's rules stays apart.
+#[test]
+fn a_column_off_the_rules_of_a_section_stays_apart() {
+    let page = section_with_totals(&[695.0, 650.0, 625.0], false);
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found[0][0], ["Aa", "Ab", "Ac", "Ad", "Ae"], "{found:#?}");
+    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
 }
 
 /// A rule inside a word cuts nothing: the run stays whole in the column of its middle. A rule

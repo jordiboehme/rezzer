@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
-use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity};
+use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
@@ -1142,6 +1142,8 @@ struct Built {
     /// Run and point pairs the page may still test.
     probe_work: usize,
     probes_cut: bool,
+    /// The `found-by` notes of tables said on the page so far.
+    found_by: Vec<&'static str>,
 }
 
 /// What a page's layout is building.
@@ -1304,6 +1306,27 @@ impl Built {
                 self.added.push((t, add.row, add.cell, inlines));
             }
         }
+        // The rule that found the table is said once on the page, before its first table.
+        if let Some(note) = plan.found_by.filter(|n| !self.found_by.contains(n)) {
+            self.found_by.push(note);
+            self.pending = Pending::Block;
+            if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.charge_text(note.len()))
+            {
+                self.stop_at(hit, cx);
+                return;
+            }
+            self.push(
+                Block::Paragraph {
+                    inlines: vec![Inline::plain(note)],
+                    role: Some("found-by".into()),
+                    anchor: None,
+                },
+                cx,
+            );
+            if self.stop.is_some() {
+                return;
+            }
+        }
         // The title line or lines, left to right, are built first, as they come before the
         // table: charged like any text, links kept.
         let mut title = std::mem::take(&mut plan.caption);
@@ -1402,9 +1425,15 @@ impl Built {
             }
             let mut cells = Vec::with_capacity(row.len());
             for c in row {
-                let Some(inlines) = self.cell_inlines(&c.runs, cx) else {
+                let Some(mut inlines) = self.cell_inlines(&c.runs, cx) else {
                     break 'rows;
                 };
+                if let (true, Some(text)) = (inlines.is_empty(), c.status) {
+                    inlines.push(Inline::Status {
+                        text: text.into(),
+                        color: StatusColor::Grey,
+                    });
+                }
                 cells.push(Cell {
                     inlines,
                     row_span: c.row_span,
@@ -2676,6 +2705,7 @@ mod tests {
                         runs: vec![run("cell", 1, 680.0, 10.0)],
                         row_span: 1,
                         col_span: 1,
+                        status: None,
                     }]
                 })
                 .collect(),
@@ -2685,6 +2715,7 @@ mod tests {
             tagged: None,
             continues: false,
             caption: vec![title],
+            found_by: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -2786,6 +2817,7 @@ mod tests {
                 runs: vec![run("cell", 1, 680.0, 10.0)],
                 row_span: 1,
                 col_span: 1,
+                status: None,
             }]],
             trs: Vec::new(),
             additions: Vec::new(),
@@ -2796,6 +2828,7 @@ mod tests {
                 uri: Some(UriTarget::new("https://example.org/titel")),
                 ..run("Muster Titel", 0, 700.0, 10.0)
             }],
+            found_by: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -2835,6 +2868,7 @@ mod tests {
                 runs: vec![run("cell", 1, 680.0, 10.0)],
                 row_span: 1,
                 col_span: 1,
+                status: None,
             }]],
             trs: Vec::new(),
             additions: Vec::new(),
@@ -2845,6 +2879,7 @@ mod tests {
                 uri: Some(UriTarget::new("https://example.org/titel")),
                 ..run("Muster Titel", 0, 700.0, 10.0)
             }],
+            found_by: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);

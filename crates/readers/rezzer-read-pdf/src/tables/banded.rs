@@ -368,6 +368,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
                 runs: Vec::new(),
                 row_span: 1,
                 col_span: 1,
+                status: None,
             })
             .collect()
     };
@@ -381,6 +382,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         tagged: None,
         continues: false,
         caption: Vec::new(),
+        found_by: None,
     });
 }
 

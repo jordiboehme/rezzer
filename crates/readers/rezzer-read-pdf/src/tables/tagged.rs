@@ -326,6 +326,7 @@ pub(crate) fn tagged(
                         .unwrap_or_default(),
                     row_span: elems[*c].row_span.max(1),
                     col_span: elems[*c].col_span.max(1),
+                    status: None,
                 })
                 .collect();
             if in_header && row_cells.iter().all(|c| elems[*c].role == "TH") {
@@ -393,6 +394,7 @@ pub(crate) fn tagged(
             tagged: Some(t),
             continues,
             caption: Vec::new(),
+            found_by: None,
         });
     }
     (out, fallbacks)

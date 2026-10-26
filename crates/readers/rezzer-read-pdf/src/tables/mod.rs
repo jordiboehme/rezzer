@@ -11,6 +11,7 @@ mod banded;
 mod borderless;
 mod ruled;
 mod sections;
+mod side;
 mod tagged;
 
 use std::collections::HashMap;
@@ -57,6 +58,9 @@ pub(crate) struct Planned {
     pub continues: bool,
     /// The runs of the table's title line, read as its caption.
     pub caption: Vec<Run>,
+    /// The rule that found the table, when it is one the output states: a `found-by` note
+    /// with this text stands before the first table of the page it found.
+    pub found_by: Option<&'static str>,
 }
 
 /// Runs for a cell of a row an earlier page began: the row's place in its table and the
@@ -73,6 +77,8 @@ pub(crate) struct PlannedCell {
     pub runs: Vec<Run>,
     pub row_span: u32,
     pub col_span: u32,
+    /// What the cell says when it has no runs: a field left empty is a grey status.
+    pub status: Option<&'static str>,
 }
 
 /// What a detector found on a page besides tables: a region that may be a table and is left as

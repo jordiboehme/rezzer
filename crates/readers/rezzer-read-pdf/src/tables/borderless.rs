@@ -189,6 +189,7 @@ pub(super) fn borderless(
                                     runs: Vec::new(),
                                     row_span: 1,
                                     col_span: 1,
+                                    status: None,
                                 })
                                 .collect()
                         })
@@ -199,6 +200,7 @@ pub(super) fn borderless(
                     tagged: None,
                     continues: false,
                     caption: Vec::new(),
+                    found_by: None,
                 });
                 continue;
             }
@@ -280,6 +282,7 @@ pub(super) fn borderless(
                                         runs: Vec::new(),
                                         row_span: 1,
                                         col_span: c.span,
+                                        status: None,
                                     })
                                     .collect()
                             })
@@ -290,6 +293,7 @@ pub(super) fn borderless(
                         tagged: None,
                         continues: false,
                         caption: Vec::new(),
+                        found_by: None,
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {
