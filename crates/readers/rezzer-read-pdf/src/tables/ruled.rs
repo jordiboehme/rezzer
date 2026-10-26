@@ -7,9 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
-use super::pairs::{field_cuts, field_strips, frames, taken_by_grids};
+use super::pairs::{Field, claim, field_cuts, field_strips, frames, pairs_table, taken_by_grids};
 use super::sections::{CUT_WORK, sections};
-use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_table};
+use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
 use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
@@ -154,18 +154,11 @@ pub(super) fn ruled(
         let StripKind::Totals(totals) = &strip.kind else {
             continue;
         };
-        let Some(table) = totals_table(flow, totals) else {
+        let list: Vec<&Field> = totals.iter().collect();
+        let Some(table) = pairs_table(flow, &list, totals_top(flow, totals), SIDE_FOUND_BY) else {
             continue;
         };
-        let t = tables.len();
-        for (r, (label, amount)) in totals.iter().enumerate() {
-            for &i in label {
-                claimed[i] = Some((t, r, 0));
-            }
-            for &i in amount {
-                claimed[i] = Some((t, r, 1));
-            }
-        }
+        claim(&mut claimed, tables.len(), &list);
         tables.push(table);
     }
     // The tables of totals come first; they have no header row.

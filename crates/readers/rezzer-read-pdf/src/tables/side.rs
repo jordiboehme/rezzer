@@ -8,6 +8,7 @@
 //! titles, the strip is one more column of that section's table; where it holds a total
 //! label alone on its line over an amount, the two are a pair.
 
+use super::pairs::Field;
 use super::*;
 use crate::regions::Seg;
 
@@ -48,9 +49,9 @@ pub(super) enum StripKind {
     /// Its first line stands on the baseline of the column titles beside it: it is one more
     /// column of that table.
     Joins,
-    /// Total labels each alone on its line, each over its amount: the runs of each label and
-    /// of its amount.
-    Totals(Vec<(Vec<usize>, Vec<usize>)>),
+    /// Total labels each alone on its line, each over its amount: each a field of the label
+    /// and its amount.
+    Totals(Vec<Field>),
     /// Neither: its text is left where it is.
     Other,
 }
@@ -227,42 +228,19 @@ fn strip_kind(
         if numeric(&text(label)) || !numeric(&text(amount)) || beside(label) {
             return StripKind::Other;
         }
-        totals.push((label.runs.clone(), amount.runs.clone()));
+        totals.push(Field {
+            label: label.runs.clone(),
+            value: amount.runs.clone(),
+        });
     }
     StripKind::Totals(totals)
 }
 
-/// The planned table of the totals of a strip: one row of a label and its amount each, in
-/// the order of the page.
-pub(super) fn totals_table(flow: &Flow, totals: &[(Vec<usize>, Vec<usize>)]) -> Option<Planned> {
-    let first = totals.iter().flat_map(|(l, a)| l.iter().chain(a)).min()?;
-    let top = totals
+/// The top of a strip's totals: the top of their highest label.
+pub(super) fn totals_top(flow: &Flow, totals: &[Field]) -> f32 {
+    totals
         .iter()
-        .flat_map(|(l, _)| l)
+        .flat_map(|f| &f.label)
         .map(|&i| flow.runs[i].y + flow.runs[i].size)
-        .fold(f32::MIN, f32::max);
-    Some(Planned {
-        at: flow.at[*first],
-        top,
-        rows: totals
-            .iter()
-            .map(|_| {
-                (0..2)
-                    .map(|_| PlannedCell {
-                        runs: Vec::new(),
-                        row_span: 1,
-                        col_span: 1,
-                        status: None,
-                    })
-                    .collect()
-            })
-            .collect(),
-        trs: Vec::new(),
-        additions: Vec::new(),
-        header_rows: 0,
-        tagged: None,
-        continues: false,
-        caption: Vec::new(),
-        found_by: Some(SIDE_FOUND_BY),
-    })
+        .fold(f32::MIN, f32::max)
 }

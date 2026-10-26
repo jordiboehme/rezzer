@@ -66,9 +66,9 @@ pub(crate) struct BoxTitle {
 
 /// One field: the runs of its label and of its value (none: the field is empty).
 #[derive(Debug, Default)]
-struct Field {
-    label: Vec<usize>,
-    value: Vec<usize>,
+pub(super) struct Field {
+    pub label: Vec<usize>,
+    pub value: Vec<usize>,
 }
 
 /// What the text of a box or of a cell between rules is.
@@ -325,8 +325,14 @@ fn short(flow: &Flow, f: &Field) -> bool {
 }
 
 /// A table of two columns, a label and its value in each row, for `fields` in order; `top` is
-/// its top. An empty value is a grey `empty` status.
-fn pairs_table(flow: &Flow, fields: &[&Field], top: f32, note: &'static str) -> Option<Planned> {
+/// its top. An empty value is a grey `empty` status. Every table of labels and values is built
+/// here: drawn boxes, rows of fields between rules and the totals of a column beside a section.
+pub(super) fn pairs_table(
+    flow: &Flow,
+    fields: &[&Field],
+    top: f32,
+    note: &'static str,
+) -> Option<Planned> {
     let first = fields
         .iter()
         .flat_map(|f| f.label.iter().chain(&f.value))
@@ -354,15 +360,14 @@ fn pairs_table(flow: &Flow, fields: &[&Field], top: f32, note: &'static str) -> 
     })
 }
 
-/// Sends the runs of the fields of each table to its cells.
-fn claim(target: &mut [Target], t: usize, fields: &[&Field]) {
-    let t = u32::try_from(t).unwrap_or(u32::MAX);
+/// Sends the runs of `fields`, the rows of the table `t`, to their cells in `claimed`.
+pub(super) fn claim(claimed: &mut [Option<(usize, usize, usize)>], t: usize, fields: &[&Field]) {
     for (r, f) in fields.iter().enumerate() {
         for &i in &f.label {
-            target[i] = Some((t, r as u32, 0));
+            claimed[i] = Some((t, r, 0));
         }
         for &i in &f.value {
-            target[i] = Some((t, r as u32, 1));
+            claimed[i] = Some((t, r, 1));
         }
     }
 }
@@ -581,7 +586,7 @@ pub(crate) fn box_pairs(
         return (Vec::new(), Vec::new(), said);
     }
     let mut planned: Vec<Planned> = Vec::new();
-    let mut target: Vec<Target> = vec![None; flow.runs.len()];
+    let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
     for c in &groups {
         let list: Vec<&Field> = c.iter().filter_map(|&b| fields[b].as_ref()).collect();
         let top = c.iter().map(|&b| boxes[b][3]).fold(f32::MIN, f32::max);
@@ -643,9 +648,7 @@ pub(crate) fn box_pairs(
     let taken = flow.take(|i, _| target[i].is_some() || title_of[i].is_some());
     for ((run, _, _), i) in taken.into_iter().zip(picked) {
         match (target[i], title_of[i]) {
-            (Some((t, r, c)), _) => planned[t as usize].rows[r as usize][c as usize]
-                .runs
-                .push(run),
+            (Some((t, r, c)), _) => planned[t].rows[r][c].runs.push(run),
             (None, Some((k, false))) => titles[k].runs.push(run),
             (None, Some((k, true))) => titles[k].text.push(run),
             (None, None) => {}
@@ -1468,15 +1471,7 @@ pub(super) fn field_strips(
         let Some(p) = pairs_table(flow, &list, top, STRIP_FOUND_BY) else {
             continue;
         };
-        let t = tables.len();
-        for (r, f) in list.iter().enumerate() {
-            for &i in &f.label {
-                claimed[i] = Some((t, r, 0));
-            }
-            for &i in &f.value {
-                claimed[i] = Some((t, r, 1));
-            }
-        }
+        claim(claimed, tables.len(), &list);
         tables.push(p);
     }
 }
