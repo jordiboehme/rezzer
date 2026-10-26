@@ -32,8 +32,8 @@
 //! source, both sources.
 //!
 //! Files an earlier run left that this run does not write are removed, but only files
-//! Rezzer names itself (rulings P5-Y and P5-AC): in the assets folder regular files named as
-//! Rezzer names pictures ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
+//! Rezzer names itself (rulings P5-Y, P5-AC and P5-AK): in the assets folder regular files
+//! named as Rezzer names pictures and attachments ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
 //! wrote for this source ([`holder`]). A file a user put there stays. An empty parts folder
 //! is removed, also one Rezzer did not make. Symlinks and folders inside are never followed
 //! or removed.
@@ -263,22 +263,31 @@ const ASSET_TYPES: [(&str, &str); 13] = [
 /// The extension of a picture or attachment whose type its bytes do not confirm.
 const OTHER_EXTENSION: &str = "bin";
 
-/// The extensions any picture gets ([`asset_extension`]): a stale file of any safe asset id
-/// with one of them is Rezzer's (ruling P5-AC).
-const PICTURE_EXTENSIONS: [&str; 6] = ["png", "jpg", "gif", "webp", "pdf", OTHER_EXTENSION];
-
-/// Whether `name` is a name Rezzer gives a picture or attachment: a safe asset id, `.` and an
-/// extension [`asset_extension`] gives. The other types of [`ASSET_TYPES`] (text, JSON,
-/// office files) only come from attachments, so only `attachment-<n>` with them counts, and
-/// a user's `notes.txt` in the folder stays.
+/// Whether `name` is a name Rezzer gives a picture or attachment (ruling P5-AK): an id of a
+/// shape the readers make, `page-<n>`, `page-<n>-pic-<m>`, `page-<n>-code-<m>` or
+/// `attachment-<n>`, then `.` and an extension [`asset_extension`] gives. Only such files are
+/// removed as stale, so a user's `logo.png` in the folder stays.
 fn is_asset_name(name: &str) -> bool {
+    let number = |n: &str| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit());
+    let own_id = |id: &str| {
+        if let Some(n) = id.strip_prefix("attachment-") {
+            return number(n);
+        }
+        let Some(rest) = id.strip_prefix("page-") else {
+            return false;
+        };
+        match rest.split_once('-') {
+            None => number(rest),
+            Some((n, inner)) => {
+                number(n)
+                    && ["pic-", "code-"]
+                        .iter()
+                        .any(|p| inner.strip_prefix(p).is_some_and(number))
+            }
+        }
+    };
     name.rsplit_once('.').is_some_and(|(id, ext)| {
-        let attachment = id
-            .strip_prefix("attachment-")
-            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-        safe_asset_id(id)
-            && (PICTURE_EXTENSIONS.contains(&ext)
-                || (attachment && ASSET_TYPES.iter().any(|(_, e)| *e == ext)))
+        own_id(id) && (ext == OTHER_EXTENSION || ASSET_TYPES.iter().any(|(_, e)| *e == ext))
     })
 }
 
@@ -846,17 +855,20 @@ mod tests {
                 .map(|(_, e)| *e);
             let ext = ext.unwrap_or_else(|| panic!("{mime} has no extension"));
             assert!(is_asset_name(&format!("attachment-1.{ext}")), "{ext}");
-            assert_eq!(
-                is_asset_name(&format!("notes.{ext}")),
-                ["png", "jpg", "gif", "webp", "pdf"].contains(&ext),
-                "{ext}"
-            );
+            assert!(is_asset_name(&format!("page-2-pic-3.{ext}")), "{ext}");
+            assert!(!is_asset_name(&format!("logo.{ext}")), "{ext}");
         }
-        assert_eq!(
-            ASSET_TYPES.len(),
-            rezzer_detect::CONFIRMED_MEDIA_TYPES.len()
-        );
         assert!(is_asset_name("page-1.bin"));
+        assert!(is_asset_name("page-12-code-1.png"));
+        for name in [
+            "page-.png",
+            "page-1-pic-.png",
+            "page-1-x-2.png",
+            "pages-1.png",
+            "attachment-a.png",
+        ] {
+            assert!(!is_asset_name(name), "{name}");
+        }
         assert!(!is_asset_name("page-1.csv"));
         assert!(!is_asset_name("page-1.md"));
         assert_eq!(asset_extension(b"\x89PNG\r\n\x1a\n"), "png");

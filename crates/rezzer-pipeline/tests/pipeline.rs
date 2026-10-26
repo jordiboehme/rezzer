@@ -2556,13 +2556,18 @@ fn a_write_error_keeps_the_old_pictures() {
 
 #[test]
 fn the_assets_cleanup_keeps_files_a_user_put_there() {
-    // Ruling P5-AC: only names Rezzer gives pictures are removed.
+    // Rulings P5-AC and P5-AK: only names Rezzer gives pictures and attachments are removed.
     let out = tempfile::tempdir().unwrap();
     let assets = out.path().join("scan.txt.assets");
     std::fs::create_dir_all(&assets).unwrap();
     for name in [
         "page-9.png",
+        "page-3-pic-2.jpg",
+        "page-4-code-1.png",
+        "attachment-7.json",
         "old-2.bin",
+        "logo.png",
+        "logo.gif",
         "My Photo.png",
         "notes.txt",
         "page-1.tiff",
@@ -2579,7 +2584,15 @@ fn the_assets_cleanup_keeps_files_a_user_put_there() {
     );
     assert_eq!(
         names_in(&assets),
-        ["My Photo.png", "notes.txt", "page-1.png", "page-1.tiff"]
+        [
+            "My Photo.png",
+            "logo.gif",
+            "logo.png",
+            "notes.txt",
+            "old-2.bin",
+            "page-1.png",
+            "page-1.tiff"
+        ]
     );
 }
 
