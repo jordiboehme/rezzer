@@ -1113,3 +1113,49 @@ fn non_ascii_passwords_decrypt() {
         Err(OpenError::WrongPassword)
     ));
 }
+
+#[test]
+fn saslprep_passwords_decrypt() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
+    use lopdf::{EncryptionState, EncryptionVersion, Permissions};
+    // AES-256 (revision 6) prepares a password with SASLprep: a no-break space becomes a
+    // space. The key must come from the prepared bytes too.
+    let mut note_id = None;
+    let bytes = one_page(plain_content(), |doc, _, page| {
+        let note = doc.add_object(dictionary! {
+            "Note" => Object::string_literal("Geheimer Text"),
+        });
+        doc.get_dictionary_mut(page).unwrap().set("Note", note);
+        note_id = Some(note);
+        let filter: Arc<dyn CryptFilter> = Arc::new(Aes256CryptFilter);
+        let state = EncryptionState::try_from(EncryptionVersion::V5 {
+            encrypt_metadata: true,
+            crypt_filters: BTreeMap::from([(b"StdCF".to_vec(), filter)]),
+            file_encryption_key: &[7u8; 32],
+            stream_filter: b"StdCF".to_vec(),
+            string_filter: b"StdCF".to_vec(),
+            owner_password: "Eigentümer",
+            user_password: "Grüße\u{a0}2026",
+            permissions: Permissions::all(),
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+    });
+    for password in ["Grüße\u{a0}2026", "Grüße 2026", "Eigentümer"] {
+        let pdf = open(&bytes, Some(password)).unwrap_or_else(|e| panic!("{password}: {e}"));
+        let canon = Document::load_mem(pdf.canonical()).unwrap();
+        let note = canon.get_dictionary(note_id.unwrap()).unwrap();
+        assert_eq!(
+            note.get(b"Note").unwrap().as_str().unwrap(),
+            b"Geheimer Text",
+            "{password}"
+        );
+    }
+    assert!(matches!(
+        open(&bytes, Some("Grusse 2026")),
+        Err(OpenError::WrongPassword)
+    ));
+}

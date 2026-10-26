@@ -1238,3 +1238,16 @@ fn byte_order_mark_inside_frontmatter_is_a_loss() {
         out.document.losses
     );
 }
+
+#[test]
+fn flow_mapping_in_a_pair_keeps_its_keys() {
+    // saphyr-parser before 0.3.1 cut the flow mapping at its first comma.
+    let out = read("---\npairs: [a: {b: 1, c: 2}, d: 3]\n---\n\nBody\n");
+    assert_eq!(
+        out.document.properties.custom["pairs"],
+        Value::List {
+            value: vec![text(r#"{"a":{"b":1,"c":2}}"#), text(r#"{"d":3}"#)]
+        }
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}

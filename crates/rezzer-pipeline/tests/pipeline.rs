@@ -1879,6 +1879,24 @@ fn part_size_not_in_cache_key() {
 }
 
 #[test]
+fn inline_size_not_in_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    Pipeline::new(config(Some(dir.path())), registry).run_bytes(
+        "x.txt",
+        b"hello\n".to_vec(),
+        None,
+        &request(),
+    );
+    let mut cfg = config(Some(dir.path()));
+    cfg.limits.max_inline_bytes = 4096;
+    let (registry, calls_again) = counting(false);
+    Pipeline::new(cfg, registry).run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls_again.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn config_inline_size_and_bounds() {
     let limits = Config::default().limits;
     assert_eq!(limits.max_inline_bytes, 32 << 20);
