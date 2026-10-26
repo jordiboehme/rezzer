@@ -2530,6 +2530,57 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_at_a_linked_title_names_it_and_gives_its_links_back() {
+        // No room for any element: the caption paragraph of the linked title is the block the
+        // stop names, nothing of it is kept, and the link counts it took go back.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_elements: 0,
+            ..rezzer_limits::Limits::default()
+        });
+        let links = LinkRoom::new(10_000);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let before = (links.left.get(), links.freed.get());
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: vec![vec![PlannedCell {
+                runs: vec![run("cell", 1, 680.0, 10.0)],
+                row_span: 1,
+                col_span: 1,
+            }]],
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![Run {
+                uri: Some(UriTarget::new("https://example.org/titel")),
+                ..run("Muster Titel", 0, 700.0, 10.0)
+            }],
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        assert!(built.stop.is_some());
+        assert_eq!(built.cut, Some(Cut::Block(1)));
+        assert!(built.blocks.is_empty(), "{:?}", built.blocks);
+        assert_eq!((links.left.get(), links.freed.get()), before);
+    }
+
+    #[test]
     fn a_title_of_a_table_without_rows_stays() {
         let blocks = titled_table(0, false, 10_000);
         assert_eq!(
