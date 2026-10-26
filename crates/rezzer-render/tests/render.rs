@@ -1933,31 +1933,45 @@ fn wikilinks_are_written_as_escaped_text() {
     assert!(out.ends_with(r"\[\[graph-view\]\]"), "{out}");
     let out = render_inline(wiki_link("a#sec", "label"));
     assert!(out.ends_with(r"\[\[a#sec\|label\]\]"), "{out}");
-    assert!(!out.contains("[["), "{out}");
+    assert_wikilink_text(&out, "[[a#sec|label]]");
+}
+
+/// Parses `md` back: no live link, no `[[` Crystalline would read as a wikilink, and the
+/// text reads `shown`.
+fn assert_wikilink_text(md: &str, shown: &str) {
+    assert!(!md.contains("[["), "{md}");
+    let mut text = String::new();
+    for event in Parser::new_ext(md, Options::all()) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => panic!("live link {dest_url} in {md}"),
+            Event::Text(t) => text.push_str(&t),
+            _ => {}
+        }
+    }
+    assert!(text.contains(shown), "{shown} not in {text:?} from {md}");
 }
 
 #[test]
-fn a_wikilink_inside_code_stays_as_it_is() {
-    let out = render_inline(Inline::Code {
-        text: "[[graph-view]]".into(),
-    });
-    assert!(out.ends_with("`[[graph-view]]`"), "{out}");
-}
-
-#[test]
-fn unsafe_wikilinks_fall_back_to_a_normal_link() {
-    for (target, text) in [
-        ("a]]b", "a]]b"),
-        ("a|b", "a|b"),
-        ("a\nb", "x"),
-        ("ok", "x|y"),
-        ("ok", "x]]y"),
+fn every_wikilink_is_text_whatever_its_target() {
+    for (target, text, shown) in [
+        ("project_plan", "project_plan", "[[project_plan]]"),
+        (
+            "notes/my_plan.md",
+            "notes/my_plan.md",
+            "[[notes/my_plan.md]]",
+        ),
+        ("a", "b", "[[a|b]]"),
+        ("a]]b", "a]]b", "[[a]]b]]"),
+        ("a|b", "a|b", "[[a|b]]"),
+        ("a\nb", "x", "[[a b|x]]"),
+        ("ok", "x|y", "[[ok|x|y]]"),
+        ("ok", "x]]y", "[[ok|x]]y]]"),
+        ("other:Note", "other:Note", "[[other:Note]]"),
     ] {
         let out = render_inline(wiki_link(target, text));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, shown);
     }
 }
-
 /// Parses the rendered Markdown back: no live javascript link and no raw HTML.
 fn assert_inert(md: &str) {
     for event in Parser::new_ext(md, Options::all()) {
@@ -1989,13 +2003,13 @@ fn hostile_wikilinks_stay_inert() {
     ];
     for (target, text) in cases {
         let out = render_inline(wiki_link(target, text));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, "[[");
         assert_inert(&out);
     }
 }
 
 #[test]
-fn wikilinks_with_formatting_in_the_text_fall_back() {
+fn wikilinks_with_formatting_in_the_text_are_text() {
     let mut link = wiki_link("x", "label");
     if let Inline::Link { inlines, .. } = &mut link {
         *inlines = vec![Inline::Text {
@@ -2005,14 +2019,14 @@ fn wikilinks_with_formatting_in_the_text_fall_back() {
             strike: false,
         }];
     }
-    assert!(!render_inline(link).contains("[["));
+    assert_wikilink_text(&render_inline(link), "[[x|label]]");
     let mut link = wiki_link("x", "label");
     if let Inline::Link { inlines, .. } = &mut link {
         *inlines = vec![Inline::Code {
             text: "label".into(),
         }];
     }
-    assert!(!render_inline(link).contains("[["));
+    assert_wikilink_text(&render_inline(link), "[[x|label]]");
 }
 
 #[test]
@@ -2021,7 +2035,10 @@ fn plain_wikilinks_in_any_script_are_written() {
         render_inline(wiki_link("Straße/日本語 note-1x.md#Sec, it's", "Straße"))
             .ends_with(r"\[\[Straße/日本語 note-1x.md#Sec, it's\|Straße\]\]")
     );
-    assert!(!render_inline(wiki_link("http://x", "http://x")).contains("[["));
+    assert_wikilink_text(
+        &render_inline(wiki_link("http://x", "http://x")),
+        "[[http://x]]",
+    );
 }
 
 fn plain_link(target: &str, text: &str) -> Inline {
@@ -2056,10 +2073,10 @@ fn headings_keep_their_links() {
 }
 
 #[test]
-fn underscores_keep_a_wikilink_from_being_written() {
+fn wikilinks_with_underscores_are_text() {
     for name in ["_b_", "__init__", "a_b"] {
         let out = render_inline(wiki_link(name, name));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, &format!("[[{name}]]"));
     }
 }
 

@@ -447,8 +447,8 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 }
                 return;
             }
-            if *wiki && let Some(written) = wikilink(target, content, mode) {
-                out.push_str(&written);
+            if *wiki {
+                out.push_str(&wikilink(target, content, mode));
                 return;
             }
             if !safe_target(target) {
@@ -2055,46 +2055,23 @@ fn model_table(
     out
 }
 
-/// Characters allowed in a wikilink written as the text `[[...]]`: letters and digits of any
-/// script, space and `- . / # ' ,` (no `_`: it can mean emphasis). Nothing here has a Markdown
-/// or HTML meaning inside `[[ ]]`.
-fn wiki_plain(text: &str) -> bool {
-    text.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '/' | '#' | '\'' | ','))
-}
-
-/// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, every
-/// bracket and `|` escaped (ruling P5-AD): Rezzer cannot know the name the target is written
-/// under, so a live wikilink would be broken on every import. Crystalline reads a wikilink
-/// wherever `[[` stands, also after a backslash, so each bracket is escaped. The link itself
-/// stays in the link facts. None unless the target (without a `:`) and the text are plain
-/// (see [`wiki_plain`]) and the text has no formatting, image or code; the link is then
-/// written as a normal, escaped link.
-fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
-    let mut text = String::new();
-    for inline in content {
-        match inline {
-            Inline::Text {
-                text: t,
-                emphasis: false,
-                strong: false,
-                strike: false,
-            } => text.push_str(t),
-            Inline::AnchorMark { .. } => {}
-            _ => return None,
-        }
-    }
-    if target.is_empty() || !wiki_plain(target) || !wiki_plain(&text) {
-        return None;
-    }
-    let spelled = if text.is_empty() || text == target {
+/// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, with
+/// every bracket, `|` and other Markdown character escaped and line breaks as spaces (ruling
+/// P5-AD): Rezzer cannot know the name the target is written under,
+/// so a live link to it would be broken on every import. This holds for every wikilink, also
+/// one with `_`, `:`, a path or formatting. Crystalline reads a wikilink wherever `[[`
+/// stands, also after a backslash, so each bracket is escaped. The link itself stays in the
+/// link facts and the graph.
+fn wikilink(target: &str, content: &[Inline], mode: Mode) -> String {
+    let text = plain_text(content);
+    let spelled = if text.trim().is_empty() || text == target {
         format!("[[{target}]]")
     } else {
         format!("[[{target}|{text}]]")
     };
     let mut out = String::new();
     escape_text(&spelled, line_mode(mode), &mut out);
-    Some(out)
+    out
 }
 
 #[cfg(test)]
