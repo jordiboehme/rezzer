@@ -6,9 +6,11 @@ Status: ✅ available in the development version. It is part of 0.1.0, the first
 
 File types: `.md`, `.markdown`. Rezzer detects the format by content, not by extension.
 
-Built on (versions as tested on 2026-10-19):
+Built on (versions as used in the development version):
 
-- [pulldown-cmark](https://crates.io/crates/pulldown-cmark) 0.13.4 for the structure, with source positions, YAML and TOML frontmatter blocks and wikilinks
+- [pulldown-cmark](https://crates.io/crates/pulldown-cmark) 0.13.5 for the structure, with source positions, YAML and TOML frontmatter blocks and wikilinks
+- [saphyr-parser](https://crates.io/crates/saphyr-parser) 0.3.2 for YAML frontmatter, read as events with Rezzer's own limits on depth and alias expansion
+- [toml](https://crates.io/crates/toml) 1.1.8 for TOML frontmatter
 - Rezzer's own reader for the frontmatter values and the link table
 
 ## What Rezzer reads
@@ -67,7 +69,8 @@ flowchart LR
 
 ## Known limitations
 
-- Reading the frontmatter values needs a YAML and a TOML parser. These are not chosen or tested yet
+- A byte order mark inside YAML frontmatter is not allowed by YAML. Such frontmatter is not read: it is kept as a code block and a loss says why. A byte order mark at the start of the file is fine
+- An empty block value (`summary: |` with nothing after it) is an empty text, as YAML says
 - Liquid or other template tags in the text are kept as text, not run
 
 ## How it is tested

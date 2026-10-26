@@ -54,7 +54,8 @@ enum Command {
     },
     /// List the formats this build can read.
     Formats,
-    /// Run the MCP server on stdio.
+    /// Run the MCP server on stdio. A file sent inline as a data: URI may be up to
+    /// limits.max_inline_bytes (32 MiB by default); give a larger file by path.
     Mcp,
 }
 

@@ -34,25 +34,25 @@ version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
 repository = "https://github.com/jordiboehme/rezzer"
-rust-version = "1.99.0"
+rust-version = "1.99.1"
 
 [workspace.dependencies]
-rmcp = { version = "=3.5.1", default-features = false }
+rmcp = { version = "=3.7.0", default-features = false }
 clap = "=4.6.7"
 serde = "=1.0.229"
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"
 sha2 = "=0.11.1"
-memmap2 = "=0.9.11"
+memmap2 = "=0.9.12"
 chardetng = "=1.0.0"
 encoding_rs = "=0.8.42"
-pulldown-cmark = { version = "=0.13.4", default-features = false }
+pulldown-cmark = { version = "=0.13.5", default-features = false }
 csv = "=1.4.0"
 whatlang = "=0.18.0"
 tokio = "=1.54.1"
 schemars = "=1.2.3"
 toml = "=1.1.8"
-saphyr-parser = "=0.2.2"
+saphyr-parser = "=0.3.2"
 directories = "=6.0.0"
 hex = "=0.4.3"
 anyhow = "=1.0.104"
@@ -60,7 +60,7 @@ insta = "=1.49.0"
 tempfile = "=3.27.0"
 assert_cmd = "=2.2.2"
 predicates = "=3.1.4"
-zip = { version = "=9.0.5", default-features = false }
+zip = { version = "=9.1.2", default-features = false }
 cfb = "=0.15.0"
 libc = "=0.2.191"
 flate2 = { version = "=1.1.10", default-features = false }
@@ -68,24 +68,26 @@ base64 = "=0.23.1"
 percent-encoding = "=2.3.2"
 # NFC file names and links (ruling P5-W); already in the tree through stringprep.
 unicode-normalization = "=0.1.26"
-formualizer-parse = { version = "=4.0.0", default-features = false }
+formualizer-parse = { version = "=4.1.0", default-features = false }
 quick-xml = "=0.42.0"
 calamine = { version = "=0.37.0", default-features = false }
-lopdf = { version = "=0.45.0", default-features = false }
+lopdf = { version = "=0.46.0", default-features = false }
 weezl = "=0.2.1"
 # The Adler-32 of zlib streams; already in the tree through miniz_oxide.
 adler2 = { version = "=2.0.1", default-features = false }
-brotli-decompressor = "=5.0.3"
+brotli-decompressor = "=6.2.0"
 # One version for the three hayro crates. hayro-interpret's default features embed the
 # standard 14 font substitutes and the predefined CMaps that text extraction needs.
 hayro = "=0.8.0"
 hayro-interpret = "=0.8.0"
 hayro-syntax = "=0.8.0"
-# The versions hayro-interpret 0.8.0 uses, so its glyph and font types are the same types.
+# The version hayro-interpret 0.8.0 uses, so its glyph types are the same types.
 kurbo = "=0.13.1"
-skrifa = "=0.46.2"
+# Newer than the skrifa 0.46 of hayro-interpret 0.8.0. Rezzer gives skrifa only font bytes and
+# no skrifa type comes from hayro, so the two copies stay apart until hayro moves.
+skrifa = "=0.49.0"
 # skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
-read-fonts = { version = "=0.43.3", features = ["agl"] }
+read-fonts = { version = "=0.46.0", features = ["agl"] }
 unicode-bidi = "=0.3.18"
 # Barcode and QR code reading. Its default features pull in the image crate and the encoders;
 # Rezzer hands it Luma8 pixels. MaxiCode stays off through the formats each pass asks for.

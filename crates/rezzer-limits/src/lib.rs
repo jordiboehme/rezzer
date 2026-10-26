@@ -23,6 +23,9 @@ const GIB: u64 = 1024 * MIB;
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_file_bytes: u64,
+    /// The largest file sent inline (a `data:` URI over MCP), at most `max_file_bytes`. A
+    /// file by path is bound by `max_file_bytes` only. See [`check_inline_bytes`].
+    pub max_inline_bytes: u64,
     pub max_unpacked_bytes: u64,
     pub max_ratio: u32,
     pub max_depth: u32,
@@ -51,6 +54,7 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             max_file_bytes: 2 * GIB,
+            max_inline_bytes: DEFAULT_INLINE_BYTES,
             max_unpacked_bytes: 4 * GIB,
             max_ratio: 100,
             max_depth: 256,
@@ -61,6 +65,32 @@ impl Default for Limits {
             max_elements: 2_000_000,
             max_text_bytes: 256 * MIB,
         }
+    }
+}
+
+impl Limits {
+    /// The largest inline file that is read: `max_inline_bytes`, but never more than
+    /// `max_file_bytes`.
+    pub fn inline_bytes(&self) -> u64 {
+        self.max_inline_bytes.min(self.max_file_bytes)
+    }
+}
+
+/// The default [`Limits::max_inline_bytes`]: 32 MiB.
+pub const DEFAULT_INLINE_BYTES: u64 = 32 * MIB;
+
+/// The largest [`Limits::max_inline_bytes`]. One inline message may take six times as many
+/// bytes as its file, and the server holds the whole message.
+pub const MAX_INLINE_BYTES: u64 = GIB;
+
+/// Checks an inline file size limit: at least 1 byte and at most [`MAX_INLINE_BYTES`].
+pub fn check_inline_bytes(n: u64) -> Result<(), String> {
+    if (1..=MAX_INLINE_BYTES).contains(&n) {
+        Ok(())
+    } else {
+        Err(format!(
+            "max_inline_bytes must be between 1 and {MAX_INLINE_BYTES}"
+        ))
     }
 }
 

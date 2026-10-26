@@ -9,7 +9,7 @@ File types: `.xlsx`, `.xlsm`, `.xlsb`. Rezzer detects the format by content, not
 Built on (versions as used in the development version):
 
 - [calamine](https://crates.io/crates/calamine) 0.37.0 for values, cached results, formula texts, merged cells and VBA module names
-- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells, ranges, names and tables each formula reads
+- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.1.0, behind Rezzer's own formulakit crate, to find the cells, ranges, names and tables each formula reads
 - Rezzer's own readers on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for the parts no crate exposes well (XLSX and XLSM): sheetparts for the workbook parts, zipguard to check the package before anything is unpacked
 
 ## What Rezzer reads

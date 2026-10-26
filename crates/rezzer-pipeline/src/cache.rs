@@ -162,11 +162,12 @@ fn write_entry<W: Write>(out: W, entry: &EntryRef<'_>) -> std::io::Result<()> {
 /// The cache key of one read, as lowercase hex.
 pub(crate) fn key(src: &Source, reader: Option<(&str, &str)>, config: &Config) -> String {
     // The page and part sizes only change pagination and the split, which run after the
-    // cache.
+    // cache. The inline size limit is checked before the pipeline runs.
     let mut limits = serde_json::to_value(&config.limits).unwrap_or_default();
     if let Some(map) = limits.as_object_mut() {
         map.remove("page_tokens");
         map.remove("part_size");
+        map.remove("max_inline_bytes");
     }
     let mut disabled = config.enrich.disabled.clone();
     disabled.sort();
