@@ -2,7 +2,7 @@
 
 Rezzer reads the text of a PDF in reading order, and also the layer behind it: outline, annotations with author and date, form fields with their calculations, scripts, signatures and saved revisions.
 
-Status: available in the development version (no release yet).
+Status: ✅ available in the development version. It is part of 0.1.0, the first release.
 
 File types: `.pdf`. Rezzer detects the format by content, not by extension.
 

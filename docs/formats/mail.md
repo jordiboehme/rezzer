@@ -2,7 +2,7 @@
 
 Rezzer reads single mails and whole mailboxes: senders, recipients, dates, the reply graph of a thread and the attachments, which it reads as documents of their own.
 
-Status: planned for a later release (after the first one).
+Status: 🔭 planned for a later release, after 0.2.0.
 
 File types: `.eml`, `.mbox`. Rezzer detects the format by content, not by extension. It looks for mail headers and for the `From ` lines that separate the messages in an mbox file, also in files named `.txt`. The output says how the format was decided.
 

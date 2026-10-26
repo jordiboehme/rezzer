@@ -2,7 +2,7 @@
 
 Rezzer reads engineering calculation worksheets without the vendor's software. It shows every definition with its expression, unit and last computed value. It also shows which values are inputs and which are results and how they depend on each other.
 
-Status: planned for a later release.
+Status: 🔭 planned for a later release.
 
 File types:
 

@@ -2,7 +2,7 @@
 
 Rezzer reads e-books with their full book metadata (authors and their roles, series, accessibility), the table of contents and a graph of footnotes and cross references.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.epub` (EPUB 2 and EPUB 3). Rezzer detects the format by content, not by extension.
 

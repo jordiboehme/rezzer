@@ -2,7 +2,7 @@
 
 Rezzer reads web pages as structure, not as a text dump: landmarks, tables with spans, math, page metadata, typed entities from JSON-LD and microdata, forms with their rules and the link graph.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.html`, `.htm`. Rezzer detects the format by content, not by extension.
 
