@@ -180,7 +180,7 @@ impl PageItems {
                         Some(u) if links.insert(Rc::as_ptr(u)) => u.uri.len() as u64 + 64,
                         _ => 0,
                     };
-                    (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64 + link
+                    (std::mem::size_of::<Run>() + 32 + r.text.len() + r.gaps.bytes()) as u64 + link
                 })
                 .sum()
         };
@@ -1002,6 +1002,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             (crop.x0, crop.y0, width, height),
             &layers,
             &boxes,
+            &dev.rules,
         );
         drop(boxes);
         if let Some(why) = &unsearched {
@@ -3524,6 +3525,7 @@ fn page_turn<'g>(visible: impl Iterator<Item = &'g Gl>) -> Turn {
 
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it; `width` and `height` are its size.
+#[allow(clippy::too_many_arguments)]
 fn lay_out(
     page: u32,
     glyphs: &[Gl],
@@ -3532,6 +3534,7 @@ fn lay_out(
     (x0, y0, width, height): (f64, f64, f32, f32),
     layers: &[String],
     boxes: &[[f32; 4]],
+    rules: &[Rule],
 ) -> PageItems {
     let mut by_layer: Vec<Vec<Gl>> = vec![Vec::new(); layers.len()];
     let mut rest: Vec<Gl> = Vec::with_capacity(glyphs.len());
@@ -3556,7 +3559,7 @@ fn lay_out(
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
     let linked = !items.links_cut && !links.is_empty();
-    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes);
+    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes, rules);
     if linked {
         for uri in unplaced_links(&visible, &items.runs, links) {
             items.notes.push(Note::Unsupported(format!(
@@ -3590,6 +3593,10 @@ fn lay_out(
         for r in runs {
             r.x += sx;
             r.y += sy;
+            for g in r.gaps.iter_mut() {
+                g.from += sx;
+                g.to += sx;
+            }
         }
     }
     if items.runs.is_empty() && !items.invisible.is_empty() {
@@ -3712,6 +3719,7 @@ mod tests {
             uri,
             line: 0,
             off_axis: false,
+            gaps: crate::layout::Gaps::default(),
         };
         // Link 0 is on a run with text; link 1 only on a run of white space.
         let glyphs = [glyph(Some(0)), glyph(Some(1)), glyph(None)];

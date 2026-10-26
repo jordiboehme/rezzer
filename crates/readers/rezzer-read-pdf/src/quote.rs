@@ -541,6 +541,7 @@ mod tests {
             uri: None,
             line,
             off_axis: false,
+            gaps: crate::layout::Gaps::default(),
         }
     }
 

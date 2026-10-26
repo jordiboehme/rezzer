@@ -10,8 +10,9 @@ use std::rc::Rc;
 
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
-use crate::layout::Run;
+use crate::layout::{Gap, Gaps, Run};
 use crate::regions::{BOX_WORK, Index, Part, offset_baselines};
+use crate::tables::Rule;
 use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
@@ -98,6 +99,9 @@ struct Frag {
     /// Where the text of each glyph (and each space put in) starts in `text`: the units
     /// right-to-left reordering moves as a whole.
     units: Vec<u32>,
+    /// The white space between words: where in `text` the word after it starts, the end of
+    /// the ink before it and the start of the ink after it.
+    gaps: Vec<(u32, f32, f32)>,
 }
 
 /// A frame that turns glyph positions so their text reads along +x.
@@ -200,9 +204,15 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                 let glued = g.joined
                     || f.text.ends_with(char::is_whitespace)
                     || t.starts_with(char::is_whitespace);
-                if gap > WORD_GAP * size && !glued {
+                let spaced = gap > WORD_GAP * size && !glued;
+                if spaced {
                     f.units.push(f.text.len() as u32);
                     f.text.push(' ');
+                }
+                // Ink after white space starts a word: the gap before it is kept.
+                if !pad && f.inked && (spaced || f.padded || t.starts_with(char::is_whitespace)) {
+                    let lead = t.len() - t.trim_start().len();
+                    f.gaps.push(((f.text.len() + lead) as u32, f.end, x));
                 }
                 if !t.is_empty() {
                     f.units.push(f.text.len() as u32);
@@ -251,6 +261,7 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             region: None,
             chars: 0,
             units: vec![0],
+            gaps: Vec::new(),
         });
     }
     // Padding is no text: only the characters from the first ink to the last count, so a
@@ -935,6 +946,7 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         uri: uri(f),
         line,
         off_axis: false,
+        gaps: Gaps::default(),
     };
     let rtl = ids.iter().any(|&i| frags[i].text.chars().any(is_rtl));
     if !rtl {
@@ -950,7 +962,23 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
                 if pad_after[pos] {
                     text.push(' ');
                 }
-                run_of(f, text)
+                // The gaps inside the kept text, by the words before each.
+                let kept = &f.text[a..b.max(a)];
+                let gaps = Gaps::new(
+                    f.gaps
+                        .iter()
+                        .filter(|g| (g.0 as usize) > a && (g.0 as usize) < b)
+                        .map(|&(at, from, to)| Gap {
+                            words: kept[..at as usize - a].split_whitespace().count() as u32,
+                            from,
+                            to,
+                        })
+                        .collect(),
+                );
+                Run {
+                    gaps,
+                    ..run_of(f, text)
+                }
             })
             .collect();
     }
@@ -1087,6 +1115,7 @@ fn vertical_runs(
                 uri: None,
                 line: 0,
                 off_axis: true,
+                gaps: Gaps::default(),
             },
             y,
         ));
@@ -1108,12 +1137,14 @@ pub(crate) fn runs_of(
     turn: Turn,
     links: &[Link],
 ) -> Vec<Run> {
-    runs_in(page, glyphs, text, turn, links, &[]).0
+    runs_in(page, glyphs, text, turn, links, &[], &[]).0
 }
 
 /// [`runs_of`], with the drawn boxes of the page (in the frame of the page box) as reading
 /// regions for the main text: the text of a box is read whole. Also says why the boxes were
-/// not used, when a bound kept them out.
+/// not used, when a bound kept them out. A run keeps its [`Gaps`] only where an end or side
+/// of one of the page's drawn `rules` lies inside it along the main text: only a column rule
+/// may cut a run.
 pub(crate) fn runs_in(
     page: u32,
     glyphs: &[Gl],
@@ -1121,6 +1152,7 @@ pub(crate) fn runs_in(
     turn: Turn,
     links: &[Link],
     boxes: &[[f32; 4]],
+    rules: &[Rule],
 ) -> (Vec<Run>, Option<String>) {
     let mut main = Vec::with_capacity(glyphs.len());
     let mut vertical = Vec::new();
@@ -1162,19 +1194,25 @@ pub(crate) fn runs_in(
             [a.0.min(c.0), a.1.min(c.1), a.0.max(c.0), a.1.max(c.1)]
         })
         .collect();
+    let mut columns: Vec<f32> = rules
+        .iter()
+        .flat_map(|r| [turn.apply(r.x0, r.y0).0, turn.apply(r.x1, r.y1).0])
+        .collect();
+    columns.sort_by(f32::total_cmp);
     let unused = if turned.is_empty() {
         None
     } else {
         tag_regions(&mut frags, &turned).err()
     };
     for ids in lines_in(&frags, true, &turned) {
-        runs.extend(line_runs(
-            page,
-            &frags,
-            from_first_ink(&frags, &ids),
-            line,
-            links,
-        ));
+        let mut r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
+        for run in &mut r {
+            let k = columns.partition_point(|x| *x <= run.x);
+            if !columns.get(k).is_some_and(|x| *x < run.x + run.w) {
+                run.gaps = Gaps::default();
+            }
+        }
+        runs.extend(r);
         line += 1;
     }
     for (dir, list) in others {
@@ -1188,6 +1226,7 @@ pub(crate) fn runs_in(
             for (run, &i) in r.iter_mut().zip(ids) {
                 (run.x, run.y) = (frags[i].ox, frags[i].oy);
                 run.off_axis = true;
+                run.gaps = Gaps::default();
             }
             runs.extend(r);
             line += 1;
@@ -1299,6 +1338,7 @@ mod tests {
             region: None,
             chars: text.chars().count(),
             units: vec![0],
+            gaps: Vec::new(),
         }
     }
 

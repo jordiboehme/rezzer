@@ -47,6 +47,95 @@ pub(crate) struct Run {
     /// The run reads in another direction than the page's text (margin notes, stamps,
     /// vertical writing); its `x` and `y` are where it starts.
     pub off_axis: bool,
+    /// Where the white space between its words lies, from the glyphs: what a column rule
+    /// that crosses the run may cut it at. Empty when the run has one word, reads in another
+    /// direction or from right to left, or its text was not laid out from glyphs.
+    pub gaps: Gaps,
+}
+
+/// The gaps of a run behind one pointer, none for a run without them: a run is no larger for
+/// them than a pointer.
+// A box of a list is one pointer where a boxed slice is two: the run stays 80 bytes.
+#[allow(clippy::box_collection)]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Gaps(Option<Box<Vec<Gap>>>);
+
+impl Gaps {
+    pub(crate) fn new(list: Vec<Gap>) -> Gaps {
+        Gaps((!list.is_empty()).then(|| Box::new(list)))
+    }
+
+    /// The memory the list takes besides the run.
+    pub(crate) fn bytes(&self) -> usize {
+        self.0.as_ref().map_or(0, |l| {
+            std::mem::size_of::<Vec<Gap>>() + l.capacity() * std::mem::size_of::<Gap>()
+        })
+    }
+}
+
+impl std::ops::Deref for Gaps {
+    type Target = [Gap];
+    fn deref(&self) -> &[Gap] {
+        self.0.as_deref().map_or(&[], Vec::as_slice)
+    }
+}
+
+impl std::ops::DerefMut for Gaps {
+    fn deref_mut(&mut self) -> &mut [Gap] {
+        self.0.as_deref_mut().map_or(&mut [], Vec::as_mut_slice)
+    }
+}
+
+/// The white space between two words of a run: after its first `words` words (as
+/// `split_whitespace` counts them, which separators put in later do not change), from the
+/// end of the ink before it to the start of the ink after it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Gap {
+    pub words: u32,
+    pub from: f32,
+    pub to: f32,
+}
+
+impl Run {
+    /// The run cut at its gap `k`: the words before it, and the words after it as a run that
+    /// starts a new word, each with its own extent and gaps.
+    pub(crate) fn cut_at(&self, k: usize) -> (Run, Run) {
+        let gap = self.gaps[k];
+        let mut seen = 0u32;
+        let mut in_word = false;
+        let mut at = self.text.len();
+        for (i, c) in self.text.char_indices() {
+            if c.is_whitespace() {
+                in_word = false;
+            } else if !in_word {
+                if seen == gap.words {
+                    at = i;
+                    break;
+                }
+                seen += 1;
+                in_word = true;
+            }
+        }
+        let end = self.x + self.w;
+        let mut before = self.clone();
+        before.text = self.text[..at].trim_end().to_string();
+        before.w = (gap.from - self.x).max(0.0);
+        before.gaps = Gaps::new(self.gaps[..k].to_vec());
+        let mut after = self.clone();
+        after.text = format!(" {}", &self.text[at..]);
+        after.x = gap.to;
+        after.w = (end - gap.to).max(0.0);
+        after.gaps = Gaps::new(
+            self.gaps[k + 1..]
+                .iter()
+                .map(|g| Gap {
+                    words: g.words - gap.words,
+                    ..*g
+                })
+                .collect(),
+        );
+        (before, after)
+    }
 }
 
 /// The target of a URI link, with the most bytes its copy can be written as. The size is
@@ -2234,6 +2323,7 @@ mod tests {
             uri: None,
             line,
             off_axis: false,
+            gaps: Gaps::default(),
         }
     }
 

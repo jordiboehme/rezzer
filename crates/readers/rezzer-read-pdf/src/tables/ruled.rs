@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::banded::{Band, Shared, Taken, banded};
+use super::banded::{Band, Shared, Taken, banded, row_starts};
 use super::sections::{CUT_WORK, sections};
 use super::*;
 use crate::marks::is_placeholder;
@@ -98,6 +98,12 @@ pub(super) fn ruled(
         let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
         top(b).total_cmp(&top(a))
     });
+    if !cut_at_columns(flow, &grids, COLUMN_CUT_WORK) {
+        found.skipped.push(format!(
+            "text across column lines on page {page} is cut at them only in part: the page has \
+             too many runs across its column lines"
+        ));
+    }
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
     // Runs a grid took, and for each the table and the row and cell it goes to.
@@ -138,16 +144,7 @@ pub(super) fn ruled(
             ));
             break;
         }
-        let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
-        xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
-        xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
-        let mut ys: Vec<f32> = h.iter().map(|s| s.at).collect();
-        ys.push(v.iter().map(|s| s.from).fold(f32::MAX, f32::min));
-        ys.push(v.iter().map(|s| s.to).fold(f32::MIN, f32::max));
-        let xs = clustered(xs);
-        let mut ys = clustered(ys);
-        // Rows from the top.
-        ys.reverse();
+        let (xs, mut ys) = edges(&h, &v);
         let mut title_above = pending.remove(&id).unwrap_or_default();
         if xs.len() >= 2 && ys.len() >= 2 {
             let mut place = TitlePlace {
@@ -410,6 +407,17 @@ pub(super) fn ruled(
                 !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
             !below.is_empty() && (bold || (median(&mut top) - median(&mut below)).abs() > 0.5)
         };
+        // An open row (the lines under a header of hanging rules) has a cell for each of the
+        // header's columns: each value goes into the column it stands under, and a field
+        // left empty is an empty cell.
+        let is_open: Vec<bool> = (0..rows)
+            .map(|r| open.iter().any(|f| (ys[r] - f).abs() <= SNAP))
+            .collect();
+        for (r, row) in owner.iter_mut().enumerate() {
+            if is_open[r] {
+                *row = (0..cols).map(|c| (r, c)).collect();
+            }
+        }
         // A band of the body that no column rule parts, under a header that has them, is
         // read in the header's columns when its lines hold text in two columns or more.
         if head >= 1 && cols >= 3 {
@@ -443,7 +451,7 @@ pub(super) fn ruled(
         // Rows of the body that only column rules part: the lines of a band that fill at
         // least half of its columns with text, the first of them included, each start a row.
         let mut anchors = anchor_rows(
-            flow, &within, head, rows, &owner, &extent, &row_at, &cell_at,
+            flow, &within, head, &is_open, &owner, &extent, &row_at, &cell_at,
         );
         // The lines under a header of hanging rules are rows by the header's columns.
         open_anchors(flow, &within, &xs, &ys, &open, &row_at, &mut anchors);
@@ -486,13 +494,17 @@ pub(super) fn ruled(
         let all: usize = extent.keys().map(|o| subs(o.0)).sum();
         let spanning: usize = extent
             .iter()
-            .filter(|(o, (rs, cs))| {
-                o.0 >= head && rs * cs > 1 && !open.iter().any(|f| (ys[o.0] - f).abs() <= SNAP)
-            })
+            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !is_open[o.0])
             .map(|(o, _)| subs(o.0))
             .sum();
-        let empty = all - with_text.len();
-        let refused = if empty as f32 > EMPTY_SHARE * all as f32 {
+        // The fields of an open row are often left empty: its cells do not count here.
+        let counted: usize = extent
+            .keys()
+            .filter(|o| !is_open[o.0])
+            .map(|o| subs(o.0))
+            .sum();
+        let empty = counted - with_text.iter().filter(|(o, _)| !is_open[o.0]).count();
+        let refused = if empty as f32 > EMPTY_SHARE * counted as f32 {
             Some("most of its cells are empty")
         } else if 10 * spanning > 3 * all {
             Some("its boxes do not form rows and columns")
@@ -560,9 +572,15 @@ pub(super) fn ruled(
             at,
             top: b[3],
             rows: planned_rows,
-            // A header of two rows or more in a style of its own is the grid's; otherwise the
-            // first row is judged by its text.
-            header_rows: if styled { head } else { 0 },
+            // A header of two rows or more in a style of its own is the grid's, as are the
+            // rows over the first open row; otherwise the first row is judged by its text.
+            header_rows: if styled {
+                head
+            } else {
+                (0..is_open.iter().position(|o| *o).unwrap_or(0))
+                    .map(subs)
+                    .sum()
+            },
             trs: Vec::new(),
             additions: Vec::new(),
             tagged: None,
@@ -889,12 +907,11 @@ fn open_anchors(
 }
 
 /// The baselines, going up, of the lines that start a row in an open row (lines without
-/// rules under a header of hanging rules) that holds `runs`, in lines by baseline: a line
-/// starts a row when it has text in at least half of the columns of `xs` that the lines
-/// use, the others join the row above.
+/// rules under a header of hanging rules) that holds `runs`, in lines by baseline, by the
+/// rule of a body under a header band ([`row_starts`]) in the columns of `xs`.
 fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
     let cols = xs.len() - 1;
-    let mut runs: Vec<(f32, f32, usize)> = runs
+    let mut runs: Vec<(f32, f32, usize, &str)> = runs
         .iter()
         .map(|&i| {
             let r = &flow.runs[i];
@@ -903,36 +920,183 @@ fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
                 .partition_point(|e| *e < cx)
                 .saturating_sub(1)
                 .min(cols - 1);
-            (r.y, r.size.max(1.0), c)
+            (r.y, r.size.max(1.0), c, r.text.as_str())
         })
         .collect();
     runs.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let mut lines: Vec<(f32, Vec<usize>)> = Vec::new();
-    for (y, size, c) in runs {
-        match lines.last_mut() {
-            Some((ly, cs)) if *ly - y <= 0.3 * size => cs.push(c),
-            _ => lines.push((y, vec![c])),
+    // Lines from the top, each the text of its columns.
+    let mut lines: Vec<(f32, Vec<(usize, String)>)> = Vec::new();
+    for (y, size, c, text) in runs {
+        if lines.last().is_none_or(|(ly, _)| *ly - y > 0.3 * size) {
+            lines.push((y, Vec::new()));
+        }
+        let Some((_, line)) = lines.last_mut() else {
+            continue;
+        };
+        match line.iter_mut().find(|p| p.0 == c) {
+            Some(p) => p.1.push_str(text),
+            None => line.push((c, text.to_string())),
         }
     }
-    let mut used: Vec<usize> = lines.iter().flat_map(|l| l.1.iter().copied()).collect();
+    let mut used: Vec<usize> = lines.iter().flat_map(|l| l.1.iter().map(|p| p.0)).collect();
     used.sort_unstable();
     used.dedup();
-    let mut starts: Vec<f32> = lines
-        .iter_mut()
-        .filter_map(|(y, cs)| {
-            cs.sort_unstable();
-            cs.dedup();
-            (2 * cs.len() >= used.len()).then_some(*y)
-        })
+    let pieces: Vec<Vec<(usize, bool)>> = lines
+        .iter()
+        .map(|l| l.1.iter().map(|(c, t)| (*c, numeric(t))).collect())
         .collect();
-    // Kept going up, for a search by baseline; the first line always starts a row.
-    if let Some(first) = lines.first()
-        && starts.first() != Some(&first.0)
-    {
-        starts.insert(0, first.0);
-    }
+    // Kept going up, for a search by baseline.
+    let mut starts: Vec<f32> = lines
+        .iter()
+        .zip(row_starts(&pieces, used.len()))
+        .filter(|(_, starts)| *starts)
+        .map(|(l, _)| l.0)
+        .collect();
     starts.reverse();
     starts
+}
+
+/// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
+/// and vertical segments `v`.
+fn edges(h: &[Seg], v: &[Seg]) -> (Vec<f32>, Vec<f32>) {
+    let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
+    xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
+    xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
+    let mut ys: Vec<f32> = h.iter().map(|s| s.at).collect();
+    ys.push(v.iter().map(|s| s.from).fold(f32::MAX, f32::min));
+    ys.push(v.iter().map(|s| s.to).fold(f32::MIN, f32::max));
+    let mut ys = clustered(ys);
+    ys.reverse();
+    (clustered(xs), ys)
+}
+
+/// Steps one page may take to cut its runs at column rules; past them the rest stay whole.
+const COLUMN_CUT_WORK: usize = 1_000_000;
+
+/// Cuts each run that an inner column rule of a section crosses in the white space between
+/// two of its words, so each part stands in its own column: a value line padded into its
+/// fields often has only one or two spaces between two fields. A rule cuts at the heights it
+/// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
+/// their section (see [`hanging_feet`]). A rule within a tenth of the text size of a gap
+/// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
+/// reading order. False when more than `budget` steps were needed: the runs past them stay
+/// whole.
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
+    // Each rule that may cut: its place and the heights it cuts at.
+    let mut spans: Vec<(f32, f32, f32)> = Vec::new();
+    for p in parts {
+        let (xs, ys) = edges(&p.h, &p.v);
+        if xs.len() < 3 || ys.len() < 2 {
+            continue;
+        }
+        let inner = &xs[1..xs.len() - 1];
+        for s in &p.v {
+            if s.at > xs[0] + SNAP && s.at < xs[xs.len() - 1] - SNAP {
+                spans.push((s.at, s.from, s.to));
+            }
+        }
+        if p.cut || ys.len() == 2 {
+            for (foot, bottom) in hanging_feet(&p.v, &xs, &ys) {
+                spans.extend(inner.iter().map(|&x| (x, bottom, foot)));
+            }
+        }
+    }
+    if spans.is_empty() {
+        return true;
+    }
+    // The rules by place (within a tenth of a point), each place with the heights it cuts at
+    // as sorted ranges apart from each other.
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut places: Vec<(f32, Vec<(f32, f32)>)> = Vec::new();
+    for (x, from, to) in spans {
+        match places.last_mut() {
+            Some((px, list)) if x - *px <= 0.1 => list.push((from, to)),
+            _ => places.push((x, vec![(from, to)])),
+        }
+    }
+    for (_, list) in &mut places {
+        list.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::with_capacity(list.len());
+        for &(from, to) in list.iter() {
+            match merged.last_mut() {
+                Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                _ => merged.push((from, to)),
+            }
+        }
+        *list = merged;
+    }
+    let mut work = 0usize;
+    let mut done = true;
+    // The runs to cut, each with the gaps it is cut at.
+    let mut cuts: Vec<(usize, Vec<usize>)> = Vec::new();
+    'runs: for (i, r) in flow.runs.iter().enumerate() {
+        if r.off_axis || r.gaps.is_empty() {
+            continue;
+        }
+        let (_, cy) = middle(r);
+        let tol = 0.1 * r.size.max(1.0);
+        let mut at: Vec<usize> = Vec::new();
+        let first = places.partition_point(|p| p.0 <= r.x + tol);
+        for (x, heights) in &places[first..] {
+            if *x >= r.x + r.w - tol {
+                break;
+            }
+            work += 1;
+            if work > budget {
+                done = false;
+                break 'runs;
+            }
+            let h = heights.partition_point(|s| s.0 <= cy);
+            if h == 0 || heights[h - 1].1 < cy {
+                continue;
+            }
+            let k = r.gaps.partition_point(|g| g.to + tol < *x);
+            if r.gaps.get(k).is_some_and(|g| g.from - tol <= *x) {
+                at.push(k);
+            }
+        }
+        at.sort_unstable();
+        at.dedup();
+        if !at.is_empty() {
+            cuts.push((i, at));
+        }
+    }
+    if cuts.is_empty() {
+        return done;
+    }
+    let all = std::mem::take(flow);
+    let extra: usize = cuts.iter().map(|c| c.1.len()).sum();
+    let n = all.runs.len() + extra;
+    let mut out = Flow {
+        runs: Vec::with_capacity(n),
+        slots: Vec::with_capacity(n),
+        at: Vec::with_capacity(n),
+    };
+    let mut next = cuts.into_iter().peekable();
+    for (i, ((run, slot), place)) in all.runs.into_iter().zip(all.slots).zip(all.at).enumerate() {
+        let Some((_, at)) = next.next_if(|c| c.0 == i) else {
+            out.runs.push(run);
+            out.slots.push(slot);
+            out.at.push(place);
+            continue;
+        };
+        // From the right, so the gaps to the left keep their numbers.
+        let mut parts: Vec<Run> = Vec::with_capacity(at.len() + 1);
+        let mut rest = run;
+        for &k in at.iter().rev() {
+            let (before, after) = rest.cut_at(k);
+            parts.push(after);
+            rest = before;
+        }
+        parts.push(rest);
+        for part in parts.into_iter().rev() {
+            out.runs.push(part);
+            out.slots.push(slot);
+            out.at.push(place);
+        }
+    }
+    *flow = out;
+    done
 }
 
 /// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
@@ -1127,8 +1291,8 @@ fn open_bands(
     }
 }
 
-/// For each grid row, the baselines of the lines that start a row in it, going up: empty
-/// when the band is one row. A band of the body whose cells are each one square and of
+/// For each grid row (`is_open` says which are open rows), the baselines of the lines that
+/// start a row in it, going up: empty when the band is one row. A band of the body whose cells are each one square and of
 /// which at least two hold text is cut when at least two of its lines are anchors: lines
 /// with text in at least half of the cells that hold text in the band (an empty first cell
 /// included). No band is cut when the rules part most bands into one record each.
@@ -1137,12 +1301,13 @@ fn anchor_rows(
     flow: &Flow,
     within: &[usize],
     head: usize,
-    rows: usize,
+    is_open: &[bool],
     owner: &[Vec<(usize, usize)>],
     extent: &HashMap<(usize, usize), (u32, u32)>,
     row_at: &dyn Fn(f32) -> usize,
     cell_at: &dyn Fn(f32, f32) -> (usize, usize),
 ) -> Vec<Vec<f32>> {
+    let rows = is_open.len();
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); rows];
     // Bands of the body with text in two cells or more, and of those the ones with two lines
     // or more that fill the band and start in its first cell.
@@ -1162,7 +1327,8 @@ fn anchor_rows(
         let one_high = owner[r]
             .iter()
             .all(|o| o.0 == r && extent.get(o) == Some(&(1, 1)));
-        if band.len() < 2 || !one_high {
+        // An open row is cut by its own lines (see [`open_anchors`]).
+        if band.len() < 2 || !one_high || is_open[r] {
             continue;
         }
         band.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -1218,6 +1384,122 @@ mod tests {
 
     fn seg(at: f32, from: f32, to: f32) -> Seg {
         Seg { at, from, to }
+    }
+
+    /// A run of `text` on the baseline 100 in the size 10, 6 points a character, with a gap
+    /// at each stretch of spaces.
+    fn spaced(text: &str, x: f32) -> Run {
+        let mut gaps = Vec::new();
+        let mut words = 0u32;
+        let mut prev = ' ';
+        for (k, c) in text.char_indices() {
+            if c != ' ' && prev == ' ' && k > 0 {
+                gaps.push(crate::layout::Gap {
+                    words,
+                    from: x + 6.0 * (text[..k].trim_end().chars().count()) as f32,
+                    to: x + 6.0 * k as f32,
+                });
+            }
+            if c != ' ' && prev == ' ' {
+                words += 1;
+            }
+            prev = c;
+        }
+        Run {
+            page: 1,
+            text: text.into(),
+            x,
+            y: 100.0,
+            w: 6.0 * text.chars().count() as f32,
+            h: 10.0,
+            size: 10.0,
+            bold: false,
+            italic: false,
+            mcid: None,
+            uri: None,
+            line: 0,
+            off_axis: false,
+            gaps: crate::layout::Gaps::new(gaps),
+        }
+    }
+
+    /// A grid of one row from 90 to 120 over the column edges `xs`, its rules drawn the full
+    /// height.
+    fn one_row(xs: &[f32]) -> Part {
+        let (left, right) = (xs[0], xs[xs.len() - 1]);
+        Part {
+            h: vec![seg(90.0, left, right), seg(120.0, left, right)],
+            v: xs.iter().map(|&x| seg(x, 90.0, 120.0)).collect(),
+            cut: false,
+            cut_below: false,
+            cut_above: false,
+            id: 0,
+        }
+    }
+
+    fn flow_of(runs: Vec<Run>) -> Flow {
+        let n = runs.len();
+        Flow {
+            runs,
+            slots: vec![crate::layout::Slot::Free; n],
+            at: (0..n).collect(),
+        }
+    }
+
+    #[test]
+    fn a_column_rule_cuts_a_run_between_two_words() {
+        // "AA  BB CC" from 0: AA ends at 12, BB starts at 24; the rule at 20 lies in the gap.
+        let mut flow = flow_of(vec![spaced("AA  BB CC", 0.0)]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            100
+        ));
+        let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["AA", " BB CC"]);
+        assert_eq!((flow.runs[0].x, flow.runs[0].w), (0.0, 12.0));
+        assert_eq!((flow.runs[1].x, flow.runs[1].w), (24.0, 30.0));
+        assert_eq!(flow.runs[1].gaps.len(), 1);
+        assert_eq!(flow.runs[1].gaps[0].words, 1);
+        assert_eq!(flow.at, [0, 0]);
+    }
+
+    #[test]
+    fn a_column_rule_inside_a_word_cuts_nothing() {
+        let mut flow = flow_of(vec![spaced("AAAA BB", 0.0)]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 9.0, 100.0])],
+            100
+        ));
+        assert_eq!(flow.runs.len(), 1);
+        assert_eq!(flow.runs[0].text, "AAAA BB");
+    }
+
+    #[test]
+    fn a_column_rule_cuts_only_at_its_heights() {
+        let mut run = spaced("AA  BB", 0.0);
+        run.y = 200.0;
+        let mut flow = flow_of(vec![run]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            100
+        ));
+        assert_eq!(flow.runs.len(), 1);
+    }
+
+    #[test]
+    fn cuts_past_the_budget_are_left_out() {
+        let runs: Vec<Run> = (0..3).map(|_| spaced("AA  BB", 0.0)).collect();
+        let mut flow = flow_of(runs);
+        assert!(!cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            2
+        ));
+        let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["AA", " BB", "AA", " BB", "AA  BB"]);
     }
 
     #[test]

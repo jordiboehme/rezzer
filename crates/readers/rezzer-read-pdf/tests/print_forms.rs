@@ -1870,46 +1870,80 @@ fn pay_slip(stroked_marks: bool) -> FormPage {
     }
 }
 
+/// The header rows of the tables of the read, in order.
+fn read_header_rows(out: &ReadOutcome) -> Vec<usize> {
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        if let Block::Section { blocks, .. } = b {
+            for inner in blocks {
+                if let Block::Table { header_rows, .. } = inner {
+                    found.push(*header_rows);
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The tables of the pay slip: its sections E, T, S, the right middle and the bottom of L,
-/// each a header over its lines; no section is lost and none gives a loss.
+/// each a header over its lines; no section is lost and none gives a loss. Each value of a
+/// value line stands in the column of its label, also where only one or two spaces part it
+/// from the next value across a column rule, and an empty field is an empty cell.
 fn assert_pay_slip(out: &ReadOutcome) {
     let found = read_tables(out);
     assert_eq!(found.len(), 5, "{found:#?} {:?}", out.document.losses);
     let header = |t: &Vec<Vec<String>>| t[0].join("|");
     let body = |t: &Vec<Vec<String>>| t[1..].iter().map(|r| r.join("|")).collect::<Vec<_>>();
-    // E: 8 columns, a row for each earning.
-    assert_eq!(found[0][0].len(), 8, "{found:#?}");
-    assert!(header(&found[0]).starts_with("Ea|Eb|"), "{found:#?}");
-    let e = body(&found[0]);
-    assert_eq!(e.len(), 3, "{e:?}");
-    assert!(e[0].starts_with("001 Gehalt") && e[2].starts_with("003 Beispiel Bezug"));
+    // Each section's label row is its table's header row.
+    assert_eq!(read_header_rows(out), [1, 1, 1, 1, 1], "{found:#?}");
+    // E: 8 columns, a row for each earning; the label over two columns and the three flags
+    // one character apart are cut at the column rules.
+    assert_eq!(
+        header(&found[0]),
+        "Ea|Eb|Ec Ed|Ee|Ef|Eg|Eh|Ei",
+        "{found:#?}"
+    );
+    assert_eq!(
+        body(&found[0]),
+        [
+            "001|Gehalt||||X|X|Y",
+            "002|Zulage Muster||||X|X|Y",
+            "003|Beispiel Bezug||||Z|X|N"
+        ]
+    );
     // T and S: their headers and one row of values, the marks read as separators.
     assert_eq!(header(&found[1]), "Ta|Tb|Tc|Td|Te|", "{found:#?}");
-    assert_eq!(body(&found[1]), ["X 12.345,67 1.234,00"], "{found:#?}");
+    assert_eq!(body(&found[1]), ["X|12.345,67|1.234,00|||"], "{found:#?}");
     assert_eq!(
         header(&found[2]),
         "Sa|Sb|Sc|Sd|Se|Sf|Sg|Sh|Si",
         "{found:#?}"
     );
-    assert!(body(&found[2])[0].contains("333,44 444,55 7"), "{found:#?}");
+    assert_eq!(
+        body(&found[2]),
+        ["X||1.111,00|2.222,00|||333,44|444,55|7"],
+        "{found:#?}"
+    );
     // L: the right middle Le | Lf over four rows, the bottom right Lk | Ll over a value.
     assert_eq!(header(&found[3]), "Le|Lf", "{found:#?}");
     assert_eq!(
         body(&found[3]),
         [
-            "9001 Muster A",
-            "9002 Muster B",
-            "9003 Muster C",
-            "9004 Muster D"
+            "9001|Muster A",
+            "9002|Muster B",
+            "9003|Muster C",
+            "9004|Muster D"
         ]
     );
     assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
-    assert_eq!(found[4].len(), 2, "{found:#?}");
+    assert_eq!(
+        body(&found[4]),
+        ["Li DE00 0000 0000 0000 0000 00 1.234,56||"],
+        "{found:#?}"
+    );
     // The title right above a section's top rule is that table's caption, never a row of
-    // the table above: T's in E's band, L's in the band under S, and E's over the grid,
-    // as the grid is cut (ruling P6-Q).
-    assert!(!e[2].contains("Abzuege"), "{e:?}");
-    assert_eq!(body(&found[2]).len(), 1, "{found:#?}");
+    // the table above (the rows of E and S above show none): T's in E's band, L's in the
+    // band under S, and E's over the grid, as the grid is cut (ruling P6-Q).
     assert_eq!(
         read_captions(out),
         [
@@ -2176,4 +2210,116 @@ fn a_line_over_a_grid_that_is_not_cut_stays_a_paragraph() {
     let out = read(&print_form(&[page], "", ""));
     assert_eq!(read_captions(&out), [None]);
     assert!(all_text(&out).contains("Muster GmbH Bezuege"));
+}
+
+/// A section of one header row of hanging column rules over value lines without rules, as a
+/// print-run form draws it: rules across at 700 and 660 and borders at 40 and 400 the full
+/// height, column rules hanging 12 points from the top at `dividers`, a label at the left of
+/// each column and the value `lines` as data lines (Courier 9.5 from 40).
+fn hanging_section(dividers: &[f32], labels: &[&str], lines: Vec<DataLine>) -> FormPage {
+    let mut t = String::new();
+    t += &bar_h(40.0, 400.0, 700.0, 0.48);
+    t += &bar_h(40.0, 400.0, 660.0, 0.48);
+    t += &bar_v(40.0, 660.0, 700.0, 0.48);
+    t += &bar_v(400.0, 660.0, 700.0, 0.48);
+    for &x in dividers {
+        t += &bar_v(x, 688.0, 700.0, 0.24);
+    }
+    let lefts = std::iter::once(40.0).chain(dividers.iter().copied());
+    for (x, l) in lefts.zip(labels) {
+        t += &label(x + 2.0, 691.0, 6.6, l);
+    }
+    t += &label(40.0, 760.0, 11.4, "Erika Mustermann");
+    FormPage {
+        template: t,
+        lines,
+        ..FormPage::default()
+    }
+}
+
+/// A rule inside a word cuts nothing: the run stays whole in the column of its middle. A rule
+/// in the one space between two values cuts there, and each value goes into its column.
+#[test]
+fn a_column_rule_cuts_a_run_only_between_words() {
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![columns_line(
+            675.0,
+            &[(1, "Muster"), (12, "ABCD EFGH"), (40, "11 22")],
+        )],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0][0], ["Aa", "Ab", "Ac", "Ad", "Ae"], "{found:#?}");
+    assert_eq!(
+        found[0][1],
+        ["Muster", "ABCD EFGH", "11", "22", ""],
+        "{found:#?}"
+    );
+    assert_eq!(read_header_rows(&out), [1]);
+    assert_no_loss(&out);
+}
+
+/// A value line that fills two of nine fields is still the section's row: its empty fields
+/// are empty cells, not a reason to refuse the table.
+#[test]
+fn a_sparse_value_line_keeps_its_empty_fields() {
+    let page = hanging_section(
+        &[80.0, 120.0, 160.0, 200.0, 240.0, 280.0, 320.0, 360.0],
+        &["Sa", "Sb", "Sc", "Sd", "Se", "Sf", "Sg", "Sh", "Si"],
+        vec![columns_line(675.0, &[(1, "X"), (43, "7")])],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0][1].join("|"), "X||||||7||", "{found:#?}");
+    assert_no_loss(&out);
+}
+
+/// Values printed as one data line padded into the cells of a grid ruled all the way down,
+/// two spaces apart across a column rule: each value goes into its own cell.
+#[test]
+fn padded_values_are_cut_at_the_rules_of_their_grid() {
+    let xs = form_columns(9);
+    let rows: [[&str; 9]; 3] = [
+        [
+            "1001", "Gehalt", "20", "160", "12,34", "1.974,40", "1.234,56", "123,45", "876,54",
+        ],
+        [
+            "1002", "Zulage", "20", "8", "5,00", "40,00", "40,00", "4,00", "36,00",
+        ],
+        [
+            "1003", "Bonus", "1", "0", "0,00", "100,00", "100,00", "10,00", "90,00",
+        ],
+    ];
+    let empty: [&[&str]; 3] = [&[""; 9], &[""; 9], &[""; 9]];
+    let titles = [
+        "Nr.", "Art", "Tage", "Std.", "Satz", "Basis", "Brutto", "Steuer", "Netto",
+    ];
+    let lines = rows
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            let parts: Vec<(usize, &str)> = row
+                .iter()
+                .enumerate()
+                .map(|(k, v)| (pad_to(xs[k] + 3.0), *v))
+                .collect();
+            columns_line(712.0 - 16.0 * (r + 2) as f32 + 5.0, &parts)
+        })
+        .collect();
+    let page = FormPage {
+        template: form_section(&xs, 712.0, &titles, &empty, BY_CELL),
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    for (got, want) in found[0][1..].iter().zip(rows) {
+        assert_eq!(got, &want, "{found:#?}");
+    }
+    assert_no_loss(&out);
 }
