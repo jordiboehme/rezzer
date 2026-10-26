@@ -20,7 +20,7 @@ const WORD_GAP: f32 = 0.15;
 
 /// A gap wider than this many font sizes splits a line into pieces, which may stand in
 /// different columns.
-const PIECE_GAP: f32 = 0.8;
+pub(crate) const PIECE_GAP: f32 = 0.8;
 
 /// A column gutter is at least this many font sizes wide.
 const GUTTER: f32 = 0.8;

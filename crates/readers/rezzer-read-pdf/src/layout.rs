@@ -18,6 +18,7 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, Severity};
 
+use crate::scan;
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
@@ -169,6 +170,11 @@ const REPEATS: usize = 3;
 /// A line at least this many times the body size is a heading in an untagged file.
 const HEADING_RATIO: f32 = 1.2;
 
+/// A line smaller than this many times the body size is a heading only when it is led by
+/// bold ink (see [`bold_led`]): data lines and labels set a little larger than the body are
+/// no headings.
+const HEADING_PLAIN_RATIO: f32 = 1.5;
+
 /// A heading line is shorter than this many characters.
 const HEADING_CHARS: usize = 120;
 
@@ -210,8 +216,8 @@ pub(crate) struct PageText<'a> {
 /// What the layout learns from the whole file before it lays out a page.
 #[derive(Debug, Default)]
 pub(crate) struct Style {
-    /// The most common font size, by character count, of the text outside running headers
-    /// and footers.
+    /// The most common font size, by ink character count, of the text outside running
+    /// headers and footers.
     pub body_size: f32,
     /// Distinct heading sizes of an untagged file, largest first.
     heading_sizes: Vec<f32>,
@@ -308,6 +314,11 @@ fn furniture_key_of(line: &Line<'_>, height: Option<f32>) -> Option<Furniture> {
     (!key.is_empty()).then_some((b, key))
 }
 
+/// The ink characters of `text`: white space is not counted.
+fn ink(text: &str) -> usize {
+    text.chars().filter(|c| !c.is_whitespace()).count()
+}
+
 /// Rounds a font size to half points.
 fn size_key(size: f32) -> i32 {
     (size * 2.0).round() as i32
@@ -374,11 +385,12 @@ impl Style {
                     continue;
                 }
                 for r in l.runs {
-                    *chars.entry(size_key(r.size)).or_default() += r.text.chars().count();
+                    *chars.entry(size_key(r.size)).or_default() += ink(&r.text);
                 }
             }
         }
-        // The most characters wins; on a tie the smaller size.
+        // The most ink characters wins; on a tie the smaller size. Padding is no text: a data
+        // line padded into its place would count its spaces.
         style.body_size = chars
             .iter()
             .max_by_key(|(size, n)| (**n, -**size))
@@ -389,7 +401,7 @@ impl Style {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
             for (l, b) in all.iter().zip(&bands) {
-                if b.is_none() && style.is_heading_size(l) {
+                if b.is_none() && style.may_head(l) {
                     sizes.push(size_key(l.size));
                 }
             }
@@ -447,9 +459,19 @@ impl Style {
             && line.text.chars().any(char::is_alphanumeric)
     }
 
+    /// Whether an untagged line may be a heading by its own text and style: large enough,
+    /// short, not data, and led by bold ink (see [`bold_led`]) when it is smaller than
+    /// [`HEADING_PLAIN_RATIO`] times the body size.
+    fn may_head(&self, line: &Line<'_>) -> bool {
+        self.is_heading_size(line)
+            && !ends_in_amount(&line.text)
+            && !data_only(&line.text)
+            && (line.size >= HEADING_PLAIN_RATIO * self.body_size || bold_led(line))
+    }
+
     /// The heading level of an untagged line, `None` for body text.
     fn heading_level(&self, line: &Line<'_>) -> Option<u8> {
-        if !self.is_heading_size(line) {
+        if !self.may_head(line) {
             return None;
         }
         let key = size_key(line.size);
@@ -633,6 +655,8 @@ pub(crate) struct Laid {
     pub probed: Vec<Option<Anchor>>,
     /// The page has too many points near its runs to place them all; the rest have no block.
     pub probes_cut: bool,
+    /// What the layout found by a rule of its own and says at the top of the page.
+    pub found_by: Option<String>,
 }
 
 /// Where a limit cut a page: the first part not kept.
@@ -856,6 +880,17 @@ pub(crate) fn page_blocks_at(
     for l in lines(&headers) {
         built.paragraph(l.runs.iter().collect(), Some("page-header"), cx);
     }
+    // The text sizes are counted over all text of the page, also what tables take later:
+    // the values of a form are its data lines.
+    let text_sizes = page_text_sizes(&flow.runs);
+    // Footnotes are found before tables and lists: a legend set in columns is no table, and
+    // a star that opens a footnote is no bullet. A tagged file says its notes.
+    let legend = if cx.tree.is_none() {
+        footnotes(&flow.runs)
+    } else {
+        Vec::new()
+    };
+    let legend = take_legend(&mut flow, legend);
     if geometry && let Some(height) = height {
         let stop = || time_over(cx.budget).is_err();
         let found = tables::untagged(page, &mut flow, drawn, height, &stop);
@@ -878,10 +913,9 @@ pub(crate) fn page_blocks_at(
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
-    let page_body = page_body_size(&flow.runs);
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
-        None => untagged(runs, page_body, cx, built),
+        None => untagged(runs, &text_sizes, cx, built),
     };
     let mut start = 0;
     for p in placed {
@@ -904,6 +938,9 @@ pub(crate) fn page_blocks_at(
         }
     }
     lay(&flow.runs[start..], &flow.slots[start..], &mut built);
+    for note in &legend {
+        built.paragraph(note.iter().collect(), Some("footnote"), cx);
+    }
     for l in lines(&footers) {
         built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
     }
@@ -932,6 +969,7 @@ pub(crate) fn page_blocks_at(
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes);
     laid.probes_cut = probes_cut;
+    laid.found_by = legend_note(page, legend.len());
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -1117,6 +1155,7 @@ impl Built {
             notes,
             probed: Vec::new(),
             probes_cut: false,
+            found_by: None,
         }
     }
 
@@ -1689,7 +1728,10 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
     }
     if matches!(first, '-' | '*' | '\u{2013}') {
         let rest = &text[first.len_utf8()..];
-        if rest.starts_with(char::is_whitespace) {
+        // Two padding characters or more after it: a mark set into a field of a form (a
+        // starred amount, a dash for none), no bullet.
+        let pad = rest.chars().take_while(|c| c.is_whitespace()).count();
+        if pad == 1 {
             return Some((false, text.len() - rest.trim_start().len()));
         }
         return None;
@@ -1704,6 +1746,17 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
         return None;
     }
     Some((true, text.len() - after.trim_start().len()))
+}
+
+/// Whether a line opens with a `*`, `-` or U+2013 run that a piece gap parts from the text
+/// after it: padding written as one space (see `order::line_runs`), no bullet.
+fn padded_mark(line: &Line<'_>) -> bool {
+    let mut inked = line.runs.iter().filter(|r| ink(&r.text) > 0);
+    let (Some(mark), Some(next)) = (inked.next(), inked.next()) else {
+        return false;
+    };
+    matches!(mark.text.trim(), "*" | "-" | "\u{2013}")
+        && next.x - (mark.x + mark.w) > crate::order::PIECE_GAP * mark.size.max(next.size)
 }
 
 /// Runs without the list marker that takes the first `cut` bytes of their trimmed text.
@@ -1779,36 +1832,125 @@ fn refused_quietly(
     out
 }
 
-/// A page needs this many characters in one size for that size to be its own body size.
+/// A size that sets at least this share of a page's ink characters is a text size there.
+const TEXT_SHARE: f32 = 0.25;
+
+/// A size that sets at least this many ink characters of a page is a text size there.
 const PAGE_BODY_CHARS: usize = 400;
 
-/// The size most characters of a page are set in, when they are at least
-/// [`PAGE_BODY_CHARS`]: a page set mostly in a larger size than the rest of the file (the back
-/// of a form printed in larger type) has its own body text, which is not a heading.
-fn page_body_size(runs: &[Run]) -> Option<f32> {
-    let mut chars: HashMap<i32, usize> = HashMap::new();
+/// A size is a text size by its share only when it sets ink on at least this many lines: the
+/// title of a cover page with little else on it stays a heading.
+const SHARE_LINES: usize = 3;
+
+/// The text sizes of a page, smallest first: every size that sets at least [`TEXT_SHARE`] of
+/// its ink characters on [`SHARE_LINES`] lines or more, or at least [`PAGE_BODY_CHARS`] of
+/// them. A line in one of them is body
+/// text on that page, never a heading: the data lines of a form set beside many small
+/// labels, or the back of a form printed in larger type, are text.
+pub(crate) fn page_text_sizes(runs: &[Run]) -> Vec<f32> {
+    // For each size: its ink characters and the lines it sets ink on.
+    let mut chars: HashMap<i32, (usize, HashSet<u32>)> = HashMap::new();
     for r in runs {
-        *chars.entry(size_key(r.size)).or_default() += r.text.chars().count();
+        let n = ink(&r.text);
+        if n > 0 {
+            let e = chars.entry(size_key(r.size)).or_default();
+            e.0 += n;
+            e.1.insert(r.line);
+        }
     }
-    chars
+    let total: usize = chars.values().map(|c| c.0).sum();
+    let mut sizes: Vec<i32> = chars
         .into_iter()
-        .max_by_key(|(size, n)| (*n, -*size))
-        .filter(|(_, n)| *n >= PAGE_BODY_CHARS)
-        .map(|(size, _)| size as f32 / 2.0)
+        .filter(|(_, (n, at))| {
+            (at.len() >= SHARE_LINES && *n as f32 >= TEXT_SHARE * total as f32)
+                || *n >= PAGE_BODY_CHARS
+        })
+        .map(|(size, _)| size)
+        .collect();
+    sizes.sort_unstable();
+    sizes.into_iter().map(|s| s as f32 / 2.0).collect()
+}
+
+/// Whether a line is bold where it matters for a heading: all its ink is bold, or it opens
+/// with bold ink and goes on in plain words that are no data (`SECTION 1 (TO BE COMPLETED BY
+/// PAYEE)`). A bold label that ends in a colon before plain text is a label and its value
+/// (`Kundennummer: 00000`), and so is a bold label before a plain number or code.
+fn bold_led(line: &Line<'_>) -> bool {
+    let inked: Vec<&Run> = line.runs.iter().filter(|r| ink(&r.text) > 0).collect();
+    let lead = inked.iter().take_while(|r| r.bold).count();
+    if lead == 0 {
+        return false;
+    }
+    if lead == inked.len() {
+        return true;
+    }
+    let label: String = inked[..lead].iter().map(|r| r.text.as_str()).collect();
+    let rest: String = inked[lead..].iter().map(|r| r.text.as_str()).collect();
+    !label.trim_end().ends_with(':') && !data_only(&rest)
+}
+
+/// Currency words and signs that may stand after an amount.
+const CURRENCIES: [&str; 7] = ["EUR", "USD", "CHF", "GBP", "\u{20ac}", "$", "\u{a3}"];
+
+/// Year widths of the dates a line is masked by before its amounts are read.
+const YEARS: std::ops::RangeInclusive<usize> = 2..=4;
+
+/// Whether `text` ends in an amount, a currency word or sign after it allowed
+/// (`Gesamtbetrag 1.234,56 EUR`). Dates are masked first, so `01.03.2026` is no amount.
+fn ends_in_amount(text: &str) -> bool {
+    let mut t = text.trim();
+    for c in CURRENCIES {
+        if let Some(rest) = t.strip_suffix(c) {
+            // A currency word is a word of its own: `TEUR` is no `EUR`.
+            let word = c.chars().all(char::is_alphabetic);
+            if !word || rest.ends_with(char::is_whitespace) {
+                t = rest.trim_end();
+            }
+            break;
+        }
+    }
+    let skip: Vec<(usize, usize)> = scan::dates(t, YEARS)
+        .iter()
+        .map(|d| (d.start, d.end))
+        .collect();
+    scan::amounts(t, &skip)
+        .last()
+        .is_some_and(|a| a.end == t.len())
+}
+
+/// Whether a line holds only numbers, codes, dates and amounts: each of its words holds a
+/// digit or is a currency word or sign, and one holds a digit (`1234567 8901 2 30`,
+/// `00123 45B`). A title holds a word (`Bericht 2025`).
+fn data_only(text: &str) -> bool {
+    let mut digit = false;
+    for w in text.split_whitespace() {
+        if w.chars().any(|c| c.is_ascii_digit()) {
+            digit = true;
+        } else if !CURRENCIES.contains(&w) {
+            return false;
+        }
+    }
+    digit
 }
 
 /// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps. A line
-/// is a heading only when it is also larger than `page_body`, the page's own body size.
-fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Built) {
+/// in one of the page's `text_sizes`, or less than [`HEADING_RATIO`] times the largest of
+/// them, is no heading.
+fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built) {
+    let largest = text_sizes.last().copied();
     let heading_level = |l: &Line<'_>| {
-        cx.style
-            .heading_level(l)
-            .filter(|_| page_body.is_none_or(|b| l.size >= b * HEADING_RATIO))
+        cx.style.heading_level(l).filter(|_| {
+            !text_sizes.iter().any(|s| size_key(*s) == size_key(l.size))
+                && largest.is_none_or(|b| l.size >= b * HEADING_RATIO)
+        })
     };
     let all = lines(flow);
     // A number of three digits or more that opens a line in the middle of a sentence is part
     // of the sentence ("31 CFR 209 and/or / 210. The information"), not a list item.
     let marker = |k: usize| {
+        if padded_mark(&all[k]) {
+            return None;
+        }
         let found = list_marker(&all[k].text)?;
         let digits = all[k].text.chars().take_while(char::is_ascii_digit).count();
         let mid_sentence = k > 0
@@ -1834,7 +1976,17 @@ fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Bu
                 runs.extend(all[j].runs.iter());
                 j += 1;
             }
-            out.heading(level, runs, cx);
+            // Bold lines a little larger than the body that read as an address or as
+            // sentences are a paragraph: the address of an invoice, its closing words.
+            let block = &all[i..j];
+            let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
+            let one_edge = block.iter().all(|b| (b.x - l.x).abs() <= EDGE);
+            let small = l.size < HEADING_PLAIN_RATIO * cx.style.body_size;
+            if small && ((address_shaped(&texts) && one_edge) || sentences(block)) {
+                out.broken_paragraph(runs, &line_breaks(block), None, cx);
+            } else {
+                out.heading(level, runs, cx);
+            }
             open_list = None;
             i = j;
             continue;
@@ -1878,6 +2030,289 @@ fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Bu
         out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
+}
+
+/// The runs of each footnote of `legend` (run indices into the flow, each list in order),
+/// taken out of `flow`.
+fn take_legend(flow: &mut Flow, legend: Vec<Vec<usize>>) -> Vec<Vec<Run>> {
+    if legend.is_empty() {
+        return Vec::new();
+    }
+    let mut owner: Vec<Option<usize>> = vec![None; flow.runs.len()];
+    for (n, ids) in legend.iter().enumerate() {
+        for &i in ids {
+            owner[i] = Some(n);
+        }
+    }
+    let mut notes: Vec<Vec<Run>> = vec![Vec::new(); legend.len()];
+    let taken = flow.take(|i, _| owner[i].is_some());
+    for ((r, _, _), n) in taken.into_iter().zip(owner.into_iter().flatten()) {
+        notes[n].push(r);
+    }
+    notes
+}
+
+/// The `found-by` note of a page with `n` footnotes.
+fn legend_note(page: u32, n: usize) -> Option<String> {
+    let what = match n {
+        0 => return None,
+        1 => format!(
+            "1 paragraph at the bottom of page {page} is read as a footnote: it is set in the \
+             page's smallest size below all other text and opens with a note marker that also \
+             stands after a word above"
+        ),
+        _ => format!(
+            "{n} paragraphs at the bottom of page {page} are read as footnotes: they are set in \
+             the page's smallest size below all other text and each opens with a note marker \
+             that also stands after a word above"
+        ),
+    };
+    Some(what)
+}
+
+/// A run of digits is raised against the run beside it when it is this many times its size or
+/// smaller, or its baseline stands this many times that size higher.
+const RAISED_SIZE: f32 = 0.8;
+const RAISED_RISE: f32 = 0.25;
+
+/// The superscript digits 0 to 9.
+const SUPERSCRIPTS: [char; 10] = [
+    '\u{2070}', '\u{b9}', '\u{b2}', '\u{b3}', '\u{2074}', '\u{2075}', '\u{2076}', '\u{2077}',
+    '\u{2078}', '\u{2079}',
+];
+
+/// A note marker: one to three stars, a number with `)`, or a raised number (a superscript
+/// digit, or digits set smaller or higher than the text beside them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum NoteMark {
+    Stars(u8),
+    Paren(u8),
+    Raised(u8),
+}
+
+/// Whether `run` holds one or two digits raised against `base`.
+fn raised_digits(run: &Run, base: &Run) -> Option<u8> {
+    let t = run.text.trim();
+    let raised = run.size < RAISED_SIZE * base.size || run.y > base.y + RAISED_RISE * base.size;
+    (raised && (1..=2).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| t.parse().ok())
+        .flatten()
+}
+
+/// The value of one or two superscript digits.
+fn superscript_value(digits: &str) -> Option<u8> {
+    let mut n: u8 = 0;
+    let mut count = 0;
+    for c in digits.chars() {
+        let d = SUPERSCRIPTS.iter().position(|s| *s == c)?;
+        n = n * 10 + d as u8;
+        count += 1;
+    }
+    (1..=2).contains(&count).then_some(n)
+}
+
+/// The note markers a word ends with, after an alphanumeric character: `Betrag*`,
+/// `Betrag1)`, `Betrag` followed by a superscript digit.
+fn word_mark(word: &str) -> Option<NoteMark> {
+    let w = word.trim_end_matches([':', ',', '.', ';']);
+    let stars = w.len() - w.trim_end_matches('*').len();
+    if stars > 0 {
+        let before = w[..w.len() - stars].chars().next_back()?;
+        return (stars <= 3 && before.is_alphanumeric()).then_some(NoteMark::Stars(stars as u8));
+    }
+    if let Some(open) = w.strip_suffix(')') {
+        let digits = open.len() - open.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let before = open[..open.len() - digits].chars().next_back()?;
+        return ((1..=2).contains(&digits) && before.is_alphabetic())
+            .then(|| {
+                open[open.len() - digits..]
+                    .parse()
+                    .ok()
+                    .map(NoteMark::Paren)
+            })
+            .flatten();
+    }
+    let tail: String = w
+        .chars()
+        .rev()
+        .take_while(|c| SUPERSCRIPTS.contains(c))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let before = w[..w.len() - tail.len()].chars().next_back()?;
+    (before.is_alphanumeric())
+        .then(|| superscript_value(&tail).map(NoteMark::Raised))
+        .flatten()
+}
+
+/// The marker a piece of a legend line opens with: stars, a number with `)` or a superscript
+/// number before its text, a run of digits raised against the run after it, or plain digits
+/// and a space (which only a raised reference above makes a marker).
+fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
+    let mut inked = runs.iter().filter(|r| ink(&r.text) > 0);
+    let first = inked.next()?;
+    if let Some(next) = inked.next()
+        && let Some(n) = raised_digits(first, next)
+    {
+        return Some(NoteMark::Raised(n));
+    }
+    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    let text = text.trim_start();
+    let stars = text.len() - text.trim_start_matches('*').len();
+    if stars > 0 {
+        let rest = &text[stars..];
+        return (stars <= 3
+            && rest
+                .trim()
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric))
+        .then_some(NoteMark::Stars(stars as u8));
+    }
+    let digits = text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if (1..=2).contains(&digits) {
+        let n: u8 = text[..digits].parse().ok()?;
+        let rest = &text[digits..];
+        if let Some(after) = rest.strip_prefix(')') {
+            return after
+                .starts_with(char::is_whitespace)
+                .then_some(NoteMark::Paren(n));
+        }
+        return rest
+            .starts_with(char::is_whitespace)
+            .then_some(NoteMark::Raised(n));
+    }
+    let sup: String = text
+        .chars()
+        .take_while(|c| SUPERSCRIPTS.contains(c))
+        .collect();
+    let n = superscript_value(&sup)?;
+    text[sup.len()..]
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(char::is_alphanumeric)
+        .then_some(NoteMark::Raised(n))
+}
+
+/// The note references of lines: markers that end a word, and digits raised after a run
+/// that ends in a letter or digit (`PV-Beitrag` and a raised `6`).
+fn references(lines: &[Line<'_>]) -> HashSet<NoteMark> {
+    let mut found = HashSet::new();
+    for l in lines {
+        found.extend(l.text.split_whitespace().filter_map(word_mark));
+        let inked: Vec<&Run> = l.runs.iter().filter(|r| ink(&r.text) > 0).collect();
+        for w in inked.windows(2) {
+            if w[0].text.trim_end().ends_with(char::is_alphanumeric)
+                && let Some(n) = raised_digits(w[1], w[0])
+            {
+                found.insert(NoteMark::Raised(n));
+            }
+        }
+    }
+    found
+}
+
+/// The footnotes of an untagged page, each as the indices of its runs, in order. They are
+/// the lines of the page's lowest block, below every other line and in its smallest size,
+/// from the first one that opens with a note marker which also stands as a reference in the
+/// text above. Each line of the legend opens a footnote with a marker, or goes on the one
+/// of its column; a legend set in columns is cut where a piece gap meets a marker. A block
+/// that does not read so gives none.
+fn footnotes(runs: &[Run]) -> Vec<Vec<usize>> {
+    let all = lines(runs);
+    let mut starts = Vec::with_capacity(all.len());
+    let mut at = 0;
+    for l in &all {
+        starts.push(at);
+        at += l.runs.len();
+    }
+    let inked = |l: &Line<'_>| !l.text.is_empty();
+    let Some(smallest) = all
+        .iter()
+        .filter(|l| inked(l))
+        .map(|l| l.size)
+        .reduce(f32::min)
+    else {
+        return Vec::new();
+    };
+    let small = |l: &Line<'_>| !inked(l) || (l.size - smallest).abs() <= SIZE_SLACK;
+    let tail = all.len() - all.iter().rev().take_while(|l| small(l)).count();
+    if tail == 0 || tail == all.len() {
+        return Vec::new();
+    }
+    let above = all[..tail]
+        .iter()
+        .filter(|l| inked(l))
+        .map(|l| l.y)
+        .fold(f32::MAX, f32::min);
+    if all[tail..].iter().any(|l| inked(l) && l.y >= above) {
+        return Vec::new();
+    }
+    let marked =
+        |piece: &[Run], refs: &HashSet<NoteMark>| opening_mark(piece).filter(|m| refs.contains(m));
+    // The references are looked for above the first line that opens a footnote.
+    let mut refs = references(&all[..tail]);
+    let mut first = None;
+    for k in tail..all.len() {
+        if inked(&all[k]) && marked(all[k].runs, &refs).is_some() {
+            first = Some(k);
+            break;
+        }
+        refs.extend(references(&all[k..=k]));
+    }
+    let Some(first) = first else {
+        return Vec::new();
+    };
+    // Each footnote: where it starts (x) and its runs.
+    let mut notes: Vec<(f32, Vec<usize>)> = Vec::new();
+    let mut prev: Option<usize> = None;
+    for k in first..all.len() {
+        let l = &all[k];
+        if !inked(l) {
+            continue;
+        }
+        // The pieces of the line: cut where a piece gap meets a marker.
+        let mut cuts = vec![0];
+        let mut end: Option<f32> = None;
+        for (i, r) in l.runs.iter().enumerate() {
+            if ink(&r.text) == 0 {
+                continue;
+            }
+            if let Some(e) = end
+                && r.x - e > crate::order::PIECE_GAP * r.size
+                && marked(&l.runs[i..], &refs).is_some()
+            {
+                cuts.push(i);
+            }
+            end = Some(r.x + r.w);
+        }
+        cuts.push(l.runs.len());
+        for w in cuts.windows(2) {
+            let piece = &l.runs[w[0]..w[1]];
+            let Some(x) = piece.iter().find(|r| ink(&r.text) > 0).map(|r| r.x) else {
+                continue;
+            };
+            let ids = (starts[k] + w[0])..(starts[k] + w[1]);
+            if marked(piece, &refs).is_some() {
+                notes.push((x, ids.collect()));
+                continue;
+            }
+            // A piece without a marker goes on the footnote of its column, on the next line.
+            let goes_on = prev.is_some_and(|p| continues(&all[p], l));
+            let column = notes
+                .iter_mut()
+                .filter(|n| n.0 <= x + EDGE)
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            match column {
+                Some(n) if goes_on => n.1.extend(ids),
+                _ => return Vec::new(),
+            }
+        }
+        prev = Some(k);
+    }
+    notes.into_iter().map(|n| n.1).collect()
 }
 
 /// Lines of a block whose widest line is at most this many font sizes are short lines.
@@ -1927,7 +2362,7 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
         && !sentences(lines)
         && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
-        && listed(lines);
+        && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
     // justified prose is not that.
@@ -1984,15 +2419,39 @@ const ADDRESS_WORDS: usize = 4;
 /// none holds more than [`ADDRESS_WORDS`] words and words in small letters are rare (at most
 /// one for every two lines, name particles aside). Prose, also German prose whose nouns
 /// start with capitals, holds many words in small letters.
-fn listed(lines: &[Line<'_>]) -> bool {
-    if lines.iter().all(|l| list_marker(&l.text).is_some()) {
+fn listed(lines: &[&str]) -> bool {
+    if lines.iter().all(|l| list_marker(l).is_some()) {
         return true;
     }
-    let total: usize = lines.iter().map(|l| small_words(&l.text)).sum();
-    lines
-        .iter()
-        .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS)
-        && 2 * total <= lines.len()
+    let total: usize = lines.iter().map(|l| small_words(l)).sum();
+    lines.iter().all(|l| words(l) <= ADDRESS_WORDS) && 2 * total <= lines.len()
+}
+
+/// The words of a line, a run of words that each hold a digit counted as one: an IBAN or a
+/// phone number written in groups is one word (`IBAN DE00 0000 0000` is two).
+fn words(text: &str) -> usize {
+    let mut n = 0;
+    let mut in_number = false;
+    for w in text.split_whitespace() {
+        let number = w.chars().any(|c| c.is_ascii_digit());
+        if !(number && in_number) {
+            n += 1;
+        }
+        in_number = number;
+    }
+    n
+}
+
+/// Whether lines have the shape of an address: three lines or more that are [`listed`], each
+/// with a letter, and a digit on a line after the first (a street number, a postcode). Their
+/// left edge is the caller's to check.
+pub(crate) fn address_shaped(lines: &[&str]) -> bool {
+    lines.len() >= 3
+        && listed(lines)
+        && lines.iter().all(|l| l.chars().any(char::is_alphabetic))
+        && lines[1..]
+            .iter()
+            .any(|l| l.chars().any(|c| c.is_ascii_digit()))
 }
 
 /// Words that start with a small letter, not counting name particles ("von der Heide",
@@ -2821,6 +3280,164 @@ mod tests {
         assert_eq!(list_marker("-5 degrees"), None);
         assert_eq!(list_marker("2024 was"), None);
         assert_eq!(list_marker("1.5 litres"), None);
+        // Padding after a star or a dash: a mark set into a form field, no bullet.
+        assert_eq!(list_marker("*     Betrag"), None);
+        assert_eq!(list_marker("-  keine"), None);
+        assert_eq!(list_marker("\u{2013}\t\tkeine"), None);
+        assert_eq!(list_marker("* Punkt"), Some((false, 2)));
+    }
+
+    #[test]
+    fn a_star_parted_by_a_piece_gap_is_no_bullet() {
+        let mark = Run {
+            w: 6.0,
+            ..run("* ", 0, 700.0, 10.0)
+        };
+        let far = Run {
+            x: 120.0,
+            ..run("Betrag", 0, 700.0, 10.0)
+        };
+        let near = Run {
+            x: 80.0,
+            ..run("Punkt", 0, 700.0, 10.0)
+        };
+        let padded = [mark.clone(), far];
+        assert!(padded_mark(&line(&padded)));
+        let bullet = [mark, near];
+        assert!(!padded_mark(&line(&bullet)));
+    }
+
+    #[test]
+    fn text_sizes_of_a_page() {
+        // 800 ink characters of labels, 300 of data lines with padding on 3 lines, 20 of a
+        // title.
+        let data = |line: u32| {
+            let text = format!("{}{}", "b".repeat(100), " ".repeat(300));
+            run(&text, line, 690.0 - 10.0 * line as f32, 9.5)
+        };
+        let runs = [
+            run(&"a".repeat(800), 0, 700.0, 6.0),
+            data(1),
+            data(2),
+            data(3),
+            run(&"c".repeat(20), 4, 640.0, 14.0),
+        ];
+        assert_eq!(page_text_sizes(&runs), [6.0, 9.5]);
+        // 400 ink characters make a text size also under a quarter of the page.
+        let runs = [
+            run(&"a".repeat(2000), 0, 700.0, 6.0),
+            run(&"b".repeat(400), 1, 680.0, 9.5),
+        ];
+        assert_eq!(page_text_sizes(&runs), [6.0, 9.5]);
+        // A cover page: a title of one line sets half of the little text there is, and is no
+        // text size.
+        let runs = [
+            run(&"a".repeat(30), 0, 700.0, 24.0),
+            run(&"b".repeat(10), 1, 600.0, 10.0),
+            run(&"b".repeat(10), 2, 590.0, 10.0),
+            run(&"b".repeat(10), 3, 580.0, 10.0),
+        ];
+        assert_eq!(page_text_sizes(&runs), [10.0]);
+    }
+
+    #[test]
+    fn amounts_at_the_end() {
+        assert!(ends_in_amount("Gesamtbetrag 1.234,56 EUR"));
+        assert!(ends_in_amount("Summe 9,99"));
+        assert!(ends_in_amount("Total $ 1,234.56"));
+        assert!(ends_in_amount("Netto 12,50 \u{20ac}"));
+        assert!(ends_in_amount("1.234,56 50,00 123,45"));
+        assert!(!ends_in_amount("Rechnung vom 01.03.2026"));
+        assert!(!ends_in_amount("Bericht 2025"));
+        assert!(!ends_in_amount("Betrag 3,50 TEUR"));
+        assert!(!ends_in_amount("1,50 und mehr"));
+    }
+
+    #[test]
+    fn lines_of_data_only() {
+        assert!(data_only("1234567 8901 2 30"));
+        assert!(data_only("01.03.2026"));
+        assert!(data_only("00000000000"));
+        assert!(data_only("1.234,56 EUR"));
+        assert!(!data_only("Bericht 2025"));
+        assert!(!data_only("EUR"));
+        assert!(!data_only("Rechnung"));
+    }
+
+    #[test]
+    fn address_shapes() {
+        assert!(address_shaped(&[
+            "Erika Mustermann",
+            "Musterweg 1",
+            "12345 Musterstadt"
+        ]));
+        // An IBAN in groups is one word.
+        assert!(address_shaped(&[
+            "Muster GmbH",
+            "IBAN DE00 0000 0000 0000 0000 00",
+            "BIC MUSTDEXXXXX"
+        ]));
+        assert_eq!(words("IBAN DE00 0000 0000 0000 0000 00"), 2);
+        // Two lines, no digit after the first, prose.
+        assert!(!address_shaped(&["Erika Mustermann", "Musterweg 1"]));
+        assert!(!address_shaped(&[
+            "Muster GmbH",
+            "Abteilung Einkauf",
+            "Musterstadt"
+        ]));
+        assert!(!address_shaped(&[
+            "die Ware wird",
+            "am 1. Mai geliefert",
+            "und bezahlt"
+        ]));
+        assert!(!address_shaped(&["Muster GmbH", "12345", "00000"]));
+    }
+
+    #[test]
+    fn bold_leads_a_heading_line() {
+        let bold = |text: &str| Run {
+            bold: true,
+            ..run(text, 0, 700.0, 9.0)
+        };
+        let plain = |text: &str| run(text, 0, 700.0, 9.0);
+        let all = [bold("Rechnung")];
+        assert!(bold_led(&line(&all)));
+        let section = [bold("SECTION 1"), plain(" (TO BE COMPLETED BY PAYEE)")];
+        assert!(bold_led(&line(&section)));
+        let label = [bold("Kundennummer:"), plain(" 00000")];
+        assert!(!bold_led(&line(&label)));
+        let value = [bold("Rechnungsnummer"), plain(" RE-2026-001")];
+        assert!(!bold_led(&line(&value)));
+        let plain_first = [plain("Seite"), bold(" 1")];
+        assert!(!bold_led(&line(&plain_first)));
+    }
+
+    #[test]
+    fn note_markers() {
+        assert_eq!(word_mark("Betrag*"), Some(NoteMark::Stars(1)));
+        assert_eq!(word_mark("Betrag**:"), Some(NoteMark::Stars(2)));
+        assert_eq!(word_mark("Betrag1)"), Some(NoteMark::Paren(1)));
+        assert_eq!(word_mark("Beitrag\u{b2}"), Some(NoteMark::Raised(2)));
+        assert_eq!(word_mark("*"), None);
+        assert_eq!(word_mark("12)"), None);
+        assert_eq!(word_mark("Betrag"), None);
+        let opens = |text: &str| opening_mark(&[run(text, 0, 60.0, 6.0)]);
+        assert_eq!(opens("* steuerfrei"), Some(NoteMark::Stars(1)));
+        assert_eq!(opens("*** ohne"), Some(NoteMark::Stars(3)));
+        assert_eq!(opens("1) laut Vertrag"), Some(NoteMark::Paren(1)));
+        assert_eq!(opens("\u{b3} anteilig"), Some(NoteMark::Raised(3)));
+        assert_eq!(opens("2 Std = Stunden"), Some(NoteMark::Raised(2)));
+        assert_eq!(opens("2025 war"), None);
+        assert_eq!(opens("*"), None);
+        // A digit run raised against the text after it.
+        let raised = [
+            Run {
+                y: 62.0,
+                ..run("4", 0, 60.0, 4.0)
+            },
+            run(" anteilig", 0, 60.0, 6.0),
+        ];
+        assert_eq!(opening_mark(&raised), Some(NoteMark::Raised(4)));
     }
 
     #[test]

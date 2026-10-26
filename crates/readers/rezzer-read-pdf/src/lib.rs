@@ -266,6 +266,34 @@ fn extract(
     extracted
 }
 
+/// Adds a `found-by` note paragraph to the blocks of page `n`, charged to the budget; past
+/// the budget the read says that the note saying `what` is not written.
+fn found_by_note(
+    blocks: &mut Vec<Block>,
+    note: String,
+    what: &str,
+    n: u32,
+    budget: &Budget,
+    out: &mut Out,
+) {
+    let charged = budget
+        .add_elements(1)
+        .and_then(|()| budget.charge_text(note.len()));
+    match charged {
+        Ok(()) => blocks.push(Block::Paragraph {
+            inlines: vec![Inline::plain(note)],
+            role: Some("found-by".into()),
+            anchor: None,
+        }),
+        Err(hit) => out.loss(
+            format!("p{n}"),
+            format!("{hit}: the note that says {what} is not written"),
+            LossReason::Limit,
+            Severity::Warning,
+        ),
+    }
+}
+
 /// Reads the separators drawn as marks on `pages` with the style the file's visible text
 /// shows (each line of runs scanned whole), before the pages are laid out. A number whose
 /// separators are not read is a Warning loss and makes the read partial: it may be off by a
@@ -432,25 +460,14 @@ fn lay_out(
         if let (false, Some(mut items)) = (halted, read.remove(&n)) {
             if let Some(note) = found_by.remove(&n) {
                 // The separators drawn as marks that were written, said at the top of the page.
-                let charged = budget
-                    .add_elements(1)
-                    .and_then(|()| budget.charge_text(note.len()));
-                match charged {
-                    Ok(()) => blocks.push(Block::Paragraph {
-                        inlines: vec![Inline::plain(note)],
-                        role: Some("found-by".into()),
-                        anchor: None,
-                    }),
-                    Err(hit) => out.loss(
-                        format!("p{n}"),
-                        format!(
-                            "{hit}: the note that says which separators on page {n} are drawn \
-                             marks is not written"
-                        ),
-                        LossReason::Limit,
-                        Severity::Warning,
-                    ),
-                }
+                found_by_note(
+                    &mut blocks,
+                    note,
+                    &format!("which separators on page {n} are drawn marks"),
+                    n,
+                    budget,
+                    out,
+                );
             }
             let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
             let cx = Context {
@@ -586,6 +603,17 @@ fn lay_out(
             }
             for (what, why, severity) in laid.notes {
                 out.loss(format!("p{n}"), what, why, severity);
+            }
+            if let Some(note) = laid.found_by {
+                // The footnotes the layout found, said at the top of the page too.
+                found_by_note(
+                    &mut blocks,
+                    note,
+                    &format!("which paragraphs on page {n} are footnotes"),
+                    n,
+                    budget,
+                    out,
+                );
             }
             let section = out.doc.body.len();
             let first_table = blocks.len();

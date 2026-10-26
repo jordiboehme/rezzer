@@ -1963,6 +1963,18 @@ fn tag_hash(tag: &[u8]) -> u64 {
     h.finish()
 }
 
+/// Whether a font name (in small letters, without a subset prefix) is a bold font of the TeX
+/// families, whose names give the series as letters (`cmbx12` is Computer Modern bold
+/// extended at 12 pt) and whose descriptors carry no weight.
+fn tex_bold(name: &str) -> bool {
+    ["cmbx", "cmssbx", "cmmib", "cmbsy", "ecbx", "ecsx"]
+        .iter()
+        .any(|p| name.starts_with(p))
+        || name
+            .strip_prefix("cmb")
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// Style and kind of a font from its dictionary: the descriptor's flags, weight and angle and
 /// the font's name.
 fn font_info(font: &Dict<'_>) -> FontInfo {
@@ -2006,7 +2018,8 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         || weight >= 600.0
         || ["bold", "black", "heavy", "semibold", "demi"]
             .iter()
-            .any(|w| name.contains(w));
+            .any(|w| name.contains(w))
+        || tex_bold(&name);
     let italic = flags & (1 << 6) != 0
         || angle != 0.0
         || ["italic", "oblique"].iter().any(|w| name.contains(w));
@@ -4138,5 +4151,15 @@ mod tests {
         assert_eq!(clean_bf(BfString::Char('\u{FB01}')).as_deref(), Some("fi"));
         assert_eq!(clean_bf(BfString::Char('\u{FFFD}')), None);
         assert_eq!(clean_bf(BfString::Char('\t')).as_deref(), Some(" "));
+    }
+
+    #[test]
+    fn tex_bold_fonts_by_name() {
+        for name in ["cmbx12", "cmssbx10", "cmb10", "ecbx1200", "cmmib10"] {
+            assert!(tex_bold(name), "{name}");
+        }
+        for name in ["cmr10", "cmbright", "cmti10", "cmtt10", "helvetica"] {
+            assert!(!tex_bold(name), "{name}");
+        }
     }
 }

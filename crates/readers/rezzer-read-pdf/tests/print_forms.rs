@@ -2498,3 +2498,284 @@ fn a_value_below_a_note_stays_its_own_row() {
     assert_eq!(found[0][3], ["Muster A", "", "", "", ""], "{found:#?}");
     assert_no_loss(&out);
 }
+
+/// Template labels of 6 pt, at least `ink` ink characters, from `top` down at 40.
+fn label_mass(ink: usize, top: f32) -> String {
+    const LABEL: &str = "Angaben zur Person und zum Arbeitgeber laut Vertrag";
+    let mut out = String::new();
+    let (mut n, mut y) = (0, top);
+    while n < ink {
+        out.push_str(&label(40.0, y, 6.0, LABEL));
+        n += LABEL.chars().filter(|c| !c.is_whitespace()).count();
+        y -= 8.0;
+    }
+    out
+}
+
+/// Data lines of the print layer, each padded into its place, about 300 ink characters from
+/// `top` down. No two start at one x, so they form no columns.
+fn padded_data_lines(top: f32) -> Vec<DataLine> {
+    (0..7)
+        .map(|k| DataLine {
+            y: top - 12.0 * k as f32,
+            text: format!(
+                "{}Muster{k} Kostenstelle Abteilung Musterort Nord",
+                " ".repeat(4 * k)
+            ),
+        })
+        .collect()
+}
+
+fn headings_of(out: &ReadOutcome) -> Vec<(u8, String)> {
+    fn walk(blocks: &[Block], found: &mut Vec<(u8, String)>) {
+        for b in blocks {
+            match b {
+                Block::Heading { level, inlines, .. } => {
+                    found.push((*level, plain_text(inlines)));
+                }
+                Block::Section { blocks, .. } => walk(blocks, found),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(&out.document.body, &mut found);
+    found
+}
+
+/// The top-level blocks of the first page section.
+fn page_blocks(out: &ReadOutcome) -> &[Block] {
+    out.document
+        .body
+        .iter()
+        .find_map(|b| match b {
+            Block::Section { blocks, .. } => Some(blocks.as_slice()),
+            _ => None,
+        })
+        .expect("a page section")
+}
+
+#[test]
+fn data_lines_are_not_headings() {
+    let page = FormPage {
+        template: label_mass(800, 400.0),
+        lines: padded_data_lines(700.0),
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(headings_of(&out).is_empty(), "{:?}", headings_of(&out));
+    assert!(all_text(&out).contains("Muster5"), "{}", all_text(&out));
+}
+
+#[test]
+fn address_block_keeps_its_lines() {
+    let mut lines = vec![
+        DataLine {
+            y: 760.0,
+            text: "Erika Mustermann".into(),
+        },
+        DataLine {
+            y: 748.0,
+            text: "Musterweg 1".into(),
+        },
+        DataLine {
+            y: 736.0,
+            text: "12345 Musterstadt".into(),
+        },
+        DataLine {
+            y: 724.0,
+            text: "Deutschland".into(),
+        },
+    ];
+    lines.extend(padded_data_lines(640.0));
+    let page = FormPage {
+        template: label_mass(800, 400.0),
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(headings_of(&out).is_empty(), "{:?}", headings_of(&out));
+    let address = page_blocks(&out)
+        .iter()
+        .find_map(|b| match b {
+            Block::Paragraph { inlines, .. }
+                if plain_text(inlines).starts_with("Erika Mustermann") =>
+            {
+                Some(inlines)
+            }
+            _ => None,
+        })
+        .expect("the address paragraph");
+    assert_eq!(
+        plain_text(address),
+        "Erika Mustermann Musterweg 1 12345 Musterstadt Deutschland"
+    );
+    let breaks = address
+        .iter()
+        .filter(|i| matches!(i, rezzer_model::Inline::LineBreak))
+        .count();
+    assert_eq!(breaks, 3, "{address:?}");
+}
+
+#[test]
+fn star_with_padding_is_no_bullet() {
+    let page = FormPage {
+        template: label(40.0, 760.0, 6.0, "Muster GmbH Abrechnung"),
+        lines: vec![
+            DataLine {
+                y: 700.0,
+                text: "*     Betrag".into(),
+            },
+            DataLine {
+                y: 640.0,
+                text: "die Ware wird wie vereinbart an die Muster GmbH geliefert".into(),
+            },
+        ],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let lists = page_blocks(&out)
+        .iter()
+        .filter(|b| matches!(b, Block::List { .. }))
+        .count();
+    assert_eq!(lists, 0, "{:#?}", page_blocks(&out));
+    assert!(all_text(&out).contains("Betrag"), "{}", all_text(&out));
+}
+
+#[test]
+fn footnotes_form_a_legend() {
+    let template = common::show("FL", 14.0, 40.0, 780.0, "Muster GmbH")
+        + &common::show("FL", 9.0, 40.0, 700.0, "Betrag* 1.234,56")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            688.0,
+            "Die Ware wird wie vereinbart geliefert.",
+        )
+        + &common::show("FL", 6.0, 40.0, 60.0, "* steuerfrei");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let blocks = page_blocks(&out);
+    let notes: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph {
+                inlines,
+                role: Some(r),
+                ..
+            } if r == "footnote" => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notes, ["* steuerfrei"], "{blocks:#?}");
+    assert!(
+        !blocks.iter().any(|b| matches!(b, Block::List { .. })),
+        "{blocks:#?}"
+    );
+    // The legend closes the page.
+    assert!(
+        matches!(blocks.last(), Some(Block::Paragraph { role: Some(r), .. }) if r == "footnote"),
+        "{blocks:#?}"
+    );
+    assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
+}
+
+/// Guard: a title at 1.5 times the body size or more stays a level-1 heading, also when it is
+/// not bold (Task 8 takes the document title from it).
+#[test]
+fn form_title_stays_a_heading() {
+    let template = common::show("FL", 14.0, 40.0, 780.0, "Musterformular")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            700.0,
+            "die Angaben dieses Formulars werden von der Muster GmbH vertraulich behandelt",
+        )
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            688.0,
+            "und nur zu dem Zweck verwendet, zu dem sie erhoben wurden, und nicht weiter",
+        );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert_eq!(headings_of(&out), [(1, "Musterformular".to_string())]);
+}
+
+/// The footnote paragraphs of the first page section.
+fn footnote_texts(out: &ReadOutcome) -> Vec<String> {
+    page_blocks(out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph {
+                inlines,
+                role: Some(r),
+                ..
+            } if r == "footnote" => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Footnote numbers raised after labels above, and a legend of two columns on one line: each
+/// footnote is its own paragraph, the columns do not run together.
+#[test]
+fn raised_numbers_and_a_legend_in_columns() {
+    let template = common::show("FL", 9.0, 40.0, 720.0, "Einheit")
+        + &common::show("FL", 5.0, 72.0, 724.0, "2")
+        + &common::show("FL", 9.0, 200.0, 720.0, "Beitrag")
+        + &common::show("FL", 5.0, 232.0, 724.0, "3")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            690.0,
+            "die Werte werden von der Muster GmbH monatlich abgerechnet und gemeldet",
+        )
+        + &common::show("FL", 6.0, 40.0, 70.0, "2 Std = Stunden")
+        + &common::show("FL", 6.0, 300.0, 70.0, "3 Gegebenenfalls anteilig")
+        + &common::show("FL", 6.0, 300.0, 62.0, "nach Vertrag");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert_eq!(
+        footnote_texts(&out),
+        ["2 Std = Stunden", "3 Gegebenenfalls anteilig nach Vertrag"],
+        "{:#?}",
+        page_blocks(&out)
+    );
+    assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
+}
+
+/// Guard: a numbered line at the bottom of a page is no footnote when no number above is
+/// raised as a reference.
+#[test]
+fn numbered_bottom_line_without_reference_is_no_footnote() {
+    let template = common::show("FL", 9.0, 40.0, 720.0, "Einheit 2 Stunden")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            690.0,
+            "die Werte werden von der Muster GmbH monatlich abgerechnet und gemeldet",
+        )
+        + &common::show("FL", 6.0, 40.0, 70.0, "2 Std = Stunden");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(footnote_texts(&out).is_empty(), "{:#?}", page_blocks(&out));
+    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+}
