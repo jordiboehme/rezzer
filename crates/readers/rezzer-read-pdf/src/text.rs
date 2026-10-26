@@ -1967,9 +1967,11 @@ fn tag_hash(tag: &[u8]) -> u64 {
 /// families, whose names give the series as letters (`cmbx12` is Computer Modern bold
 /// extended at 12 pt) and whose descriptors carry no weight.
 fn tex_bold(name: &str) -> bool {
-    ["cmbx", "cmssbx", "cmmib", "cmbsy", "ecbx", "ecsx"]
-        .iter()
-        .any(|p| name.starts_with(p))
+    [
+        "cmbx", "cmssbx", "cmmib", "cmbsy", "ecbx", "ecsx", "ecrb", "ecbi", "ecbl",
+    ]
+    .iter()
+    .any(|p| name.starts_with(p))
         || name
             .strip_prefix("cmb")
             .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
@@ -4156,7 +4158,10 @@ mod tests {
 
     #[test]
     fn tex_bold_fonts_by_name() {
-        for name in ["cmbx12", "cmssbx10", "cmb10", "ecbx1200", "cmmib10"] {
+        for name in [
+            "cmbx12", "cmssbx10", "cmb10", "ecbx1200", "cmmib10", "ecrb1000", "ecbi1000",
+            "ecbl1000",
+        ] {
             assert!(tex_bold(name), "{name}");
         }
         for name in ["cmr10", "cmbright", "cmti10", "cmtt10", "helvetica"] {

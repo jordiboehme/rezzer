@@ -2662,7 +2662,7 @@ fn footnotes_form_a_legend() {
     let blocks = page_blocks(&out);
     assert_eq!(
         footnote_texts(&out),
-        [("p1-star".to_string(), "* steuerfrei".to_string())],
+        [("p1-star".to_string(), "steuerfrei".to_string())],
         "{blocks:#?}"
     );
     assert!(
@@ -2686,7 +2686,7 @@ fn footnotes_form_a_legend() {
         &rezzer_render::RenderOptions::default(),
     );
     assert!(md.contains("Betrag[^p1-star] 1.234,56"), "{md}");
-    assert!(md.contains("[^p1-star]: \\* steuerfrei"), "{md}");
+    assert!(md.contains("[^p1-star]: steuerfrei"), "{md}");
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
 }
 
@@ -2801,10 +2801,10 @@ fn raised_numbers_and_a_legend_in_columns() {
     assert_eq!(
         footnote_texts(&out),
         [
-            ("p1-2".to_string(), "2 Std = Stunden".to_string()),
+            ("p1-2".to_string(), "Std = Stunden".to_string()),
             (
                 "p1-3".to_string(),
-                "3 Gegebenenfalls anteilig nach Vertrag".to_string()
+                "Gegebenenfalls anteilig nach Vertrag".to_string()
             )
         ],
         "{:#?}",
@@ -2909,14 +2909,14 @@ fn legend_of_three_columns_links_its_references() {
     let blocks = page_blocks(&out);
     let label = |n: u32| format!("p1-{n}");
     let want: Vec<(String, String)> = [
-        (1, "1 A = Muster, B = Beispiel"),
-        (2, "2 Std = Stunden, Min = Minuten, Tg = Tage"),
-        (3, "3 Gegebenenfalls anteilig"),
-        (4, "4 SV = Sozialversicherung, KV = Krankenversicherung"),
-        (5, "5 GB = Grundbetrag"),
-        (6, "6 Abz = Abzug, Zu = Zuschlag"),
-        (7, "7 Rest = Restbetrag nach Abzug aller Posten"),
-        (8, "8 Mio = Million Euro"),
+        (1, "A = Muster, B = Beispiel"),
+        (2, "Std = Stunden, Min = Minuten, Tg = Tage"),
+        (3, "Gegebenenfalls anteilig"),
+        (4, "SV = Sozialversicherung, KV = Krankenversicherung"),
+        (5, "GB = Grundbetrag"),
+        (6, "Abz = Abzug, Zu = Zuschlag"),
+        (7, "Rest = Restbetrag nach Abzug aller Posten"),
+        (8, "Mio = Million Euro"),
     ]
     .iter()
     .map(|(n, t)| (label(*n), t.to_string()))
@@ -3047,8 +3047,34 @@ fn legend_of_raised_markers_in_columns_links_its_references() {
     let out = read(&print_form(&[page], "", ""));
     let blocks = page_blocks(&out);
     let label = |n: u32| format!("p1-{n}");
-    let texts: Vec<String> = footnote_texts(&out).into_iter().map(|(l, _)| l).collect();
-    assert_eq!(texts, (1..=8).map(label).collect::<Vec<_>>(), "{blocks:#?}");
+    let want: Vec<(String, String)> = [
+        (1, "A = Musterbetrag nach Vertrag"),
+        (
+            2,
+            "Abc = Abcdef, Gh = Ghijkl, Mn = Mnopqr, Uv = Uvwxyz Ab = Abend, Bc = Becher, \
+             Cd = Cedern, De = Delle",
+        ),
+        (3, "Muster anteilig nach Tagen im Monat"),
+        (
+            4,
+            "Q = Quelle, R = Rest, U = Umlage, X = Extra, Y = Ypsilon, K = Kappe, D = Delta, \
+             O = Oktav, H = Halde, I = Insel, C = Chor, G = Garten V = Vorlage, W = Wiese",
+        ),
+        (5, "J = Teil der Mustersumme im Monat"),
+        (
+            6,
+            "Z = Zuschlag zur Musterkasse fuer alle Gruppen, E = Eintrag geprueft, 1-5 = \
+             Anzahl der Muster",
+        ),
+        (7, "KZ = Kennzeichen fuer den Monat"),
+        (8, "Muster Satz zur Musterkasse mit allen Teilen"),
+    ]
+    .iter()
+    .map(|(n, t)| (label(*n), t.to_string()))
+    .collect();
+    assert_eq!(footnote_texts(&out), want, "{blocks:#?}");
+    // The legend sets no body size: the sentence and the bold amount label are no headings.
+    assert!(headings_of(&out).is_empty(), "{:?}", headings_of(&out));
     let refs = references(&out);
     for n in 1..=8 {
         assert!(refs.contains(&label(n)), "{n}: {refs:?}");
@@ -3111,6 +3137,7 @@ fn no_limit_leaves_a_reference_without_its_footnote() {
             max_text_bytes,
             ..rezzer_limits::Limits::default()
         }));
+    let mut any = false;
     for limits in limits {
         let out = common::read_in(
             &bytes,
@@ -3133,8 +3160,52 @@ fn no_limit_leaves_a_reference_without_its_footnote() {
                 _ => None,
             })
             .collect();
-        for r in references(&out) {
+        let refs = references(&out);
+        any |= !refs.is_empty();
+        for r in refs {
             assert!(notes.contains(&r), "{r} without its footnote: {notes:?}");
         }
     }
+    assert!(any, "no limit kept a reference");
+}
+
+/// A legend entry no marker above points to stays a paragraph with the role `footnote` and
+/// its marker: a Markdown viewer would hide a footnote definition without a reference.
+#[test]
+fn footnote_without_reference_is_a_paragraph() {
+    let template = common::show("FL", 9.0, 40.0, 700.0, "Betrag* 1.234,56")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            688.0,
+            "Die Ware wird wie vereinbart geliefert.",
+        )
+        + &common::show("FL", 6.0, 40.0, 60.0, "* steuerfrei")
+        + &common::show("FL", 6.0, 40.0, 52.0, "** ohne Verweis");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let blocks = page_blocks(&out);
+    assert_eq!(
+        footnote_texts(&out),
+        [("p1-star".to_string(), "steuerfrei".to_string())],
+        "{blocks:#?}"
+    );
+    let plain: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph {
+                inlines,
+                role: Some(r),
+                ..
+            } if r == "footnote" => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(plain, ["** ohne Verweis"], "{blocks:#?}");
+    let note = found_by(&out);
+    assert!(note[0].contains("1 of them are linked"), "{note:?}");
 }

@@ -67,8 +67,9 @@ impl NoteMark {
 /// The legend of a page taken out of its flow.
 #[derive(Default)]
 pub(super) struct Legend {
-    /// Each footnote, in reading order (column by column, top down): its label and runs.
-    pub notes: Vec<(String, Vec<Run>)>,
+    /// Each footnote, in reading order (column by column, top down): its label, its runs
+    /// and the bytes its marker takes of their trimmed text.
+    pub notes: Vec<(String, Vec<Run>, usize)>,
     /// The label of each marker the legend holds.
     labels: HashMap<NoteMark, String>,
 }
@@ -76,6 +77,8 @@ pub(super) struct Legend {
 /// One footnote while the legend is read.
 struct Entry {
     mark: NoteMark,
+    /// The bytes of its first piece's trimmed text the marker takes.
+    cut: usize,
     /// The left edge of its marker, and the top and the last baseline of its lines.
     x: f32,
     top: f32,
@@ -265,7 +268,12 @@ pub(super) fn take(page: u32, flow: &mut Flow) -> Legend {
         runs[n].push(r);
     }
     Legend {
-        notes: named.into_iter().zip(runs).collect(),
+        notes: named
+            .into_iter()
+            .zip(runs)
+            .zip(&entries)
+            .map(|((label, runs), e)| (label, runs, e.cut))
+            .collect(),
         labels,
     }
 }
@@ -312,6 +320,11 @@ fn place_inside(flow: &mut Flow, mut inside: Vec<(usize, Split, usize)>) -> Vec<
             // The part after a cut starts with one space before its first word, and its gaps
             // count from the cut.
             let here = match last {
+                // Two references after one word: the second follows the first.
+                Some(l) if l.byte == split.byte => {
+                    moved[r] = push(&mut out, reference, slot, at);
+                    continue;
+                }
                 None => Some(split),
                 Some(l) => (split.byte + 1).checked_sub(l.byte).map(|byte| Split {
                     byte,
@@ -388,22 +401,47 @@ fn walk_inlines(blocks: &mut [Block], f: &mut dyn FnMut(&mut Vec<Inline>)) {
     }
 }
 
-/// The `found-by` note of a page with `n` footnotes written.
-pub(super) fn note(page: u32, n: usize) -> Option<String> {
+/// The `found-by` note of a page with `n` footnotes written, `linked` of them with their
+/// references.
+pub(super) fn note(page: u32, n: usize, linked: usize) -> Option<String> {
+    let how = "set in one size below all other text, each opening with a note marker, the \
+               first of which also stands after a word above";
     let what = match n {
         0 => return None,
-        1 => format!(
-            "1 footnote at the bottom of page {page} is read from its legend: it is set in the \
-             legend's size below all other text and opens with a note marker that also stands \
-             after a word above, where it is linked"
-        ),
-        _ => format!(
-            "{n} footnotes at the bottom of page {page} are read from their legend: they are \
-             set in one size below all other text, each opens with a note marker, the first \
-             marker also stands after a word above, and the markers above are linked to them"
-        ),
+        1 => format!("1 footnote at the bottom of page {page} is read from its legend, {how}"),
+        _ => {
+            format!("{n} footnotes at the bottom of page {page} are read from their legend, {how}")
+        }
     };
-    Some(what)
+    let refs = match (n, linked) {
+        (1, 1) => "; the marker above is linked to it".to_string(),
+        (1, 0) => "; no marker above is linked to it".to_string(),
+        (_, 0) => "; no marker above is linked to them".to_string(),
+        (n, l) if n == l => "; the markers above are linked to them".to_string(),
+        (_, l) => format!("; {l} of them are linked to their markers above"),
+    };
+    Some(what + &refs)
+}
+
+/// The runs of the legend of `runs` (a page in its line order), by index; none when the
+/// page has none.
+pub(super) fn legend_runs(runs: &[Run]) -> HashSet<usize> {
+    find(runs)
+        .map(|f| f.entries.into_iter().flat_map(|e| e.ids).collect())
+        .unwrap_or_default()
+}
+
+/// The labels of the footnote references of `blocks`.
+pub(super) fn referenced(blocks: &mut [Block]) -> HashSet<String> {
+    let mut found = HashSet::new();
+    walk_inlines(blocks, &mut |inlines| {
+        for i in inlines.iter() {
+            if let Inline::FootnoteRef { id } = i {
+                found.insert(id.clone());
+            }
+        }
+    });
+    found
 }
 
 /// Whether `run` holds one or two digits raised against `base`, the text after it.
@@ -441,10 +479,18 @@ fn raised_ref(run: &Run, word: &Run) -> Option<(u8, Option<Split>)> {
     {
         return Some((n, None));
     }
-    splits(word).into_iter().find_map(|g| {
+    // A space by the share of characters may end early after wide letters: the number may
+    // stand past it, up to a little before the end of the next word.
+    let spaces = splits(word);
+    spaces.iter().enumerate().find_map(|(k, g)| {
         let before = word.text[..g.byte].trim_end();
-        (run.x >= g.from - REF_LEAD * size && run.x <= g.to && no_digit(before))
-            .then_some((n, Some(g)))
+        let next_end = spaces.get(k + 1).map_or(end, |s| s.from);
+        let last = match g.gap {
+            Some(_) => g.to,
+            None => (next_end - REF_LEAD * size).max(g.to),
+        };
+        (run.x >= g.from - REF_LEAD * size && run.x <= last && no_digit(before))
+            .then_some((n, Some(*g)))
     })
 }
 
@@ -489,12 +535,18 @@ fn word_mark(word: &str) -> Option<(NoteMark, usize)> {
 /// number before its text, a run of digits raised against the run after it, or plain digits
 /// and a space.
 fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
+    opening(runs).map(|o| o.0)
+}
+
+/// [`opening_mark`] with the bytes the marker and the white space after it take of the
+/// trimmed text of the piece: what the footnote's text leaves out.
+fn opening(runs: &[Run]) -> Option<(NoteMark, usize)> {
     let mut inked = runs.iter().filter(|r| ink(&r.text) > 0);
     let first = inked.next()?;
     if let Some(next) = inked.next()
         && let Some(n) = raised_digits(first, next)
     {
-        return Some(NoteMark::Raised(n));
+        return Some((NoteMark::Raised(n), first.text.trim().len()));
     }
     // The marker and the start of the text after it stand in the first two runs with ink.
     let head = runs
@@ -505,16 +557,13 @@ fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
         .map_or(runs.len(), |(i, _)| i + 1);
     let text: String = runs[..head].iter().map(|r| r.text.as_str()).collect();
     let text = text.trim_start();
+    // The bytes up to the text after the marker.
+    let cut = |after: &str| text.len() - after.trim_start().len();
+    let opens_text = |after: &str| after.trim_start().starts_with(char::is_alphanumeric);
     let stars = text.len() - text.trim_start_matches('*').len();
     if stars > 0 {
         let rest = &text[stars..];
-        return (stars <= 3
-            && rest
-                .trim()
-                .chars()
-                .next()
-                .is_some_and(char::is_alphanumeric))
-        .then_some(NoteMark::Stars(stars as u8));
+        return (stars <= 3 && opens_text(rest)).then(|| (NoteMark::Stars(stars as u8), cut(rest)));
     }
     let n = text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
     if (1..=2).contains(&n) {
@@ -523,23 +572,19 @@ fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
         if let Some(after) = rest.strip_prefix(')') {
             return after
                 .starts_with(char::is_whitespace)
-                .then_some(NoteMark::Paren(value));
+                .then(|| (NoteMark::Paren(value), cut(after)));
         }
         return rest
             .starts_with(char::is_whitespace)
-            .then_some(NoteMark::Raised(value));
+            .then(|| (NoteMark::Raised(value), cut(rest)));
     }
     let sup: String = text
         .chars()
         .take_while(|c| SUPERSCRIPTS.contains(c))
         .collect();
     let value = superscript_value(&sup)?;
-    text[sup.len()..]
-        .trim_start()
-        .chars()
-        .next()
-        .is_some_and(char::is_alphanumeric)
-        .then_some(NoteMark::Raised(value))
+    let rest = &text[sup.len()..];
+    opens_text(rest).then(|| (NoteMark::Raised(value), cut(rest)))
 }
 
 /// The references of line `k` of `all`, whose first run is run `start` of the page:
@@ -697,9 +742,10 @@ fn find(runs: &[Run]) -> Option<Found> {
                 continue;
             };
             let ids = (starts[k] + from)..(starts[k] + from + piece.len());
-            if let Some(mark) = opening_mark(piece) {
+            if let Some((mark, cut)) = opening(piece) {
                 entries.push(Entry {
                     mark,
+                    cut,
                     x,
                     top: l.y,
                     last: l.y,
@@ -761,7 +807,7 @@ fn link_inlines(inlines: &mut Vec<Inline>, legend: &Legend) {
             strike,
         };
         let mut from = 0;
-        for (start, word) in words(&text) {
+        for (start, word) in word_spans(&text) {
             let Some((mark, len)) = word_mark(word) else {
                 continue;
             };
@@ -786,7 +832,7 @@ fn link_inlines(inlines: &mut Vec<Inline>, legend: &Legend) {
 }
 
 /// The words of `text` with their byte offsets.
-fn words(text: &str) -> Vec<(usize, &str)> {
+fn word_spans(text: &str) -> Vec<(usize, &str)> {
     let mut out = Vec::new();
     let mut start = None;
     for (i, c) in text.char_indices() {
@@ -1015,6 +1061,47 @@ mod tests {
                 Inline::plain(" 2"),
             ]
         );
+    }
+
+    #[test]
+    fn a_marker_after_wide_letters_is_found() {
+        // Without glyph gaps the space after `MW` is estimated by characters and ends early:
+        // the marker right after the real glyph end still goes after `MW`.
+        // Helvetica 9 pt: `MW` ends at 56, the estimate says 49 and the next word at 53.5.
+        let mut word = run("MW ii", 0, 40.0, 720.0, 9.0);
+        word.w = 22.5;
+        assert_eq!(
+            raised_ref(&run("4", 0, 56.3, 722.5, 6.0), &word).map(|r| r.0),
+            Some(4)
+        );
+        assert!(matches!(
+            raised_ref(&run("4", 0, 56.3, 722.5, 6.0), &word),
+            Some((4, Some(_)))
+        ));
+        // At the end of `ii` it follows the whole run.
+        assert_eq!(
+            raised_ref(&run("4", 0, 61.0, 722.5, 6.0), &word),
+            Some((4, None))
+        );
+    }
+
+    #[test]
+    fn two_markers_after_one_word_follow_each_other() {
+        let mut word = run(" Xa Xb", 0, 40.0, 700.0, 6.6);
+        word.w = 15.0;
+        let runs = vec![
+            word,
+            run("2", 0, 47.0, 701.9, 4.7),
+            run("3", 0, 49.0, 701.9, 4.7),
+            run("die Werte werden monatlich gemeldet", 1, 40.0, 690.0, 9.0),
+            run("2 B = Beispiel", 2, 40.0, 62.0, 6.0),
+            run("3 C = Chor", 3, 40.0, 54.0, 6.0),
+        ];
+        let n = runs.len();
+        let mut flow = Flow::new(runs, vec![super::super::Slot::Free; n]);
+        take(1, &mut flow);
+        let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).take(4).collect();
+        assert_eq!(texts, [" Xa", "p1-2", "p1-3", " Xb"]);
     }
 
     #[test]
