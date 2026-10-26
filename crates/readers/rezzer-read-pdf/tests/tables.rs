@@ -8,13 +8,12 @@
 mod common;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use common::{Builder, Page, helvetica_width, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, Cell, Completeness, Confidence, Detection, FormatId, LossReason,
-    ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
+    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, Reader, SectionKind,
+    Severity, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -25,19 +24,7 @@ fn corpus_path(name: &str) -> PathBuf {
 }
 
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     PdfReader.read(&src, &ReadOptions::default(), &Budget::new(limits))
 }
 

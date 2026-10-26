@@ -8,14 +8,13 @@
 mod common;
 
 use std::io::Write;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{Builder, heap_peak_bytes, peak_of};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline, Loss,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
+    Anchor, Block, CalloutKind, Completeness, Inline, Loss, LossReason, ReadOptions, ReadOutcome,
+    Reader, SectionKind, Severity, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -48,19 +47,7 @@ fn read(bytes: &[u8]) -> ReadOutcome {
 }
 
 fn read_with(bytes: &[u8], budget: &Budget) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     PdfReader.read(&src, &ReadOptions::default(), budget)
 }
 
@@ -2208,19 +2195,7 @@ fn no_annots(_: usize, _: &[u32]) -> Vec<String> {
 }
 
 fn read_extracting(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: true,
         ..ReadOptions::default()
@@ -3309,19 +3284,7 @@ fn a_probe_bound_with_every_note_placed_says_nothing() {
 }
 
 fn read_assets(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: true,
         ..ReadOptions::default()

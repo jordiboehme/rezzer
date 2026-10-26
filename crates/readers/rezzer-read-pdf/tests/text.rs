@@ -5,14 +5,12 @@
 mod common;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use common::{Builder, Page, pdf, show, zeros_packed};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, StatusColor,
-    plain_text,
+    Anchor, Block, CalloutKind, Completeness, FormatId, Inline, LossReason, ReadOptions,
+    ReadOutcome, Reader, SectionKind, Severity, StatusColor, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -26,25 +24,9 @@ fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(path.join(name)).expect("corpus file")
 }
 
-fn source(bytes: &[u8]) -> Source {
-    Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    }
-}
-
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
     PdfReader.read(
-        &source(bytes),
+        &common::source(bytes),
         &ReadOptions::default(),
         &Budget::new(limits),
     )
@@ -796,7 +778,7 @@ fn wrong_password_is_said() {
         ..ReadOptions::default()
     };
     let out = PdfReader.read(
-        &source(&corpus("qpdf-user-password.pdf")),
+        &common::source(&corpus("qpdf-user-password.pdf")),
         &opts,
         &Budget::new(Limits::default()),
     );

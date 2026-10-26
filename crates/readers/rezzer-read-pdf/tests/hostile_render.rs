@@ -9,14 +9,12 @@
 mod common;
 
 use std::io::Write;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{Builder, lenient_bomb};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Block, Bytes, Completeness, Confidence, Detection, FormatId, Loss, LossReason, ReadOptions,
-    ReadOutcome, Reader, Severity, Source, plain_text,
+    Block, Completeness, Loss, LossReason, ReadOptions, ReadOutcome, Reader, Severity, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -37,19 +35,7 @@ fn hostile() -> Limits {
 }
 
 fn read_with(bytes: &[u8], extract: bool) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: extract,
         ..ReadOptions::default()
@@ -58,19 +44,7 @@ fn read_with(bytes: &[u8], extract: bool) -> ReadOutcome {
 }
 
 fn read_with_limits(bytes: &[u8], extract: bool, limits: Limits) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-    };
+    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: extract,
         ..ReadOptions::default()

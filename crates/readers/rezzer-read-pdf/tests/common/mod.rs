@@ -178,10 +178,10 @@ pub fn pdf(pages: &[Page], catalog_extra: &str) -> Vec<u8> {
     b.finish(catalog)
 }
 
-/// `bytes` read as `file.pdf` with the default options and limits. Tests read through this
-/// one helper, so a new field of `Source` is set in one place.
-pub fn read(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
+/// `bytes` as the source `file.pdf`, detected as PDF for certain. This is the one `Source`
+/// of the tests, so a new field of `Source` is set in one place.
+pub fn source(bytes: &[u8]) -> Source {
+    Source {
         path: None,
         name: "file.pdf".into(),
         bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
@@ -193,9 +193,18 @@ pub fn read(bytes: &[u8]) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
-    };
-    PdfReader.read(
-        &src,
+    }
+}
+
+/// `bytes` read with `opts` under `budget`.
+pub fn read_in(bytes: &[u8], opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
+    PdfReader.read(&source(bytes), opts, budget)
+}
+
+/// `bytes` read with the default options and limits.
+pub fn read(bytes: &[u8]) -> ReadOutcome {
+    read_in(
+        bytes,
         &ReadOptions::default(),
         &Budget::new(Limits::default()),
     )

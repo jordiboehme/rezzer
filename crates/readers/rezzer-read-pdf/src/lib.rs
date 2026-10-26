@@ -1475,10 +1475,7 @@ impl Out {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use rezzer_limits::Limits;
-    use rezzer_model::{Bytes, Confidence, Detection};
 
     use super::*;
     use crate::fixtures::{Page, pdf, show};
@@ -1562,19 +1559,7 @@ mod tests {
         // 5,000 different small pictures on one page of a read whose time is spent: the
         // listing asks the clock after 4,096 pictures, keeps those it listed and says how
         // many are not listed and why.
-        let mut out = Out::new(Document::new(source_info(&Source {
-            path: None,
-            name: "f.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(Vec::new())),
-            sha256: "00".repeat(32),
-            size: 0,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "x".into(),
-            },
-            modified: None,
-        })));
+        let mut out = Out::new(Document::new(source_info(&fixtures::source(&[]))));
         let budget = Budget::new(Limits::default());
         budget.cancel();
         let list: Vec<render::Small> = (0..5_000u64)
@@ -1618,19 +1603,7 @@ mod tests {
 
     #[test]
     fn failures_are_grouped_by_run_of_pages() {
-        let mut out = Out::new(Document::new(source_info(&Source {
-            path: None,
-            name: "f.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(Vec::new())),
-            sha256: "00".repeat(32),
-            size: 0,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "x".into(),
-            },
-            modified: None,
-        })));
+        let mut out = Out::new(Document::new(source_info(&fixtures::source(&[]))));
         let bad = |page: u32, why: &str| Failure {
             page,
             why: why.to_string(),
@@ -1723,19 +1696,7 @@ mod tests {
         );
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         let bytes = b.finish(catalog);
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-        };
+        let src = fixtures::source(&bytes);
         let budget = Budget::new(Limits::default());
         let before = render::SCAN_RUNS.with(std::cell::Cell::get);
         let out = read_pdf_in(
@@ -1755,19 +1716,7 @@ mod tests {
     #[test]
     fn crops_stop_when_the_blob_room_is_spent() {
         let bytes = crate::fixtures::small_pictures_twin(2_000);
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-        };
+        let src = fixtures::source(&bytes);
         let opts = ReadOptions {
             extract_assets: true,
             ..ReadOptions::default()
@@ -1807,19 +1756,7 @@ mod tests {
     fn time_stop_between_pages_is_partial() {
         let page = Page::text(show("F1", 12.0, 72.0, 700.0, "Some words."));
         let bytes = pdf(&std::iter::repeat_n(page, 70).collect::<Vec<_>>(), "");
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-        };
+        let src = fixtures::source(&bytes);
         let asked = std::cell::Cell::new(0);
         let budget = Budget::new(Limits::default());
         // The time runs out after 64 pages: from then on the budget says so too.
