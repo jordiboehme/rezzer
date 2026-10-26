@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
+use crate::layout::Gaps;
 use crate::regions::{Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
@@ -481,14 +482,27 @@ fn split_label(row: &mut [PlannedCell]) {
     let Some(cut) = run.text[lead..].find(": ").map(|c| lead + c + 1) else {
         return;
     };
-    let mut rest = run.clone();
-    let chars = run.text.chars().count().max(1) as f32;
-    let before = run.text[..cut].chars().count() as f32;
-    rest.text = run.text[cut..].trim_start().to_string();
-    rest.x = run.x + run.w * before / chars;
-    rest.w = run.w - (rest.x - run.x);
-    run.text.truncate(cut);
-    run.w -= rest.w;
+    // At the gap after the colon where the glyphs say where it is; else by an even share of
+    // the characters.
+    let words = run.text[..cut].split_whitespace().count() as u32;
+    let rest = if let Some(k) = run.gaps.iter().position(|g| g.words == words) {
+        let (before, mut rest) = run.cut_at(k);
+        rest.text = rest.text.trim_start().to_string();
+        *run = before;
+        rest
+    } else {
+        let mut rest = run.clone();
+        let chars = run.text.chars().count().max(1) as f32;
+        let before = run.text[..cut].chars().count() as f32;
+        rest.text = run.text[cut..].trim_start().to_string();
+        rest.x = run.x + run.w * before / chars;
+        rest.w = run.w - (rest.x - run.x);
+        rest.gaps = Gaps::default();
+        run.text.truncate(cut);
+        run.w -= rest.w;
+        run.gaps = Gaps::default();
+        rest
+    };
     value.runs.push(rest);
     value.runs.extend(label.runs.drain(1..));
 }

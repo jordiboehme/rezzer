@@ -1358,6 +1358,29 @@ fn line_in_an_empty_column_starts_a_row() {
 }
 
 #[test]
+fn word_rows_under_a_band_stay_rows() {
+    // Guard: lines of words only that each fill at least half of the columns are each a row,
+    // as before the rule for sparse lines.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "frei"), (3, "offen")],
+        &[(0, "Steuer B"), (1, "frei"), (2, "keiner")],
+        &[(0, "Steuer C"), (2, "keiner"), (3, "offen")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0].1,
+        owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "frei", "", "offen"],
+            &["Steuer B", "frei", "keiner", ""],
+            &["Steuer C", "", "keiner", "offen"],
+        ])
+    );
+}
+
+#[test]
 fn key_value_totals_box() {
     // A box of five labels on the left and amounts set flush right.
     let mut c = String::from("0.5 w 300 100 260 95 re S ");

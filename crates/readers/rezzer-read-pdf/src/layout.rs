@@ -49,7 +49,9 @@ pub(crate) struct Run {
     pub off_axis: bool,
     /// Where the white space between its words lies, from the glyphs: what a column rule
     /// that crosses the run may cut it at. Empty when the run has one word, reads in another
-    /// direction or from right to left, or its text was not laid out from glyphs.
+    /// direction or from right to left, or its text was not laid out from glyphs. They are
+    /// kept up to date until tables are built; text cut off later (a list marker) leaves them
+    /// as they were.
     pub gaps: Gaps,
 }
 
