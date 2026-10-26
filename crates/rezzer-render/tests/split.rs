@@ -3159,3 +3159,26 @@ fn each_column_profile_goes_with_its_own_table() {
         assert_eq!(holders, [first.file.as_str()], "{:?}", names(&list));
     }
 }
+
+#[test]
+fn a_link_to_a_heading_with_inline_html_keeps_its_fragment_across_parts() {
+    // The Markdown reader leaves inline HTML out of a heading's slug; the link into the
+    // other part names the same fragment.
+    let text = format!(
+        "## Alpha\n\n{}\n\nSee [the bold one](#beta-bold).\n\n## Beta <b>bold</b>\n\n{}\n",
+        words(5_000),
+        words(5_000)
+    );
+    let d = read_markdown(&text);
+    let list = units(&d, 2_500);
+    let beta = list
+        .iter()
+        .find(|u| u.file.starts_with("beta"))
+        .expect("a part for Beta");
+    let link = format!("({}.md#beta-bold)", beta.file);
+    assert!(
+        list[0].markdown.contains(&link),
+        "{link}: {}",
+        list[0].markdown
+    );
+}

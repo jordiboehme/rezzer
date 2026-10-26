@@ -17,6 +17,7 @@ mod loss;
 mod reader;
 mod registry;
 mod sheet;
+pub mod text;
 mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};

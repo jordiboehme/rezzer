@@ -273,10 +273,7 @@ impl<'a> PageNames<'a> {
 
 /// A title on one line: runs of white space and control characters become one space.
 fn one_line(text: &str) -> String {
-    text.split(|c: char| c.is_whitespace() || c.is_control())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+    rezzer_model::text::one_line(text)
 }
 
 /// Nested lists built from items with levels. A deeper item opens a list in the item before

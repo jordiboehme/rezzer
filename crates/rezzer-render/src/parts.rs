@@ -687,9 +687,7 @@ fn list_lines(listed: &[&Entry], prefix: &str) -> String {
 
 /// Text from the file on one line: every control character a space.
 fn one_line(text: &str) -> String {
-    text.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect()
+    rezzer_model::text::controls_to_spaces(text)
 }
 
 /// Text from the file as the start of a list item: cut to [`TITLE_CAP`] characters, on one

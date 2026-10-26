@@ -33,6 +33,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
+use rezzer_model::text::{heading_slug, percent_decode};
 use rezzer_model::{Block, Completeness, Document, FormatId, Inline, SectionKind, split_rows};
 
 use crate::blocks::{self, Ctx, MAX_DEPTH, Notes};
@@ -2852,45 +2853,6 @@ fn rewrite_inlines(list: &mut [Inline], links: &Links<'_>, depth: usize) {
             rewrite_inlines(inlines, links, depth + 1);
         }
     }
-}
-
-/// `%XX` codes decoded; other text as it is.
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        if bytes[i] == b'%'
-            && let (Some(h), Some(l)) = (
-                bytes.get(i + 1).copied().and_then(hex),
-                bytes.get(i + 2).copied().and_then(hex),
-            )
-        {
-            out.push((h * 16 + l) as u8);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// A heading slug the way the Markdown reader builds its anchors: lowercase letters and
-/// digits, a space or `-` as `-`, `_` kept, other characters left out.
-fn heading_slug(text: &str) -> String {
-    let mut out = String::new();
-    for c in text.trim().chars() {
-        if c.is_alphanumeric() {
-            out.extend(c.to_lowercase());
-        } else if c == ' ' || c == '-' {
-            out.push('-');
-        } else if c == '_' {
-            out.push('_');
-        }
-    }
-    out
 }
 
 #[cfg(test)]
