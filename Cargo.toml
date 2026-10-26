@@ -80,7 +80,7 @@ hayro-interpret = "=0.8.0"
 hayro-syntax = "=0.8.0"
 # The versions hayro-interpret 0.8.0 uses, so its glyph and font types are the same types.
 kurbo = "=0.13.1"
-skrifa = "=0.46.2"
+skrifa = "=0.48.0"
 # skrifa's own read-fonts, with the Adobe Glyph List for glyph names.
 read-fonts = { version = "=0.43.3", features = ["agl"] }
 unicode-bidi = "=0.3.18"
