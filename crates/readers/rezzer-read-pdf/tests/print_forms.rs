@@ -3714,6 +3714,47 @@ fn box_with_its_label_below_is_not_paired() {
     );
 }
 
+/// Boxes whose bold value stands over a regular label of the same size: weight alone does not
+/// tell which line is the label, so no box pairs (the value is never read as the label of the
+/// label, ruling P6-X), and a loss says why.
+#[test]
+fn bold_value_over_a_regular_label_of_its_size_is_not_paired() {
+    let mut t = String::new();
+    for (k, (l, v)) in [("Name", "Erika"), ("Ort", "Musterstadt"), ("Nr", "12")]
+        .iter()
+        .enumerate()
+    {
+        let x = 40.0 + 120.0 * k as f32;
+        t += &boxed(x, 700.0, 120.0, 24.0);
+        t += &bold(x + 3.0, 712.0, 8.0, v);
+        t += &common::show("FL", 8.0, x + 3.0, 703.0, l);
+    }
+    let lines = ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+        .map(|(k, l)| DataLine {
+            y: 600.0 - 12.0 * k as f32,
+            text: (*l).into(),
+        })
+        .collect();
+    let page = FormPage {
+        template: t,
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert!(found.is_empty(), "{found:#?}");
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("weight") && l.what.contains("page 1")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
 /// Boxed fields one under the other (a column of boxes) are one table too.
 #[test]
 fn boxed_fields_in_a_column_become_pairs() {

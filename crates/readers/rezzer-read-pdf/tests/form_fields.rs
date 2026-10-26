@@ -601,6 +601,224 @@ fn title_over_a_bar_heads_its_lines() {
     assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
 }
 
+/// Where a text stands in its field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// A block of rows of fields between drawn rules, set in Courier so that every width is
+/// known: labels of `label` points, values of `data` points (a character is 0.6 of the size).
+#[derive(Debug, Clone, Copy)]
+struct Rows {
+    data: f32,
+    label: f32,
+    /// The labels stand under the rule and the values on it (a signature line), not the
+    /// labels at the top of the space between two rules and the values at its bottom.
+    under: bool,
+    labels: Align,
+    values: Align,
+    /// Dividers hang from the rule over the labels between the fields; without them a
+    /// vertical rule stands far from the fields, so the page has rules of both directions.
+    dividers: bool,
+}
+
+const ROWS: Rows = Rows {
+    data: 9.5,
+    label: 6.6,
+    under: false,
+    labels: Align::Left,
+    values: Align::Left,
+    dividers: true,
+};
+
+/// A field of [`rows_page`]: its first data column, its width in columns, its label and its
+/// value ("" for none).
+type FieldSpec = (usize, usize, &'static str, &'static str);
+
+/// A page of rows of fields in the shape `s`, each row a list of fields, with what to expect
+/// of each field: its value, or `Err` where `unclear` names it.
+fn rows_page(s: &Rows, rows: &[&[FieldSpec]], unclear: &[&str]) -> Built {
+    let mut b = Built {
+        page: FormPage {
+            left: 42.52,
+            size: s.data,
+            ..FormPage::default()
+        },
+        values: Vec::new(),
+        fields: Vec::new(),
+    };
+    let pitch = 0.6 * s.data;
+    let col = |k: usize| 42.52 + k as f32 * pitch;
+    let h = 2.4 * s.data;
+    let end = rows
+        .iter()
+        .flat_map(|r| r.iter().map(|f| f.0 + f.1))
+        .max()
+        .unwrap_or(0);
+    let (x0, x1) = (col(0) - 0.12, col(end));
+    let top = 760.0;
+    // The rules: one over each row and one under the last; with labels under, one per row.
+    let n = if s.under { rows.len() } else { rows.len() + 1 };
+    for k in 0..n {
+        b.page.template += &bar_h(x0, x1, top - h * k as f32, 0.24);
+    }
+    if !s.dividers {
+        b.page.template += &bar_v(30.0, 100.0, 300.0, 0.24);
+    }
+    let at = |align: Align, f: &FieldSpec, w: f32, pad: f32| match align {
+        Align::Left => col(f.0) + pad,
+        Align::Center => col(f.0) + (f.1 as f32 * pitch - w) / 2.0,
+        Align::Right => col(f.0 + f.1) - w - pad,
+    };
+    for (k, row) in rows.iter().enumerate() {
+        let rule = top - h * k as f32;
+        let (label_y, value_y) = if s.under {
+            (rule - 0.86 * s.data, rule + 0.17 * s.data)
+        } else {
+            (rule - 0.86 * s.data, rule - 2.23 * s.data)
+        };
+        for (n, f) in row.iter().enumerate() {
+            if n > 0 && s.dividers {
+                b.page.template += &bar_v(col(f.0) - 0.06, rule - 1.21 * s.data, rule, 0.24);
+            }
+            let lw = 0.6 * s.label * f.2.chars().count() as f32;
+            let lx = at(s.labels, f, lw, 0.18 * s.label);
+            b.page.template +=
+                &format!("BT /FD {} Tf {lx} {label_y} Td ({}) Tj ET\n", s.label, f.2);
+            if !f.3.is_empty() {
+                let vw = pitch * f.3.chars().count() as f32;
+                let vx = at(s.values, f, vw, 0.3 * pitch);
+                b.page.template +=
+                    &format!("BT /FD {} Tf {vx} {value_y} Td ({}) Tj ET\n", s.data, f.3);
+                b.values.push(f.3.to_string());
+            }
+            let want = if unclear.contains(&f.2) {
+                Err(())
+            } else if f.3.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(f.3))
+            };
+            b.fields.push((f.2, want));
+        }
+    }
+    // Text in the data font elsewhere, so it is a text size of the page.
+    for (k, l) in ["Muster GmbH", "Musterweg 2", "54321 Musterdorf"]
+        .iter()
+        .enumerate()
+    {
+        g_text(&mut b, s.data, 120.0 - 1.2 * s.data * k as f32, l);
+    }
+    b
+}
+
+/// A line of the data font at the data margin.
+fn g_text(b: &mut Built, size: f32, y: f32, text: &str) {
+    b.page.template += &format!("BT /FD {size} Tf 42.52 {y} Td ({text}) Tj ET\n");
+}
+
+/// Three rows of two fields each.
+const THREE_ROWS: [&[FieldSpec]; 3] = [
+    &[
+        (0, 30, "Name", "Erika Mustermann"),
+        (30, 20, "Ort", "Musterstadt"),
+    ],
+    &[(0, 30, "Strasse", "Musterweg 1"), (30, 20, "Hausnr", "12")],
+    &[(0, 30, "PLZ", "12345"), (30, 20, "Land", "DE")],
+];
+
+/// Reads `b` and asserts the fields' invariants.
+fn assert_fields(b: &Built) {
+    let out = read(&print_form(std::slice::from_ref(&b.page), "", ""));
+    let broken = check_fields(&out, b);
+    assert!(
+        broken.is_empty(),
+        "{broken:#?}\n{:#?}\n{:#?}",
+        blocks(&out),
+        out.document.losses
+    );
+}
+
+/// Labels printed under the rule their value stands on (a signature line) pair with the
+/// value over the same rule, never with the value of the next row, which stands under them
+/// between the same two rules (ruling P6-X).
+#[test]
+fn labels_under_their_values_pair_across_the_rule() {
+    for dividers in [true, false] {
+        let s = Rows {
+            under: true,
+            dividers,
+            ..ROWS
+        };
+        assert_fields(&rows_page(&s, &THREE_ROWS, &[]));
+    }
+}
+
+/// A row of fields whose labels stand over their values in one field and under them in the
+/// next is not read as labels and values: its text stays, and a loss names its fields.
+#[test]
+fn mixed_directions_in_a_row_give_a_loss() {
+    let mut b = rows_page(
+        &ROWS,
+        &[&[(0, 30, "Name", "Erika Mustermann"), (30, 20, "Ort", "")]],
+        &["Name", "Ort"],
+    );
+    // The second field: its value at the top, its label at the bottom.
+    let (top, d) = (760.0, ROWS.data);
+    let x = 42.52 + 30.0 * 0.6 * d + 0.3 * 0.6 * d;
+    b.page.template += &format!(
+        "BT /FD {d} Tf {x} {} Td (Musterstadt) Tj ET\n",
+        top - 0.86 * d - 0.3 * d
+    );
+    b.values.push("Musterstadt".into());
+    // Move the label "Ort" to the bottom of its field.
+    b.page.template = b.page.template.replacen(
+        &format!("{} Td (Ort)", top - 0.86 * d),
+        &format!("{} Td (Ort)", top - 2.23 * d),
+        1,
+    );
+    assert_fields(&b);
+}
+
+/// Labels set in the middle of their fields or at their right end, over values at the
+/// fields' left ends, without dividers: a value under no label has no certain field, so the
+/// fields it may belong to stay text with a loss (ruling P6-X); a value under its label
+/// pairs.
+#[test]
+fn labels_away_from_their_values_never_pair_wrongly() {
+    let rows: [&[FieldSpec]; 2] = [
+        &[(0, 30, "Name", "Erika Mustermann"), (30, 12, "Nr", "30")],
+        &[(0, 30, "Ort", "Musterstadt"), (30, 12, "Tag", "X")],
+    ];
+    for labels in [Align::Center, Align::Right] {
+        let s = Rows {
+            labels,
+            dividers: false,
+            ..ROWS
+        };
+        assert_fields(&rows_page(&s, &rows, &["Name", "Nr", "Ort", "Tag"]));
+    }
+}
+
+/// Values set at the right end of their fields under labels at the left end, without
+/// dividers: they stand under no label, so their fields stay text with a loss.
+#[test]
+fn right_aligned_values_without_dividers_never_pair_wrongly() {
+    let s = Rows {
+        values: Align::Right,
+        dividers: false,
+        ..ROWS
+    };
+    let rows: [&[FieldSpec]; 2] = [
+        &[(0, 30, "Name", "Erika Mustermann"), (30, 12, "Nr", "30")],
+        &[(0, 30, "Ort", "Musterstadt"), (30, 12, "Tag", "X")],
+    ];
+    assert_fields(&rows_page(&s, &rows, &["Name", "Nr", "Ort", "Tag"]));
+}
+
 /// The generated variants of the three shapes, by name, each with whether its rate
 /// overflows and whether its last two labels are one run.
 fn variants() -> Vec<(String, Geo, bool, bool)> {
