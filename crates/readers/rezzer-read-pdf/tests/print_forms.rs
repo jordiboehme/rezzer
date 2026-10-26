@@ -2469,3 +2469,32 @@ fn a_note_of_two_lines_is_one_cell() {
     );
     assert_no_loss(&out);
 }
+
+/// A value alone on the line below a note does not go on the note: it is no sentence, and
+/// stays a row of its own in its column.
+#[test]
+fn a_value_below_a_note_stays_its_own_row() {
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![
+            columns_line(682.0, &[(1, "Muster"), (22, "ABCD"), (40, "11")]),
+            columns_line(
+                673.0,
+                &[(1, "Bitte die Hinweise auf der Rueckseite beachten")],
+            ),
+            columns_line(664.0, &[(1, "Muster A")]),
+        ],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].len(), 4, "{found:#?}");
+    assert_eq!(
+        found[0][2],
+        ["Bitte die Hinweise auf der Rueckseite beachten"],
+        "{found:#?}"
+    );
+    assert_eq!(found[0][3], ["Muster A", "", "", "", ""], "{found:#?}");
+    assert_no_loss(&out);
+}

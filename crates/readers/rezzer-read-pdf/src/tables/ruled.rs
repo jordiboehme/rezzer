@@ -106,6 +106,7 @@ pub(super) fn ruled(
     }
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
+    let per_line = texted_per_line(flow);
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
     // Runs of grids refused with a note, and those grids: where each stands and why; and
@@ -473,7 +474,7 @@ pub(super) fn ruled(
             if !is_open[r] {
                 continue;
             }
-            if alone_on_line(flow, i) && note_across(run, &xs) {
+            if alone_on_line(&per_line, run) && note_across(run, &xs) {
                 spanned.insert((r, sub_of(r, run)));
             }
         }
@@ -1038,30 +1039,32 @@ fn note_across(run: &Run, xs: &[f32]) -> bool {
 }
 
 /// Whether `run` goes on with the line of a note `note` above it: in its size and weight,
-/// one line pitch below, and no number. The caller checks that it is alone on its line.
+/// one line pitch below, and a sentence itself (see [`prose_like`]), so a value alone on
+/// the line below a note stays a row of its own. The caller checks that it is alone on its
+/// line.
 fn goes_on_note(note: &Run, run: &Run) -> bool {
     let pitch = note.y - run.y;
     (run.size - note.size).abs() <= 0.05 * note.size.max(1.0)
         && run.bold == note.bold
         && pitch > 0.3 * note.size
         && pitch <= 1.6 * note.size.max(1.0)
-        && !numeric(&run.text)
+        && prose_like(&run.text, 1)
 }
 
-/// Whether run `i` is the only run with text on its line.
-fn alone_on_line(flow: &Flow, i: usize) -> bool {
-    let line = flow.runs[i].line;
-    let texted = |r: &Run| r.line == line && !r.text.trim().is_empty();
-    let before = flow.runs[..i]
-        .iter()
-        .rev()
-        .take_while(|r| r.line == line)
-        .any(texted);
-    let after = flow.runs[i + 1..]
-        .iter()
-        .take_while(|r| r.line == line)
-        .any(texted);
-    !before && !after
+/// For each line of the page (by [`Run::line`]), how many of its runs hold text, wherever
+/// they stand in the flow.
+fn texted_per_line(flow: &Flow) -> HashMap<u32, u32> {
+    let mut out: HashMap<u32, u32> = HashMap::new();
+    for r in flow.runs.iter().filter(|r| !r.text.trim().is_empty()) {
+        *out.entry(r.line).or_default() += 1;
+    }
+    out
+}
+
+/// Whether `run`, which holds text, is the only run with text on its line (`per_line` from
+/// [`texted_per_line`]).
+fn alone_on_line(per_line: &HashMap<u32, u32>, run: &Run) -> bool {
+    per_line.get(&run.line).is_some_and(|n| *n == 1)
 }
 
 /// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
@@ -1166,12 +1169,13 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
     let mut cuts: Vec<(usize, Vec<usize>)> = Vec::new();
     // The last line of a note, which the next line may go on: such a line is not cut either.
     let mut note: Option<&Run> = None;
+    let per_line = texted_per_line(flow);
     'runs: for (i, r) in flow.runs.iter().enumerate() {
         if r.text.trim().is_empty() {
             continue;
         }
         if let Some(n) = note.filter(|n| n.line != r.line) {
-            if goes_on_note(n, r) && alone_on_line(flow, i) {
+            if goes_on_note(n, r) && alone_on_line(&per_line, r) {
                 note = Some(r);
                 continue;
             }
@@ -1219,7 +1223,7 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
         }
         // A sentence alone on its line that runs over the hanging edges as words (a note)
         // is not cut there.
-        if in_word && prose_like(&r.text, crossed + 1) && alone_on_line(flow, i) {
+        if in_word && prose_like(&r.text, crossed + 1) && alone_on_line(&per_line, r) {
             note = Some(r);
         } else {
             at.extend(below);
@@ -1616,6 +1620,18 @@ mod tests {
             slots: vec![crate::layout::Slot::Free; n],
             at: (0..n).collect(),
         }
+    }
+
+    #[test]
+    fn a_run_is_alone_on_its_line_wherever_the_others_stand() {
+        // The runs of line 0 stand apart in the flow, with a run of line 1 between them.
+        let mut runs = vec![spaced("AA", 0.0), spaced("BB", 50.0), spaced("CC", 100.0)];
+        runs[1].line = 1;
+        let flow = flow_of(runs);
+        let per_line = texted_per_line(&flow);
+        assert!(!alone_on_line(&per_line, &flow.runs[0]));
+        assert!(alone_on_line(&per_line, &flow.runs[1]));
+        assert!(!alone_on_line(&per_line, &flow.runs[2]));
     }
 
     #[test]
