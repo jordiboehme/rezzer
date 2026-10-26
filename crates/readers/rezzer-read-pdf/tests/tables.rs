@@ -1259,6 +1259,104 @@ fn header_band_over_prose_says_so() {
     assert_eq!(notes[0].why, LossReason::Uncertain);
 }
 
+/// A page with a header band of four filled cells `Art | Basis | Satz | Betrag` over lines
+/// without rules, each line a list of (column, text): the columns start at 40, 160, 280 and
+/// 400, the lines 14 points apart from the top.
+fn tax_band_page(lines: &[&[(usize, &str)]]) -> String {
+    let xs = [40.0, 160.0, 280.0, 400.0];
+    let mut c = String::from("0.9 g ");
+    for x in xs {
+        c += &format!("{} 666 120 14 re f ", x - 4.0);
+    }
+    c += "0 g ";
+    for (x, t) in xs.iter().zip(["Art", "Basis", "Satz", "Betrag"]) {
+        c += &show("F2", 8.0, *x, 670.0, t);
+    }
+    for (k, line) in lines.iter().enumerate() {
+        let y = 650.0 - 14.0 * k as f32;
+        for (col, t) in *line {
+            c += &show("F1", 8.0, xs[*col], y, t);
+        }
+    }
+    c += &show("F1", 9.0, 40.0, 500.0, "Thank you.");
+    c
+}
+
+/// The rows of a table as written, for comparing.
+fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| r.iter().map(|c| c.to_string()).collect())
+        .collect()
+}
+
+#[test]
+fn sparse_row_keeps_its_columns() {
+    // A line with only an amount is a row of its own: a number never joins the row above,
+    // and its empty cells stay empty.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(3, "20,00")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(3, "5,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let (head, rows) = &found[0];
+    assert_eq!(*head, 1, "{rows:?}");
+    assert_eq!(
+        rows,
+        &owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "1.000,00", "10 %", "100,00"],
+            &["", "", "", "20,00"],
+            &["Steuer C", "500,00", "5 %", "25,00"],
+            &["", "", "", "5,00"],
+        ])
+    );
+}
+
+#[test]
+fn wrapped_cell_still_joins() {
+    // Guard: a second line of words in a column that has text above goes on that cell.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(0, "mit Zuschlag")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(0, "Steuer D"), (1, "200,00"), (2, "5 %"), (3, "10,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[1][0], "Steuer A mit Zuschlag", "{rows:?}");
+    assert_eq!(rows[2][0], "Steuer C", "{rows:?}");
+}
+
+#[test]
+fn line_in_an_empty_column_starts_a_row() {
+    // A line of words in a column that is empty in the row above starts a row of its own.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (3, "100,00")],
+        &[(2, "frei")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(
+        rows,
+        &owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "1.000,00", "", "100,00"],
+            &["", "", "frei", ""],
+            &["Steuer C", "500,00", "5 %", "25,00"],
+        ])
+    );
+}
+
 #[test]
 fn key_value_totals_box() {
     // A box of five labels on the left and amounts set flush right.

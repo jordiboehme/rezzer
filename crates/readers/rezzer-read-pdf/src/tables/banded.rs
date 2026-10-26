@@ -255,8 +255,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         take.refusals.push((at, b[3], why));
         hold(take);
     };
-    // Rows: lines with text in at least half of the columns the body uses; other lines join
-    // the row above them (lines above the first join the first).
+    // Rows: see [`row_starts`].
     let mut used: Vec<usize> = body.iter().flat_map(|l| l.2.iter().map(|p| p.0)).collect();
     used.sort_unstable();
     used.dedup();
@@ -271,16 +270,21 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     }
     let mut row_of: Vec<usize> = Vec::with_capacity(body.len());
     let mut rows = 0usize;
-    for (_, _, placed) in &body {
-        let mut c: Vec<usize> = placed.iter().map(|p| p.0).collect();
-        c.sort_unstable();
-        c.dedup();
-        // A line that fills half of the columns starts a row, also with an empty first
-        // cell (a date printed once a day); a line that fills less goes on the row above.
-        if 2 * c.len() >= used.len() {
-            rows += 1;
-        }
-        row_of.push(rows.saturating_sub(1));
+    let pieces: Vec<Vec<(usize, bool)>> = body
+        .iter()
+        .map(|(_, _, placed)| {
+            placed
+                .iter()
+                .map(|(c, ids)| {
+                    let text: String = ids.iter().map(|&i| flow.runs[i].text.as_str()).collect();
+                    (*c, numeric(&text))
+                })
+                .collect()
+        })
+        .collect();
+    for starts in row_starts(&pieces, used.len()) {
+        rows += usize::from(starts);
+        row_of.push(rows - 1);
     }
     if rows < 3 {
         refuse("too few rows follow its header", take);
@@ -378,6 +382,33 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         continues: false,
         caption: Vec::new(),
     });
+}
+
+/// For the lines of a body without rules from the top, each its pieces as (column, whether
+/// the piece is a number), whether the line starts a row. A line that fills at least half of
+/// the `used` columns starts one, also with an empty first cell (a date printed once a day).
+/// A line that fills less goes on the row above only when each of its pieces goes on text in
+/// its column there and none is a number (a cell that wraps); any other line is a row of its
+/// own, with empty cells where it has no piece. The first line always starts a row.
+pub(super) fn row_starts(lines: &[Vec<(usize, bool)>], used: usize) -> Vec<bool> {
+    let mut filled: Vec<usize> = Vec::new();
+    let mut out = Vec::with_capacity(lines.len());
+    for (k, pieces) in lines.iter().enumerate() {
+        let mut cols: Vec<usize> = pieces.iter().map(|p| p.0).collect();
+        cols.sort_unstable();
+        cols.dedup();
+        let joins = k > 0
+            && 2 * cols.len() < used
+            && pieces
+                .iter()
+                .all(|(c, number)| !number && filled.contains(c));
+        if !joins {
+            filled.clear();
+        }
+        filled.extend(cols);
+        out.push(!joins);
+    }
+    out
 }
 
 /// Why the cells of a table without rules are not a table's: their text is long, or runs on
