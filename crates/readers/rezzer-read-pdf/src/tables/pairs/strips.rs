@@ -729,15 +729,19 @@ fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
 ///   row pitch or up to the next rule of a frame; each label heads a field of that strip that
 ///   holds one of its values, at the offset from label to value the group shows inside its
 ///   strips (a character of play), and crosses no divider;
-/// - over the top rule of a strip with no strip over it, runs in the values' role as far over
-///   the rule as its values stand over theirs, with no label over them within the same reach;
-///   each value starts within a character of a field start of that strip (its left end, a
-///   divider, a label start), crosses no divider, and is the only one of its field.
+/// - over the top rule of every strip with no strip over it, runs in the values' role as far
+///   over the rule as its values stand over theirs, with no label over them within the same
+///   reach; each value starts within a character of the start of a field of that strip (where
+///   one of its labels starts, or the divider or left end before it), crosses no divider, and
+///   every field has one.
 ///
 /// Without the labels under the bottom rule the group reads labels over values, whatever
-/// stands over its top rule (a data line, a title, a date); with them and values over the top
-/// rule, field for field, its labels stand under their values; with them and runs over the top
-/// rule that are not field for field, it is not clear.
+/// stands over its top rule (a data line, a title, a date); without anything over its top rule
+/// as well. With the labels under the bottom rule and a value over the top rule for every field,
+/// its labels stand under their values; with them and runs over the top rule that are not
+/// field for field (a line across a divider, a value of some fields only), it is not clear:
+/// the same page may be a grid with its labels over its values beside a line over it and the
+/// column titles of a table under it.
 fn ends(
     flow: &Flow,
     by_y: &ByY,
@@ -900,34 +904,37 @@ fn ends(
                         })
             })
             .collect();
-        let mut starts = vec![s.x0];
-        starts.extend(&s.dividers);
-        starts.extend(
-            labels_in_line(flow, labels)
-                .iter()
-                .map(|l| flow.runs[l[0]].x),
-        );
-        let mut fields: HashSet<usize> = HashSet::new();
+        // Each label of the strip heads a field from its divider (or the strip's left end)
+        // or from its own start; each value over the rule starts at one of them, and each
+        // field has one value.
+        let heads = labels_in_line(flow, labels);
+        let mut taken = vec![false; heads.len()];
         for value in labels_in_line(flow, &by_x(found.clone())) {
             let r = &flow.runs[value[0]];
-            let field = starts
+            let ch = CHAR * r.size.max(1.0);
+            let field = heads
                 .iter()
-                .position(|&x| (r.x - x).abs() <= CHAR * r.size.max(1.0));
+                .enumerate()
+                .filter_map(|(k, l)| {
+                    let lx = flow.runs[l[0]].x;
+                    let start = std::iter::once(s.x0)
+                        .chain(s.dividers.iter().copied())
+                        .filter(|&d| d <= lx + ch)
+                        .fold(s.x0, f32::max);
+                    let off = (r.x - lx).abs().min((r.x - start).abs());
+                    (off <= ch).then_some((k, off))
+                })
+                .min_by(|p, q| p.1.total_cmp(&q.1))
+                .map(|(k, _)| k);
             let crossed = value
                 .iter()
                 .any(|&i| s.dividers.iter().any(|&d| across(&flow.runs[i], d)));
-            // Two starts within a character are one field start.
-            let field = field.map(|k| {
-                starts
-                    .iter()
-                    .position(|&x| (x - starts[k]).abs() <= CHAR * r.size.max(1.0))
-                    .unwrap_or(k)
-            });
             match field {
-                Some(k) if !crossed && fields.insert(k) => {}
+                Some(k) if !crossed && !taken[k] => taken[k] = true,
                 _ => clear = false,
             }
         }
+        clear &= taken.iter().all(|t| *t);
         above.extend(found);
     }
     match (above.is_empty(), clear) {

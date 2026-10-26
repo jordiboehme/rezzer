@@ -26,10 +26,10 @@ use common::{all_text, label};
 use draw::{Stroke, bar_h, bar_v, mark_b};
 use rezzer_model::{Block, plain_text};
 use shapes::{
-    Align, BLOCK_A, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, TitleBlock,
-    boxed_row, grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page,
-    rows_page, shape_page, short_value_rows, title_grid_labels, title_grid_page, title_over,
-    total_column,
+    Align, BLOCK_A, Built, DataFont, FieldSpec, Geo, GridAt, Neighbour, REAL, ROWS, Rows,
+    THREE_ROWS, TitleBlock, boxed_row, grids_side_by_side, header_grid, label_block, lone_field,
+    neighbour, overflow_rows, page, rows_page, shape_page, short_value_rows, title_grid_labels,
+    title_grid_page, title_over, total_column,
 };
 
 #[global_allocator]
@@ -759,6 +759,113 @@ fn shapes() -> Vec<(&'static str, Shape)> {
         }),
     ]
 }
+
+/// A grid of fields drawn on a page of its own in a geometry, with where it stands.
+type Grid = fn(&Geo) -> (Built, GridAt);
+
+/// The grids of fields of the pay slip that neighbours are drawn beside, by name.
+fn grids() -> Vec<(&'static str, Grid)> {
+    vec![
+        ("header grid", |g| {
+            let mut b = Built::new(g);
+            let top = 760.0 + g.dy;
+            let bottom = header_grid(g, &mut b, top);
+            b.address(g);
+            let at = GridAt {
+                top,
+                bottom,
+                starts: &[0, 10, 30],
+                under: false,
+                courier: false,
+                whole_bottom: false,
+            };
+            (b, at)
+        }),
+        ("rows", |g| {
+            let top = 760.0 + g.dy;
+            let at = GridAt {
+                top,
+                bottom: top - 3.0 * 2.4 * g.data,
+                starts: &[0, 30],
+                under: false,
+                courier: true,
+                whole_bottom: true,
+            };
+            (rows_page(g, &ROWS, &THREE_ROWS, &[]), at)
+        }),
+        ("labels under values", |g| {
+            let s = Rows {
+                under: true,
+                ..ROWS
+            };
+            let top = 760.0 + g.dy;
+            let at = GridAt {
+                top,
+                bottom: top - 2.0 * 2.4 * g.data,
+                starts: &[0, 30],
+                under: true,
+                courier: true,
+                whole_bottom: true,
+            };
+            (rows_page(g, &s, &THREE_ROWS, &[]), at)
+        }),
+    ]
+}
+
+/// The neighbours drawn beside each grid, by name. Text over the top rule at the values'
+/// depth is drawn only beside grids whose labels stand over their values: over the others
+/// their own values stand there.
+fn neighbours(under: bool) -> Vec<(&'static str, Neighbour)> {
+    let mut out = vec![
+        (
+            "column titles with their table",
+            Neighbour::ColumnTitles { body: true },
+        ),
+        (
+            "column titles alone",
+            Neighbour::ColumnTitles { body: false },
+        ),
+        ("a grid beside it of another pitch", Neighbour::Beside),
+    ];
+    if !under {
+        out.extend([
+            ("a data line over it", Neighbour::DataLine),
+            ("a title at the values' depth over it", Neighbour::Title),
+            ("the title block of a pay slip", Neighbour::Cluster),
+            (
+                "a short line over it and column titles alone under it",
+                Neighbour::LineAndTitles,
+            ),
+        ]);
+    }
+    out
+}
+
+/// Every grid of fields with each of its neighbours, in the real look and in each of
+/// [`looks`], holds the invariants: text just over or under a grid on one side of it, or a grid
+/// beside it with rows of another pitch, never makes its labels read under their values nor
+/// refuses it, and the grid beside pairs too. Text at both ends that a grid of labels under
+/// their values could have as well leaves the grid as text with a loss, never pairs it.
+#[test]
+fn grids_with_neighbours_hold_the_invariants() {
+    let mut reads = Vec::new();
+    for (grid, draw) in grids() {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let (_, at) = draw(&g);
+            for (name, n) in neighbours(at.under) {
+                let (mut b, at) = draw(&g);
+                neighbour(&g, &mut b, at, n);
+                let out = read_pages(&[&b]);
+                reads.push((format!("{grid}, {name}, {look}"), check_fields(&out, &b)));
+            }
+        }
+    }
+    let wrong = unexpected(reads, KNOWN_NEIGHBOURS);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Grids with neighbours that break an invariant today (see [`KNOWN`]).
+const KNOWN_NEIGHBOURS: &[Known] = &[];
 
 /// Shapes in looks that break an invariant today (see [`KNOWN`]).
 const KNOWN_SHAPES: &[Known] = &[];

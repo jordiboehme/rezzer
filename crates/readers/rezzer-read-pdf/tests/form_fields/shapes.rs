@@ -1070,6 +1070,131 @@ pub(crate) fn title_over(g: &Geo, b: &mut Built) {
     b.values.push(t.to_string());
 }
 
+/// Text or a grid printed next to a grid of fields on its page, as forms have them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Neighbour {
+    /// A data line at the values' depth over the top rule, across the dividers under it.
+    DataLine,
+    /// A bold proportional title of the data size at the values' depth over the top rule.
+    Title,
+    /// The title, a period line and the page number of the shape file's variant a.
+    Cluster,
+    /// The column titles of the next table in the labels' style, as far under the last rule
+    /// of labels as labels stand under their rules and at the field starts of the last row,
+    /// no rule under them; with lines of that table in the data font under them, or alone.
+    ColumnTitles { body: bool },
+    /// A grid of two fields a row beside it on the same top rule, with rows of another pitch.
+    Beside,
+    /// A short data line at the values' depth over the top rule from the first field's start,
+    /// and the column titles alone under the last rule. When they could head every lowest
+    /// field with a value, the same page is a grid of labels under their values whose first row
+    /// has one value: neither reading is clear, so every field of the grid is to stay text with
+    /// a loss. Else the grid pairs, labels over values.
+    LineAndTitles,
+}
+
+/// A grid of fields to draw neighbours beside: its top rule, its last rule, the first data
+/// columns of the fields of its last row, whether its labels stand under their values,
+/// whether its labels and values are set in Courier (see [`rows_page`]) rather than in the
+/// label font and the data layer, and whether its last rule runs under every field with a
+/// value and no field under it (the header grid's right part ends after its first row), so
+/// that column titles under it could head them all.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GridAt {
+    pub top: f32,
+    pub bottom: f32,
+    pub starts: &'static [usize],
+    pub under: bool,
+    pub courier: bool,
+    pub whole_bottom: bool,
+}
+
+impl GridAt {
+    /// Writes `parts` (column, text) at baseline `y` in the grid's data font and size.
+    fn data(&self, g: &Geo, b: &mut Built, y: f32, parts: &[(usize, &str)]) {
+        if self.courier {
+            for (k, t) in parts {
+                b.page.template += &courier(g.col(*k), y, g.data, t);
+            }
+        } else {
+            g.values(b, y, parts);
+        }
+    }
+
+    /// Writes `text` at `x` and baseline `y` in the grid's label font and size.
+    fn label(&self, g: &Geo, x: f32, y: f32, text: &str) -> String {
+        if self.courier {
+            courier(x, y, g.label, text)
+        } else {
+            label(x, y, g.label, text)
+        }
+    }
+}
+
+/// Draws `n` next to the grid `at` on the page `b`, its text in the grid's own fonts. Every
+/// text it adds that a field must not take is to be found once; the fields of a grid beside
+/// are to pair.
+pub(crate) fn neighbour(g: &Geo, b: &mut Built, at: GridAt, n: Neighbour) {
+    let d = g.data;
+    let title = "Abrechnung der Muster/Muster-Bezuege";
+    match n {
+        Neighbour::DataLine => {
+            let t = "Abrechnung Oktober 2026";
+            at.data(g, b, at.top + 0.17 * d, &[(0, t)]);
+            b.values.push(t.to_string());
+        }
+        Neighbour::Title => {
+            b.page.template += &bold(g.col(0), at.top + 0.17 * d, 1.003 * d, title);
+            b.values.push(title.to_string());
+        }
+        Neighbour::Cluster => {
+            b.page.template += &bold(g.col(0), at.top + 0.33 * d, 1.003 * d, title);
+            b.values.push(title.to_string());
+            let t = "fuer Muster 2026";
+            // Right of the title's end, so the two do not run into one word.
+            at.data(g, b, at.top + 0.17 * d, &[(36, t), (85, "1")]);
+            b.values.push(t.to_string());
+        }
+        Neighbour::ColumnTitles { body } => {
+            // Under labels that stand under the last rule, a row pitch further down.
+            let base = at.bottom - 0.86 * d - if at.under { 2.4 * d } else { 0.0 };
+            let titles = ["Lohnart", "Bezeichnung", "Betrag"];
+            for (&k, t) in at.starts.iter().zip(titles) {
+                b.page.template += &at.label(g, g.col(k) + 0.18 * g.label, base, t);
+            }
+            if body {
+                for (n, line) in [["1000", "Gehalt", "1.111,11"], ["2000", "Zulage", "22,22"]]
+                    .iter()
+                    .enumerate()
+                {
+                    let parts: Vec<(usize, &str)> = at
+                        .starts
+                        .iter()
+                        .copied()
+                        .zip(line.iter().copied())
+                        .collect();
+                    at.data(g, b, base - 1.2 * d * (n as f32 + 1.0), &parts);
+                    b.values.extend(parts.iter().map(|p| p.1.to_string()));
+                }
+            }
+        }
+        Neighbour::Beside => {
+            beside_grid(g, b, at.top, &[3.2, 2.0, 3.2, 2.0], true);
+        }
+        Neighbour::LineAndTitles => {
+            let t = "Abrechnung";
+            at.data(g, b, at.top + 0.17 * d, &[(0, t)]);
+            b.values.push(t.to_string());
+            neighbour(g, b, at, Neighbour::ColumnTitles { body: false });
+            if at.whole_bottom {
+                for f in &mut b.fields {
+                    f.1 = Err(());
+                }
+            }
+        }
+    }
+}
+
 /// A page of one shape drawn by `draw` from the top, with the address under it.
 pub(crate) fn shape_page(g: &Geo, draw: fn(&Geo, &mut Built, f32) -> f32) -> Built {
     let mut b = Built::new(g);
