@@ -44,8 +44,9 @@ async fn connect(config: Config) -> RunningService<RoleClient, ()> {
 async fn connect_to(pipeline: Pipeline) -> RunningService<RoleClient, ()> {
     let pipeline = Arc::new(pipeline);
     let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let (read, write) = tokio::io::split(server_io);
     tokio::spawn(async move {
-        rezzer_mcp::serve(pipeline, server_io)
+        rezzer_mcp::serve_io(pipeline, read, write)
             .await
             .expect("the server runs");
     });
@@ -1163,4 +1164,77 @@ async fn rez_without_output_dir_page_snapshot() {
         "{page}"
     );
     insta::assert_snapshot!(page);
+}
+
+/// `bytes` as a base64 `data:` URI named `name`.
+fn base64_uri(name: &str, bytes: &[u8]) -> String {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+    format!("data:text/plain;name={name};base64,{data}")
+}
+
+/// Ends a call that gets no answer, so silence fails the test instead of hanging it.
+const ANSWER_WITHIN: Duration = Duration::from_secs(120);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_data_uri_over_16_mib_is_read() {
+    // rmcp's own line transport drops lines over 16 MiB without an answer.
+    let line = "Rezzer reads this line again and again.\n";
+    let file = line.repeat((13 << 20) / line.len());
+    let uri = base64_uri("big.txt", file.as_bytes());
+    assert!(uri.len() > 16 << 20);
+    let client = connect(config()).await;
+    let result = tokio::time::timeout(
+        ANSWER_WITHIN,
+        call(&client, "rez", json!({ "file": uri, "page": 1 })),
+    )
+    .await
+    .expect("an answer");
+    let s = structured(&result);
+    assert_eq!(s["status"], "complete", "{s}");
+    assert!(text(&result).contains("big.txt"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_advertised_max_size_fits_percent_encoded() {
+    let mut small = config();
+    small.limits.max_file_bytes = 1 << 20;
+    let client = connect(small).await;
+    // A file of the largest size, every byte percent-encoded: three bytes per byte.
+    let uri = format!("data:text/plain;name=max.txt,{}", "%41".repeat(1 << 20));
+    let result = tokio::time::timeout(ANSWER_WITHIN, call(&client, "rez", json!({ "file": uri })))
+        .await
+        .expect("an answer");
+    assert_eq!(structured(&result)["status"], "complete");
+    // One byte more is Rezzer's own too-large result.
+    let uri = base64_uri("over.txt", &vec![b'a'; (1 << 20) + 1]);
+    let result = tokio::time::timeout(ANSWER_WITHIN, call(&client, "rez", json!({ "file": uri })))
+        .await
+        .expect("an answer");
+    let s = structured(&result);
+    assert_eq!(s["status"], "failed", "{s}");
+    assert!(s["message"].as_str().unwrap().contains("too large"), "{s}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_over_the_bound_gets_an_error_answer() {
+    let mut small = config();
+    small.limits.max_file_bytes = 1 << 20;
+    let max = rezzer_mcp::transport::max_message_bytes(1 << 20);
+    let client = connect(small).await;
+    let uri = base64_uri("huge.txt", &vec![b'a'; max]);
+    let params = CallToolRequestParams::new("rez".to_string())
+        .with_arguments(json!({ "file": uri }).as_object().unwrap().clone());
+    let answer = tokio::time::timeout(ANSWER_WITHIN, client.call_tool(params))
+        .await
+        .expect("an answer, not silence");
+    let Err(rmcp::ServiceError::McpError(error)) = answer else {
+        panic!("a protocol error: {answer:?}");
+    };
+    assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_REQUEST);
+    assert!(error.message.contains(&format!("{max} bytes")), "{error:?}");
+    assert!(error.message.contains("by path"), "{error:?}");
+    // The connection goes on.
+    let result = call(&client, "rez", json!({ "file": "data:,ok" })).await;
+    assert_eq!(structured(&result)["status"], "complete");
 }
