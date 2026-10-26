@@ -11,10 +11,12 @@ use super::*;
 use crate::regions::Seg;
 
 /// A header band: a grid of drawn cells one row high. `xs` are its cell edges, `b` its box.
+/// `cut` is set for a section of a grid that was cut in sections: refused, it is a loss.
 #[derive(Debug, Clone)]
 pub(super) struct Band {
     pub xs: Vec<f32>,
     pub b: [f32; 4],
+    pub cut: bool,
 }
 
 /// A header band is at most this many times its largest title text high.
@@ -68,7 +70,8 @@ pub(super) fn banded(sh: &Shared<'_>, mut bands: Vec<Band>, take: &mut Taken<'_>
             ));
             break;
         }
-        if band.b[3] - band.b[1] > BAND_HEIGHT * largest {
+        // A section of a cut grid is judged by its own text below.
+        if !band.cut && band.b[3] - band.b[1] > BAND_HEIGHT * largest {
             continue;
         }
         if work > BAND_WORK {
@@ -149,7 +152,19 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         .iter()
         .map(|&i| flow.runs[i].size)
         .fold(0.0f32, f32::max);
-    if titles.values().filter(|t| !numeric(t)).count() < 3 || b[3] - b[1] > BAND_HEIGHT * size {
+    let tall = b[3] - b[1] > BAND_HEIGHT * size;
+    if titles.values().filter(|t| !numeric(t)).count() < 3 || tall {
+        // A section of a cut grid with text is not let go without a word.
+        if band.cut
+            && let Some(at) = head.iter().map(|&i| flow.at[i]).min()
+        {
+            let why = if tall {
+                "it is too tall for a header over lines"
+            } else {
+                "its cells hold too few column titles"
+            };
+            take.quiet.push((at, why, Refused::Band));
+        }
         return;
     }
     // The body: lines below the band, from the top.

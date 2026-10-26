@@ -152,6 +152,9 @@ pub(crate) fn plural(why: &str) -> &str {
             "the text below their headers does not stand in their columns"
         }
         "its cells hold long text" => "their cells hold long text",
+        "it is too tall for a header over lines" => "they are too tall for headers over lines",
+        "its cells hold too few column titles" => "their cells hold too few column titles",
+
         "its text runs on from row to row like prose" => {
             "their text runs on from row to row like prose"
         }

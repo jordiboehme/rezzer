@@ -59,17 +59,20 @@ pub(super) fn ruled(
             return;
         }
     };
-    // Each connected grid in its sections, each judged as a grid of its own, top to bottom.
-    let mut grids: Vec<(Vec<Seg>, Vec<Seg>)> = groups
-        .iter()
-        .flat_map(|(gh, gv)| {
-            let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
-            let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
-            sections(&h, &v)
-        })
-        .collect();
+    // Each connected grid in its sections, each judged as a grid of its own, top to bottom;
+    // a section of a grid that was cut is no grid's to drop without a word.
+    let mut cut_work = 0usize;
+    let mut grids: Vec<(Vec<Seg>, Vec<Seg>, bool)> = Vec::new();
+    for (gh, gv) in &groups {
+        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
+        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
+        let parts = sections(&h, &v, &hs, &mut cut_work);
+        let cut = parts.len() > 1;
+        grids.extend(parts.into_iter().map(|(h, v)| (h, v, cut)));
+    }
     grids.sort_by(|a, b| {
-        let top = |g: &(Vec<Seg>, Vec<Seg>)| g.0.iter().map(|s| s.at).fold(f32::MIN, f32::max);
+        let top =
+            |g: &(Vec<Seg>, Vec<Seg>, bool)| g.0.iter().map(|s| s.at).fold(f32::MIN, f32::max);
         top(b).total_cmp(&top(a))
     });
     let lines = flow_lines(flow);
@@ -88,7 +91,7 @@ pub(super) fn ruled(
     let mut icons: Vec<(usize, usize, usize, [f32; 4])> = Vec::new();
     let mut strokes: Option<Vec<[f32; 4]>> = None;
     let mut icon_work = 0usize;
-    'grids: for (g, (h, v)) in grids.into_iter().enumerate() {
+    'grids: for (g, (mut h, v, cut)) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "ruled tables on page {page} are looked for only in part: the time limit was \
@@ -106,12 +109,29 @@ pub(super) fn ruled(
         let mut ys = clustered(ys);
         // Rows from the top.
         ys.reverse();
+        // A row whose inner column rules all hang from its top and end at one height is a
+        // header over lines without rules: a rule across at their feet parts the two, and
+        // the row below it (its lines) is open: one cell across that is no spanning box.
+        let mut open: Vec<f32> = Vec::new();
+        if xs.len() >= 3 && ys.len() >= 2 {
+            for foot in hanging_feet(&v, &xs, &ys) {
+                let at = ys.partition_point(|e| *e > foot);
+                ys.insert(at, foot);
+                open.push(foot);
+                h.push(Seg {
+                    at: foot,
+                    from: xs[0],
+                    to: xs[xs.len() - 1],
+                });
+            }
+        }
         let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
         if rows == 1 && cols >= 2 {
             // A row of drawn cells may head a table whose lines have no rules.
             bands.push(Band {
                 b: [xs[0], ys[1], xs[cols], ys[0]],
                 xs,
+                cut,
             });
             continue;
         }
@@ -343,9 +363,25 @@ pub(super) fn ruled(
         };
         // Rows of the body that only column rules part: the lines of a band that fill at
         // least half of its columns with text, the first of them included, each start a row.
-        let anchors = anchor_rows(
+        let mut anchors = anchor_rows(
             flow, &within, head, rows, &owner, &extent, &row_at, &cell_at,
         );
+        // The lines under a header of hanging rules are rows by the header's columns.
+        if !open.is_empty() {
+            let mut by_row: HashMap<usize, Vec<usize>> = HashMap::new();
+            for &i in &within {
+                let r = row_at(middle(&flow.runs[i]).1);
+                if open.iter().any(|f| (ys[r] - f).abs() <= SNAP) {
+                    by_row.entry(r).or_default().push(i);
+                }
+            }
+            for (r, runs) in by_row {
+                let lines = open_rows(flow, &runs, &xs);
+                if lines.len() >= 2 {
+                    anchors[r] = lines;
+                }
+            }
+        }
         let subs = |r: usize| anchors[r].len().max(1);
         // The row of a band a run goes to: that of the nearest anchor line at or above it.
         let sub_of = |r: usize, run: &Run| -> usize {
@@ -385,7 +421,9 @@ pub(super) fn ruled(
         let all: usize = extent.keys().map(|o| subs(o.0)).sum();
         let spanning: usize = extent
             .iter()
-            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1)
+            .filter(|(o, (rs, cs))| {
+                o.0 >= head && rs * cs > 1 && !open.iter().any(|f| (ys[o.0] - f).abs() <= SNAP)
+            })
             .map(|(o, _)| subs(o.0))
             .sum();
         let empty = all - with_text.len();
@@ -537,6 +575,91 @@ pub(super) fn ruled(
         }
         found.tables.push(t);
     }
+}
+
+/// The baselines, going up, of the lines that start a row in an open row (lines without
+/// rules under a header of hanging rules) that holds `runs`, in lines by baseline: a line
+/// starts a row when it has text in at least half of the columns of `xs` that the lines
+/// use, the others join the row above.
+fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
+    let cols = xs.len() - 1;
+    let mut runs: Vec<(f32, f32, usize)> = runs
+        .iter()
+        .map(|&i| {
+            let r = &flow.runs[i];
+            let (cx, _) = middle(r);
+            let c = xs
+                .partition_point(|e| *e < cx)
+                .saturating_sub(1)
+                .min(cols - 1);
+            (r.y, r.size.max(1.0), c)
+        })
+        .collect();
+    runs.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut lines: Vec<(f32, Vec<usize>)> = Vec::new();
+    for (y, size, c) in runs {
+        match lines.last_mut() {
+            Some((ly, cs)) if *ly - y <= 0.3 * size => cs.push(c),
+            _ => lines.push((y, vec![c])),
+        }
+    }
+    let mut used: Vec<usize> = lines.iter().flat_map(|l| l.1.iter().copied()).collect();
+    used.sort_unstable();
+    used.dedup();
+    let mut starts: Vec<f32> = lines
+        .iter_mut()
+        .filter_map(|(y, cs)| {
+            cs.sort_unstable();
+            cs.dedup();
+            (2 * cs.len() >= used.len()).then_some(*y)
+        })
+        .collect();
+    // Kept going up, for a search by baseline; the first line always starts a row.
+    if let Some(first) = lines.first()
+        && starts.first() != Some(&first.0)
+    {
+        starts.insert(0, first.0);
+    }
+    starts.reverse();
+    starts
+}
+
+/// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
+/// heights where the inner column rules of a row end when it has some, all of them hang
+/// from its top and they end at one height clear of its bottom. Each rule is looked at in
+/// the rows it reaches into, no more.
+fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<f32> {
+    let (left, right) = (xs[0], xs[xs.len() - 1]);
+    let rows = ys.len() - 1;
+    let mut feet: Vec<Vec<f32>> = vec![Vec::new(); rows];
+    let mut standing = vec![false; rows];
+    for s in v {
+        if s.at <= left + SNAP || s.at >= right - SNAP {
+            continue;
+        }
+        // Rows whose top is above the rule's foot and whose bottom is below its head.
+        let first = ys.partition_point(|e| *e >= s.to - SNAP).saturating_sub(1);
+        for r in first..rows {
+            if ys[r] <= s.from + SNAP {
+                break;
+            }
+            if ys[r + 1] >= s.to - SNAP {
+                continue;
+            }
+            if s.to >= ys[r] - SNAP && s.from > ys[r + 1] + SNAP {
+                feet[r].push(s.from);
+            } else {
+                standing[r] = true;
+            }
+        }
+    }
+    feet.into_iter()
+        .zip(standing)
+        .filter_map(|(f, standing)| {
+            let f = clustered(f);
+            (!standing && f.len() == 1).then(|| f[0])
+        })
+        .collect()
 }
 
 /// A box of a boxed field is at most this many times as wide as the size of its digits.

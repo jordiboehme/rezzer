@@ -2810,18 +2810,21 @@ impl Subpath {
             keep(r);
             return;
         }
+        let corners = &self.corners[..self.count.min(self.corners.len())];
+        let four = !self.curved && (4..=5).contains(&self.count);
+        // A mark is a separator of a boxed number field, never a rule: neither its fill nor
+        // the sides of its stroke (a print run fills and strokes it with a hairline).
+        if four && axis_box(corners).is_some_and(crate::marks::is_mark) {
+            return;
+        }
         for r in self.held.into_iter().flatten() {
             keep(r);
         }
-        if !stroke && !self.curved && (4..=5).contains(&self.count) {
-            let corners = &self.corners[..self.count];
-            // A mark is a separator of a boxed number field, never a rule.
-            if axis_box(corners).is_some_and(crate::marks::is_mark) {
-                return;
-            }
-            if let Some(r) = rectangle(corners) {
-                keep(r);
-            }
+        if !stroke
+            && four
+            && let Some(r) = rectangle(corners)
+        {
+            keep(r);
         }
     }
 }
@@ -3824,6 +3827,19 @@ mod tests {
             let mut rules = Vec::new();
             rules_of(&path, Affine::IDENTITY, false, &mut |r| rules.push(r));
             assert!(rules.is_empty(), "{h}: {rules:?}");
+        }
+        // A mark drawn as four lines and a close, filled and then stroked with a hairline
+        // (`B*`): neither pass gives a rule.
+        let mut path = kurbo::BezPath::new();
+        path.move_to((100.24, 702.16));
+        path.line_to((100.0, 702.16));
+        path.line_to((100.0, 700.0));
+        path.line_to((100.24, 700.0));
+        path.close_path();
+        for stroke in [false, true] {
+            let mut rules = Vec::new();
+            rules_of(&path, Affine::IDENTITY, stroke, &mut |r| rules.push(r));
+            assert!(rules.is_empty(), "{stroke}: {rules:?}");
         }
         // A thin rule of the same width is one.
         let path = kurbo::Rect::new(100.0, 700.0, 100.24, 720.0).to_path(0.1);

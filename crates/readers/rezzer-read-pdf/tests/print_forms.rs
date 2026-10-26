@@ -1455,12 +1455,11 @@ fn form_sections_without_marks() {
     assert_no_loss(&out);
 }
 
-/// Guard: the earnings section alone, its amounts printed as digits with drawn decimal
-/// marks on a baseline 2 points above the row rules. The marks are no rules (Task 4), so the
-/// grid keeps its 9 columns and 4 rows and is read as one table with its separators; the
-/// form of two sections is refused only for its sections (`form_sections_without_marks`).
-#[test]
-fn marks_without_sections() {
+/// The earnings section alone, its amounts printed as digits with drawn decimal marks on a
+/// baseline 2 points above the row rules, filled (`re f`) or filled and stroked (`B*`) as
+/// `stroked` says. The marks are no rules, so the grid keeps its 9 columns and 4 rows and is
+/// read as one table with its separators.
+fn marks_without_sections(stroked: bool) {
     let xs = form_columns(9);
     let top = 712.0;
     let amounts: [[&str; 4]; 3] = [
@@ -1491,7 +1490,11 @@ fn marks_without_sections() {
         let y = top - 16.0 * (r + 2) as f32 + print.rise;
         for (k, v) in row.iter().enumerate() {
             let x = xs[5 + k] + 3.0 + (v.len() - 2) as f32 * PITCH;
-            template += &mark(x - 0.12, y - 0.5);
+            template += &if stroked {
+                mark_b(x, y - 0.5, 2.0)
+            } else {
+                mark(x - 0.12, y - 0.5)
+            };
         }
     }
     let page = FormPage {
@@ -1520,6 +1523,20 @@ fn marks_without_sections() {
     );
     assert_eq!(found[0][3][5..], ["100,00", "100,00", "10,00", "90,00"]);
     assert_no_loss(&out);
+}
+
+/// Guard: filled marks in one section; the form of two sections is refused only for its
+/// sections (`form_sections_without_marks`).
+#[test]
+fn filled_marks_without_sections() {
+    marks_without_sections(false);
+}
+
+/// Marks filled and stroked with a hairline: the 2 point sides of the stroke would meet the
+/// row rules 1.5 points below and add 12 column edges; they are no rules either.
+#[test]
+fn stroked_marks_without_sections() {
+    marks_without_sections(true);
 }
 
 /// Guard: a boxed amount of one row of digit boxes alone is a header band candidate that
@@ -1606,4 +1623,318 @@ fn wide_chart_with_two_label_rows_gives_no_note() {
         all_text(&out)
     );
     assert_no_loss(&out);
+}
+
+// ---------------------------------------------------------------------------------------
+// A pay slip form: the geometry of a real print-run form, all text and values invented
+
+/// A rule drawn as a filled bar of thickness `t` from `x0` to `x1`, its top at `y`.
+fn bar_h(x0: f32, x1: f32, y: f32, t: f32) -> String {
+    format!("{x0} {} {} {t} re f\n", y - t, x1 - x0)
+}
+
+/// A rule drawn as a filled bar of thickness `t` from `y0` to `y1`, centred on `x`.
+fn bar_v(x: f32, y0: f32, y1: f32, t: f32) -> String {
+    format!("{} {y0} {t} {} re f\n", x - t / 2.0, y1 - y0)
+}
+
+/// A separator mark of `h` points from `y0`, centred on `x`, filled and stroked with a
+/// hairline as the print run draws it.
+fn mark_b(x: f32, y0: f32, h: f32) -> String {
+    let (l, r, top) = (x - 0.12, x + 0.12, y0 + h);
+    format!("q 0 w {r} {top} m {l} {top} l {l} {y0} l {r} {y0} l h B* Q\n")
+}
+
+/// A bold template label in Helvetica-Bold (`/FB`).
+fn bold(x: f32, y: f32, size: f32, text: &str) -> String {
+    format!("BT /FB {size} Tf {x} {y} Td ({text}) Tj ET\n")
+}
+
+/// A data line of the pay slip: each text placed at its character column.
+fn columns_line(y: f32, parts: &[(usize, &str)]) -> DataLine {
+    let mut text = String::new();
+    for (k, t) in parts {
+        let len = text.chars().count();
+        assert!(*k >= len, "{k} overlaps {text:?}");
+        text += &" ".repeat(k - len);
+        text += t;
+    }
+    DataLine { y, text }
+}
+
+/// The pay slip page. `marks` draws the separator marks as `mark_b` (fill and stroke) when
+/// true, as `re f` when false.
+fn pay_slip(stroked_marks: bool) -> FormPage {
+    let m = |x: f32, y0: f32| {
+        if stroked_marks {
+            mark_b(x, y0, 2.16)
+        } else {
+            format!("{} {y0} 0.24 2.16 re f\n", x - 0.12)
+        }
+    };
+    let mut t = String::new();
+    // Shared: the long border and the rules of the right column.
+    t += &bar_v(458.44, 98.39, 554.62, 0.72);
+    for y in [
+        554.51, 394.91, 372.10, 326.51, 280.91, 258.10, 121.43, 98.62,
+    ] {
+        t += &bar_h(464.32, 538.00, y, 0.48);
+    }
+    t += &label(59.67, 632.28, 11.4, "Erika Mustermann");
+    // Section E.
+    t += &bar_h(42.40, 458.32, 554.51, 0.48);
+    t += &bar_h(42.40, 458.32, 372.10, 0.48);
+    for x in [76.72, 253.36, 327.52, 384.40, 424.24, 435.76, 447.04] {
+        t += &bar_v(x, 542.86, 554.39, 0.24);
+    }
+    t += &bold(42.40, 557.74, 6.66, "Bezuege A");
+    for (x, s) in [
+        (42.40, "Ea"),
+        (79.56, "Eb"),
+        (256.24, "Ec"),
+        (307.12, "Ed"),
+        (364.96, "Ee"),
+        (387.24, "Ef"),
+        (427.08, "Eg"),
+        (437.64, "Eh Ei"),
+    ] {
+        t += &label(x, 546.22, 6.6, s);
+    }
+    t += &bold(520.0, 546.22, 6.66, "Ej");
+    t += &bold(42.40, 375.35, 6.66, "Abzuege B");
+    t += &bold(500.0, 386.86, 6.66, "Ek");
+    // Section T.
+    t += &bar_h(42.40, 458.56, 326.39, 0.48);
+    for x in [53.92, 128.08, 202.00, 270.40, 338.80] {
+        t += &bar_v(x, 360.46, 371.98, 0.24);
+    }
+    for (x, s) in [
+        (42.40, "Ta"),
+        (114.0, "Tb"),
+        (188.0, "Tc"),
+        (256.6, "Td"),
+        (324.7, "Te"),
+        (470.32, "Tf"),
+    ] {
+        t += &bold(x, 364.07, 6.66, s);
+    }
+    for y0 in [349.42, 338.14, 326.62] {
+        for x in [110.68, 184.84, 253.24, 321.64] {
+            t += &m(x, y0);
+        }
+    }
+    // Section S.
+    t += &bar_h(42.40, 458.32, 280.91, 0.48);
+    for x in [
+        53.92, 105.28, 156.40, 207.76, 259.12, 310.24, 361.60, 407.20,
+    ] {
+        t += &bar_v(x, 315.11, 326.39, 0.24);
+    }
+    t += &bold(42.40, 318.46, 6.66, "Sa");
+    for (end, s) in [
+        (99.39, "Sb"),
+        (150.75, "Sc"),
+        (201.87, "Sd"),
+        (253.23, "Se"),
+        (304.59, "Sf"),
+        (355.71, "Sg"),
+        (401.31, "Sh"),
+        (452.67, "Si"),
+    ] {
+        t += &bold(end - 8.0, 318.46, 6.66, s);
+    }
+    t += &bold(477.76, 318.46, 6.66, "Sj");
+    for y0 in [303.83, 292.55, 281.02] {
+        for x in [
+            87.88, 139.24, 190.60, 241.84, 293.08, 344.44, 390.04, 441.28,
+        ] {
+            t += &m(x, y0);
+        }
+    }
+    // Section L.
+    t += &bar_h(281.92, 458.56, 258.10, 0.48);
+    t += &bar_h(281.92, 458.56, 121.18, 0.48);
+    t += &bar_h(42.40, 458.80, 98.39, 0.72);
+    t += &bar_h(42.40, 270.40, 258.10, 0.48);
+    t += &bar_h(42.40, 270.40, 143.99, 0.48);
+    t += &bar_h(42.40, 270.40, 121.18, 0.48);
+    t += &bar_v(162.16, 143.99, 257.98, 0.24);
+    t += &bar_v(310.24, 246.71, 257.98, 0.24);
+    for x in [333.04, 384.40] {
+        t += &bar_v(x, 109.90, 121.18, 0.24);
+    }
+    for k in 0..10 {
+        let y0 = 144.23 + 11.4 * k as f32;
+        t += &m(145.00, y0);
+        t += &m(253.24, y0);
+    }
+    for x in [315.88, 367.24, 441.28] {
+        t += &m(x, 98.62);
+    }
+    t += &bold(42.40, 261.35, 6.66, "La");
+    t += &bold(281.92, 261.35, 6.66, "Lb");
+    for k in 0..9 {
+        let y = 249.10 - 11.4 * k as f32;
+        t += &label(42.40, y, 6.6, &format!("Lc{}", k + 1));
+        if k < 7 {
+            t += &label(163.60, y, 6.6, &format!("Ld{}", k + 1));
+        }
+    }
+    t += &label(281.92, 249.82, 6.6, "Le");
+    t += &label(311.68, 249.82, 6.6, "Lf");
+    t += &bold(500.0, 250.07, 6.66, "Lg");
+    t += &label(42.40, 112.54, 6.6, "Lh");
+    t += &label(42.40, 101.03, 6.6, "Li");
+    for (x, s) in [(297.76, "Lj"), (343.84, "Lk"), (421.60, "Ll")] {
+        t += &label(x, 113.26, 6.6, s);
+    }
+    t += &bold(500.0, 113.26, 6.66, "Lm");
+    t += &bold(493.36, 272.86, 6.66, "Ln");
+    let lines = vec![
+        columns_line(
+            533.22,
+            &[(2, "001 Gehalt"), (67, "X X Y"), (78, "1.234,56")],
+        ),
+        columns_line(
+            521.82,
+            &[(2, "002 Zulage Muster"), (67, "X X Y"), (81, "12,34")],
+        ),
+        columns_line(
+            510.42,
+            &[(2, "003 Beispiel Bezug"), (67, "Z X N"), (81, "56,78")],
+        ),
+        columns_line(373.62, &[(78, "1.302,90")]),
+        columns_line(
+            350.82,
+            &[(0, "X"), (6, "12.34567"), (20, "1.23400"), (78, "1.234,00")],
+        ),
+        columns_line(
+            305.22,
+            &[
+                (0, "X"),
+                (12, "1.11100"),
+                (21, "2.22200"),
+                (50, "33344"),
+                (58, "44455 7"),
+                (80, "555,66"),
+            ],
+        ),
+        columns_line(259.62, &[(78, "8.765,43")]),
+        columns_line(248.22, &[(12, "99.99999"), (31, "88.88800")]),
+        columns_line(
+            236.82,
+            &[(12, "99.99999"), (42, "9001 Muster A"), (81, "11,11")],
+        ),
+        columns_line(
+            225.42,
+            &[
+                (13, "7.77700"),
+                (32, "6.66600"),
+                (42, "9002 Muster B"),
+                (81, "22,22-"),
+            ],
+        ),
+        columns_line(214.02, &[(42, "9003 Muster C"), (81, "33,33")]),
+        columns_line(202.62, &[(42, "9004 Muster D"), (78, "4.444,44-")]),
+        columns_line(111.42, &[(4, "Musterbank")]),
+        columns_line(
+            100.02,
+            &[
+                (4, "DE00 0000 0000 0000 0000 00"),
+                (43, "1.23456"),
+                (78, "9.876,54"),
+            ],
+        ),
+    ];
+    FormPage {
+        template: t,
+        left: 42.52,
+        size: 9.5,
+        lines,
+        ..FormPage::default()
+    }
+}
+
+/// The tables of the pay slip: its sections E, T, S, the right middle and the bottom of L,
+/// each a header over its lines; no section is lost and none gives a loss.
+fn assert_pay_slip(out: &ReadOutcome) {
+    let found = read_tables(out);
+    assert_eq!(found.len(), 5, "{found:#?} {:?}", out.document.losses);
+    let header = |t: &Vec<Vec<String>>| t[0].join("|");
+    let body = |t: &Vec<Vec<String>>| t[1..].iter().map(|r| r.join("|")).collect::<Vec<_>>();
+    // E: 8 columns, a row for each earning.
+    assert_eq!(found[0][0].len(), 8, "{found:#?}");
+    assert!(header(&found[0]).starts_with("Ea|Eb|"), "{found:#?}");
+    let e = body(&found[0]);
+    assert_eq!(e.len(), 3, "{e:?}");
+    assert!(e[0].starts_with("001 Gehalt") && e[2].starts_with("003 Beispiel Bezug"));
+    // T and S: their headers and one row of values, the marks read as separators.
+    assert_eq!(header(&found[1]), "Ta|Tb|Tc|Td|Te|", "{found:#?}");
+    assert_eq!(body(&found[1]), ["X 12.345,67 1.234,00"], "{found:#?}");
+    assert_eq!(
+        header(&found[2]),
+        "Sa|Sb|Sc|Sd|Se|Sf|Sg|Sh|Si",
+        "{found:#?}"
+    );
+    assert!(body(&found[2])[0].contains("333,44 444,55 7"), "{found:#?}");
+    // L: the right middle Le | Lf over four rows, the bottom right Lk | Ll over a value.
+    assert_eq!(header(&found[3]), "Le|Lf", "{found:#?}");
+    assert_eq!(
+        body(&found[3]),
+        [
+            "9001 Muster A",
+            "9002 Muster B",
+            "9003 Muster C",
+            "9004 Muster D"
+        ]
+    );
+    assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
+    assert_eq!(found[4].len(), 2, "{found:#?}");
+    assert_no_loss(out);
+}
+
+/// The pay slip with its separator marks filled and stroked (`B*`), as the print run draws
+/// them: the marks are no rules, so S keeps its 9 columns.
+#[test]
+fn pay_slip_sections_are_tables() {
+    let out = read(&print_form(&[pay_slip(true)], "", ""));
+    assert_pay_slip(&out);
+}
+
+/// Guard: the same pay slip with marks drawn as `re f` reads the same.
+#[test]
+fn pay_slip_with_filled_marks_reads_the_same() {
+    let out = read(&print_form(&[pay_slip(false)], "", ""));
+    assert_pay_slip(&out);
+}
+
+/// A table of 4 columns over a row of 3 drawn cells with one label: the row is a section of
+/// its own and no header band (too few titles); it is not let go without a loss.
+#[test]
+fn a_refused_section_is_a_loss() {
+    let mut template = form_section(
+        &form_columns(4),
+        760.0,
+        &["Nr.", "Art", "Tage", "Betrag"],
+        &[
+            &["1001", "Gehalt", "20", "1.234,56"],
+            &["1002", "Zulage", "8", "12,34"],
+        ],
+        BY_CELL,
+    );
+    let xs = [40.0, 150.0, 400.0, 555.0];
+    template += &grid(&xs, &[692.0, 712.0]);
+    template += &label(44.0, 698.0, 7.0, "Muster GmbH");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert_eq!(read_tables(&out).len(), 1, "{:?}", read_tables(&out));
+    let what = one_uncertain_loss(&out);
+    assert_eq!(
+        what,
+        "a header band on page 1 is not read as a table: its cells hold too few column titles; \
+         its text is read without the band"
+    );
 }
