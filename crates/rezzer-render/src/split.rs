@@ -1689,8 +1689,9 @@ impl<'a> Splitter<'a> {
     ) {
         let pieces = self.pieces(text);
         let whole = pieces.len() == 1;
-        // The part the previous piece is in, and how many pieces it has had.
-        let mut prev: Option<(String, String)> = None;
+        // The previous piece's file base and location, the `###` part it ends in (empty
+        // outside Logic), and how many pieces that part has had.
+        let mut prev: Option<(String, String, String)> = None;
         let mut n = 0usize;
         for piece in pieces {
             let part = if whole || base != "logic" {
@@ -1698,28 +1699,30 @@ impl<'a> Splitter<'a> {
             } else {
                 logic_part(&piece)
             };
-            // Packed `###` parts are located `<first> to <last>`.
-            let last = last_logic_part(&piece);
-            let here = |title: &str| {
-                let shown = match &last {
-                    Some(l) if l != title => format!("{title} to {l}"),
-                    _ => title.to_string(),
-                };
+            // A piece names every `###` part it holds (ruling P5-AH): the one it starts in,
+            // then each one that begins in it.
+            let here = |start: &str| {
+                let mut held = vec![start.to_string()];
+                held.extend(begun_logic_parts(&piece));
                 (
-                    format!("{base}-{}", slug(title)),
-                    capped(&format!("{location}, {shown}"), TITLE_CAP),
+                    format!("{base}-{}", slug(start)),
+                    capped(&format!("{location}, {}", listed(&held)), TITLE_CAP),
+                    start.to_string(),
                 )
             };
-            let (piece_base, piece_location) = match (&part, &prev) {
+            let (piece_base, piece_location, start) = match (&part, &prev) {
                 (Some(PartStart::Begins(title) | PartStart::Continues(title)), _) => here(title),
                 // A piece without a heading of its own goes on in the part before it.
-                (None, Some(before)) => before.clone(),
-                (None, None) => (base.to_string(), location.to_string()),
+                (None, Some((_, _, before))) if !before.is_empty() => here(before),
+                (None, Some((b, l, _))) => (b.clone(), l.clone(), String::new()),
+                (None, None) => (base.to_string(), location.to_string(), String::new()),
             };
             let goes_on = !matches!(part, Some(PartStart::Begins(_)))
-                && prev.as_ref().is_some_and(|(b, _)| *b == piece_base);
+                && prev.as_ref().is_some_and(|(b, _, _)| *b == piece_base);
             n = if goes_on { n + 1 } else { 1 };
-            prev = Some((piece_base.clone(), piece_location.clone()));
+            // The part the next piece goes on in: the last one that begins here, if any.
+            let current = begun_logic_parts(&piece).pop().unwrap_or(start);
+            prev = Some((piece_base.clone(), piece_location.clone(), current));
             let order = units.len() + 1;
             let title = family_title(&piece_location, n);
             units.push(Unit {
@@ -1760,13 +1763,33 @@ fn logic_part(piece: &str) -> Option<PartStart> {
     })
 }
 
-/// The title of the last `###` part that begins in a piece of `## Logic`, without escapes.
-fn last_logic_part(piece: &str) -> Option<String> {
+/// The titles of the `###` parts that begin in a piece of `## Logic`, in order, without
+/// escapes.
+fn begun_logic_parts(piece: &str) -> Vec<String> {
     piece
         .lines()
         .filter_map(|l| l.strip_prefix("### "))
-        .rfind(|t| !t.ends_with(" (continued)"))
+        .filter(|t| !t.ends_with(" (continued)"))
         .map(unescape)
+        .collect()
+}
+
+/// Names held by one part, as its title shows them (ruling P5-AH): repeats next to each
+/// other once, then `A`, `A and B`, `A, B and C`, or the first three and `and <n> more`.
+fn listed(names: &[String]) -> String {
+    let mut held: Vec<&str> = Vec::new();
+    for name in names {
+        if held.last() != Some(&name.as_str()) {
+            held.push(name);
+        }
+    }
+    match held.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        [a, b, c, rest @ ..] => format!("{a}, {b}, {c} and {} more", rest.len()),
+    }
 }
 
 /// Rendered line text back as plain text: a backslash before ASCII punctuation goes.
@@ -1852,7 +1875,8 @@ fn packs(prev: &Item<'_>, next: &Item<'_>) -> bool {
 }
 
 /// Packed items as one: the first one's name (`pages-<a>-<b>` for pages without an
-/// outline), `<first> to <last>` as title and location where they differ.
+/// outline), `<first> to <last>` as location where they differ, and every item in the
+/// title ([`listed`]).
 fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
     let first = &group[0];
     let last = &group[group.len() - 1];
@@ -1894,7 +1918,9 @@ fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
     {
         item.title = first.title.clone();
     } else {
-        item.title = joined(&first.title, &last.title);
+        // Every packed item by name (ruling P5-AH).
+        let titles: Vec<String> = group.iter().map(|g| g.title.clone()).collect();
+        item.title = capped(&listed(&titles), TITLE_CAP);
     }
     item
 }

@@ -979,8 +979,9 @@ fn a_heading_never_stands_alone() {
     );
 }
 
+/// Ruling P5-AH: a part names every sheet whose Logic it holds.
 #[test]
-fn packed_logic_parts_name_their_range() {
+fn packed_logic_parts_name_every_sheet() {
     let mut d = doc(FormatId::Xlsx);
     d.body.push(sheet("Alpha", vec![para(&words(5_000))]));
     // Three sheets of small logic and one large: the small ones pack into one part.
@@ -1010,7 +1011,62 @@ fn packed_logic_parts_name_their_range() {
         .find(|u| u.file.starts_with("logic"))
         .expect("logic");
     assert_eq!(first.file, "logic-aa", "{:?}", names(&list));
-    assert_eq!(first.location, "Logic, Aa to Cc");
+    assert_eq!(first.location, "Logic, Aa, Bb and Cc");
+}
+
+/// One formula of `sheet` in row `row`, about 60 words long.
+fn long_formula(sheet: &str, row: usize) -> Formula {
+    Formula {
+        anchor: Anchor(format!("{sheet}!C{row}")),
+        expression: format!("SUM({sheet}!A{row}:B{row}) + {}", words(60)),
+        dialect: "excel".into(),
+        references: Vec::new(),
+        cached: None,
+        role: Some(Role::Result),
+        pattern: None,
+        latex: None,
+        note: None,
+        kind: None,
+        range: None,
+        original: None,
+    }
+}
+
+/// Ruling P5-AH: an invented workbook of two sheets. The Logic of the first is cut into
+/// pieces, and the Logic of the second shares the last piece: its title names both.
+#[test]
+fn a_logic_piece_names_every_sheet_it_holds() {
+    let mut d = doc(FormatId::Xlsx);
+    for (s, count) in [("Lining", 40), ("Ventilation", 2)] {
+        d.body.push(sheet(s, vec![para("x")]));
+        for row in 1..=count {
+            d.facets.formulas.push(long_formula(s, row));
+        }
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let holder = list
+        .iter()
+        .find(|u| u.markdown.contains("### Ventilation"))
+        .expect("Ventilation");
+    assert!(
+        holder.title.starts_with("Logic, Lining and Ventilation"),
+        "{:?}",
+        titles(&list)
+    );
+    let lining: Vec<&str> = titles(&list)
+        .into_iter()
+        .filter(|t| t.starts_with("Logic, Lining"))
+        .collect();
+    assert!(lining.len() > 1, "{lining:?}");
+    // Small sheets packed into one part are all named, up to three, then counted.
+    let mut d = doc(FormatId::Xlsx);
+    for s in ["Aa", "Bb", "Cc", "Dd", "Ee"] {
+        d.body.push(sheet(s, vec![para(&words(400))]));
+    }
+    d.body.push(sheet("Big", vec![para(&words(30_000))]));
+    let all = titles(&units(&d, 2_500)).join(" | ");
+    assert!(all.contains("Aa, Bb, Cc and 2 more"), "{all}");
 }
 
 /// A document as the Markdown reader makes it.

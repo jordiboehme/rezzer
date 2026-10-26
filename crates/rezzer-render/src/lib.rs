@@ -330,6 +330,12 @@ pub(crate) fn column_numbers(doc: &Document) -> bool {
     )
 }
 
+/// A frontmatter value as Rezzer writes it: double-quoted and escaped, for example the
+/// `resource` of a source. Lets a caller compare a written file's line with a source.
+pub fn frontmatter_value(value: &str) -> String {
+    frontmatter::quote(value)
+}
+
 /// Renders a document as OKF Markdown.
 pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let want = |s: OutputSection| opts.sections.as_ref().is_none_or(|l| l.contains(&s));
