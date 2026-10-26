@@ -143,7 +143,7 @@ pub fn detect_with_hints(name: &str, mime: Option<&str>, bytes: &[u8]) -> (Forma
 }
 
 /// Every media type [`confirmed_media_type`] gives.
-pub const CONFIRMED_MEDIA_TYPES: [&str; 11] = [
+pub const CONFIRMED_MEDIA_TYPES: [&str; 13] = [
     "image/png",
     "image/jpeg",
     "image/gif",
@@ -155,14 +155,31 @@ pub const CONFIRMED_MEDIA_TYPES: [&str; 11] = [
     "application/vnd.oasis.opendocument.text",
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.oasis.opendocument.presentation",
+    "application/json",
+    "text/plain",
 ];
 
 /// The media type of an embedded file or picture when its bytes confirm it: a PNG, JPEG, GIF
 /// or WebP signature, or a PDF, DOCX, XLSX, PPTX, ODT, ODS or ODP that [`detect`] finds with
-/// certainty. The name and a declared type never count. `None` for anything else, also for
-/// text formats, which no signature confirms. Always one of [`CONFIRMED_MEDIA_TYPES`].
+/// certainty. Then text: a JSON object or array is JSON, any other valid UTF-8 without a NUL
+/// byte is plain text. The name and a declared type never count. `None` for anything else.
+/// Always one of [`CONFIRMED_MEDIA_TYPES`].
 pub fn confirmed_media_type(bytes: &[u8]) -> Option<&'static str> {
-    let [png, jpeg, gif, webp, pdf, docx, xlsx, pptx, odt, ods, odp] = CONFIRMED_MEDIA_TYPES;
+    let [
+        png,
+        jpeg,
+        gif,
+        webp,
+        pdf,
+        docx,
+        xlsx,
+        pptx,
+        odt,
+        ods,
+        odp,
+        json,
+        plain,
+    ] = CONFIRMED_MEDIA_TYPES;
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Some(png);
     }
@@ -177,7 +194,7 @@ pub fn confirmed_media_type(bytes: &[u8]) -> Option<&'static str> {
     }
     let (format, detection) = detect("", bytes);
     if detection.confidence != Confidence::Certain {
-        return None;
+        return text_media_type(bytes, json, plain);
     }
     match format {
         FormatId::Pdf => Some(pdf),
@@ -187,8 +204,19 @@ pub fn confirmed_media_type(bytes: &[u8]) -> Option<&'static str> {
         FormatId::Odt => Some(odt),
         FormatId::Ods => Some(ods),
         FormatId::Odp => Some(odp),
-        _ => None,
+        _ => text_media_type(bytes, json, plain),
     }
+}
+
+/// `json` for a JSON object or array, `plain` for other valid UTF-8 without a NUL byte.
+fn text_media_type(bytes: &[u8], json: &'static str, plain: &'static str) -> Option<&'static str> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    if text.contains('\0') {
+        return None;
+    }
+    let structured = matches!(text.trim_start().as_bytes().first(), Some(b'{' | b'['))
+        && serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok();
+    Some(if structured { json } else { plain })
 }
 
 /// `Text/CSV; charset=utf-8` -> `text/csv`.

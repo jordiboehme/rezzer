@@ -235,7 +235,7 @@ fn safe_asset_id(id: &str) -> bool {
 /// The media types whose files Rezzer writes under their own extension (ruling P5-AJ), each
 /// one Crystalline 0.29.0 copies on import (its `attachment_mime` list). Any other picture
 /// or attachment is written as [`OTHER_EXTENSION`].
-const ASSET_TYPES: [(&str, &str); 11] = [
+const ASSET_TYPES: [(&str, &str); 13] = [
     ("image/png", "png"),
     ("image/jpeg", "jpg"),
     ("image/gif", "gif"),
@@ -256,16 +256,29 @@ const ASSET_TYPES: [(&str, &str); 11] = [
     ("application/vnd.oasis.opendocument.text", "odt"),
     ("application/vnd.oasis.opendocument.spreadsheet", "ods"),
     ("application/vnd.oasis.opendocument.presentation", "odp"),
+    ("application/json", "json"),
+    ("text/plain", "txt"),
 ];
 
 /// The extension of a picture or attachment whose type its bytes do not confirm.
 const OTHER_EXTENSION: &str = "bin";
 
-/// Whether `name` is a name Rezzer gives a picture: a safe asset id, `.` and an extension
-/// [`asset_extension`] gives.
+/// The extensions any picture gets ([`asset_extension`]): a stale file of any safe asset id
+/// with one of them is Rezzer's (ruling P5-AC).
+const PICTURE_EXTENSIONS: [&str; 6] = ["png", "jpg", "gif", "webp", "pdf", OTHER_EXTENSION];
+
+/// Whether `name` is a name Rezzer gives a picture or attachment: a safe asset id, `.` and an
+/// extension [`asset_extension`] gives. The other types of [`ASSET_TYPES`] (text, JSON,
+/// office files) only come from attachments, so only `attachment-<n>` with them counts, and
+/// a user's `notes.txt` in the folder stays.
 fn is_asset_name(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(id, ext)| {
-        safe_asset_id(id) && (ext == OTHER_EXTENSION || ASSET_TYPES.iter().any(|(_, e)| *e == ext))
+        let attachment = id
+            .strip_prefix("attachment-")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        safe_asset_id(id)
+            && (PICTURE_EXTENSIONS.contains(&ext)
+                || (attachment && ASSET_TYPES.iter().any(|(_, e)| *e == ext)))
     })
 }
 
@@ -833,20 +846,28 @@ mod tests {
                 .map(|(_, e)| *e);
             let ext = ext.unwrap_or_else(|| panic!("{mime} has no extension"));
             assert!(is_asset_name(&format!("attachment-1.{ext}")), "{ext}");
+            assert_eq!(
+                is_asset_name(&format!("notes.{ext}")),
+                ["png", "jpg", "gif", "webp", "pdf"].contains(&ext),
+                "{ext}"
+            );
         }
         assert_eq!(
             ASSET_TYPES.len(),
             rezzer_detect::CONFIRMED_MEDIA_TYPES.len()
         );
         assert!(is_asset_name("page-1.bin"));
-        assert!(!is_asset_name("page-1.txt"));
+        assert!(!is_asset_name("page-1.csv"));
         assert!(!is_asset_name("page-1.md"));
         assert_eq!(asset_extension(b"\x89PNG\r\n\x1a\n"), "png");
         assert_eq!(asset_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), "jpg");
         assert_eq!(asset_extension(b"GIF87a"), "gif");
         assert_eq!(asset_extension(b"%PDF-1.4\n"), "pdf");
-        assert_eq!(asset_extension(b"x.png"), OTHER_EXTENSION);
-        assert_eq!(asset_extension(b"a,b\n1,2\n"), OTHER_EXTENSION);
+        // A name in the bytes counts for nothing: this is text.
+        assert_eq!(asset_extension(b"x.png"), "txt");
+        assert_eq!(asset_extension(b"a,b\n1,2\n"), "txt");
+        assert_eq!(asset_extension(b"{\"a\": 1}"), "json");
+        assert_eq!(asset_extension(b"\x00\x01binary"), OTHER_EXTENSION);
     }
 
     fn files<'a>(main_markdown: &'a str) -> Files<'a> {

@@ -312,7 +312,7 @@ flowchart LR
     A --> K[Knowledge base]
 ```
 
-It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue. The output folder imports into Crystalline as it is: import the folder itself, with the main documents, their parts and pictures. An attachment keeps its type in the file name, such as `.png` or `.pdf`, when Rezzer can tell the type from its content. Other attachments are written as `.bin`. Crystalline does not copy those on import, and it also leaves out files over 10 MiB.
+It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue. The output folder imports into Crystalline as it is: import the folder itself, with the main documents, their parts and pictures. An attachment keeps its type in the file name, such as `.png`, `.pdf`, `.txt` or `.json`, when Rezzer can tell the type from its content. Only attachments of an unknown binary type are written as `.bin`. Crystalline does not copy those on import, and it also leaves out files over 10 MiB.
 
 ## What Rezzer is not
 

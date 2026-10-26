@@ -1143,7 +1143,7 @@ fn attachments_get_the_extension_their_bytes_confirm() {
     };
     let assets = out.path().join("scan.txt.assets");
     // The declared type says PNG; only the bytes count (ruling P5-AJ).
-    let (registry, _) = pictures_of(&["attachment-1"], b"not a picture, named x.png");
+    let (registry, _) = pictures_of(&["attachment-1"], b"\0\x01 not a picture, named x.png");
     let res =
         Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
     let doc = res.document.unwrap();
@@ -1156,14 +1156,26 @@ fn attachments_get_the_extension_their_bytes_confirm() {
     let (registry, _) = pictures_of(&["attachment-1", "attachment-2"], pdf);
     Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
     assert_eq!(names_in(&assets), ["attachment-1.pdf", "attachment-2.pdf"]);
+    // Text and JSON, told by their content.
+    let (registry, _) = pictures_of(&["attachment-1"], "Notiz \u{fc}ber x\n".as_bytes());
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(names_in(&assets), ["attachment-1.txt"]);
+    let (registry, _) = pictures_of(&["attachment-1"], b"{\"a\": [1, 2]}");
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(names_in(&assets), ["attachment-1.json"]);
     // A later run removes the old names of every type Rezzer writes.
     std::fs::write(assets.join("attachment-3.png"), PNG).unwrap();
     std::fs::write(assets.join("attachment-4.docx"), b"old").unwrap();
     std::fs::write(assets.join("attachment-5.webp"), b"old").unwrap();
+    std::fs::write(assets.join("attachment-6.txt"), b"old").unwrap();
     std::fs::write(assets.join("notes.txt"), b"mine").unwrap();
+    std::fs::write(assets.join("notes.json"), b"mine").unwrap();
     let (registry, _) = pictures(&["attachment-1"]);
     Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
-    assert_eq!(names_in(&assets), ["attachment-1.png", "notes.txt"]);
+    assert_eq!(
+        names_in(&assets),
+        ["attachment-1.png", "notes.json", "notes.txt"]
+    );
 }
 
 #[cfg(unix)]

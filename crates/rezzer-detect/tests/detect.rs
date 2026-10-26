@@ -104,16 +104,31 @@ fn confirmed_media_types_come_from_the_bytes_only() {
             odf("application/vnd.oasis.opendocument.text"),
             Some("application/vnd.oasis.opendocument.text"),
         ),
-        // A macro workbook, text and a name alone confirm nothing.
+        // Text: a JSON object or array is JSON, other UTF-8 without NUL plain text.
+        (
+            "json",
+            b" {\"a\": [1, 2]}\n".to_vec(),
+            Some("application/json"),
+        ),
+        ("json array", b"[1, 2]".to_vec(), Some("application/json")),
+        ("broken json", b"{\"a\": ".to_vec(), Some("text/plain")),
+        ("a json number is text", b"42".to_vec(), Some("text/plain")),
+        (
+            "text",
+            "just text named x.png, \u{e4}\n".as_bytes().to_vec(),
+            Some("text/plain"),
+        ),
+        ("csv", b"a,b\n1,2\n".to_vec(), Some("text/plain")),
+        ("empty", Vec::new(), Some("text/plain")),
+        // A macro workbook, binary bytes and a name alone confirm nothing.
         ("xlsm", xlsm, None),
-        ("text", b"just text named x.png\n".to_vec(), None),
-        ("csv", b"a,b\n1,2\n".to_vec(), None),
+        ("text with nul", b"text\0more".to_vec(), None),
+        ("latin-1", b"caf\xe9".to_vec(), None),
         (
             "riff without webp",
             b"RIFF\x10\0\0\0WAVEfmt ".to_vec(),
             None,
         ),
-        ("empty", Vec::new(), None),
     ];
     for (what, bytes, want) in cases {
         assert_eq!(rezzer_detect::confirmed_media_type(&bytes), want, "{what}");
