@@ -2600,5 +2600,16 @@ fn qr_modules_are_not_marks() {
     assert_eq!(found, [1], "{:#?}", out.document.assets);
     let text = common::all_text(&out);
     assert!(text.contains("1234,56"), "{text}");
-    assert_eq!(text.matches('\u{FDD0}').count(), 0);
+    // Neither the Markdown nor the JSON holds a placeholder of Rezzer (U+FDD0 to U+FDEF).
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let json = serde_json::to_string(&out.document).expect("json");
+    let placeholder = |c: char| ('\u{FDD0}'..='\u{FDEF}').contains(&c);
+    assert!(
+        !md.contains(placeholder) && !json.contains(placeholder),
+        "{md}"
+    );
 }

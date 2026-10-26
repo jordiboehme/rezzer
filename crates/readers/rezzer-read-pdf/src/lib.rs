@@ -273,16 +273,18 @@ fn extract(
 fn separators(pages: &mut [PageItems], out: &mut Out) -> HashMap<u32, String> {
     // Only visible glyphs get placeholders: they are in the runs and the quotes.
     let placed = |p: &PageItems| {
-        p.runs.iter().any(|r| r.text.contains(marks::SEP))
+        p.runs
+            .iter()
+            .any(|r| r.text.contains(marks::is_placeholder))
             || p.quotes
                 .iter()
                 .flat_map(|q| &q.text)
-                .any(|t| t.contains(marks::SEP))
+                .any(|t| t.contains(marks::is_placeholder))
     };
     if !pages.iter().any(placed) {
         return HashMap::new();
     }
-    let (style, words) = marks::style_in(pages);
+    let (style, votes) = marks::style_in(pages);
     let mut notes = HashMap::new();
     for (page, got) in marks::resolve(pages, &style) {
         for why in &got.unread {
@@ -310,7 +312,7 @@ fn separators(pages: &mut [PageItems], out: &mut Out) -> HashMap<u32, String> {
         if !got.unread.is_empty() {
             out.partial = true;
         }
-        if let Some(note) = marks::note(&got, &style, &words) {
+        if let Some(note) = marks::note(&got, &style, &votes) {
             notes.insert(page, note);
         }
     }

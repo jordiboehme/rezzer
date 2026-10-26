@@ -911,11 +911,24 @@ impl<'p, 'a> PageReader<'p, 'a> {
         }
         // A separator drawn as a mark between two digits puts a placeholder between them, read
         // once the whole file is (`marks::resolve`). The quotes below are taken with it.
-        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut dev.drawn_marks) {
+        let turn = page_turn(
+            dev.glyphs
+                .iter()
+                .filter(|g| g.layer.is_none() && !g.invisible),
+        );
+        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut dev.drawn_marks, turn) {
             notes.push(Note::Limit(format!(
                 "separators drawn as marks on page {n} are looked for only in part: the page has \
                  too many marks near its digits"
             )));
+        }
+        // Dashed rules drawn as rows of marks are rules all the same.
+        for r in crate::marks::dashed_rules(&mut dev.drawn_marks) {
+            if dev.rules.len() < dev.cap {
+                dev.rules.push(r);
+            } else {
+                dev.rules_cut = true;
+            }
         }
         if dev.drawn_marks_cut {
             notes.push(Note::Limit(format!(
@@ -3486,6 +3499,25 @@ fn unplaced_links(glyphs: &[Gl], runs: &[Run], links: &[Link]) -> Vec<String> {
         .collect()
 }
 
+/// The frame a page is read in: when most of its `visible` text reads in one other
+/// direction, that direction.
+fn page_turn<'g>(visible: impl Iterator<Item = &'g Gl>) -> Turn {
+    let mut by_dir = [0usize; 4];
+    for g in visible {
+        if g.vertical {
+            continue;
+        }
+        if let Some(t) = Turn::of(g.dx, g.dy) {
+            by_dir[t as usize] += g.len as usize;
+        }
+    }
+    let total: usize = by_dir.iter().sum();
+    [Turn::Up, Turn::Half, Turn::Down]
+        .into_iter()
+        .find(|&t| total > 0 && by_dir[t as usize] * 2 > total)
+        .unwrap_or(Turn::None)
+}
+
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it; `width` and `height` are its size.
 fn lay_out(
@@ -3507,21 +3539,7 @@ fn lay_out(
     }
     let glyphs = &rest[..];
     let (mut visible, hidden): (Vec<Gl>, Vec<Gl>) = glyphs.iter().partition(|g| !g.invisible);
-    // When most of the text reads in one other direction, the page is read in that frame.
-    let mut by_dir = [0usize; 4];
-    for g in &visible {
-        if g.vertical {
-            continue;
-        }
-        if let Some(t) = Turn::of(g.dx, g.dy) {
-            by_dir[t as usize] += g.len as usize;
-        }
-    }
-    let total: usize = by_dir.iter().sum();
-    let turn = [Turn::Up, Turn::Half, Turn::Down]
-        .into_iter()
-        .find(|&t| total > 0 && by_dir[t as usize] * 2 > total)
-        .unwrap_or(Turn::None);
+    let turn = page_turn(visible.iter());
     let mut items = PageItems {
         page,
         turned: turn != Turn::None,
