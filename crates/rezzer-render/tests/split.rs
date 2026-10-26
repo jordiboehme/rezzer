@@ -1409,6 +1409,41 @@ fn titles_stay_unique_against_own_parts_and_pieces() {
     assert_eq!(unique.len(), all.len(), "{all:?}");
 }
 
+/// A lone source chapter `Outline` keeps its title, in Markdown and in a PDF without an
+/// Outline section: only a PDF's outline is Rezzer's own `Outline` part.
+#[test]
+fn a_lone_source_outline_chapter_keeps_its_title() {
+    let mut md = doc(FormatId::Markdown);
+    for title in ["Outline", "Chapter 2"] {
+        md.body.push(heading(1, title));
+        md.body.push(para(&words(8_000)));
+    }
+    let mut pdf = doc(FormatId::Pdf);
+    for n in 1..=4 {
+        pdf.body.push(page(n, vec![para(&words(4_000))]));
+    }
+    for (title, p) in [("Outline", 1), ("Chapter 2", 3)] {
+        pdf.facets.outline.push(OutlineEntry {
+            level: 1,
+            title: title.into(),
+            page: Some(p),
+        });
+    }
+    for d in [md, pdf] {
+        let list = units(&d, 2_500);
+        assert_within(&list, 2_500);
+        assert_eq!(titles(&list), ["Outline", "Chapter 2"]);
+        let out = output(&d, 2_500, "report.md", "b");
+        // Part titles are `<document title>: <title>`.
+        let all: Vec<&str> = out
+            .parts
+            .iter()
+            .filter_map(|p| p.title.split_once(": ").map(|(_, t)| t))
+            .collect();
+        assert_eq!(all, ["Outline", "Chapter 2"]);
+    }
+}
+
 /// Ruling P5-AF: a source chapter `Overview` gets a word only when the main document writes
 /// its own `Overview` part.
 #[test]

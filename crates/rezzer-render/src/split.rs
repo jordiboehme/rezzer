@@ -469,11 +469,22 @@ fn is_title_or_piece(key: &str, own: &str) -> bool {
             .is_some_and(|rest| rest.starts_with(", "))
 }
 
+/// Whether `key` is `own` or one of its numbered pieces (`list of parts, part 2`), the
+/// titles a part of `own` really gets.
+fn is_title_or_numbered_piece(key: &str, own: &str) -> bool {
+    key == own
+        || key
+            .strip_prefix(own)
+            .and_then(|rest| rest.strip_prefix(", part "))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Writes the final title of every unit from its [`Naming`] (ruling P5-AF): a unit of the
 /// source titled like a part Rezzer really writes for this document (one of its own units,
 /// or one of `extra`, the parts the main document writer adds: `Overview`, `Not read`,
 /// `List of parts`) gets its location in words, else the word `(section)`; then its piece
-/// number. A title still used twice gets ` (2)`, ` (3)`, own units first.
+/// number. A title still used twice gets ` (2)`, ` (3)`, own units first; a unit of the
+/// source also gets one when its title is one of `extra` or a numbered piece of it.
 pub(crate) fn finish_titles(units: &mut [Unit], extra: &[&str]) {
     let present: Vec<String> = units
         .iter()
@@ -502,12 +513,21 @@ pub(crate) fn finish_titles(units: &mut [Unit], extra: &[&str]) {
         }
         unit.title = family_title(&base, n.piece);
     }
+    let extra_keys: Vec<String> = extra.iter().map(|t| title_key(t)).collect();
     let mut taken: HashSet<String> = HashSet::new();
     for own in [true, false] {
         for unit in units.iter_mut().filter(|u| u.naming.own == own) {
             let base = unit.title.clone();
             let mut n = 1;
-            while !taken.insert(title_key(&unit.title)) {
+            loop {
+                let key = title_key(&unit.title);
+                let reserved = !own
+                    && extra_keys
+                        .iter()
+                        .any(|e| is_title_or_numbered_piece(&key, e));
+                if !reserved && taken.insert(key) {
+                    break;
+                }
                 n += 1;
                 unit.title = with_suffix(&capped(&base, TITLE_CAP), &format!("({n})"));
             }
@@ -2637,6 +2657,22 @@ mod tests {
             ["Logic (section)", "Logic (section), part 2", "Logic"]
         );
         assert_eq!(title_key(" Start "), "start");
+        // The last guard keeps a unit of the source off a part the main document adds and
+        // off its numbered pieces; a title that only starts like one stays.
+        let mut taken = unit("", "", false, 0);
+        taken.title = "List of parts, part 2".into();
+        let mut similar = unit("", "", false, 0);
+        similar.title = "List of parts, Sheet1".into();
+        let mut own = unit("", "", true, 0);
+        own.title = "Overview".into();
+        assert_eq!(
+            titled(&mut [taken, similar, own], &["List of parts", "Overview"]),
+            [
+                "List of parts, part 2 (2)",
+                "List of parts, Sheet1",
+                "Overview"
+            ]
+        );
         assert_eq!(
             titled(&mut [unit("Startup", "Startup", false, 0)], &["Start"]),
             ["Startup"]
