@@ -330,26 +330,34 @@ enum Stale {
     Parts,
 }
 
-/// The most bytes read to find the `part:` key of a part file.
-const PART_HEAD_MAX: u64 = 64 * 1024;
+/// The most bytes read to find the `part:` key of a part file. Rezzer's own frontmatter
+/// can be long (keyword tags, file tags), so this is generous; it only bounds a hostile file.
+const PART_HEAD_MAX: u64 = 16 * 1024 * 1024;
 
-/// Whether `path` is a part file Rezzer wrote: frontmatter with a `part:` key. Read without
-/// following a symlink (the caller checked the entry type) and only its head.
+/// Whether `path` is a part file Rezzer wrote: frontmatter with a `part:` key. Read line by
+/// line up to the closing `---`, without following a symlink (the caller checked the entry
+/// type).
 fn is_rezzer_part(path: &Path) -> bool {
+    use std::io::BufRead;
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
-    let mut head = Vec::new();
-    if file.take(PART_HEAD_MAX).read_to_end(&mut head).is_err() {
+    let mut lines = std::io::BufReader::new(file.take(PART_HEAD_MAX)).split(b'\n');
+    if !matches!(lines.next(), Some(Ok(first)) if first == b"---") {
         return false;
     }
-    let text = String::from_utf8_lossy(&head);
-    let Some(rest) = text.strip_prefix("---\n") else {
-        return false;
-    };
-    rest.lines()
-        .take_while(|line| *line != "---")
-        .any(|line| line.starts_with("part: "))
+    for line in lines {
+        let Ok(line) = line else {
+            return false;
+        };
+        if line == b"---" {
+            return false;
+        }
+        if line.starts_with(b"part: ") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Removes the regular files in `folder` whose names are not in `keep` and that `which`

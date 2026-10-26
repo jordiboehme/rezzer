@@ -1739,6 +1739,12 @@ fn rerun_removes_stale_parts() {
     std::fs::write(&victim, "---\npart: 1\n---\n\nkeep\n").unwrap();
     std::os::unix::fs::symlink(&victim, parts_folder.join("chapter-99.md")).unwrap();
     std::fs::write(parts_folder.join("mine.md"), "# My own note\n").unwrap();
+    // A stale part of ours with a long frontmatter before its `part:` key.
+    let long = format!(
+        "---\ntags: [\"{}\"]\npart: 50\n---\n\nold\n",
+        "a".repeat(200_000)
+    );
+    std::fs::write(parts_folder.join("chapter-50.md"), long).unwrap();
     // Grown more, then shrunk to fewer parts: the old parts are gone.
     let larger = run(b"40 4000");
     assert!(larger.parts.len() > large.parts.len());
