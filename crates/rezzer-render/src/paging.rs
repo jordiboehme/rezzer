@@ -337,11 +337,16 @@ fn pages(md: &str, limit: usize, size: &dyn Fn(&str) -> usize, hard: bool) -> Ve
             }
             Some((page, _)) => {
                 pages.push(page);
-                let lead = start
+                let mut lead = start
                     .map(|s| continued(md, s, &starts, &kinds, &contexts))
                     .unwrap_or_default();
+                if hard && size(&lead) > limit / 2 {
+                    // A very long section or group title: its continued line is shortened,
+                    // so the part still has room.
+                    lead = shortened(&lead, limit / 8);
+                }
                 let lead_cost = size(&lead);
-                if hard && lead_cost + cost > limit && lead_cost < limit / 2 {
+                if hard && lead_cost + cost > limit && lead_cost < limit {
                     // The lines the page begins with push it over: cut the part to the room
                     // they leave; its pieces after the first begin with `(continued)`.
                     let mut cut = hard_cut(text, limit - lead_cost, size).into_iter();
@@ -426,11 +431,31 @@ fn line_prefix(line: &str) -> (&str, &str) {
     }
 }
 
+/// The continued lines of `lead` with each title cut to at most `max` characters.
+fn shortened(lead: &str, max: usize) -> String {
+    let suffix = format!(" {CONTINUED}");
+    let mut out = String::with_capacity(lead.len().min(4 * max + 64));
+    for line in lead.split("\n\n").filter(|l| !l.is_empty()) {
+        let title = line.strip_suffix(suffix.as_str()).unwrap_or(line);
+        out.push_str(&crate::split::capped(title, max.max(8)));
+        out.push_str(&suffix);
+        out.push_str("\n\n");
+    }
+    out
+}
+
 /// The line that stands for a fence written as an indented code block: its language, at
 /// most 64 characters of it.
 fn language_line(info: &str) -> Option<String> {
-    let info: String = info.trim().chars().take(64).collect();
-    (!info.is_empty()).then(|| format!("Code in {}:", crate::blocks::line_text(&info)))
+    const LINE: usize = 64;
+    let escaped = crate::blocks::line_text(info.trim());
+    // Cut after escaping, so the line is at most 64 characters, never inside an escape.
+    let room = LINE - "Code in :".len();
+    let mut cut: String = escaped.chars().take(room).collect();
+    if cut.bytes().rev().take_while(|b| *b == b'\\').count() % 2 == 1 {
+        cut.pop();
+    }
+    (!cut.is_empty()).then(|| format!("Code in {cut}:"))
 }
 
 /// A table separator row: only `|`, `-`, `:` and spaces, with a `-`.
@@ -633,16 +658,22 @@ fn cut_line(
         // Each piece keeps the line's quote markers and indent (an indented code line its
         // indent).
         let (prefix, text) = line_prefix(content);
-        if !prefix.is_empty() {
-            let n = prefix.chars().count();
-            let mut b = room.saturating_sub(n);
+        let n = prefix.chars().count();
+        // A prefix longer than a quarter of the room is not repeated: it would make the
+        // pieces many and the output grow with it. The first piece keeps it, as before.
+        if !prefix.is_empty() && n.saturating_mul(4) <= room {
+            let (mut a, mut b) = (first.saturating_sub(n), room.saturating_sub(n));
             let mut lines = Vec::new();
             for _ in 0..=8 {
-                lines = text_lines(text, first.saturating_sub(n), b, fence);
-                if lines.iter().all(|l| size(l) + n <= room) {
+                lines = text_lines(text, a, b, fence);
+                let fits = lines
+                    .iter()
+                    .enumerate()
+                    .all(|(i, l)| size(l) + n <= if i == 0 { first } else { room });
+                if fits {
                     break;
                 }
-                b /= 2;
+                (a, b) = (a / 2, b / 2);
             }
             return lines.into_iter().map(|l| format!("{prefix}{l}")).collect();
         }
@@ -836,6 +867,34 @@ mod tests {
         for p in &pieces {
             assert!(size(p) <= budget, "{} over {budget}: {p}", size(p));
         }
+    }
+
+    #[test]
+    fn a_very_long_section_title_is_shortened_in_its_continued_line() {
+        let budget = 2_000;
+        let title = "Sheet with a title ".repeat(80);
+        let words = "lorem ipsum ".repeat(200);
+        let paragraph = words[..budget - 10].trim_end();
+        let md = format!("## Logic\n\n### {title}\n\nSpreadsheet formulas.\n\n{paragraph}\n");
+        let size = |t: &str| t.chars().count();
+        let pieces = cut(&md, budget, &size);
+        assert!(pieces.len() > 1);
+        assert!(
+            pieces[1].starts_with("### Sheet with a title"),
+            "{}",
+            pieces[1]
+        );
+        assert!(pieces[1].contains("... (continued)"));
+        for p in &pieces {
+            assert!(size(p) <= budget, "{} over {budget}", size(p));
+        }
+    }
+
+    #[test]
+    fn a_language_line_is_at_most_64_characters() {
+        let line = super::language_line(&"*".repeat(200)).expect("a line");
+        assert!(line.chars().count() <= 64, "{line}");
+        assert!(line.ends_with(":") && !line.ends_with("\\:"));
     }
 
     #[test]

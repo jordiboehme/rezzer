@@ -1252,3 +1252,81 @@ fn a_section_inside_a_section_is_cut_at_its_headings() {
         );
     }
 }
+
+#[test]
+fn a_long_prefix_is_not_repeated_on_every_piece() {
+    // One code line of 2,000 (repeated: under a quarter of the room) or 4,000 spaces (not
+    // repeated) and about 10 MB of text: the output stays within twice the input and the
+    // cut stays fast.
+    for spaces in [2_000, 4_000] {
+        let text = format!("{}{}\n", " ".repeat(spaces), words(10_000_000));
+        let mut d = doc(FormatId::Markdown);
+        d.body.push(Block::Code {
+            lang: Some("text".into()),
+            text,
+            anchor: None,
+        });
+        let started = std::time::Instant::now();
+        let list = units(&d, 2_500);
+        assert_within(&list, 2_500);
+        let out: usize = list.iter().map(|u| u.markdown.len()).sum();
+        assert!(
+            out < 20_000_000,
+            "{out} bytes of output for {spaces} spaces"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "{:?}",
+            started.elapsed()
+        );
+        if spaces == 4_000 {
+            assert!(
+                !list[1].markdown.contains(&" ".repeat(1_000)),
+                "the prefix is repeated"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_table_without_layout_is_cut_again_with_its_own_row_numbers() {
+    // Escaped cells take twice the characters the row estimate counts, so the first ranges
+    // are over the size and are cut again; their numbers stay the table's own rows.
+    let mut rows = vec![vec![
+        Cell::new(vec![Inline::plain("Key")]),
+        Cell::new(vec![Inline::plain("Stars")]),
+    ]];
+    for i in 0..40 {
+        rows.push(vec![
+            Cell::new(vec![Inline::plain(format!("k{i}"))]),
+            Cell::new(vec![Inline::plain("*".repeat(600))]),
+        ]);
+    }
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    });
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let mut next = 2;
+    for u in &list {
+        let range = u.file.strip_prefix("start-rows-").expect("a row range");
+        let (a, b) = range.split_once('-').expect("two numbers");
+        let (a, b): (u32, u32) = (a.parse().expect("first"), b.parse().expect("last"));
+        assert_eq!(a, next, "{:?}", names(&list));
+        next = b + 1;
+        assert!(
+            u.markdown.contains(&format!("| k{} |", a - 2)),
+            "{}",
+            u.file
+        );
+    }
+    assert_eq!(next, 42);
+    assert!(list.len() >= 4, "{:?}", names(&list));
+}
