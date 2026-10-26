@@ -355,25 +355,26 @@ fn outline(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
     let mut cut: Option<(usize, String)> = None;
     for (k, item) in items.iter().enumerate() {
         let title = one_line(&item.title);
-        let (inlines, charged) = match (item.page, &item.uri) {
-            (Some(p), _) => {
-                let text = format!("{title}, {}", names.of(p));
-                (vec![Inline::plain(text.clone())], vec![text])
-            }
-            (None, Some(uri)) => (
-                vec![
-                    Inline::plain(format!("{title}, link to ")),
-                    Inline::Code {
-                        text: uri.to_string(),
-                    },
-                ],
-                vec![title.clone(), uri.to_string()],
-            ),
-            (None, None) => (vec![Inline::plain(title.clone())], vec![title.clone()]),
+        let inlines = match (item.page, &item.uri) {
+            (Some(p), _) => vec![Inline::plain(format!("{title}, {}", names.of(p)))],
+            (None, Some(uri)) => vec![
+                Inline::plain(format!("{title}, link to ")),
+                Inline::Code {
+                    text: uri.to_string(),
+                },
+            ],
+            (None, None) => vec![Inline::plain(title.clone())],
         };
-        let mut texts: Vec<&str> = charged.iter().map(String::as_str).collect();
-        texts.push(&title);
-        // The item, its paragraph and its inlines, and the entry with its title.
+        let texts: Vec<&str> = inlines
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Text { text, .. } | Inline::Code { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        // The item, its paragraph and its inlines, and the entry. The entry's title is a
+        // copy of the paragraph's text and shares its charge (P5-L), so the outline keeps as
+        // many items as the section alone would.
         if let Err(why) = kept.take(3 + inlines.len() as u64, &texts) {
             cut = Some((k + 1, why));
             break;

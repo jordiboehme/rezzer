@@ -929,3 +929,37 @@ fn rows_split_without_layout_keeps_row_spans() {
     };
     assert_eq!(split_rows(&[], &hostile, &[], 40).last().unwrap().last, 41);
 }
+
+#[test]
+fn header_spans_stay_inside_the_header_band() {
+    // A header cell whose span reaches into the data rows would cover data cells in every
+    // range that repeats it: a cut range clips it to the header band.
+    let Block::Table { mut rows, .. } = plain_table(40, &"x".repeat(40)) else {
+        unreachable!()
+    };
+    rows[0][0].row_span = 3;
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    let ranges = split_rows(&[], &t, &[], 40);
+    assert!(ranges.len() > 1);
+    for range in &ranges {
+        let (rows, _) = plain_rows(range);
+        assert_eq!(rows[0][0].row_span, 1);
+        assert_eq!(rows[1].len(), 2);
+    }
+    // The table with layout is clipped the same way.
+    let mut t = table(11);
+    if let Block::Table { rows, .. } = &mut t {
+        rows[0][1].row_span = 2;
+    }
+    for range in split_rows(&[], &t, &[], 20) {
+        assert_eq!(table_of(&range).0[0][1].row_span, 1);
+    }
+}

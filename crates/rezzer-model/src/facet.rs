@@ -45,6 +45,7 @@ pub struct Facets {
 pub struct OutlineEntry {
     /// How deep the item stands: 1 for the top level, one more per nested level.
     pub level: u8,
+    /// The title on one line, as the document's outline shows it.
     pub title: String,
     /// The page the item points at: the 1-based page of the file, as the page anchor `p<n>`
     /// names it, not its label. `None` when it points at no page.

@@ -238,6 +238,7 @@ fn outline_entries_with_levels_and_pages() {
     };
     let mut items = Vec::new();
     list_items(&blocks[0], 1, &mut items);
+    assert_eq!(entries.len(), items.len());
     for (entry, (depth, text)) in entries.iter().zip(&items) {
         assert_eq!(usize::from(entry.level), *depth);
         assert!(

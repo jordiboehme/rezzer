@@ -233,9 +233,10 @@ const CELL_BASE: usize = 6;
 /// 9.3). `max_tokens` is the part size the caller chose; 0 means no limit.
 ///
 /// Every range repeats `lead` (heading and caption blocks) and the table's header band (its
-/// first `header_rows` rows). Rows are cut only at row borders, never between a
-/// [`RowKind::Group`] row and its next row that is no group or blank row, and never inside
-/// the rows a data cell's `row_span` covers. A unit larger than the limit is a range of its
+/// first `header_rows` rows); in a cut range a header cell's `row_span` is clipped to the
+/// band. Rows are cut only at row borders, never between a [`RowKind::Group`] row and its
+/// next row that is no group or blank row, and never inside the rows a data cell's
+/// `row_span` covers. A unit larger than the limit is a range of its
 /// own. Each range's table names its own data rows in `layout.data`. A range keeps the row
 /// notes from the row after the previous range's last row to its own last row; the first
 /// range also those before it, the last range also those after it.
@@ -374,10 +375,8 @@ pub fn split_rows(
             rows: r, layout: l, ..
         } = &mut cut
         {
-            *r = rows[..head]
-                .iter()
-                .chain(&data[start..=end])
-                .cloned()
+            *r = header_band(&rows[..head])
+                .chain(data[start..=end].iter().cloned())
                 .collect();
             *l = part;
         }
@@ -395,6 +394,21 @@ pub fn split_rows(
     }
     out.extend(notes);
     out
+}
+
+/// The header rows as a cut range repeats them: a cell's `row_span` ends inside the band,
+/// so it never covers the range's data cells.
+fn header_band(head: &[Vec<Cell>]) -> impl Iterator<Item = Vec<Cell>> + '_ {
+    let n = head.len();
+    head.iter().enumerate().map(move |(i, row)| {
+        row.iter()
+            .map(|cell| {
+                let mut cell = cell.clone();
+                cell.row_span = cell.row_span.min((n - i) as u32);
+                cell
+            })
+            .collect()
+    })
 }
 
 /// The smallest and largest 1-based sheet row the anchors of `blocks` name (`Sheet!A5` or
