@@ -57,6 +57,70 @@ fn cfb_with(streams: &[&str]) -> Vec<u8> {
 }
 
 #[test]
+fn confirmed_media_types_come_from_the_bytes_only() {
+    let docx = zip_of(&[
+        (
+            "[Content_Types].xml",
+            &content_types(
+                r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+            ),
+        ),
+        ("word/document.xml", b"<w:document/>"),
+    ]);
+    let xlsm = zip_of(&[
+        (
+            "[Content_Types].xml",
+            &content_types(
+                r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>"#,
+            ),
+        ),
+        ("xl/workbook.xml", b"<w/>"),
+    ]);
+    let cases: Vec<(&str, Vec<u8>, Option<&str>)> = vec![
+        (
+            "png",
+            b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec(),
+            Some("image/png"),
+        ),
+        (
+            "jpeg",
+            vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10],
+            Some("image/jpeg"),
+        ),
+        ("gif", b"GIF89a\x01\0\x01\0".to_vec(), Some("image/gif")),
+        (
+            "webp",
+            b"RIFF\x10\0\0\0WEBPVP8 ".to_vec(),
+            Some("image/webp"),
+        ),
+        ("pdf", b"%PDF-1.7\n".to_vec(), Some("application/pdf")),
+        (
+            "docx",
+            docx,
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ),
+        (
+            "odt",
+            odf("application/vnd.oasis.opendocument.text"),
+            Some("application/vnd.oasis.opendocument.text"),
+        ),
+        // A macro workbook, text and a name alone confirm nothing.
+        ("xlsm", xlsm, None),
+        ("text", b"just text named x.png\n".to_vec(), None),
+        ("csv", b"a,b\n1,2\n".to_vec(), None),
+        (
+            "riff without webp",
+            b"RIFF\x10\0\0\0WAVEfmt ".to_vec(),
+            None,
+        ),
+        ("empty", Vec::new(), None),
+    ];
+    for (what, bytes, want) in cases {
+        assert_eq!(rezzer_detect::confirmed_media_type(&bytes), want, "{what}");
+    }
+}
+
+#[test]
 fn empty_file_detects_as_empty() {
     let (f, d) = detect("x.txt", b"");
     assert_eq!(f, FormatId::Empty);

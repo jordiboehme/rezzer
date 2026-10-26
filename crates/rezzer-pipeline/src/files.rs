@@ -227,23 +227,50 @@ fn safe_asset_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// The extensions Rezzer gives pictures ([`asset_extension`]).
-const ASSET_EXTENSIONS: [&str; 4] = ["png", "jpg", "pdf", "bin"];
+/// The media types whose files Rezzer writes under their own extension (ruling P5-AJ), each
+/// one Crystalline 0.29.0 copies on import (its `attachment_mime` list). Any other picture
+/// or attachment is written as [`OTHER_EXTENSION`].
+const ASSET_TYPES: [(&str, &str); 11] = [
+    ("image/png", "png"),
+    ("image/jpeg", "jpg"),
+    ("image/gif", "gif"),
+    ("image/webp", "webp"),
+    ("application/pdf", "pdf"),
+    (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
+    (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+    (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptx",
+    ),
+    ("application/vnd.oasis.opendocument.text", "odt"),
+    ("application/vnd.oasis.opendocument.spreadsheet", "ods"),
+    ("application/vnd.oasis.opendocument.presentation", "odp"),
+];
 
-/// Whether `name` is a name Rezzer gives a picture: a safe asset id, `.` and one of
-/// [`ASSET_EXTENSIONS`].
+/// The extension of a picture or attachment whose type its bytes do not confirm.
+const OTHER_EXTENSION: &str = "bin";
+
+/// Whether `name` is a name Rezzer gives a picture: a safe asset id, `.` and an extension
+/// [`asset_extension`] gives.
 fn is_asset_name(name: &str) -> bool {
-    name.rsplit_once('.')
-        .is_some_and(|(id, ext)| safe_asset_id(id) && ASSET_EXTENSIONS.contains(&ext))
+    name.rsplit_once('.').is_some_and(|(id, ext)| {
+        safe_asset_id(id) && (ext == OTHER_EXTENSION || ASSET_TYPES.iter().any(|(_, e)| *e == ext))
+    })
 }
 
-fn asset_extension(mime: &str) -> &'static str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "application/pdf" => "pdf",
-        _ => "bin",
-    }
+/// The extension of a picture or attachment, from what its bytes confirm (ruling P5-AJ):
+/// a PNG attachment named `image.png` gets `png`, a file named `x.png` with other bytes
+/// gets `bin`. Neither the name nor the declared type counts.
+fn asset_extension(bytes: &[u8]) -> &'static str {
+    rezzer_detect::confirmed_media_type(bytes)
+        .and_then(|mime| ASSET_TYPES.iter().find(|(m, _)| *m == mime))
+        .map_or(OTHER_EXTENSION, |(_, ext)| ext)
 }
 
 /// A picture to write: its file name in `<stem>.assets/` and its bytes.
@@ -275,7 +302,7 @@ pub(crate) fn plan_assets(document: &mut Document, blobs: Vec<Blob>, stem: &str)
             });
             continue;
         }
-        let file = format!("{}.{}", asset.id, asset_extension(&asset.mime));
+        let file = format!("{}.{}", asset.id, asset_extension(&blob.bytes));
         asset.path = Some(format!("{folder}/{file}"));
         planned.push(Planned {
             asset: index,
@@ -785,7 +812,37 @@ fn write_new(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Files, check_paths, write_files, write_new};
+    use super::{
+        ASSET_TYPES, Files, OTHER_EXTENSION, asset_extension, check_paths, is_asset_name,
+        write_files, write_new,
+    };
+
+    #[test]
+    fn every_confirmed_type_has_its_extension() {
+        // Every type the bytes can confirm is written under an extension Crystalline takes,
+        // and the cleanup knows that name (ruling P5-AJ).
+        for mime in rezzer_detect::CONFIRMED_MEDIA_TYPES {
+            let ext = ASSET_TYPES
+                .iter()
+                .find(|(m, _)| *m == mime)
+                .map(|(_, e)| *e);
+            let ext = ext.unwrap_or_else(|| panic!("{mime} has no extension"));
+            assert!(is_asset_name(&format!("attachment-1.{ext}")), "{ext}");
+        }
+        assert_eq!(
+            ASSET_TYPES.len(),
+            rezzer_detect::CONFIRMED_MEDIA_TYPES.len()
+        );
+        assert!(is_asset_name("page-1.bin"));
+        assert!(!is_asset_name("page-1.txt"));
+        assert!(!is_asset_name("page-1.md"));
+        assert_eq!(asset_extension(b"\x89PNG\r\n\x1a\n"), "png");
+        assert_eq!(asset_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), "jpg");
+        assert_eq!(asset_extension(b"GIF87a"), "gif");
+        assert_eq!(asset_extension(b"%PDF-1.4\n"), "pdf");
+        assert_eq!(asset_extension(b"x.png"), OTHER_EXTENSION);
+        assert_eq!(asset_extension(b"a,b\n1,2\n"), OTHER_EXTENSION);
+    }
 
     fn files<'a>(main_markdown: &'a str) -> Files<'a> {
         Files {

@@ -142,6 +142,55 @@ pub fn detect_with_hints(name: &str, mime: Option<&str>, bytes: &[u8]) -> (Forma
     )
 }
 
+/// Every media type [`confirmed_media_type`] gives.
+pub const CONFIRMED_MEDIA_TYPES: [&str; 11] = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+];
+
+/// The media type of an embedded file or picture when its bytes confirm it: a PNG, JPEG, GIF
+/// or WebP signature, or a PDF, DOCX, XLSX, PPTX, ODT, ODS or ODP that [`detect`] finds with
+/// certainty. The name and a declared type never count. `None` for anything else, also for
+/// text formats, which no signature confirms. Always one of [`CONFIRMED_MEDIA_TYPES`].
+pub fn confirmed_media_type(bytes: &[u8]) -> Option<&'static str> {
+    let [png, jpeg, gif, webp, pdf, docx, xlsx, pptx, odt, ods, odp] = CONFIRMED_MEDIA_TYPES;
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(png);
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some(jpeg);
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some(gif);
+    }
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some(webp);
+    }
+    let (format, detection) = detect("", bytes);
+    if detection.confidence != Confidence::Certain {
+        return None;
+    }
+    match format {
+        FormatId::Pdf => Some(pdf),
+        FormatId::Docx => Some(docx),
+        FormatId::Xlsx => Some(xlsx),
+        FormatId::Pptx => Some(pptx),
+        FormatId::Odt => Some(odt),
+        FormatId::Ods => Some(ods),
+        FormatId::Odp => Some(odp),
+        _ => None,
+    }
+}
+
 /// `Text/CSV; charset=utf-8` -> `text/csv`.
 fn normalize_mime(mime: &str) -> String {
     mime.split(';')

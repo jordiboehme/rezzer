@@ -890,8 +890,12 @@ fn inspect_keeps_the_open_error_kind() {
 /// extraction was asked for.
 struct Pictures {
     ids: Vec<&'static str>,
+    bytes: Vec<u8>,
     extract: Arc<AtomicUsize>,
 }
+
+/// The start of a PNG file: enough for Rezzer to confirm the type by its signature.
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 
 impl Reader for Pictures {
     fn id(&self) -> &'static str {
@@ -923,7 +927,7 @@ impl Reader for Pictures {
             });
             blobs.push(Blob {
                 asset: id.to_string(),
-                bytes: vec![1, 2, 3],
+                bytes: self.bytes.clone(),
             });
         }
         ReadOutcome {
@@ -935,10 +939,16 @@ impl Reader for Pictures {
 }
 
 fn pictures(ids: &[&'static str]) -> (Registry, Arc<AtomicUsize>) {
+    pictures_of(ids, PNG)
+}
+
+/// A reader that gives one picture or attachment of `bytes` per id.
+fn pictures_of(ids: &[&'static str], bytes: &[u8]) -> (Registry, Arc<AtomicUsize>) {
     let extract = Arc::new(AtomicUsize::new(0));
     let mut registry = Registry::new();
     registry.register(Box::new(Pictures {
         ids: ids.to_vec(),
+        bytes: bytes.to_vec(),
         extract: extract.clone(),
     }));
     (registry, extract)
@@ -962,7 +972,7 @@ fn blobs_written_to_bundle_and_paths_set() {
         ["scan.txt.assets/page-1.png", "scan.txt.assets/page-2.png"]
     );
     for p in &paths {
-        assert_eq!(std::fs::read(out.path().join(p)).unwrap(), [1, 2, 3]);
+        assert_eq!(std::fs::read(out.path().join(p)).unwrap(), PNG);
     }
     let md = res.markdown_pages.concat();
     assert!(md.contains("scan.txt.assets/page-1.png"), "{md}");
@@ -1081,7 +1091,7 @@ fn symlinked_target_file_is_not_followed() {
     let res = pipeline.run_bytes("scan.txt", b"x".to_vec(), None, &req);
     assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
     let written = out.join("scan.txt.assets/page-1.png");
-    assert_eq!(std::fs::read(&written).unwrap(), [1, 2, 3]);
+    assert_eq!(std::fs::read(&written).unwrap(), PNG);
     assert!(!std::fs::symlink_metadata(&written).unwrap().is_symlink());
     assert_eq!(res.completeness, Completeness::Complete);
 }
@@ -1122,6 +1132,38 @@ fn a_second_run_with_fewer_pictures_leaves_no_old_file() {
         Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
     assert_eq!(res.completeness, Completeness::Complete);
     assert!(names_in(&assets).is_empty(), "{:?}", names_in(&assets));
+}
+
+#[test]
+fn attachments_get_the_extension_their_bytes_confirm() {
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    let assets = out.path().join("scan.txt.assets");
+    // The declared type says PNG; only the bytes count (ruling P5-AJ).
+    let (registry, _) = pictures_of(&["attachment-1"], b"not a picture, named x.png");
+    let res =
+        Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    let doc = res.document.unwrap();
+    assert_eq!(
+        doc.assets[0].path.as_deref(),
+        Some("scan.txt.assets/attachment-1.bin")
+    );
+    assert_eq!(names_in(&assets), ["attachment-1.bin"]);
+    let pdf = b"%PDF-1.7\n";
+    let (registry, _) = pictures_of(&["attachment-1", "attachment-2"], pdf);
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(names_in(&assets), ["attachment-1.pdf", "attachment-2.pdf"]);
+    // A later run removes the old names of every type Rezzer writes.
+    std::fs::write(assets.join("attachment-3.png"), PNG).unwrap();
+    std::fs::write(assets.join("attachment-4.docx"), b"old").unwrap();
+    std::fs::write(assets.join("attachment-5.webp"), b"old").unwrap();
+    std::fs::write(assets.join("notes.txt"), b"mine").unwrap();
+    let (registry, _) = pictures(&["attachment-1"]);
+    Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
+    assert_eq!(names_in(&assets), ["attachment-1.png", "notes.txt"]);
 }
 
 #[cfg(unix)]
@@ -1402,7 +1444,7 @@ impl Reader for Chapters {
                 });
                 blobs.push(Blob {
                     asset: id,
-                    bytes: vec![1, 2, chapters as u8],
+                    bytes: [PNG, &[chapters as u8]].concat(),
                 });
             }
         }
@@ -1714,7 +1756,10 @@ fn similar_names_keep_their_own_bundles() {
         let doc = res.document.as_ref().unwrap();
         for asset in &doc.assets {
             let path = asset.path.as_ref().unwrap();
-            assert_eq!(std::fs::read(out.path().join(path)).unwrap(), [1, 2, 30]);
+            assert_eq!(
+                std::fs::read(out.path().join(path)).unwrap(),
+                [PNG, &[30]].concat()
+            );
         }
         let assets = doc.assets[0].path.as_ref().unwrap();
         assert!(asset_folders.insert(assets.split('/').next().unwrap().to_string()));
@@ -2508,7 +2553,8 @@ fn the_assets_cleanup_keeps_files_a_user_put_there() {
         "old-2.bin",
         "My Photo.png",
         "notes.txt",
-        "page-1.gif",
+        "page-1.tiff",
+        "page-2.gif",
     ] {
         std::fs::write(assets.join(name), b"old").unwrap();
     }
@@ -2521,7 +2567,7 @@ fn the_assets_cleanup_keeps_files_a_user_put_there() {
     );
     assert_eq!(
         names_in(&assets),
-        ["My Photo.png", "notes.txt", "page-1.gif", "page-1.png"]
+        ["My Photo.png", "notes.txt", "page-1.png", "page-1.tiff"]
     );
 }
 

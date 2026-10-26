@@ -891,6 +891,47 @@ fn files_under(dir: &Path) -> Vec<PathBuf> {
 // ---------------------------------------------------------------------------------------
 // The Crystalline import
 
+/// The relative targets of the Markdown links and pictures in `text` outside code, without
+/// their fragment and percent-decoded: no scheme, no `#` alone. A target in `<...>` may
+/// hold spaces.
+fn relative_links(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut fence = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fence = !fence;
+        }
+        if fence {
+            continue;
+        }
+        // Code spans are left out: a backtick pair and what lies between.
+        let plain: String = line.split('`').step_by(2).collect::<Vec<_>>().join(" ");
+        let mut rest = plain.as_str();
+        while let Some(at) = rest.find("](") {
+            rest = &rest[at + 2..];
+            // `<target with spaces>` or a target up to `)` or a title.
+            let (target, after) = match rest.strip_prefix('<') {
+                Some(inner) => {
+                    let end = inner.find('>').unwrap_or(inner.len());
+                    (&inner[..end], &inner[end..])
+                }
+                None => {
+                    let end = rest.find([')', ' ']).unwrap_or(rest.len());
+                    (&rest[..end], &rest[end..])
+                }
+            };
+            rest = after;
+            let target = target.split('#').next().unwrap_or("");
+            if target.is_empty() || target.contains(':') || target.starts_with('/') {
+                continue;
+            }
+            let decoded = percent_encoding::percent_decode_str(target).decode_utf8_lossy();
+            out.push(decoded.into_owned());
+        }
+    }
+    out
+}
+
 /// `crystalline` from `PATH`, found without any helper program.
 fn crystalline_on_path() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -1073,6 +1114,32 @@ fn crystalline_imports_without_errors() {
     if !verified {
         problems.push(format!("verify failed: {stderr}"));
     }
+
+    // Every relative link of an imported engram leads to a file in the domain: the import
+    // copied each picture and attachment it links (ruling P5-AJ), and rewrote the links.
+    let mut attachments = 0;
+    for file in files_under(&dom) {
+        if file.extension().is_none_or(|e| e != "md") || file.ends_with("MANIFEST.md") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file).unwrap();
+        for target in relative_links(&text) {
+            if target.contains("attachment-") {
+                attachments += 1;
+            }
+            // Crystalline links an attachment from the domain root (`assets/...`).
+            let base = if target.starts_with("assets/") {
+                dom.as_path()
+            } else {
+                file.parent().unwrap()
+            };
+            if !base.join(&target).exists() {
+                let relative = file.strip_prefix(&dom).unwrap().display().to_string();
+                problems.push(format!("{relative}: link {target} leads to no file"));
+            }
+        }
+    }
+    assert!(attachments > 0, "no attachment link was checked");
 
     // A part of each document with a hard name: its relations resolve after a sync.
     cr.run(&["sync", "--domain", "rezzertest"]);
