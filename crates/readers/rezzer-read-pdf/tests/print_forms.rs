@@ -7,12 +7,35 @@
 
 mod common;
 
-use common::{DataLine, FormPage, all_text, boxed, data_line, label, print_form, read};
-use rezzer_model::{Completeness, LossReason, ReadOutcome, Severity};
+use std::time::{Duration, Instant};
+
+use common::{DataLine, FormPage, all_text, boxed, data_line, label, mark, print_form};
+use rezzer_model::{Block, Completeness, LossReason, ReadOutcome, Severity, plain_text};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
+/// `bytes` read with the default options and limits. Every read of this file also checks
+/// that neither the rendered Markdown nor the JSON of the model holds a noncharacter of
+/// U+FDD0 to U+FDEF: those are Rezzer's own placeholders while a page is read.
+fn read(bytes: &[u8]) -> ReadOutcome {
+    let out = common::read(bytes);
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    let json = serde_json::to_string(&out.document).expect("json");
+    let placeholder = |c: char| ('\u{FDD0}'..='\u{FDEF}').contains(&c);
+    assert!(
+        !md.contains(placeholder),
+        "a placeholder in the Markdown: {md}"
+    );
+    // JSON writes the noncharacters as they are, not escaped.
+    assert!(!json.contains(placeholder), "a placeholder in the JSON");
+    out
+}
 
 /// The read is complete and names no loss.
 fn assert_no_loss(out: &ReadOutcome) {
@@ -650,4 +673,363 @@ fn header_field_grid_reads_row_by_row() {
 #[test]
 fn header_field_grid_of_one_line_a_row_reads_row_by_row() {
     header_grid(true);
+}
+
+// ---------------------------------------------------------------------------------------
+// Separators drawn as marks
+
+/// The pitch of the data font: Courier at 9.5 points is 5.7 points a character.
+const PITCH: f32 = 5.7;
+
+/// A boxed number field of `digits` cells from `x` with the data baseline `y`: one stroked
+/// box a digit, and a drawn mark before each cell of `marks_before` (0-based), on the
+/// baseline in the gap between two cells, as a form template prints its separators.
+fn boxed_field(x: f32, y: f32, digits: usize, marks_before: &[usize]) -> String {
+    let mut out = String::new();
+    for k in 0..digits {
+        out += &boxed(x + k as f32 * PITCH, y - 2.0, PITCH, 11.0);
+    }
+    for &k in marks_before {
+        out += &mark(x + k as f32 * PITCH - 0.12, y - 0.5);
+    }
+    out
+}
+
+/// A page with the boxed field at x 154 (20 characters from the data margin) on the
+/// baseline 700, its data line, and `lines` of text elsewhere on the page.
+fn boxed_page(digits: &str, marks_before: &[usize], lines: &[&str]) -> FormPage {
+    let x = 40.0 + 20.0 * PITCH;
+    let mut template = label(40.0, 712.0, 6.0, "Betrag");
+    template += &boxed_field(x, 700.0, digits.len(), marks_before);
+    let mut data = vec![DataLine {
+        y: 700.0,
+        text: padded(20, digits),
+    }];
+    for (k, l) in lines.iter().enumerate() {
+        data.push(DataLine {
+            y: 600.0 - 14.0 * k as f32,
+            text: (*l).into(),
+        });
+    }
+    FormPage {
+        template,
+        lines: data,
+        ..FormPage::default()
+    }
+}
+
+/// The text of the `found-by` paragraphs of the read.
+fn found_by(out: &ReadOutcome) -> Vec<String> {
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        if let Block::Section { blocks, .. } = b {
+            for inner in blocks {
+                if let Block::Paragraph {
+                    inlines,
+                    role: Some(r),
+                    ..
+                } = inner
+                    && r == "found-by"
+                {
+                    found.push(plain_text(inlines));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The losses that say a drawn separator is not read.
+fn separator_losses(out: &ReadOutcome) -> Vec<&rezzer_model::Loss> {
+    out.document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("separator drawn as a mark"))
+        .collect()
+}
+
+/// The found-by note stands right after the page marker of its page.
+fn note_after_marker(out: &ReadOutcome) -> bool {
+    out.document.body.iter().any(|b| match b {
+        Block::Section { blocks, .. } => matches!(
+            blocks.get(1),
+            Some(Block::Paragraph { role: Some(r), .. }) if r == "found-by"
+        ),
+        _ => false,
+    })
+}
+
+#[test]
+fn boxed_amount_gets_its_decimal_comma() {
+    let page = boxed_page(
+        "123456",
+        &[4],
+        &["Summe 9.876,54", "Netto 1.234,56", "Datum 01.02.2026"],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(text.contains("1234,56"), "{text}");
+    assert!(!text.contains("123456"), "{text}");
+    assert_eq!(
+        found_by(&out),
+        [
+            "Found by: 1 decimal separator on this page is a drawn mark, not text; it is \
+          written as \",\" as in 2 amounts written as text in this file."
+        ]
+    );
+    assert!(note_after_marker(&out), "{:#?}", out.document.body);
+    assert!(
+        separator_losses(&out).is_empty(),
+        "{:?}",
+        out.document.losses
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn boxed_date_gets_its_points() {
+    let page = boxed_page(
+        "01022026",
+        &[2, 4],
+        &["Eintritt 01.01.2026", "Austritt 15.03.2026"],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(text.contains("01.02.2026"), "{text}");
+    assert_eq!(
+        found_by(&out),
+        [
+            "Found by: 2 date separators on this page are drawn marks, not text; they are \
+          written as \".\" as in 2 dates written as text in this file."
+        ]
+    );
+    assert!(
+        separator_losses(&out).is_empty(),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// Group, decimal and date marks on one page, with amounts in groups and dates as text.
+#[test]
+fn group_decimal_and_date_marks_on_one_page() {
+    let mut page = boxed_page(
+        "123456789",
+        &[1, 4, 7],
+        &[
+            "Summe 9.876,54",
+            "Netto 1.234,56",
+            "Am 01.01.2026",
+            "Bis 15.03.2026",
+        ],
+    );
+    let x = 40.0 + 20.0 * PITCH;
+    page.template += &boxed_field(x, 650.0, 8, &[2, 4]);
+    page.lines.push(DataLine {
+        y: 650.0,
+        text: padded(20, "28022026"),
+    });
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(text.contains("1.234.567,89"), "{text}");
+    assert!(text.contains("28.02.2026"), "{text}");
+    assert_eq!(
+        found_by(&out),
+        [
+            "Found by: 1 decimal separator, 2 group separators and 2 date separators on this \
+          page are drawn marks, not text; they are written as \",\", \".\" and \".\" as in 2 \
+          amounts and 2 dates written as text in this file."
+        ]
+    );
+}
+
+#[test]
+fn no_style_in_text_means_not_read() {
+    let page = boxed_page("123456", &[4], &["Muster GmbH", "Erika Mustermann"]);
+    let out = read(&print_form(&[page], "", "/Lang (de-DE)"));
+    let text = all_text(&out);
+    assert!(text.contains("123456"), "{text}");
+    let losses = separator_losses(&out);
+    assert_eq!(losses.len(), 1, "{:?}", out.document.losses);
+    assert_eq!(losses[0].why, LossReason::Unsupported);
+    assert_eq!(losses[0].severity, Severity::Warning);
+    assert_eq!(losses[0].location, "p1");
+    // The place and the digit count, never the value.
+    assert!(losses[0].what.contains("(6 digits)"), "{}", losses[0].what);
+    assert!(!losses[0].what.contains("1234"), "{}", losses[0].what);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert!(found_by(&out).is_empty());
+}
+
+/// Amounts as text in both styles: no decimal separator is written.
+#[test]
+fn mixed_styles_in_text_mean_not_read() {
+    let page = boxed_page(
+        "123456",
+        &[4],
+        &["Summe 9.876,54", "Netto 1.234,56", "Total 1,234.56"],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    assert!(all_text(&out).contains("123456"));
+    assert_eq!(separator_losses(&out).len(), 1, "{:?}", out.document.losses);
+    assert_eq!(out.completeness, Completeness::Partial);
+}
+
+/// A mark that cuts the digits in no known pattern is not read.
+#[test]
+fn unknown_digit_groups_are_not_read() {
+    let page = boxed_page("123456", &[3], &["Summe 9.876,54", "Netto 1.234,56"]);
+    let out = read(&print_form(&[page], "", ""));
+    assert!(all_text(&out).contains("123456"));
+    let losses = separator_losses(&out);
+    assert_eq!(losses.len(), 1, "{:?}", out.document.losses);
+    assert!(losses[0].what.contains("(6 digits)"), "{}", losses[0].what);
+}
+
+/// Guard: a dotted leader of tiny squares between a label and an amount written with its
+/// comma is no separator and gives no loss.
+#[test]
+fn leader_dots_are_not_separators() {
+    let mut template = String::new();
+    for k in 0..30 {
+        template += &format!("{} 700 0.4 0.4 re f\n", 80.0 + k as f32 * 2.0);
+        template += &format!("{} 690 0.3 1.2 re f\n", 80.0 + k as f32 * 2.0);
+    }
+    let page = FormPage {
+        template,
+        lines: vec![
+            DataLine {
+                y: 700.0,
+                text: format!("Summe{}1.234,56", " ".repeat(20)),
+            },
+            DataLine {
+                y: 690.0,
+                text: format!("Netto{}9.876,54", " ".repeat(20)),
+            },
+        ],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(
+        text.contains("1.234,56") && text.contains("9.876,54"),
+        "{text}"
+    );
+    assert!(found_by(&out).is_empty());
+    assert_no_loss(&out);
+}
+
+/// Guard: a decimal comma printed as text with a mark under it is written once.
+#[test]
+fn printed_point_is_not_doubled() {
+    let x = 40.0 + 20.0 * PITCH;
+    let page = FormPage {
+        // The mark stands under the comma, the fifth character.
+        template: mark(x + 4.5 * PITCH - 0.12, 699.5),
+        lines: vec![
+            DataLine {
+                y: 700.0,
+                text: padded(20, "1234,56"),
+            },
+            DataLine {
+                y: 600.0,
+                text: "Summe 9.876,54".into(),
+            },
+            DataLine {
+                y: 586.0,
+                text: "Netto 1.234,56".into(),
+            },
+        ],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(text.contains("1234,56"), "{text}");
+    assert!(!text.contains("1234,,56") && !text.contains(",,"), "{text}");
+    assert!(found_by(&out).is_empty());
+    assert_no_loss(&out);
+}
+
+/// Guard: a mark between a letter and a digit is no separator.
+#[test]
+fn mark_beside_a_letter_is_ignored() {
+    let x = 40.0 + 20.0 * PITCH;
+    let page = FormPage {
+        template: mark(x + 2.0 * PITCH - 0.12, 699.5),
+        lines: vec![DataLine {
+            y: 700.0,
+            text: padded(20, "AB1234"),
+        }],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(all_text(&out).contains("AB1234"), "{}", all_text(&out));
+    assert!(found_by(&out).is_empty());
+    assert_no_loss(&out);
+}
+
+/// More marks than a page keeps: a Limit note says so, and the read stays quick.
+#[test]
+fn many_marks_are_bounded() {
+    let mut template = String::with_capacity(2_600_000);
+    // 100,001 marks in rows of 500 below the data line, none near a digit.
+    for k in 0..100_001usize {
+        let (col, row) = (k % 500, k / 500);
+        template += &format!(
+            "{:.2} {:.2} 0.24 2 re f\n",
+            20.0 + col as f32 * 1.1,
+            20.0 + row as f32 * 2.5
+        );
+    }
+    let mut page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
+    page.template += &template;
+    let start = Instant::now();
+    let out = read(&print_form(&[page], "", ""));
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+    let limit: Vec<_> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit && l.what.contains("100000 drawn marks"))
+        .collect();
+    assert_eq!(limit.len(), 1, "{:?}", out.document.losses);
+    // The marks are no rules and no code.
+    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
+    // The field's mark is among the first ones the page draws and is still read.
+    assert!(all_text(&out).contains("1234,56"));
+}
+
+/// A highlight over a boxed amount quotes it with the separator the body has.
+#[test]
+fn quote_over_a_boxed_amount_has_its_separator() {
+    let mut page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
+    let x = 40.0 + 20.0 * PITCH;
+    let (x1, y0, y1) = (x + 6.0 * PITCH, 697.0, 709.0);
+    page.annots.push(format!(
+        "<< /Type /Annot /Subtype /Highlight /Rect [{x} {y0} {x1} {y1}] \
+         /QuadPoints [{x} {y1} {x1} {y1} {x} {y0} {x1} {y0}] >>"
+    ));
+    let out = read(&print_form(&[page], "", ""));
+    let list = &out.document.facets.annotations;
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(list[0].quoted.as_deref(), Some("1234,56"), "{list:?}");
+}
+
+/// Two pages: the style comes from the text of the whole file, and each page with drawn
+/// separators has its own note.
+#[test]
+fn style_from_another_page() {
+    let first = boxed_page("123456", &[4], &[]);
+    let second = boxed_page("654321", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
+    let out = read(&print_form(&[first, second], "", ""));
+    let text = all_text(&out);
+    assert!(
+        text.contains("1234,56") && text.contains("6543,21"),
+        "{text}"
+    );
+    assert_eq!(found_by(&out).len(), 2);
 }

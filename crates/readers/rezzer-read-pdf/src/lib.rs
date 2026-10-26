@@ -20,6 +20,7 @@ mod codes;
 mod fallback;
 mod forms;
 mod layout;
+mod marks;
 mod meta;
 mod objects;
 mod open;
@@ -27,6 +28,7 @@ mod order;
 mod quote;
 mod regions;
 mod render;
+mod scan;
 mod tables;
 mod text;
 
@@ -264,6 +266,57 @@ fn extract(
     extracted
 }
 
+/// Reads the separators drawn as marks on `pages` with the style the file's visible text
+/// shows (each line of runs scanned whole), before the pages are laid out. A number whose
+/// separators are not read is a Warning loss and makes the read partial: it may be off by a
+/// factor of 10 or 100. Returns the `found-by` note of each page that got separators.
+fn separators(pages: &mut [PageItems], out: &mut Out) -> HashMap<u32, String> {
+    // Only visible glyphs get placeholders: they are in the runs and the quotes.
+    let placed = |p: &PageItems| {
+        p.runs.iter().any(|r| r.text.contains(marks::SEP))
+            || p.quotes
+                .iter()
+                .flat_map(|q| &q.text)
+                .any(|t| t.contains(marks::SEP))
+    };
+    if !pages.iter().any(placed) {
+        return HashMap::new();
+    }
+    let (style, words) = marks::style_in(pages);
+    let mut notes = HashMap::new();
+    for (page, got) in marks::resolve(pages, &style) {
+        for why in &got.unread {
+            out.loss(
+                format!("p{page}"),
+                format!("a separator drawn as a mark on page {page} is not read: {why}"),
+                LossReason::Unsupported,
+                Severity::Warning,
+            );
+        }
+        if got.more > 0 {
+            out.loss(
+                format!("p{page}"),
+                format!(
+                    "separators drawn as marks in {} more numbers on page {page} are not read; \
+                     their digits are kept without them",
+                    got.more
+                ),
+                LossReason::Unsupported,
+                Severity::Warning,
+            );
+        }
+        // Content Rezzer cannot read: an `Unsupported` loss, which by itself leaves a read
+        // complete, so the read is made partial here.
+        if !got.unread.is_empty() {
+            out.partial = true;
+        }
+        if let Some(note) = marks::note(&got, &style, &words) {
+            notes.insert(page, note);
+        }
+    }
+    notes
+}
+
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
 pub(crate) fn marker(page: &PageInfo) -> String {
     let n = page.number;
@@ -299,7 +352,7 @@ fn lay_out(
     out: &mut Out,
 ) -> LaidOut {
     let Extracted {
-        pages: read,
+        pages: mut read,
         failed,
         stopped_at,
         kept_left,
@@ -312,6 +365,7 @@ fn lay_out(
     }
     let mut spots = vec![annots::Placed::default(); annots.len()];
     let mut unquoted = quote::Unquoted::default();
+    let mut found_by = separators(&mut read, out);
     let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
         .iter()
@@ -374,6 +428,28 @@ fn lay_out(
             anchor: None,
         }];
         if let (false, Some(mut items)) = (halted, read.remove(&n)) {
+            if let Some(note) = found_by.remove(&n) {
+                // The separators drawn as marks that were written, said at the top of the page.
+                let charged = budget
+                    .add_elements(1)
+                    .and_then(|()| budget.charge_text(note.len()));
+                match charged {
+                    Ok(()) => blocks.push(Block::Paragraph {
+                        inlines: vec![Inline::plain(note)],
+                        role: Some("found-by".into()),
+                        anchor: None,
+                    }),
+                    Err(hit) => out.loss(
+                        format!("p{n}"),
+                        format!(
+                            "{hit}: the note that says which separators on page {n} are drawn \
+                             marks is not written"
+                        ),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    ),
+                }
+            }
             let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
             let cx = Context {
                 style: &style,

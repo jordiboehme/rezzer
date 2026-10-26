@@ -94,6 +94,10 @@ pub(crate) struct PageItems {
     /// Straight lines and rectangles the page draws, in the frame of the runs, for finding
     /// ruled tables.
     pub rules: Vec<Rule>,
+    /// Tiny filled bars the page draws (see [`crate::marks::is_mark`]), in the frame of the
+    /// runs: separators of boxed number fields, never rules. At most
+    /// [`crate::marks::MAX_MARKS`].
+    pub marks: Vec<[f32; 4]>,
     /// The lower left corner of the visible page box in user space: what moves boxes of the
     /// object layer (links, form fields) into the frame of the runs.
     pub origin: (f32, f32),
@@ -158,6 +162,7 @@ impl PageItems {
         copy(&mut self.runs);
         copy(&mut self.invisible);
         self.rules = self.rules.to_vec();
+        self.marks = self.marks.to_vec();
         for (_, list) in &mut self.hidden_layers {
             copy(list);
         }
@@ -189,9 +194,11 @@ impl PageItems {
             .map(|l| l.len() as u64 + 32)
             .sum::<u64>();
         self.rules.shrink_to_fit();
+        self.marks.shrink_to_fit();
         total
             + 25 * self.images.len() as u64
             + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
+            + CELL_BYTES * self.marks.len() as u64
             + 256
     }
 }
@@ -804,6 +811,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
             cells: Vec::new(),
             cells_cut: false,
             cells_held: 0,
+            drawn_marks: Vec::new(),
+            drawn_marks_cut: false,
+            drawn_marks_held: 0,
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -837,8 +847,13 @@ impl<'p, 'a> PageReader<'p, 'a> {
         }));
         drop(ctx);
         if let Err(payload) = run {
+            // A page not kept gives back what its cells and marks hold of the object pool.
+            let held = dev.cells_held + dev.drawn_marks_held;
             match payload.downcast_ref::<Abort>() {
-                Some(Abort::Stop) => return Read::Stopped,
+                Some(Abort::Stop) => {
+                    self.origin.release_copy(held);
+                    return Read::Stopped;
+                }
                 Some(Abort::Cap) => {
                     in_part = true;
                     notes.push(Note::Limit(format!(
@@ -851,6 +866,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                     // Whatever the interpreter cached may be half built.
                     self.cache = InterpreterCache::new();
                     self.cache_bytes = 0;
+                    self.origin.release_copy(held);
                     return fail("interpreting the content".into(), Fail::Internal);
                 }
             }
@@ -891,6 +907,21 @@ impl<'p, 'a> PageReader<'p, 'a> {
             notes.push(Note::Limit(format!(
                 "glyph tables of embedded fonts on page {n} not read: they take more than the \
                  object limit allows; their glyphs count as unmapped"
+            )));
+        }
+        // A separator drawn as a mark between two digits puts a placeholder between them, read
+        // once the whole file is (`marks::resolve`). The quotes below are taken with it.
+        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut dev.drawn_marks) {
+            notes.push(Note::Limit(format!(
+                "separators drawn as marks on page {n} are looked for only in part: the page has \
+                 too many marks near its digits"
+            )));
+        }
+        if dev.drawn_marks_cut {
+            notes.push(Note::Limit(format!(
+                "only the first {} drawn marks on page {n} are looked at as separators: the page \
+                 draws more than it may keep",
+                dev.drawn_marks.len()
             )));
         }
         let texts = Texts {
@@ -1004,13 +1035,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images_id = std::mem::take(&mut dev.images_id);
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
+        items.marks = std::mem::take(&mut dev.drawn_marks);
+        // What the page keeps of the marks counts against the kept bytes from here on.
+        self.origin.release_copy(dev.drawn_marks_held);
         if items.turned {
-            // The rules go into the frame of the runs, in place.
+            // The rules and marks go into the frame of the runs, in place.
             for r in &mut items.rules {
                 let b = items
                     .turn
                     .place_box([r.x0, r.y0, r.x1, r.y1], width, height);
                 (r.x0, r.y0, r.x1, r.y1) = (b[0], b[1], b[2], b[3]);
+            }
+            for m in &mut items.marks {
+                *m = items.turn.place_box(*m, width, height);
             }
         }
         items.origin = (crop.x0 as f32, crop.y0 as f32);
@@ -1671,9 +1708,14 @@ impl<'w> Walk<'w> {
     /// The ActualText of a sequence's properties: inline, or a named entry of `/Properties`,
     /// read once for the file.
     fn actual_text(&mut self, props: &Object<'_>, res: &Resources<'_>) -> Option<Rc<str>> {
+        // Rezzer's placeholders are dropped from the file's text (see `TextDevice::push_glyph`).
         let read = |d: &Dict<'_>| {
             d.get::<hayro_syntax::object::String<'_>>(b"ActualText")
-                .map(|s| Rc::from(pdfparts::objects::text_string(s.as_bytes())))
+                .map(|s| {
+                    let mut text = pdfparts::objects::text_string(s.as_bytes());
+                    text.retain(|c| !crate::marks::is_placeholder(c));
+                    Rc::from(text)
+                })
         };
         if let Some((d, _)) = dict_or_stream(props) {
             return read(d);
@@ -2092,7 +2134,8 @@ fn name_text(name: &str) -> Option<String> {
 
 /// The text a Unicode mapping gives, cleaned: ligatures written out, white space control
 /// characters as spaces. `None` when nothing usable is left (U+FFFD, noncharacters, other
-/// control characters).
+/// control characters). The noncharacters U+FDD0 to U+FDEF are dropped too: they are
+/// Rezzer's placeholders for separators drawn as marks.
 fn clean_bf(bf: BfString) -> Option<String> {
     let mut out = String::new();
     let mut push = |c: char| match c {
@@ -2104,7 +2147,7 @@ fn clean_bf(bf: BfString) -> Option<String> {
         '\u{FB05}' | '\u{FB06}' => out.push_str("st"),
         '\t' | '\n' | '\r' => out.push(' '),
         '\u{FFFD}' | '\u{FFFE}' | '\u{FFFF}' => {}
-        c if c.is_control() => {}
+        c if c.is_control() || crate::marks::is_placeholder(c) => {}
         c => out.push(c),
     };
     match bf {
@@ -2525,6 +2568,13 @@ struct TextDevice<'d> {
     cells_cut: bool,
     /// What the cells hold of the object pool.
     cells_held: u64,
+    /// Marks the page draws (see [`crate::marks::is_mark`]), at most
+    /// [`crate::marks::MAX_MARKS`].
+    drawn_marks: Vec<[f32; 4]>,
+    /// More marks were drawn than are kept.
+    drawn_marks_cut: bool,
+    /// What the marks hold of the object pool.
+    drawn_marks_held: u64,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -2631,10 +2681,19 @@ impl TextDevice<'_> {
         tables.by_gid.get(&o.glyph_id().to_u32()).cloned()
     }
 
+    /// Keeps a glyph with its text. Rezzer's placeholders (U+FDD0 to U+FDEF) are dropped from
+    /// it, whatever gave the text (a glyph name, a font table), so a placeholder in the text
+    /// is always Rezzer's own.
     fn push_glyph(&mut self, text: &str, g: Gl) {
         let start = u32::try_from(self.text.len()).unwrap_or(u32::MAX);
-        self.text.push_str(text);
-        let len = u32::try_from(text.len()).unwrap_or(0);
+        let before = self.text.len();
+        if text.contains(crate::marks::is_placeholder) {
+            self.text
+                .extend(text.chars().filter(|&c| !crate::marks::is_placeholder(c)));
+        } else {
+            self.text.push_str(text);
+        }
+        let len = u32::try_from(self.text.len() - before).unwrap_or(0);
         self.glyphs.push(Gl { start, len, ..g });
     }
 }
@@ -2740,21 +2799,25 @@ impl Subpath {
         for r in self.held.into_iter().flatten() {
             keep(r);
         }
-        if !stroke
-            && !self.curved
-            && (4..=5).contains(&self.count)
-            && let Some(r) = rectangle(&self.corners[..self.count])
-        {
-            keep(r);
+        if !stroke && !self.curved && (4..=5).contains(&self.count) {
+            let corners = &self.corners[..self.count];
+            // A mark is a separator of a boxed number field, never a rule.
+            if axis_box(corners).is_some_and(crate::marks::is_mark) {
+                return;
+            }
+            if let Some(r) = rectangle(corners) {
+                keep(r);
+            }
         }
     }
 }
 
 /// The rules a path draws once `transform` maps it into the page box: each straight
 /// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
-/// rectangle is a line when thin and a rectangle otherwise. A closed subpath of sides along
-/// the axes and small corner curves, stroked or filled, is the rectangle of its bounds (a
-/// box with rounded corners). Other curves and slanted segments are not rules.
+/// rectangle is a line when thin and a rectangle otherwise, and none when it is a mark
+/// ([`crate::marks::is_mark`]). A closed subpath of sides along the axes and small corner
+/// curves, stroked or filled, is the rectangle of its bounds (a box with rounded corners).
+/// Other curves and slanted segments are not rules.
 fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
     use kurbo::PathEl;
     let segment = |a: Point, b: Point| -> Option<Rule> {
@@ -3021,21 +3084,38 @@ impl<'a> Device<'a> for TextDevice<'_> {
             hayro_interpret::Paint::Color(c) => c.to_rgba().to_rgba8()[3] > 127,
             _ => false,
         };
-        if !stroke && dark && !self.cells_cut {
+        // Marks are dark too, and are also cells: a bar of a code can have their shape.
+        if !stroke && dark && !(self.cells_cut && self.drawn_marks_cut) {
             let origin = self.origin;
             let (cells, cut, held) = (&mut self.cells, &mut self.cells_cut, &mut self.cells_held);
+            let (marks, marks_cut, marks_held) = (
+                &mut self.drawn_marks,
+                &mut self.drawn_marks_cut,
+                &mut self.drawn_marks_held,
+            );
             cells_of(path, props.transform, &mut |c| {
-                // The cells are held in the object pool, a block at a time.
-                if cells.len() as u64 * CELL_BYTES >= *held {
-                    if cells.len() >= crate::codes::MAX_CELLS
-                        || !origin.reserve_copy(CELL_BLOCK * CELL_BYTES)
-                    {
+                // Cells and marks are held in the object pool, a block at a time, up to their
+                // caps.
+                let keep = |list: &mut Vec<[f32; 4]>, cut: &mut bool, held: &mut u64, cap| {
+                    if list.len() >= cap {
                         *cut = true;
-                        return;
+                    } else if list.len() as u64 * CELL_BYTES >= *held {
+                        if origin.reserve_copy(CELL_BLOCK * CELL_BYTES) {
+                            *held += CELL_BLOCK * CELL_BYTES;
+                        } else {
+                            *cut = true;
+                        }
                     }
-                    *held += CELL_BLOCK * CELL_BYTES;
+                    if !*cut {
+                        list.push(c);
+                    }
+                };
+                if !*cut {
+                    keep(cells, cut, held, crate::codes::MAX_CELLS);
                 }
-                cells.push(c);
+                if !*marks_cut && crate::marks::is_mark(c) {
+                    keep(marks, marks_cut, marks_held, crate::marks::MAX_MARKS);
+                }
             });
         }
         let (rules, cap) = (&mut self.rules, self.cap);
@@ -3714,6 +3794,23 @@ mod tests {
                 .collect::<String>(),
             "Text"
         );
+    }
+
+    /// A separator drawn as a mark (0.24 by 2 points, or a little taller) is no rule.
+    #[test]
+    fn mark_is_not_a_rule() {
+        use kurbo::Shape;
+        for h in [2.0, 2.05] {
+            let path = kurbo::Rect::new(100.0, 700.0, 100.24, 700.0 + h).to_path(0.1);
+            let mut rules = Vec::new();
+            rules_of(&path, Affine::IDENTITY, false, &mut |r| rules.push(r));
+            assert!(rules.is_empty(), "{h}: {rules:?}");
+        }
+        // A thin rule of the same width is one.
+        let path = kurbo::Rect::new(100.0, 700.0, 100.24, 720.0).to_path(0.1);
+        let mut rules = Vec::new();
+        rules_of(&path, Affine::IDENTITY, false, &mut |r| rules.push(r));
+        assert_eq!(rules.len(), 1);
     }
 
     #[test]

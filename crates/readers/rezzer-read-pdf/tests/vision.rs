@@ -2560,3 +2560,45 @@ fn vector_codes_in_any_color_are_read() {
         );
     }
 }
+
+/// A code drawn with modules under half a point is no set of separator marks: its modules
+/// are square. Beside it, a boxed amount with a drawn decimal mark is still read, and
+/// the code is still found.
+#[test]
+fn qr_modules_are_not_marks() {
+    let m = modules(Symbology::QrCode, &"epc 4711 ".repeat(6));
+    // Data line in Courier from x 72 at 9.5 points (5.7 points a character): the mark stands
+    // between the fourth and the fifth digit.
+    // No amount with a point (as in the invoice text of the other tests): the file's own
+    // amounts write the decimal comma.
+    let content = format!(
+        "BT /F1 16 Tf 72 780 Td (Rechnung 2026-114) Tj ET\n\
+         {}BT /F2 9.5 Tf 72 600 Td (123456) Tj ET\n\
+         BT /F2 9.5 Tf 72 584 Td (Summe 9.876,54) Tj ET\n\
+         BT /F2 9.5 Tf 72 570 Td (Netto 1.234,56) Tj ET\n\
+         {:.2} 599.5 0.24 2 re f\n",
+        vector_code(&m, 120.0, 590.0, 0.45),
+        72.0 + 4.0 * 5.7 - 0.12,
+    );
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let helvetica = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let courier = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>");
+    let cs = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {helvetica} 0 R /F2 {courier} 0 R >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    let found: Vec<usize> = out.document.assets.iter().map(|a| a.codes.len()).collect();
+    assert_eq!(found, [1], "{:#?}", out.document.assets);
+    let text = common::all_text(&out);
+    assert!(text.contains("1234,56"), "{text}");
+    assert_eq!(text.matches('\u{FDD0}').count(), 0);
+}
