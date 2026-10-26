@@ -476,6 +476,47 @@ fn labels_under_values_with_a_line_over_an_empty_first_row_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// A row of fields between two rules, parted by a divider, whose every field has its label
+/// under its value: no field is read as labels and values, and a loss says that the row's text
+/// is read as it stands, though it names no label (it cannot tell which text is one).
+#[test]
+fn a_row_of_fields_none_of_which_is_clear_gives_a_loss() {
+    let mut b = rows_page(
+        &REAL,
+        &ROWS,
+        &[&[(0, 30, "Name", ""), (30, 20, "Ort", "")]],
+        &[],
+    );
+    let (top, d) = (760.0, REAL.data);
+    for (k, v, l) in [
+        (0usize, "Erika Mustermann", "Name"),
+        (30, "Musterstadt", "Ort"),
+    ] {
+        let x = REAL.col(k) + 0.3 * REAL.pitch();
+        b.page.template += &draw::courier(x, top - 0.86 * d - 0.3 * d, d, v);
+        b.values.push(v.into());
+        // The label at the bottom of its field.
+        b.page.template = b.page.template.replacen(
+            &format!("{} Td ({l})", top - 0.86 * d),
+            &format!("{} Td ({l})", top - 2.23 * d),
+            1,
+        );
+    }
+    b.fields.clear();
+    let out = read_pages(&[&b]);
+    let broken = check_fields(&out, &b);
+    assert!(broken.is_empty(), "{broken:#?}");
+    assert!(pairs_of(blocks(&out)).is_empty(), "{:#?}", blocks(&out));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("a row of fields on page 1")),
+        "{:#?}",
+        out.document.losses
+    );
+}
+
 /// Two rows of two fields each without dividers, the second field narrow.
 const NARROW: [&[FieldSpec]; 2] = [
     &[(0, 30, "Name", "Erika Mustermann"), (30, 12, "Nr", "30")],

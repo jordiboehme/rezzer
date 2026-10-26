@@ -423,7 +423,7 @@ pub(in crate::tables) fn field_strips(
         }
         let mut fields: Vec<Field> = Vec::new();
         let mut left_out: Vec<(&'static str, Vec<String>)> = Vec::new();
-        let (mut fits, mut unread) = (true, false);
+        let (mut fits, mut unread) = (true, None);
         for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
             let why = if over[c] {
                 Some(ACROSS)
@@ -435,7 +435,7 @@ pub(in crate::tables) fn field_strips(
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
                                 }
-                                Parsed::Unsure(_) => unread = true,
+                                Parsed::Unsure(why) => unread = unread.or(Some(why)),
                                 _ => fits = false,
                             }
                         }
@@ -453,12 +453,15 @@ pub(in crate::tables) fn field_strips(
         }
         // Text that is not fields makes the strip no row of fields; labels and values in the
         // wrong places beside fields read right make it one that is not clear, and that is
-        // said.
+        // said. A row whose every field is not clear is said too, without names: which of its
+        // text is a label is what is not clear.
         if !fits {
             continue;
         }
-        if unread {
-            if !fields.is_empty() {
+        if let Some(why) = unread {
+            if fields.is_empty() {
+                say(unsure, &[], why);
+            } else {
                 let names: Vec<String> = cells.iter().flat_map(|c| label_names(flow, c)).collect();
                 say(unsure, &names, NOT_FIELDS);
             }
