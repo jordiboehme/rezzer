@@ -36,8 +36,21 @@ Release 0.2.0 brings HTML first, then the office formats, then EPUB.
 | [EPUB](epub.md) | EPUB 2 and 3 | 🗓️ 0.2.0 |
 | [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; DWG and closed native formats after that | 🔭 Later |
 | [PostScript](postscript.md) | PostScript, EPS | 🔭 Later |
-| [Mail](mail.md) | EML, MBOX | 🔭 Later |
+| [Mail](mail.md) | EML, MBOX, MSG, Outlook PST and OST | 🔭 Later |
 | [Mathcad](mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath | 🔭 Later |
+| Lotus Notes | NSF mail databases | 🔭 Later |
+| Photos and scans | JPEG, PNG, TIFF, HEIC | 🔭 Later |
+| Archives | ZIP, 7z, TAR | 🔭 Later |
+| Diagrams | draw.io, Visio, Lucidchart | 🔭 Later |
+| Automation | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports | 🔭 Later |
+| Plant and product data | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF | 🔭 Later |
+| Lab data | ELN exports, ChemDraw, Allotrope, instrument files | 🔭 Later |
+| Data science | Parquet, Arrow and Feather, Avro, JSON Lines, compressed CSV, HDF5, NetCDF, NumPy, Zarr | 🔭 Later |
+| Research writing | Jupyter notebooks, LaTeX, BibTeX, RIS | 🔭 Later |
+| Signals and parameters | DBC, A2L, COMTRADE, NI TDMS, FMI | 🔭 Later |
+| Retro | WordStar, WordPerfect, Lotus 1-2-3, dBase, disk and tape images from the C64, Atari and classic Mac | 🔭 Later |
+
+The groups without a page get one when their plan starts.
 
 `rezzer formats` lists what your build can read.
 

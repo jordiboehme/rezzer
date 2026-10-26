@@ -1,10 +1,10 @@
-# Mail (EML and MBOX)
+# Mail (EML, MBOX, MSG, PST and OST)
 
 Rezzer reads single mails and whole mailboxes: senders, recipients, dates, the reply graph of a thread and the attachments, which it reads as documents of their own.
 
 Status: 🔭 planned for a later release, after 0.2.0.
 
-File types: `.eml`, `.mbox`. Rezzer detects the format by content, not by extension. It looks for mail headers and for the `From ` lines that separate the messages in an mbox file, also in files named `.txt`. The output says how the format was decided.
+File types: `.eml`, `.mbox`, `.msg` (Outlook), `.pst` and `.ost` (Outlook data files). Rezzer detects the format by content, not by extension. It looks for mail headers and for the `From ` lines that separate the messages in an mbox file, also in files named `.txt`. The output says how the format was decided.
 
 Built on (versions as tested on 2026-10-19):
 
@@ -52,7 +52,7 @@ flowchart BT
 
 ## Known limitations
 
-- MSG files (Outlook) are planned too, but no reader has been chosen or tested yet
+- MSG, PST and OST files (Outlook) are planned too, but no reader has been chosen or tested yet. Candidates are msg_parser and outlook-pst, both MIT
 - mail-parser 0.11.9 builds an HTML body from the text part when a mail has no HTML part. Rezzer uses the list of parts, so it shows only what is really in the mail
 - Scripts in HTML parts are listed, never run, the same as for [HTML](html.md)
 
