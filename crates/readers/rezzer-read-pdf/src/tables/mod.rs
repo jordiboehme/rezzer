@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
-pub(crate) use pairs::box_pairs;
+pub(crate) use pairs::{BoxTitle, box_pairs};
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
@@ -111,6 +111,9 @@ pub(crate) struct Found {
     /// order, why and what it is. Their text is free for the detector without rules. The
     /// layout writes them as losses, one per kind and page.
     pub quiet: Vec<(usize, &'static str, Refused)>,
+    /// Text a detector left as it stands, unsure what it is: the layout writes each as an
+    /// Info `Uncertain` loss.
+    pub uncertain: Vec<String>,
 }
 
 /// What a refusal without a note refused.

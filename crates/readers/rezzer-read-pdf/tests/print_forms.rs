@@ -3822,3 +3822,141 @@ fn header_field_grid_reads_as_pairs() {
     );
     assert_no_loss(&out);
 }
+
+/// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
+/// labels and one data line, dividers that hang 11.53 points from the rule above. Row 1: three
+/// short values one or two spaces apart, each in its own field; row 2: an ID and a name in
+/// two fields; row 3: a value that runs over the divider without a word gap there; row 4:
+/// two labels without a divider, a date under the first. All values are invented.
+fn field_rows() -> FormPage {
+    // Each row: the fields' left edges (the first is the frame's) with their labels, and the
+    // data line as (column, text) parts.
+    type Row<'a> = (&'a [(f32, &'a str)], &'a [(usize, &'a str)]);
+    let rows: [Row<'_>; 4] = [
+        (
+            &[(42.40, "Pers.-Nr."), (76.72, "Eintritt"), (133.0, "Stkl")],
+            &[(0, "00123"), (7, "01.01.80"), (16, "1")],
+        ),
+        (
+            &[(42.40, "Kasse-Nr."), (115.0, "Krankenkasse")],
+            &[(0, "00000000X000"), (13, "Muster Kasse")],
+        ),
+        (
+            &[(42.40, "Betrag"), (90.0, "Zuschlag")],
+            &[(0, "123456789012")],
+        ),
+        (
+            &[(42.40, "Eintritt"), (120.0, "Austritt")],
+            &[(0, "01.04.2020")],
+        ),
+    ];
+    let mut t = String::new();
+    let mut lines = Vec::new();
+    let top0 = 760.0f32;
+    for k in 0..=rows.len() {
+        t += &bar_h(42.40, 200.0, top0 - 22.8 * k as f32, 0.24);
+    }
+    for (k, (fields, values)) in rows.iter().enumerate() {
+        let top = top0 - 22.8 * k as f32;
+        for (n, (x, l)) in fields.iter().enumerate() {
+            // The last row has no dividers: its labels alone part its fields.
+            if n > 0 && k < 3 {
+                t += &bar_v(*x, top - 11.53, top, 0.24);
+            }
+            t += &label(x + 1.5, top - 8.17, 6.6, l);
+        }
+        lines.push(columns_line(top - 21.17, values));
+    }
+    // Text in the data font elsewhere, so it is a text size of the page.
+    for (k, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        lines.push(columns_line(600.0 - 12.0 * k as f32, &[(0, l)]));
+    }
+    FormPage {
+        template: t,
+        left: 42.52,
+        lines,
+        ..FormPage::default()
+    }
+}
+
+/// A value line over several fields is cut at the dividers where a word gap falls there,
+/// each value paired with the field it stands in; a row whose value runs over a divider is
+/// not paired, and a loss names it; labels alone part the fields of a row without dividers
+/// (ruling P6-X: never a wrong pair).
+#[test]
+fn values_over_several_fields_pair_with_their_own_fields() {
+    let out = read(&print_form(&[field_rows()], "", ""));
+    let found = read_tables(&out);
+    let pairs: Vec<Vec<String>> = found
+        .iter()
+        .map(|t| t.iter().map(|r| r.join(": ")).collect())
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            vec![
+                "Pers.-Nr.: 00123",
+                "Eintritt: 01.01.80",
+                "Stkl: 1",
+                "Kasse-Nr.: 00000000X000",
+                "Krankenkasse: Muster Kasse"
+            ],
+            vec!["Eintritt: 01.04.2020", "Austritt: empty"]
+        ],
+        "{found:#?}"
+    );
+    let text = all_text(&out);
+    assert!(text.contains("123456789012"), "{text}");
+    let losses: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Uncertain && l.severity == Severity::Info)
+        .map(|l| l.what.as_str())
+        .collect();
+    assert_eq!(losses.len(), 1, "{:?}", out.document.losses);
+    assert!(
+        losses[0].contains("Betrag, Zuschlag") && losses[0].contains("page 1"),
+        "{losses:?}"
+    );
+}
+
+/// A bold title alone in a box beside boxed fields is the box's title, not the label of an
+/// empty field: it is no pair but a heading, and the text under it follows it.
+#[test]
+fn bold_box_title_is_no_empty_field() {
+    let third = bold(283.0, 712.0, 6.0, "Hinweise zur Abrechnung");
+    let mut page = boxed_fields(["00000", "01.01.2020", ""], Some(third));
+    page.template += &label(283.0, 690.0, 6.0, "Bitte pruefen Sie alle Angaben.");
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(
+        found,
+        [[["Personalnummer", "00000"], ["Eintritt", "01.01.2020"]]],
+        "{found:#?}"
+    );
+    let text = all_text(&out);
+    assert!(
+        in_order(
+            &text,
+            &["Hinweise zur Abrechnung", "Bitte pruefen Sie alle Angaben."]
+        )
+        .is_ok(),
+        "{text}"
+    );
+    let title = page_blocks(&out).iter().position(|b| {
+        matches!(b, Block::Heading { inlines, .. } if plain_text(inlines) == "Hinweise zur Abrechnung")
+    });
+    let text_at = page_blocks(&out).iter().position(|b| {
+        matches!(b, Block::Paragraph { inlines, .. } if plain_text(inlines) == "Bitte pruefen Sie alle Angaben.")
+    });
+    assert!(
+        title.zip(text_at).is_some_and(|(h, p)| h < p),
+        "{:#?}",
+        page_blocks(&out)
+    );
+    assert_no_loss(&out);
+}

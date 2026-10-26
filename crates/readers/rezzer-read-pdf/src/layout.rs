@@ -943,9 +943,10 @@ pub(crate) fn page_blocks_at(
         // Drawn boxes of a label over its value are taken first: a row of them is no header
         // band. A page with form fields is the form's (see `tables::untagged`).
         if drawn.widgets.is_empty() {
-            let (found, unsure) =
+            let (found, titles, unsure) =
                 tables::box_pairs(page, &mut flow, drawn.boxes, drawn.rules, &text_sizes);
             placed.extend(found.into_iter().map(Placed::Table));
+            placed.extend(titles.into_iter().map(Placed::Title));
             notes.extend(
                 unsure
                     .into_iter()
@@ -961,6 +962,12 @@ pub(crate) fn page_blocks_at(
                 .skipped
                 .into_iter()
                 .map(|w| (w, LossReason::Limit, Severity::Info)),
+        );
+        notes.extend(
+            found
+                .uncertain
+                .into_iter()
+                .map(|w| (w, LossReason::Uncertain, Severity::Info)),
         );
         notes.extend(
             refused_quietly(page, found.quiet)
@@ -985,6 +992,11 @@ pub(crate) fn page_blocks_at(
         start = end;
         match p {
             Placed::Table(t) => built.table(t, cx),
+            Placed::Title(t) => {
+                let mut runs: Vec<&Run> = t.runs.iter().collect();
+                runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+                built.heading(SIZE_LEVELS as u8, runs, cx);
+            }
             Placed::Unsure(u) => {
                 let what = u.text.unwrap_or_else(|| {
                     format!(
@@ -1086,6 +1098,8 @@ fn anchor_of(block: &Block) -> Option<Anchor> {
 enum Placed {
     Table(Planned),
     Unsure(Unsure),
+    /// The title of a box beside boxed fields, a heading of the lowest level.
+    Title(tables::BoxTitle),
 }
 
 impl Placed {
@@ -1094,6 +1108,7 @@ impl Placed {
         match self {
             Placed::Table(t) => (t.at, t.top),
             Placed::Unsure(u) => (u.at, u.top),
+            Placed::Title(t) => (t.at, t.top),
         }
     }
 }
