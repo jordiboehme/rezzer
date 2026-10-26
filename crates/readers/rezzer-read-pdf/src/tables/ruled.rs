@@ -32,50 +32,6 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
     })
 }
 
-/// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
-/// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
-pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
-    let mut counts: Vec<(&str, usize)> = Vec::new();
-    for why in reasons {
-        match counts.iter_mut().find(|(w, _)| *w == why) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((why, 1)),
-        }
-    }
-    let parts: Vec<String> = counts
-        .iter()
-        .map(|&(why, n)| {
-            let why = if n == 1 { why } else { plural(why) };
-            format!("{n} ({why})")
-        })
-        .collect();
-    parts.join(", ")
-}
-
-/// A reason a ruled grid or a header band is refused, said of several.
-fn plural(why: &str) -> &str {
-    match why {
-        "it has more than 15 columns" => "they have more than 15 columns",
-        "most of its cells are empty" => "most of their cells are empty",
-        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
-        "its text crosses its lines" => "their text crosses their lines",
-        "it covers most of the page" => "they cover most of the page",
-        ON_PICTURE => "they lie on a picture",
-        "its text is much smaller than the body text, as in a picture of a page" => {
-            "their text is much smaller than the body text, as in pictures of pages"
-        }
-        "too few rows follow its header" => "too few rows follow their headers",
-        "the text below its header does not stand in its columns" => {
-            "the text below their headers does not stand in their columns"
-        }
-        "its cells hold long text" => "their cells hold long text",
-        "its text runs on from row to row like prose" => {
-            "their text runs on from row to row like prose"
-        }
-        other => other,
-    }
-}
-
 /// Grids of drawn rules: horizontal and vertical lines that meet, with text in their cells.
 pub(super) fn ruled(
     page: u32,
@@ -224,14 +180,16 @@ pub(super) fn ruled(
                 });
         // A figure caption speaks against a table: no note and no loss for it. A grid that
         // looks like a table gets a note and holds its text as paragraphs. Any other grid is
-        // a loss only, unless it lies on a picture (a chart): its text stays free for the
-        // detector without rules, as such a grid often frames a table of its own.
+        // a loss only, unless it is a chart's (a figure caption next to it or a picture under
+        // it), whatever reason refuses it: its text stays free for the detector without
+        // rules, as such a grid often frames a table of its own.
+        let chart = figure_caption || area.on_picture(b);
         let mut refuse = |why: &'static str| {
             if why == FIGURE_NEAR {
                 return;
             }
             if !noted {
-                if why != ON_PICTURE {
+                if !chart {
                     quiet.push((at, why, Refused::Grid));
                 }
                 return;

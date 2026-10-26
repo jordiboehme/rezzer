@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
-pub(crate) use ruled::counted;
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
@@ -91,8 +90,9 @@ pub(crate) struct Found {
     pub tables: Vec<Planned>,
     pub unsure: Vec<Unsure>,
     pub skipped: Vec<String>,
-    /// For each run of the flow, whether a grid or band refused with a note holds it: no
-    /// detector after it may take the run into a table. Empty when none holds a run.
+    /// For each run of the flow, whether a grid or band refused with a note (or with a
+    /// limit note for its size) holds it: no detector after it may take the run into a table.
+    /// Empty when none holds a run.
     pub held: Vec<bool>,
     /// Heights of the rules of header bands, sorted: no region without rules runs across one.
     pub cuts: Vec<f32>,
@@ -113,6 +113,50 @@ pub(crate) enum Refused {
 
 /// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
 const ON_PICTURE: &str = "it lies on a picture";
+
+/// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
+/// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
+pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for why in reasons {
+        match counts.iter_mut().find(|(w, _)| *w == why) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((why, 1)),
+        }
+    }
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|&(why, n)| {
+            let why = if n == 1 { why } else { plural(why) };
+            format!("{n} ({why})")
+        })
+        .collect();
+    parts.join(", ")
+}
+
+/// A reason a ruled grid or a header band is refused, said of several.
+pub(crate) fn plural(why: &str) -> &str {
+    match why {
+        "it has more than 15 columns" => "they have more than 15 columns",
+        "most of its cells are empty" => "most of their cells are empty",
+        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
+        "its text crosses its lines" => "their text crosses their lines",
+        "it covers most of the page" => "they cover most of the page",
+        ON_PICTURE => "they lie on a picture",
+        "its text is much smaller than the body text, as in a picture of a page" => {
+            "their text is much smaller than the body text, as in pictures of pages"
+        }
+        "too few rows follow its header" => "too few rows follow their headers",
+        "the text below its header does not stand in its columns" => {
+            "the text below their headers does not stand in their columns"
+        }
+        "its cells hold long text" => "their cells hold long text",
+        "its text runs on from row to row like prose" => {
+            "their text runs on from row to row like prose"
+        }
+        other => other,
+    }
+}
 
 /// Lines this close are one line, and line ends this close meet, in points.
 pub(crate) const SNAP: f32 = 2.0;
@@ -196,13 +240,20 @@ struct Area<'a> {
 }
 
 impl Area<'_> {
+    /// Whether a picture lies under most of `b` (x0, y0, x1, y1): a grid or band there is a
+    /// chart's.
+    fn on_picture(&self, b: [f32; 4]) -> bool {
+        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
+        self.images.iter().any(|i| overlap(*i, b) > 0.5 * size)
+    }
+
     /// Why a table cannot stand in `b` (x0, y0, x1, y1) with text of `sizes`, if it cannot.
     fn refuses(&self, b: [f32; 4], sizes: &[f32]) -> Option<&'static str> {
         let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
         if size > PAGE_SHARE * self.width * self.height {
             return Some(PAGE_FRAME);
         }
-        if self.images.iter().any(|i| overlap(*i, b) > 0.5 * size) {
+        if self.on_picture(b) {
             return Some(ON_PICTURE);
         }
         let mut sizes = sizes.to_vec();

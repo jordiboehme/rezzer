@@ -310,10 +310,11 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     }
     let bottom = body.last().map_or(b[1], |l| l.0 - 0.25 * l.1);
     let sizes: Vec<f32> = body.iter().map(|l| l.1).collect();
-    if let Some(why) = sh.area.refuses([b[0], bottom, b[2], b[3]], &sizes) {
+    let area = [b[0], bottom, b[2], b[3]];
+    if let Some(why) = sh.area.refuses(area, &sizes) {
         // The page's frame or tiny text: no note and its text stays free, as for a ruled
         // grid, but a loss. On a picture the band is a chart's: no loss either.
-        if why != ON_PICTURE {
+        if !sh.area.on_picture(area) {
             take.quiet.push((at, why, Refused::Band));
         }
         return;

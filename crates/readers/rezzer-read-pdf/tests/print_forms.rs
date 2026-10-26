@@ -171,10 +171,9 @@ fn page_frame_grid_refusal_is_a_loss() {
     assert!(!text.contains('|'), "{text}");
 }
 
-/// A header band whose rows are set in text much smaller than the page's body text: refused
-/// without a note, and that refusal is a loss.
-#[test]
-fn band_refused_for_tiny_text_is_a_loss() {
+/// A header band of three titles at 10 pt with three rows at 4 pt below it, and 12 lines of
+/// 10 pt prose that make 10 pt the body size: the band is refused for its tiny text.
+fn tiny_band() -> String {
     let mut template = grid(&[40.0, 200.0, 360.0, 520.0], &[700.0, 715.0]);
     for (x, t) in [(44.0, "Name"), (204.0, "Ort"), (364.0, "Betrag")] {
         template += &label(x, 704.0, 10.0, t);
@@ -193,6 +192,14 @@ fn band_refused_for_tiny_text_is_a_loss() {
             "Die Muster GmbH zahlt den Betrag zum Monatsende aus.",
         );
     }
+    template
+}
+
+/// A header band whose rows are set in text much smaller than the page's body text: refused
+/// without a note, and that refusal is a loss.
+#[test]
+fn band_refused_for_tiny_text_is_a_loss() {
+    let template = tiny_band();
     let page = FormPage {
         template,
         ..FormPage::default()
@@ -308,9 +315,126 @@ fn quiet_grids_of_a_page_give_one_loss() {
     let what = one_uncertain_loss(&out);
     assert_eq!(
         what,
-        "2 grids of drawn rules on page 1 are not read as tables: 2 (most of their cells are \
-         empty); their text is read without the grids"
+        "2 grids of drawn rules on page 1 are not read as tables: most of their cells are \
+         empty; their text is read without the grids"
     );
     let text = all_text(&out);
     assert!(text.contains("Erika Mustermann"), "{text}");
+}
+
+/// A gray picture of `w` by `h` points with its lower left corner at `(x, y)`, drawn inline.
+fn picture(x: f32, y: f32, w: f32, h: f32) -> String {
+    format!(
+        "q {w} 0 0 {h} {x} {y} cm BI /W 8 /H 8 /CS /G /BPC 8 ID {} EI Q\n",
+        "A".repeat(64)
+    )
+}
+
+/// The losses of a read that speak of tables.
+fn table_losses(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("table"))
+        .collect()
+}
+
+/// A chart with twenty columns of grid lines, labels in one row and a figure caption: refused
+/// for its many columns, and no loss, as the caption names a figure.
+#[test]
+fn wide_chart_grid_gives_no_loss() {
+    let xs: Vec<f32> = (0..=20).map(|k| 40.0 + 25.0 * k as f32).collect();
+    let mut template = grid(&xs, &[640.0, 660.0, 680.0, 700.0]);
+    for k in 0..5 {
+        template += &label(43.0 + 100.0 * k as f32, 646.0, 7.0, &format!("{}0", k + 1));
+    }
+    template += &label(40.0, 625.0, 9.0, "Figure 2: Stunden je Woche");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert_no_loss(&out);
+}
+
+/// A grid with text in two of its nine squares over a picture: refused for its empty cells,
+/// and no loss, as a grid on a picture is a chart's.
+#[test]
+fn sparse_grid_on_a_picture_gives_no_loss() {
+    let mut template = picture(40.0, 500.0, 300.0, 200.0);
+    template += &grid(&[40.0, 140.0, 240.0, 340.0], &[520.0, 580.0, 640.0, 700.0]);
+    template += &label(44.0, 680.0, 9.0, "100");
+    template += &label(144.0, 680.0, 9.0, "200");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(table_losses(&out).is_empty(), "{:?}", out.document.losses);
+}
+
+/// Guard: the same grid without the picture gives its loss, so the picture is what keeps the
+/// loss away.
+#[test]
+fn sparse_grid_without_a_picture_is_a_loss() {
+    let mut template = grid(&[40.0, 140.0, 240.0, 340.0], &[520.0, 580.0, 640.0, 700.0]);
+    template += &label(44.0, 680.0, 9.0, "100");
+    template += &label(144.0, 680.0, 9.0, "200");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let what = one_uncertain_loss(&out);
+    assert!(what.contains("most of its cells are empty"), "{what}");
+}
+
+/// A header band refused for its tiny text over a picture: no loss, as the band is a chart's.
+#[test]
+fn band_on_a_picture_gives_no_loss() {
+    let template = picture(30.0, 660.0, 500.0, 70.0) + &tiny_band();
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(table_losses(&out).is_empty(), "{:?}", out.document.losses);
+}
+
+/// A page with a grid and a header band refused without a note: one loss for each, the
+/// grid's first.
+#[test]
+fn quiet_grid_and_band_of_a_page_give_two_losses() {
+    let mut template = tiny_band();
+    template += &grid(&[40.0, 200.0, 360.0, 520.0], &[220.0, 260.0, 300.0]);
+    template += &label(44.0, 280.0, 9.0, "Muster GmbH");
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let losses: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert_eq!(
+        losses,
+        [
+            "a grid of drawn rules on page 1 is not read as a table: most of its cells are \
+             empty; its text is read without the grid",
+            "a header band on page 1 is not read as a table: its text is much smaller than \
+             the body text, as in a picture of a page; its text is read without the band",
+        ],
+        "{:?}",
+        out.document.losses
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .all(|l| l.why == LossReason::Uncertain && l.severity == Severity::Info)
+    );
 }

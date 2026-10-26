@@ -1615,12 +1615,19 @@ fn refused_quietly(
                 "{one} on page {page} is not read as a table: {why}; its text is read without \
                  the {what}"
             )),
-            _ => out.push(format!(
-                "{} {many} on page {page} are not read as tables: {}; their text is read \
-                 without the {what}s",
-                why.len(),
-                tables::counted(why.iter().copied())
-            )),
+            _ => {
+                // One reason for all is said once, without a count.
+                let reasons = if why.iter().all(|w| *w == why[0]) {
+                    tables::plural(why[0]).to_string()
+                } else {
+                    tables::counted(why.iter().copied())
+                };
+                out.push(format!(
+                    "{} {many} on page {page} are not read as tables: {reasons}; their text \
+                     is read without the {what}s",
+                    why.len()
+                ));
+            }
         }
     }
     out
