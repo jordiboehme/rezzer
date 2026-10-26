@@ -1415,6 +1415,21 @@ fn earnings_section(top: f32, brutto: &str, print: Print) -> String {
     )
 }
 
+/// The captions of the tables of the read, in order.
+fn read_captions(out: &ReadOutcome) -> Vec<Option<String>> {
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        if let Block::Section { blocks, .. } = b {
+            for inner in blocks {
+                if let Block::Table { caption, .. } = inner {
+                    found.push(caption.clone());
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The tables of the read: the text of each cell.
 fn read_tables(out: &ReadOutcome) -> Vec<Vec<Vec<String>>> {
     let mut found = Vec::new();
@@ -1890,6 +1905,43 @@ fn assert_pay_slip(out: &ReadOutcome) {
     );
     assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
     assert_eq!(found[4].len(), 2, "{found:#?}");
+    // The title right above a section's top rule is that table's caption, never a row of
+    // the table above: T's in E's band, L's in the band under S. E's title stands above
+    // the grid, a paragraph before E.
+    assert!(!e[2].contains("Abzuege"), "{e:?}");
+    assert_eq!(body(&found[2]).len(), 1, "{found:#?}");
+    assert_eq!(
+        read_captions(out),
+        [
+            None,
+            Some("Abzuege B".to_string()),
+            None,
+            Some("La Lb".to_string()),
+            None
+        ]
+    );
+    let blocks: Vec<String> = out
+        .document
+        .body
+        .iter()
+        .flat_map(|b| match b {
+            Block::Section { blocks, .. } => blocks
+                .iter()
+                .map(|inner| match inner {
+                    Block::Table { .. } => "table".to_string(),
+                    other => {
+                        let mut t = String::new();
+                        common::block_text(other, &mut t);
+                        t
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    let title = blocks.iter().position(|t| t.trim() == "Bezuege A");
+    let table = blocks.iter().position(|t| t == "table");
+    assert!(title.is_some() && title < table, "{blocks:?}");
     assert_no_loss(out);
 }
 
@@ -1937,4 +1989,60 @@ fn a_refused_section_is_a_loss() {
         "a header band on page 1 is not read as a table: its cells hold too few column titles; \
          its text is read without the band"
     );
+}
+
+/// A table of 4 columns, a band of one cell with a line of text, and a table of 3 other
+/// columns, one grid. With the line near the band's bottom, right above the cut, it is the
+/// caption of the table below; near the band's top it is a note, the last row of the table
+/// above.
+fn note_or_title(near_bottom: bool) -> ReadOutcome {
+    let mut template = form_section(
+        &form_columns(4),
+        760.0,
+        &["Nr.", "Art", "Tage", "Betrag"],
+        &[
+            &["1001", "Gehalt", "20", "1.234,56"],
+            &["1002", "Zulage", "8", "12,34"],
+        ],
+        BY_CELL,
+    );
+    template += &grid(&[40.0, 555.0], &[682.0, 712.0]);
+    let y = if near_bottom { 685.0 } else { 703.0 };
+    template += &bold(44.0, y, 7.0, "Muster GmbH Abzuege");
+    template += &form_section(
+        &[40.0, 200.0, 420.0, 555.0],
+        682.0,
+        &["Kasse", "Art", "Betrag"],
+        &[&["A", "Steuer", "123,45"], &["B", "Beitrag", "67,89"]],
+        BY_CELL,
+    );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    read(&print_form(&[page], "", ""))
+}
+
+#[test]
+fn a_line_right_above_a_cut_titles_the_table_below() {
+    let out = note_or_title(true);
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].len(), 3, "{found:?}");
+    assert_eq!(
+        read_captions(&out),
+        [None, Some("Muster GmbH Abzuege".to_string())]
+    );
+    assert_no_loss(&out);
+}
+
+#[test]
+fn a_note_near_the_top_of_its_band_stays_above() {
+    let out = note_or_title(false);
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].len(), 4, "{found:?}");
+    assert_eq!(found[0][3].join("|"), "Muster GmbH Abzuege", "{found:?}");
+    assert_eq!(read_captions(&out), [None, None]);
+    assert_no_loss(&out);
 }

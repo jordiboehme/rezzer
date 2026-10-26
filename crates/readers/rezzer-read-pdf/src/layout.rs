@@ -1185,8 +1185,17 @@ impl Built {
             }
             None => {
                 self.tagged.push(plan.tagged);
+                // The title line, left to right.
+                plan.caption.sort_by(|a, b| a.x.total_cmp(&b.x));
+                let caption = plan
+                    .caption
+                    .iter()
+                    .map(|r| r.text.trim())
+                    .filter(|t| !t.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 self.blocks.push(Block::Table {
-                    caption: None,
+                    caption: (!caption.is_empty()).then_some(caption),
                     header_rows: plan.header_rows.min(rows.len()),
                     role: None,
                     rows,

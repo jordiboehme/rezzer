@@ -376,6 +376,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         additions: Vec::new(),
         tagged: None,
         continues: false,
+        caption: Vec::new(),
     });
 }
 

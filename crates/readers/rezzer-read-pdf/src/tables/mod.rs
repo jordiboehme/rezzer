@@ -55,6 +55,8 @@ pub(crate) struct Planned {
     pub tagged: Option<usize>,
     /// The rows go on a table that started on an earlier page.
     pub continues: bool,
+    /// The runs of the table's title line, read as its caption.
+    pub caption: Vec<Run>,
 }
 
 /// Runs for a cell of a row an earlier page began: the row's place in its table and the
@@ -447,6 +449,9 @@ fn middle(r: &Run) -> (f32, f32) {
 /// Where a run of the page goes: the table, row and cell of `planned`.
 type Target = Option<(u32, u32, u32)>;
 
+/// The row of a [`Target`] that sends a run to the table's caption.
+const CAPTION_ROW: u32 = u32::MAX;
+
 /// Moves the runs `target` names out of `flow` into the cells of `planned`. Each cell is sized
 /// for its runs first: a list grown one run at a time keeps room for four.
 fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
@@ -455,6 +460,9 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
         *counts.entry(*t).or_default() += 1;
     }
     for ((t, r, c), n) in counts {
+        if r == CAPTION_ROW {
+            continue;
+        }
         planned[t as usize].rows[r as usize][c as usize]
             .runs
             .reserve_exact(n);
@@ -462,6 +470,10 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
     let stay = target.iter().filter(|t| t.is_none()).count()
         + flow.runs.len().saturating_sub(target.len());
     flow.take_each(stay, |i, r| match target.get(i).copied().flatten() {
+        Some((t, CAPTION_ROW, _)) => {
+            planned[t as usize].caption.push(r);
+            None
+        }
         Some((t, row, cell)) => {
             planned[t as usize].rows[row as usize][cell as usize]
                 .runs

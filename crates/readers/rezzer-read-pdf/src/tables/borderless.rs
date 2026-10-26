@@ -197,6 +197,7 @@ pub(super) fn borderless(
                     additions: Vec::new(),
                     tagged: None,
                     continues: false,
+                    caption: Vec::new(),
                 });
                 continue;
             }
@@ -287,6 +288,7 @@ pub(super) fn borderless(
                         additions: Vec::new(),
                         tagged: None,
                         continues: false,
+                        caption: Vec::new(),
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {

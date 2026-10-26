@@ -15,6 +15,16 @@ use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 /// Why a grid with a figure caption next to it is not a table.
 const FIGURE_NEAR: &str = "a figure caption stands next to it";
 
+/// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom,
+/// and its grid's place among the page's grids.
+struct Part {
+    h: Vec<Seg>,
+    v: Vec<Seg>,
+    cut: bool,
+    cut_below: bool,
+    id: usize,
+}
+
 /// The one note of a page for its grids refused with a note: a grid alone says why; several
 /// say how many and why, by reason, the reasons in the order they first came. The note stands
 /// where the first of them does.
@@ -62,17 +72,22 @@ pub(super) fn ruled(
     // Each connected grid in its sections, each judged as a grid of its own, top to bottom;
     // a section of a grid that was cut is no grid's to drop without a word.
     let mut cut_work = 0usize;
-    let mut grids: Vec<(Vec<Seg>, Vec<Seg>, bool)> = Vec::new();
-    for (gh, gv) in &groups {
+    let mut grids: Vec<Part> = Vec::new();
+    for (id, (gh, gv)) in groups.iter().enumerate() {
         let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
         let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
         let parts = sections(&h, &v, &hs, &mut cut_work);
-        let cut = parts.len() > 1;
-        grids.extend(parts.into_iter().map(|(h, v)| (h, v, cut)));
+        let (cut, last) = (parts.len() > 1, parts.len().saturating_sub(1));
+        grids.extend(parts.into_iter().enumerate().map(|(k, (h, v))| Part {
+            h,
+            v,
+            cut,
+            cut_below: k < last,
+            id,
+        }));
     }
     grids.sort_by(|a, b| {
-        let top =
-            |g: &(Vec<Seg>, Vec<Seg>, bool)| g.0.iter().map(|s| s.at).fold(f32::MIN, f32::max);
+        let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
         top(b).total_cmp(&top(a))
     });
     let lines = flow_lines(flow);
@@ -82,6 +97,10 @@ pub(super) fn ruled(
     // Runs of grids refused with a note, and those grids: where each stands and why; and
     // the grids refused without a note.
     let mut held: Vec<bool> = vec![false; flow.runs.len()];
+    // Runs that title the section below a cut: no section above takes them, and the section
+    // below, by its grid, has them as its caption once it is a table.
+    let mut titles: Vec<bool> = vec![false; flow.runs.len()];
+    let mut pending: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
     let mut quiet: Vec<(usize, &'static str, Refused)> = Vec::new();
     let mut tables: Vec<Planned> = Vec::new();
@@ -91,7 +110,17 @@ pub(super) fn ruled(
     let mut icons: Vec<(usize, usize, usize, [f32; 4])> = Vec::new();
     let mut strokes: Option<Vec<[f32; 4]>> = None;
     let mut icon_work = 0usize;
-    'grids: for (g, (mut h, v, cut)) in grids.into_iter().enumerate() {
+    'grids: for (
+        g,
+        Part {
+            mut h,
+            v,
+            cut,
+            cut_below,
+            id,
+        },
+    ) in grids.into_iter().enumerate()
+    {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "ruled tables on page {page} are looked for only in part: the time limit was \
@@ -109,6 +138,51 @@ pub(super) fn ruled(
         let mut ys = clustered(ys);
         // Rows from the top.
         ys.reverse();
+        let title_above = pending.remove(&id).unwrap_or_default();
+        // The line right above a cut is the title of the section below: it leaves this
+        // section, and a row of one cell that held only it goes too.
+        if cut_below && xs.len() >= 2 && ys.len() >= 2 {
+            let free = |i: usize| {
+                let r = &flow.runs[i];
+                let (cx, _) = middle(r);
+                !r.off_axis
+                    && claimed[i].is_none()
+                    && !titles[i]
+                    && cx > xs[0]
+                    && cx < xs[xs.len() - 1]
+                    && !r.text.trim().is_empty()
+            };
+            let runs: Vec<usize> = by_y
+                .runs_between(ys[ys.len() - 1], ys[0])
+                .into_iter()
+                .filter(|&i| free(i))
+                .collect();
+            let title = bottom_title(flow, &runs, &ys);
+            for &i in &title {
+                titles[i] = true;
+            }
+            pending.insert(id, title.clone());
+            let n = ys.len();
+            if !title.is_empty() && n >= 3 {
+                let (lo, hi) = (ys[n - 1], ys[n - 2]);
+                let empty = runs.iter().all(|&i| {
+                    titles[i] || {
+                        let (_, cy) = middle(&flow.runs[i]);
+                        cy > hi || cy < lo
+                    }
+                });
+                let parted = v.iter().any(|s| {
+                    s.at > xs[0] + SNAP
+                        && s.at < xs[xs.len() - 1] - SNAP
+                        && s.from < hi - SNAP
+                        && s.to > lo + SNAP
+                });
+                if empty && !parted {
+                    ys.pop();
+                    h.retain(|s| s.at >= hi - SNAP);
+                }
+            }
+        }
         // A row whose inner column rules all hang from its top and end at one height is a
         // header over lines without rules: a rule across at their feet parts the two, and
         // the row below it (its lines) is open: one cell across that is no spanning box.
@@ -149,7 +223,7 @@ pub(super) fn ruled(
         let inside = |i: usize| {
             let r = &flow.runs[i];
             let (cx, _) = middle(r);
-            !r.off_axis && claimed[i].is_none() && cx > b[0] && cx < b[2]
+            !r.off_axis && claimed[i].is_none() && !titles[i] && cx > b[0] && cx < b[2]
         };
         let mine: Vec<usize> = by_y
             .runs_between(b[1], b[3])
@@ -487,6 +561,10 @@ pub(super) fn ruled(
                 icons.push((t, r, k, cell));
             }
         }
+        for &i in &title_above {
+            claimed[i] = Some((t, CAPTION_ROW as usize, 0));
+        }
+        let at = title_above.iter().map(|&i| flow.at[i]).fold(at, usize::min);
         tables.push(Planned {
             at,
             top: b[3],
@@ -498,6 +576,7 @@ pub(super) fn ruled(
             additions: Vec::new(),
             tagged: None,
             continues: false,
+            caption: Vec::new(),
         });
     }
     // Regions without rules never run across a band.
@@ -574,6 +653,47 @@ pub(super) fn ruled(
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
+    }
+}
+
+/// The runs of the lowest line of `runs` when it titles what stands below the section whose
+/// row edges are `ys` (from the top): the line is closer to the section's bottom than to the
+/// line or row edge above it, or it is bold and at most its size above the bottom.
+fn bottom_title(flow: &Flow, runs: &[usize], ys: &[f32]) -> Vec<usize> {
+    let bottom = ys[ys.len() - 1];
+    let Some(low) = runs.iter().map(|&i| flow.runs[i].y).reduce(f32::min) else {
+        return Vec::new();
+    };
+    let near = |i: usize| {
+        let r = &flow.runs[i];
+        r.y - low <= 0.3 * r.size.max(1.0)
+    };
+    let line: Vec<usize> = runs.iter().copied().filter(|&i| near(i)).collect();
+    let size = line
+        .iter()
+        .map(|&i| flow.runs[i].size)
+        .fold(0.0f32, f32::max);
+    let head = line
+        .iter()
+        .map(|&i| flow.runs[i].y + flow.runs[i].size)
+        .fold(f32::MIN, f32::max);
+    let next = runs
+        .iter()
+        .filter(|&&i| !near(i))
+        .map(|&i| flow.runs[i].y)
+        .fold(f32::MAX, f32::min);
+    let edge = ys
+        .iter()
+        .copied()
+        .filter(|e| *e > low)
+        .fold(f32::MAX, f32::min);
+    let below = low - bottom;
+    let above = next.min(edge) - head;
+    let bold = line.iter().all(|&i| flow.runs[i].bold);
+    if below < above || (bold && below <= size) {
+        line
+    } else {
+        Vec::new()
     }
 }
 

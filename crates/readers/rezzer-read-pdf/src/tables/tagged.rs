@@ -392,6 +392,7 @@ pub(crate) fn tagged(
             header_rows,
             tagged: Some(t),
             continues,
+            caption: Vec::new(),
         });
     }
     (out, fallbacks)
