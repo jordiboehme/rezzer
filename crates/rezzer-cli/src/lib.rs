@@ -63,9 +63,12 @@ struct ReadArgs {
     /// The file to read.
     path: PathBuf,
     /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
-    /// for example budget.xlsx.md. Some names get a short hash added. Pictures go to a
-    /// folder next to it. Older files that Rezzer wrote there and this read does not write
-    /// are removed.
+    /// for example budget.xlsx.md. Some names get a short hash added. A document over the
+    /// part size is written as <file name>.md plus parts in a folder next to it,
+    /// <file name>.parts. Pictures go to a folder next to it. Older files that Rezzer wrote
+    /// there and this read does not write are removed. A file of yours in the way of a part
+    /// stops the read. Two file names that differ only in case clash on a file system that
+    /// ignores case (the macOS default).
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
     /// Largest part in tokens when writing with -o. A larger document is written as a main

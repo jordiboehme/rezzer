@@ -525,6 +525,23 @@ fn version_and_help_exit_0() {
     env.cmd().arg("--help").assert().code(0);
 }
 
+/// `rezzer read --help` names `--part-size` and says where the parts of a large document go.
+/// clap wraps by terminal width, so both sides are compared with their whitespace joined.
+#[test]
+fn help_mentions_part_size() {
+    let env = Env::new();
+    let out = env.cmd().args(["read", "--help"]).output().expect("help");
+    assert!(out.status.success());
+    let join = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let help = join(&String::from_utf8_lossy(&out.stdout));
+    assert!(help.contains("--part-size"), "{help}");
+    let sentence = join(
+        "A document over the part size is written as <file name>.md plus parts in a folder
+         next to it, <file name>.parts.",
+    );
+    assert!(help.contains(&sentence), "{help}");
+}
+
 #[test]
 fn usage_errors_exit_1_not_2() {
     let env = Env::new();

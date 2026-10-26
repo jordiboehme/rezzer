@@ -63,9 +63,11 @@ pub struct RezParams {
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
     /// Absolute path of an existing directory. The Markdown is written there too, as
-    /// <file name>.md. Some names get a short hash added. Pictures (for example rendered PDF
-    /// pages) go to a folder next to it, and the Markdown links to them. Older files that
-    /// Rezzer wrote there and this read does not write are removed. Without it nothing is
+    /// <file name>.md. Some names get a short hash added. A document over part_size is
+    /// written as <file name>.md plus parts in a folder next to it, <file name>.parts.
+    /// Pictures (for example rendered PDF pages) go to a folder next to it, and the Markdown
+    /// links to them. Older files that Rezzer wrote there and this read does not write are
+    /// removed. A file of the user in the way of a part stops the read. Without it nothing is
     /// written.
     #[serde(default)]
     pub output_dir: Option<String>,
