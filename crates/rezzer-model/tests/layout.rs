@@ -6,7 +6,7 @@
 
 use rezzer_model::{
     Anchor, Block, Cell, Certainty, Evidence, Inline, LayoutKind, RowKind, RowNote, RowRange,
-    TableLayout, split_rows, table_key,
+    TableLayout, join_ranges, split_rows, table_key,
 };
 
 fn name(n: &str) -> String {
@@ -593,6 +593,105 @@ fn fitting_table_with_large_notes_gives_two_ranges() {
     let ranges = split_rows(&[heading()], &t, &tail, 0);
     assert_eq!(ranges.len(), 1);
     assert_eq!(ranges[0].blocks, vec![heading(), t, tail[0].clone()]);
+}
+
+/// Joins `ranges` from the first on, each to the one before.
+fn joined(ranges: &[RowRange]) -> RowRange {
+    let mut out = ranges[0].clone();
+    for r in &ranges[1..] {
+        out = join_ranges(&out, r).expect("neighbours join");
+    }
+    out
+}
+
+#[test]
+fn joined_ranges_are_the_whole_table() {
+    // Every range of a cut joined again gives the table as one range: the lead and the
+    // header band once, every row, the notes at the end, the whole data range.
+    let t = table(11);
+    let tail = vec![note_of(76, Some("A13"))];
+    let whole = split_rows(&[heading()], &t, &tail, 0);
+    let ranges = split_rows(&[heading()], &t, &tail, 39);
+    assert_eq!(ranges.last().unwrap().table, None, "a notes range");
+    let all = joined(&ranges);
+    assert_eq!(all.blocks, whole[0].blocks);
+    assert_eq!((all.first, all.last), (2, 11));
+    assert_eq!(all.table, Some(1));
+    // Two in the middle: their rows only, the data range of both.
+    let middle = join_ranges(&ranges[1], &ranges[2]).unwrap();
+    assert_eq!((middle.first, middle.last), (5, 10));
+    let (rows, _, layout) = table_of(&middle);
+    assert_eq!(rows.len(), 1 + 6);
+    assert_eq!(layout.data.as_deref(), Some("A5:B10"));
+    assert_eq!(middle.blocks.len(), 2);
+    // Row notes of both are kept, in order.
+    let notes = vec![
+        RowNote {
+            row: 3,
+            kind: RowKind::Subtotal,
+            level: None,
+            parent: None,
+            why: String::new(),
+        },
+        RowNote {
+            row: 9,
+            kind: RowKind::Subtotal,
+            level: None,
+            parent: None,
+            why: String::new(),
+        },
+    ];
+    let mut noted = t.clone();
+    if let Block::Table {
+        layout: Some(l), ..
+    } = &mut noted
+    {
+        l.rows = notes.clone();
+    }
+    let ranges = split_rows(&[], &noted, &[], 39);
+    assert!(ranges.len() > 2);
+    let all = joined(&ranges);
+    let (_, _, layout) = table_of(&all);
+    assert_eq!(layout.rows, notes);
+}
+
+#[test]
+fn joined_ranges_without_layout_count_table_rows() {
+    // A Markdown table: no layout, rows counted from the table's first row.
+    let mut rows = vec![vec![
+        Cell::new(vec![txt("Name")]),
+        Cell::new(vec![txt("Value")]),
+    ]];
+    rows.extend((0..20).map(|_| vec![Cell::new(vec![txt("a")]), Cell::new(vec![txt("1")])]));
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    let ranges = split_rows(&[], &t, &[], 20);
+    assert!(ranges.len() > 2, "{:?}", borders(&ranges));
+    let pair = join_ranges(&ranges[0], &ranges[1]).unwrap();
+    assert_eq!((pair.first, pair.last), (ranges[0].first, ranges[1].last));
+    assert_eq!(joined(&ranges).blocks, vec![t]);
+}
+
+#[test]
+fn ranges_that_do_not_follow_each_other_do_not_join() {
+    let t = table(11);
+    let tail = vec![note_of(76, Some("A13"))];
+    let ranges = split_rows(&[heading()], &t, &tail, 39);
+    let notes = ranges.last().unwrap();
+    // The notes range comes last, and a range with the tail is closed.
+    assert_eq!(join_ranges(notes, &ranges[0]), None);
+    let closed = joined(&ranges);
+    assert_eq!(join_ranges(&closed, &ranges[1]), None);
+    // Another lead length.
+    let other = split_rows(&[], &t, &[], 39);
+    assert_eq!(join_ranges(&ranges[0], &other[1]), None);
 }
 
 #[test]

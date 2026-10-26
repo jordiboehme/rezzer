@@ -396,6 +396,67 @@ pub fn split_rows(
     out
 }
 
+/// Two neighbouring ranges of one [`split_rows`] call as one range: the lead once, the
+/// header band once, the rows of both, the row notes of both and `b`'s tail. `b` may be the
+/// notes range; the joined range then keeps `a`'s rows and gets the tail. `None` when `a`
+/// is the notes range or already holds the tail, or when the two do not belong together
+/// (another lead length, another header band, a table that is no table).
+pub fn join_ranges(a: &RowRange, b: &RowRange) -> Option<RowRange> {
+    let ta = a.table?;
+    if a.blocks.len() != ta + 1 || b.blocks.len() < ta {
+        return None;
+    }
+    let Some(tb) = b.table else {
+        // The notes range: the lead, then the tail.
+        let mut blocks = a.blocks.clone();
+        blocks.extend_from_slice(&b.blocks[ta..]);
+        return Some(RowRange {
+            blocks,
+            ..a.clone()
+        });
+    };
+    if tb != ta {
+        return None;
+    }
+    let (
+        Block::Table {
+            header_rows: head_a,
+            layout: layout_a,
+            ..
+        },
+        Block::Table {
+            rows: rows_b,
+            header_rows: head_b,
+            layout: layout_b,
+            ..
+        },
+    ) = (&a.blocks[ta], &b.blocks[tb])
+    else {
+        return None;
+    };
+    if head_a != head_b || layout_a.is_some() != layout_b.is_some() {
+        return None;
+    }
+    let head = (*head_b).min(rows_b.len());
+    let mut joined = a.blocks[ta].clone();
+    if let Block::Table { rows, layout, .. } = &mut joined {
+        rows.extend(rows_b[head..].iter().cloned());
+        if let (Some(layout), Some(other)) = (layout.as_deref_mut(), layout_b.as_deref()) {
+            layout.data = Some(data_range(layout, a.first, b.last));
+            layout.rows.extend(other.rows.iter().cloned());
+        }
+    }
+    let mut blocks: Vec<Block> = a.blocks[..ta].to_vec();
+    blocks.push(joined);
+    blocks.extend_from_slice(&b.blocks[tb + 1..]);
+    Some(RowRange {
+        first: a.first,
+        last: b.last,
+        blocks,
+        table: Some(ta),
+    })
+}
+
 /// The header rows as a cut range repeats them: a cell's `row_span` ends inside the band,
 /// so it never covers the range's data cells.
 fn header_band(head: &[Vec<Cell>]) -> impl Iterator<Item = Vec<Cell>> + '_ {

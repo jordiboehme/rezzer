@@ -9,9 +9,12 @@
 //! PDF pages grouped into the chapters of the outline's top level, else pages; then the
 //! headings of the smallest level; then blocks, a heading kept with the block after it; a
 //! table with its heading and caption before it and its notes after it is cut into row
-//! ranges (`split_rows`, its `max_tokens` halved up to 8 times while a range is over). One
-//! block still over the limit is cut as text by [`crate::paging::cut`]. Units of one level
-//! next to each other are packed while they fit.
+//! ranges (`split_rows` at a quarter of the part, a range over the limit cut again with half
+//! the size up to 8 times), which are joined again while they fit; a CSV column profile goes
+//! with the first rows of its table. One block still over the limit is cut as text by
+//! [`crate::paging::cut`]. Units of one level next to each other are packed while they fit,
+//! and a last pass packs neighbours inside one top-level unit whatever level made them: a
+//! heading with the rows after it, the last rows with the notes and pages after them.
 //!
 //! Each unit is measured by [`Measure`] against the part size less the worst case a part
 //! file adds around it (title line, description, `## Relations`, F11). The measure counts
@@ -337,6 +340,55 @@ struct Item<'a> {
     /// Rezzer made it and titled it itself (`Start`, `Footnotes`): its title never changes
     /// for a clash.
     rezzer: bool,
+    /// The unit on the top level it lies in: the final packing never joins two of them.
+    top: usize,
+    /// The paragraphs it holds, counted in its part around it from 1: they make its
+    /// location more exact ([`Item::shown_location`]).
+    paragraphs: Option<(usize, usize)>,
+    /// Rows of a table: the title of the unit that holds the table. Its lead and tail pieces
+    /// carry that title, so a part that packs them with the rows is named by the rows.
+    table: Option<String>,
+    /// The units it holds when packed in the final pass, by title (ruling P5-AH); empty for
+    /// one unit.
+    held: Vec<String>,
+}
+
+impl Item<'_> {
+    /// Where it lies, with its paragraphs: `Start, paragraphs 12 to 40`, `Intro, paragraph 3`.
+    fn shown_location(&self) -> String {
+        match self.paragraphs {
+            Some((a, b)) if a == b => {
+                capped(&format!("{}, paragraph {a}", self.location), TITLE_CAP)
+            }
+            Some((a, b)) => capped(
+                &format!("{}, paragraphs {a} to {b}", self.location),
+                TITLE_CAP,
+            ),
+            None => self.location.clone(),
+        }
+    }
+
+    /// The pages it holds: its own, else those of the page it lies in.
+    fn on_pages(&self) -> Option<(u32, u32)> {
+        self.pages.or_else(|| {
+            let page = self
+                .wraps
+                .iter()
+                .rev()
+                .find(|w| w.kind == SectionKind::Page)?;
+            let n = page.anchor?.strip_prefix('p')?.parse().ok()?;
+            Some((n, n))
+        })
+    }
+
+    /// The titles of the units it holds.
+    fn held(&self) -> Vec<String> {
+        if self.held.is_empty() {
+            vec![self.title.clone()]
+        } else {
+            self.held.clone()
+        }
+    }
 }
 
 /// A unit as planned: the item, and how many pieces its text is cut into (more than one only
@@ -347,8 +399,12 @@ struct Spec<'a> {
     /// A name part after the base, for row ranges.
     suffix: String,
     pieces: usize,
-    /// The blocks whose anchors lead to this unit.
-    anchors: Option<&'a [Block]>,
+    /// The runs of blocks whose anchors lead to this unit; none for its own slice.
+    anchors: Vec<(&'a [Block], usize, usize)>,
+    /// The anchors of sections it holds besides its wraps (a packed unit's inner sections).
+    wrap_anchors: Vec<&'a str>,
+    /// Its size by [`Measure`], when the plan measured it.
+    cost: Option<usize>,
 }
 
 /// The names of a family's members: what the `n`-th of them (from 1) is titled.
@@ -550,6 +606,9 @@ struct Splitter<'a> {
     /// A trial render's notes: undone after each measure.
     trial: Notes<'a>,
     next_family: usize,
+    /// Blocks shown in another unit than their own (a column profile with the first rows of
+    /// its table): left out where they stand.
+    moved: HashSet<*const Block>,
 }
 
 impl<'a> Splitter<'a> {
@@ -619,6 +678,7 @@ impl<'a> Splitter<'a> {
             footnotes,
             trial: Notes::new(&doc.facets.annotations),
             next_family: 0,
+            moved: HashSet::new(),
         }
     }
 
@@ -656,6 +716,7 @@ impl<'a> Splitter<'a> {
             let items = self.top_items();
             self.plan(items, &mut specs);
         }
+        let specs = self.pack(specs);
         self.write(specs)
     }
 
@@ -674,6 +735,18 @@ impl<'a> Splitter<'a> {
     ) -> String {
         let ctx = self.ctx(notes);
         let mut list: Cow<'_, [Block]> = Cow::Borrowed(content.blocks());
+        if !self.moved.is_empty()
+            && list
+                .iter()
+                .any(|b| self.moved.contains(&std::ptr::from_ref(b)))
+        {
+            list = Cow::Owned(
+                list.iter()
+                    .filter(|b| !self.moved.contains(&std::ptr::from_ref(*b)))
+                    .cloned()
+                    .collect(),
+            );
+        }
         if let Some(links) = links
             && list.iter().any(|b| block_needs_rewrite(b, links, 0))
         {
@@ -833,6 +906,10 @@ impl<'a> Splitter<'a> {
             heading_only: false,
             rezzer: true,
             last: true,
+            top: 0,
+            paragraphs: None,
+            table: None,
+            held: Vec::new(),
         };
         let pages = body.iter().any(|b| page_number(b).is_some());
         let chapters = if pages { chapters(doc) } else { Vec::new() };
@@ -859,6 +936,9 @@ impl<'a> Splitter<'a> {
             } else {
                 items.extend(self.items_of(body, from, to, &[], &start, true));
             }
+        }
+        for (k, item) in items.iter_mut().enumerate() {
+            item.top = k;
         }
         items
     }
@@ -911,6 +991,10 @@ impl<'a> Splitter<'a> {
                 heading_only: false,
                 rezzer: chapter.is_none(),
                 last: true,
+                top: start.top,
+                paragraphs: None,
+                table: None,
+                held: Vec::new(),
             });
         };
         for (i, b) in list.iter().enumerate().take(to).skip(from) {
@@ -993,6 +1077,10 @@ impl<'a> Splitter<'a> {
             heading_only: false,
             rezzer: parent.is_some_and(|p| p.rezzer),
             last,
+            top: parent.map_or(0, |p| p.top),
+            paragraphs: None,
+            table: None,
+            held: Vec::new(),
         }
     }
 
@@ -1089,6 +1177,10 @@ impl<'a> Splitter<'a> {
             heading_only: false,
             rezzer,
             last,
+            top: parent.top,
+            paragraphs: None,
+            table: None,
+            held: Vec::new(),
         }
     }
 
@@ -1149,6 +1241,8 @@ impl<'a> Splitter<'a> {
     ) -> Vec<Item<'a>> {
         let mut out = Vec::new();
         let mut i = from;
+        // The paragraphs before, counted from the start of the run.
+        let mut before = 0;
         while i < to {
             let mut j = i;
             while j + 1 < to && leads(&list[j]) {
@@ -1160,7 +1254,7 @@ impl<'a> Splitter<'a> {
                     j += 1;
                 }
             }
-            out.push(self.titled_item(
+            let mut item = self.titled_item(
                 None,
                 list,
                 i,
@@ -1169,7 +1263,16 @@ impl<'a> Splitter<'a> {
                 parent,
                 Expand::Atom,
                 last && j == to,
-            ));
+            );
+            let held = list[i..j]
+                .iter()
+                .filter(|b| matches!(b, Block::Paragraph { .. }))
+                .count();
+            if held > 0 {
+                item.paragraphs = Some((before + 1, before + held));
+                before += held;
+            }
+            out.push(item);
             i = j;
         }
         out
@@ -1188,6 +1291,11 @@ impl<'a> Splitter<'a> {
                 i += 1;
                 continue;
             };
+            // A column profile that went with the first rows of its table.
+            if self.all_moved(&item) {
+                i += 1;
+                continue;
+            }
             if costs[i] > self.budget {
                 self.expand(item, out);
                 i += 1;
@@ -1229,7 +1337,7 @@ impl<'a> Splitter<'a> {
                 j += 1;
             }
             if j == i + 1 {
-                out.push(spec(item));
+                out.push(measured(item, costs[i]));
                 i += 1;
                 continue;
             }
@@ -1237,8 +1345,9 @@ impl<'a> Splitter<'a> {
                 .chain(items[i + 1..j].iter_mut().filter_map(Option::take))
                 .collect();
             let packed = merge(&group);
-            if self.cost(&packed) <= self.budget {
-                out.push(spec(packed));
+            let cost = self.cost(&packed);
+            if cost <= self.budget {
+                out.push(measured(packed, cost));
             } else {
                 out.extend(group.into_iter().map(spec));
             }
@@ -1370,7 +1479,10 @@ impl<'a> Splitter<'a> {
     }
 
     /// One block over the limit: a table into row ranges (retried with half the size up to 8
-    /// times while a range is over), anything else cut as text.
+    /// times while a range is over), anything else cut as text. The table's column profile
+    /// goes with its first rows when they have room for it, and neighbouring ranges are
+    /// joined again while they fit: the row estimate is careful, and a range cut again
+    /// leaves a small rest.
     fn rows(
         &mut self,
         item: Item<'a>,
@@ -1384,29 +1496,18 @@ impl<'a> Splitter<'a> {
             return;
         };
         let (lead, table, tail) = (&list[from..t], &list[t], &list[t + 1..to]);
-        let mut max = (self.budget / 4).max(1);
-        let costs_of = |ranges: &[rezzer_model::RowRange]| -> Vec<usize> {
+        // Small ranges first, a quarter of the part: joined again below while they fit, they
+        // fill the parts better than the careful row estimate does on its own.
+        let mut max = (self.budget / 16).max(1);
+        let costs_of = |this: &Self, ranges: &[rezzer_model::RowRange]| -> Vec<usize> {
             ranges
                 .iter()
-                .map(|r| {
-                    let mut probe = item.clone();
-                    probe.content = Content::Owned(r.blocks.clone());
-                    self.cost(&probe)
-                })
+                .map(|r| this.blocks_cost(&item, r.blocks.clone()))
                 .collect()
         };
         let fit = |costs: &[usize]| costs.iter().all(|c| *c <= self.budget);
         let mut ranges = split_rows(lead, table, tail, max);
-        let mut costs = costs_of(&ranges);
-        if fit(&costs) && ranges.len() > 1 {
-            // The row estimate is careful: when every range fits, ranges of twice the size
-            // are taken if they fit too, so the parts are fuller.
-            let wider = split_rows(lead, table, tail, max.saturating_mul(2));
-            let wider_costs = costs_of(&wider);
-            if fit(&wider_costs) {
-                (ranges, costs) = (wider, wider_costs);
-            }
-        }
+        let mut costs = costs_of(self, &ranges);
         // Only a range over the limit is cut again, with half the size, up to 8 times; the
         // others keep their size. A range of one row over the limit is cut as text.
         let mut tries = 0;
@@ -1426,7 +1527,7 @@ impl<'a> Splitter<'a> {
                     continue;
                 }
                 changed = true;
-                let sub_costs = costs_of(&sub);
+                let sub_costs = costs_of(self, &sub);
                 next.extend(sub.into_iter().zip(sub_costs));
             }
             (ranges, costs) = next.into_iter().unzip();
@@ -1438,14 +1539,49 @@ impl<'a> Splitter<'a> {
             out.push(cut_spec(item, self));
             return;
         }
+        // The column profile describes every row: it goes with the first ones, when they
+        // have room for it, and its own place stays empty.
+        let mut profile = None;
+        if let Some(p) = column_profile(list, t, table)
+            && costs[0] <= self.budget
+        {
+            let cost = self.blocks_cost(&item, with_profile(&ranges[0], Some(p)));
+            if cost <= self.budget {
+                profile = Some(p);
+                costs[0] = cost;
+            }
+        }
+        // Neighbours are joined while they fit: their sizes, less the lead and header band
+        // that each one after the first repeats, decide a run. One render confirms it; a run
+        // over the limit gives back its last range until it fits.
+        let fixed = self.blocks_cost(&item, header_only(&ranges[0]));
+        let mut kept: Vec<(rezzer_model::RowRange, usize)> = Vec::with_capacity(ranges.len());
+        let mut run: Vec<(rezzer_model::RowRange, usize)> = Vec::new();
+        let mut sum = 0usize;
+        for (range, cost) in ranges.into_iter().zip(costs) {
+            let more = sum.saturating_add(cost.saturating_sub(fixed));
+            if !run.is_empty() && (cost > self.budget || sum > self.budget || more > self.budget) {
+                self.join_run(&item, std::mem::take(&mut run), profile, &mut kept);
+            }
+            sum = if run.is_empty() { cost } else { more };
+            run.push((range, cost));
+        }
+        self.join_run(&item, run, profile, &mut kept);
+        if kept.len() == 1 {
+            out.push(cut_spec(item, self));
+            return;
+        }
+        if let Some(p) = profile {
+            self.moved.insert(std::ptr::from_ref(p));
+        }
         let key = table_key(list, table);
         let sheet = item
             .wraps
             .last()
             .filter(|w| w.kind == SectionKind::Sheet)
             .and_then(|w| w.title);
-        let count = ranges.len();
-        for (k, (range, cost)) in ranges.into_iter().zip(costs).enumerate() {
+        let count = kept.len();
+        for (k, (range, cost)) in kept.into_iter().enumerate() {
             let data = range.table.and_then(|i| match &range.blocks[i] {
                 Block::Table {
                     layout: Some(layout),
@@ -1455,10 +1591,12 @@ impl<'a> Splitter<'a> {
             });
             let location = match (sheet, data) {
                 (Some(sheet), Some(data)) => format!("{sheet}!{data}"),
+                _ if range.first == range.last => format!("{}, row {}", item.location, range.first),
                 _ => format!("{}, rows {} to {}", item.location, range.first, range.last),
             };
             let location = capped(&location, TITLE_CAP);
             let suffix = format!("{key}-rows-{}-{}", range.first, range.last);
+            let blocks = with_profile(&range, profile.filter(|_| k == 0));
             let row_item = Item {
                 base: item.base.clone(),
                 title: location.clone(),
@@ -1467,24 +1605,261 @@ impl<'a> Splitter<'a> {
                 pages: item.pages,
                 page_names: false,
                 wraps: item.wraps.clone(),
-                content: Content::Owned(range.blocks),
+                content: Content::Owned(blocks),
                 expand: Expand::Text,
                 lead: 0,
                 heading_only: false,
                 rezzer: false,
                 last: item.last && k + 1 == count,
+                top: item.top,
+                paragraphs: None,
+                table: Some(item.title.clone()),
+                held: Vec::new(),
             };
             let mut s = if cost > self.budget {
                 cut_spec(row_item, self)
             } else {
-                spec(row_item)
+                measured(row_item, cost)
             };
             s.suffix = suffix;
             if k == 0 {
-                s.anchors = Some(&list[from..to]);
+                s.anchors = vec![(list, from, to)];
             }
             out.push(s);
         }
+    }
+
+    /// The ranges of `run` joined into as few as fit, in order, onto `kept`: the longest
+    /// start of the run that fits by one render, then the rest the same way. The very first
+    /// range of the table carries `profile`.
+    fn join_run(
+        &self,
+        item: &Item<'a>,
+        run: Vec<(rezzer_model::RowRange, usize)>,
+        profile: Option<&Block>,
+        kept: &mut Vec<(rezzer_model::RowRange, usize)>,
+    ) {
+        let mut i = 0;
+        while i < run.len() {
+            let mut n = run.len() - i;
+            while n > 1 {
+                let joined = run[i + 1..i + n]
+                    .iter()
+                    .try_fold(run[i].0.clone(), |acc, (r, _)| {
+                        rezzer_model::join_ranges(&acc, r)
+                    });
+                if let Some(joined) = joined {
+                    let first = kept.is_empty();
+                    let cost =
+                        self.blocks_cost(item, with_profile(&joined, profile.filter(|_| first)));
+                    if cost <= self.budget {
+                        kept.push((joined, cost));
+                        break;
+                    }
+                }
+                n -= 1;
+            }
+            if n == 1 {
+                kept.push(run[i].clone());
+            }
+            i += n;
+        }
+    }
+
+    /// The size of `item` with `blocks` as its content.
+    fn blocks_cost(&self, item: &Item<'a>, blocks: Vec<Block>) -> usize {
+        let mut probe = item.clone();
+        probe.content = Content::Owned(blocks);
+        self.cost(&probe)
+    }
+
+    /// Whether every block of `item` went to another unit (a column profile).
+    fn all_moved(&self, item: &Item<'a>) -> bool {
+        let list = item.content.blocks();
+        !self.moved.is_empty()
+            && !list.is_empty()
+            && list
+                .iter()
+                .all(|b| self.moved.contains(&std::ptr::from_ref(b)))
+    }
+
+    /// The final packing (plan Task 5: units packed greedily while they fit): neighbouring
+    /// units of one top-level unit, inside the same sections, are joined in document order
+    /// while the part stays within the limit, whatever level made them. So a heading's piece
+    /// goes with the rows after it, a table's last rows with the notes after them, and a
+    /// small rest of a section with the section after it. A unit cut as text stays alone.
+    fn pack(&self, specs: Vec<Spec<'a>>) -> Vec<Spec<'a>> {
+        let mut out: Vec<Spec<'a>> = Vec::with_capacity(specs.len());
+        for mut s in specs {
+            if s.pieces == 1 && s.cost.is_none() {
+                s.cost = Some(self.cost(&s.item));
+            }
+            if let Some(prev) = out.last_mut()
+                && let (Some(a), Some(b)) = (prev.cost, s.cost)
+                && prev.pieces == 1
+                && s.pieces == 1
+                && a + 2 + b <= self.budget
+                && let Some(joined) = self.join(prev, &s)
+            {
+                let cost = self.cost(&joined.item);
+                if cost <= self.budget {
+                    *prev = Spec {
+                        cost: Some(cost),
+                        ..joined
+                    };
+                    continue;
+                }
+            }
+            out.push(s);
+        }
+        out
+    }
+
+    /// `a` and `b` as one unit, `None` when they lie in different top-level units. Inside
+    /// the sections both lie in, each keeps the sections only it lies in, written around its
+    /// blocks. A table's rows keep their name when the other one is a piece of the unit that
+    /// holds the table (its heading, its notes); else the part names every unit it holds
+    /// (ruling P5-AH).
+    fn join(&self, a: &Spec<'a>, b: &Spec<'a>) -> Option<Spec<'a>> {
+        let (x, y) = (&a.item, &b.item);
+        if x.top != y.top {
+            return None;
+        }
+        let common = x
+            .wraps
+            .iter()
+            .zip(&y.wraps)
+            .take_while(|(p, q)| p == q)
+            .count();
+        let content = match (&x.content, &y.content) {
+            (
+                Content::Slice { list, from, to },
+                Content::Slice {
+                    list: other,
+                    from: next,
+                    to: end,
+                },
+            ) if std::ptr::eq(*list, *other)
+                && to == next
+                && x.wraps.len() == common
+                && y.wraps.len() == common =>
+            {
+                Content::Slice {
+                    list,
+                    from: *from,
+                    to: *end,
+                }
+            }
+            _ => {
+                let mut blocks = self.nested(x, common);
+                blocks.extend(self.nested(y, common));
+                Content::Owned(blocks)
+            }
+        };
+        let mut anchors = anchor_runs(a);
+        anchors.extend(anchor_runs(b));
+        let mut wrap_anchors = a.wrap_anchors.clone();
+        wrap_anchors.extend(x.wraps[common..].iter().filter_map(|w| w.anchor));
+        wrap_anchors.extend(b.wrap_anchors.iter().copied());
+        wrap_anchors.extend(y.wraps[common..].iter().filter_map(|w| w.anchor));
+        let mut item = x.clone();
+        item.wraps.truncate(common);
+        item.content = content;
+        item.last = y.last;
+        item.pages = match (x.pages, y.pages) {
+            (Some((p, _)), Some((_, q))) => Some((p, q)),
+            _ => None,
+        };
+        item.rezzer = x.rezzer && y.rezzer;
+        item.page_names = false;
+        item.heading_only = false;
+        item.lead = 0;
+        let (held_x, held_y) = (x.held(), y.held());
+        let holds_only = |rows: &Item<'_>, other: &[String]| {
+            rows.table
+                .as_ref()
+                .is_some_and(|t| other.iter().all(|h| h == t))
+        };
+        // A piece on pages past the rows' pages says so in the location.
+        let within = |piece: &Item<'_>, rows: &Item<'_>| match (piece.pages, rows.on_pages()) {
+            (None, _) => true,
+            (Some((a, b)), Some((c, d))) => a >= c && b <= d,
+            (Some(_), None) => false,
+        };
+        let both = joined_location(&x.shown_location(), &y.shown_location());
+        let suffix = if y.table.is_none() && holds_only(x, &held_y) {
+            if !within(y, x) {
+                item.location = both;
+            }
+            a.suffix.clone()
+        } else if x.table.is_none() && holds_only(y, &held_x) {
+            item.base = y.base.clone();
+            item.title = y.title.clone();
+            item.location = if within(x, y) {
+                y.location.clone()
+            } else {
+                both
+            };
+            item.paragraphs = None;
+            item.family = y.family;
+            item.table = y.table.clone();
+            item.held = y.held.clone();
+            b.suffix.clone()
+        } else {
+            let mut held = held_x;
+            for h in held_y {
+                if held.last() != Some(&h) {
+                    held.push(h);
+                }
+            }
+            item.table = None;
+            item.paragraphs = match (x.paragraphs, y.paragraphs) {
+                (Some((p, _)), Some((_, q))) if x.location == y.location => Some((p, q)),
+                _ => None,
+            };
+            if item.paragraphs.is_none() {
+                item.location = both;
+            }
+            if x.family.is_none() || x.family != y.family {
+                item.family = None;
+                item.title = capped(&listed(&held), TITLE_CAP);
+            }
+            item.held = if held.len() > 1 { held } else { Vec::new() };
+            a.suffix.clone()
+        };
+        Some(Spec {
+            item,
+            suffix,
+            pieces: 1,
+            anchors,
+            wrap_anchors,
+            cost: None,
+        })
+    }
+
+    /// The blocks of `item` without the moved ones, inside the sections of its wraps from
+    /// `common` on, as [`wrapped`] writes them: a section's anchor only where the item
+    /// reaches its end.
+    fn nested(&self, item: &Item<'a>, common: usize) -> Vec<Block> {
+        let mut blocks: Vec<Block> = item
+            .content
+            .blocks()
+            .iter()
+            .filter(|b| !self.moved.contains(&std::ptr::from_ref(*b)))
+            .cloned()
+            .collect();
+        for w in item.wraps[common..].iter().rev() {
+            blocks = vec![Block::Section {
+                kind: w.kind,
+                title: w.title.map(str::to_string),
+                anchor: w
+                    .anchor
+                    .filter(|_| item.last)
+                    .map(|a| rezzer_model::Anchor(a.to_string())),
+                blocks,
+            }];
+        }
+        blocks
     }
 
     // -----------------------------------------------------------------------------------
@@ -1513,11 +1888,12 @@ impl<'a> Splitter<'a> {
         // leads to the first of them.
         let mut at: HashMap<&'a str, usize> = HashMap::new();
         for (k, s) in specs.iter().enumerate() {
-            for anchor in s.item.wraps.iter().filter_map(|w| w.anchor) {
+            let wraps = s.item.wraps.iter().filter_map(|w| w.anchor);
+            for anchor in wraps.chain(s.wrap_anchors.iter().copied()) {
                 at.entry(anchor).or_insert(k);
             }
-            if let Some(list) = anchor_source(s) {
-                collect_anchors(list, 0, &mut |anchor| {
+            for (list, from, to) in anchor_runs(s) {
+                collect_anchors(&list[from..to], 0, &mut |anchor| {
                     at.entry(anchor).or_insert(k);
                 });
             }
@@ -1586,7 +1962,7 @@ impl<'a> Splitter<'a> {
                 units.push(Unit {
                     file,
                     title: family_title(unit_title, piece_number),
-                    location: s.item.location.clone(),
+                    location: s.item.shown_location(),
                     markdown: piece,
                     naming: Naming {
                         own: s.item.rezzer,
@@ -1816,7 +2192,17 @@ fn spec(item: Item<'_>) -> Spec<'_> {
         item,
         suffix: String::new(),
         pieces: 1,
-        anchors: None,
+        anchors: Vec::new(),
+        wrap_anchors: Vec::new(),
+        cost: None,
+    }
+}
+
+/// A spec for an item that fits, measured at `cost`.
+fn measured(item: Item<'_>, cost: usize) -> Spec<'_> {
+    Spec {
+        cost: Some(cost),
+        ..spec(item)
     }
 }
 
@@ -1833,7 +2219,9 @@ fn cut_spec<'a>(mut item: Item<'a>, splitter: &mut Splitter<'a>) -> Spec<'a> {
         item,
         suffix: String::new(),
         pieces,
-        anchors: None,
+        anchors: Vec::new(),
+        wrap_anchors: Vec::new(),
+        cost: None,
     }
 }
 
@@ -1893,16 +2281,24 @@ fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
     };
     item.pages = pages;
     item.rezzer = group.iter().all(|g| g.rezzer);
-    let joined = |a: &str, b: &str| {
-        if a == b {
-            a.to_string()
-        } else {
-            capped(&format!("{a} to {b}"), TITLE_CAP)
+    let paragraphs = match (first.paragraphs, last.paragraphs) {
+        (Some((a, _)), Some((_, b)))
+            if group
+                .iter()
+                .all(|g| g.paragraphs.is_some() && g.location == first.location) =>
+        {
+            Some((a, b))
         }
+        _ => None,
     };
-    item.location = match pages {
-        Some(p) => pages_location(p),
-        None => joined(&first.location, &last.location),
+    item.paragraphs = None;
+    item.location = match (pages, paragraphs) {
+        (Some(p), _) => pages_location(p),
+        (None, Some(_)) => {
+            item.paragraphs = paragraphs;
+            first.location.clone()
+        }
+        (None, None) => joined_location(&first.shown_location(), &last.shown_location()),
     };
     if first.page_names && pages.is_some() {
         let (a, b) = pages.unwrap_or_default();
@@ -1923,6 +2319,66 @@ fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
         item.title = capped(&listed(&titles), TITLE_CAP);
     }
     item
+}
+
+/// `<first> to <last>` as the location of packed units, or the one location they share.
+fn joined_location(a: &str, b: &str) -> String {
+    if a == b {
+        a.to_string()
+    } else {
+        capped(&format!("{a} to {b}"), TITLE_CAP)
+    }
+}
+
+/// The column profile the CSV reader writes for `table` (`list[t]`): a table of role
+/// `summary` after it in `list`, captioned `Columns <range>` with the table's range, or
+/// `Columns` when `list` holds no other table.
+fn column_profile<'x>(list: &'x [Block], t: usize, table: &Block) -> Option<&'x Block> {
+    let Block::Table { layout, .. } = table else {
+        return None;
+    };
+    let range = layout.as_ref().map(|l| l.range.as_str());
+    let summary = |b: &Block| matches!(b, Block::Table { role: Some(r), .. } if r == "summary");
+    let tables = list
+        .iter()
+        .filter(|b| matches!(b, Block::Table { .. }) && !summary(b))
+        .count();
+    list[t + 1..].iter().find(|b| match b {
+        Block::Table {
+            caption: Some(caption),
+            ..
+        } if summary(b) => match caption.strip_prefix("Columns") {
+            Some("") => tables == 1,
+            Some(rest) => rest.strip_prefix(' ').is_some_and(|r| Some(r) == range),
+            None => false,
+        },
+        _ => false,
+    })
+}
+
+/// The blocks of `range`, with `profile` right after its table.
+fn with_profile(range: &rezzer_model::RowRange, profile: Option<&Block>) -> Vec<Block> {
+    let mut blocks = range.blocks.clone();
+    if let (Some(p), Some(t)) = (profile, range.table) {
+        blocks.insert(t + 1, p.clone());
+    }
+    blocks
+}
+
+/// The lead of `range` and its table's header band, without data rows: what every range
+/// of the table repeats.
+fn header_only(range: &rezzer_model::RowRange) -> Vec<Block> {
+    let Some(t) = range.table else {
+        return range.blocks.clone();
+    };
+    let mut blocks = range.blocks[..=t].to_vec();
+    if let Some(Block::Table {
+        rows, header_rows, ..
+    }) = blocks.last_mut()
+    {
+        rows.truncate(*header_rows);
+    }
+    blocks
 }
 
 /// `page 12` or `pages 12 to 20` (decision 10).
@@ -2249,18 +2705,18 @@ impl Links<'_> {
     }
 }
 
-/// The blocks whose anchors lead to a spec's unit.
-fn anchor_source<'a>(s: &Spec<'a>) -> Option<&'a [Block]> {
-    match (&s.anchors, &s.item.content) {
-        (Some(list), _) => Some(*list),
-        (None, Content::Slice { list, from, to }) => Some(&list[*from..*to]),
-        (None, Content::Owned(_)) => None,
+/// The runs of blocks whose anchors lead to `s`: its own runs, else its slice.
+fn anchor_runs<'a>(s: &Spec<'a>) -> Vec<(&'a [Block], usize, usize)> {
+    match &s.item.content {
+        _ if !s.anchors.is_empty() => s.anchors.clone(),
+        Content::Slice { list, from, to } => vec![(*list, *from, *to)],
+        Content::Owned(_) => Vec::new(),
     }
 }
 
-/// The fragment each heading anchor has in the part file of its unit: the headings of the
-/// unit in order (its sections' titles first), slugged as the Markdown reader does, a
-/// repeated slug numbered `-1`, `-2` within the file.
+/// The fragment each heading anchor has in the part file of its unit: the headings the
+/// unit shows in order (its sections' titles first, a table's repeated lead too), slugged as
+/// the Markdown reader does, a repeated slug numbered `-1`, `-2` within the file.
 fn fragments<'a>(specs: &[Spec<'a>], at: &HashMap<&'a str, usize>) -> HashMap<&'a str, String> {
     let mut out: HashMap<&'a str, String> = HashMap::new();
     for (k, s) in specs.iter().enumerate() {
@@ -2272,11 +2728,12 @@ fn fragments<'a>(specs: &[Spec<'a>], at: &HashMap<&'a str, usize>) -> HashMap<&'
             *n += 1;
             frag
         };
-        let mut take = |anchor: Option<&'a str>, frag: String| {
+        let mut take = |anchor: Option<&str>, frag: String| {
             if let Some(a) = anchor
-                && at.get(a) == Some(&k)
+                && let Some((key, unit)) = at.get_key_value(a)
+                && *unit == k
             {
-                out.entry(a).or_insert(frag);
+                out.entry(*key).or_insert(frag);
             }
         };
         for w in &s.item.wraps {
@@ -2285,25 +2742,23 @@ fn fragments<'a>(specs: &[Spec<'a>], at: &HashMap<&'a str, usize>) -> HashMap<&'
                 take(w.anchor, frag);
             }
         }
-        if let Some(list) = anchor_source(s) {
-            walk(list, 0, &mut |node| match node {
-                Node::Block(Block::Heading {
-                    inlines, anchor, ..
-                }) => {
-                    let frag = unique(&rezzer_model::plain_text(inlines));
-                    take(anchor.as_ref().map(|a| a.0.as_str()), frag);
-                }
-                Node::Block(Block::Section {
-                    title: Some(title),
-                    anchor,
-                    ..
-                }) if !title.trim().is_empty() => {
-                    let frag = unique(title);
-                    take(anchor.as_ref().map(|a| a.0.as_str()), frag);
-                }
-                _ => {}
-            });
-        }
+        walk(s.item.content.blocks(), 0, &mut |node| match node {
+            Node::Block(Block::Heading {
+                inlines, anchor, ..
+            }) => {
+                let frag = unique(&rezzer_model::plain_text(inlines));
+                take(anchor.as_ref().map(|a| a.0.as_str()), frag);
+            }
+            Node::Block(Block::Section {
+                title: Some(title),
+                anchor,
+                ..
+            }) if !title.trim().is_empty() => {
+                let frag = unique(title);
+                take(anchor.as_ref().map(|a| a.0.as_str()), frag);
+            }
+            _ => {}
+        });
     }
     out
 }

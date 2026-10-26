@@ -336,7 +336,7 @@ fn pages_without_outline_pack() {
 #[test]
 fn headings_then_blocks() {
     // Every chunk of about 5,000 characters fits a part of 2,500 tokens alone but not with
-    // its neighbour. "Two" holds 12 paragraphs of 1,500 characters: 4 fit, 5 do not.
+    // its neighbour. "Two" holds 12 paragraphs of 1,500 characters: 5 fit, 6 do not.
     let mut d = doc(FormatId::Markdown);
     d.body.push(para(&words(5_000)));
     d.body.push(heading(2, "Alpha"));
@@ -359,7 +359,16 @@ fn headings_then_blocks() {
     assert!(list[2].markdown.starts_with("## Beta"));
     assert!(list[2].markdown.contains("### One"));
     assert!(list[3].markdown.starts_with("### Two"));
-    assert_eq!(list[3].location, "Two");
+    // Pieces without a heading of their own say which paragraphs of the heading they hold.
+    let locations: Vec<&str> = list[3..6].iter().map(|u| u.location.as_str()).collect();
+    assert_eq!(
+        locations,
+        [
+            "Two, paragraphs 1 to 5",
+            "Two, paragraphs 6 to 10",
+            "Two, paragraphs 11 to 12"
+        ]
+    );
     assert_eq!(list[4].title, "Two, part 2");
 }
 
@@ -2902,5 +2911,251 @@ fn the_overview_part_holds_every_row() {
             "{}: {reads:?}",
             p.path
         );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The final packing: every kind of unit joins its neighbour while the part fits.
+
+/// Crystalline's measure of a unit: characters / 4.
+fn tokens(u: &Unit) -> usize {
+    u.markdown.chars().count() / 4
+}
+
+/// No part under a quarter of the part size has a neighbour with clear room for it: the
+/// two together are over three quarters of the part size (the rest is the part's own
+/// title and relations). `content` is how many units are content, before the trailing
+/// sections.
+fn assert_no_small_part_with_room(list: &[Unit], content: usize, part_size: usize) {
+    for k in 0..content {
+        if tokens(&list[k]) >= part_size / 4 {
+            continue;
+        }
+        for n in [k.wrapping_sub(1), k + 1] {
+            if n < content {
+                assert!(
+                    tokens(&list[k]) + tokens(&list[n]) > part_size * 3 / 4,
+                    "{} ({} tokens) next to {} ({} tokens): {:?}",
+                    list[k].file,
+                    tokens(&list[k]),
+                    list[n].file,
+                    tokens(&list[n]),
+                    names(list)
+                );
+            }
+        }
+    }
+}
+
+/// A table without layout, as a PDF reader writes one: a header row and `n` rows.
+fn plain_table(n: usize) -> Block {
+    let row = |a: String, b: String| {
+        vec![
+            Cell::new(vec![Inline::plain(&a)]),
+            Cell::new(vec![Inline::plain(&b)]),
+        ]
+    };
+    let mut rows = vec![row("Key".into(), "Reference".into())];
+    rows.extend((1..=n).map(|i| row(format!("REF {i}"), words(160))));
+    Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }
+}
+
+fn caption(text: &str) -> Block {
+    Block::Paragraph {
+        inlines: vec![Inline::plain(text)],
+        role: Some("caption".into()),
+        anchor: None,
+    }
+}
+
+/// The NIST shape: a chapter whose first page holds a page header, the chapter heading
+/// with a caption, a long table and a footnote; the chapter's later pages are short.
+fn references_doc() -> Document {
+    let mut d = doc(FormatId::Pdf);
+    d.body.push(page(
+        1,
+        vec![
+            para("SECURITY AND PRIVACY CONTROLS"),
+            heading(1, "References"),
+            caption("LAWS, POLICIES AND GUIDELINES"),
+            plain_table(120),
+            para("34 The references cited in this appendix support the projects."),
+        ],
+    ));
+    for n in 2..=5 {
+        d.body
+            .push(page(n, vec![para(&format!("page {n} footer text"))]));
+    }
+    d.facets.outline.push(OutlineEntry {
+        level: 1,
+        title: "References".into(),
+        page: Some(1),
+    });
+    d
+}
+
+#[test]
+fn heading_rows_and_footnote_of_a_table_pack_together() {
+    let d = references_doc();
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let content = list
+        .iter()
+        .filter(|u| u.file.starts_with("references"))
+        .count();
+    assert_no_small_part_with_room(&list, content, 2_500);
+    // The page header and the heading go with the first rows, the footnote and the short
+    // pages with the last ones: no part holds only a heading, a caption or a footnote.
+    let rows: Vec<&Unit> = list.iter().filter(|u| u.file.contains("-rows-")).collect();
+    assert_eq!(rows.len(), content, "{:?}", names(&list));
+    assert!(rows[0].markdown.contains("SECURITY AND PRIVACY CONTROLS"));
+    assert!(
+        rows[0].location.starts_with("References, rows 2 to "),
+        "{}",
+        rows[0].location
+    );
+    assert!(rows[0].markdown.contains("LAWS, POLICIES AND GUIDELINES"));
+    let last = rows.last().expect("rows");
+    assert!(last.markdown.contains("34 The references cited"));
+    assert!(last.markdown.contains("page 5 footer text"));
+    // The ranges cover every row once, in order, and keep their names (ruling P5-AH).
+    let mut next = 2;
+    for u in &rows {
+        let range = u
+            .file
+            .strip_prefix("references-rows-")
+            .expect("a row range");
+        let (a, b) = range.split_once('-').expect("two row numbers");
+        let (a, b): (u32, u32) = (a.parse().expect("first"), b.parse().expect("last"));
+        assert_eq!(a, next, "{:?}", names(&list));
+        next = b + 1;
+        assert!(
+            u.title.starts_with(&format!("References, rows {a} to {b}")),
+            "{}",
+            u.title
+        );
+    }
+    assert_eq!(next, 122);
+    // The last part also holds the later pages, and its location says so.
+    assert!(
+        last.location.ends_with("to pages 2 to 5"),
+        "{}",
+        last.location
+    );
+}
+
+/// A CSV sheet as the reader writes it: a data table with its range and the column
+/// profiles of all tables after the last one.
+fn csv_doc(tables: &[(&str, &str, u32)]) -> Document {
+    let mut d = doc(FormatId::Csv);
+    let mut blocks = Vec::new();
+    for (left, right, last) in tables {
+        let mut t = sheet_table("banks", *last);
+        if let Block::Table {
+            layout: Some(layout),
+            rows,
+            ..
+        } = &mut t
+        {
+            layout.range = format!("{left}1:{right}{last}");
+            layout.data = Some(format!("{left}2:{right}{last}"));
+            layout.key = format!("banks!{left}1");
+            for row in rows.iter_mut() {
+                // The cells' anchors name the table's own columns.
+                for (j, cell) in row.iter_mut().enumerate() {
+                    let at = cell
+                        .anchor
+                        .as_ref()
+                        .map(|a| a.0.clone())
+                        .unwrap_or_default();
+                    let n = at.trim_start_matches(|c: char| !c.is_ascii_digit());
+                    let col = if j == 0 { *left } else { *right };
+                    cell.anchor = Some(Anchor(format!("banks!{col}{n}")));
+                }
+            }
+        }
+        blocks.push(t);
+    }
+    for (left, right, last) in tables {
+        blocks.push(Block::Table {
+            caption: Some(format!("Columns {left}1:{right}{last}")),
+            header_rows: 1,
+            role: Some("summary".into()),
+            rows: vec![
+                vec![
+                    Cell::new(vec![Inline::plain("Column")]),
+                    Cell::new(vec![Inline::plain("Type")]),
+                ],
+                vec![
+                    Cell::new(vec![Inline::plain(format!("Item {left}"))]),
+                    Cell::new(vec![Inline::plain("text")]),
+                ],
+                vec![
+                    Cell::new(vec![Inline::plain(format!("Amount {right}"))]),
+                    Cell::new(vec![Inline::plain("integer")]),
+                ],
+            ],
+            alignments: Vec::new(),
+            anchor: None,
+            layout: None,
+        });
+    }
+    d.body.push(sheet("banks", blocks));
+    d
+}
+
+#[test]
+fn a_column_profile_goes_with_the_first_rows_of_its_table() {
+    let d = csv_doc(&[("A", "B", 900)]);
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let rows: Vec<&Unit> = list.iter().filter(|u| u.file.contains("-rows-")).collect();
+    assert!(rows.len() > 1, "{:?}", names(&list));
+    // Only range parts: the profile has no part of its own.
+    assert!(
+        list.iter().all(|u| u.file.contains("-rows-")),
+        "{:?}",
+        names(&list)
+    );
+    assert_no_small_part_with_room(&list, list.len(), 2_500);
+    let profile = "**Columns A1:B900**";
+    assert!(rows[0].markdown.contains(profile), "{}", rows[0].markdown);
+    assert_eq!(
+        list.iter().filter(|u| u.markdown.contains(profile)).count(),
+        1
+    );
+    // It comes after the rows of its part.
+    let at = rows[0].markdown.find(profile).expect("profile");
+    assert!(rows[0].markdown[..at].contains("item number 2 "));
+}
+
+#[test]
+fn each_column_profile_goes_with_its_own_table() {
+    // Two tables side by side, both cut, and both profiles after the second table.
+    let d = csv_doc(&[("A", "B", 700), ("D", "E", 700)]);
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    for (key, profile) in [
+        ("-a1-rows-", "**Columns A1:B700**"),
+        ("-d1-rows-", "**Columns D1:E700**"),
+    ] {
+        let holders: Vec<&str> = list
+            .iter()
+            .filter(|u| u.markdown.contains(profile))
+            .map(|u| u.file.as_str())
+            .collect();
+        let first = list
+            .iter()
+            .find(|u| u.file.contains(key))
+            .expect("ranges of the table");
+        assert_eq!(holders, [first.file.as_str()], "{:?}", names(&list));
     }
 }
