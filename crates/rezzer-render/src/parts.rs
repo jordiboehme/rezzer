@@ -34,7 +34,8 @@ use crate::blocks;
 use crate::bullets;
 use crate::describe::{self, Counts, Measure, body_tokens, counted};
 use crate::split::{
-    self, Names, TITLE_CAP, Unit, capped, family_title, part_budget, part_measure, pieces,
+    self, LIST_TITLE, Names, TITLE_CAP, Unit, capped, family_title, part_budget, part_measure,
+    pieces,
 };
 use crate::{
     OutputSection, PartMeta, RenderOptions, Selection, chosen_sheets, facets, frontmatter,
@@ -294,11 +295,11 @@ impl Writer<'_> {
             .saturating_sub(GOES_ON_ROOM)
             .max(self.budget / 2);
         let list = pieces(&text, budget, self.measure);
-        let mut parts = self.family(&list, "contents", "Contents", names);
+        let mut parts = self.family(&list, "contents", LIST_TITLE, names);
         for k in 1..parts.len() {
             let goes_on = format!(
                 "\n\nThe list goes on in [{}]({}).",
-                label(&family_title("Contents", k + 1), false),
+                label(&family_title(LIST_TITLE, k + 1), false),
                 destination(&format!("{}.md", parts[k].file))
             );
             parts[k - 1].markdown.push_str(&goes_on);
@@ -608,12 +609,12 @@ impl Writer<'_> {
             1 => format!(
                 "## Parts\n\nThe {} parts are listed in {}.",
                 listed.len(),
-                link("Contents")
+                link(LIST_TITLE)
             ),
             k => format!(
-                "## Parts\n\nThe {} parts are listed in {k} contents parts, starting with {}.",
+                "## Parts\n\nThe {} parts are listed in {k} parts, starting with {}.",
                 listed.len(),
-                link("Contents")
+                link(LIST_TITLE)
             ),
         }
     }

@@ -1337,67 +1337,87 @@ fn a_table_without_layout_is_cut_again_with_its_own_row_numbers() {
 use rezzer_model::{FieldAction, FormField, Loss, LossReason, OverviewPart, Severity, Signature};
 use rezzer_render::{Output, PartFile, render_output};
 
-/// Ruling P5-AE: no two parts of a document share a title, as Crystalline compares them (in
-/// lower case), and none takes the title of a contents part.
+/// Ruling P5-AF: a source chapter named `Contents` keeps its name (Rezzer's own list parts
+/// are `List of parts`), and its pieces are numbered as one unit.
 #[test]
-fn repeated_chapter_titles_give_unique_part_titles() {
+fn a_source_contents_chapter_keeps_its_name() {
     let mut d = doc(FormatId::Markdown);
-    for title in [
-        "Abstract",
-        "Chapter 1",
-        "abstract",
-        "Abstract",
-        "Contents",
-        "Abstract, part 2",
+    d.body.push(heading(1, "Contents"));
+    d.body.push(para(&words(30_000)));
+    d.body.push(heading(1, "Chapter 1"));
+    d.body.push(para(&words(8_000)));
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let all = titles(&list);
+    assert_eq!(&all[..2], ["Contents", "Contents, part 2"], "{all:?}");
+    assert!(all.contains(&"Chapter 1"), "{all:?}");
+}
+
+/// Ruling P5-AF: units that share a title get their location in words.
+#[test]
+fn chapters_sharing_a_title_get_their_pages() {
+    let mut d = doc(FormatId::Pdf);
+    for n in 1..=4 {
+        d.body.push(page(n, vec![para(&words(4_000))]));
+    }
+    for p in [1, 3] {
+        d.facets.outline.push(OutlineEntry {
+            level: 1,
+            title: "Notes".into(),
+            page: Some(p),
+        });
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    assert_eq!(
+        titles(&list),
+        ["Notes (pages 1 to 2)", "Notes (pages 3 to 4)"]
+    );
+}
+
+/// Ruling P5-AF: units that share title and location get ` (2)`, not `, part 2`.
+#[test]
+fn units_at_one_place_get_a_number() {
+    let mut d = doc(FormatId::Markdown);
+    for _ in 0..2 {
+        d.body.push(heading(1, "Notes"));
+        d.body.push(para(&words(8_000)));
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    assert_eq!(titles(&list), ["Notes", "Notes (2)"]);
+}
+
+/// A title like one of Rezzer's own parts gets a word, and no title is used twice, also not
+/// in another letter case or as a piece title.
+#[test]
+fn titles_stay_unique_against_own_parts_and_pieces() {
+    let mut d = doc(FormatId::Markdown);
+    for (title, chars) in [
+        ("Logic", 8_000),
+        ("Abstract", 30_000),
+        ("abstract, part 2", 8_000),
     ] {
         d.body.push(heading(1, title));
-        d.body.push(para(&words(9_000)));
+        d.body.push(para(&words(chars)));
     }
     let list = units(&d, 2_500);
     assert_within(&list, 2_500);
-    let mut seen = std::collections::HashSet::new();
-    for unit in &list {
-        let key = unit.title.trim().to_lowercase();
-        assert!(
-            seen.insert(key.clone()),
-            "{key} twice in {:?}",
-            titles(&list)
-        );
-        assert!(
-            key != "contents"
-                && !key
-                    .strip_prefix("contents, part ")
-                    .is_some_and(|n| n.parse::<usize>().is_ok()),
-            "{key}"
-        );
-    }
     let all = titles(&list);
-    assert!(all.contains(&"Abstract"), "{all:?}");
-    assert!(all.contains(&"Chapter 1"), "{all:?}");
-    assert!(all.iter().any(|t| t.starts_with("Contents (")), "{all:?}");
-
-    // One outline chapter over many pages is cut into page ranges: the location tells them
-    // apart.
-    let mut d = doc(FormatId::Pdf);
-    for n in 1..=12 {
-        d.body.push(page(n, vec![para(&words(9_000))]));
-    }
-    d.facets.outline.push(OutlineEntry {
-        level: 1,
-        title: "Abstract".into(),
-        page: Some(1),
-    });
-    let list = units(&d, 2_500);
-    assert_within(&list, 2_500);
-    let all = titles(&list);
+    assert_eq!(all[0], "Logic (section)", "{all:?}");
     let unique: std::collections::HashSet<_> = all.iter().map(|t| t.to_lowercase()).collect();
     assert_eq!(unique.len(), all.len(), "{all:?}");
-    assert!(
-        all.contains(&"Abstract (page 1)")
-            || all.contains(&"Abstract (pages 1 to 2)")
-            || all.iter().any(|t| t.starts_with("Abstract (page")),
-        "{all:?}"
-    );
+}
+
+/// Ruling P5-AD with the Markdown reader: a wikilink in the text becomes escaped text, one in
+/// a code span or a fence stays as it is.
+#[test]
+fn wikilinks_in_code_stay_and_in_text_are_escaped() {
+    let d = read_markdown("# T\n\nA `[[x]]` b.\n\n```\n[[y]]\n```\n\nSee [[z]] and [[p_q|R]].\n");
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("A `[[x]]` b."), "{md}");
+    assert!(md.contains("\n[[y]]\n"), "{md}");
+    assert!(md.contains(r"See \[\[z\]\] and \[\[p\_q\|R\]\]."), "{md}");
 }
 
 fn titles(list: &[Unit]) -> Vec<&str> {
@@ -1706,23 +1726,23 @@ fn main_document_within_limit_with_many_parts() {
     assert!(contents.len() > 1, "the list needs more than one part");
     assert_eq!(contents[0].path, "report-md/contents.md");
     assert_eq!(contents[1].path, "report-md/contents-2.md");
-    assert_eq!(contents[0].title, "report.md: Contents");
-    assert_eq!(contents[1].title, "report.md: Contents, part 2");
-    assert_eq!(contents[0].location, "Contents");
+    assert_eq!(contents[0].title, "report.md: List of parts");
+    assert_eq!(contents[1].title, "report.md: List of parts, part 2");
+    assert_eq!(contents[0].location, "List of parts");
     // The main document links the first one and lists none of the parts itself.
     let parts = section_lines(&out.main, "Parts");
     assert_eq!(
         parts,
         [format!(
-            "The 2000 parts are listed in {} contents parts, starting with \
-             [Contents](report-md/contents.md).",
+            "The 2000 parts are listed in {} parts, starting with \
+             [List of parts](report-md/contents.md).",
             contents.len()
         )]
     );
     // Each contents part but the last leads on to the next one.
     for (k, c) in contents.iter().enumerate() {
         let goes_on = format!(
-            "The list goes on in [Contents, part {}](contents-{}.md).",
+            "The list goes on in [List of parts, part {}](contents-{}.md).",
             k + 2,
             k + 2
         );

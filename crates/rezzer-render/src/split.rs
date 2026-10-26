@@ -355,53 +355,96 @@ pub(crate) fn family_title(title: &str, n: usize) -> String {
     }
 }
 
-/// Makes the unit titles of one document unique (ruling P5-AE), as Crystalline compares
-/// them (trimmed, in lower case), so no two parts share a title (L003). A title that two
-/// units share, or that a `contents` part takes (`Contents`, `Contents, part <n>`), gets the
-/// unit's location in words, `Abstract (pages 3 to 5)`; when that is no different, the
-/// piece number, `Abstract, part 2` (`Contents (2)` for a unit titled `Contents`). Every title stays within [`TITLE_CAP`] and the 12
-/// characters of a piece number, as the part overhead counts it.
-pub(crate) fn unique_titles(units: &mut [Unit]) {
-    fn key(title: &str) -> String {
-        title.trim().to_lowercase()
-    }
-    fn reserved(key: &str) -> bool {
-        key == "contents"
+/// The title of Rezzer's own parts that list the other parts (ruling P5-AF), so a source
+/// chapter named `Contents` keeps its name.
+pub(crate) const LIST_TITLE: &str = "List of parts";
+
+/// The titles of Rezzer's own parts, in lower case: a unit of the source titled like one of
+/// them (or like a piece of one, `Logic, part 2`) gets a word added.
+const OWN_TITLES: [&str; 8] = [
+    "list of parts",
+    "properties",
+    "logic",
+    "annotations",
+    "changes",
+    "embedded",
+    "outline",
+    "not read",
+];
+
+/// A title as Crystalline compares it (L003): trimmed, in lower case.
+fn title_key(title: &str) -> String {
+    title.trim().to_lowercase()
+}
+
+fn own_title(key: &str) -> bool {
+    OWN_TITLES.iter().any(|own| {
+        key == *own
             || key
-                .strip_prefix("contents, part ")
-                .is_some_and(|n| n.parse::<usize>().is_ok())
-    }
+                .strip_prefix(own)
+                .is_some_and(|rest| rest.starts_with(", "))
+    })
+}
+
+/// `title` with ` <suffix>` added, within [`TITLE_CAP`]: the title is cut to make room.
+fn with_suffix(title: &str, suffix: &str) -> String {
+    let room = TITLE_CAP.saturating_sub(suffix.chars().count() + 1);
+    format!("{} {suffix}", capped(title, room))
+}
+
+/// The titles of the units of one document (title, location), made unique before their
+/// pieces are numbered (rulings P5-AE and P5-AF), as Crystalline compares titles (L003).
+/// Units that share a title get their location in words, `Abstract (pages 3 to 5)`; units
+/// that share title and location get ` (2)`, ` (3)` after the first. A unit titled like one
+/// of Rezzer's own parts gets its location, or the word `(section)`. Each title stays within
+/// [`TITLE_CAP`], so the pieces' `, part <n>` fits the part overhead.
+pub(crate) fn unit_titles(units: &[(&str, &str)]) -> Vec<String> {
     let mut count: HashMap<String, usize> = HashMap::new();
-    for unit in units.iter() {
-        *count.entry(key(&unit.title)).or_insert(0) += 1;
+    for (title, _) in units {
+        *count.entry(title_key(title)).or_insert(0) += 1;
     }
-    let clashes = |k: &str| count.get(k).is_some_and(|&n| n > 1) || reserved(k);
-    let mut taken: HashSet<String> = count.keys().filter(|k| !clashes(k)).cloned().collect();
-    for unit in units.iter_mut() {
-        if !clashes(&key(&unit.title)) {
-            continue;
-        }
-        let location = unit.location.trim();
-        let base = if location.is_empty() || key(location) == key(&unit.title) {
-            unit.title.clone()
-        } else {
-            let suffix = format!(" ({})", capped(location, 60));
-            let room = (TITLE_CAP + 12).saturating_sub(suffix.chars().count());
-            format!("{}{suffix}", capped(&unit.title, room))
-        };
-        let mut title = base.clone();
-        let mut n = 1;
-        while reserved(&key(&title)) || !taken.insert(key(&title)) {
-            n += 1;
-            let cut = capped(&base, TITLE_CAP);
-            // `Contents, part <n>` is a contents part's own title.
-            title = if reserved(&key(&base)) {
-                format!("{cut} ({n})")
+    let located: Vec<String> = units
+        .iter()
+        .map(|(title, location)| {
+            let key = title_key(title);
+            let shared = count.get(&key).is_some_and(|&n| n > 1);
+            let own = own_title(&key);
+            let location = location.trim();
+            if (shared || own) && !location.is_empty() && title_key(location) != key {
+                with_suffix(title, &format!("({})", capped(location, 60)))
+            } else if own {
+                with_suffix(title, "(section)")
             } else {
-                family_title(&cut, n)
-            };
+                capped(title, TITLE_CAP)
+            }
+        })
+        .collect();
+    let mut taken: HashSet<String> = HashSet::new();
+    let mut out = Vec::with_capacity(located.len());
+    for title in located {
+        let mut unique = title.clone();
+        let mut n = 1;
+        while !taken.insert(title_key(&unique)) {
+            n += 1;
+            unique = with_suffix(&title, &format!("({n})"));
         }
-        unit.title = title;
+        out.push(unique);
+    }
+    out
+}
+
+/// The last guard: a title that is still used twice in the document (a source unit titled
+/// like a piece, `Notes, part 2`) gets ` (2)`, ` (3)`. Rezzer's own parts come last, so a
+/// source unit keeps its title before them only when nothing clashes.
+fn distinct_titles(units: &mut [Unit]) {
+    let mut taken: HashSet<String> = HashSet::new();
+    for unit in units.iter_mut() {
+        let base = unit.title.clone();
+        let mut n = 1;
+        while !taken.insert(title_key(&unit.title)) {
+            n += 1;
+            unit.title = with_suffix(&capped(&base, TITLE_CAP), &format!("({n})"));
+        }
     }
 }
 
@@ -1388,6 +1431,28 @@ impl<'a> Splitter<'a> {
         let frags = fragments(&specs, &at);
 
         let notes = Notes::new(&self.doc.facets.annotations);
+        // One title per unit before its pieces are numbered: a family (a section cut into
+        // several units) is one unit, named by its first member.
+        let family_of = |k: usize| specs[k].item.family.unwrap_or(usize::MAX - k);
+        let mut seen: HashSet<usize> = HashSet::new();
+        let firsts: Vec<(usize, usize)> = (0..specs.len())
+            .filter(|&k| seen.insert(family_of(k)))
+            .map(|k| (family_of(k), k))
+            .collect();
+        let pairs: Vec<(&str, &str)> = firsts
+            .iter()
+            .map(|&(_, k)| {
+                (
+                    specs[k].item.title.as_str(),
+                    specs[k].item.location.as_str(),
+                )
+            })
+            .collect();
+        let titles: HashMap<usize, String> = firsts
+            .iter()
+            .map(|&(f, _)| f)
+            .zip(unit_titles(&pairs))
+            .collect();
         let mut units: Vec<Unit> = Vec::new();
         let mut families: HashMap<usize, usize> = HashMap::new();
         for (k, s) in specs.iter().enumerate() {
@@ -1406,7 +1471,8 @@ impl<'a> Splitter<'a> {
             );
             let pieces = self.pieces(&text);
             let lone = pieces.len() == 1 && s.item.family.is_none();
-            let family = s.item.family.unwrap_or(usize::MAX - k);
+            let family = family_of(k);
+            let unit_title = &titles[&family];
             for (p, piece) in pieces.into_iter().enumerate() {
                 let file = match p {
                     0 => files[k].clone(),
@@ -1418,9 +1484,9 @@ impl<'a> Splitter<'a> {
                 let n = families.entry(family).or_insert(0);
                 *n += 1;
                 let title = if lone {
-                    s.item.title.clone()
+                    unit_title.clone()
                 } else {
-                    family_title(&s.item.title, *n)
+                    family_title(unit_title, *n)
                 };
                 units.push(Unit {
                     file,
@@ -1441,7 +1507,7 @@ impl<'a> Splitter<'a> {
         for (base, location, text) in self.trailing(&notes, &links) {
             self.push_trailing(&mut units, &mut names, base, location, &text);
         }
-        unique_titles(&mut units);
+        distinct_titles(&mut units);
         units
     }
 
