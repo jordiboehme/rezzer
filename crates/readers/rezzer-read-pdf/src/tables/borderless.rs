@@ -485,8 +485,12 @@ fn split_label(row: &mut [PlannedCell]) {
     // At the gap after the colon where the glyphs say where it is; else by an even share of
     // the characters.
     let words = run.text[..cut].split_whitespace().count() as u32;
-    let rest = if let Some(k) = run.gaps.iter().position(|g| g.words == words) {
-        let (before, mut rest) = run.cut_at(k);
+    let cut_at_gap = run
+        .gaps
+        .iter()
+        .position(|g| g.words == words)
+        .and_then(|k| run.cut_at(k));
+    let rest = if let Some((before, mut rest)) = cut_at_gap {
         rest.text = rest.text.trim_start().to_string();
         *run = before;
         rest

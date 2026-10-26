@@ -1935,6 +1935,8 @@ fn assert_pay_slip(out: &ReadOutcome) {
             "9004|Muster D"
         ]
     );
+    // The left block (Lh, Li and their values) still reads into the first column here; Task
+    // 9 reads it as label and value pairs and changes these two rows.
     assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
     assert_eq!(
         body(&found[4]),
@@ -2321,5 +2323,48 @@ fn padded_values_are_cut_at_the_rules_of_their_grid() {
     for (got, want) in found[0][1..].iter().zip(rows) {
         assert_eq!(got, &want, "{found:#?}");
     }
+    assert_no_loss(&out);
+}
+
+/// Guard: values that run on into the next field of an open row (no rule is drawn there) go
+/// by their middle; two of nine runs doing so do not refuse the section.
+#[test]
+fn values_running_into_the_next_field_keep_the_section() {
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![columns_line(
+            675.0,
+            &[(1, "Muster"), (12, "ABCDEFGH"), (40, "IJKLMNOP"), (58, "Z")],
+        )],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0][1],
+        ["Muster", "ABCDEFGH", "", "IJKLMNOP", "Z"],
+        "{found:#?}"
+    );
+    assert_no_loss(&out);
+}
+
+/// A note of prose across the columns under a header of hanging rules is not cut at them: it
+/// stays one cell across the row, as before values went into their columns.
+#[test]
+fn a_note_across_an_open_row_stays_whole() {
+    let note = "Bitte die Hinweise auf der Rueckseite beachten";
+    let page = hanging_section(
+        &[120.0, 200.0, 280.0, 340.0],
+        &["Aa", "Ab", "Ac", "Ad", "Ae"],
+        vec![
+            columns_line(675.0, &[(1, "Muster"), (12, "ABCD"), (40, "11")]),
+            columns_line(665.0, &[(1, note)]),
+        ],
+    );
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].last(), Some(&vec![note.to_string()]), "{found:#?}");
     assert_no_loss(&out);
 }

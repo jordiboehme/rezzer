@@ -100,24 +100,26 @@ pub(crate) struct Gap {
 
 impl Run {
     /// The run cut at its gap `k`: the words before it, and the words after it as a run that
-    /// starts a new word, each with its own extent and gaps.
-    pub(crate) fn cut_at(&self, k: usize) -> (Run, Run) {
-        let gap = self.gaps[k];
+    /// starts a new word, each with its own extent and gaps. `None` when the text no longer
+    /// has the words the gap was taken after.
+    pub(crate) fn cut_at(&self, k: usize) -> Option<(Run, Run)> {
+        let gap = *self.gaps.get(k)?;
         let mut seen = 0u32;
         let mut in_word = false;
-        let mut at = self.text.len();
+        let mut at = None;
         for (i, c) in self.text.char_indices() {
             if c.is_whitespace() {
                 in_word = false;
             } else if !in_word {
                 if seen == gap.words {
-                    at = i;
+                    at = Some(i);
                     break;
                 }
                 seen += 1;
                 in_word = true;
             }
         }
+        let at = at.filter(|_| gap.words > 0)?;
         let end = self.x + self.w;
         let mut before = self.clone();
         before.text = self.text[..at].trim_end().to_string();
@@ -131,12 +133,12 @@ impl Run {
             self.gaps[k + 1..]
                 .iter()
                 .map(|g| Gap {
-                    words: g.words - gap.words,
+                    words: g.words.saturating_sub(gap.words),
                     ..*g
                 })
                 .collect(),
         );
-        (before, after)
+        Some((before, after))
     }
 }
 
@@ -2327,6 +2329,21 @@ mod tests {
             off_axis: false,
             gaps: Gaps::default(),
         }
+    }
+
+    #[test]
+    fn a_cut_at_words_the_text_no_longer_has_is_none() {
+        let mut r = run("AA BB", 0, 700.0, 10.0);
+        r.gaps = Gaps::new(vec![Gap {
+            words: 1,
+            from: 82.0,
+            to: 86.0,
+        }]);
+        let (before, after) = r.cut_at(0).expect("a cut");
+        assert_eq!((before.text.as_str(), after.text.as_str()), ("AA", " BB"));
+        r.text = "AABB".into();
+        assert!(r.cut_at(0).is_none());
+        assert!(r.cut_at(1).is_none());
     }
 
     #[test]

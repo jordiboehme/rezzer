@@ -1358,6 +1358,29 @@ fn line_in_an_empty_column_starts_a_row() {
 }
 
 #[test]
+fn a_first_cell_that_wraps_upward_joins_its_row() {
+    // The first line of a label alone above the line with the values set at the middle of
+    // the row: it goes on that row, not a row of its own.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A")],
+        &[
+            (0, "mit Zuschlag"),
+            (1, "1.000,00"),
+            (2, "10 %"),
+            (3, "100,00"),
+        ],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(0, "Steuer D"), (1, "200,00"), (2, "5 %"), (3, "10,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[1][0], "Steuer A mit Zuschlag", "{rows:?}");
+}
+
+#[test]
 fn word_rows_under_a_band_stay_rows() {
     // Guard: lines of words only that each fill at least half of the columns are each a row,
     // as before the rule for sparse lines.

@@ -284,7 +284,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         .collect();
     for starts in row_starts(&pieces, used.len()) {
         rows += usize::from(starts);
-        row_of.push(rows - 1);
+        row_of.push(rows.saturating_sub(1));
     }
     if rows < 3 {
         refuse("too few rows follow its header", take);
@@ -389,20 +389,40 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
 /// the `used` columns starts one, also with an empty first cell (a date printed once a day).
 /// A line that fills less goes on the row above only when each of its pieces goes on text in
 /// its column there and none is a number (a cell that wraps); any other line is a row of its
-/// own, with empty cells where it has no piece. The first line always starts a row.
+/// own, with empty cells where it has no piece. Lines of words above the first line that
+/// fills half of the columns, each in a column that line fills, are the first lines of its
+/// cells (a cell that wraps upward over values set at the middle of the row): they start no
+/// row and go on the first row. Any other first line starts a row.
 pub(super) fn row_starts(lines: &[Vec<(usize, bool)>], used: usize) -> Vec<bool> {
-    let mut filled: Vec<usize> = Vec::new();
-    let mut out = Vec::with_capacity(lines.len());
-    for (k, pieces) in lines.iter().enumerate() {
+    let columns = |pieces: &[(usize, bool)]| {
         let mut cols: Vec<usize> = pieces.iter().map(|p| p.0).collect();
         cols.sort_unstable();
         cols.dedup();
-        let joins = k > 0
+        cols
+    };
+    let full = |pieces: &[(usize, bool)]| 2 * columns(pieces).len() >= used;
+    // The lines above the first full line that wrap upward into its cells.
+    let lead = lines
+        .iter()
+        .position(|l| full(l))
+        .filter(|&f| {
+            let below = columns(&lines[f]);
+            lines[..f]
+                .iter()
+                .flatten()
+                .all(|(c, number)| !number && below.contains(c))
+        })
+        .unwrap_or(0);
+    let mut filled: Vec<usize> = lines[..lead].iter().flat_map(|l| columns(l)).collect();
+    let mut out = vec![false; lead];
+    for (k, pieces) in lines.iter().enumerate().skip(lead) {
+        let cols = columns(pieces);
+        let joins = k > lead
             && 2 * cols.len() < used
             && pieces
                 .iter()
                 .all(|(c, number)| !number && filled.contains(c));
-        if !joins {
+        if !joins && k > lead {
             filled.clear();
         }
         filled.extend(cols);

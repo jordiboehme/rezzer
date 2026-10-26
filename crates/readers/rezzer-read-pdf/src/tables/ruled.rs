@@ -409,9 +409,28 @@ pub(super) fn ruled(
         };
         // An open row (the lines under a header of hanging rules) has a cell for each of the
         // header's columns: each value goes into the column it stands under, and a field
-        // left empty is an empty cell.
-        let is_open: Vec<bool> = (0..rows)
+        // left empty is an empty cell. A note of prose across the columns keeps the row one
+        // cell, as before (`footed` is each row under a header of hanging rules).
+        let footed: Vec<bool> = (0..rows)
             .map(|r| open.iter().any(|f| (ys[r] - f).abs() <= SNAP))
+            .collect();
+        let mut noted_rows: HashSet<usize> = HashSet::new();
+        for &i in &within {
+            let run = &flow.runs[i];
+            let (_, cy) = middle(run);
+            let r = ys
+                .partition_point(|e| *e > cy)
+                .saturating_sub(1)
+                .min(rows - 1);
+            let across = xs[1..cols]
+                .iter()
+                .any(|&e| e > run.x + SNAP && e < run.x + run.w - SNAP);
+            if footed[r] && across && prose_like(&run.text) {
+                noted_rows.insert(r);
+            }
+        }
+        let is_open: Vec<bool> = (0..rows)
+            .map(|r| footed[r] && !noted_rows.contains(&r))
             .collect();
         for (r, row) in owner.iter_mut().enumerate() {
             if is_open[r] {
@@ -451,7 +470,7 @@ pub(super) fn ruled(
         // Rows of the body that only column rules part: the lines of a band that fill at
         // least half of its columns with text, the first of them included, each start a row.
         let mut anchors = anchor_rows(
-            flow, &within, head, &is_open, &owner, &extent, &row_at, &cell_at,
+            flow, &within, head, &footed, &owner, &extent, &row_at, &cell_at,
         );
         // The lines under a header of hanging rules are rows by the header's columns.
         open_anchors(flow, &within, &xs, &ys, &open, &row_at, &mut anchors);
@@ -483,9 +502,10 @@ pub(super) fn ruled(
             let (cx, cy) = middle(r);
             let o = cell_at(cx, cy);
             with_text.insert((o, sub_of(o.0, r)));
-            // A run that reaches over its cell's side crosses a drawn line.
+            // A run that reaches over its cell's side crosses a drawn line. In an open row no
+            // line is drawn there: a value that runs on into the next field goes by its middle.
             let (x0, x1) = (xs[o.1], xs[(o.1 + extent[&o].1 as usize).min(cols)]);
-            if r.x < x0 - SNAP || r.x + r.w > x1 + SNAP {
+            if !is_open[o.0] && (r.x < x0 - SNAP || r.x + r.w > x1 + SNAP) {
                 crossing += 1;
             }
         }
@@ -494,7 +514,7 @@ pub(super) fn ruled(
         let all: usize = extent.keys().map(|o| subs(o.0)).sum();
         let spanning: usize = extent
             .iter()
-            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !is_open[o.0])
+            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !footed[o.0])
             .map(|(o, _)| subs(o.0))
             .sum();
         // The fields of an open row are often left empty: its cells do not count here.
@@ -577,7 +597,7 @@ pub(super) fn ruled(
             header_rows: if styled {
                 head
             } else {
-                (0..is_open.iter().position(|o| *o).unwrap_or(0))
+                (0..footed.iter().position(|o| *o).unwrap_or(0))
                     .map(subs)
                     .sum()
             },
@@ -970,44 +990,34 @@ fn edges(h: &[Seg], v: &[Seg]) -> (Vec<f32>, Vec<f32>) {
     (clustered(xs), ys)
 }
 
+/// Whether the text of a run reads as a line of prose: at least [`PROSE_WORDS`] words and
+/// [`PROSE_LINE`] characters, most of them words with a small letter and no digit. Values,
+/// codes and flags do not.
+fn prose_like(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let worded = words
+        .iter()
+        .filter(|w| w.chars().any(char::is_lowercase) && !w.chars().any(|c| c.is_ascii_digit()))
+        .count();
+    words.len() >= PROSE_WORDS
+        && text.trim().chars().count() >= PROSE_LINE
+        && 2 * worded > words.len()
+}
+
 /// Steps one page may take to cut its runs at column rules; past them the rest stay whole.
 const COLUMN_CUT_WORK: usize = 1_000_000;
 
-/// Cuts each run that an inner column rule of a section crosses in the white space between
-/// two of its words, so each part stands in its own column: a value line padded into its
-/// fields often has only one or two spaces between two fields. A rule cuts at the heights it
-/// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
-/// their section (see [`hanging_feet`]). A rule within a tenth of the text size of a gap
-/// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
-/// reading order. False when more than `budget` steps were needed: the runs past them stay
-/// whole.
-fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
-    // Each rule that may cut: its place and the heights it cuts at.
-    let mut spans: Vec<(f32, f32, f32)> = Vec::new();
-    for p in parts {
-        let (xs, ys) = edges(&p.h, &p.v);
-        if xs.len() < 3 || ys.len() < 2 {
-            continue;
-        }
-        let inner = &xs[1..xs.len() - 1];
-        for s in &p.v {
-            if s.at > xs[0] + SNAP && s.at < xs[xs.len() - 1] - SNAP {
-                spans.push((s.at, s.from, s.to));
-            }
-        }
-        if p.cut || ys.len() == 2 {
-            for (foot, bottom) in hanging_feet(&p.v, &xs, &ys) {
-                spans.extend(inner.iter().map(|&x| (x, bottom, foot)));
-            }
-        }
-    }
-    if spans.is_empty() {
-        return true;
-    }
-    // The rules by place (within a tenth of a point), each place with the heights it cuts at
-    // as sorted ranges apart from each other.
+/// A rule that may cut runs: its place and the heights it cuts at, from and to.
+type Span = (f32, f32, f32);
+
+/// A place of rules that may cut runs and the heights they cut at, as sorted ranges apart
+/// from each other.
+type Place = (f32, Vec<(f32, f32)>);
+
+/// The rules that may cut runs by place (within a tenth of a point).
+fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
     spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut places: Vec<(f32, Vec<(f32, f32)>)> = Vec::new();
+    let mut places: Vec<Place> = Vec::new();
     for (x, from, to) in spans {
         match places.last_mut() {
             Some((px, list)) if x - *px <= 0.1 => list.push((from, to)),
@@ -1025,6 +1035,41 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
         }
         *list = merged;
     }
+    places
+}
+
+/// Cuts each run that an inner column rule of a section crosses in the white space between
+/// two of its words, so each part stands in its own column: a value line padded into its
+/// fields often has only one or two spaces between two fields. A rule cuts at the heights it
+/// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
+/// their section (see [`hanging_feet`]), but not a line of prose there (a note across the
+/// section, see [`prose_like`]). A rule within a tenth of the text size of a gap cuts there;
+/// a rule inside a word cuts nothing. A cut part keeps the run's place in the reading order.
+/// False when more than `budget` steps were needed: the runs past them stay whole.
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
+    // The rules as drawn, and the inner column edges of hanging headers below their feet.
+    let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
+    for p in parts {
+        let (xs, ys) = edges(&p.h, &p.v);
+        if xs.len() < 3 || ys.len() < 2 {
+            continue;
+        }
+        let inner = &xs[1..xs.len() - 1];
+        for s in &p.v {
+            if s.at > xs[0] + SNAP && s.at < xs[xs.len() - 1] - SNAP {
+                drawn.push((s.at, s.from, s.to));
+            }
+        }
+        if p.cut || ys.len() == 2 {
+            for (foot, bottom) in hanging_feet(&p.v, &xs, &ys) {
+                hanging.extend(inner.iter().map(|&x| (x, bottom, foot)));
+            }
+        }
+    }
+    if drawn.is_empty() && hanging.is_empty() {
+        return true;
+    }
+    let (drawn, hanging) = (places_of(drawn), places_of(hanging));
     let mut work = 0usize;
     let mut done = true;
     // The runs to cut, each with the gaps it is cut at.
@@ -1036,23 +1081,30 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
         let (_, cy) = middle(r);
         let tol = 0.1 * r.size.max(1.0);
         let mut at: Vec<usize> = Vec::new();
-        let first = places.partition_point(|p| p.0 <= r.x + tol);
-        for (x, heights) in &places[first..] {
-            if *x >= r.x + r.w - tol {
-                break;
-            }
-            work += 1;
-            if work > budget {
-                done = false;
-                break 'runs;
-            }
-            let h = heights.partition_point(|s| s.0 <= cy);
-            if h == 0 || heights[h - 1].1 < cy {
-                continue;
-            }
-            let k = r.gaps.partition_point(|g| g.to + tol < *x);
-            if r.gaps.get(k).is_some_and(|g| g.from - tol <= *x) {
-                at.push(k);
+        let lists: &[&[Place]] = if prose_like(&r.text) {
+            &[&drawn]
+        } else {
+            &[&drawn, &hanging]
+        };
+        for places in lists {
+            let first = places.partition_point(|p| p.0 <= r.x + tol);
+            for (x, heights) in &places[first..] {
+                if *x >= r.x + r.w - tol {
+                    break;
+                }
+                work += 1;
+                if work > budget {
+                    done = false;
+                    break 'runs;
+                }
+                let h = heights.partition_point(|s| s.0 <= cy);
+                if h == 0 || heights[h - 1].1 < cy {
+                    continue;
+                }
+                let k = r.gaps.partition_point(|g| g.to + tol < *x);
+                if r.gaps.get(k).is_some_and(|g| g.from - tol <= *x) {
+                    at.push(k);
+                }
             }
         }
         at.sort_unstable();
@@ -1084,7 +1136,9 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
         let mut parts: Vec<Run> = Vec::with_capacity(at.len() + 1);
         let mut rest = run;
         for &k in at.iter().rev() {
-            let (before, after) = rest.cut_at(k);
+            let Some((before, after)) = rest.cut_at(k) else {
+                break;
+            };
             parts.push(after);
             rest = before;
         }
@@ -1291,7 +1345,7 @@ fn open_bands(
     }
 }
 
-/// For each grid row (`is_open` says which are open rows), the baselines of the lines that
+/// For each grid row (`is_open` says which are rows under a header of hanging rules), the baselines of the lines that
 /// start a row in it, going up: empty when the band is one row. A band of the body whose cells are each one square and of
 /// which at least two hold text is cut when at least two of its lines are anchors: lines
 /// with text in at least half of the cells that hold text in the band (an empty first cell
