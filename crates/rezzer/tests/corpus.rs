@@ -23,9 +23,14 @@
     feature = "fmt-pdf"
 ))]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
-use rezzer_model::{Block, Document, Registry, plain_text};
+use common::{
+    GENERATED_AT, PIPELINE_FOLDERS, corpus_dir, corpus_files, pipeline, relative, remote_rows,
+};
+use rezzer_model::{Block, Document, plain_text};
 use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
 use serde_json::Value;
 
@@ -34,26 +39,6 @@ use serde_json::Value;
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
-const GENERATED_AT: &str = "2026-01-01T00:00:00Z";
-
-fn corpus_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus")
-}
-
-fn pipeline() -> Pipeline {
-    let mut registry = Registry::new();
-    registry.register(Box::new(rezzer_read_text::TextReader));
-    registry.register(Box::new(rezzer_read_markdown::MarkdownReader));
-    registry.register(Box::new(rezzer_read_csv::CsvReader));
-    registry.register(Box::new(rezzer_read_sheet::SheetReader));
-    registry.register(Box::new(rezzer_read_pdf::PdfReader));
-    let config = Config {
-        cache: false,
-        ..Config::default()
-    };
-    Pipeline::new(config, registry)
-}
-
 fn request() -> Request {
     Request {
         output: OutputKind::Json,
@@ -61,10 +46,6 @@ fn request() -> Request {
         ..Request::default()
     }
 }
-
-/// Folders whose files run through the pipeline with facts. `office/malformed/` is not walked:
-/// the hostile tests read those files.
-const PIPELINE_FOLDERS: [&str; 3] = ["web-text", "office", "pdf"];
 
 /// The spreadsheets with golden files: one of each format and the main kinds of logic
 /// (engineering chains, folded add-in calls, data tables, LAMBDA and spills, threaded
@@ -99,36 +80,6 @@ const GOLDEN_PDF: [&str; 9] = [
     "scan-truman-letter-nara.pdf",
     "mustang-gnuaccounting-invoice-508.pdf",
 ];
-
-/// Corpus files, sorted: the files right in the pipeline folders, except facts files and the
-/// large files of `remote.tsv` (they may be absent).
-fn corpus_files() -> Vec<PathBuf> {
-    let remote = remote_rows();
-    let mut files = Vec::new();
-    for folder in std::fs::read_dir(corpus_dir()).unwrap() {
-        let folder = folder.unwrap().path();
-        if !folder.is_dir()
-            || !PIPELINE_FOLDERS
-                .iter()
-                .any(|f| folder.file_name().is_some_and(|n| n == *f))
-        {
-            continue;
-        }
-        for file in std::fs::read_dir(&folder).unwrap() {
-            let file = file.unwrap().path();
-            let name = file.file_name().unwrap().to_string_lossy().to_string();
-            if file.is_file()
-                && !name.ends_with(".facts.json")
-                && !name.starts_with('.')
-                && !remote.contains_key(&relative(&file))
-            {
-                files.push(file);
-            }
-        }
-    }
-    files.sort();
-    files
-}
 
 struct Output {
     json: Value,
@@ -347,15 +298,6 @@ fn manifest_rows() -> std::collections::BTreeMap<String, String> {
     listed
 }
 
-fn relative(file: &Path) -> String {
-    file.strip_prefix(corpus_dir())
-        .unwrap()
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 fn sha256_of(file: &Path) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
@@ -472,23 +414,6 @@ fn pdf_corpus_matches_manifest() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
-}
-
-/// The `pdf/` rows of `remote.tsv` (path, SHA-256): large files that are fetched, not committed.
-fn remote_rows() -> std::collections::BTreeMap<String, String> {
-    let list = std::fs::read_to_string(corpus_dir().join("remote.tsv")).unwrap();
-    let mut rows = std::collections::BTreeMap::new();
-    for line in list
-        .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-    {
-        let cells: Vec<&str> = line.split('\t').collect();
-        assert_eq!(cells.len(), 3, "bad remote.tsv row: {line}");
-        assert!(cells[1].starts_with("https://"), "not https: {line}");
-        assert_eq!(cells[2].len(), 64, "not a full SHA-256: {line}");
-        rows.insert(cells[0].to_string(), cells[2].to_string());
-    }
-    rows
 }
 
 // The spreadsheet corpus: what each workbook proves. The checks read the model JSON (and the
