@@ -1064,3 +1064,52 @@ fn scan_starts_inside_a_string_do_not_cut_it() {
         }
     }
 }
+
+#[test]
+fn non_ascii_passwords_decrypt() {
+    use lopdf::{EncryptionState, EncryptionVersion, Permissions};
+    // lopdf turns a password into PDFDocEncoding before it checks it. The key must come
+    // from the same bytes, or every string and stream decrypts to garbage.
+    let mut note_id = None;
+    let bytes = one_page(plain_content(), |doc, _, page| {
+        let note = doc.add_object(dictionary! {
+            "Note" => Object::string_literal("Geheimer Text"),
+        });
+        doc.get_dictionary_mut(page).unwrap().set("Note", note);
+        note_id = Some(note);
+        let id = Object::string_literal(b"0123456789abcdef".to_vec());
+        doc.trailer.set("ID", vec![id.clone(), id]);
+        let state = EncryptionState::try_from(EncryptionVersion::V2 {
+            document: doc,
+            owner_password: "Eigentümer",
+            user_password: "Grüße",
+            key_length: 128,
+            permissions: Permissions::all(),
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+    });
+    for password in ["Grüße", "Eigentümer"] {
+        let pdf = open(&bytes, Some(password)).unwrap_or_else(|e| panic!("{password}: {e}"));
+        let enc = pdf.encryption().expect("encrypted");
+        assert!(!enc.empty_user_password);
+        let canon = Document::load_mem(pdf.canonical()).unwrap();
+        let note = canon.get_dictionary(note_id.unwrap()).unwrap();
+        assert_eq!(
+            note.get(b"Note").unwrap().as_str().unwrap(),
+            b"Geheimer Text",
+            "{password}"
+        );
+        let text: String = pdf
+            .issues()
+            .iter()
+            .map(|i| i.what.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
+        assert!(!text.contains("decrypt"), "{password}: {text}");
+    }
+    assert!(matches!(
+        open(&bytes, Some("Grusse")),
+        Err(OpenError::WrongPassword)
+    ));
+}
