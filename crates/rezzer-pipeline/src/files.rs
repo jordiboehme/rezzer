@@ -23,11 +23,12 @@
 //! Files an earlier run left that this run does not write are removed, but only files
 //! Rezzer names itself (rulings P5-Y and P5-AC): in the assets folder regular files named as
 //! Rezzer names pictures ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
-//! wrote ([`is_rezzer_part`]). A file a user put there stays. A part path held by anything else fails the run before a file of
-//! it is written (ruling P5-AB). An empty parts folder is removed, also one Rezzer did not
-//! make. Symlinks and folders inside are never followed or removed. The check of a folder
-//! and the removal of its files are separate steps, so a folder that is swapped for a
-//! symlink in between is a known gap (planned for the known-issues plan).
+//! wrote ([`is_rezzer_part`]). A file a user put there stays. A part path held by anything
+//! else fails the run before a file of it is written (ruling P5-AB). An empty parts folder
+//! is removed, also one Rezzer did not make. Symlinks and folders inside are never followed
+//! or removed. The check of a folder and the removal of its files are separate steps, so a
+//! folder that is swapped for a symlink in between is a known gap (planned for the
+//! known-issues plan).
 //!
 //! Order: the pictures are planned while the document is read, because the Markdown links
 //! name them. After the render the part paths are checked, so a run that fails there has
@@ -73,8 +74,8 @@ fn name_hash(name: &str) -> String {
 }
 
 /// The directory name stem for the assets of `source_name`: the last path component (split at
-/// `/` and a backslash), every char outside `[A-Za-z0-9._-]` replaced by `_`, a leading `.` replaced
-/// by `_`, `file` when empty, at most 120 bytes. It never holds a separator, so the bundle
+/// `/` and a backslash), every char outside `[A-Za-z0-9._-]` replaced by `_`, a leading `.`
+/// replaced by `_`, `file` when empty, at most 120 bytes. It never holds a separator, so the bundle
 /// stays inside the output directory.
 pub fn bundle_name(source_name: &str) -> String {
     let last = source_name.rsplit(['/', '\\']).next().unwrap_or_default();
