@@ -1,0 +1,593 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Labels and values of forms as print runs fill them, in the shapes of a real pay slip
+//! (measured by structure only; all text and values invented), and generated variants of each
+//! shape: shifted, scaled as a whole, other label and data sizes, other data fonts, other rule
+//! thicknesses and strokes, dividers hanging or rising, labels over or under their values and
+//! set left, in the middle or right, values left or right, with and without drawn decimal
+//! marks, on two pages and turned. Each variant is held to the same invariants (see
+//! [`check`]): no wrong pair ever, every value once, a pair where the geometry is clear, a
+//! named loss where it is not.
+
+#[path = "../common/mod.rs"]
+mod common;
+
+mod check;
+mod draw;
+mod shapes;
+
+use check::{
+    Broken, Inv, Known, assert_fields, blocks, check_fields, check_page, check_title, pairs_of,
+    read, read_pages, unexpected,
+};
+use common::{all_text, label};
+use draw::{Stroke, bar_h, bar_v, mark_b};
+use rezzer_model::{Block, plain_text};
+use shapes::{
+    Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row, header_grid,
+    label_block, page, rows_page, shape_page, total_column,
+};
+
+#[global_allocator]
+static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
+
+#[test]
+fn rate_over_its_divider_pairs_by_its_mark() {
+    let b = page(&REAL, true, true);
+    let out = read_pages(&[&b]);
+    let broken = check_fields(&out, &b);
+    assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
+}
+
+#[test]
+fn rate_over_its_divider_without_a_mark_names_only_its_fields() {
+    let g = Geo {
+        marks: false,
+        ..REAL
+    };
+    let b = page(&g, true, true);
+    let out = read_pages(&[&b]);
+    let broken = check_fields(&out, &b);
+    assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
+    let named: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("row of fields") || l.what.contains("fields "))
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        named
+            .iter()
+            .all(|w| !w.contains("Feld A") && !w.contains("Gr D")),
+        "{named:?}"
+    );
+}
+
+#[test]
+fn row_under_a_longer_rule_pairs() {
+    let b = page(&REAL, true, true);
+    let out = read_pages(&[&b]);
+    let pairs = pairs_of(blocks(&out));
+    for want in [("Eintritt", "01.01.20"), ("Austritt", "empty")] {
+        assert!(
+            pairs.iter().any(|(l, v)| l == want.0 && v == want.1),
+            "{want:?} in {pairs:?}"
+        );
+    }
+}
+
+#[test]
+fn title_over_a_bar_heads_its_lines() {
+    let b = page(&REAL, true, true);
+    let out = read_pages(&[&b]);
+    let broken = check_title(&out);
+    assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
+}
+
+/// A page of prose: a small bold heading over a drawn rule, then two paragraphs of regular
+/// text half a point larger, of three lines each, with no field, grid or box on the page.
+/// The heading and the rule are no form's title: the lines keep their paragraphs.
+#[test]
+fn a_heading_over_a_rule_on_a_prose_page_keeps_its_paragraphs() {
+    let mut c = String::from("BT /F2 9 Tf 72 700 Td (Ergebnisse der Messung) Tj ET\n");
+    c += "q 0.5 w 72 697.5 m 400 697.5 l S Q\n";
+    let lines = [
+        "Die Messung zeigt einen klaren Anstieg der Werte im",
+        "zweiten Abschnitt, der sich bis zum Ende der Reihe",
+        "fortsetzt und im letzten Monat am hoechsten ist.",
+        "Im Vergleich mit dem Vorjahr liegt der Wert damit",
+        "deutlich hoeher, obwohl die Zahl der Proben gleich",
+        "geblieben ist und die Methode nicht geaendert wurde.",
+    ];
+    for (k, l) in lines.iter().enumerate() {
+        let y = 682.0 - 11.4 * k as f32 - if k >= 3 { 8.0 } else { 0.0 };
+        c += &format!("BT /F1 9.5 Tf 72 {y} Td ({l}) Tj ET\n");
+    }
+    let out = read(&common::pdf(&[common::Page::text(c)], ""));
+    let paragraphs: Vec<String> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph { inlines, .. } => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect();
+    for (a, b) in [(0, 2), (3, 5)] {
+        assert!(
+            paragraphs
+                .iter()
+                .any(|p| p.contains(lines[a]) && p.contains(lines[b])),
+            "{paragraphs:#?}"
+        );
+    }
+}
+
+/// A row of fields like F1 (labels over a value line, dividers hanging from the upper rule
+/// at data columns 13, 43, 47 and 51) whose rate field (columns 43 to 47) holds `digits`
+/// from column 43, a drawn mark after its first two digits, and `next` (column, text) on the
+/// value line after it; with `frame` false only the divider at column 47 is drawn and no
+/// rule over or under the row. Two amounts elsewhere set the page's style of amounts.
+fn mark_row(digits: &str, next: Option<(usize, &str)>, frame: bool) -> Built {
+    let g = REAL;
+    let mut b = Built::new(&g);
+    let top = 760.0;
+    if frame {
+        b.page.template += &bar_h(g.col(0) - 0.12, g.col(61), top, g.rule);
+        b.page.template += &bar_h(g.col(0) - 0.12, g.col(61), top - 2.4 * g.data, g.rule);
+    }
+    for k in [13, 43, 47, 51] {
+        if frame || k == 47 {
+            b.page.template += &bar_v(g.col(k) - 0.06, top - 1.21 * g.data, top, g.rule);
+        }
+    }
+    let base = top - 0.86 * g.data;
+    for (k, l) in [
+        (0, "Feld A"),
+        (13, "Feld B"),
+        (43, "Satz"),
+        (47, "Gr C"),
+        (51, "Gr D"),
+    ] {
+        b.page.template += &label(g.col(k) + 0.18 * g.label, base, g.label, l);
+    }
+    let y = top - 2.23 * g.data;
+    let mut parts = vec![(0, "12345678X012"), (13, "Muster Kasse"), (43, digits)];
+    parts.extend(next);
+    parts.push((51, "8901"));
+    g.values(&mut b, y, &parts);
+    b.page.template += &mark_b(
+        g.col(43) + 2.0 * g.pitch(),
+        y - 0.087 * g.data,
+        0.2 * g.data,
+    );
+    for (k, l) in ["Summe 9.876,54", "Netto 1.234,56"].iter().enumerate() {
+        g.values(&mut b, 120.0 - 1.2 * g.data * k as f32, &[(0, l)]);
+    }
+    b
+}
+
+/// The text of a read and the losses that keep a number without its separators.
+fn kept_whole(b: &Built) -> (String, Vec<String>) {
+    let out = read_pages(&[b]);
+    let kept = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("is kept without"))
+        .map(|l| l.what.clone())
+        .collect();
+    (all_text(&out), kept)
+}
+
+/// A number under a vertical rule that divides no row of fields (no rule over or under the
+/// row) is never cut at it: it stays whole, with the loss that its separator is not read.
+#[test]
+fn a_number_under_a_lone_rule_stays_whole() {
+    let (text, kept) = kept_whole(&mark_row("123456", None, false));
+    assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
+    assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
+/// A number that reads as a whole number in groups of three (a thousands value, or a value of
+/// three decimals) is never cut at a divider, even when the part before it would read as an
+/// amount: it stays whole with its loss.
+#[test]
+fn a_number_in_groups_of_three_stays_whole_at_a_divider() {
+    for digits in ["12500", "12345"] {
+        let (text, kept) = kept_whole(&mark_row(digits, None, true));
+        assert!(text.contains(digits), "{digits}: {text}");
+        assert!(
+            kept.iter().any(|w| w.contains(digits)),
+            "{digits}: {kept:?}"
+        );
+    }
+}
+
+/// A number is cut at a divider only when the part after it is the whole value of the next
+/// field: with another value in that field it stays whole with its loss.
+#[test]
+fn a_number_is_not_cut_into_a_field_with_a_value() {
+    let (text, kept) = kept_whole(&mark_row("123456", Some((50, "7")), true));
+    assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
+    assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
+/// Labels printed under the rule their value stands on (a signature line) pair with the
+/// value over the same rule, never with the value of the next row, which stands under them
+/// between the same two rules (ruling P6-X).
+#[test]
+fn labels_under_their_values_pair_across_the_rule() {
+    for dividers in [true, false] {
+        let s = Rows {
+            under: true,
+            dividers,
+            ..ROWS
+        };
+        assert_fields(&rows_page(&REAL, &s, &THREE_ROWS, &[]));
+    }
+}
+
+/// A row of fields whose labels stand over their values in one field and under them in the
+/// next is not read as labels and values: its text stays, and a loss names its fields.
+#[test]
+fn mixed_directions_in_a_row_give_a_loss() {
+    let mut b = rows_page(
+        &REAL,
+        &ROWS,
+        &[&[(0, 30, "Name", "Erika Mustermann"), (30, 20, "Ort", "")]],
+        &["Name", "Ort"],
+    );
+    // The second field: its value at the top, its label at the bottom.
+    let (top, d) = (760.0, REAL.data);
+    let x = 42.52 + 30.0 * 0.6 * d + 0.3 * 0.6 * d;
+    b.page.template += &format!(
+        "BT /FD {d} Tf {x} {} Td (Musterstadt) Tj ET\n",
+        top - 0.86 * d - 0.3 * d
+    );
+    b.values.push("Musterstadt".into());
+    // Move the label "Ort" to the bottom of its field.
+    b.page.template = b.page.template.replacen(
+        &format!("{} Td (Ort)", top - 0.86 * d),
+        &format!("{} Td (Ort)", top - 2.23 * d),
+        1,
+    );
+    assert_fields(&b);
+}
+
+/// Two rows of two fields each without dividers, the second field narrow.
+const NARROW: [&[FieldSpec]; 2] = [
+    &[(0, 30, "Name", "Erika Mustermann"), (30, 12, "Nr", "30")],
+    &[(0, 30, "Ort", "Musterstadt"), (30, 12, "Tag", "X")],
+];
+
+/// Labels set in the middle of their fields or at their right end, over values at the
+/// fields' left ends, without dividers: a value under no label has no certain field, so the
+/// fields it may belong to stay text with a loss (ruling P6-X); a value under its label
+/// pairs.
+#[test]
+fn labels_away_from_their_values_never_pair_wrongly() {
+    for labels in [Align::Center, Align::Right] {
+        let s = Rows {
+            labels,
+            dividers: false,
+            ..ROWS
+        };
+        assert_fields(&rows_page(
+            &REAL,
+            &s,
+            &NARROW,
+            &["Name", "Nr", "Ort", "Tag"],
+        ));
+    }
+}
+
+/// Values set at the right end of their fields under labels at the left end, without
+/// dividers: they stand under no label, so their fields stay text with a loss.
+#[test]
+fn right_aligned_values_without_dividers_never_pair_wrongly() {
+    let s = Rows {
+        values: Align::Right,
+        dividers: false,
+        ..ROWS
+    };
+    assert_fields(&rows_page(
+        &REAL,
+        &s,
+        &NARROW,
+        &["Name", "Nr", "Ort", "Tag"],
+    ));
+}
+
+/// The generated variants of F1 to F3, by name, each with whether its rate overflows and
+/// whether its last two labels are one run.
+fn variants() -> Vec<(String, Geo, bool, bool)> {
+    let mut out = Vec::new();
+    let geos = [
+        ("real", REAL),
+        (
+            "shifted",
+            Geo {
+                dx: -17.3,
+                dy: -41.0,
+                ..REAL
+            },
+        ),
+        ("larger data", Geo { data: 10.5, ..REAL }),
+        ("smaller data", Geo { data: 8.5, ..REAL }),
+        ("larger labels", Geo { label: 7.5, ..REAL }),
+        ("smaller labels", Geo { label: 5.6, ..REAL }),
+        (
+            "courier",
+            Geo {
+                font: DataFont::Courier,
+                ..REAL
+            },
+        ),
+        (
+            "helvetica",
+            Geo {
+                font: DataFont::Helvetica,
+                ..REAL
+            },
+        ),
+        (
+            "thick rules",
+            Geo {
+                rule: 0.6,
+                bar: 1.2,
+                ..REAL
+            },
+        ),
+        (
+            "hairlines",
+            Geo {
+                rule: 0.1,
+                bar: 0.3,
+                ..REAL
+            },
+        ),
+        (
+            "stroked bar",
+            Geo {
+                stroked_bar: true,
+                ..REAL
+            },
+        ),
+        (
+            "no marks",
+            Geo {
+                marks: false,
+                ..REAL
+            },
+        ),
+        ("wider field", Geo { wide: 5, ..REAL }),
+        (
+            "one field less",
+            Geo {
+                fewer: true,
+                ..REAL
+            },
+        ),
+        (
+            "wider and fewer, courier",
+            Geo {
+                wide: 3,
+                fewer: true,
+                font: DataFont::Courier,
+                ..REAL
+            },
+        ),
+        (
+            "all changed",
+            Geo {
+                dx: 11.0,
+                dy: 23.0,
+                data: 10.0,
+                label: 7.0,
+                font: DataFont::Courier,
+                rule: 0.4,
+                bar: 1.0,
+                stroked_bar: true,
+                ..REAL
+            },
+        ),
+    ];
+    for (name, g) in geos.into_iter().chain(looks()) {
+        for overflow in [true, false] {
+            let label = format!("{name}{}", if overflow { ", overflow" } else { "" });
+            out.push((label, g, overflow, true));
+        }
+    }
+    // The two short labels as two text objects, each in its field, close together.
+    for (name, g) in [
+        ("separate labels", REAL),
+        ("separate labels, larger data", Geo { data: 10.5, ..REAL }),
+        (
+            "separate labels, smaller labels",
+            Geo { label: 5.6, ..REAL },
+        ),
+    ] {
+        out.push((name.to_string(), g, true, false));
+    }
+    out
+}
+
+/// The looks every shape is drawn in besides the real one: printed smaller and larger as a
+/// whole, its thin rules dashed or dotted, its dividers rising from the rule under the row.
+fn looks() -> Vec<(&'static str, Geo)> {
+    vec![
+        ("scale 0.7", Geo { scale: 0.7, ..REAL }),
+        ("scale 1.5", Geo { scale: 1.5, ..REAL }),
+        (
+            "dashed rules",
+            Geo {
+                stroke: Stroke::Dashed,
+                ..REAL
+            },
+        ),
+        (
+            "dotted rules",
+            Geo {
+                stroke: Stroke::Dotted,
+                ..REAL
+            },
+        ),
+        (
+            "rising dividers",
+            Geo {
+                rising: true,
+                ..REAL
+            },
+        ),
+    ]
+}
+
+/// Variants of F1 to F3 that break an invariant today: the variant's name, the one invariant
+/// it breaks, and why (reported, not tuned away). Every other invariant is still held for it,
+/// and the test fails when a known variant starts to hold or breaks another one. No variant
+/// may be known to break [`Inv::RightPair`] or [`Inv::ValueOnce`].
+const KNOWN: &[Known] = &[(
+    "separate labels",
+    Inv::ClearPairs,
+    "the two short labels are two text objects less than half a label size apart, so the \
+     text pass reads them as one word without a space; that word stands across the divider \
+     between them, so both fields stay text with a loss that names them",
+)];
+
+/// The check of known variants bites: a known variant that breaks another invariant than
+/// its own, or that holds them all, is reported; so is any other variant that breaks one.
+#[test]
+fn known_variants_are_held_to_every_other_invariant() {
+    let known: &[Known] = &[("k", Inv::ClearPairs, "a reason")];
+    let read = |name: &str, broken: Vec<Broken>| vec![(name.to_string(), broken)];
+    let b = |inv: Inv| Broken(inv, String::new());
+    assert!(unexpected(read("k", vec![b(Inv::ClearPairs)]), known).is_empty());
+    for other in [
+        Inv::RightPair,
+        Inv::ValueOnce,
+        Inv::UnclearSaid,
+        Inv::Title,
+        Inv::NoteOnce,
+    ] {
+        let both = vec![b(Inv::ClearPairs), b(other)];
+        assert_eq!(unexpected(read("k", both), known).len(), 1, "{other:?}");
+    }
+    assert_eq!(unexpected(read("k", Vec::new()), known).len(), 1);
+    assert_eq!(
+        unexpected(read("other", vec![b(Inv::Title)]), known).len(),
+        1
+    );
+}
+
+#[test]
+fn generated_variants_hold_the_invariants() {
+    let mut reads = Vec::new();
+    for (name, g, overflow, one_run) in variants() {
+        let b = page(&g, overflow, one_run);
+        let out = read_pages(&[&b]);
+        let mut broken = check_fields(&out, &b);
+        broken.extend(check_title(&out));
+        reads.push((name, broken));
+    }
+    let wrong = unexpected(reads, KNOWN);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A shape drawn on a page of its own in a geometry.
+type Shape = fn(&Geo) -> Built;
+
+/// The other shapes of the pay slip, each on a page of its own, by name.
+fn shapes() -> Vec<(&'static str, Shape)> {
+    vec![
+        ("header grid", |g| shape_page(g, header_grid)),
+        ("column of totals", |g| shape_page(g, total_column)),
+        ("boxed fields", |g| shape_page(g, boxed_row)),
+        ("label block and bank row", |g| shape_page(g, label_block)),
+        ("rows", |g| rows_page(g, &ROWS, &THREE_ROWS, &[])),
+        ("labels under values", |g| {
+            let s = Rows {
+                under: true,
+                ..ROWS
+            };
+            rows_page(g, &s, &THREE_ROWS, &[])
+        }),
+        ("centered labels", |g| {
+            let s = Rows {
+                labels: Align::Center,
+                ..ROWS
+            };
+            rows_page(g, &s, &THREE_ROWS, &[])
+        }),
+        ("right-aligned values", |g| {
+            let s = Rows {
+                values: Align::Right,
+                ..ROWS
+            };
+            rows_page(g, &s, &THREE_ROWS, &[])
+        }),
+    ]
+}
+
+/// Shapes in looks that break an invariant today (see [`KNOWN`]).
+const KNOWN_SHAPES: &[Known] = &[];
+
+/// Every other shape of the pay slip in the real look and in each of [`looks`] holds the
+/// invariants.
+#[test]
+fn generated_shapes_hold_the_invariants() {
+    let mut reads = Vec::new();
+    for (shape, draw) in shapes() {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let b = draw(&g);
+            let out = read_pages(&[&b]);
+            reads.push((format!("{shape}, {look}"), check_fields(&out, &b)));
+        }
+    }
+    let wrong = unexpected(reads, KNOWN_SHAPES);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A form of two pages, each of several shapes: every page holds the invariants on its own,
+/// each note of a kind once on each page (ruling P6-W).
+#[test]
+fn a_form_of_two_pages_holds_the_invariants_on_each() {
+    let first = page(&REAL, true, true);
+    let mut second = Built::new(&REAL);
+    let below = header_grid(&REAL, &mut second, 760.0);
+    let below = total_column(&REAL, &mut second, below - 3.0 * REAL.data);
+    label_block(&REAL, &mut second, below - 3.0 * REAL.data);
+    second.address(&REAL);
+    let out = read_pages(&[&first, &second]);
+    let mut broken = check_page(&out, 0, &first);
+    broken.extend(check_page(&out, 1, &second));
+    assert!(broken.is_empty(), "{broken:#?}\n{:#?}", out.document.body);
+}
+
+/// Every shape drawn a quarter turn across the page never gives a wrong pair, and keeps
+/// every value once. F1 to F3 are drawn without marks there: a separator drawn between digits
+/// that do not read in the direction of the page's text is not read, by design (a loss says
+/// so), so the values written with them would not stand as expected.
+#[test]
+fn turned_forms_never_pair_wrongly() {
+    let g = Geo { turn: true, ..REAL };
+    let plain = Geo { marks: false, ..g };
+    let mut all: Vec<(String, Built)> = vec![("F1 to F3".to_string(), page(&plain, true, true))];
+    all.extend(
+        shapes()
+            .into_iter()
+            .map(|(n, draw)| (n.to_string(), draw(&g))),
+    );
+    let mut reads: Vec<(String, Vec<Broken>)> = Vec::new();
+    for (name, b) in all {
+        let out = read_pages(&[&b]);
+        let broken: Vec<Broken> = check_fields(&out, &b)
+            .into_iter()
+            .filter(|b| matches!(b.0, Inv::RightPair | Inv::ValueOnce))
+            .collect();
+        reads.push((format!("{name}, turned"), broken));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

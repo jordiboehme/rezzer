@@ -689,7 +689,8 @@ const CUT_WORK: usize = 1_000_000;
 /// number stays whole and its separators unread:
 /// - the divider is one of a frame of fields between rules (see
 ///   [`crate::tables::field_frames`]) the number stands in, hanging from the frame's top over
-///   the digits (see [`DIVIDER_FOOT`]), between the middles of two neighbouring digits;
+///   the digits (see [`DIVIDER_FOOT`]) or rising from its bottom past them, between the
+///   middles of two neighbouring digits, and the only divider of the frame in the number;
 /// - the frame holds smaller text over the number (its labels);
 /// - the digits before the divider, with their separators, read as a number, and the whole
 ///   does not read as a whole number in groups of three (a thousands value, or a value of three
@@ -809,17 +810,26 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
                 a.x + a.adv.unwrap_or(0.5 * size) / 2.0,
                 b.x + b.adv.unwrap_or(0.5 * size) / 2.0,
             );
+            // A divider hangs from the frame's top over the digits or rises from its bottom
+            // past them; no other divider of the frame stands in the number (the sides of
+            // boxes drawn around each digit).
             let at = held.iter().find_map(|f| {
-                f.dividers
+                let k = f
+                    .dividers
                     .iter()
                     .zip(&f.spans)
                     .position(|(&x, &(low, high))| {
-                        x > from
-                            && x < to
-                            && low >= a.y + DIVIDER_FOOT * size
-                            && (high - f.top).abs() <= DIVIDER_FOOT * size
-                    })
-                    .map(|k| (*f, k))
+                        let over = a.y + DIVIDER_FOOT * size;
+                        let hangs = (high - f.top).abs() <= DIVIDER_FOOT * size && low >= over;
+                        let rises = (low - f.bottom).abs() <= DIVIDER_FOOT * size && high >= over;
+                        x > from && x < to && (hangs || rises)
+                    })?;
+                let inside = f
+                    .dividers
+                    .iter()
+                    .filter(|&&d| d > head.x + ch / 2.0 && d < line.1 - ch / 2.0)
+                    .count();
+                (inside == 1).then_some((*f, k))
             });
             let Some((f, k)) = at else {
                 continue;
@@ -878,9 +888,9 @@ const DASH_SNAP: f32 = 0.1;
 
 /// Lines drawn as rows of marks: dashed or dotted rules of filled dashes, which are marks by
 /// shape. Marks of one direction on one line (their middles within [`DASH_SNAP`] across it,
-/// the same thickness), each at most its own length after the one before, make one line when
-/// they are at least three. The marks of such lines are taken out of `marks`: they are
-/// rules, not separators.
+/// the same thickness), each at most its own length after the one before (or over it, as a
+/// copy), make one line when at least three of them reach past the ones before. The marks of
+/// such lines are taken out of `marks`: they are rules, not separators.
 pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
     // Along the long side: (upright, across, start, end, thickness).
     let flat = |m: &[f32; 4]| {
@@ -916,17 +926,23 @@ pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
             let (_, _, start, mut end, thick) = flat(&line[k]);
             let mut sum = flat(&line[k]).1;
             let mut j = k + 1;
+            // Dashes that reach past the ones before: a copy drawn over a dash (an edge two
+            // boxes share, drawn by each) goes on the line without counting.
+            let mut ahead = 1;
             while let Some(m) = line.get(j) {
                 let (_, c, s, e, t) = flat(m);
                 let gap = s - end;
-                if (t - thick).abs() > 0.1 || gap < 0.0 || gap > e - s {
+                if (t - thick).abs() > 0.1 || gap > e - s {
                     break;
                 }
-                end = e;
+                if e > end {
+                    end = e;
+                    ahead += 1;
+                }
                 sum += c;
                 j += 1;
             }
-            if j - k >= 3 {
+            if ahead >= 3 {
                 let at = sum / (j - k) as f32;
                 dashed[i + k..i + j].iter_mut().for_each(|d| *d = true);
                 out.push(if upright {
@@ -1163,6 +1179,23 @@ mod tests {
         assert!((r.y0 - 600.15).abs() < 0.01 && r.y0 == r.y1);
         // The dashes of the rule are no separators; the two marks stay.
         assert_eq!(marks.len(), 2, "{marks:?}");
+    }
+
+    #[test]
+    fn a_dashed_line_drawn_twice_is_one_rule() {
+        // The edge two dashed boxes share, drawn by each: every dash twice. A separator mark
+        // drawn three times over itself stays a mark.
+        let mut marks: Vec<[f32; 4]> = (0..10)
+            .map(|k| {
+                let x = 100.0 + 2.5 * (k / 2) as f32;
+                [x, 600.0, x + 1.5, 600.3]
+            })
+            .collect();
+        marks.extend([[200.0, 700.0, 200.24, 702.0]; 3]);
+        let rules = dashed_rules(&mut marks);
+        assert_eq!(rules.len(), 1, "{rules:?}");
+        assert_eq!((rules[0].x0, rules[0].x1), (100.0, 111.5));
+        assert_eq!(marks.len(), 3, "{marks:?}");
     }
 
     #[test]

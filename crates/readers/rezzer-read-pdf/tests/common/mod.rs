@@ -286,6 +286,9 @@ pub struct FormPage {
     /// The whole page drawn this many times as large (the page box too), as a form printed
     /// larger or smaller.
     pub scale: f32,
+    /// The whole page drawn turned a quarter turn counterclockwise on a landscape page box, as
+    /// a form scanned or printed across.
+    pub turn: bool,
 }
 
 impl Default for FormPage {
@@ -298,6 +301,7 @@ impl Default for FormPage {
             annots: Vec::new(),
             bold_data: false,
             scale: 1.0,
+            turn: false,
         }
     }
 }
@@ -332,7 +336,16 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
             &win_ansi(&page.template),
         );
         let s = page.scale;
-        let mut content = format!("q {s} 0 0 {s} 0 0 cm q /Tpl Do Q\n");
+        let (w, h) = if page.turn {
+            (842.0 * s, 595.0 * s)
+        } else {
+            (595.0 * s, 842.0 * s)
+        };
+        let mut content = if page.turn {
+            format!("q 0 {s} {} 0 {w} 0 cm q /Tpl Do Q\n", -s)
+        } else {
+            format!("q {s} 0 0 {s} 0 0 cm q /Tpl Do Q\n")
+        };
         for line in &page.lines {
             let line = data_line(page.left, line.y, page.size, &line.text);
             if page.bold_data {
@@ -352,8 +365,8 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
             "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {} {}] \
              /Resources << {fonts} /XObject << /Tpl {tpl} 0 R >> >> \
              /Contents {content} 0 R /Annots [{}] >>",
-            595.0 * s,
-            842.0 * s,
+            w,
+            h,
             annots.join(" ")
         ));
         all_annots.extend(annots);
