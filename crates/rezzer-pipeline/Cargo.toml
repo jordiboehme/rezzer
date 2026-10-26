@@ -23,6 +23,7 @@ thiserror.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+fileattrs = { path = "../formats/fileattrs", features = ["test-support"] }
 rezzer-read-text = { path = "../readers/rezzer-read-text" }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv" }
 rezzer-read-sheet = { path = "../readers/rezzer-read-sheet" }

@@ -11,8 +11,14 @@ readme = "README.md"
 keywords = ["xattr", "plist", "provenance", "metadata", "forensics"]
 categories = ["filesystem", "parser-implementations"]
 
+[features]
+# Writes extended attributes, for tests of this crate and of crates that use it. Off by
+# default; nothing but dev-dependencies turns it on.
+test-support = []
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
+fileattrs = { path = ".", features = ["test-support"] }
 tempfile.workspace = true

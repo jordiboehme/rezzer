@@ -17,6 +17,11 @@
 
 mod bplist;
 mod tags;
+#[cfg(all(
+    feature = "test-support",
+    any(target_os = "macos", target_os = "linux")
+))]
+pub mod test_support;
 #[cfg(unix)]
 mod xattr;
 mod zone;

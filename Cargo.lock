@@ -713,6 +713,7 @@ checksum = "3296eb97d869113eaf148a6bdf01884e90b3828ad7ae2340b0f93362fc158611"
 name = "fileattrs"
 version = "0.1.0"
 dependencies = [
+ "fileattrs",
  "libc",
  "tempfile",
 ]
@@ -1839,6 +1840,7 @@ name = "rezzer-pipeline"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "fileattrs",
  "hex",
  "libc",
  "rezzer-detect",

@@ -578,42 +578,7 @@ fn zone_without_host_url_is_none() {
 mod xattrs {
     use super::*;
     use fileattrs::read_xattr;
-    use std::ffi::CString;
-    use std::os::fd::AsRawFd;
-
-    /// Writes an attribute, or returns the OS error.
-    fn set(file: &std::fs::File, name: &str, value: &[u8]) -> std::io::Result<()> {
-        let name = CString::new(name).unwrap();
-        // SAFETY: the name is a NUL-terminated string and the value pointer and length come
-        // from one live slice; the descriptor belongs to an open file.
-        #[cfg(target_os = "macos")]
-        let rc = unsafe {
-            libc::fsetxattr(
-                file.as_raw_fd(),
-                name.as_ptr(),
-                value.as_ptr().cast(),
-                value.len(),
-                0,
-                0,
-            )
-        };
-        // SAFETY: as above.
-        #[cfg(target_os = "linux")]
-        let rc = unsafe {
-            libc::fsetxattr(
-                file.as_raw_fd(),
-                name.as_ptr(),
-                value.as_ptr().cast(),
-                value.len(),
-                0,
-            )
-        };
-        if rc == 0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::last_os_error())
-        }
-    }
+    use fileattrs::test_support::set_xattr as set;
 
     /// Errors that mean this file system cannot hold the attribute.
     fn unsupported(error: &std::io::Error) -> bool {

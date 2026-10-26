@@ -22,6 +22,7 @@ flate2 = { workspace = true, features = ["zlib-rs"] }
 cfb.workspace = true
 
 [dev-dependencies]
+fileattrs = { path = "../formats/fileattrs", features = ["test-support"] }
 tempfile.workspace = true
 serde_json.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }

@@ -209,43 +209,6 @@ fn cache_hit_takes_the_path_from_the_current_source() {
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
 }
 
-/// Sets an extended attribute on a path, or returns the OS error.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn set_xattr(path: &Path, name: &str, value: &[u8]) -> std::io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
-    let name = std::ffi::CString::new(name).unwrap();
-    // SAFETY: path and name are NUL-terminated strings, the value pointer and length come
-    // from one live slice.
-    #[cfg(target_os = "macos")]
-    let rc = unsafe {
-        libc::setxattr(
-            path.as_ptr(),
-            name.as_ptr(),
-            value.as_ptr().cast(),
-            value.len(),
-            0,
-            0,
-        )
-    };
-    // SAFETY: as above.
-    #[cfg(target_os = "linux")]
-    let rc = unsafe {
-        libc::setxattr(
-            path.as_ptr(),
-            name.as_ptr(),
-            value.as_ptr().cast(),
-            value.len(),
-            0,
-        )
-    };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn cache_hit_takes_fresh_file_facts() {
@@ -260,7 +223,9 @@ fn cache_hit_takes_fresh_file_facts() {
         (&b, "Blau, Projekt", 1_800_000_000),
     ] {
         std::fs::write(path, "hello\n").unwrap();
-        if let Err(error) = set_xattr(path, "user.xdg.tags", tags.as_bytes()) {
+        if let Err(error) =
+            fileattrs::test_support::set_xattr_at(path, "user.xdg.tags", tags.as_bytes())
+        {
             eprintln!("skipped: this file system refuses user.xdg.tags ({error})");
             return;
         }

@@ -1880,10 +1880,9 @@ fn bytes_have_no_file_facts() {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod xattrs {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
 
+    use fileattrs::test_support::set_xattr_at as set;
     use rezzer_detect::open;
     use rezzer_limits::Limits;
 
@@ -1918,41 +1917,6 @@ mod xattrs {
         bytes.extend_from_slice(&0u64.to_be_bytes());
         bytes.extend_from_slice(&32u64.to_be_bytes());
         bytes
-    }
-
-    /// Sets an extended attribute on a path, or returns the OS error.
-    fn set(path: &Path, name: &str, value: &[u8]) -> std::io::Result<()> {
-        let path = CString::new(path.as_os_str().as_bytes()).unwrap();
-        let name = CString::new(name).unwrap();
-        // SAFETY: path and name are NUL-terminated strings, the value pointer and length come
-        // from one live slice.
-        #[cfg(target_os = "macos")]
-        let rc = unsafe {
-            libc::setxattr(
-                path.as_ptr(),
-                name.as_ptr(),
-                value.as_ptr().cast(),
-                value.len(),
-                0,
-                0,
-            )
-        };
-        // SAFETY: as above.
-        #[cfg(target_os = "linux")]
-        let rc = unsafe {
-            libc::setxattr(
-                path.as_ptr(),
-                name.as_ptr(),
-                value.as_ptr().cast(),
-                value.len(),
-                0,
-            )
-        };
-        if rc == 0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::last_os_error())
-        }
     }
 
     /// A new file in its own temporary folder.
