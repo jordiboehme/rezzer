@@ -30,7 +30,8 @@
 //!   sheet take none: a cell comment stays in the list
 //! - A body with fewer than 3 non-blank lines outside fences (Crystalline's Q001) gets the
 //!   frontmatter description as a paragraph under the title. When it is still short, a last
-//!   line says there is no content (in the chosen sections, when the caller chose some)
+//!   line says there is no content, or that it ends here when there is some (speaking of
+//!   the chosen sections when the caller chose some)
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 
@@ -374,11 +375,11 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     }
     // Crystalline wants 3 lines of content (Q001): a shorter body gets the description as
     // a paragraph under the title, and a body that is still short says it has nothing more.
-    let lines = describe::content_lines(&heading)
-        + parts
-            .iter()
-            .map(|p| describe::content_lines(p))
-            .sum::<usize>();
+    let content = parts
+        .iter()
+        .map(|p| describe::content_lines(p))
+        .sum::<usize>();
+    let lines = describe::content_lines(&heading) + content;
     if lines < MIN_CONTENT_LINES {
         let description = blocks::paragraph(&[Inline::Text {
             text: frontmatter::shown_description(doc, opts),
@@ -387,11 +388,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
             strike: false,
         }]);
         if lines + describe::content_lines(&description) < MIN_CONTENT_LINES {
-            parts.push(if opts.sections.is_some() {
-                NO_CONTENT_IN_SECTIONS.to_string()
-            } else {
-                NO_CONTENT.to_string()
-            });
+            parts.push(closing_line(content, opts.sections.is_some()).to_string());
         }
         parts.insert(0, description);
     }
@@ -415,12 +412,17 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
 /// Crystalline's least number of content lines in a body (its rule Q001).
 const MIN_CONTENT_LINES: usize = 3;
 
-/// The last line of a body that has nothing but its title and description.
-const NO_CONTENT: &str = "The document has no content.";
-
-/// [`NO_CONTENT`] when the caller chose the sections: the document may have content in
-/// others.
-const NO_CONTENT_IN_SECTIONS: &str = "The chosen sections have no content.";
+/// The last line of a body still under [`MIN_CONTENT_LINES`] with its description: it says
+/// there is no content only when there is none (`content` counts the lines under the title).
+/// With chosen sections it speaks of them, as the document may hold more in others.
+fn closing_line(content: usize, sections_chosen: bool) -> &'static str {
+    match (content, sections_chosen) {
+        (0, false) => "The document has no content.",
+        (0, true) => "The chosen sections have no content.",
+        (_, false) => "The document ends here.",
+        (_, true) => "The chosen sections end here.",
+    }
+}
 
 /// `## Overview`: the parts with kind, size, role and what they read from, the facts, and a
 /// Mermaid graph of the parts when one reads from another. `None` when the document has no
@@ -587,4 +589,20 @@ fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
         }
     }
     min
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closing_line;
+
+    #[test]
+    fn closing_line_says_no_content_only_when_there_is_none() {
+        assert_eq!(closing_line(0, false), "The document has no content.");
+        assert_eq!(
+            closing_line(0, true),
+            "The chosen sections have no content."
+        );
+        assert_eq!(closing_line(1, false), "The document ends here.");
+        assert_eq!(closing_line(1, true), "The chosen sections end here.");
+    }
 }
