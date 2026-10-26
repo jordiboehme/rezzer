@@ -1238,7 +1238,11 @@ pub(crate) fn runs_in(
             match r.kind {
                 // A rectangle's top and bottom are rules across too.
                 RuleKind::Rect => vec![(a.1, x0, x1), (b.1, x0, x1)],
-                RuleKind::Line if (a.1 - b.1).abs() <= 1.0 => vec![((a.1 + b.1) / 2.0, x0, x1)],
+                // A line rule runs along one axis by how it is made: flat in this frame when
+                // it is wider than high.
+                RuleKind::Line if (a.1 - b.1).abs() < (a.0 - b.0).abs() => {
+                    vec![((a.1 + b.1) / 2.0, x0, x1)]
+                }
                 RuleKind::Line => Vec::new(),
             }
         })

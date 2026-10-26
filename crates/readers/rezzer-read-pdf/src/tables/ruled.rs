@@ -9,9 +9,7 @@ use std::collections::{HashMap, HashSet};
 use super::banded::{Band, Shared, Taken, banded, row_starts};
 use super::pairs::{field_cuts, field_strips, frames, taken_by_grids};
 use super::sections::{CUT_WORK, sections};
-use super::side::{
-    Beside, SIDE_FOUND_BY, SIDE_GAP, SIDE_WORK, Side, StripKind, side_columns, totals_table,
-};
+use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_table};
 use super::*;
 use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
@@ -211,8 +209,8 @@ pub(super) fn ruled(
         // A section below a cut reaches only as far left as its own top rule: where another
         // block draws the rule at that height over its left part (fields beside it), the
         // text under that part is the other block's.
-        if cut_above && let Some(&top) = ys.first() {
-            let from = own_left(&h, &hs, top, xs[0]);
+        if cut_above && let (Some(&top), Some(&l), Some(&r)) = (ys.first(), xs.first(), xs.last()) {
+            let from = own_left(&h, &hs, top, (l, r));
             if from > xs[0] {
                 xs.retain(|x| *x >= from - SNAP);
                 if xs.first().is_none_or(|x| *x > from + SNAP) {
@@ -810,11 +808,15 @@ pub(super) fn ruled(
     }
 }
 
+/// A section's own top rule that starts right of its left edge by more than this share of its
+/// width is short of the edge: a rule a little shorter is the same rule.
+const OWN_LEFT: f32 = 0.05;
+
 /// Where the own top rule of a section at height `top` starts, when it starts right of the
-/// section's left edge `left` and a rule of another block at that height (among the page's
-/// `hs`, sorted by height) covers most of the stretch from `left` up to it; else `left`.
-/// `h` are the section's own horizontal segments.
-fn own_left(h: &[Seg], hs: &[Seg], top: f32, left: f32) -> f32 {
+/// section's left edge `left` (see [`OWN_LEFT`]; `right` is its right edge) and a rule of
+/// another block at that height (among the page's `hs`, sorted by height) covers most of the
+/// stretch from `left` up to it; else `left`. `h` are the section's own horizontal segments.
+fn own_left(h: &[Seg], hs: &[Seg], top: f32, (left, right): (f32, f32)) -> f32 {
     let Some(from) = h
         .iter()
         .filter(|s| (s.at - top).abs() <= SNAP)
@@ -823,7 +825,7 @@ fn own_left(h: &[Seg], hs: &[Seg], top: f32, left: f32) -> f32 {
     else {
         return left;
     };
-    if from <= left + SIDE_GAP {
+    if from - left <= OWN_LEFT * (right - left) {
         return left;
     }
     let lo = hs.partition_point(|s| s.at < top - SNAP);
@@ -842,7 +844,7 @@ fn joined<'s>(sides: &'s [Side], xs: &[f32], ys: &[f32]) -> Option<&'s Side> {
     sides.iter().find(|s| {
         let gap = s.x0 - right;
         gap > SNAP
-            && gap <= SIDE_GAP
+            && gap <= s.gap
             && s.strips.iter().any(|st| {
                 matches!(st.kind, StripKind::Joins)
                     && st.top <= top + SNAP

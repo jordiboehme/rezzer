@@ -40,8 +40,14 @@ const LABEL_LINES: usize = 2;
 /// Lines a strip of fields between two rules may hold; a taller one is text, not fields.
 const STRIP_LINES: usize = 40;
 
-/// A divider of a strip is at least this long: shorter strokes are marks.
-const DIVIDER: f32 = 3.0 * SNAP;
+/// A divider of a strip is at least this share of the strip's height long: it parts the
+/// fields over much of the row, where a drawn separator mark is a small share of it.
+const DIVIDER: f32 = 0.25;
+
+/// Boxes of one row or column of fields touch within this share of the size of their
+/// smallest text: farther apart, they are boxes on their own. Relative to the text, so a form
+/// printed larger or smaller chains the same.
+const TOUCH: f32 = 0.5;
 
 /// Steps the search for fields between rules may take on one page.
 const STRIP_WORK: usize = 1_000_000;
@@ -463,23 +469,37 @@ pub(crate) fn box_pairs(
         }
         unsure.retain(|u| !u.1.is_empty());
     }
-    let near = |a: [f32; 4], b: [f32; 4]| {
-        let row = (a[3] - b[3]).abs() <= SNAP
-            && ((a[2] - b[0]).abs() <= SNAP || (b[2] - a[0]).abs() <= SNAP);
-        let column = (a[0] - b[0]).abs() <= SNAP
-            && ((a[1] - b[3]).abs() <= SNAP || (b[1] - a[3]).abs() <= SNAP);
+    // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
+    let touch: Vec<f32> = in_box
+        .iter()
+        .map(|ids| {
+            let small = ids
+                .iter()
+                .filter(|&&i| inked(&flow.runs[i]))
+                .map(|&i| flow.runs[i].size)
+                .fold(f32::INFINITY, f32::min);
+            if small.is_finite() {
+                TOUCH * small
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let near = |p: usize, q: usize| {
+        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+        let row =
+            (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || (b[2] - a[0]).abs() <= t);
+        let column =
+            (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
         row || column
     };
     // Rows first: boxes left to right, each going on the row whose last box it touches.
     let mut order: Vec<usize> = (0..boxes.len()).filter(|&b| fields[b].is_some()).collect();
     order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
-    let chains = |order: &[usize], next: &dyn Fn([f32; 4], [f32; 4]) -> bool| {
+    let chains = |order: &[usize], next: &dyn Fn(usize, usize) -> bool| {
         let mut out: Vec<Vec<usize>> = Vec::new();
         for &b in order {
-            match out
-                .iter_mut()
-                .find(|c| next(boxes[*c.last().expect("a box")], boxes[b]))
-            {
+            match out.iter_mut().find(|c| next(*c.last().expect("a box"), b)) {
                 Some(c) => c.push(b),
                 None => out.push(vec![b]),
             }
@@ -493,8 +513,9 @@ pub(crate) fn box_pairs(
     let mut hs: Option<Vec<Seg>> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = vec![false; boxes.len()];
-    for c in chains(&order, &|a, b| {
-        (a[3] - b[3]).abs() <= SNAP && (a[2] - b[0]).abs() <= SNAP
+    for c in chains(&order, &|p, q| {
+        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+        (a[3] - b[3]).abs() <= t && (a[2] - b[0]).abs() <= t
     }) {
         if c.len() < 2 || !has_value(&c) {
             continue;
@@ -518,8 +539,9 @@ pub(crate) fn box_pairs(
     }
     let mut rest: Vec<usize> = order.into_iter().filter(|&b| !used[b]).collect();
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
-    for c in chains(&rest, &|a, b| {
-        (a[0] - b[0]).abs() <= SNAP && (a[1] - b[3]).abs() <= SNAP
+    for c in chains(&rest, &|p, q| {
+        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+        (a[0] - b[0]).abs() <= t && (a[1] - b[3]).abs() <= t
     }) {
         if c.len() >= 2 && has_value(&c) {
             groups.push(c);
@@ -531,11 +553,11 @@ pub(crate) fn box_pairs(
     let reasons: Vec<&str> = unsure
         .iter()
         .filter(|(b, why)| {
-            paired.iter().any(|&p| near(boxes[*b], boxes[p]))
+            paired.iter().any(|&p| near(*b, p))
                 || (*why == WEIGHT_ONLY
                     && unsure
                         .iter()
-                        .any(|(o, w)| o != b && *w == WEIGHT_ONLY && near(boxes[*b], boxes[*o])))
+                        .any(|(o, w)| o != b && *w == WEIGHT_ONLY && near(*b, *o)))
         })
         .map(|(_, why)| *why)
         .collect();
@@ -601,7 +623,7 @@ pub(crate) fn box_pairs(
                 .iter()
                 .all(|&i| flow.runs[i].bold && !flow.runs[i].off_axis)
             && lines_of(flow, &inked_ids).len() <= LABEL_LINES;
-        if fields[b].is_some() || !bold || !paired.iter().any(|&p| near(boxes[b], boxes[p])) {
+        if fields[b].is_some() || !bold || !paired.iter().any(|&p| near(b, p)) {
             continue;
         }
         for &i in ids {
@@ -647,7 +669,8 @@ const TITLE_TEXT_LINES: usize = 20;
 /// them. Each title is a heading where it stands and its lines its text; their runs leave
 /// `flow`. `rules` are the page's drawn rules.
 pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle> {
-    let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() <= SNAP / 2.0;
+    // A line rule runs along one axis by how it is made: it is flat when it is wider than high.
+    let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() < (r.x0 - r.x1).abs();
     let segs: Vec<Seg> = rules
         .iter()
         .filter(|r| flat(r))
@@ -1069,7 +1092,10 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
                 break;
             }
             let reaches = (v.to - top).abs() <= SNAP || (v.from - bottom).abs() <= SNAP;
-            if reaches && v.to - v.from >= DIVIDER && v.from >= bottom - SNAP && v.to <= top + SNAP
+            if reaches
+                && v.to - v.from >= DIVIDER * (top - bottom)
+                && v.from >= bottom - SNAP
+                && v.to <= top + SNAP
             {
                 dividers.push(v.at);
                 spans.push((v.from, v.to));
@@ -1803,8 +1829,9 @@ fn label_starts(flow: &Flow, cell: &[usize]) -> Vec<f32> {
         .windows(2)
         .map(|w| {
             let (_, end) = extent(flow, &w[0]);
-            let b = flow.runs[w[1][0]].x;
-            b - SNAP.min(0.5 * (b - end))
+            let r = &flow.runs[w[1][0]];
+            // A character of the label left of it, or half the room to the label before.
+            r.x - (CHAR * r.size).min(0.5 * (r.x - end))
         })
         .collect()
 }

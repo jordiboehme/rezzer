@@ -11,9 +11,11 @@
 use super::*;
 use crate::regions::Seg;
 
-/// A column stands beside a grid when it starts at most this many points right of the grid's
-/// right edge (and more than [`SNAP`], or the two would be one rule).
-pub(super) const SIDE_GAP: f32 = 4.0 * SNAP;
+/// A column stands beside a grid when it starts at most this many times the size of its text
+/// right of the grid's right edge (and more than [`SNAP`], or the two would be one rule): a
+/// gutter of about a character parts a column of totals from its section; it is also at least
+/// this wide. Relative to the text, so a form printed larger or smaller reads the same.
+pub(super) const SIDE_GAP: f32 = 1.0;
 
 /// The note before the first table on a page the column of totals adds to.
 pub(super) const SIDE_FOUND_BY: &str = "Found by: a column of amounts beside a table, drawn with \
@@ -23,11 +25,13 @@ pub(super) const SIDE_FOUND_BY: &str = "Found by: a column of amounts beside a t
 /// Rules one page may look at for columns of totals; past them none is looked for.
 pub(super) const SIDE_WORK: usize = 1_000_000;
 
-/// A column of totals: its left and right ends, and its strips.
+/// A column of totals: its left and right ends, the widest gap it may stand from a section
+/// beside it (see [`SIDE_GAP`]), and its strips.
 #[derive(Debug)]
 pub(super) struct Side {
     pub x0: f32,
     pub x1: f32,
+    pub gap: f32,
     pub strips: Vec<Strip>,
 }
 
@@ -101,17 +105,33 @@ pub(super) fn side_columns(
     }
     let mut out = Vec::new();
     for (x0, x1, mut ys) in columns {
-        if ys.len() < 2 || x1 - x0 <= SIDE_GAP {
+        if ys.len() < 2 {
             continue;
         }
         ys.sort_by(|a, b| b.total_cmp(a));
         ys.dedup_by(|b, a| *a - *b <= SNAP);
+        // The size of the column's text sets how far it may stand from a section, and how
+        // narrow it may be.
+        let size = by_y
+            .runs_between(ys[ys.len() - 1], ys[0])
+            .into_iter()
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                let (cx, _) = middle(r);
+                !r.off_axis && cx > x0 && cx < x1 && !r.text.trim().is_empty()
+            })
+            .map(|i| flow.runs[i].size)
+            .fold(0.0f32, f32::max);
+        let gap_most = SIDE_GAP * size;
+        if x1 - x0 <= gap_most {
+            continue;
+        }
         let on = |edges: &[f32], y: f32| edges.iter().any(|e| (e - y).abs() <= SNAP);
         let beside: Vec<&Beside<'_>> = parts
             .iter()
             .filter(|p| {
                 let gap = x0 - p.right;
-                gap > SNAP && gap <= SIDE_GAP && ys.iter().filter(|y| on(p.ys, **y)).count() >= 2
+                gap > SNAP && gap <= gap_most && ys.iter().filter(|y| on(p.ys, **y)).count() >= 2
             })
             .collect();
         if beside.is_empty() {
@@ -140,7 +160,12 @@ pub(super) fn side_columns(
                 kind: strip_kind(flow, by_y, (x0, x1), (w[1], w[0]), left),
             })
             .collect();
-        out.push(Side { x0, x1, strips });
+        out.push(Side {
+            x0,
+            x1,
+            gap: gap_most,
+            strips,
+        });
     }
     out
 }

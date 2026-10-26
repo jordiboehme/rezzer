@@ -283,6 +283,9 @@ pub struct FormPage {
     pub annots: Vec<String>,
     /// The data lines are set in Courier-Bold (`/FDB`), as some print runs set them.
     pub bold_data: bool,
+    /// The whole page drawn this many times as large (the page box too), as a form printed
+    /// larger or smaller.
+    pub scale: f32,
 }
 
 impl Default for FormPage {
@@ -294,6 +297,7 @@ impl Default for FormPage {
             lines: Vec::new(),
             annots: Vec::new(),
             bold_data: false,
+            scale: 1.0,
         }
     }
 }
@@ -327,7 +331,8 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
             &format!("/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Resources << {fonts} >>"),
             &win_ansi(&page.template),
         );
-        let mut content = String::from("q /Tpl Do Q\n");
+        let s = page.scale;
+        let mut content = format!("q {s} 0 0 {s} 0 0 cm q /Tpl Do Q\n");
         for line in &page.lines {
             let line = data_line(page.left, line.y, page.size, &line.text);
             if page.bold_data {
@@ -336,6 +341,7 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
                 content.push_str(&line);
             }
         }
+        content.push_str("Q\n");
         let content = b.stream("", &win_ansi(&content));
         let annots: Vec<String> = page
             .annots
@@ -343,9 +349,11 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
             .map(|a| format!("{} 0 R", b.add(a.as_bytes())))
             .collect();
         let kid = b.add(format!(
-            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {} {}] \
              /Resources << {fonts} /XObject << /Tpl {tpl} 0 R >> >> \
              /Contents {content} 0 R /Annots [{}] >>",
+            595.0 * s,
+            842.0 * s,
             annots.join(" ")
         ));
         all_annots.extend(annots);
