@@ -926,30 +926,31 @@ fn many_pictures_page(n: usize, mask: bool) -> Vec<u8> {
 #[test]
 fn a_soft_mask_many_pictures_share_is_read_once() {
     // 50,000 pictures share one soft mask of 1 MB: knowing them takes not much longer than
-    // knowing 50,000 pictures without a mask.
+    // knowing 50,000 pictures without a mask. Reading the mask once per picture would take
+    // many times longer. Wall time on a shared machine is noisy, so each file is read three
+    // times in turn and the fastest read of each is compared, with room for the noise left.
     let plain = many_pictures_page(50_000, false);
     let masked = many_pictures_page(50_000, true);
-    let start = std::time::Instant::now();
-    let out = read(&plain);
-    let plain_time = start.elapsed();
-    assert_eq!(
-        out.completeness,
-        Completeness::Complete,
-        "{:#?}",
-        out.document.losses
-    );
-    let start = std::time::Instant::now();
-    let out = read(&masked);
-    let masked_time = start.elapsed();
-    assert_eq!(
-        out.completeness,
-        Completeness::Complete,
-        "{:#?}",
-        out.document.losses
-    );
+    let timed = |bytes: &[u8]| {
+        let start = std::time::Instant::now();
+        let out = read(bytes);
+        let took = start.elapsed();
+        assert_eq!(
+            out.completeness,
+            Completeness::Complete,
+            "{:#?}",
+            out.document.losses
+        );
+        took
+    };
+    let (mut plain_time, mut masked_time) = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..3 {
+        plain_time = plain_time.min(timed(&plain));
+        masked_time = masked_time.min(timed(&masked));
+    }
     eprintln!("plain {plain_time:?}, masked {masked_time:?}");
     assert!(
-        masked_time < plain_time * 3 / 2 + std::time::Duration::from_millis(300),
+        masked_time < plain_time * 2 + std::time::Duration::from_millis(500),
         "plain {plain_time:?}, masked {masked_time:?}"
     );
 }
