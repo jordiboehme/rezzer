@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats and EPUB. Until the first release is out, you build Rezzer from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats, EPUB and Atlassian Document Format. Until the first release is out, you build Rezzer from source. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -232,6 +232,7 @@ Each format has its own page with what Rezzer extracts and the known limitations
 | [PPT](docs/formats/ppt.md) | 🗓️ | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
 | [RTF](docs/formats/rtf.md) | 🗓️ | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
 | [EPUB](docs/formats/epub.md) | 🗓️ | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
+| [ADF](docs/formats/adf.md) | 🗓️ | Jira and Confluence rich text: structure, tables, code, panels, mentions, links, attachments by id | own reader |
 | [CAD and engineering](docs/formats/cad.md) | 🔭 | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 | [PostScript, EPS](docs/formats/postscript.md) | 🔭 | Document facts from the header, text after that | own reader |
 
@@ -247,7 +248,8 @@ Planned after that:
 | Lotus Notes | 🔭 | NSF mail databases |
 | Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
 | Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
-| Diagrams | 🔭 | draw.io, Visio, Lucidchart |
+| Diagrams | 🔭 | draw.io, Visio, Lucidchart, Excalidraw |
+| Design | 🔭 | Figma: frames, components, text and comments |
 | [Calculation sheets](docs/formats/mathcad.md) | 🔭 | Mathcad Prime, Mathcad 12-15, SMath |
 | Automation | 🔭 | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports |
 | Plant and product data | 🔭 | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF |
