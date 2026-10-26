@@ -355,6 +355,56 @@ pub(crate) fn family_title(title: &str, n: usize) -> String {
     }
 }
 
+/// Makes the unit titles of one document unique (ruling P5-AE), as Crystalline compares
+/// them (trimmed, in lower case), so no two parts share a title (L003). A title that two
+/// units share, or that a `contents` part takes (`Contents`, `Contents, part <n>`), gets the
+/// unit's location in words, `Abstract (pages 3 to 5)`; when that is no different, the
+/// piece number, `Abstract, part 2` (`Contents (2)` for a unit titled `Contents`). Every title stays within [`TITLE_CAP`] and the 12
+/// characters of a piece number, as the part overhead counts it.
+pub(crate) fn unique_titles(units: &mut [Unit]) {
+    fn key(title: &str) -> String {
+        title.trim().to_lowercase()
+    }
+    fn reserved(key: &str) -> bool {
+        key == "contents"
+            || key
+                .strip_prefix("contents, part ")
+                .is_some_and(|n| n.parse::<usize>().is_ok())
+    }
+    let mut count: HashMap<String, usize> = HashMap::new();
+    for unit in units.iter() {
+        *count.entry(key(&unit.title)).or_insert(0) += 1;
+    }
+    let clashes = |k: &str| count.get(k).is_some_and(|&n| n > 1) || reserved(k);
+    let mut taken: HashSet<String> = count.keys().filter(|k| !clashes(k)).cloned().collect();
+    for unit in units.iter_mut() {
+        if !clashes(&key(&unit.title)) {
+            continue;
+        }
+        let location = unit.location.trim();
+        let base = if location.is_empty() || key(location) == key(&unit.title) {
+            unit.title.clone()
+        } else {
+            let suffix = format!(" ({})", capped(location, 60));
+            let room = (TITLE_CAP + 12).saturating_sub(suffix.chars().count());
+            format!("{}{suffix}", capped(&unit.title, room))
+        };
+        let mut title = base.clone();
+        let mut n = 1;
+        while reserved(&key(&title)) || !taken.insert(key(&title)) {
+            n += 1;
+            let cut = capped(&base, TITLE_CAP);
+            // `Contents, part <n>` is a contents part's own title.
+            title = if reserved(&key(&base)) {
+                format!("{cut} ({n})")
+            } else {
+                family_title(&cut, n)
+            };
+        }
+        unit.title = title;
+    }
+}
+
 struct Splitter<'a> {
     doc: &'a Document,
     opts: &'a RenderOptions,
@@ -1391,6 +1441,7 @@ impl<'a> Splitter<'a> {
         for (base, location, text) in self.trailing(&notes, &links) {
             self.push_trailing(&mut units, &mut names, base, location, &text);
         }
+        unique_titles(&mut units);
         units
     }
 

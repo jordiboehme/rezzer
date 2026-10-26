@@ -1337,6 +1337,73 @@ fn a_table_without_layout_is_cut_again_with_its_own_row_numbers() {
 use rezzer_model::{FieldAction, FormField, Loss, LossReason, OverviewPart, Severity, Signature};
 use rezzer_render::{Output, PartFile, render_output};
 
+/// Ruling P5-AE: no two parts of a document share a title, as Crystalline compares them (in
+/// lower case), and none takes the title of a contents part.
+#[test]
+fn repeated_chapter_titles_give_unique_part_titles() {
+    let mut d = doc(FormatId::Markdown);
+    for title in [
+        "Abstract",
+        "Chapter 1",
+        "abstract",
+        "Abstract",
+        "Contents",
+        "Abstract, part 2",
+    ] {
+        d.body.push(heading(1, title));
+        d.body.push(para(&words(9_000)));
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let mut seen = std::collections::HashSet::new();
+    for unit in &list {
+        let key = unit.title.trim().to_lowercase();
+        assert!(
+            seen.insert(key.clone()),
+            "{key} twice in {:?}",
+            titles(&list)
+        );
+        assert!(
+            key != "contents"
+                && !key
+                    .strip_prefix("contents, part ")
+                    .is_some_and(|n| n.parse::<usize>().is_ok()),
+            "{key}"
+        );
+    }
+    let all = titles(&list);
+    assert!(all.contains(&"Abstract"), "{all:?}");
+    assert!(all.contains(&"Chapter 1"), "{all:?}");
+    assert!(all.iter().any(|t| t.starts_with("Contents (")), "{all:?}");
+
+    // One outline chapter over many pages is cut into page ranges: the location tells them
+    // apart.
+    let mut d = doc(FormatId::Pdf);
+    for n in 1..=12 {
+        d.body.push(page(n, vec![para(&words(9_000))]));
+    }
+    d.facets.outline.push(OutlineEntry {
+        level: 1,
+        title: "Abstract".into(),
+        page: Some(1),
+    });
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let all = titles(&list);
+    let unique: std::collections::HashSet<_> = all.iter().map(|t| t.to_lowercase()).collect();
+    assert_eq!(unique.len(), all.len(), "{all:?}");
+    assert!(
+        all.contains(&"Abstract (page 1)")
+            || all.contains(&"Abstract (pages 1 to 2)")
+            || all.iter().any(|t| t.starts_with("Abstract (page")),
+        "{all:?}"
+    );
+}
+
+fn titles(list: &[Unit]) -> Vec<&str> {
+    list.iter().map(|u| u.title.as_str()).collect()
+}
+
 fn output(d: &Document, part_size: usize, main: &str, bundle: &str) -> Output {
     render_output(d, Completeness::Complete, &opts(), part_size, main, bundle)
 }
