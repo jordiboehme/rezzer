@@ -514,8 +514,8 @@ impl Pdf {
         &self.verdict.refused_pages
     }
 
-    /// The page tree has a cycle, a shared or repeated node, a missing, untyped or wrongly
-    /// typed node or more depth than the limits allow. Page numbers here follow lopdf's page
+    /// The page tree has a cycle, a shared or repeated node, a missing node, an untyped node,
+    /// a node of another type or more depth than the limits allow. Page numbers here follow lopdf's page
     /// walk, a depth-first walk of `/Kids` in order that keeps a missing kid as an empty page;
     /// a parser with a different walk may number such a file differently, so it must not get
     /// the file.

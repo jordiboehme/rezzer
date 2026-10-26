@@ -36,7 +36,7 @@ pdfparts has its own PDF parser, and it is the only code that reads the file. It
 
 From these objects pdfparts writes `canonical()`: a plain PDF with a classic cross-reference table, no object streams, no comments and no encryption. A stream over a limit is written empty, so the copy holds nothing that unpacks past the limits. Give other parsers these bytes, never the original file. `original()` keeps the bytes the file was opened from, for checks such as signature byte ranges. The `/Contents` of a signature is not decrypted, because it is not encrypted in the file.
 
-Page numbers follow lopdf's page walk, so they match other parsers built on lopdf. `unsafe_page_tree` is true when the page tree has a cycle, a node listed twice, a missing node, a node without a type or with another type, or too much depth. Such a file may get other page numbers in a parser with its own walk. Do not give it to one.
+Page numbers follow lopdf's page walk, so they match other parsers built on lopdf. `unsafe_page_tree` is true when the page tree has a cycle, a node listed twice, a missing node, an untyped node, a node of another type or too much depth. Such a file may get other page numbers in a parser with its own walk. Do not give it to one.
 
 lopdf is used as the object model in memory, to compute the decryption key and decrypt single objects, and to write the canonical copy. It never parses the original file. Trees, the outline, labels, links, annotations, the structure tree and threads are walked by this crate with a visited set and depth and item limits. A cycle or a broken entry becomes an `Issue` and the rest is still read. Nothing panics.
 
