@@ -1293,18 +1293,12 @@ fn band_rules(rules: &[Rule], turn: Turn) -> Vec<HRule> {
         })
         .collect();
     if let Ok(g) = crate::regions::grids(&turned) {
-        for (gh, gv) in &g.groups {
-            let distinct = |at: &mut Vec<f32>| {
-                at.sort_by(f32::total_cmp);
-                at.dedup_by(|b, a| *b - *a <= SNAP);
-                at.len()
-            };
-            let mut ys: Vec<f32> = gh.iter().map(|&j| g.hs[j].at).collect();
-            let mut xs: Vec<f32> = gv.iter().map(|&k| g.vs[k].at).collect();
-            if distinct(&mut ys) < 3 && distinct(&mut xs) < 3 {
+        for group in &g.groups {
+            if !crate::regions::inner_ruled(&g, group) {
                 continue;
             }
-            let top = gh
+            let top = group
+                .0
                 .iter()
                 .map(|&j| g.hs[j])
                 .max_by(|a, b| a.at.total_cmp(&b.at));

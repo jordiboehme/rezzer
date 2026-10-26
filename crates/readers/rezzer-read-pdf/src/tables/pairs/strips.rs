@@ -68,7 +68,8 @@ pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
 }
 
 /// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
-/// of rules, or a frame of fields between rules with a divider (see [`frames`]). An underlined
+/// with rules inside its frame (see [`crate::regions::inner_ruled`]; the frame of a figure is
+/// none), or a frame of fields between rules with a divider (see [`frames`]). An underlined
 /// title is looked for only there: on a page of prose a heading over a rule is a heading of
 /// the prose.
 pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
@@ -78,7 +79,9 @@ pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
     let Ok(g) = grids(rules) else {
         return false;
     };
-    !g.groups.is_empty()
+    g.groups
+        .iter()
+        .any(|group| crate::regions::inner_ruled(&g, group))
         || frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs)
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
@@ -553,17 +556,20 @@ fn kind_of(text: &str) -> Kind {
 /// Puts back whole a value that runs on into the empty next field of its row of the group `g`
 /// of `strips`: a value cut at its word gap at a divider pairs its last piece with the next
 /// field when the dividers part it there. When the other rows of the group hold values in that
-/// field's column (its label within a character of the same place) and none of them is of the
-/// piece's kind, while the piece is of the kind of the value before it, the piece is that
-/// value's overflow: it goes back to its field, and the next field is empty.
+/// field's column (its label within a character of the same place), none of them of the
+/// piece's kind and all of them shorter than the piece, while the piece is of the kind of the
+/// value before it, the piece is that value's overflow: it goes back to its field, and the
+/// next field is empty. A short piece (a letter where the column holds numbers) may be that
+/// field's own odd value, so it stays where the cut put it.
 fn overflow_back(flow: &Flow, strips: &mut [Strip], g: &[usize]) {
     let column = |f: &Field| f.label.first().map(|&i| &flow.runs[i]);
     // The kinds of the values of the group by the place and size of their labels.
-    let mut seen: Vec<(f32, f32, usize, Kind)> = Vec::new();
+    let mut seen: Vec<(f32, usize, Kind, usize)> = Vec::new();
     for &k in g {
         for f in &strips[k].fields {
             if let (Some(l), false) = (column(f), f.value.is_empty()) {
-                seen.push((l.x, l.size, k, kind_of(&words(flow, &f.value))));
+                let text = words(flow, &f.value);
+                seen.push((l.x, k, kind_of(&text), text.chars().count()));
             }
         }
     }
@@ -587,14 +593,15 @@ fn overflow_back(flow: &Flow, strips: &mut [Strip], g: &[usize]) {
                 continue;
             };
             let piece = kind_of(&rb.text);
-            let others: Vec<Kind> = seen
+            let length = rb.text.trim().chars().count();
+            let others: Vec<(Kind, usize)> = seen
                 .iter()
-                .filter(|s| s.2 != k && (s.0 - l.x).abs() <= CHAR * l.size.max(1.0))
-                .map(|s| s.3)
+                .filter(|s| s.1 != k && (s.0 - l.x).abs() <= CHAR * l.size.max(1.0))
+                .map(|s| (s.2, s.3))
                 .collect();
             if touching
                 && !others.is_empty()
-                && !others.contains(&piece)
+                && others.iter().all(|&(kind, n)| kind != piece && n < length)
                 && kind_of(&ra.text) == piece
             {
                 a.value.push(*vb);

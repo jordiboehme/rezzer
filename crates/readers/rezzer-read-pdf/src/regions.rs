@@ -155,6 +155,19 @@ pub(crate) struct Grids {
     pub groups: Vec<(Vec<usize>, Vec<usize>)>,
 }
 
+/// Whether the group `(gh, gv)` of `g` holds rules inside its frame: three rules or more of
+/// one direction (pieces of one line count once). A frame alone (a box, the sides of a figure
+/// or of a shaded band) has two of each.
+pub(crate) fn inner_ruled(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> bool {
+    let distinct = |mut at: Vec<f32>| {
+        at.sort_by(f32::total_cmp);
+        at.dedup_by(|b, a| *b - *a <= SNAP);
+        at.len()
+    };
+    distinct(gh.iter().map(|&j| g.hs[j].at).collect()) >= 3
+        || distinct(gv.iter().map(|&k| g.vs[k].at).collect()) >= 3
+}
+
 /// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides.
 pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
     let flat = |r: &Rule| (r.y0 - r.y1).abs() <= SNAP / 2.0;

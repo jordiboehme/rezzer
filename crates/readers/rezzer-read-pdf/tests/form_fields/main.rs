@@ -27,7 +27,7 @@ use draw::{Stroke, bar_h, bar_v, mark_b};
 use rezzer_model::{Block, plain_text};
 use shapes::{
     Align, Built, DataFont, FieldSpec, Geo, REAL, ROWS, Rows, THREE_ROWS, boxed_row, header_grid,
-    label_block, overflow_rows, page, rows_page, shape_page, total_column,
+    label_block, overflow_rows, page, rows_page, shape_page, short_value_rows, total_column,
 };
 
 #[global_allocator]
@@ -88,11 +88,19 @@ fn title_over_a_bar_heads_its_lines() {
 }
 
 /// A page of prose: a small bold heading over a drawn rule, then two paragraphs of regular
-/// text half a point larger, of three lines each, with no field, grid or box on the page.
-/// The heading and the rule are no form's title: the lines keep their paragraphs.
+/// text half a point larger, of three lines each, with no field or grid on the page; with and
+/// without a framed figure under the text. The heading and the rule are no form's title: the
+/// lines keep their paragraphs.
 #[test]
 fn a_heading_over_a_rule_on_a_prose_page_keeps_its_paragraphs() {
-    let mut c = String::from("BT /F2 9 Tf 72 700 Td (Ergebnisse der Messung) Tj ET\n");
+    for figure in ["", "q 0.5 w 72 300 300 200 re S Q\n"] {
+        prose_page_keeps_its_paragraphs(figure);
+    }
+}
+
+fn prose_page_keeps_its_paragraphs(figure: &str) {
+    let mut c = String::from(figure);
+    c += "BT /F2 9 Tf 72 700 Td (Ergebnisse der Messung) Tj ET\n";
     c += "q 0.5 w 72 697.5 m 400 697.5 l S Q\n";
     let lines = [
         "Die Messung zeigt einen klaren Anstieg der Werte im",
@@ -119,7 +127,7 @@ fn a_heading_over_a_rule_on_a_prose_page_keeps_its_paragraphs() {
             paragraphs
                 .iter()
                 .any(|p| p.contains(lines[a]) && p.contains(lines[b])),
-            "{paragraphs:#?}"
+            "{figure:?}: {paragraphs:#?}"
         );
     }
 }
@@ -544,6 +552,9 @@ fn shapes() -> Vec<(&'static str, Shape)> {
         ("label block and bank row", |g| shape_page(g, label_block)),
         ("overflow into an empty field", |g| {
             shape_page(g, overflow_rows)
+        }),
+        ("a short value after a full field", |g| {
+            shape_page(g, short_value_rows)
         }),
         ("rows", |g| rows_page(g, &ROWS, &THREE_ROWS, &[])),
         ("labels under values", |g| {

@@ -750,25 +750,71 @@ pub(crate) fn label_block(g: &Geo, b: &mut Built, top: f32) -> f32 {
 /// the divider; in the other rows the number field holds numbers. The name is one value, and
 /// the number field of the first row is empty.
 pub(crate) fn overflow_rows(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    field_pair_rows(
+        g,
+        b,
+        top,
+        6,
+        &[
+            (
+                "Name",
+                "Erika Mustermann",
+                "Nr",
+                "",
+                Some("Erika Mustermann"),
+            ),
+            ("Ruf", "Max", "Haus", "12", None),
+            ("Kurz", "Udo", "Zi", "34", None),
+        ],
+    )
+}
+
+/// The same rows with a name of one word that fills its field (seven columns) but one, and a
+/// short value of letters at the next field's start, one space after it: the next field's own
+/// value, though the other rows hold numbers there. It pairs with its own field.
+pub(crate) fn short_value_rows(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    field_pair_rows(
+        g,
+        b,
+        top,
+        7,
+        &[
+            ("Name", "Peters", "Kz", "V", None),
+            ("Ruf", "Max", "Haus", "12", None),
+            ("Kurz", "Udo", "Zi", "34", None),
+        ],
+    )
+}
+
+/// Rows of two fields parted by a divider at data column `split`: each row its two labels,
+/// their values, and the whole first value when the data line writes it over both fields.
+fn field_pair_rows(
+    g: &Geo,
+    b: &mut Built,
+    top: f32,
+    split: usize,
+    rows: &[(
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+    )],
+) -> f32 {
     let h = 2.4 * g.data;
-    let rows = [
-        ("Name", "Erika Mustermann", "Nr", ""),
-        ("Ruf", "Max", "Haus", "12"),
-        ("Kurz", "Udo", "Zi", "34"),
-    ];
     for k in 0..=rows.len() {
         b.page.template += &g.hrule(g.col(0) - 0.12, g.col(30), top - h * k as f32);
     }
     let lab = |k: usize| g.col(k) + 0.18 * g.label;
-    for (n, (l1, v1, l2, v2)) in rows.iter().enumerate() {
+    for (n, (l1, v1, l2, v2, _)) in rows.iter().enumerate() {
         let rule = top - h * n as f32;
-        b.page.template += &g.divider(g.col(6) - 0.06, rule, rule - h);
+        b.page.template += &g.divider(g.col(split) - 0.06, rule, rule - h);
         let base = rule - 0.86 * g.data;
         b.page.template += &label(lab(0), base, g.label, l1);
-        b.page.template += &label(lab(6), base, g.label, l2);
+        b.page.template += &label(lab(split), base, g.label, l2);
         let mut parts = vec![(0, *v1)];
         if !v2.is_empty() {
-            parts.push((6, *v2));
+            parts.push((split, *v2));
         }
         g.values(b, rule - 2.23 * g.data, &parts);
         b.expect(l1, v1);
