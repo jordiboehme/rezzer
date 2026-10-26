@@ -113,41 +113,46 @@ fn two_column_page(gap: Option<(f32, f32)>, drawn: &str) -> String {
     c
 }
 
-/// Whether every numbered line of the left column comes before every line of the right one.
-fn column_by_column(t: &str) -> bool {
-    let at = |side: &str| {
-        let mut found = Vec::new();
-        for k in 1..=40 {
-            if let Some(p) = t.find(&format!("Zeile {side}{k:02} ")) {
-                found.push(p);
+/// Whether the numbered lines of [`two_column_page`] around a drawing across both columns
+/// between lines 20 and 21 of each column read in bands: the lines above it column by column,
+/// then the lines under it column by column, each column in its order.
+fn in_bands(t: &str) -> bool {
+    let at = |side: &str, k: usize| t.find(&format!("Zeile {side}{k:02} "));
+    let band = |from: usize, to: usize| -> Option<(usize, usize)> {
+        let mut seen = Vec::new();
+        for side in ["L", "R"] {
+            for k in from..=to {
+                if let Some(p) = at(side, k) {
+                    seen.push(p);
+                }
             }
         }
-        found
+        let ordered = seen.len() >= 2 && seen.windows(2).all(|w| w[0] < w[1]);
+        ordered.then(|| (seen[0], *seen.last().expect("a line")))
     };
-    let (l, r) = (at("L"), at("R"));
-    !l.is_empty()
-        && !r.is_empty()
-        && l.windows(2).all(|w| w[0] < w[1])
-        && r.windows(2).all(|w| w[0] < w[1])
-        && l.iter().max() < r.iter().min()
+    matches!((band(1, 20), band(21, 40)), (Some(above), Some(below)) if above.1 < below.0)
 }
 
 /// A framed figure across both columns in the middle of the page, with no text across the
-/// gutter: each column flows past it, so the columns read one after the other.
+/// gutter: the frame's top and bottom part the columns into bands, so the lines above it are
+/// read column by column, then the lines under it. Column flow past a figure is read in bands
+/// until text evidence decides it (a word or a sentence that goes on in the column under the
+/// figure): two-column reports with a figure across the page read so, and their columns may
+/// as well flow past it.
 #[test]
-fn columns_flow_past_a_framed_figure_across_them() {
+fn columns_past_a_framed_figure_across_them_read_in_bands() {
     let frame = "q 0.5 w 56 390 484 130 re S Q\n";
     let out = read(&pdf(
         &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
         "",
     ));
     let t = all_text(&out);
-    assert!(column_by_column(&t), "{t}");
+    assert!(in_bands(&t), "{t}");
 }
 
-/// The same with the frame drawn as four lines that meet: it is no lone line either.
+/// The same with the frame drawn as four lines that meet.
 #[test]
-fn columns_flow_past_a_figure_framed_by_four_lines() {
+fn columns_past_a_figure_framed_by_four_lines_read_in_bands() {
     let frame = "q 0.5 w 56 390 m 540 390 l S 56 520 m 540 520 l S \
                  56 390 m 56 520 l S 540 390 m 540 520 l S Q\n";
     let out = read(&pdf(
@@ -155,13 +160,12 @@ fn columns_flow_past_a_figure_framed_by_four_lines() {
         "",
     ));
     let t = all_text(&out);
-    assert!(column_by_column(&t), "{t}");
+    assert!(in_bands(&t), "{t}");
 }
 
 /// A framed chart across both columns with one rule across it and one up it inside the frame
-/// (a grid with rules inside, but no text in its cells): its top rule parts the bands of the
-/// columns, so the columns above it are read before the columns under it (reported: a grid's
-/// top rule parts bands whether or not its cells hold text).
+/// (a grid with rules inside, but no text in its cells): it parts the columns into bands as a
+/// framed figure does.
 #[test]
 fn columns_past_a_framed_chart_with_inner_rules_read_in_bands() {
     let frame = "q 0.5 w 56 390 484 130 re S 56 455 m 540 455 l S 298 390 m 298 520 l S Q\n";
@@ -170,13 +174,7 @@ fn columns_past_a_framed_chart_with_inner_rules_read_in_bands() {
         "",
     ));
     let t = all_text(&out);
-    let at = |w: &str| t.find(w).unwrap_or(usize::MAX);
-    assert!(
-        at("Zeile L20 ") < at("Zeile R01 ")
-            && at("Zeile R20 ") < at("Zeile L21 ")
-            && at("Zeile L21 ") < usize::MAX,
-        "{t}"
-    );
+    assert!(in_bands(&t), "{t}");
 }
 
 /// Guard: a shaded band across both columns behind their text is a box the text in it is read

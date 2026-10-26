@@ -12,7 +12,7 @@ use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::{Gap, Gaps, Run};
 use crate::regions::{Part, offset_baselines};
-use crate::tables::{Rule, RuleKind, SNAP};
+use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
@@ -1234,8 +1234,24 @@ pub(crate) fn runs_in(
         .flat_map(|r| [turn.apply(r.x0, r.y0).0, turn.apply(r.x1, r.y1).0])
         .collect();
     columns.sort_by(f32::total_cmp);
-    // The horizontal rules in the frame of the main text that part bands of columns.
-    let across = band_rules(rules, turn);
+    // The horizontal rules in the frame of the main text, which part bands of columns.
+    let across: Vec<HRule> = rules
+        .iter()
+        .flat_map(|r| {
+            let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
+            let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
+            match r.kind {
+                // A rectangle's top and bottom are rules across too.
+                RuleKind::Rect => vec![(a.1, x0, x1), (b.1, x0, x1)],
+                // A line rule runs along one axis by how it is made: flat in this frame when
+                // it is wider than high.
+                RuleKind::Line if (a.1 - b.1).abs() < (a.0 - b.0).abs() => {
+                    vec![((a.1 + b.1) / 2.0, x0, x1)]
+                }
+                RuleKind::Line => Vec::new(),
+            }
+        })
+        .collect();
     let unused = if turned.is_empty() {
         None
     } else {
@@ -1271,94 +1287,6 @@ pub(crate) fn runs_in(
     }
     runs.extend(vertical_runs(page, &vertical, text, turn, line));
     (runs, unused)
-}
-
-/// Steps the search for lone lines may take on one page; past them no more line parts bands.
-const LONE_WORK: usize = 1_000_000;
-
-/// The horizontal rules among `rules` that part bands of columns, in the frame turned by
-/// `turn`: a line that stands alone (no upright line meets it, within [`SNAP`]; no side of a
-/// rectangle, a fill or a box), and the top rule of a ruled grid with rules inside it (three
-/// rules or more of one direction): a block above it is read before the table it starts. The
-/// sides of a frame around a figure or of a shaded band, which text may flow past or through,
-/// and the inner and lower rules of a grid part none.
-fn band_rules(rules: &[Rule], turn: Turn) -> Vec<HRule> {
-    let mut out = lone_lines(rules, turn);
-    let turned: Vec<Rule> = rules
-        .iter()
-        .map(|r| {
-            let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
-            Rule {
-                x0: a.0.min(b.0),
-                y0: a.1.min(b.1),
-                x1: a.0.max(b.0),
-                y1: a.1.max(b.1),
-                kind: r.kind,
-            }
-        })
-        .collect();
-    if let Ok(g) = crate::regions::grids(&turned) {
-        for group in &g.groups {
-            if !crate::regions::inner_ruled(&g, group) {
-                continue;
-            }
-            let top = group
-                .0
-                .iter()
-                .map(|&j| g.hs[j])
-                .max_by(|a, b| a.at.total_cmp(&b.at));
-            if let Some(t) = top {
-                out.push((t.at, t.from, t.to));
-            }
-        }
-    }
-    out
-}
-
-/// The horizontal lines among `rules` that stand alone, in the frame turned by `turn`: a line
-/// that no upright line meets (within [`SNAP`]), not a side of a rectangle, a fill or a box.
-fn lone_lines(rules: &[Rule], turn: Turn) -> Vec<HRule> {
-    // A line rule runs along one axis by how it is made: flat in this frame when it is wider
-    // than high.
-    let ends = |r: &Rule| (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
-    let mut upright: Vec<(f32, f32, f32)> = rules
-        .iter()
-        .filter(|r| r.kind == RuleKind::Line)
-        .filter_map(|r| {
-            let (a, b) = ends(r);
-            ((a.1 - b.1).abs() > (a.0 - b.0).abs())
-                .then(|| ((a.0 + b.0) / 2.0, a.1.min(b.1), a.1.max(b.1)))
-        })
-        .collect();
-    upright.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut work = 0usize;
-    let mut out = Vec::new();
-    for r in rules.iter().filter(|r| r.kind == RuleKind::Line) {
-        let (a, b) = ends(r);
-        if (a.1 - b.1).abs() >= (a.0 - b.0).abs() {
-            continue;
-        }
-        let (y, x0, x1) = ((a.1 + b.1) / 2.0, a.0.min(b.0), a.0.max(b.0));
-        let lo = upright.partition_point(|u| u.0 < x0 - SNAP);
-        let mut met = false;
-        for u in &upright[lo..] {
-            work += 1;
-            if u.0 > x1 + SNAP || work > LONE_WORK {
-                break;
-            }
-            met |= u.1 <= y + SNAP && u.2 >= y - SNAP;
-            if met {
-                break;
-            }
-        }
-        if work > LONE_WORK {
-            break;
-        }
-        if !met {
-            out.push((y, x0, x1));
-        }
-    }
-    out
 }
 
 /// Fragments drawn before one that are looked at for the copy it may be of.
