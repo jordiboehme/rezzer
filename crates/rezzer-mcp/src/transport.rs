@@ -35,6 +35,9 @@ pub fn max_message_bytes(max_inline_bytes: u64) -> usize {
     usize::try_from(bytes).unwrap_or(usize::MAX)
 }
 
+/// How long `close` waits for error answers that are still being sent.
+const CLOSE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The bytes read at once from the input.
 const CHUNK: usize = 64 * 1024;
 
@@ -116,6 +119,17 @@ where
     }
 
     async fn close(&mut self) -> Result<(), Self::Error> {
+        // The last answer task waits for the ones before it, so waiting for it is enough.
+        if let Some(task) = self.answering.take() {
+            match tokio::time::timeout(CLOSE_WAIT, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("rezzer: sending an error answer stopped: {e}"),
+                Err(_) => eprintln!(
+                    "rezzer: an error answer was not sent within {} seconds of the end",
+                    CLOSE_WAIT.as_secs()
+                ),
+            }
+        }
         self.inner.close().await
     }
 }
@@ -136,11 +150,14 @@ where
         let send = self.inner.send(answer);
         let before = self.answering.take();
         self.answering = Some(tokio::spawn(async move {
-            if let Some(before) = before {
-                let _ = before.await;
+            if let Some(before) = before
+                && let Err(e) = before.await
+            {
+                eprintln!("rezzer: sending an error answer stopped: {e}");
             }
-            // An error here means the connection is closed; nobody waits for the answer then.
-            let _ = send.await;
+            if let Err(e) = send.await {
+                eprintln!("rezzer: an error answer could not be sent: {e}");
+            }
         }));
     }
 }
@@ -551,6 +568,8 @@ mod tests {
                 read_ids.insert(id as u64);
             }
             assert_eq!(read_ids, BTreeSet::from([1, 2, 5, 6]), "step {step}");
+            // Closing waits for the answers still being sent.
+            transport.close().await.unwrap();
             let (client_read, _client_write) = tokio::io::split(client);
             assert_eq!(
                 answers(client_read, 3).await,
@@ -577,7 +596,10 @@ mod tests {
         let dropped = tokio::time::timeout(Duration::from_millis(300), transport.receive()).await;
         assert!(dropped.is_err(), "no message is read");
         let _client_write = writer.await.unwrap();
-        assert_eq!(answers(client_read, 1).await, BTreeSet::from([9]));
+        // The client reads only now; closing must still let the blocked answer through.
+        let reader = tokio::spawn(answers(client_read, 1));
+        transport.close().await.unwrap();
+        assert_eq!(reader.await.unwrap(), BTreeSet::from([9]));
     }
 
     fn id_of(text: &str) -> Option<RequestId> {
