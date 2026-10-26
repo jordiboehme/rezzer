@@ -11,7 +11,7 @@ One page per format: what Rezzer gets out of it, which crates it builds on, how 
 | 🗓️ 0.2.0 | Planned for release 0.2.0. Nothing is implemented yet. The page describes what is planned |
 | 🔭 Later | Planned for a release after 0.2.0. Nothing is implemented yet |
 
-Release 0.2.0 brings HTML first, then the office formats, then EPUB.
+Release 0.2.0 brings HTML first, then the office formats, then EPUB, then Atlassian Document Format.
 
 ## All formats
 
@@ -34,6 +34,7 @@ Release 0.2.0 brings HTML first, then the office formats, then EPUB.
 | [PPT](ppt.md) | PPT (PowerPoint 97-2003) | 🗓️ 0.2.0 |
 | [RTF](rtf.md) | RTF | 🗓️ 0.2.0 |
 | [EPUB](epub.md) | EPUB 2 and 3 | 🗓️ 0.2.0 |
+| [ADF](adf.md) | Atlassian Document Format (Jira and Confluence) | 🗓️ 0.2.0 |
 | [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; DWG and closed native formats after that | 🔭 Later |
 | [PostScript](postscript.md) | PostScript, EPS | 🔭 Later |
 | [Mail](mail.md) | EML, MBOX, MSG, Outlook PST and OST | 🔭 Later |
