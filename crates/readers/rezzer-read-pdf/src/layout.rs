@@ -774,6 +774,11 @@ pub(crate) fn page_blocks_at(
                 .into_iter()
                 .map(|w| (w, LossReason::Limit, Severity::Info)),
         );
+        notes.extend(
+            refused_quietly(page, found.quiet)
+                .into_iter()
+                .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+        );
     }
     placed.sort_by(|a, b| {
         let (la, ta) = a.at();
@@ -1579,6 +1584,46 @@ fn without_marker(runs: &[&Run], cut: usize) -> Vec<Run> {
     }
     runs.retain(|r| !r.text.is_empty());
     runs
+}
+
+/// The losses for a page's grids and header bands refused without a note: one for its grids
+/// and one for its bands, each naming why, by reason in reading order.
+fn refused_quietly(
+    page: u32,
+    mut quiet: Vec<(usize, &'static str, tables::Refused)>,
+) -> Vec<String> {
+    quiet.sort_by_key(|q| q.0);
+    let mut out = Vec::new();
+    for (kind, one, many, what) in [
+        (
+            tables::Refused::Grid,
+            "a grid of drawn rules",
+            "grids of drawn rules",
+            "grid",
+        ),
+        (
+            tables::Refused::Band,
+            "a header band",
+            "header bands",
+            "band",
+        ),
+    ] {
+        let why: Vec<&str> = quiet.iter().filter(|q| q.2 == kind).map(|q| q.1).collect();
+        match why.as_slice() {
+            [] => {}
+            [why] => out.push(format!(
+                "{one} on page {page} is not read as a table: {why}; its text is read without \
+                 the {what}"
+            )),
+            _ => out.push(format!(
+                "{} {many} on page {page} are not read as tables: {}; their text is read \
+                 without the {what}s",
+                why.len(),
+                tables::counted(why.iter().copied())
+            )),
+        }
+    }
+    out
 }
 
 /// A page needs this many characters in one size for that size to be its own body size.

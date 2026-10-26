@@ -18,27 +18,12 @@ const FIGURE_NEAR: &str = "a figure caption stands next to it";
 /// where the first of them does.
 fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsure> {
     let first = refusals.iter().min_by_key(|r| r.0)?;
-    let mut text = None;
-    if refusals.len() > 1 {
-        let mut counts: Vec<(&str, usize)> = Vec::new();
-        for (_, _, why) in refusals {
-            match counts.iter_mut().find(|(w, _)| w == why) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((why, 1)),
-            }
-        }
-        let parts: Vec<String> = counts
-            .iter()
-            .map(|&(why, n)| {
-                let why = if n == 1 { why } else { plural(why) };
-                format!("{n} ({why})")
-            })
-            .collect();
-        text = Some(format!(
+    let text = (refusals.len() > 1).then(|| {
+        format!(
             "Possible tables on page {page} not rebuilt: {}",
-            parts.join(", ")
-        ));
-    }
+            counted(refusals.iter().map(|r| r.2))
+        )
+    });
     Some(Unsure {
         at: first.0,
         top: first.1,
@@ -47,7 +32,27 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
     })
 }
 
-/// A reason a ruled grid is refused, said of several grids.
+/// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
+/// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
+pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for why in reasons {
+        match counts.iter_mut().find(|(w, _)| *w == why) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((why, 1)),
+        }
+    }
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|&(why, n)| {
+            let why = if n == 1 { why } else { plural(why) };
+            format!("{n} ({why})")
+        })
+        .collect();
+    parts.join(", ")
+}
+
+/// A reason a ruled grid or a header band is refused, said of several.
 fn plural(why: &str) -> &str {
     match why {
         "it has more than 15 columns" => "they have more than 15 columns",
@@ -55,7 +60,7 @@ fn plural(why: &str) -> &str {
         "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
         "its text crosses its lines" => "their text crosses their lines",
         "it covers most of the page" => "they cover most of the page",
-        "it lies on a picture" => "they lie on a picture",
+        ON_PICTURE => "they lie on a picture",
         "its text is much smaller than the body text, as in a picture of a page" => {
             "their text is much smaller than the body text, as in pictures of pages"
         }
@@ -107,9 +112,11 @@ pub(super) fn ruled(
     let by_y = ByY::new(flow, &lines);
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
-    // Runs of grids refused with a note, and those grids: where each stands and why.
+    // Runs of grids refused with a note, and those grids: where each stands and why; and
+    // the grids refused without a note.
     let mut held: Vec<bool> = vec![false; flow.runs.len()];
     let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
+    let mut quiet: Vec<(usize, &'static str, Refused)> = Vec::new();
     let mut tables: Vec<Planned> = Vec::new();
     let mut bands: Vec<Band> = Vec::new();
     // Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
@@ -215,9 +222,18 @@ pub(super) fn ruled(
                     None => true,
                     Some(why) => why == PAGE_FRAME && dense,
                 });
-        // A figure caption speaks against a table: no note for it.
+        // A figure caption speaks against a table: no note and no loss for it. A grid that
+        // looks like a table gets a note and holds its text as paragraphs. Any other grid is
+        // a loss only, unless it lies on a picture (a chart): its text stays free for the
+        // detector without rules, as such a grid often frames a table of its own.
         let mut refuse = |why: &'static str| {
-            if !noted || why == FIGURE_NEAR {
+            if why == FIGURE_NEAR {
+                return;
+            }
+            if !noted {
+                if why != ON_PICTURE {
+                    quiet.push((at, why, Refused::Grid));
+                }
                 return;
             }
             refusals.push((at, b[3], why));
@@ -497,10 +513,12 @@ pub(super) fn ruled(
             claimed: &mut claimed,
             held: &mut held,
             refusals: &mut refusals,
+            quiet: &mut quiet,
             tables: &mut tables,
             skipped: &mut found.skipped,
         },
     );
+    found.quiet = quiet;
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
     }

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
+pub(crate) use ruled::counted;
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
@@ -90,12 +91,28 @@ pub(crate) struct Found {
     pub tables: Vec<Planned>,
     pub unsure: Vec<Unsure>,
     pub skipped: Vec<String>,
-    /// For each run of the flow, whether a refused grid with a note holds it: no detector
-    /// after it may take the run into a table. Empty when no grid holds a run.
+    /// For each run of the flow, whether a grid or band refused with a note holds it: no
+    /// detector after it may take the run into a table. Empty when none holds a run.
     pub held: Vec<bool>,
     /// Heights of the rules of header bands, sorted: no region without rules runs across one.
     pub cuts: Vec<f32>,
+    /// Grids and bands with text refused without a note: where each stands in the reading
+    /// order, why and what it is. Their text is free for the detector without rules. The
+    /// layout writes them as losses, one per kind and page.
+    pub quiet: Vec<(usize, &'static str, Refused)>,
 }
+
+/// What a refusal without a note refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// A grid of drawn rules.
+    Grid,
+    /// A header band and the lines below it.
+    Band,
+}
+
+/// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
+const ON_PICTURE: &str = "it lies on a picture";
 
 /// Lines this close are one line, and line ends this close meet, in points.
 pub(crate) const SNAP: f32 = 2.0;
@@ -186,7 +203,7 @@ impl Area<'_> {
             return Some(PAGE_FRAME);
         }
         if self.images.iter().any(|i| overlap(*i, b) > 0.5 * size) {
-            return Some("it lies on a picture");
+            return Some(ON_PICTURE);
         }
         let mut sizes = sizes.to_vec();
         sizes.sort_by(f32::total_cmp);

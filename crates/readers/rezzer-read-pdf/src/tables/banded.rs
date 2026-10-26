@@ -43,6 +43,8 @@ pub(super) struct Taken<'a> {
     pub claimed: &'a mut [Option<(usize, usize, usize)>],
     pub held: &'a mut [bool],
     pub refusals: &'a mut Vec<(usize, f32, &'static str)>,
+    /// Bands refused without a note, for the losses of the page.
+    pub quiet: &'a mut Vec<(usize, &'static str, Refused)>,
     pub tables: &'a mut Vec<Planned>,
     pub skipped: &'a mut Vec<String>,
 }
@@ -222,20 +224,21 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     if *work > BAND_WORK {
         return;
     }
-    let at = head
-        .iter()
-        .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        .map(|&i| flow.at[i])
-        .min()
-        .unwrap_or(0);
-    let refuse = |why: &'static str, take: &mut Taken<'_>| {
-        take.refusals.push((at, b[3], why));
-        for &i in head
-            .iter()
+    // The runs of the band's titles and body.
+    let runs = || {
+        head.iter()
             .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        {
+    };
+    let at = runs().map(|&i| flow.at[i]).min().unwrap_or(0);
+    // A refused band holds them as paragraphs.
+    let hold = |take: &mut Taken<'_>| {
+        for &i in runs() {
             take.held[i] = true;
         }
+    };
+    let refuse = |why: &'static str, take: &mut Taken<'_>| {
+        take.refusals.push((at, b[3], why));
+        hold(take);
     };
     // Rows: lines with text in at least half of the columns the body uses; other lines join
     // the row above them (lines above the first join the first).
@@ -280,12 +283,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             kept.len(),
             sh.page
         ));
-        for &i in head
-            .iter()
-            .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        {
-            take.held[i] = true;
-        }
+        hold(take);
         return;
     }
     // The text of each body cell, for the tests of a table without rules: only the kept
@@ -313,8 +311,11 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     let bottom = body.last().map_or(b[1], |l| l.0 - 0.25 * l.1);
     let sizes: Vec<f32> = body.iter().map(|l| l.1).collect();
     if let Some(why) = sh.area.refuses([b[0], bottom, b[2], b[3]], &sizes) {
-        // The page's frame, a picture or tiny text: no note, as for a ruled grid.
-        let _ = why;
+        // The page's frame or tiny text: no note and its text stays free, as for a ruled
+        // grid, but a loss. On a picture the band is a chart's: no loss either.
+        if why != ON_PICTURE {
+            take.quiet.push((at, why, Refused::Band));
+        }
         return;
     }
     if take.tables.len() >= MAX_TABLES {
