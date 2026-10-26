@@ -17,6 +17,7 @@
 //! max_elements = 2000000
 //! max_text_bytes = 268435456
 //! page_tokens = 20000
+//! part_size = 10000
 //!
 //! [enrich]
 //! disabled = ["language"]
@@ -148,6 +149,8 @@ impl Config {
                 dir.display()
             )));
         }
+        rezzer_limits::check_part_size(file.limits.part_size)
+            .map_err(|e| invalid(format!("limits.{e}")))?;
         let known: Vec<&str> = rezzer_enrich::passes().iter().map(|p| p.name()).collect();
         if let Some(bad) = file
             .enrich

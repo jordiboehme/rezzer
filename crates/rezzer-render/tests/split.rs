@@ -2629,7 +2629,12 @@ fn the_overview_part_holds_every_row() {
                 kind: "chapter".into(),
                 size: "1 paragraph".into(),
                 role: None,
-                reads: Vec::new(),
+                // One arrow, so the overview has a graph, which shows only 200 parts.
+                reads: if i == 2 {
+                    vec!["p1".into()]
+                } else {
+                    Vec::new()
+                },
             })
             .collect(),
         facts: vec![("See".into(), "[x](y.md)".into())],
@@ -2648,6 +2653,11 @@ fn the_overview_part_holds_every_row() {
         assert!(text.contains(&format!("| Part {i} |")), "Part {i}");
     }
     assert!(!text.contains("Only the first"));
+    // The note says that the graph is cut, not the table.
+    assert!(
+        text.contains("The graph shows only the first 200 of 250 parts. The table lists them all."),
+        "{text}"
+    );
     // Every written file reads as Crystalline reads it: relations only where Rezzer means them.
     assert_eq!(crystalline_reads(body(&out.main)), []);
     for p in &out.parts {

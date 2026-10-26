@@ -19,6 +19,7 @@ hex.workspace = true
 toml.workspace = true
 directories.workspace = true
 thiserror.workspace = true
+unicode-normalization.workspace = true
 # Atomic cache writes: a temporary file in the cache directory, then a rename.
 tempfile.workspace = true
 
@@ -27,6 +28,8 @@ fileattrs = { path = "../formats/fileattrs", features = ["test-support"] }
 rezzer-read-text = { path = "../readers/rezzer-read-text" }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv" }
 rezzer-read-sheet = { path = "../readers/rezzer-read-sheet" }
+rezzer-read-pdf = { path = "../readers/rezzer-read-pdf" }
+percent-encoding.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 libc.workspace = true

@@ -35,6 +35,9 @@ pub struct Limits {
     /// document they build through [`Limits::max_elements`].
     pub max_memory_bytes: u64,
     pub page_tokens: usize,
+    /// The largest part in tokens when Rezzer writes files: a larger document is written as
+    /// a main document plus parts. 0 writes one file. See [`check_part_size`].
+    pub part_size: usize,
     /// Model elements (blocks, inlines, table cells) one read may build. This is how readers
     /// bound the memory of the document model; on a hit the reader stops with a `Limit` loss.
     pub max_elements: u64,
@@ -54,9 +57,25 @@ impl Default for Limits {
             max_time: Duration::from_secs(120),
             max_memory_bytes: 2 * GIB,
             page_tokens: 20_000,
+            part_size: DEFAULT_PART_SIZE,
             max_elements: 2_000_000,
             max_text_bytes: 256 * MIB,
         }
+    }
+}
+
+/// The default [`Limits::part_size`]: Crystalline's budget for a source engram.
+pub const DEFAULT_PART_SIZE: usize = 10_000;
+
+/// The smallest [`Limits::part_size`] other than 0.
+pub const MIN_PART_SIZE: usize = 2_500;
+
+/// Checks a part size: 0 (one file) or at least [`MIN_PART_SIZE`].
+pub fn check_part_size(n: usize) -> Result<(), String> {
+    if n == 0 || n >= MIN_PART_SIZE {
+        Ok(())
+    } else {
+        Err(format!("part_size must be 0 or at least {MIN_PART_SIZE}"))
     }
 }
 

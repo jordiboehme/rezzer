@@ -1843,11 +1843,13 @@ dependencies = [
  "fileattrs",
  "hex",
  "libc",
+ "percent-encoding",
  "rezzer-detect",
  "rezzer-enrich",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-read-csv",
+ "rezzer-read-pdf",
  "rezzer-read-sheet",
  "rezzer-read-text",
  "rezzer-render",
@@ -1857,6 +1859,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "unicode-normalization",
 ]
 
 [[package]]

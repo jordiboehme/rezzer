@@ -291,6 +291,102 @@ fn output_dir_writes_markdown_and_json() {
     );
 }
 
+/// Markdown far over 10,000 tokens, in chapters.
+fn long_markdown() -> String {
+    let mut text = String::from("# Book\n\n");
+    for c in 1..=30 {
+        text.push_str(&format!("## Chapter {c}\n\n"));
+        for _ in 0..8 {
+            text.push_str(&"Words of a chapter that fill its pages. ".repeat(12));
+            text.push_str("\n\n");
+        }
+    }
+    text
+}
+
+#[test]
+fn part_size_flag_needs_output_dir() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .args(["--part-size", "5000"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("--output-dir"));
+}
+
+#[test]
+fn part_size_below_minimum_fails() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    let dir = env.root.path().join("out");
+    for bad in ["100", "2499", "-1", "many"] {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&md)
+            .arg("-o")
+            .arg(&dir)
+            .arg(format!("--part-size={bad}"))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains("--part-size"), "{bad}: {stderr}");
+    }
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .arg("-o")
+        .arg(&dir)
+        .args(["--part-size", "100"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "part_size must be 0 or at least 2500",
+        ));
+    assert!(!dir.exists());
+}
+
+#[test]
+fn output_dir_writes_main_and_parts() {
+    let env = Env::new();
+    let book = env.file("book.markdown", long_markdown().as_bytes());
+    let dir = env.root.path().join("out");
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .arg("-o")
+        .arg(&dir)
+        .assert()
+        .code(0)
+        .stdout("");
+    let main = std::fs::read_to_string(dir.join("book.markdown.md")).unwrap();
+    assert!(main.starts_with("---\ntype: source\n"), "{main}");
+    let parts: Vec<String> = std::fs::read_dir(dir.join("book.markdown"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(parts.len() >= 3, "{parts:?}");
+    for part in &parts {
+        assert!(main.contains(&format!("](book.markdown/{part})")), "{part}");
+    }
+    // A larger part size, then 0: one file, and the parts folder is gone.
+    for (size, many) in [("50000", false), ("0", false), ("2500", true)] {
+        env.cmd()
+            .arg("read")
+            .arg(&book)
+            .arg("-o")
+            .arg(&dir)
+            .args(["--part-size", size])
+            .assert()
+            .code(0);
+        assert_eq!(dir.join("book.markdown").exists(), many, "{size}");
+    }
+}
+
 #[test]
 fn resource_is_the_canonical_absolute_path() {
     let env = Env::new();

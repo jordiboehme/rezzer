@@ -91,11 +91,17 @@ pub fn split(
     Some(Splitter::new(doc, opts, part_size, bundle).run())
 }
 
+/// The longest a main document's name without `.md` may be, in bytes (decision 8). The
+/// writer cuts a longer name and adds the name hash, so the file name with `.md` or `.json`
+/// stays under the 255 bytes of common file systems and [`part_budget`] never falls to its
+/// floor.
+pub const MAIN_NAME_MAX: usize = 200;
+
 /// The longest the main document's path without `.md` can be (decision 8): the file name's
-/// last component, plus `-<8 hex>` when it gets a hash.
+/// last component, plus `-<8 hex>` when it gets a hash, at most [`MAIN_NAME_MAX`].
 fn main_note_len(doc: &Document) -> usize {
     let name = doc.source.name.rsplit(['/', '\\']).next().unwrap_or("");
-    name.chars().count().max(4) + 9
+    (name.chars().count().max(4) + 9).min(MAIN_NAME_MAX)
 }
 
 /// The most characters a part file adds around its unit (F11): the title line, a description

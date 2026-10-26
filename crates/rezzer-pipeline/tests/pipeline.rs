@@ -1342,3 +1342,612 @@ fn selection_applies_to_a_cached_document() {
     assert_eq!(out.completeness, Completeness::Failed);
     assert!(out.message.unwrap().starts_with("unknown sheet \"Nope\""));
 }
+
+// ---------------------------------------------------------------------------------------
+// Writing files: the main document, its parts and the part size (decisions 8, 11 and 12)
+
+/// A reader that makes chapters from its input `<chapters> <chars per chapter>`: a heading,
+/// paragraphs and, in every third chapter, a picture with a blob. It reads text, CSV and
+/// Markdown, so any source name reaches it.
+struct Chapters;
+
+impl Reader for Chapters {
+    fn id(&self) -> &'static str {
+        "chapters"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text, FormatId::Csv, FormatId::Markdown]
+    }
+    fn read(&self, src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        let text = String::from_utf8_lossy(src.bytes()).into_owned();
+        let mut numbers = text.split_whitespace().map(|n| n.parse::<usize>().unwrap());
+        let (chapters, chars) = (numbers.next().unwrap(), numbers.next().unwrap());
+        let mut doc = Document::new(source_info(src));
+        let mut blobs = Vec::new();
+        let sentence = "Words of a chapter that fill its pages. ";
+        for c in 1..=chapters {
+            doc.body.push(Block::Heading {
+                level: 1,
+                inlines: vec![Inline::plain(format!("Chapter {c}"))],
+                anchor: None,
+            });
+            let mut left = chars;
+            while left > 0 {
+                let n = (left / sentence.len()).clamp(1, 20);
+                doc.body
+                    .push(Block::paragraph(vec![Inline::plain(sentence.repeat(n))]));
+                left = left.saturating_sub(n * sentence.len());
+            }
+            if c % 3 == 1 {
+                let id = format!("pic-{c}");
+                doc.body.push(Block::Media {
+                    asset: id.clone(),
+                    alt: Some(format!("Picture {c}")),
+                    anchor: None,
+                });
+                doc.assets.push(Asset {
+                    id: id.clone(),
+                    path: None,
+                    sha256: "0".repeat(64),
+                    mime: "image/png".to_string(),
+                    caption: None,
+                    alt: None,
+                    needs_vision: true,
+                    codes: Vec::new(),
+                    code_unread: false,
+                });
+                blobs.push(Blob {
+                    asset: id,
+                    bytes: vec![1, 2, 3],
+                });
+            }
+        }
+        ReadOutcome {
+            blobs,
+            document: doc,
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+fn chapters_pipeline(cfg: Config) -> Pipeline {
+    let mut registry = Registry::new();
+    registry.register(Box::new(Chapters));
+    Pipeline::new(cfg, registry)
+}
+
+/// Input for [`Chapters`]: 30 chapters of 4,000 chars are far over 10,000 tokens.
+const LARGE: &[u8] = b"30 4000";
+/// Input for [`Chapters`] that fits one file.
+const SMALL: &[u8] = b"2 600";
+
+fn written(out: &Path) -> Request {
+    Request {
+        output_dir: Some(out.to_path_buf()),
+        ..request()
+    }
+}
+
+/// Q002's measure, counted here on its own (preflight F15): the chars after the closing
+/// `---` line, divided by 4.
+fn body_tokens(markdown: &str) -> usize {
+    let rest = markdown.strip_prefix("---\n").expect("frontmatter");
+    let end = rest.find("\n---\n").expect("closing ---");
+    rest[end + 5..].chars().count() / 4
+}
+
+/// Every file under `dir`, without following symlinks.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let kind = entry.file_type().unwrap();
+        if kind.is_dir() {
+            out.extend(files_under(&entry.path()));
+        } else if kind.is_file() {
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    out
+}
+
+fn markdown_files(dir: &Path) -> Vec<PathBuf> {
+    files_under(dir)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .collect()
+}
+
+/// The link destinations in `markdown`: `](<dest>)` and `](dest)`.
+fn link_destinations(markdown: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = markdown;
+    while let Some(at) = rest.find("](") {
+        let after = &rest[at + 2..];
+        let dest = if let Some(inner) = after.strip_prefix('<') {
+            &inner[..inner.find('>').expect("a closing >")]
+        } else {
+            let end = after
+                .find(|c: char| c == ')' || c.is_whitespace())
+                .unwrap_or(after.len());
+            &after[..end]
+        };
+        out.push(dest.to_string());
+        rest = after;
+    }
+    out
+}
+
+/// Whether the relative link `dest` in the file `from` names an existing entry, matching
+/// every path component byte for byte (as Crystalline does), never through the file
+/// system's own folding of case or normalization. The path must stay inside `root`.
+fn resolves(root: &Path, from: &Path, dest: &str) -> bool {
+    let path = dest.split('#').next().unwrap();
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .expect("a UTF-8 link");
+    let mut at = from.parent().unwrap().to_path_buf();
+    for part in decoded.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                assert!(at != root, "{dest} in {} leaves the folder", from.display());
+                at.pop();
+            }
+            name => {
+                let found = std::fs::read_dir(&at)
+                    .unwrap()
+                    .any(|e| e.unwrap().file_name().as_encoded_bytes() == name.as_bytes());
+                if !found {
+                    return false;
+                }
+                at.push(name);
+            }
+        }
+    }
+    true
+}
+
+/// Asserts that every relative link in every Markdown file under `root` resolves, and
+/// returns how many there are.
+fn assert_links_resolve(root: &Path) -> usize {
+    let mut count = 0;
+    for file in markdown_files(root) {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for dest in link_destinations(&text) {
+            if dest.is_empty() || dest.starts_with('#') || dest.contains(':') {
+                continue;
+            }
+            assert!(
+                resolves(root, &file, &dest),
+                "{dest} in {} does not resolve",
+                file.display()
+            );
+            count += 1;
+        }
+    }
+    count
+}
+
+#[test]
+fn small_document_is_one_file() {
+    let out = tempfile::tempdir().unwrap();
+    let res = chapters_pipeline(config(None)).run_bytes(
+        "notes.txt",
+        SMALL.to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(res.completeness, Completeness::Complete);
+    assert!(res.parts.is_empty());
+    let main = out.path().join("notes.txt.md");
+    assert_eq!(res.main_file.as_deref(), Some(main.as_path()));
+    assert_eq!(
+        std::fs::read_to_string(&main).unwrap(),
+        res.markdown_pages.concat()
+    );
+    assert_eq!(names_in(out.path()), ["notes.txt.assets", "notes.txt.md"]);
+    assert!(!out.path().join("notes.txt").exists());
+    assert!(assert_links_resolve(out.path()) >= 1);
+}
+
+#[test]
+fn generated_large_document_writes_main_and_parts() {
+    let out = tempfile::tempdir().unwrap();
+    let res = chapters_pipeline(config(None)).run_bytes(
+        "book.txt",
+        LARGE.to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(res.completeness, Completeness::Complete);
+    assert!(res.parts.len() >= 3, "{}", res.parts.len());
+    let main = std::fs::read_to_string(out.path().join("book.txt.md")).unwrap();
+    assert_eq!(main, res.markdown_pages.concat());
+    for part in &res.parts {
+        assert!(part.path.starts_with("book.txt/"), "{}", part.path);
+        assert!(main.contains(&format!("]({})", part.path)), "{}", part.path);
+        assert!(!part.title.is_empty() && !part.location.is_empty());
+    }
+    let files = markdown_files(out.path());
+    assert_eq!(files.len(), res.parts.len() + 1);
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        let tokens = body_tokens(&text);
+        assert!(tokens <= 10_000, "{}: {tokens}", file.display());
+    }
+    assert!(assert_links_resolve(out.path()) > res.parts.len());
+}
+
+#[test]
+#[ignore = "needs scripts/fetch-corpus.sh"]
+fn large_document_writes_main_and_parts() {
+    let nist =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/pdf/nist-sp800-53r5.pdf");
+    assert!(nist.exists(), "run scripts/fetch-corpus.sh first");
+    let mut registry = Registry::new();
+    registry.register(Box::new(rezzer_read_pdf::PdfReader));
+    let out = tempfile::tempdir().unwrap();
+    let res = Pipeline::new(config(None), registry).run_path(&nist, &written(out.path()));
+    assert_ne!(res.completeness, Completeness::Failed, "{:?}", res.message);
+    assert!(res.parts.len() > 10, "{}", res.parts.len());
+    for file in markdown_files(out.path()) {
+        let text = std::fs::read_to_string(&file).unwrap();
+        let tokens = body_tokens(&text);
+        assert!(tokens <= 10_000, "{}: {tokens}", file.display());
+    }
+    assert_links_resolve(out.path());
+}
+
+#[test]
+fn names_stay_inside_and_links_resolve() {
+    for name in ["../../x.csv", "日本", "Q3 report (final) #2 100%.csv"] {
+        let root = tempfile::tempdir().unwrap();
+        let out = root.path().join("a/b/out");
+        std::fs::create_dir_all(&out).unwrap();
+        let res =
+            chapters_pipeline(config(None)).run_bytes(name, LARGE.to_vec(), None, &written(&out));
+        assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        assert!(!res.parts.is_empty(), "{name}");
+        // Nothing lands next to the output folder or above it.
+        assert_eq!(names_in(root.path()), ["a"], "{name}");
+        assert_eq!(names_in(&root.path().join("a")), ["b"], "{name}");
+        assert_eq!(names_in(&root.path().join("a/b")), ["out"], "{name}");
+        let main = res.main_file.unwrap();
+        assert_eq!(main.parent(), Some(out.as_path()), "{name}");
+        for part in &res.parts {
+            assert!(out.join(&part.path).is_file(), "{name}: {}", part.path);
+        }
+        let links = assert_links_resolve(&out);
+        // Every part links its main document, and the main document every part.
+        assert!(links >= 2 * res.parts.len(), "{name}: {links}");
+    }
+}
+
+#[test]
+fn nfd_names_give_nfc_files_and_links() {
+    let nfd = "Bericht A\u{0308}nderung.txt";
+    let nfc = "Bericht \u{c4}nderung.txt";
+    assert_eq!(rezzer_pipeline::main_name(nfd), nfc);
+    assert_eq!(
+        rezzer_pipeline::folder_stem(nfd),
+        rezzer_pipeline::folder_stem(nfc)
+    );
+    let out = tempfile::tempdir().unwrap();
+    let res =
+        chapters_pipeline(config(None)).run_bytes(nfd, LARGE.to_vec(), None, &written(out.path()));
+    assert!(!res.parts.is_empty());
+    for file in files_under(out.path()) {
+        let relative = file.strip_prefix(out.path()).unwrap().to_str().unwrap();
+        assert!(!relative.contains('\u{0308}'), "{relative}");
+    }
+    let main = format!("{nfc}.md");
+    assert!(names_in(out.path()).contains(&main));
+    // The links use NFC too; the title keeps the name as it was given.
+    for file in markdown_files(out.path()) {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for dest in link_destinations(&text) {
+            let decoded = percent_encoding::percent_decode_str(&dest)
+                .decode_utf8()
+                .unwrap();
+            assert!(
+                !decoded.contains('\u{0308}'),
+                "{dest} in {}",
+                file.display()
+            );
+        }
+    }
+    assert!(assert_links_resolve(out.path()) >= 2 * res.parts.len());
+}
+
+#[test]
+fn similar_names_keep_their_own_bundles() {
+    let out = tempfile::tempdir().unwrap();
+    let names = ["a b.pdf", "a_b.pdf", "x", "x.assets", "a", "a.md"];
+    let pipeline = chapters_pipeline(config(None));
+    let mut results = Vec::new();
+    for name in names {
+        let res = pipeline.run_bytes(name, LARGE.to_vec(), None, &written(out.path()));
+        assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        assert!(!res.parts.is_empty(), "{name}");
+        results.push(res);
+    }
+    let mut folders = std::collections::HashSet::new();
+    let mut asset_folders = std::collections::HashSet::new();
+    for (name, res) in names.iter().zip(&results) {
+        // Each source's files are all still there after the others were written.
+        let main = res.main_file.as_ref().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(main).unwrap(),
+            res.markdown_pages.concat(),
+            "{name}"
+        );
+        for part in &res.parts {
+            assert!(
+                out.path().join(&part.path).is_file(),
+                "{name}: {}",
+                part.path
+            );
+        }
+        let folder = res.parts[0].path.split('/').next().unwrap().to_string();
+        assert!(folders.insert(folder), "{name}");
+        let doc = res.document.as_ref().unwrap();
+        for asset in &doc.assets {
+            let path = asset.path.as_ref().unwrap();
+            assert_eq!(std::fs::read(out.path().join(path)).unwrap(), [1, 2, 3]);
+        }
+        let assets = doc.assets[0].path.as_ref().unwrap();
+        assert!(asset_folders.insert(assets.split('/').next().unwrap().to_string()));
+    }
+    assert!(assert_links_resolve(out.path()) > 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn rerun_removes_stale_parts() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    let pipeline = chapters_pipeline(config(None));
+    let run = |input: &[u8]| {
+        let res = pipeline.run_bytes("grow.txt", input.to_vec(), None, &written(&out));
+        assert_eq!(res.completeness, Completeness::Complete);
+        assert_links_resolve(&out);
+        res
+    };
+    let parts_folder = out.join("grow.txt");
+    let part_names = |res: &rezzer_pipeline::RunResult| -> Vec<String> {
+        let mut names: Vec<String> = res
+            .parts
+            .iter()
+            .map(|p| p.path.rsplit('/').next().unwrap().to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    // Small: one file, no parts folder.
+    assert!(run(SMALL).parts.is_empty());
+    assert!(!parts_folder.exists());
+    // Grown over the limit.
+    let large = run(b"30 4000");
+    assert_eq!(names_in(&parts_folder), part_names(&large));
+    // A symlink to a file that looks like a part, and a note of the user's own.
+    let victim = root.path().join("victim.md");
+    std::fs::write(&victim, "---\npart: 1\n---\n\nkeep\n").unwrap();
+    std::os::unix::fs::symlink(&victim, parts_folder.join("chapter-99.md")).unwrap();
+    std::fs::write(parts_folder.join("mine.md"), "# My own note\n").unwrap();
+    // Grown more, then shrunk to fewer parts: the old parts are gone.
+    let larger = run(b"40 4000");
+    assert!(larger.parts.len() > large.parts.len());
+    let fewer = run(b"12 4000");
+    assert!(fewer.parts.len() < large.parts.len());
+    let mut expected = part_names(&fewer);
+    expected.extend(["chapter-99.md".to_string(), "mine.md".to_string()]);
+    expected.sort();
+    assert_eq!(names_in(&parts_folder), expected);
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "---\npart: 1\n---\n\nkeep\n"
+    );
+    assert!(
+        std::fs::symlink_metadata(parts_folder.join("chapter-99.md"))
+            .unwrap()
+            .is_symlink()
+    );
+    // Shrunk under the limit: the parts go, the folder stays for what is not Rezzer's.
+    assert!(run(SMALL).parts.is_empty());
+    assert_eq!(names_in(&parts_folder), ["chapter-99.md", "mine.md"]);
+    // Without them the empty folder goes too.
+    std::fs::remove_file(parts_folder.join("chapter-99.md")).unwrap();
+    std::fs::remove_file(parts_folder.join("mine.md")).unwrap();
+    run(LARGE);
+    assert!(parts_folder.is_dir());
+    run(SMALL);
+    assert!(!parts_folder.exists());
+    assert!(victim.exists());
+}
+
+#[test]
+fn part_size_not_in_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, calls) = counting(false);
+    Pipeline::new(config(Some(dir.path())), registry).run_bytes(
+        "x.txt",
+        b"hello\n".to_vec(),
+        None,
+        &request(),
+    );
+    let mut cfg = config(Some(dir.path()));
+    cfg.limits.part_size = 0;
+    let (registry, calls_unsplit) = counting(false);
+    Pipeline::new(cfg, registry).run_bytes("x.txt", b"hello\n".to_vec(), None, &request());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls_unsplit.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn config_part_size_and_bounds() {
+    assert_eq!(Config::default().limits.part_size, 10_000);
+    assert_eq!(rezzer_pipeline::check_part_size(0), Ok(()));
+    assert_eq!(rezzer_pipeline::check_part_size(2_500), Ok(()));
+    assert_eq!(
+        rezzer_pipeline::check_part_size(2_499),
+        Err("part_size must be 0 or at least 2500".to_string())
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    for (value, expected) in [(5_000, 5_000), (0, 0)] {
+        std::fs::write(&path, format!("[limits]\npart_size = {value}\n")).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().limits.part_size, expected);
+    }
+    std::fs::write(&path, "[limits]\npart_size = 100\n").unwrap();
+    let err = Config::load_from(&path).unwrap_err().to_string();
+    assert!(err.contains(path.to_str().unwrap()), "{err}");
+    assert!(
+        err.ends_with("limits.part_size must be 0 or at least 2500"),
+        "{err}"
+    );
+
+    // From the config, and from the request over the config.
+    let out = tempfile::tempdir().unwrap();
+    let mut cfg = config(None);
+    cfg.limits.part_size = 0;
+    let one = chapters_pipeline(cfg).run_bytes("a.txt", LARGE.to_vec(), None, &written(out.path()));
+    assert!(one.parts.is_empty());
+    let req = Request {
+        part_size: Some(2_500),
+        ..written(out.path())
+    };
+    let pipeline = chapters_pipeline(config(None));
+    let small_parts = pipeline.run_bytes("b.txt", LARGE.to_vec(), None, &req);
+    let default_parts = pipeline.run_bytes("c.txt", LARGE.to_vec(), None, &written(out.path()));
+    assert!(small_parts.parts.len() > default_parts.parts.len());
+    for file in markdown_files(&out.path().join("b.txt")) {
+        let tokens = body_tokens(&std::fs::read_to_string(&file).unwrap());
+        assert!(tokens <= 2_500, "{}: {tokens}", file.display());
+    }
+    let bad = Request {
+        part_size: Some(100),
+        ..written(out.path())
+    };
+    let res = pipeline.run_bytes("d.txt", LARGE.to_vec(), None, &bad);
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert_eq!(
+        res.message.as_deref(),
+        Some("part_size must be 0 or at least 2500")
+    );
+    assert!(!out.path().join("d.txt.md").exists());
+}
+
+#[test]
+fn json_is_written_next_to_the_main_document() {
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output: OutputKind::Json,
+        ..written(out.path())
+    };
+    let res = chapters_pipeline(config(None)).run_bytes("a.md", LARGE.to_vec(), None, &req);
+    let json = std::fs::read_to_string(out.path().join("a.md.json")).unwrap();
+    assert!(json.ends_with("}\n"));
+    serde_json::from_str::<Document>(&json).unwrap();
+    assert!(!res.parts.is_empty());
+    // A name ending in .md gets the hash, so its parts never meet a source named `a`.
+    assert!(
+        res.parts[0].path.starts_with("a.md-"),
+        "{}",
+        res.parts[0].path
+    );
+}
+
+#[test]
+fn a_write_error_is_a_failed_result() {
+    let out = tempfile::tempdir().unwrap();
+    std::fs::create_dir(out.path().join("blocked.txt.md")).unwrap();
+    let res = chapters_pipeline(config(None)).run_bytes(
+        "blocked.txt",
+        SMALL.to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(message.starts_with("cannot write "), "{message}");
+    assert!(message.contains("blocked.txt.md"), "{message}");
+}
+
+#[test]
+fn main_name_and_folder_stem_follow_decision_8() {
+    use rezzer_pipeline::{folder_stem, main_name};
+    let hashed = |name: &str, base: &str| {
+        let got = main_name(name);
+        let suffix = got.strip_prefix(base).unwrap_or_else(|| panic!("{got}"));
+        assert_eq!(suffix.len(), 9, "{got}");
+        assert!(suffix.starts_with('-'), "{got}");
+        assert!(suffix[1..].bytes().all(|b| b.is_ascii_hexdigit()), "{got}");
+    };
+    assert_eq!(main_name("budget.xlsx"), "budget.xlsx");
+    assert_eq!(main_name("../dir/x.pdf"), "x.pdf");
+    assert_eq!(main_name("C:\\dir\\x.pdf"), "x.pdf");
+    assert_eq!(main_name(""), "file");
+    assert_eq!(main_name("a/.."), "file");
+    assert_eq!(
+        main_name("Q3 report (final) #2.pdf"),
+        "Q3 report (final) #2.pdf"
+    );
+    assert_eq!(main_name("indexes.pdf"), "indexes.pdf");
+    hashed("日本", "日本");
+    hashed("...", "...");
+    hashed("index", "index");
+    hashed("LOG", "LOG");
+    hashed("Index.PDF", "Index.PDF");
+    hashed("log.txt", "log.txt");
+    hashed("a\nb\u{85}.txt", "a_b_.txt");
+    assert_ne!(main_name("a\nb.txt"), main_name("a\tb.txt"));
+    // Within the bound the splitter counts with, and the file system's 255 bytes.
+    for name in [
+        "a".repeat(500),
+        "日".repeat(100),
+        format!("{}\n", "b".repeat(300)),
+        "x".to_string(),
+        "日本".to_string(),
+        "क़".repeat(30),
+    ] {
+        let got = main_name(&name);
+        assert!(got.len() <= rezzer_render::MAIN_NAME_MAX, "{got}");
+        assert!(
+            got.chars().count() <= name.chars().count().max(4) + 9,
+            "{got}"
+        );
+        assert!(got.is_char_boundary(got.len()));
+    }
+    assert_eq!(folder_stem("x.pdf"), "x.pdf");
+    assert_eq!(folder_stem("a_b.pdf"), "a_b.pdf");
+    assert!(folder_stem("a b.pdf").starts_with("a_b.pdf-"));
+    assert_ne!(folder_stem("日本.pdf"), folder_stem("中国.pdf"));
+    for name in ["a.md", "a.MD", "x.assets", "a.json"] {
+        assert_eq!(folder_stem(name).len(), name.len() + 9, "{name}");
+    }
+    assert_eq!(folder_stem("../x.txt"), "x.txt");
+}
+
+#[test]
+fn assets_cleanup_keeps_markdown() {
+    // An assets folder may share its name with another source's parts folder (preflight
+    // F31): its cleanup never removes Markdown.
+    let out = tempfile::tempdir().unwrap();
+    let assets = out.path().join("scan.txt.assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join("chapter-1.md"), "---\npart: 1\n---\n").unwrap();
+    std::fs::write(assets.join("page-9.png"), b"old").unwrap();
+    let (registry, _) = pictures(&["page-1"]);
+    Pipeline::new(config(None), registry).run_bytes(
+        "scan.txt",
+        b"x".to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(names_in(&assets), ["chapter-1.md", "page-1.png"]);
+}

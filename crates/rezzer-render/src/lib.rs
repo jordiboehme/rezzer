@@ -63,7 +63,7 @@ use rezzer_model::{Block, Completeness, Document, Inline, SectionKind, plain_tex
 use crate::blocks::{Ctx, MAX_DEPTH, Notes};
 
 pub use crate::parts::{Output, PartFile, render_output};
-pub use crate::split::{Unit, split};
+pub use crate::split::{MAIN_NAME_MAX, Unit, split};
 
 /// A part of the output that a caller can ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

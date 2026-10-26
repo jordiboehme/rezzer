@@ -229,10 +229,14 @@ fn graph(parts: &[OverviewPart], max_nodes: usize, max_edges: usize, limit: Limi
         ));
     }
     if parts.len() > shown {
+        // Say that it is the graph that is cut, so it never reads as if the table were.
         out.push_str(&format!(
-            "\nOnly the first {shown} of {} parts are shown.",
+            "\nThe graph shows only the first {shown} of {} parts.",
             parts.len()
         ));
+        if matches!(limit, Limit::Whole) {
+            out.push_str(" The table lists them all.");
+        }
     }
     out
 }
