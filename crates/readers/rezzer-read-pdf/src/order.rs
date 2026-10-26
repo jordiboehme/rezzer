@@ -1238,6 +1238,9 @@ pub(crate) fn runs_in(
     (runs, unused)
 }
 
+/// Fragments drawn before one that are looked at for the copy it may be of.
+const TWIN_LOOK: usize = 8;
+
 /// Tags each fragment with the innermost of `boxes` its middle lies in (see
 /// [`crate::regions::regions_of`]). Past the bounds no fragment is tagged, and the reason is
 /// given.
@@ -1252,6 +1255,19 @@ fn tag_regions(frags: &mut [Frag], boxes: &[[f32; 4]]) -> Result<(), String> {
         Ok(regions) => {
             for (f, r) in frags.iter_mut().zip(regions) {
                 f.region = r;
+            }
+            // A copy drawn a little apart (a fake bold) is read with the first copy, in its
+            // box, so it is dropped as a copy there even where a box's edge parts the two.
+            for k in 1..frags.len() {
+                let twin = (k.saturating_sub(TWIN_LOOK)..k).rev().find(|&j| {
+                    let (a, b) = (&frags[j], &frags[k]);
+                    a.text == b.text
+                        && (a.x - b.x).abs() < 0.3 * a.size
+                        && (a.y - b.y).abs() < 0.1 * a.size
+                });
+                if let Some(j) = twin {
+                    frags[k].region = frags[j].region;
+                }
             }
             Ok(())
         }
