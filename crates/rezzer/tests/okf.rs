@@ -85,6 +85,15 @@ fn write_corpus(dir: &Path, part_size: usize) -> Vec<PathBuf> {
     let empty = sources.path().join("empty.txt");
     std::fs::write(&empty, b"").unwrap();
     paths.push(empty);
+    // Wikilinks whose targets Rezzer cannot know (ruling P5-AD): none may be a live link.
+    let wiki = sources.path().join("wikilinks.md");
+    std::fs::write(
+        &wiki,
+        "# Wikilinks\n\nSee [[project_plan]] and [[notes/my_plan.md]].\n\nAlso [[a|b]] and \
+         [[graph-view]].\n\nIn code `[[kept]]` stays.\n",
+    )
+    .unwrap();
+    paths.push(wiki);
     let nfd = sources.path().join(NFD_NAME);
     std::fs::write(&nfd, invented_report()).unwrap();
     paths.push(nfd);
@@ -453,7 +462,10 @@ fn body_rules(root: &Path, file: &Path, part_size: usize) -> Vec<String> {
 
 /// Q002's count: body characters divided by 4, each asset link counted at the longer of its
 /// written length and the one Crystalline 0.29.0 rewrites it to on import
-/// (`assets/<note path without .md>/<file name>`).
+/// (`assets/<note path without .md>/<file name>`). The note path is taken below `root`, so
+/// the count holds when `root` is the import root. The Crystalline test imports the folder
+/// above (`out/size-<n>/`), so its rewritten links are longer by `size-<n>/`; there the
+/// verify after the import is the real Q002 check.
 fn body_tokens(root: &Path, file: &Path, body: &str) -> usize {
     let note = file.strip_prefix(root).unwrap().with_extension("");
     let note = note.to_str().unwrap();
