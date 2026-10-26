@@ -1788,14 +1788,19 @@ impl<'a> Splitter<'a> {
             (Some(_), None) => false,
         };
         let both = joined_location(&x.shown_location(), &y.shown_location());
+        // A piece on pages past the rows' pages is named too: the title follows the location.
         let suffix = if y.table.is_none() && holds_only(x, &held_y) {
             if !within(y, x) {
+                item.title = capped(&both, TITLE_CAP);
                 item.location = both;
             }
             a.suffix.clone()
         } else if x.table.is_none() && holds_only(y, &held_x) {
             item.base = y.base.clone();
             item.title = y.title.clone();
+            if !within(x, y) {
+                item.title = capped(&both, TITLE_CAP);
+            }
             item.location = if within(x, y) {
                 y.location.clone()
             } else {

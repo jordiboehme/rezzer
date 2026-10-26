@@ -3044,11 +3044,59 @@ fn heading_rows_and_footnote_of_a_table_pack_together() {
         );
     }
     assert_eq!(next, 122);
-    // The last part also holds the later pages, and its location says so.
+    // The last part also holds the later pages; its location and title say so.
     assert!(
         last.location.ends_with("to pages 2 to 5"),
         "{}",
         last.location
+    );
+    assert_eq!(last.title, last.location);
+    // The parts follow the document order.
+    let markers = [
+        "SECURITY AND PRIVACY",
+        "REF 1 ",
+        "REF 120 ",
+        "34 The references",
+        "page 2 footer",
+        "page 5 footer",
+    ];
+    let all: String = list.iter().map(|u| u.markdown.as_str()).collect();
+    let at: Vec<usize> = markers.iter().map(|m| all.find(m).expect(m)).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
+}
+
+#[test]
+fn units_of_different_titles_pack_under_both_names() {
+    // "Alpha" is cut into pieces; its small last piece and the small "Beta" after it share
+    // one part, named by both (ruling P5-AH) and by the first unit's file name.
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(heading(1, "Top"));
+    d.body.push(heading(2, "Alpha"));
+    for _ in 0..5 {
+        d.body.push(para(&words(1_800)));
+    }
+    d.body.push(heading(2, "Beta"));
+    d.body.push(para(&words(300)));
+    d.body.push(heading(1, "Next"));
+    d.body.push(para(&words(9_000)));
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let both = list
+        .iter()
+        .find(|u| u.markdown.contains("## Beta"))
+        .expect("a part with Beta");
+    assert_eq!(both.title, "Alpha and Beta", "{:?}", names(&list));
+    assert!(
+        both.location.starts_with("Alpha, paragraph"),
+        "{}",
+        both.location
+    );
+    assert!(both.location.ends_with(" to Beta"), "{}", both.location);
+    assert!(both.file.starts_with("alpha"), "{}", both.file);
+    // Never across a top-level unit: "Next" stays on its own.
+    assert!(
+        list.iter()
+            .all(|u| !u.markdown.contains("# Next") || !u.markdown.contains("Beta"))
     );
 }
 
