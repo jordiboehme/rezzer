@@ -1210,10 +1210,8 @@ impl<'a> Splitter<'a> {
             let b = borders.get(k + 1).copied().unwrap_or(to);
             let title = match &list[a] {
                 Block::Heading { inlines, .. } if heading_level(&list[a]) == Some(min) => {
-                    // The heading's words: inline HTML tags left out, their text kept.
-                    Some(rezzer_model::text::strip_html_tags(
-                        &rezzer_model::plain_text(inlines),
-                    ))
+                    let html = self.doc.source.format == FormatId::Markdown;
+                    Some(rezzer_model::text::one_line(&heading_words(inlines, html)))
                 }
                 _ => None,
             };
@@ -2331,6 +2329,24 @@ fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
         item.title = capped(&listed(&titles), TITLE_CAP);
     }
     item
+}
+
+/// The words of a heading for a part's title and file name: its plain text, with inline HTML
+/// tags left out of its text when `html` (only the Markdown reader keeps inline HTML, as text;
+/// the model has no inline HTML of its own). Code keeps its text whole, so `<div>` in code
+/// and `Vec<T>` from a DOCX heading stay.
+fn heading_words(list: &[Inline], html: bool) -> String {
+    let mut out = String::new();
+    for inline in list {
+        match inline {
+            Inline::Text { text, .. } if html => {
+                out.push_str(&rezzer_model::text::strip_html_tags(text));
+            }
+            Inline::Link { inlines, .. } => out.push_str(&heading_words(inlines, html)),
+            other => out.push_str(&rezzer_model::plain_text(std::slice::from_ref(other))),
+        }
+    }
+    out
 }
 
 /// `<first> to <last>` as the location of packed units, or the one location they share.

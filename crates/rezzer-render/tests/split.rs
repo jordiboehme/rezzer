@@ -3233,3 +3233,32 @@ fn a_link_to_a_heading_with_inline_html_keeps_its_fragment_across_parts() {
         list[0].markdown
     );
 }
+
+#[test]
+fn heading_titles_keep_code_and_plain_angle_brackets() {
+    // Markdown: inline code keeps its `<div>`, inline HTML goes; no double space is left.
+    let text = format!(
+        "## Alpha\n\n{}\n\n## The `<div>` element\n\n{}\n\n## Gamma <i>x</i>  <b></b> end\n\n{}\n",
+        words(5_000),
+        words(5_000),
+        words(5_000)
+    );
+    let list = units(&read_markdown(&text), 2_500);
+    let titles: Vec<&str> = list.iter().map(|u| u.title.as_str()).collect();
+    assert!(titles.contains(&"The <div> element"), "{titles:?}");
+    assert!(titles.contains(&"Gamma x end"), "{titles:?}");
+    assert!(
+        names(&list).contains(&"the-div-element"),
+        "{:?}",
+        names(&list)
+    );
+    // A heading from another reader is plain text: its angle brackets are words.
+    let mut d = doc(FormatId::Docx);
+    d.body.push(heading(2, "Vec<T> and Option<T>"));
+    d.body.push(para(&words(5_000)));
+    d.body.push(heading(2, "Other"));
+    d.body.push(para(&words(5_000)));
+    let list = units(&d, 2_500);
+    assert_eq!(list[0].title, "Vec<T> and Option<T>");
+    assert_eq!(list[0].file, "vec-t-and-option-t");
+}
