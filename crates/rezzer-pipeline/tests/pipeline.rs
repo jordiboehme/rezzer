@@ -1512,6 +1512,18 @@ fn resolves(root: &Path, from: &Path, dest: &str) -> bool {
     true
 }
 
+/// Whether `dest` starts with a URL scheme (`https:`, `mailto:`), so a file name with a `:`
+/// is still checked.
+fn has_scheme(dest: &str) -> bool {
+    let Some((scheme, _)) = dest.split_once(':') else {
+        return false;
+    };
+    scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+}
+
 /// Asserts that every relative link in every Markdown file under `root` resolves, and
 /// returns how many there are.
 fn assert_links_resolve(root: &Path) -> usize {
@@ -1519,7 +1531,7 @@ fn assert_links_resolve(root: &Path) -> usize {
     for file in markdown_files(root) {
         let text = std::fs::read_to_string(&file).unwrap();
         for dest in link_destinations(&text) {
-            if dest.is_empty() || dest.starts_with('#') || dest.contains(':') {
+            if dest.is_empty() || dest.starts_with('#') || has_scheme(&dest) {
                 continue;
             }
             assert!(
@@ -1551,7 +1563,7 @@ fn small_document_is_one_file() {
         res.markdown_pages.concat()
     );
     assert_eq!(names_in(out.path()), ["notes.txt.assets", "notes.txt.md"]);
-    assert!(!out.path().join("notes.txt").exists());
+    assert!(!out.path().join("notes.txt.parts").exists());
     assert!(assert_links_resolve(out.path()) >= 1);
 }
 
@@ -1569,7 +1581,7 @@ fn generated_large_document_writes_main_and_parts() {
     let main = std::fs::read_to_string(out.path().join("book.txt.md")).unwrap();
     assert_eq!(main, res.markdown_pages.concat());
     for part in &res.parts {
-        assert!(part.path.starts_with("book.txt/"), "{}", part.path);
+        assert!(part.path.starts_with("book.txt.parts/"), "{}", part.path);
         assert!(main.contains(&format!("]({})", part.path)), "{}", part.path);
         assert!(!part.title.is_empty() && !part.location.is_empty());
     }
@@ -1706,6 +1718,10 @@ fn similar_names_keep_their_own_bundles() {
     assert!(assert_links_resolve(out.path()) > 0);
 }
 
+/// A file that Rezzer's cleanup would take for one of its parts.
+const PART_LIKE: &str =
+    "---\ngenerated: { by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }\npart: 1\n---\n\nkeep\n";
+
 #[cfg(unix)]
 #[test]
 fn rerun_removes_stale_parts() {
@@ -1718,7 +1734,7 @@ fn rerun_removes_stale_parts() {
         assert_links_resolve(&out);
         res
     };
-    let parts_folder = out.join("grow.txt");
+    let parts_folder = out.join("grow.txt.parts");
     let part_names = |res: &rezzer_pipeline::RunResult| -> Vec<String> {
         let mut names: Vec<String> = res
             .parts
@@ -1736,12 +1752,18 @@ fn rerun_removes_stale_parts() {
     assert_eq!(names_in(&parts_folder), part_names(&large));
     // A symlink to a file that looks like a part, and a note of the user's own.
     let victim = root.path().join("victim.md");
-    std::fs::write(&victim, "---\npart: 1\n---\n\nkeep\n").unwrap();
+    std::fs::write(&victim, PART_LIKE).unwrap();
     std::os::unix::fs::symlink(&victim, parts_folder.join("chapter-99.md")).unwrap();
     std::fs::write(parts_folder.join("mine.md"), "# My own note\n").unwrap();
+    // A note of the user's own with a `part:` key, as book notes have.
+    std::fs::write(
+        parts_folder.join("notes-3.md"),
+        "---\npart: 3\n---\n\nmine\n",
+    )
+    .unwrap();
     // A stale part of ours with a long frontmatter before its `part:` key.
     let long = format!(
-        "---\ntags: [\"{}\"]\npart: 50\n---\n\nold\n",
+        "---\ntags: [\"{}\"]\ngenerated: {{ by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }}\npart: 50\n---\n\nold\n",
         "a".repeat(200_000)
     );
     std::fs::write(parts_folder.join("chapter-50.md"), long).unwrap();
@@ -1751,13 +1773,10 @@ fn rerun_removes_stale_parts() {
     let fewer = run(b"12 4000");
     assert!(fewer.parts.len() < large.parts.len());
     let mut expected = part_names(&fewer);
-    expected.extend(["chapter-99.md".to_string(), "mine.md".to_string()]);
+    expected.extend(["chapter-99.md", "mine.md", "notes-3.md"].map(String::from));
     expected.sort();
     assert_eq!(names_in(&parts_folder), expected);
-    assert_eq!(
-        std::fs::read_to_string(&victim).unwrap(),
-        "---\npart: 1\n---\n\nkeep\n"
-    );
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), PART_LIKE);
     assert!(
         std::fs::symlink_metadata(parts_folder.join("chapter-99.md"))
             .unwrap()
@@ -1765,10 +1784,14 @@ fn rerun_removes_stale_parts() {
     );
     // Shrunk under the limit: the parts go, the folder stays for what is not Rezzer's.
     assert!(run(SMALL).parts.is_empty());
-    assert_eq!(names_in(&parts_folder), ["chapter-99.md", "mine.md"]);
+    assert_eq!(
+        names_in(&parts_folder),
+        ["chapter-99.md", "mine.md", "notes-3.md"]
+    );
     // Without them the empty folder goes too.
     std::fs::remove_file(parts_folder.join("chapter-99.md")).unwrap();
     std::fs::remove_file(parts_folder.join("mine.md")).unwrap();
+    std::fs::remove_file(parts_folder.join("notes-3.md")).unwrap();
     run(LARGE);
     assert!(parts_folder.is_dir());
     run(SMALL);
@@ -1831,7 +1854,7 @@ fn config_part_size_and_bounds() {
     let small_parts = pipeline.run_bytes("b.txt", LARGE.to_vec(), None, &req);
     let default_parts = pipeline.run_bytes("c.txt", LARGE.to_vec(), None, &written(out.path()));
     assert!(small_parts.parts.len() > default_parts.parts.len());
-    for file in markdown_files(&out.path().join("b.txt")) {
+    for file in markdown_files(&out.path().join("b.txt.parts")) {
         let tokens = body_tokens(&std::fs::read_to_string(&file).unwrap());
         assert!(tokens <= 2_500, "{}: {tokens}", file.display());
     }
@@ -1862,7 +1885,7 @@ fn json_is_written_next_to_the_main_document() {
     assert!(!res.parts.is_empty());
     // A name ending in .md gets the hash, so its parts never meet a source named `a`.
     assert!(
-        res.parts[0].path.starts_with("a.md-"),
+        res.parts[0].path.starts_with("a.md-") && res.parts[0].path.contains(".parts/"),
         "{}",
         res.parts[0].path
     );
@@ -1905,7 +1928,9 @@ fn main_name_and_folder_stem_follow_decision_8() {
     );
     assert_eq!(main_name("indexes.pdf"), "indexes.pdf");
     hashed("日本", "日本");
-    hashed("...", "...");
+    hashed("...", "_..");
+    hashed(".env", "_env");
+    hashed(".env.md", "_env.md");
     hashed("index", "index");
     hashed("LOG", "LOG");
     hashed("Index.PDF", "Index.PDF");
@@ -1933,10 +1958,11 @@ fn main_name_and_folder_stem_follow_decision_8() {
     assert_eq!(folder_stem("a_b.pdf"), "a_b.pdf");
     assert!(folder_stem("a b.pdf").starts_with("a_b.pdf-"));
     assert_ne!(folder_stem("日本.pdf"), folder_stem("中国.pdf"));
-    for name in ["a.md", "a.MD", "x.assets", "a.json"] {
+    for name in ["a.md", "a.MD", "x.assets", "a.json", "x.parts"] {
         assert_eq!(folder_stem(name).len(), name.len() + 9, "{name}");
     }
     assert_eq!(folder_stem("../x.txt"), "x.txt");
+    assert_eq!(rezzer_pipeline::parts_folder("x.txt"), "x.txt.parts");
 }
 
 #[test]
@@ -1946,7 +1972,11 @@ fn assets_cleanup_keeps_markdown() {
     let out = tempfile::tempdir().unwrap();
     let assets = out.path().join("scan.txt.assets");
     std::fs::create_dir_all(&assets).unwrap();
-    std::fs::write(assets.join("chapter-1.md"), "---\npart: 1\n---\n").unwrap();
+    std::fs::write(
+        assets.join("chapter-1.md"),
+        "---\ngenerated: { by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }\npart: 1\n---\n",
+    )
+    .unwrap();
     std::fs::write(assets.join("page-9.png"), b"old").unwrap();
     let (registry, _) = pictures(&["page-1"]);
     Pipeline::new(config(None), registry).run_bytes(
@@ -1956,4 +1986,230 @@ fn assets_cleanup_keeps_markdown() {
         &written(out.path()),
     );
     assert_eq!(names_in(&assets), ["chapter-1.md", "page-1.png"]);
+}
+
+/// The names of every file and folder under `dir`, without following symlinks.
+fn all_names(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        out.push(entry.file_name().to_string_lossy().into_owned());
+        if entry.file_type().unwrap().is_dir() {
+            out.extend(all_names(&entry.path()));
+        }
+    }
+    out
+}
+
+#[test]
+fn a_source_writes_into_its_own_folder() {
+    // Ruling P5-AA: the parts and assets folders never take the source's own name.
+    for name in ["notes.txt", "book.markdown", "README"] {
+        let src = tempfile::tempdir().unwrap();
+        let file = src.path().join(name);
+        std::fs::write(&file, LARGE).unwrap();
+        let pipeline = chapters_pipeline(config(None));
+        let first = pipeline.run_path(&file, &written(src.path()));
+        assert_eq!(
+            first.completeness,
+            Completeness::Complete,
+            "{name}: {:?}",
+            first.message
+        );
+        assert!(!first.parts.is_empty(), "{name}");
+        assert_eq!(std::fs::read(&file).unwrap(), LARGE, "{name}");
+        assert_eq!(
+            first.main_file.as_deref(),
+            Some(src.path().join(format!("{name}.md")).as_path())
+        );
+        assert!(
+            first.parts[0].path.starts_with(&format!("{name}.parts/")),
+            "{name}"
+        );
+        let doc = first.document.as_ref().unwrap();
+        let pictures: Vec<_> = doc.assets.iter().map(|a| a.path.clone().unwrap()).collect();
+        assert!(
+            pictures[0].starts_with(&format!("{name}.assets/")),
+            "{name}"
+        );
+        assert_links_resolve(src.path());
+        // A rerun gives the same paths.
+        let again = pipeline.run_path(&file, &written(src.path()));
+        assert_eq!(again.parts, first.parts, "{name}");
+        let doc = again.document.as_ref().unwrap();
+        let again_pictures: Vec<_> = doc.assets.iter().map(|a| a.path.clone().unwrap()).collect();
+        assert_eq!(again_pictures, pictures, "{name}");
+        assert_eq!(std::fs::read(&file).unwrap(), LARGE, "{name}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
+    // Ruling P5-AB: never overwrite a file Rezzer did not write.
+    let probe = tempfile::tempdir().unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    let parts = pipeline
+        .run_bytes("notes.txt", LARGE.to_vec(), None, &written(probe.path()))
+        .parts;
+    let first = parts[0].path.clone();
+    let root = tempfile::tempdir().unwrap();
+    let victim = root.path().join("victim.md");
+    std::fs::write(&victim, PART_LIKE).unwrap();
+    for (what, plant) in [("a note", false), ("a symlink", true)] {
+        let out = root.path().join(format!("out-{plant}"));
+        let target = out.join(&first);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        if plant {
+            std::os::unix::fs::symlink(&victim, &target).unwrap();
+        } else {
+            std::fs::write(&target, "# My own introduction\n").unwrap();
+        }
+        let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+        assert_eq!(res.completeness, Completeness::Failed, "{what}");
+        let message = res.message.unwrap();
+        assert!(message.contains(&first), "{what}: {message}");
+        assert!(
+            message.contains("is not a part Rezzer wrote"),
+            "{what}: {message}"
+        );
+        // The read itself worked, so its document stays in the result.
+        assert!(res.document.is_some(), "{what}");
+        // Nothing else of the run was written, and the file in the way is untouched.
+        assert!(!out.join("notes.txt.md").exists(), "{what}");
+        assert_eq!(names_in(target.parent().unwrap()).len(), 1, "{what}");
+        if plant {
+            assert!(std::fs::symlink_metadata(&target).unwrap().is_symlink());
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&target).unwrap(),
+                "# My own introduction\n"
+            );
+        }
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), PART_LIKE);
+    // A part Rezzer wrote at that path is replaced as before.
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(probe.path()));
+    assert_eq!(res.completeness, Completeness::Complete);
+}
+
+#[test]
+fn dot_names_are_not_hidden() {
+    // Ruling P5-Z: Crystalline skips hidden files, so no name starts with a dot.
+    for name in [".env.md", ".env", "..."] {
+        let out = tempfile::tempdir().unwrap();
+        let res = chapters_pipeline(config(None)).run_bytes(
+            name,
+            LARGE.to_vec(),
+            None,
+            &written(out.path()),
+        );
+        assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        assert!(!res.parts.is_empty(), "{name}");
+        for written in all_names(out.path()) {
+            assert!(!written.starts_with('.'), "{name}: {written}");
+        }
+        assert!(
+            assert_links_resolve(out.path()) >= 2 * res.parts.len(),
+            "{name}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_parts_folder_is_never_followed() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    let elsewhere = root.path().join("elsewhere");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("chapter-1.md"), PART_LIKE).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, out.join("notes.txt.parts")).unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    // A split run refuses it.
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert!(
+        res.message
+            .as_deref()
+            .unwrap()
+            .contains("not a plain directory"),
+        "{:?}",
+        res.message
+    );
+    // A run that fits does not clean up through it, and leaves the link.
+    let res = pipeline.run_bytes("notes.txt", SMALL.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Complete);
+    assert_eq!(names_in(&elsewhere), ["chapter-1.md"]);
+    assert!(
+        std::fs::symlink_metadata(out.join("notes.txt.parts"))
+            .unwrap()
+            .is_symlink()
+    );
+    // Also a link to an empty folder stays.
+    std::fs::remove_file(elsewhere.join("chapter-1.md")).unwrap();
+    pipeline.run_bytes("notes.txt", SMALL.to_vec(), None, &written(&out));
+    assert!(out.join("notes.txt.parts").exists());
+    assert!(elsewhere.is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_main_document_replaces_a_file_or_link_without_following_it() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let victim = root.path().join("victim");
+    std::fs::write(&victim, "keep").unwrap();
+    std::os::unix::fs::symlink(&victim, out.join("notes.txt.md")).unwrap();
+    std::fs::write(out.join("other.txt.md"), "an older output").unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    for name in ["notes.txt", "other.txt"] {
+        let res = pipeline.run_bytes(name, SMALL.to_vec(), None, &written(&out));
+        assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        let main = out.join(format!("{name}.md"));
+        assert!(!std::fs::symlink_metadata(&main).unwrap().is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(&main).unwrap(),
+            res.markdown_pages.concat()
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+}
+
+#[test]
+fn hostile_names_are_written_end_to_end() {
+    let long = format!("{}.txt", "a".repeat(500));
+    let wide = "日".repeat(100);
+    for name in [
+        "/abs/dir/report.txt",
+        "a\0b.txt",
+        long.as_str(),
+        wide.as_str(),
+        "C:\\dir\\x.txt",
+        "a:b.txt",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let out = root.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let res =
+            chapters_pipeline(config(None)).run_bytes(name, LARGE.to_vec(), None, &written(&out));
+        assert_eq!(
+            res.completeness,
+            Completeness::Complete,
+            "{name:?}: {:?}",
+            res.message
+        );
+        assert!(!res.parts.is_empty(), "{name:?}");
+        assert_eq!(names_in(root.path()), ["out"], "{name:?}");
+        for written in all_names(&out) {
+            assert!(written.len() <= 255, "{name:?}: {written}");
+            assert!(!written.contains('\0'), "{name:?}");
+        }
+        assert!(
+            assert_links_resolve(&out) >= 2 * res.parts.len(),
+            "{name:?}"
+        );
+    }
 }

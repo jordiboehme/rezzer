@@ -30,7 +30,7 @@ use rezzer_model::{
 use rezzer_render::RenderOptions;
 
 pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, config_path_from};
-pub use files::{bundle_name, folder_stem, main_name};
+pub use files::{bundle_name, folder_stem, main_name, parts_folder};
 pub use rezzer_limits::{CancelToken, check_part_size};
 pub use rezzer_render::{OutputSection, TableStyle};
 
@@ -77,7 +77,7 @@ pub struct Request {
     /// content lands in the cache.
     pub password: Option<String>,
     /// Where the run writes its files (decision 8): `<main name>.md`, the parts of a large
-    /// document in `<stem>/`, `<main name>.json` for [`OutputKind::Json`] and the extracted
+    /// document in `<stem>.parts/`, `<main name>.json` for [`OutputKind::Json`] and the extracted
     /// assets (rendered pages, pictures) in `<stem>.assets/`; see [`main_name`] and
     /// [`folder_stem`]. When set, readers are asked to extract assets and the read neither
     /// looks up nor stores the cache (blobs are never cached).
@@ -156,7 +156,7 @@ pub struct RunResult {
 /// One part file a run wrote.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PartInfo {
-    /// Relative to the output directory: `<stem>/<file>.md`.
+    /// Relative to the output directory: `<stem>.parts/<file>.md`.
     pub path: String,
     /// `<document title>: <unit title or location>`.
     pub title: String,
@@ -312,8 +312,10 @@ impl Pipeline {
     }
 
     fn run_source(&self, src: &Source, detect_panic: Option<String>, req: &Request) -> RunResult {
-        if let Some(n) = req.part_size
-            && let Err(message) = rezzer_limits::check_part_size(n)
+        // The request's or the config's: a config built in code is checked here too.
+        let part_size = req.part_size.unwrap_or(self.config.limits.part_size);
+        if req.output_dir.is_some()
+            && let Err(message) = rezzer_limits::check_part_size(part_size)
         {
             return RunResult::failed(message);
         }
@@ -353,11 +355,10 @@ impl Pipeline {
             parts: None,
         };
         let page_tokens = self.config.limits.page_tokens;
-        let part_size = req.part_size.unwrap_or(self.config.limits.part_size);
         let names = req
             .output_dir
             .as_ref()
-            .map(|_| (main_name(&src.name), folder_stem(&src.name)));
+            .map(|_| (main_name(&src.name), parts_folder(&folder_stem(&src.name))));
         let rendered = panics::contained(|| match &names {
             Some((main, stem)) => {
                 let main_file = format!("{main}.md");
@@ -405,10 +406,10 @@ impl Pipeline {
             OutputKind::Markdown => None,
         };
         let mut main_file = None;
-        if let (Some(dir), Some((main, stem))) = (&req.output_dir, &names) {
+        if let (Some(dir), Some((main, folder))) = (&req.output_dir, &names) {
             let files = files::Files {
                 main,
-                stem,
+                folder,
                 main_markdown: &main_markdown,
                 parts: part_files
                     .iter()
@@ -417,7 +418,16 @@ impl Pipeline {
                 json: json.as_deref(),
             };
             if let Err(message) = files::write_files(dir, &files) {
-                return RunResult::failed(message);
+                // The read worked: its document (losses, pictures) stays in the result.
+                return RunResult {
+                    completeness: Completeness::Failed,
+                    document: Some(document),
+                    markdown_pages: Vec::new(),
+                    json: None,
+                    message: Some(message),
+                    parts: Vec::new(),
+                    main_file: None,
+                };
             }
             main_file = Some(dir.join(format!("{main}.md")));
         }

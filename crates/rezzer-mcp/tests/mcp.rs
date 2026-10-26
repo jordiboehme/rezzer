@@ -966,7 +966,7 @@ async fn rez_output_dir_returns_main_document() {
     assert!(parts.len() >= 3, "{s}");
     for part in parts {
         let rel = part["path"].as_str().unwrap();
-        assert!(rel.starts_with("book.markdown/"), "{rel}");
+        assert!(rel.starts_with("book.markdown.parts/"), "{rel}");
         assert!(out.path().join(rel).is_file(), "{rel}");
         assert!(written.contains(&format!("]({rel})")), "{rel}");
         assert!(
@@ -983,10 +983,10 @@ async fn rez_output_dir_returns_main_document() {
     )
     .await;
     assert_eq!(structured(&one)["parts"], json!([]));
-    assert!(!out.path().join("book.markdown").exists());
+    assert!(!out.path().join("book.markdown.parts").exists());
     // The one file is over a page, so the text is its first page.
     let whole = std::fs::read_to_string(&main).unwrap();
-    assert!(!whole.contains("](book.markdown/"));
+    assert!(!whole.contains("](book.markdown.parts/"));
     assert_eq!(structured(&one)["pages"], 2);
     let first = text(&one).split("\n\nPage 1 of 2.").next().unwrap();
     assert!(whole.starts_with(first));
@@ -1126,4 +1126,17 @@ async fn rez_json_names_parts() {
     let json = std::fs::read_to_string(out.path().join("book.markdown.json")).unwrap();
     assert_eq!(json.trim_end(), text(&result).trim_end());
     assert!(out.path().join("book.markdown.md").is_file());
+}
+
+/// A paged result without output_dir, fixed as a snapshot: the second page of a long
+/// document, which holds no frontmatter, plus its paging line.
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_without_output_dir_page_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "book.markdown", &book());
+    let client = connect(config()).await;
+    let result = call(&client, "rez", json!({ "path": path, "page": 2 })).await;
+    let s = structured(&result);
+    assert_eq!(s["pages"], 2, "{s}");
+    insta::assert_snapshot!(text(&result));
 }

@@ -365,13 +365,16 @@ fn output_dir_writes_main_and_parts() {
         .stdout("");
     let main = std::fs::read_to_string(dir.join("book.markdown.md")).unwrap();
     assert!(main.starts_with("---\ntype: source\n"), "{main}");
-    let parts: Vec<String> = std::fs::read_dir(dir.join("book.markdown"))
+    let parts: Vec<String> = std::fs::read_dir(dir.join("book.markdown.parts"))
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     assert!(parts.len() >= 3, "{parts:?}");
     for part in &parts {
-        assert!(main.contains(&format!("](book.markdown/{part})")), "{part}");
+        assert!(
+            main.contains(&format!("](book.markdown.parts/{part})")),
+            "{part}"
+        );
     }
     // A larger part size, then 0: one file, and the parts folder is gone.
     for (size, many) in [("50000", false), ("0", false), ("2500", true)] {
@@ -383,8 +386,28 @@ fn output_dir_writes_main_and_parts() {
             .args(["--part-size", size])
             .assert()
             .code(0);
-        assert_eq!(dir.join("book.markdown").exists(), many, "{size}");
+        assert_eq!(dir.join("book.markdown.parts").exists(), many, "{size}");
     }
+}
+
+#[test]
+fn output_dir_can_be_the_source_folder() {
+    // The parts and pictures folders never take the source's own name (ruling P5-AA).
+    let env = Env::new();
+    let book = env.file("book.markdown", long_markdown().as_bytes());
+    for _ in 0..2 {
+        env.cmd()
+            .arg("read")
+            .arg(&book)
+            .arg("-o")
+            .arg(env.root.path())
+            .assert()
+            .code(0)
+            .stdout("");
+    }
+    assert_eq!(std::fs::read_to_string(&book).unwrap(), long_markdown());
+    assert!(env.root.path().join("book.markdown.md").is_file());
+    assert!(env.root.path().join("book.markdown.parts").is_dir());
 }
 
 #[test]

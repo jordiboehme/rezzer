@@ -63,9 +63,10 @@ pub struct RezParams {
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
     /// Absolute path of an existing directory. The Markdown is written there too, as
-    /// <file name>.md. Pictures (for example rendered PDF pages) go to a folder next to it,
-    /// and the Markdown links to them. Older files there that this read does not write are
-    /// removed. Without it nothing is written.
+    /// <file name>.md. Some names get a short hash added. Pictures (for example rendered PDF
+    /// pages) go to a folder next to it, and the Markdown links to them. Older files that
+    /// Rezzer wrote there and this read does not write are removed. Without it nothing is
+    /// written.
     #[serde(default)]
     pub output_dir: Option<String>,
     /// Largest part in tokens when output_dir is set. A larger document is written as a main
@@ -429,7 +430,7 @@ pub struct RezOutput {
 /// One part file in the `rez` structured content.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RezPart {
-    /// Relative to output_dir, for example `report.pdf/introduction.md`.
+    /// Relative to output_dir, for example `report.pdf.parts/introduction.md`.
     pub path: String,
     /// The part's title.
     pub title: String,

@@ -7,19 +7,33 @@
 //! For a source named `<name>`:
 //! - `<dir>/<main name>.md`, the main document (or the whole document when it fits);
 //! - `<dir>/<main name>.json` with the model JSON;
-//! - `<dir>/<stem>/` with the parts of a split document;
+//! - `<dir>/<stem>.parts/` with the parts of a split document (ruling P5-AA);
 //! - `<dir>/<stem>.assets/` with the pictures.
+//!
+//! The suffixes keep both folders off the source's own name, so a source can be written into
+//! its own folder (`notes.txt` next to `notes.txt.md`, `notes.txt.parts/` and
+//! `notes.txt.assets/`).
 //!
 //! Every name comes from the last path component of the source name in Unicode NFC (ruling
 //! P5-W), so a name that macOS gives in NFD gets the same files and links as its NFC form.
 //! The name hash is the first 8 hex of the SHA-256 of that NFC name, not of the content, so
-//! an edited file keeps its addresses.
+//! an edited file keeps its addresses. No name starts with `.` (ruling P5-Z): Crystalline
+//! skips hidden files.
 //!
 //! Files an earlier run left that this run does not write are removed: in the assets folder
 //! every regular file but Markdown, in the parts folder only Markdown parts that Rezzer wrote
-//! (a `part:` key in the frontmatter). Symlinks and folders are never followed or removed.
-//! The check of a folder and the removal of its files are separate steps, so a folder that
-//! is swapped for a symlink in between is a known gap (planned for the known-issues plan).
+//! ([`is_rezzer_part`]). A part path held by anything else fails the run before a file of
+//! it is written (ruling P5-AB). An empty parts folder is removed, also one Rezzer did not
+//! make. Symlinks and folders inside are never followed or removed. The check of a folder
+//! and the removal of its files are separate steps, so a folder that is swapped for a
+//! symlink in between is a known gap (planned for the known-issues plan).
+//!
+//! Order: the pictures are written while the document is read, because the Markdown links
+//! name them; then the parts, the main document and the JSON; the stale parts go last. A
+//! failure after the pictures leaves them in place: they are in Rezzer's own assets folder,
+//! which the next run rewrites and cleans up, and no other file has been touched. A failure
+//! while writing the parts or the main document leaves the new files written so far and
+//! keeps the stale parts, which the next run removes.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -89,14 +103,14 @@ fn ends_with_ignore_case(name: &str, suffix: &str) -> bool {
 
 /// The stem of the parts folder `<stem>/` and the assets folder `<stem>.assets/` of
 /// `source_name` (decision 8): [`bundle_name`] of the NFC name, plus `-<name hash>` when
-/// `bundle_name` changed the name, or when the name ends in `.md`, `.json` or `.assets`
-/// (any case). So `a b.pdf` and `a_b.pdf` never share a folder, and the folders of one
-/// source never land on a file or folder of another (`a` and `a.md`, `x` and `x.assets`,
-/// `a` with its JSON and `a.json`).
+/// `bundle_name` changed the name (also a leading `.`), or when the name ends in `.md`,
+/// `.json`, `.assets` or `.parts` (any case). So `a b.pdf` and `a_b.pdf` never share a
+/// folder, and the folders of one source never land on a file or folder of another (`x` and
+/// `x.assets`, `x` and `x.parts`, `a` with its JSON and `a.json`).
 pub fn folder_stem(source_name: &str) -> String {
     let name = last_component(source_name);
     let stem = bundle_name(&name);
-    let clash = [".md", ".json", ".assets"]
+    let clash = [".md", ".json", ".assets", ".parts"]
         .iter()
         .any(|suffix| ends_with_ignore_case(&name, suffix));
     if stem != name || clash {
@@ -104,6 +118,11 @@ pub fn folder_stem(source_name: &str) -> String {
     } else {
         stem
     }
+}
+
+/// The parts folder for a [`folder_stem`]: `<stem>.parts`.
+pub fn parts_folder(stem: &str) -> String {
+    format!("{stem}.parts")
 }
 
 /// Whether Crystalline would read `name` as one of its reserved names: `index` or `log`
@@ -116,8 +135,9 @@ fn reserved(name: &str) -> bool {
 /// The name of the main document without `.md` (decision 8): the last path component of
 /// `source_name` in NFC, so `budget.xlsx` gives `budget.xlsx.md`. `.`, `..` or an empty name
 /// become `file`. `-<name hash>` is added once when the name holds no ASCII letter or digit,
-/// when it is `index` or `log` before the first `.` (any case), when a control character
-/// was replaced by `_`, or when the name was cut.
+/// when it is `index` or `log` before the first `.` (any case), when a control character or
+/// a leading `.` was replaced by `_` (so Crystalline does not skip it as hidden), or when the
+/// name was cut.
 ///
 /// A name is cut to [`MAIN_NAME_MAX`] bytes with the hash, and to the char count of the
 /// source's last component (at least 4), so it never holds more than that count plus 9
@@ -139,6 +159,10 @@ pub fn main_name(source_name: &str) -> String {
         .collect();
     if matches!(name.as_str(), "" | "." | "..") {
         name = "file".to_string();
+    }
+    if name.starts_with('.') {
+        name.replace_range(..1, "_");
+        hashed = true;
     }
     if !name.bytes().any(|b| b.is_ascii_alphanumeric()) || reserved(&name) {
         hashed = true;
@@ -254,18 +278,19 @@ pub(crate) fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path
 pub(crate) struct Files<'a> {
     /// The main document's name without `.md` ([`main_name`]).
     pub main: &'a str,
-    /// The parts folder ([`folder_stem`]).
-    pub stem: &'a str,
+    /// The parts folder ([`parts_folder`]).
+    pub folder: &'a str,
     pub main_markdown: &'a str,
-    /// `(<stem>/<file>.md, markdown)` in order.
+    /// `(<folder>/<file>.md, markdown)` in order.
     pub parts: Vec<(&'a str, &'a str)>,
     pub json: Option<&'a str>,
 }
 
-/// Writes the files of one run into `dir` (made when missing): the parts into `<stem>/`,
+/// Writes the files of one run into `dir` (made when missing): the parts into `<folder>/`,
 /// then the main document and the JSON. Parts of an earlier run that this one does not
 /// write are removed, and the parts folder too when it is empty then. A symlink is never
-/// written through. The error says which file could not be written.
+/// written through. Before anything is written, every part path is checked: one that holds
+/// anything but a part Rezzer wrote fails the run (ruling P5-AB). The error names the file.
 pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     let shown = |path: &Path, e: std::io::Error| {
         format!(
@@ -274,11 +299,14 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
             one_line(&e.to_string())
         )
     };
+    let folder = dir.join(files.folder);
+    if !files.parts.is_empty() {
+        check_part_paths(dir, &folder, files)?;
+    }
     std::fs::create_dir_all(dir).map_err(|e| shown(dir, e))?;
-    let folder = dir.join(files.stem);
     let mut keep: HashSet<OsString> = HashSet::new();
     if !files.parts.is_empty() {
-        prepare_folder(dir, files.stem).map_err(|e| shown(&folder, e))?;
+        prepare_folder(dir, files.folder).map_err(|e| shown(&folder, e))?;
     }
     for (path, markdown) in &files.parts {
         let target = dir.join(path);
@@ -304,6 +332,43 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     })?;
     if keep.is_empty() {
         remove_if_empty(&folder);
+    }
+    Ok(())
+}
+
+/// Checks the parts folder and every part path before anything is written: the folder must
+/// be missing or a plain directory, and each path missing or a part Rezzer wrote.
+fn check_part_paths(dir: &Path, folder: &Path, files: &Files<'_>) -> Result<(), String> {
+    match std::fs::symlink_metadata(folder) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => {
+            return Err(format!(
+                "cannot write the parts: {} exists and is not a plain directory",
+                folder.display()
+            ));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(format!(
+                "cannot write the parts: {}: {}",
+                folder.display(),
+                one_line(&e.to_string())
+            ));
+        }
+    }
+    for (path, _) in &files.parts {
+        let target = dir.join(path);
+        let ours = match std::fs::symlink_metadata(&target) {
+            Ok(meta) => meta.is_file() && is_rezzer_part(&target),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        };
+        if !ours {
+            return Err(format!(
+                "cannot write the parts: {} is in the way and is not a part Rezzer wrote",
+                target.display()
+            ));
+        }
     }
     Ok(())
 }
@@ -334,9 +399,9 @@ enum Stale {
 /// can be long (keyword tags, file tags), so this is generous; it only bounds a hostile file.
 const PART_HEAD_MAX: u64 = 16 * 1024 * 1024;
 
-/// Whether `path` is a part file Rezzer wrote: frontmatter with a `part:` key. Read line by
-/// line up to the closing `---`, without following a symlink (the caller checked the entry
-/// type).
+/// Whether `path` is a part file Rezzer wrote: frontmatter with a `part:` key and a
+/// `generated:` line by `rezzer/`. Read line by line up to the closing `---`, without
+/// following a symlink (the caller checked the entry type).
 fn is_rezzer_part(path: &Path) -> bool {
     use std::io::BufRead;
     let Ok(file) = std::fs::File::open(path) else {
@@ -346,18 +411,18 @@ fn is_rezzer_part(path: &Path) -> bool {
     if !matches!(lines.next(), Some(Ok(first)) if first == b"---") {
         return false;
     }
+    let (mut part, mut generated) = (false, false);
     for line in lines {
         let Ok(line) = line else {
             return false;
         };
         if line == b"---" {
-            return false;
+            break;
         }
-        if line.starts_with(b"part: ") {
-            return true;
-        }
+        part |= line.starts_with(b"part: ");
+        generated |= line.starts_with(b"generated: { by: rezzer/");
     }
-    false
+    part && generated
 }
 
 /// Removes the regular files in `folder` whose names are not in `keep` and that `which`
