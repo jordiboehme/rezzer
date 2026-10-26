@@ -169,9 +169,9 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     match styles.len() {
         0 => return Parsed::No,
         1 => {
-            // Bold text alone in a box is its title, not the label of an empty field: the
-            // text after it is its own.
-            if styles[0].0 >= how.small || (how.one_field && styles[0].1) {
+            // Bold text alone in a box or between rules is a title, not the label of an empty
+            // field: the text after it is its own.
+            if styles[0].0 >= how.small || styles[0].1 {
                 return Parsed::No;
             }
             // Labels only: each line an empty field, or in a box one label of a line or two.
@@ -570,6 +570,196 @@ pub(crate) fn box_pairs(
     (planned, titles, said)
 }
 
+/// Lines under an underlined title follow each other at most this many line heights
+/// apart; past it the title's text ends.
+const TITLE_TEXT_PITCH: f32 = 1.6;
+
+/// Lines of text one underlined title may have.
+const TITLE_TEXT_LINES: usize = 20;
+
+/// Titles over a drawn bar: a line of bold text alone over a horizontal rule that no grid
+/// takes, the rule under its baseline by at most the title's size, longer than the title and
+/// starting within two of its sizes of the title's start; and under the rule, within its
+/// stretch, the lines of one style larger than the title (by half a point, any weight) that
+/// follow each other, the first within two line heights of the rule and no rule between
+/// them. Each title is a heading where it stands and its lines its text; their runs leave
+/// `flow`. `rules` are the page's drawn rules.
+pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle> {
+    let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() <= SNAP / 2.0;
+    let segs: Vec<Seg> = rules
+        .iter()
+        .filter(|r| flat(r))
+        .map(|r| Seg {
+            at: (r.y0 + r.y1) / 2.0,
+            from: r.x0.min(r.x1),
+            to: r.x0.max(r.x1),
+        })
+        .collect();
+    if segs.is_empty() || flow.runs.is_empty() {
+        return Vec::new();
+    }
+    let hs = crate::regions::merged(segs);
+    // The rules of grids are a table's or a section's, not a title's.
+    let taken: Vec<bool> = match grids(rules) {
+        Ok(g) if !g.hs.is_empty() => {
+            let mut t = vec![false; hs.len()];
+            for (gh, _) in &g.groups {
+                for &j in gh {
+                    let s = g.hs[j];
+                    for (k, h) in hs.iter().enumerate() {
+                        if (h.at - s.at).abs() <= SNAP && h.from < s.to && h.to > s.from {
+                            t[k] = true;
+                        }
+                    }
+                }
+            }
+            t
+        }
+        _ => vec![false; hs.len()],
+    };
+    let lines = flow_lines(flow);
+    let by_y = ByY::new(flow, &lines);
+    let mut used = vec![false; flow.runs.len()];
+    let mut found: Vec<(Vec<usize>, Vec<usize>, f32)> = Vec::new();
+    for (k, bar) in hs.iter().enumerate() {
+        if taken[k] {
+            continue;
+        }
+        let in_range = |i: usize| {
+            let (cx, _) = middle(&flow.runs[i]);
+            cx > bar.from - SNAP && cx < bar.to + SNAP
+        };
+        let usable = |i: usize, used: &[bool]| {
+            let r = &flow.runs[i];
+            !used[i] && !r.off_axis && inked(r)
+        };
+        // The title: the lowest line over the bar within its size.
+        let near = by_y.runs_between(bar.at, bar.at + 3.0 * MAX_CAPTION_SIZE);
+        let over: Vec<usize> = near
+            .into_iter()
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                usable(i, &used) && in_range(i) && r.y > bar.at && r.y - bar.at <= r.size
+            })
+            .collect();
+        let Some(&low) = over
+            .iter()
+            .min_by(|&&a, &&b| flow.runs[a].y.total_cmp(&flow.runs[b].y))
+        else {
+            continue;
+        };
+        let title: Vec<usize> = lines_of(flow, &over)
+            .into_iter()
+            .find(|l| l.contains(&low))
+            .unwrap_or_default();
+        let size = title
+            .iter()
+            .map(|&i| flow.runs[i].size)
+            .fold(0.0f32, f32::max);
+        let x0 = title
+            .iter()
+            .map(|&i| flow.runs[i].x)
+            .fold(f32::MAX, f32::min);
+        let x1 = title
+            .iter()
+            .map(|&i| flow.runs[i].x + flow.runs[i].w)
+            .fold(f32::MIN, f32::max);
+        // Nothing else stands on the title's line within the bar's stretch.
+        let line_y = flow.runs[low].y;
+        let alone = by_y
+            .runs_between(line_y - size, line_y + size)
+            .into_iter()
+            .filter(|&i| in_range(i) && inked(&flow.runs[i]))
+            .all(|i| title.contains(&i) || (flow.runs[i].y - line_y).abs() > 0.3 * size);
+        if title.is_empty()
+            || !alone
+            || !title.iter().all(|&i| flow.runs[i].bold)
+            || x1 - x0 >= bar.to - bar.from
+            || (x0 - bar.from).abs() > 2.0 * size
+        {
+            continue;
+        }
+        // Its text: the lines under the bar within its stretch.
+        let below: Vec<usize> = by_y
+            .runs_between(
+                bar.at - 2.0 * TITLE_TEXT_LINES as f32 * size * TITLE_TEXT_PITCH,
+                bar.at,
+            )
+            .into_iter()
+            .filter(|&i| usable(i, &used) && in_range(i))
+            .collect();
+        let text_lines = lines_of(flow, &below);
+        let mut text: Vec<usize> = Vec::new();
+        let mut last = bar.at;
+        let mut style: Option<Style> = None;
+        for l in text_lines.iter().take(TITLE_TEXT_LINES) {
+            let y = flow.runs[l[0]].y;
+            let h = l.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
+            let gap = last - y;
+            let first = text.is_empty();
+            let limit = if first { 2.0 * h } else { TITLE_TEXT_PITCH * h };
+            // A rule between the lines ends the text.
+            let ruled = hs
+                .iter()
+                .any(|s| s.at < last - SNAP && s.at > y && s.from < bar.to && s.to > bar.from);
+            let styles: Vec<Style> = l.iter().map(|&i| style_of(&flow.runs[i])).collect();
+            let one = styles.iter().all(|s| *s == styles[0]);
+            if gap > limit || ruled || !one || style.is_some_and(|s| s != styles[0]) {
+                break;
+            }
+            if styles[0].0 as f32 / 2.0 - size < 0.5 {
+                break;
+            }
+            style = Some(styles[0]);
+            text.extend(l.iter().copied());
+            last = y;
+        }
+        if text.is_empty() {
+            continue;
+        }
+        for &i in title.iter().chain(&text) {
+            used[i] = true;
+        }
+        let top = title
+            .iter()
+            .map(|&i| flow.runs[i].y + flow.runs[i].size)
+            .fold(f32::MIN, f32::max);
+        found.push((title, text, top));
+    }
+    if found.is_empty() {
+        return Vec::new();
+    }
+    let mut owner: Vec<Option<(usize, bool)>> = vec![None; flow.runs.len()];
+    let mut out: Vec<BoxTitle> = Vec::with_capacity(found.len());
+    for (k, (title, text, top)) in found.iter().enumerate() {
+        for &i in title {
+            owner[i] = Some((k, false));
+        }
+        for &i in text {
+            owner[i] = Some((k, true));
+        }
+        let first = title.iter().chain(text).min().copied().unwrap_or(0);
+        out.push(BoxTitle {
+            at: flow.at[first],
+            top: *top,
+            runs: Vec::new(),
+            text: Vec::new(),
+        });
+    }
+    let picked: Vec<usize> = (0..flow.runs.len())
+        .filter(|&i| owner[i].is_some())
+        .collect();
+    let taken_runs = flow.take(|i, _| owner[i].is_some());
+    for ((run, _, _), i) in taken_runs.into_iter().zip(picked) {
+        match owner[i] {
+            Some((k, false)) => out[k].runs.push(run),
+            Some((k, true)) => out[k].text.push(run),
+            None => {}
+        }
+    }
+    out
+}
+
 /// A framed box read as a title over its lines: the boxes it takes (the frame and a title
 /// box in it), the runs of its title and of its text, and the frame's top.
 struct Framed {
@@ -712,8 +902,10 @@ struct Strip {
     fields: Vec<Field>,
 }
 
-/// Where fields between rules may stand: a rule no grid takes and the nearest rule below that
-/// covers it bound the strip, and dividers in it that reach its top or its bottom part it.
+/// Where fields between rules may stand: a rule no grid takes and the nearest rule below it
+/// bound the strip, over all of the upper rule when the lower one covers it, over the lower
+/// one's stretch when it lies within the upper one; dividers in it that reach its top or its
+/// bottom part it.
 #[derive(Debug, Clone)]
 pub(super) struct Frame {
     pub x0: f32,
@@ -746,10 +938,19 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
                 break;
             }
         }
-        let Some(low) = below.filter(|s| s.from <= up.from + SNAP && s.to >= up.to - SNAP) else {
+        let Some(low) = below else {
             continue;
         };
-        let (x0, x1, bottom, top) = (up.from, up.to, low.at, up.at);
+        // A lower rule that covers the upper one bounds all of it; one that lies within it
+        // (a row under part of a longer rule) bounds the stretch both share.
+        let (x0, x1) = if low.from <= up.from + SNAP && low.to >= up.to - SNAP {
+            (up.from, up.to)
+        } else if low.from >= up.from - SNAP && low.to <= up.to + SNAP {
+            (low.from, low.to)
+        } else {
+            continue;
+        };
+        let (bottom, top) = (low.at, up.at);
         let lo = vs.partition_point(|v| v.at <= x0 + SNAP);
         let mut dividers = Vec::new();
         for v in &vs[lo..] {
@@ -925,34 +1126,65 @@ pub(super) fn field_strips(
         if ids.is_empty() || lines_of(flow, &ids).len() > STRIP_LINES {
             continue;
         }
+        // No text between the rules may run over the frame's ends: the frame would cut it.
+        let over_end = by_y.runs_between(fr.bottom, fr.top).into_iter().any(|i| {
+            let r = &flow.runs[i];
+            inked(r) && !r.off_axis && (across(r, fr.x0) || across(r, fr.x1))
+        });
+        if over_end {
+            continue;
+        }
         let edges = field_edges(flow, fr, &ids);
         let cells = cells_of(flow, &edges, &ids);
+        // Never a wrong pair: a run over a field edge leaves the cells it stands in as text;
+        // the other cells of the row still pair.
+        let inner = &edges[1..edges.len() - 1];
+        let cell_at = |x: f32| {
+            edges
+                .partition_point(|e| *e <= x)
+                .saturating_sub(1)
+                .min(cells.len() - 1)
+        };
+        let mut over = vec![false; cells.len()];
+        for &i in &ids {
+            let r = &flow.runs[i];
+            if inner.iter().any(|&e| across(r, e)) {
+                let c = CHAR * r.size.max(1.0);
+                for flag in &mut over[cell_at(r.x + c)..=cell_at(r.x + r.w - c)] {
+                    *flag = true;
+                }
+            }
+        }
         let mut fields: Vec<Field> = Vec::new();
+        let mut left_out: Vec<String> = Vec::new();
         let mut fits = true;
-        for cell in cells.iter().filter(|c| !c.is_empty()) {
+        for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
             match parse(flow, cell, how) {
-                Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => fields.extend(f),
+                Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
+                    if over[c] {
+                        left_out.extend(f.iter().map(|f| words(flow, &f.label)));
+                    } else {
+                        fields.extend(f);
+                    }
+                }
+                _ if over[c] => left_out.push(words(flow, cell)),
                 _ => {
                     fits = false;
                     break;
                 }
             }
         }
-        if !fits || fields.is_empty() {
+        if !fits {
             continue;
         }
-        // Never a wrong pair: a run over a field edge leaves the row as text.
-        let inner = &edges[1..edges.len() - 1];
-        if ids
-            .iter()
-            .any(|&i| inner.iter().any(|&e| across(&flow.runs[i], e)))
-        {
-            let labels: Vec<String> = fields.iter().map(|f| words(flow, &f.label)).collect();
+        if !left_out.is_empty() {
             unsure.push(format!(
-                "the row of fields {} on page {page} is not read as labels and values ({ACROSS}): \
-                 its text is read as it stands",
-                labels.join(", ")
+                "the fields {} of a row of fields on page {page} are not read as labels and \
+                 values ({ACROSS}): their text is read as it stands",
+                left_out.join(", ")
             ));
+        }
+        if fields.is_empty() {
             continue;
         }
         strips.push(Strip {

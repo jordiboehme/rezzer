@@ -281,6 +281,8 @@ pub struct FormPage {
     pub lines: Vec<DataLine>,
     /// Annotation dictionaries, each written as its own object.
     pub annots: Vec<String>,
+    /// The data lines are set in Courier-Bold (`/FDB`), as some print runs set them.
+    pub bold_data: bool,
 }
 
 impl Default for FormPage {
@@ -291,12 +293,14 @@ impl Default for FormPage {
             size: 9.5,
             lines: Vec::new(),
             annots: Vec::new(),
+            bold_data: false,
         }
     }
 }
 
 /// A file of A4 print-run form pages. The page and the template have the fonts `/FL`
-/// (Helvetica, for labels), `/FD` (Courier, for data lines) and `/FB` (Helvetica-Bold), all
+/// (Helvetica, for labels), `/FD` (Courier, for data lines), `/FB` (Helvetica-Bold) and
+/// `/FDB` (Courier-Bold, for data lines with `bold_data`), all
 /// in WinAnsi: the template and the data lines are written in that encoding, so labels may
 /// hold umlauts, `\u{df}` and the euro sign.
 /// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
@@ -313,7 +317,9 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
     let label = b.add(font("Helvetica"));
     let data = b.add(font("Courier"));
     let bold = b.add(font("Helvetica-Bold"));
-    let fonts = format!("/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R >>");
+    let bold_data = b.add(font("Courier-Bold"));
+    let fonts =
+        format!("/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R >>");
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();
     for page in pages {
@@ -323,7 +329,12 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
         );
         let mut content = String::from("q /Tpl Do Q\n");
         for line in &page.lines {
-            content.push_str(&data_line(page.left, line.y, page.size, &line.text));
+            let line = data_line(page.left, line.y, page.size, &line.text);
+            if page.bold_data {
+                content.push_str(&line.replace("/FD ", "/FDB "));
+            } else {
+                content.push_str(&line);
+            }
         }
         let content = b.stream("", &win_ansi(&content));
         let annots: Vec<String> = page

@@ -669,6 +669,135 @@ pub(crate) fn insert(
     whole
 }
 
+/// A divider stands over a line of digits when its foot lies between these many font sizes
+/// over the baseline: over the digits (a digit is at most about three quarters of the size
+/// high, so the sides of boxes drawn around each digit, which reach under the baseline, are
+/// no dividers) and in the row of the line (it hangs from the rule above it).
+const DIVIDER_FOOT: f32 = 0.75;
+const DIVIDER_OVER: f32 = 3.0;
+
+/// Puts a word space at a field divider inside a number whose drawn separators read as no
+/// number (see [`kinds`]) when the digits before the divider read as one with them: a value
+/// that fills its field and touches the next field's value, its separator drawn as a mark. A
+/// divider is a vertical rule of `rules` between the middles of two neighbouring digits of
+/// one baseline, hanging over the line (see [`DIVIDER_FOOT`]). Only the first such divider of a
+/// number cuts, and only with that evidence: a number without a drawn separator, or one that
+/// reads whole, is never cut. Runs only in the direction of the page's text.
+pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[Rule]) {
+    let mut dividers: Vec<(f32, f32, f32)> = rules
+        .iter()
+        .filter(|r| r.kind == RuleKind::Line && (r.x0 - r.x1).abs() <= 0.5)
+        .map(|r| ((r.x0 + r.x1) / 2.0, r.y0.min(r.y1), r.y0.max(r.y1)))
+        .collect();
+    if dividers.is_empty() || !text.contains(SEP) {
+        return;
+    }
+    dividers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let bytes = text.as_bytes();
+    let char_at = |g: &Gl| text[g.start as usize..].chars().next();
+    let digit = |g: &Gl| {
+        !g.invisible
+            && g.layer.is_none()
+            && g.len == 1
+            && bytes.get(g.start as usize).is_some_and(u8::is_ascii_digit)
+    };
+    let placeholder = |g: &Gl| char_at(g) == Some(SEP);
+    let flat = |g: &Gl| !g.vertical && g.dx > 0.99 && g.dy.abs() < 0.01;
+    // After which glyph a space goes, and where.
+    let mut spaces: Vec<(usize, f32)> = Vec::new();
+    let mut i = 0;
+    while i < glyphs.len() {
+        if !(digit(&glyphs[i]) && flat(&glyphs[i])) {
+            i += 1;
+            continue;
+        }
+        // The number from `i`: digits and placeholders on one baseline, each after the last.
+        let mut j = i + 1;
+        while j < glyphs.len() {
+            let (p, g) = (&glyphs[j - 1], &glyphs[j]);
+            let size = p.size.max(0.1);
+            let end = p.x + p.adv.unwrap_or(0.5 * size);
+            let next = (digit(g) || placeholder(g))
+                && flat(g)
+                && (g.y - p.y).abs() <= 0.1 * size
+                && g.x - end <= 0.5 * size
+                && g.x >= p.x - 0.1 * size;
+            if !next {
+                break;
+            }
+            j += 1;
+        }
+        let number = i..j;
+        i = j;
+        let mut lens: Vec<usize> = vec![0];
+        for g in &glyphs[number.clone()] {
+            if placeholder(g) {
+                lens.push(0);
+            } else {
+                *lens.last_mut().expect("a group") += 1;
+            }
+        }
+        if lens.len() < 2 || kinds(&lens).is_some() {
+            continue;
+        }
+        // The first divider between two digits after a separator where the digits before it
+        // read as a number.
+        let mut prefix: Vec<usize> = vec![0];
+        let ids: Vec<usize> = number.collect();
+        for w in ids.windows(2) {
+            let (a, b) = (&glyphs[w[0]], &glyphs[w[1]]);
+            if placeholder(a) {
+                prefix.push(0);
+                continue;
+            }
+            *prefix.last_mut().expect("a group") += 1;
+            if placeholder(b) || prefix.len() < 2 || kinds(&prefix).is_none() {
+                continue;
+            }
+            let size = a.size.max(0.1);
+            let (from, to) = (
+                a.x + a.adv.unwrap_or(0.5 * size) / 2.0,
+                b.x + b.adv.unwrap_or(0.5 * size) / 2.0,
+            );
+            let lo = dividers.partition_point(|d| d.0 <= from);
+            let over = dividers[lo..]
+                .iter()
+                .take_while(|d| d.0 < to)
+                .find(|d| d.1 >= a.y + DIVIDER_FOOT * size && d.1 <= a.y + DIVIDER_OVER * size);
+            if let Some(d) = over {
+                spaces.push((w[0], d.0));
+                break;
+            }
+        }
+    }
+    if spaces.is_empty() {
+        return;
+    }
+    let Ok(at) = u32::try_from(text.len()) else {
+        return;
+    };
+    text.push(' ');
+    // Moved up from the back, each space goes in right after its digit, with no advance.
+    let n = glyphs.len();
+    glyphs.resize(n + spaces.len(), glyphs[0]);
+    let (mut src, mut dst) = (n, glyphs.len());
+    for &(k, x) in spaces.iter().rev() {
+        while src > k + 1 {
+            src -= 1;
+            dst -= 1;
+            glyphs[dst] = glyphs[src];
+        }
+        dst -= 1;
+        glyphs[dst] = Gl {
+            start: at,
+            len: 1,
+            x,
+            adv: Some(0.0),
+            ..glyphs[k]
+        };
+    }
+}
+
 /// Marks of one line lie within this many points of each other across it.
 const DASH_SNAP: f32 = 0.1;
 

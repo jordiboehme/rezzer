@@ -938,6 +938,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  too many marks near its digits"
             )));
         }
+        // A value that touches the next field's value, its separator drawn, is parted at the
+        // field's divider when the digits before it read as a number.
+        crate::marks::cut_at_dividers(&mut dev.glyphs, &mut dev.text, &dev.rules);
         if dev.drawn_marks_cut {
             notes.push(Note::Limit(format!(
                 "only the first {kept_marks} drawn marks on page {n} are looked at as separators: \

@@ -12,7 +12,7 @@ use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::{Gap, Gaps, Run};
 use crate::regions::{Part, offset_baselines};
-use crate::tables::Rule;
+use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, Link, Texts};
 
 /// A gap wider than this many font sizes between two glyphs of a line separates two words.
@@ -438,13 +438,19 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
 
 /// The pieces in reading order: columns one after the other, with the pieces that cross the
 /// gutter (titles, notes across the columns) splitting the columns into bands.
-fn reading_order(pieces: &[Piece]) -> Vec<usize> {
+/// A horizontal drawn rule in the frame of the pieces: its height and its two ends.
+pub(crate) type HRule = (f32, f32, f32);
+
+/// A rule this share of a region's width or wider, across its gutter, parts its bands.
+const WIDE_RULE: f32 = 2.0 / 3.0;
+
+fn reading_order(pieces: &[Piece], rules: &[HRule]) -> Vec<usize> {
     let mut out = Vec::with_capacity(pieces.len());
-    region(pieces, (0..pieces.len()).collect(), 0, &mut out);
+    region(pieces, (0..pieces.len()).collect(), 0, rules, &mut out);
     out
 }
 
-fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) {
+fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Vec<usize>) {
     let deep = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
     let found = if deep { gutter(p, &ids) } else { None };
     // A gutter that only a drawn box makes is taken after the bands of white space across:
@@ -453,8 +459,8 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) 
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         if let Some(at) = widest_gap(p, &ids) {
             let rest = ids.split_off(at);
-            region(p, ids, depth + 1, out);
-            region(p, rest, depth + 1, out);
+            region(p, ids, depth + 1, rules, out);
+            region(p, rest, depth + 1, rules, out);
             return;
         }
     }
@@ -467,15 +473,32 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) 
             }
             let (left, right): (Vec<usize>, Vec<usize>) =
                 band.drain(..).partition(|&i| p[i].x1 <= g0 + 0.5);
-            region(p, left, depth + 1, out);
-            region(p, right, depth + 1, out);
+            region(p, left, depth + 1, rules, out);
+            region(p, right, depth + 1, rules, out);
         };
+        // A drawn rule across the gutter and most of the region parts the bands too: the
+        // text above it is read before the text below it (a titled block before a grid).
+        let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
+        let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
+        let across: Vec<f32> = rules
+            .iter()
+            .filter(|r| r.1 < g0 && r.2 > g1 && r.2 - r.1 >= WIDE_RULE * (hi - lo))
+            .map(|r| r.0)
+            .collect();
+        let mut low = f32::MAX;
         for id in ids {
+            let ruled = across.iter().any(|&y| y < low && y > p[id].y1);
+            if ruled {
+                flush(&mut band, out);
+                low = f32::MAX;
+            }
             if p[id].x1 > g0 + 0.5 && p[id].x0 < g1 - 0.5 {
                 flush(&mut band, out);
                 out.push(id);
+                low = f32::MAX;
             } else {
                 band.push(id);
+                low = low.min(p[id].y0);
             }
         }
         flush(&mut band, out);
@@ -490,8 +513,8 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, out: &mut Vec<usize>) 
         && let Some(at) = widest_gap(p, &ids)
     {
         let rest = ids.split_off(at);
-        region(p, ids, depth + 1, out);
-        region(p, rest, depth + 1, out);
+        region(p, ids, depth + 1, rules, out);
+        region(p, rest, depth + 1, rules, out);
         return;
     }
     out.extend(ids);
@@ -654,14 +677,14 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
 /// Lines of fragments in reading order, as lists of fragment indices.
 #[cfg(test)]
 fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
-    lines_in(frags, columns, &[])
+    lines_in(frags, columns, &[], &[])
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices. A fragment tagged with
 /// one of `boxes` (in the frame of the fragments) is read with the rest of its box: the box
 /// stands as one piece among the others, ordered as they are, and its text is read whole
 /// where it stands.
-fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
+fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) -> Vec<Vec<usize>> {
     let head = chain_heads(frags);
     let boxed = columns && frags.iter().any(|f| f.region.is_some());
     let order: Vec<usize>;
@@ -670,7 +693,7 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]]) -> Vec<Vec<usize>
         let all: Vec<usize> = (0..frags.len()).collect();
         ps = pieces_in(frags, &all, &head, 0).0;
         order = if columns {
-            reading_order(&ps)
+            reading_order(&ps, rules)
         } else {
             let mut o: Vec<usize> = (0..ps.len()).collect();
             o.sort_by(|&a, &b| {
@@ -682,7 +705,7 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]]) -> Vec<Vec<usize>
             o
         };
     } else {
-        (ps, order) = boxed_order(frags, &head, boxes);
+        (ps, order) = boxed_order(frags, &head, boxes, rules);
     }
     let mut lines: Vec<Vec<usize>> = Vec::new();
     let mut last_row = None;
@@ -704,7 +727,12 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]]) -> Vec<Vec<usize>
 /// box and one stand-in piece for each box (its extent, its characters summed) are ordered as
 /// a page without boxes is; each stand-in is then replaced by the pieces of its box in their
 /// own reading order. Rows never join fragments of different boxes.
-fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece>, Vec<usize>) {
+fn boxed_order(
+    frags: &[Frag],
+    head: &[usize],
+    boxes: &[[f32; 4]],
+    rules: &[HRule],
+) -> (Vec<Piece>, Vec<usize>) {
     // Free text first, then the fragments of each box, in the order the boxes are first met.
     let mut group_of: Vec<Option<usize>> = vec![None; boxes.len()];
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
@@ -861,11 +889,11 @@ fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece
         .chain(first_stand..ps.len())
         .collect();
     let mut out = Vec::with_capacity(ps.len());
-    region(&ps, top, 0, &mut out);
+    region(&ps, top, 0, rules, &mut out);
     let mut order = Vec::with_capacity(ps.len());
     for id in out {
         match ps[id].stand {
-            Some(g) => region(&ps, inner[g].clone().collect(), 0, &mut order),
+            Some(g) => region(&ps, inner[g].clone().collect(), 0, rules, &mut order),
             None => order.push(id),
         }
     }
@@ -1201,12 +1229,26 @@ pub(crate) fn runs_in(
         .flat_map(|r| [turn.apply(r.x0, r.y0).0, turn.apply(r.x1, r.y1).0])
         .collect();
     columns.sort_by(f32::total_cmp);
+    // The horizontal rules in the frame of the main text, which part bands of columns.
+    let across: Vec<HRule> = rules
+        .iter()
+        .flat_map(|r| {
+            let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
+            let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
+            match r.kind {
+                // A rectangle's top and bottom are rules across too.
+                RuleKind::Rect => vec![(a.1, x0, x1), (b.1, x0, x1)],
+                RuleKind::Line if (a.1 - b.1).abs() <= 1.0 => vec![((a.1 + b.1) / 2.0, x0, x1)],
+                RuleKind::Line => Vec::new(),
+            }
+        })
+        .collect();
     let unused = if turned.is_empty() {
         None
     } else {
         tag_regions(&mut frags, &turned).err()
     };
-    for ids in lines_in(&frags, true, &turned) {
+    for ids in lines_in(&frags, true, &turned, &across) {
         let mut r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
         for run in &mut r {
             let k = columns.partition_point(|x| *x <= run.x);
@@ -1222,7 +1264,7 @@ pub(crate) fn runs_in(
         // position of their first glyph in the page's frame.
         let frame = compose(turn, dir);
         let frags = fragments(&list, text, frame, turn);
-        for ids in lines_in(&frags, false, &[]) {
+        for ids in lines_in(&frags, false, &[], &[]) {
             let ids = from_first_ink(&frags, &ids);
             let mut r = line_runs(page, &frags, ids, line, links);
             for (run, &i) in r.iter_mut().zip(ids) {
@@ -1610,7 +1652,7 @@ mod tests {
             frags.push(r);
         }
         frags.push(frag("A line under the boxes", 40.0, 560.0));
-        let lines = lines_in(&frags, true, &boxes);
+        let lines = lines_in(&frags, true, &boxes, &[]);
         let text: Vec<String> = lines
             .iter()
             .map(|l| l.iter().map(|&i| frags[i].text.clone()).collect())
@@ -1634,7 +1676,7 @@ mod tests {
         // Text beside a box of one line stays on its line.
         let mut frags = vec![frag("Total", 50.0, 700.0), frag("10.00", 300.0, 700.0)];
         frags[1].region = Some(0);
-        let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]]);
+        let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]], &[]);
         assert_eq!(lines, [vec![0, 1]]);
     }
 
