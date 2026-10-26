@@ -1157,7 +1157,11 @@ impl Built {
             + ROW_COST * plan.rows.len() as u64
             + CELL_COST * cells as u64;
         if !plan.rows.is_empty() {
-            let mark = self.mark.take().unwrap_or_else(|| cx.links.mark());
+            // The overhead alone goes back when it does not fit: the title is still placed
+            // (as a paragraph), so what its links took, cut links too, stays counted. A later
+            // stop drops the title with the table and gives back from the title's mark.
+            let title_mark = self.mark.take();
+            let mark = cx.links.mark();
             if cx.links.take_bytes(overhead).is_err() {
                 cx.links.restore(mark);
                 let rows = std::mem::take(&mut plan.rows);
@@ -1166,7 +1170,7 @@ impl Built {
                 return;
             }
             // The overhead goes back with the table's first row if that is dropped.
-            self.mark = Some(mark);
+            self.mark = Some(title_mark.unwrap_or(mark));
         }
         let table = match earlier {
             Some(t) => TableRef::Earlier(t),
@@ -2578,6 +2582,64 @@ mod tests {
         assert_eq!(built.cut, Some(Cut::Block(1)));
         assert!(built.blocks.is_empty(), "{:?}", built.blocks);
         assert_eq!((links.left.get(), links.freed.get()), before);
+    }
+
+    #[test]
+    fn a_cut_title_link_stays_counted_when_its_table_is_kept_as_text() {
+        // No link room: the title's link is cut (its text stays plain, so the title is a
+        // plain caption), and the table's overhead does not fit either. The table is text,
+        // the title a caption paragraph before it, and the cut link is still counted for
+        // its loss.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let links = LinkRoom::new(0);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: vec![vec![PlannedCell {
+                runs: vec![run("cell", 1, 680.0, 10.0)],
+                row_span: 1,
+                col_span: 1,
+            }]],
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![Run {
+                uri: Some(UriTarget::new("https://example.org/titel")),
+                ..run("Muster Titel", 0, 700.0, 10.0)
+            }],
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        let k = kinds(&built.blocks);
+        assert_eq!(
+            k[0],
+            (
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )
+        );
+        assert!(
+            !k.iter().any(|(kind, _)| kind.starts_with("table")),
+            "{k:?}"
+        );
+        assert_eq!(links.cut(), Some((1, 1, 1)));
     }
 
     #[test]
