@@ -4,14 +4,43 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-empty",
+      "anchor": "'csv-spectrum-empty'",
       "blocks": [
         {
+          "anchor": "'csv-spectrum-empty'!A1:C3",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C3",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "a",
+              "b",
+              "c"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "'csv-spectrum-empty'!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C3"
+          },
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-empty!A1",
+                "anchor": "'csv-spectrum-empty'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -22,7 +51,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!B1",
+                "anchor": "'csv-spectrum-empty'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -33,7 +62,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!C1",
+                "anchor": "'csv-spectrum-empty'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -46,7 +75,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-empty!A2",
+                "anchor": "'csv-spectrum-empty'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -57,31 +86,19 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!B2",
+                "anchor": "'csv-spectrum-empty'!B2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!C2",
+                "anchor": "'csv-spectrum-empty'!C2",
                 "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "",
-                    "type": "text"
-                  }
-                ],
                 "row_span": 1
               }
             ],
             [
               {
-                "anchor": "csv-spectrum-empty!A3",
+                "anchor": "'csv-spectrum-empty'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -92,7 +109,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!B3",
+                "anchor": "'csv-spectrum-empty'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -103,7 +120,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-empty!C3",
+                "anchor": "'csv-spectrum-empty'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -118,7 +135,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:C3",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -384,7 +401,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-spectrum-empty",
+        "id": "'csv-spectrum-empty'",
         "kind": "sheet",
         "name": "csv-spectrum-empty",
         "size": "2 rows x 3 columns"

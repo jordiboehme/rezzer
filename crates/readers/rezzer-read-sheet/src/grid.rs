@@ -2,29 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The cells of one sheet: read sparsely from calamine, then laid out as the value table.
+//! The cells of one sheet, read sparsely from calamine, and helpers for cell positions.
 
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 
-use calamine::{DataRef, Dimensions, Xlsx, XlsxFormulaMetadata};
+use calamine::{DataRef, Xlsx, XlsxFormulaMetadata};
 use rezzer_limits::Budget;
-use rezzer_model::{Anchor, Block, Cell, Inline, column_letter};
+use rezzer_model::{Block, Inline, column_letter};
 
 use crate::logic::TextMeter;
 
-/// Columns in a value table, as the renderer shows them.
-pub(crate) const MAX_TABLE_COLUMNS: u32 = 1_000;
-
-/// Cells in a value table, as the renderer shows them.
-pub(crate) const MAX_TABLE_CELLS: u64 = 200_000;
-
 /// Cells read between two checks of the time and the stop flag.
 const CHECK_EVERY: u64 = 1_024;
-
-/// Most cells visited while placing merged cells in one table. Bounds hostile overlapping
-/// merges; further merges are ignored with a loss.
-const MAX_MERGE_VISITS: u64 = 4_000_000;
 
 /// A cell value as stored in the file.
 #[derive(Debug, Clone, PartialEq)]
@@ -266,126 +256,6 @@ pub(crate) fn parse_area(text: &str) -> Option<((u32, u32), (u32, u32))> {
         }
     };
     Some(((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1))))
-}
-
-/// What building a value table could not show.
-#[derive(Debug, Default)]
-pub(crate) struct TableNotes {
-    /// The last 1-based row and the last 0-based column of the used area, when they are past
-    /// the shown part: (first row not shown, last row).
-    pub rows_cut: Option<(u64, u64)>,
-    /// (first column not shown, last column), 0-based.
-    pub cols_cut: Option<(u32, u32)>,
-    /// The element budget ended the table after this many rows.
-    pub element_stop: Option<u64>,
-    /// Merged areas ignored because they overlap another one or start outside the table.
-    pub merges_ignored: u64,
-}
-
-/// The value table of a sheet, from A1 to the last used row and column, so table positions
-/// are sheet positions. Merged cells become spans; the cells they cover are left out of the
-/// rows. `text` gives the shown text of a cell.
-pub(crate) fn value_table(
-    sheet_q: &str,
-    cells: &[RawCell],
-    merges: &[Dimensions],
-    budget: &Budget,
-    text: &dyn Fn(&RawCell) -> String,
-) -> (Option<Block>, TableNotes) {
-    let mut notes = TableNotes::default();
-    let Some(last_row) = cells.iter().map(|c| c.row).max() else {
-        return (None, notes);
-    };
-    let last_col = cells.iter().map(|c| c.col).max().unwrap_or(0);
-    let width = (last_col + 1).min(MAX_TABLE_COLUMNS);
-    if last_col >= width {
-        notes.cols_cut = Some((width, last_col));
-    }
-    let max_rows = (MAX_TABLE_CELLS / u64::from(width)).max(1);
-    let height = (u64::from(last_row) + 1).min(max_rows);
-    if u64::from(last_row) + 1 > height {
-        notes.rows_cut = Some((height + 1, u64::from(last_row) + 1));
-    }
-    let (w, h) = (width as usize, height as usize);
-
-    // Merged areas clipped to the table: 0 free, 1 covered, 2 top left of a merge.
-    let mut grid = vec![0u8; w * h];
-    let mut spans: HashMap<(u32, u32), (u32, u32)> = HashMap::new();
-    let mut visits: u64 = 0;
-    let mut sorted: Vec<&Dimensions> = merges.iter().collect();
-    sorted.sort_by_key(|d| d.start);
-    for d in sorted {
-        let (r0, c0) = d.start;
-        let (r1, c1) = (d.end.0.max(r0), d.end.1.max(c0));
-        if u64::from(r0) >= height || c0 >= width || (r0 == r1 && c0 == c1) {
-            continue;
-        }
-        let r1 = r1.min(height as u32 - 1);
-        let c1 = c1.min(width - 1);
-        let area = u64::from(r1 - r0 + 1) * u64::from(c1 - c0 + 1);
-        visits += area;
-        if visits > MAX_MERGE_VISITS {
-            notes.merges_ignored += 1;
-            continue;
-        }
-        let free = (r0..=r1).all(|r| (c0..=c1).all(|c| grid[r as usize * w + c as usize] == 0));
-        if !free {
-            notes.merges_ignored += 1;
-            continue;
-        }
-        for r in r0..=r1 {
-            for c in c0..=c1 {
-                grid[r as usize * w + c as usize] = 1;
-            }
-        }
-        grid[r0 as usize * w + c0 as usize] = 2;
-        spans.insert((r0, c0), (r1 - r0 + 1, c1 - c0 + 1));
-    }
-
-    let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(h);
-    let mut next = 0usize;
-    for r in 0..height as u32 {
-        let mut row = Vec::new();
-        let mut padding = 0u64;
-        for c in 0..width {
-            while cells.get(next).is_some_and(|x| (x.row, x.col) < (r, c)) {
-                next += 1;
-            }
-            let slot = grid[r as usize * w + c as usize];
-            if slot == 1 {
-                continue;
-            }
-            let found = cells.get(next).filter(|x| (x.row, x.col) == (r, c));
-            let inlines = match found {
-                Some(x) => crate::text_inlines(&text(x)),
-                None => {
-                    padding += 1;
-                    Vec::new()
-                }
-            };
-            let mut cell = Cell::new(inlines);
-            if let Some(&(rs, cs)) = spans.get(&(r, c)) {
-                cell.row_span = rs;
-                cell.col_span = cs;
-            }
-            cell.anchor = Some(Anchor(format!("{sheet_q}!{}", a1(r, c))));
-            row.push(cell);
-        }
-        if budget.add_elements(padding).is_err() {
-            notes.element_stop = Some(u64::from(r));
-            break;
-        }
-        rows.push(row);
-    }
-    let table = Block::Table {
-        caption: None,
-        header_rows: 0,
-        role: None,
-        rows,
-        alignments: Vec::new(),
-        anchor: None,
-    };
-    (Some(table), notes)
 }
 
 /// `8 to 11, 15` from 0-based spans; `letters` writes columns as letters.

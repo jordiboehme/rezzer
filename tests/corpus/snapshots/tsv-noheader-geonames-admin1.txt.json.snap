@@ -4,14 +4,46 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "tsv-noheader-geonames-admin1",
+      "anchor": "'tsv-noheader-geonames-admin1'",
       "blocks": [
         {
+          "anchor": "'tsv-noheader-geonames-admin1'!A1:D3865",
           "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A1:D3865",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              },
+              {
+                "detail": "label columns A to C",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "key": "'tsv-noheader-geonames-admin1'!A1",
+            "kind": "table",
+            "label_cols": 3,
+            "range": "A1:D3865"
+          },
           "rows": [
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A1",
+                "anchor": "'tsv-noheader-geonames-admin1'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -22,7 +54,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B1",
+                "anchor": "'tsv-noheader-geonames-admin1'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -33,7 +65,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C1",
+                "anchor": "'tsv-noheader-geonames-admin1'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -44,7 +76,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D1",
+                "anchor": "'tsv-noheader-geonames-admin1'!D1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -57,7 +89,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A2",
+                "anchor": "'tsv-noheader-geonames-admin1'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -68,7 +100,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B2",
+                "anchor": "'tsv-noheader-geonames-admin1'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -79,7 +111,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C2",
+                "anchor": "'tsv-noheader-geonames-admin1'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -90,7 +122,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D2",
+                "anchor": "'tsv-noheader-geonames-admin1'!D2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -103,7 +135,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A3",
+                "anchor": "'tsv-noheader-geonames-admin1'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -114,7 +146,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B3",
+                "anchor": "'tsv-noheader-geonames-admin1'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -125,7 +157,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C3",
+                "anchor": "'tsv-noheader-geonames-admin1'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -136,7 +168,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D3",
+                "anchor": "'tsv-noheader-geonames-admin1'!D3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -149,7 +181,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A4",
+                "anchor": "'tsv-noheader-geonames-admin1'!A4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -160,7 +192,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B4",
+                "anchor": "'tsv-noheader-geonames-admin1'!B4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -171,7 +203,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C4",
+                "anchor": "'tsv-noheader-geonames-admin1'!C4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -182,7 +214,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D4",
+                "anchor": "'tsv-noheader-geonames-admin1'!D4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -195,7 +227,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A5",
+                "anchor": "'tsv-noheader-geonames-admin1'!A5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -206,7 +238,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B5",
+                "anchor": "'tsv-noheader-geonames-admin1'!B5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -217,7 +249,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C5",
+                "anchor": "'tsv-noheader-geonames-admin1'!C5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -228,7 +260,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D5",
+                "anchor": "'tsv-noheader-geonames-admin1'!D5",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -241,7 +273,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A6",
+                "anchor": "'tsv-noheader-geonames-admin1'!A6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -252,7 +284,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B6",
+                "anchor": "'tsv-noheader-geonames-admin1'!B6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -263,7 +295,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C6",
+                "anchor": "'tsv-noheader-geonames-admin1'!C6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -274,7 +306,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D6",
+                "anchor": "'tsv-noheader-geonames-admin1'!D6",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -287,7 +319,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A7",
+                "anchor": "'tsv-noheader-geonames-admin1'!A7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -298,7 +330,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B7",
+                "anchor": "'tsv-noheader-geonames-admin1'!B7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -309,7 +341,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C7",
+                "anchor": "'tsv-noheader-geonames-admin1'!C7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -320,7 +352,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D7",
+                "anchor": "'tsv-noheader-geonames-admin1'!D7",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -333,7 +365,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A8",
+                "anchor": "'tsv-noheader-geonames-admin1'!A8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -344,7 +376,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B8",
+                "anchor": "'tsv-noheader-geonames-admin1'!B8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -355,7 +387,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C8",
+                "anchor": "'tsv-noheader-geonames-admin1'!C8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -366,7 +398,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D8",
+                "anchor": "'tsv-noheader-geonames-admin1'!D8",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -379,7 +411,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A9",
+                "anchor": "'tsv-noheader-geonames-admin1'!A9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -390,7 +422,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B9",
+                "anchor": "'tsv-noheader-geonames-admin1'!B9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -401,7 +433,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C9",
+                "anchor": "'tsv-noheader-geonames-admin1'!C9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -412,7 +444,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D9",
+                "anchor": "'tsv-noheader-geonames-admin1'!D9",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -425,7 +457,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A10",
+                "anchor": "'tsv-noheader-geonames-admin1'!A10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -436,7 +468,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B10",
+                "anchor": "'tsv-noheader-geonames-admin1'!B10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -447,7 +479,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C10",
+                "anchor": "'tsv-noheader-geonames-admin1'!C10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -458,7 +490,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D10",
+                "anchor": "'tsv-noheader-geonames-admin1'!D10",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -471,7 +503,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A11",
+                "anchor": "'tsv-noheader-geonames-admin1'!A11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -482,7 +514,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B11",
+                "anchor": "'tsv-noheader-geonames-admin1'!B11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -493,7 +525,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C11",
+                "anchor": "'tsv-noheader-geonames-admin1'!C11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -504,7 +536,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D11",
+                "anchor": "'tsv-noheader-geonames-admin1'!D11",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -517,7 +549,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "tsv-noheader-geonames-admin1!A12",
+                "anchor": "'tsv-noheader-geonames-admin1'!A12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -528,7 +560,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!B12",
+                "anchor": "'tsv-noheader-geonames-admin1'!B12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -539,7 +571,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!C12",
+                "anchor": "'tsv-noheader-geonames-admin1'!C12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -550,7 +582,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "tsv-noheader-geonames-admin1!D12",
+                "anchor": "'tsv-noheader-geonames-admin1'!D12",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -566,7 +598,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:D3865",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -894,7 +926,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "tsv-noheader-geonames-admin1",
+        "id": "'tsv-noheader-geonames-admin1'",
         "kind": "sheet",
         "name": "tsv-noheader-geonames-admin1",
         "size": "3865 rows x 4 columns"

@@ -1,0 +1,258 @@
+{
+  "cells": [
+    [
+      "mySheet1!A1",
+      "String"
+    ],
+    [
+      "mySheet1!A10",
+      "date"
+    ],
+    [
+      "mySheet1!A11",
+      "comment"
+    ],
+    [
+      "mySheet1!A12",
+      "hyperlink"
+    ],
+    [
+      "mySheet1!A13",
+      "formula"
+    ],
+    [
+      "mySheet1!A14",
+      "formulaErr"
+    ],
+    [
+      "mySheet1!A15",
+      "formulaFloat"
+    ],
+    [
+      "mySheet1!A16",
+      "customFormat1"
+    ],
+    [
+      "mySheet1!A17",
+      "customFormat2"
+    ],
+    [
+      "mySheet1!A2",
+      "integer"
+    ],
+    [
+      "mySheet1!A3",
+      "float"
+    ],
+    [
+      "mySheet1!A4",
+      "currency"
+    ],
+    [
+      "mySheet1!A5",
+      "percent"
+    ],
+    [
+      "mySheet1!A6",
+      "float 2"
+    ],
+    [
+      "mySheet1!A7",
+      "long int"
+    ],
+    [
+      "mySheet1!A8",
+      "longer int"
+    ],
+    [
+      "mySheet1!A9",
+      "fraction"
+    ],
+    [
+      "mySheet1!B1",
+      "This is a string"
+    ],
+    [
+      "mySheet1!B10",
+      "2017-03-09"
+    ],
+    [
+      "mySheet1!B11",
+      "contents"
+    ],
+    [
+      "mySheet1!B12",
+      "tika_link"
+    ],
+    [
+      "mySheet1!B13",
+      "4"
+    ],
+    [
+      "mySheet1!B14",
+      "#NAME?"
+    ],
+    [
+      "mySheet1!B15",
+      "0.5"
+    ],
+    [
+      "mySheet1!B16",
+      "   46/1963"
+    ],
+    [
+      "mySheet1!B17",
+      "  3/128"
+    ],
+    [
+      "mySheet1!B2",
+      "13"
+    ],
+    [
+      "mySheet1!B3",
+      "13.12112313"
+    ],
+    [
+      "mySheet1!B30",
+      "the"
+    ],
+    [
+      "mySheet1!B33",
+      "the"
+    ],
+    [
+      "mySheet1!B35",
+      "comment6"
+    ],
+    [
+      "mySheet1!B4",
+      "3.03"
+    ],
+    [
+      "mySheet1!B5",
+      "0.2"
+    ],
+    [
+      "mySheet1!B6",
+      "13.12131231"
+    ],
+    [
+      "mySheet1!B7",
+      "1.23457E+14"
+    ],
+    [
+      "mySheet1!B8",
+      "1.23457E+15"
+    ],
+    [
+      "mySheet1!B9",
+      "0.25"
+    ],
+    [
+      "mySheet1!C13",
+      "2"
+    ],
+    [
+      "mySheet1!C16",
+      "merchant1"
+    ],
+    [
+      "mySheet1!C17",
+      "merchant2"
+    ],
+    [
+      "mySheet1!C21",
+      "text test"
+    ],
+    [
+      "mySheet1!D15",
+      "March"
+    ],
+    [
+      "mySheet1!D16",
+      "1"
+    ],
+    [
+      "mySheet1!D17",
+      "2"
+    ],
+    [
+      "mySheet1!D33",
+      "quick"
+    ],
+    [
+      "mySheet1!E15",
+      "April"
+    ],
+    [
+      "mySheet1!E16",
+      "3"
+    ],
+    [
+      "mySheet1!E17",
+      "4"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "mySheet1!B13",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "excel",
+      "expression": "=C13*2",
+      "kind": "cell",
+      "latex": "\\mathrm{C13} \\cdot 2",
+      "references": [
+        "mySheet1!C13"
+      ]
+    },
+    {
+      "anchor": "mySheet1!B14",
+      "cached": {
+        "type": "text",
+        "value": "#NAME?"
+      },
+      "dialect": "excel",
+      "expression": "=COS(NA)",
+      "kind": "cell",
+      "latex": "\\operatorname{COS}(\\mathrm{NA})",
+      "references": [
+        "name:NA"
+      ]
+    },
+    {
+      "anchor": "mySheet1!B15",
+      "cached": {
+        "type": "number",
+        "value": 0.5
+      },
+      "dialect": "excel",
+      "expression": "=1/C13",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{C13}}",
+      "references": [
+        "mySheet1!C13"
+      ]
+    },
+    {
+      "anchor": "name:NA",
+      "dialect": "excel",
+      "expression": "",
+      "kind": "name",
+      "note": "the file gives no formula text for this name that is read (for XLSB: an add-in or external name)"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "mySheet1!C13",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    }
+  ],
+  "rules": []
+}

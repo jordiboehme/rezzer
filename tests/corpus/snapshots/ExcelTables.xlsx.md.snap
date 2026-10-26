@@ -1,0 +1,147 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "ExcelTables.xlsx"
+resource: "<corpus>/office/ExcelTables.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "1e43011440eb39000d1751abaf9ded42d37b26f91b4f586a94bf91ce8ecbe9e5"
+source_size: 9457
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+created: "2006-09-21T08:52:22Z"
+modified: "2013-07-16T07:00:19Z"
+---
+
+# ExcelTables.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| ExcelTable | sheet | 3 rows x 3 columns, 2 regions | result |  |
+
+- Sheets: 1
+- Formulas: 6
+- Patterns: 1
+- Parameters: 18
+- Results: 6
+- Names: 2
+- Last changed: 2013-07-16T07:00:19Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+
+## ExcelTable
+
+### NonTable
+
+Table A1:C4 (data A2:C4), header row 1, row labels in A, found by: defined name NonTable; rules: no gaps, header by type change.
+
+| Name | Age | AgeGroup |
+| --- | --- | --- |
+| Anton | 44 | 4 |
+| Bertha | 33 | 3 |
+| Cäsar | 21 | 2 |
+
+### TableName
+
+Table G1:I4 (data G2:I4), header row 1, row labels in G, found by: Excel table TableName.
+
+| Name | Age | AgeGroup |
+| --- | --- | --- |
+| Anton | 44 | 4 |
+| Bertha | 33 | 3 |
+| Cäsar | 21 | 2 |
+
+Hidden columns: K to XFD.
+
+**Excel tables**
+
+| Table | Range | Columns |
+| --- | --- | --- |
+| TableName | G1:I4 | Name, Age, AgeGroup |
+
+## Logic
+
+### ExcelTable
+
+#### Parameters
+
+Parameters in NonTable:
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 |  |  | Name |  |  | 0 |
+| B1 |  | Name | Age |  |  | 0 |
+| C1 |  | Age | AgeGroup |  |  | 0 |
+| A2 |  | Name | Anton |  |  | 0 |
+| B2 |  | Anton | 44 |  |  | 1 |
+| A3 |  | Name | Bertha |  |  | 0 |
+| B3 |  | Bertha | 33 |  |  | 1 |
+| A4 |  | Name | Cäsar |  |  | 0 |
+| B4 |  | Cäsar | 21 |  |  | 1 |
+
+Parameters in TableName:
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 |  | AgeGroup | Name |  |  | 0 |
+| H1 |  | Name | Age |  |  | 0 |
+| I1 |  | Age | AgeGroup |  |  | 0 |
+| G2 |  | Name | Anton |  |  | 0 |
+| H2 |  | Anton | 44 |  |  | 1 |
+| G3 |  | Name | Bertha |  |  | 0 |
+| H3 |  | Bertha | 33 |  |  | 1 |
+| G4 |  | Name | Cäsar |  |  | 0 |
+| H4 |  | Cäsar | 21 |  |  | 1 |
+
+#### Formulas
+
+A row with a count above 1 stands for one formula copied over its cells. It shows the first cell.
+
+| Cells | Count | Formula | Reads | Role | Value | Math |
+| --- | --- | --- | --- | --- | --- | --- |
+| C2:I4 (6 of 21 cells) | 6 | `=INT(B2/10)` | B2 | result | 4 | $`\operatorname{INT}(\frac{\mathrm{B2}}{10})`$ |
+
+#### Results
+
+For formulas copied over several cells the first cell is shown.
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| C2:I4 (6 of 21 cells) | `=INT(B2/10)` | 4 |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| NonTable | workbook | name | `ExcelTable!$A$1:$C$4` |  |  |  |
+| TableAsRangeName | workbook | name | `TableName[#All]` |  |  |  |
+
+### Dependencies
+
+Arrows point from what is read to what reads it. Double boxes are formulas copied over several cells, round boxes are parameters.
+```mermaid
+flowchart LR
+    n0[["ExcelTable!C2:I4, 6 formulas"]]
+    n1(["ExcelTable!B2:H4"])
+    n1 --> n0
+```
+
+### Hidden logic
+
+| What | Where | Detail |
+| --- | --- | --- |
+| calculation | workbook | automatic, iterative calculation off |

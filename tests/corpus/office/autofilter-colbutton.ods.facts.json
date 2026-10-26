@@ -1,0 +1,9 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "ods"
+  },
+  {
+    "contains": "Hidden rows: 3 to 4."
+  }
+]

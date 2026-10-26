@@ -1,6 +1,6 @@
 # ODS
 
-Rezzer reads OpenDocument spreadsheets the same way as Excel files: values, formulas with the cells they read, annotations and hidden parts.
+Rezzer reads OpenDocument spreadsheets the same way as Excel files: the tables inside each sheet, formulas with the cells they read, annotations and hidden parts.
 
 Status: available in the development version (no release yet).
 
@@ -10,13 +10,18 @@ Built on (versions as used in the development version):
 
 - [calamine](https://crates.io/crates/calamine) 0.37.0 for values and formulas (as OpenFormula text)
 - [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells and ranges each formula reads. formulakit turns OpenFormula into the familiar A1 form first
-- Rezzer's own reader sheetparts on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for named ranges, annotations, hidden sheets, rows and columns, validation, number formats and document properties
+- Rezzer's own reader sheetparts on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for named ranges, annotations, hidden sheets, rows and columns, validation, number formats, merged cells, database ranges, data pilots, cell styles and document properties
+- Rezzer's own sheetlayout crate to find the tables, titles and notes inside a sheet
 
 ## What Rezzer reads
 
 ### Structure
 
-- Each sheet as a value table
+- The tables inside each sheet with their header rows, titles and notes, the same way as for [XLSX](xlsx.md#tables-inside-a-sheet)
+- Label and value blocks and text lists of report sheets
+- Merged cells
+- Database ranges with their header and footer rows, also the unnamed range a sheet keeps for its filter
+- Data pilot (pivot table) output ranges
 - Hidden sheets, rows and columns (marked, not dropped)
 - Number formats from the cell styles
 
@@ -27,14 +32,18 @@ Built on (versions as used in the development version):
 ### Hidden logic
 
 - Every formula with the cells and ranges it reads, also across sheets
-- Copied formulas folded into patterns, parameters with labels and units, results and a dependency graph, the same way as for [XLSX](xlsx.md)
+- Copied formulas folded into patterns, parameters with labels and units, results and a dependency graph, the same way as for [XLSX](xlsx.md). A parameter in a table is named by its path: title, column header and row label. In the Logic section the shared part is written once as a title over the group
 - Named ranges and named expressions, with their scope
 - Annotations with author and date, at their cell
 - Data validation rules
 
 ## How it shows up in the output
 
-The same as for [XLSX](xlsx.md): one value table per sheet, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
+The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with a layout line that says where it is and how it was found, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
+
+## Tables inside a sheet
+
+Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records` and `--sheet` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
 
 ## Example
 
@@ -65,7 +74,9 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 ## Known limitations
 
 - Rezzer does not calculate. It shows the cached results stored in the file
-- Not read yet: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings. The output lists them under "Not read"
+- Not read yet: conditional formats, charts and calculation settings. The output lists them under "Not read"
+- A data pilot is read by its output range only: Rezzer finds its table there, but not its header rows, label columns or grand totals
+- The limits of table finding are the same as for [XLSX](xlsx.md#limits)
 - ODF has no "very hidden" state. A sheet is hidden through its table style. Rezzer reads the style
 - No public ODS test file with validation rules was found. This part is not proven on a real file
 - Encrypted ODS files are reported as encrypted and not read
@@ -78,7 +89,7 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 ## How it is tested
 
-The corpus has 4 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+The corpus has 13 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
@@ -86,4 +97,4 @@ Extreme cases the test suite holds, at the default limits unless a limit is name
 - 100,000 nested spans in one cell: refused for its depth before any parser reads it
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
-Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 7 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
+Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 4 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 4.7), release build (cargo profile release) of Rezzer 0.1.0 at commit be1efc2, 2026-10-26.

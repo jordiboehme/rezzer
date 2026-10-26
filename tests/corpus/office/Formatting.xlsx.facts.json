@@ -16,9 +16,9 @@
     "absent": true
   },
   {
-    "contains": "| £nn.nn | £10.52 |"
+    "contains": "- £nn.nn: £10.52 (B13)"
   },
   {
-    "contains": "| yyyy-mm-dd | 2006-11-24 |"
+    "contains": "- yyyy-mm-dd: 2006-11-24 (B4)"
   }
 ]

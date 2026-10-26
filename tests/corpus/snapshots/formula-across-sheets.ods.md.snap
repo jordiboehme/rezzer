@@ -27,7 +27,7 @@ modified: "2014-01-25T21:08:47.223500176"
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
 | indiceOrga | sheet | 2 rows x 1 column |  |  |
-| Calculation | sheet | 9 rows x 7 columns | result | Data |
+| Calculation | sheet | 4 rows x 5 columns, 4 regions | result | Data |
 | Data | sheet | 4 rows x 4 columns | result | Calculation |
 
 - Sheets: 3
@@ -61,28 +61,56 @@ flowchart LR
 
 ## indiceOrga
 
-|  |
+Table A1:A2, found by rules: no gaps, no header found.
+
+| A |
 | --- |
 | 1.4965 |
 | -0.1459 |
 
 ## Calculation
 
-|  |  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- | --- |
-| Semi // | Colonne a |  | Colonne b |  |  | 1.4965 |
-|  | bas (1) | haut (n) | bas (1) | haut (n) |  | -0.1459 |
-|  | L | L | L | L |  |  |
-| Indice | 1.4666 | 1.4870 |  | 1.4907 |  |  |
-| titre | 20.49% | 6.51% | 6.51% | 3.98% |  |  |
-| rapport | 25.78% | 6.96% | 6.96% | 4.14% |  |  |
-| débit | 12 | 10 |  | 1.00E+01 |  |  |
-|  |  |  |  |  |  |  |
-| Aexp | 10 |  | 10 |  |  |  |
+### Table A1:E7
+
+Table A1:E7 (data A4:E7), header rows 1 to 3, row labels in A, found by rules: empty-row and empty-column gaps, header by type change.
+
+| Semi // | Colonne a / bas (1) / L | Colonne a / haut (n) / L | Colonne b / bas (1) / L | Colonne b / haut (n) / L |
+| --- | --- | --- | --- | --- |
+| Indice | 1.4666 | 1.4870 |  | 1.4907 |
+| titre | 20.49% | 6.51% | 6.51% | 3.98% |
+| rapport | 25.78% | 6.96% | 6.96% | 4.14% |
+| débit | 12 | 10 |  | 1.00E+01 |
+
+### Table G1:G2
+
+Table G1:G2, found by rules: empty-row and empty-column gaps, no header found.
+
+| G |
+| --- |
+| 1.4965 |
+| -0.1459 |
+
+### Table A9:B9
+
+Table A9:B9, row labels in A, found by rules: empty-row and empty-column gaps, no header found.
+
+| A | B |
+| --- | --- |
+| Aexp | 10 |
+
+### Table D9
+
+Table D9, found by rules: empty-row and empty-column gaps, no header found.
+
+| D |
+| --- |
+| 10 |
 
 ## Data
 
-|  |  |  |  |
+Table A1:D4, found by rules: no gaps, no header found.
+
+| A | B | C | D |
 | --- | --- | --- | --- |
 | 66 | 170 | (b) | 107 |
 | L0a | Lna | L0b | Lnb |
@@ -243,4 +271,4 @@ flowchart LR
 
 | Where | What | Why | Severity |
 | --- | --- | --- | --- |
-| document | not read for ODS: conditional formats, merged cells, database ranges, pivot tables (data pilot), charts and calculation settings | unsupported | info |
+| document | not read for ODS: conditional formats, charts and calculation settings | unsupported | info |

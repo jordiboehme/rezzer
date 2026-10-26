@@ -1,0 +1,30 @@
+[
+  {
+    "pointer": "/source/format",
+    "equals": "xlsx"
+  },
+  {
+    "contains": "Generation at Utility Scale Facilities"
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/range",
+    "equals": "A1:P57"
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/header_rows",
+    "equals": [
+      3,
+      4
+    ]
+  },
+  {
+    "pointer": "/body/0/blocks/2/layout/header_paths/1",
+    "equals": "Generation at Utility Scale Facilities / Coal"
+  },
+  {
+    "contains": "Group rows: 5, 16, 29, 42, 50, 54 (one merged area across the table)."
+  },
+  {
+    "contains": "### Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026"
+  }
+]

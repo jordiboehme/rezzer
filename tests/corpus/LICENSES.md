@@ -32,6 +32,8 @@ changed, except where `MANIFEST.md` says "derived".
   https://opendatacommons.org/licenses/pddl/1-0/ . No notice is required.
 - `csv-pandas-fdic-banklist.csv`, `csv-broken-derived-banklist.csv`: the data is from the US
   FDIC (public domain); the file comes from the pandas test data (BSD-3-Clause, text below).
+- `office/NST-EST2023-POP.xlsx`: Annual Estimates of the Resident Population for the United States, Regions, States, DC and Puerto Rico, April 1, 2020 to July 1, 2023, US Census Bureau, https://www2.census.gov/programs-surveys/popest/tables/2020-2023/state/totals/NST-EST2023-POP.xlsx . Work of the US government, public domain (17 U.S.C. 105).
+- `office/table_1_01.xlsx`: Table 1.1 Net Generation by Energy Source, Electric Power Monthly, US Energy Information Administration, https://www.eia.gov/electricity/monthly/xls/table_1_01.xlsx (fetched 2026-10-20, updated monthly at the source). Work of the US government, public domain (17 U.S.C. 105).
 
 ## License texts of software sources
 
@@ -177,7 +179,7 @@ The spreadsheet files were downloaded on 2026-10-20 from the raw form of the pin
 
 ### Apache-2.0 sources
 
-- Apache POI test data (Apache-2.0): `office/Formatting.xlsx`, `55906-MultiSheetRefs.xlsx`, `MatrixFormulaEvalTestData.xlsx`, `simple-table-named-range.xlsx`, `testNames.xlsm`, `DataValidations-49244.xlsx`, `SimpleWithComments.xlsx`, `GroupTest.xlsx`, `WithConditionalFormatting.xlsx`, `WithChart.xlsx`. Source: https://github.com/apache/poi/tree/04804ac97487ceded07a8231bc106a258109cbeb/test-data/spreadsheet . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/poi/blob/04804ac97487ceded07a8231bc106a258109cbeb/legal/NOTICE . The license text is the Apache License 2.0 below.
+- Apache POI test data (Apache-2.0): `office/Formatting.xlsx`, `55906-MultiSheetRefs.xlsx`, `MatrixFormulaEvalTestData.xlsx`, `simple-table-named-range.xlsx`, `testNames.xlsm`, `DataValidations-49244.xlsx`, `SimpleWithComments.xlsx`, `GroupTest.xlsx`, `WithConditionalFormatting.xlsx`, `WithChart.xlsx`, `ExcelTables.xlsx`, `TablesWithDifferentHeaders.xlsx`, `ExcelPivotTableSample.xlsx`, `malformed/57893-many-merges.xlsx`. Source: https://github.com/apache/poi/tree/04804ac97487ceded07a8231bc106a258109cbeb/test-data/spreadsheet . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/poi/blob/04804ac97487ceded07a8231bc106a258109cbeb/legal/NOTICE . The license text is the Apache License 2.0 below.
 
 - Apache Tika test documents (Apache-2.0): `office/testEXCEL_custom_props.xlsx`, `testEXCEL_various.xlsb`. Source: https://github.com/apache/tika/tree/043762c6327ff36b3081ce297688e93915c85996 . Copyright The Apache Software Foundation. NOTICE: https://github.com/apache/tika/blob/043762c6327ff36b3081ce297688e93915c85996/NOTICE.txt . The license text is the Apache License 2.0 below.
 
@@ -444,7 +446,7 @@ Apache License 2.0, source of the text: https://www.apache.org/licenses/LICENSE-
        limitations under the License.
 
 
-### LibreOffice core (MPL-2.0): `office/threadedComment.xlsx`, `hidden_sheets.xlsx`, `external-refs.xlsx`, `formula-across-sheets.ods`, `one-variable.xlsx`
+### LibreOffice core (MPL-2.0): `office/threadedComment.xlsx`, `hidden_sheets.xlsx`, `external-refs.xlsx`, `formula-across-sheets.ods`, `one-variable.xlsx`, `database.ods`, `cool15769_minimal_DB_ranges.ods`, `autofilter-colbutton.ods`, `merged.ods`, `outline.ods`, `print-range.ods`, `pivot-table-basic.ods`
 
 Source: https://github.com/LibreOffice/core/tree/79be16a7156fadfad7d4a0be0dbbb38f761f242e/sc/qa/unit/data . Source of the text: https://raw.githubusercontent.com/LibreOffice/core/79be16a7156fadfad7d4a0be0dbbb38f761f242e/COPYING.MPL . The files are unchanged, so the MPL notice applies to them as Source Code Form.
 
@@ -823,7 +825,7 @@ Source: https://github.com/LibreOffice/core/tree/79be16a7156fadfad7d4a0be0dbbb38
       defined by the Mozilla Public License, v. 2.0.
 
 
-### calamine (MIT): `office/merged_range.xlsx`, `table-multiple.xlsx`, `pivots.xlsx`, `any_sheets.ods`, `with-annotation.ods`, `malformed/issue_666_panic.xlsb`, `malformed/issue_594_dos.ods`
+### calamine (MIT): `office/merged_range.xlsx`, `table-multiple.xlsx`, `pivots.xlsx`, `any_sheets.ods`, `with-annotation.ods`, `malformed/issue_666_panic.xlsb`, `malformed/issue_594_dos.ods`, `temperature-in-middle.xlsx`, `header-row.xlsx`, `no-header.xlsx`, `merged_cells.ods`, `covered.ods`
 
 Source of the text: https://raw.githubusercontent.com/tafia/calamine/f2c5948242fdfe390e292313a1f87f9db19b9633/LICENSE-MIT.md
 

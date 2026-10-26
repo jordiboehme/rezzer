@@ -1,0 +1,95 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "Dates, all 24th November 2006"
+    ],
+    [
+      "Sheet1!A10",
+      "nn.nn"
+    ],
+    [
+      "Sheet1!A11",
+      "nn.nnn"
+    ],
+    [
+      "Sheet1!A12",
+      "nn.n"
+    ],
+    [
+      "Sheet1!A13",
+      "£nn.nn"
+    ],
+    [
+      "Sheet1!A2",
+      "dd/mm/yyyy"
+    ],
+    [
+      "Sheet1!A3",
+      "yyyy/mm/dd"
+    ],
+    [
+      "Sheet1!A4",
+      "yyyy-mm-dd"
+    ],
+    [
+      "Sheet1!A5",
+      "yy/mm/dd"
+    ],
+    [
+      "Sheet1!A6",
+      "dd/mm/yy"
+    ],
+    [
+      "Sheet1!A7",
+      "dd-mm-yy"
+    ],
+    [
+      "Sheet1!A9",
+      "Numbers, all 10.52"
+    ],
+    [
+      "Sheet1!B10",
+      "10.52"
+    ],
+    [
+      "Sheet1!B11",
+      "10.520"
+    ],
+    [
+      "Sheet1!B12",
+      "10.5"
+    ],
+    [
+      "Sheet1!B13",
+      "£10.52"
+    ],
+    [
+      "Sheet1!B2",
+      "11-24-06"
+    ],
+    [
+      "Sheet1!B3",
+      "2006/11/24"
+    ],
+    [
+      "Sheet1!B4",
+      "2006-11-24"
+    ],
+    [
+      "Sheet1!B5",
+      "06/11/24"
+    ],
+    [
+      "Sheet1!B6",
+      "24/11/06"
+    ],
+    [
+      "Sheet1!B7",
+      "24-11-06"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

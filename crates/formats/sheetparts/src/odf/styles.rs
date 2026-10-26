@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::xml::{Elem, Ev};
-use crate::{Issue, IssueKind};
+use crate::{Issue, IssueKind, Look};
 
 #[derive(Debug, Clone)]
 struct Part {
@@ -50,6 +50,27 @@ struct DataStyle {
 struct CellStyle {
     data_style: Option<String>,
     parent: Option<String>,
+    /// What this style itself says about the look. `None` is "not said here": the value
+    /// comes from the parent style.
+    bold: Option<bool>,
+    filled: Option<bool>,
+    rule_above: Option<bool>,
+    rule_below: Option<bool>,
+    /// The left margin in points.
+    margin: Option<f64>,
+}
+
+/// The most parent styles followed up a chain, for looks and number formats.
+const MAX_CHAIN: usize = 64;
+
+/// The look properties of a style after inheritance.
+#[derive(Debug, Clone, Copy, Default)]
+struct Props {
+    bold: Option<bool>,
+    filled: Option<bool>,
+    rule_above: Option<bool>,
+    rule_below: Option<bool>,
+    margin: Option<f64>,
 }
 
 const DATA_STYLES: [&str; 7] = [
@@ -70,9 +91,14 @@ pub(super) struct StyleBook {
     cells: HashMap<String, CellStyle>,
     table_hidden: HashMap<String, bool>,
     cell_cache: HashMap<String, Option<String>>,
+    look_cache: HashMap<String, Look>,
+    props_cache: HashMap<String, (Props, usize)>,
+    deep_chain: bool,
     code_cache: HashMap<String, Option<String>>,
     // Parser state.
     table_style: Option<String>,
+    /// The cell style whose properties are being read.
+    cell_now: Option<String>,
     data_now: Option<(String, DataStyle)>,
     part_now: Option<Part>,
     part_nested: usize,
@@ -85,6 +111,86 @@ impl StyleBook {
             .and_then(|s| self.table_hidden.get(s))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// Whether any cell style was read. Without one the file says nothing about looks.
+    pub fn has_looks(&self) -> bool {
+        !self.cells.is_empty()
+    }
+
+    /// The look of a cell style: bold, fill, rules and indent, each from the style itself or the
+    /// nearest parent that says it (named styles end in `Default`).
+    pub fn look(&mut self, style: &str) -> Look {
+        if let Some(hit) = self.look_cache.get(style) {
+            return *hit;
+        }
+        let p = self.resolve(style);
+        let look = Look {
+            bold: p.bold.unwrap_or(false),
+            filled: p.filled.unwrap_or(false),
+            rule_above: p.rule_above.unwrap_or(false),
+            rule_below: p.rule_below.unwrap_or(false),
+            indent: p.margin.map_or(0, indent_level),
+            center_across: false,
+        };
+        self.look_cache.insert(style.to_string(), look);
+        look
+    }
+
+    /// Whether a style had parents more than [`MAX_CHAIN`] levels up: those are not inherited
+    /// from.
+    pub fn chain_too_long(&self) -> bool {
+        self.deep_chain
+    }
+
+    /// The properties of a style after inheritance. Every style on the way is resolved once and
+    /// kept, so a long chain of styles costs a linear number of steps in all.
+    fn resolve(&mut self, style: &str) -> Props {
+        let mut path: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        let mut name = Some(style.to_string());
+        let mut base = Props::default();
+        // How many styles the kept result at the end of the path stands for.
+        let mut tail = 0;
+        let mut cut = false;
+        while let Some(n) = name.take() {
+            // A kept result is used only when the whole chain fits under the cap, so what a
+            // style inherits never depends on which style was asked for first.
+            if let Some((hit, len)) = self.props_cache.get(&n)
+                && path.len() + len <= MAX_CHAIN + 1
+            {
+                base = *hit;
+                tail = *len;
+                break;
+            }
+            if !seen.insert(n.clone()) || !self.cells.contains_key(&n) {
+                break;
+            }
+            if path.len() > MAX_CHAIN {
+                self.deep_chain = true;
+                cut = true;
+                break;
+            }
+            name = self.cells.get(&n).and_then(|c| c.parent.clone());
+            path.push(n);
+        }
+        for (i, n) in path.iter().enumerate().rev() {
+            if let Some(c) = self.cells.get(n) {
+                base = Props {
+                    bold: c.bold.or(base.bold),
+                    filled: c.filled.or(base.filled),
+                    rule_above: c.rule_above.or(base.rule_above),
+                    rule_below: c.rule_below.or(base.rule_below),
+                    margin: c.margin.or(base.margin),
+                };
+            }
+            // The result of a cut path is only an answer for the style that was asked.
+            if !cut {
+                self.props_cache
+                    .insert(n.clone(), (base, tail + path.len() - i));
+            }
+        }
+        base
     }
 
     /// Feeds one XML event. Elements that are no style are ignored.
@@ -127,11 +233,17 @@ impl StyleBook {
                 let Some(name) = e.attr("name") else { return };
                 match e.attr("family") {
                     Some("table-cell") => {
+                        if !empty {
+                            self.cell_now = Some(name.to_string());
+                        }
+                        self.look_cache.clear();
+                        self.props_cache.clear();
                         self.cells.insert(
                             name.to_string(),
                             CellStyle {
                                 data_style: e.attr("data-style-name").map(str::to_string),
                                 parent: e.attr("parent-style-name").map(str::to_string),
+                                ..CellStyle::default()
                             },
                         );
                     }
@@ -144,8 +256,42 @@ impl StyleBook {
                     self.table_hidden.insert(style.clone(), display == "false");
                 }
             }
+            "text-properties" => {
+                if let Some(c) = self.now()
+                    && let Some(w) = e.attr("font-weight")
+                {
+                    c.bold = Some(is_bold(w));
+                }
+            }
+            "table-cell-properties" => {
+                if let Some(c) = self.now() {
+                    if let Some(bg) = e.attr("background-color") {
+                        c.filled = Some(is_filled(bg));
+                    }
+                    // A side beats the shorthand for all four.
+                    if let Some(b) = e.attr("border-top").or(e.attr("border")) {
+                        c.rule_above = Some(is_rule(b));
+                    }
+                    if let Some(b) = e.attr("border-bottom").or(e.attr("border")) {
+                        c.rule_below = Some(is_rule(b));
+                    }
+                }
+            }
+            "paragraph-properties" => {
+                if let Some(c) = self.now()
+                    && let Some(m) = e.attr("margin-left").and_then(points)
+                {
+                    c.margin = Some(m);
+                }
+            }
             _ => {}
         }
+    }
+
+    /// The cell style being read.
+    fn now(&mut self) -> Option<&mut CellStyle> {
+        let name = self.cell_now.as_ref()?;
+        self.cells.get_mut(name)
     }
 
     fn open_in_data_style(&mut self, e: &Elem, empty: bool) {
@@ -190,6 +336,7 @@ impl StyleBook {
             }
         } else if name == "style" {
             self.table_style = None;
+            self.cell_now = None;
         }
     }
 
@@ -204,6 +351,10 @@ impl StyleBook {
         let mut data = None;
         while let Some(n) = name {
             if !seen.insert(n.clone()) {
+                break;
+            }
+            if seen.len() > MAX_CHAIN + 1 {
+                self.deep_chain = true;
                 break;
             }
             let Some(style) = self.cells.get(&n) else {
@@ -276,6 +427,65 @@ impl StyleBook {
 }
 
 const MAX_CODE: usize = 255;
+
+/// `fo:font-weight`: the word `bold` or a number of 600 or more.
+fn is_bold(weight: &str) -> bool {
+    let w = weight.trim();
+    w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)
+}
+
+/// `fo:background-color`: a color that is neither `transparent` nor white.
+fn is_filled(color: &str) -> bool {
+    let c = color.trim().to_ascii_lowercase();
+    c != "transparent" && c != "#ffffff" && !c.is_empty()
+}
+
+/// A length in points. Percentages and unknown units give `None`.
+fn points(length: &str) -> Option<f64> {
+    let t = length.trim();
+    let split = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+        .unwrap_or(t.len());
+    let (number, unit) = t.split_at(split);
+    let n: f64 = number.parse().ok().filter(|n: &f64| n.is_finite())?;
+    let per_unit = match unit.trim() {
+        "pt" => 1.0,
+        "in" => 72.0,
+        "cm" => 72.0 / 2.54,
+        "mm" => 72.0 / 25.4,
+        "pc" => 12.0,
+        "px" => 0.75,
+        _ => return None,
+    };
+    Some(n * per_unit)
+}
+
+/// `fo:border-*`: a solid or double line of at least half a point.
+fn is_rule(border: &str) -> bool {
+    let mut line = false;
+    let mut width = None;
+    for token in border.split_whitespace() {
+        match token {
+            "solid" | "double" => line = true,
+            other => {
+                if let Some(w) = points(other) {
+                    width = Some(w);
+                }
+            }
+        }
+    }
+    // The comparison leaves room for the rounding of lengths written in other units.
+    line && width.is_none_or(|w| w >= 0.5 - 1e-6)
+}
+
+/// The indent level of a left margin: one level per 10 points, at least 1 above 0.
+fn indent_level(margin: f64) -> u8 {
+    if margin > 0.0 {
+        (margin / 10.0).round().clamp(1.0, 255.0) as u8
+    } else {
+        0
+    }
+}
 
 /// `value()>=0` becomes `>=0`.
 fn condition(raw: &str) -> Option<String> {

@@ -15,24 +15,6 @@ use rezzer_model::{Severity, StatusColor};
 // Fixtures
 // ---------------------------------------------------------------------------------------
 
-fn zip_of(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
-    let mut w = ZipWriter::new(Cursor::new(Vec::new()));
-    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    for (name, bytes) in entries {
-        w.start_file(*name, opts).unwrap();
-        w.write_all(bytes).unwrap();
-    }
-    w.finish().unwrap().into_inner()
-}
-
-fn read_as(bytes: Vec<u8>, name: &str, format: FormatId, limits: Limits) -> ReadOutcome {
-    SheetReader.read(
-        &source(bytes, name, format),
-        &ReadOptions::default(),
-        &Budget::new(limits),
-    )
-}
-
 /// One BIFF12 record: type (one or two bytes) and length (7 bits per byte).
 fn rec(typ: u16, payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -121,6 +103,20 @@ enum C<'a> {
 }
 
 fn sheet_bin(rows: &[(u32, Vec<C>)]) -> Vec<u8> {
+    sheet_bin_with(rows, &[])
+}
+
+/// A BrtMergeCell record: rwFirst, rwLast, colFirst, colLast (0-based).
+fn merge_cell(rw_first: u32, rw_last: u32, col_first: u32, col_last: u32) -> Vec<u8> {
+    let mut p = rw_first.to_le_bytes().to_vec();
+    p.extend(rw_last.to_le_bytes());
+    p.extend(col_first.to_le_bytes());
+    p.extend(col_last.to_le_bytes());
+    rec(0x00B0, &p)
+}
+
+/// A sheet part with these records after the sheet data, before BrtEndSheet.
+fn sheet_bin_with(rows: &[(u32, Vec<C>)], tail: &[Vec<u8>]) -> Vec<u8> {
     let mut out = rec(0x0081, &[]); // BrtBeginSheet
     out.extend(rec(0x0094, &[0; 16])); // BrtWsDim
     out.extend(rec(0x0091, &[])); // BrtBeginSheetData
@@ -166,6 +162,9 @@ fn sheet_bin(rows: &[(u32, Vec<C>)]) -> Vec<u8> {
         }
     }
     out.extend(rec(0x0092, &[])); // BrtEndSheetData
+    for r in tail {
+        out.extend(r);
+    }
     out.extend(rec(0x0082, &[])); // BrtEndSheet
     out
 }
@@ -259,32 +258,6 @@ fn xlsb(sheets: &[(&str, Vec<u8>)], names: &[(&str, Vec<u8>)]) -> Vec<u8> {
 
 fn read_xlsb(bytes: Vec<u8>) -> ReadOutcome {
     read_as(bytes, "book.xlsb", FormatId::Xlsb, Limits::default())
-}
-
-const ODS_MIME: &str = "application/vnd.oasis.opendocument.spreadsheet";
-const MANIFEST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><manifest:file-entry manifest:full-path=\"/\" manifest:media-type=\"application/vnd.oasis.opendocument.spreadsheet\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/></manifest:manifest>";
-
-/// content.xml with the standard namespaces around `body` (the inside of office:spreadsheet).
-fn content(body: &str) -> String {
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet>{body}</office:spreadsheet></office:body></office:document-content>"
-    )
-}
-
-fn ods_with(mime: &str, manifest: &str, content: &str) -> Vec<u8> {
-    zip_of(&[
-        ("mimetype", mime.as_bytes().to_vec()),
-        ("META-INF/manifest.xml", manifest.as_bytes().to_vec()),
-        ("content.xml", content.as_bytes().to_vec()),
-    ])
-}
-
-fn ods(content: &str) -> Vec<u8> {
-    ods_with(ODS_MIME, MANIFEST, content)
-}
-
-fn read_ods(bytes: Vec<u8>) -> ReadOutcome {
-    read_as(bytes, "book.ods", FormatId::Ods, Limits::default())
 }
 
 fn whole_file_loss(out: &ReadOutcome, why: LossReason, text: &str) -> bool {
@@ -400,6 +373,157 @@ fn xlsb_lists_what_is_not_read() {
     ] {
         assert!(loss.what.contains(part), "{part}: {}", loss.what);
     }
+}
+
+#[test]
+fn xlsb_layout_from_values_says_so() {
+    let sheet = sheet_bin(&[
+        (0, vec![C::Text(0, "Name"), C::Text(1, "Score")]),
+        (1, vec![C::Text(0, "Ann"), C::Num(1, 3.0)]),
+        (2, vec![C::Text(0, "Bob"), C::Num(1, 4.0)]),
+    ]);
+    let out = read_xlsb(xlsb(&[("S", sheet)], &[]));
+    let doc = &out.document;
+    let loss = doc
+        .losses
+        .iter()
+        .find(|l| l.location == "S" && l.what.starts_with("layout from values only"))
+        .unwrap_or_else(|| panic!("{:#?}", doc.losses));
+    assert_eq!(
+        loss.what,
+        "layout from values only: styles, tables and filters are not read for XLSB"
+    );
+    assert_eq!(loss.why, LossReason::Unsupported);
+    assert_eq!(loss.severity, Severity::Info);
+    let layouts: Vec<&rezzer_model::TableLayout> = section(doc, "S")
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                layout: Some(l), ..
+            } => Some(l.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(layouts.len(), 1, "{:#?}", section(doc, "S"));
+    assert_eq!(layouts[0].range, "A1:B3");
+    assert_eq!(layouts[0].header_paths, ["Name", "Score"]);
+
+    // One per sheet on the corpus file too.
+    let out = corpus("testEXCEL_various.xlsb");
+    let sheets = out
+        .document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { .. }))
+        .count();
+    let losses = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.starts_with("layout from values only"))
+        .count();
+    assert!(sheets > 0);
+    assert_eq!(losses, sheets);
+}
+
+#[test]
+fn xlsb_merges_are_read() {
+    let sheet = sheet_bin_with(
+        &[
+            (
+                0,
+                vec![
+                    C::Text(0, "Region"),
+                    C::Text(1, "Sales"),
+                    C::Text(2, "hidden"),
+                ],
+            ),
+            (1, vec![C::Text(0, "North"), C::Num(1, 1.0), C::Num(2, 2.0)]),
+            (2, vec![C::Text(0, "South"), C::Num(1, 3.0), C::Num(2, 4.0)]),
+        ],
+        &[
+            rec(0x00B1, &1u32.to_le_bytes()), // BrtBeginMergeCells
+            merge_cell(0, 0, 1, 2),           // B1:C1
+            rec(0x00B2, &[]),                 // BrtEndMergeCells
+        ],
+    );
+    let out = read_xlsb(xlsb(&[("S", sheet)], &[]));
+    let doc = &out.document;
+    let b1 = section(doc, "S")
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows),
+            _ => None,
+        })
+        .flatten()
+        .flatten()
+        .find(|c| c.anchor.as_ref().is_some_and(|a| a.0 == "S!B1"))
+        .unwrap_or_else(|| panic!("{:#?}", section(doc, "S")));
+    assert_eq!((b1.row_span, b1.col_span), (1, 2));
+    // The value under the merge is not shown, and a loss says so.
+    assert!(
+        has_loss(doc, LossReason::Unsupported, "S!C1", "B1:C1"),
+        "{:#?}",
+        doc.losses
+    );
+    let not_read = doc
+        .losses
+        .iter()
+        .find(|l| l.what.contains("not read for XLSB"))
+        .unwrap();
+    assert!(!not_read.what.contains("merged"), "{}", not_read.what);
+}
+
+#[test]
+fn xlsb_damaged_merge_records_keep_the_sheet() {
+    // A short merge record is skipped; a record past the end of the part after the sheet
+    // data ends the merges, not the sheet.
+    let mut tail = vec![rec(0x00B0, &[0; 8]), merge_cell(0, 1, 0, 0)];
+    tail.push(vec![0xB0, 0x01, 0x7F, 1, 2]);
+    // It claims 127 bytes; only its own 2 and BrtEndSheet follow.
+    let sheet = sheet_bin_with(
+        &[(0, vec![C::Text(0, "a")]), (1, vec![C::Text(1, "b")])],
+        &tail,
+    );
+    let out = read_xlsb(xlsb(&[("S", sheet)], &[]));
+    let doc = &out.document;
+    assert!(
+        doc.losses.iter().any(|l| l.location == "S"
+            && l.why == LossReason::Damaged
+            && l.what.starts_with("merged cells")),
+        "{:#?}",
+        doc.losses
+    );
+    // The merge read before the broken record joins A1 and B2 into one region.
+    let ranges: Vec<String> = section(doc, "S")
+        .iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                layout: Some(l), ..
+            } => Some(l.range.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ranges, ["A1:B2"], "{:#?}", section(doc, "S"));
+    let mut texts: Vec<String> = all_blocks(doc)
+        .into_iter()
+        .flat_map(|b| match b {
+            Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => {
+                vec![plain_text(inlines)]
+            }
+            Block::Table {
+                rows, role: None, ..
+            } => rows
+                .iter()
+                .flatten()
+                .map(|c| plain_text(&c.inlines))
+                .collect(),
+            _ => Vec::new(),
+        })
+        .filter(|t| t == "a" || t == "b")
+        .collect();
+    texts.sort();
+    assert_eq!(texts, ["a", "b"]);
 }
 
 #[test]

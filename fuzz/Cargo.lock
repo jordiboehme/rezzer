@@ -1367,10 +1367,20 @@ dependencies = [
  "rezzer-read-sheet",
  "rezzer-read-text",
  "rezzer-render",
+ "sheetlayout",
  "sheetparts",
  "textenc",
  "zip",
  "zipguard",
+]
+
+[[package]]
+name = "rezzer-layout"
+version = "0.1.0"
+dependencies = [
+ "rezzer-limits",
+ "rezzer-model",
+ "sheetlayout",
 ]
 
 [[package]]
@@ -1396,8 +1406,11 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "csvsniff",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
+ "sheetlayout",
+ "sheetparts",
  "textenc",
 ]
 
@@ -1441,8 +1454,10 @@ dependencies = [
  "cfb",
  "formulakit",
  "quick-xml",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
+ "sheetlayout",
  "sheetparts",
  "zipguard",
 ]
@@ -1622,6 +1637,10 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "sheetlayout"
+version = "0.1.0"
 
 [[package]]
 name = "sheetparts"

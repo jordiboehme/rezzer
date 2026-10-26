@@ -109,9 +109,11 @@ fn one_wide_row_stays_small() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let (out, extra) = read_measured(one_wide_row(100));
     let (cells, rows, width) = table_cells(&out);
-    assert_eq!(width, 1_000);
-    assert_eq!(rows, 102);
-    assert_eq!(cells, 102_000, "the table is rectangular");
+    // The wide row holds no value: the table spans the two columns with values, and the
+    // empty row is no table row.
+    assert_eq!(width, 2);
+    assert_eq!(rows, 101);
+    assert_eq!(cells, 202, "the table is rectangular");
     assert!(cells <= 200_000, "{cells} cells");
     assert!(extra < 64 * 1024 * 1024, "extra heap: {extra} bytes");
     let cut = out
@@ -123,20 +125,17 @@ fn one_wide_row_stays_small() {
     assert_eq!(cut.what, "9001 columns after column 1000 not shown");
     assert_eq!(cut.why, LossReason::Limit);
     assert_eq!(cut.severity, Severity::Info);
-    // Header plus at most 500 columns.
-    assert_eq!(facts_rows(&out), 501);
-    let listed = out
-        .document
-        .losses
-        .iter()
-        .find(|l| l.what.contains("Columns table"))
-        .expect("facts cap loss");
-    assert_eq!(
-        listed.what,
-        "columns 501 to 10001 not listed in the Columns table"
+    // The Columns table describes the table's two columns; the empty fields of the wide
+    // row belong to no table.
+    assert_eq!(facts_rows(&out), 3);
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("not listed in")),
+        "{:?}",
+        out.document.losses
     );
-    assert_eq!(listed.why, LossReason::Limit);
-    assert_eq!(listed.severity, Severity::Info);
 }
 
 #[test]

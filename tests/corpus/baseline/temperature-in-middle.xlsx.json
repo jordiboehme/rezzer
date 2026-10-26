@@ -1,0 +1,31 @@
+{
+  "cells": [
+    [
+      "Sheet1!B4",
+      "label"
+    ],
+    [
+      "Sheet1!B5",
+      "celsius"
+    ],
+    [
+      "Sheet1!B6",
+      "fahrenheit"
+    ],
+    [
+      "Sheet1!C4",
+      "value"
+    ],
+    [
+      "Sheet1!C5",
+      "22.2222"
+    ],
+    [
+      "Sheet1!C6",
+      "72"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

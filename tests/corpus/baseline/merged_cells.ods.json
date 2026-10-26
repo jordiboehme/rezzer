@@ -1,0 +1,35 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "A"
+    ],
+    [
+      "Sheet1!A2",
+      "A"
+    ],
+    [
+      "Sheet1!B1",
+      "B"
+    ],
+    [
+      "Sheet1!B2",
+      "B"
+    ],
+    [
+      "Sheet1!C1",
+      "C"
+    ],
+    [
+      "Sheet1!C2",
+      "C"
+    ],
+    [
+      "Sheet1!C3",
+      "C"
+    ]
+  ],
+  "formulas": [],
+  "parameters": [],
+  "rules": []
+}

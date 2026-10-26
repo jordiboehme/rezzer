@@ -37,12 +37,14 @@ losses: 0
 
 ## csv-spectrum-quotes\_and\_newlines
 
+Table A1:B3 (data A2:B3), header row 1, found by rules: no gaps, header by type change.
+
 | a | b |
 | --- | --- |
 | 1 | ha "ha" ha |
 | 3 | 4 |
 
-**Columns**
+**Columns A1:B3**
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |

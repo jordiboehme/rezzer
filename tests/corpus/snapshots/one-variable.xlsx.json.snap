@@ -7,7 +7,46 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "'One-Var'",
       "blocks": [
         {
-          "header_rows": 0,
+          "inlines": [
+            {
+              "text": "Table A1:C2",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "'One-Var'!A1:C2",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C2",
+            "found_by": [
+              {
+                "detail": "empty-row gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "A",
+              "B",
+              "=A*B"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "'One-Var'!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C2"
+          },
           "rows": [
             [
               {
@@ -41,36 +80,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H1",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I1",
-                "col_span": 1,
                 "row_span": 1
               }
             ],
@@ -107,85 +116,49 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table A4:B11",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "'One-Var'!A4:B11",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "A4:B11",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
               },
               {
-                "anchor": "'One-Var'!D2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H2",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I2",
-                "col_span": 1,
-                "row_span": 1
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
               }
             ],
-            [
-              {
-                "anchor": "'One-Var'!A3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H3",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I3",
-                "col_span": 1,
-                "row_span": 1
-              }
+            "header_paths": [
+              "A",
+              "B"
             ],
+            "key": "'One-Var'!A4",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A4:B11"
+          },
+          "rows": [
             [
               {
                 "anchor": "'One-Var'!A4",
@@ -208,12 +181,222 @@ source: crates/rezzer/tests/corpus.rs
                   }
                 ],
                 "row_span": 1
-              },
+              }
+            ],
+            [
               {
-                "anchor": "'One-Var'!C4",
+                "anchor": "'One-Var'!A5",
                 "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
                 "row_span": 1
               },
+              {
+                "anchor": "'One-Var'!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B6",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "8",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "10",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "6",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "12",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "'One-Var'!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "7",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "'One-Var'!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "14",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Table D4:I5",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "'One-Var'!D4:I5",
+          "header_rows": 0,
+          "layout": {
+            "certainty": "rule",
+            "data": "D4:I5",
+            "found_by": [
+              {
+                "detail": "empty-row and empty-column gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "no header found",
+                "id": "H0",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "D",
+              "E",
+              "F",
+              "G",
+              "H",
+              "I"
+            ],
+            "key": "'One-Var'!D4",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "D4:I5"
+          },
+          "rows": [
+            [
               {
                 "anchor": "'One-Var'!D4",
                 "col_span": 1,
@@ -283,33 +466,6 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "'One-Var'!A5",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "1",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B5",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "2",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C5",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
                 "anchor": "'One-Var'!D5",
                 "col_span": 1,
                 "inlines": [
@@ -373,360 +529,6 @@ source: crates/rezzer/tests/corpus.rs
                     "type": "text"
                   }
                 ],
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A6",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "2",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B6",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "4",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H6",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I6",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A7",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "3",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B7",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "6",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H7",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I7",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A8",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "4",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B8",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "8",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H8",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I8",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A9",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "5",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B9",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "10",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H9",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I9",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A10",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "6",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B10",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "12",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H10",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I10",
-                "col_span": 1,
-                "row_span": 1
-              }
-            ],
-            [
-              {
-                "anchor": "'One-Var'!A11",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "7",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!B11",
-                "col_span": 1,
-                "inlines": [
-                  {
-                    "text": "14",
-                    "type": "text"
-                  }
-                ],
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!C11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!D11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!E11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!F11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!G11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!H11",
-                "col_span": 1,
-                "row_span": 1
-              },
-              {
-                "anchor": "'One-Var'!I11",
-                "col_span": 1,
                 "row_span": 1
               }
             ]
@@ -905,6 +707,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "'One-Var'!A2",
         "label": "A",
+        "path": [
+          "A"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",
@@ -914,6 +719,9 @@ source: crates/rezzer/tests/corpus.rs
       {
         "anchor": "'One-Var'!B2",
         "label": "B",
+        "path": [
+          "B"
+        ],
         "read_by": 2,
         "value": {
           "type": "number",
@@ -952,7 +760,7 @@ source: crates/rezzer/tests/corpus.rs
         "kind": "sheet",
         "name": "One-Var",
         "role": "result",
-        "size": "11 rows x 9 columns"
+        "size": "1 row x 3 columns, 3 regions"
       }
     ]
   },

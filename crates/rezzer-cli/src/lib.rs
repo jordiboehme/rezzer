@@ -17,7 +17,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use rezzer_model::Registry;
-use rezzer_pipeline::{Config, OutputSection};
+use rezzer_pipeline::{Config, OutputSection, TableStyle};
 
 /// What `-V` and `--version` print: the version, the copyright with the license and the
 /// source link, in the same three lines as Crystalline. clap puts the program name in front
@@ -86,6 +86,15 @@ struct ReadArgs {
     /// Do not show formulas as LaTeX math in the Logic section.
     #[arg(long)]
     no_math: bool,
+    /// How sheet tables are written: table (Markdown tables) or records (one list item per
+    /// row with the column header of each value). Default from the config file, else table.
+    /// It changes only the Markdown: --json prints the full model.
+    #[arg(long, value_name = "table|records")]
+    table_style: Option<TableStyle>,
+    /// Only this sheet, by name or by position as #1, #2 and so on. Give it more than once
+    /// for more sheets. It changes only the Markdown: --json prints all sheets.
+    #[arg(long = "sheet", value_name = "SELECTOR")]
+    sheets: Vec<String>,
 }
 
 /// Runs the command line with the readers of this build.

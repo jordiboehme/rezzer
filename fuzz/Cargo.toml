@@ -23,6 +23,7 @@ csvsniff = { path = "../crates/formats/csvsniff" }
 zipguard = { path = "../crates/formats/zipguard" }
 formulakit = { path = "../crates/formats/formulakit" }
 sheetparts = { path = "../crates/formats/sheetparts" }
+sheetlayout = { path = "../crates/formats/sheetlayout" }
 rezzer-read-sheet = { path = "../crates/readers/rezzer-read-sheet" }
 pdfparts = { path = "../crates/formats/pdfparts" }
 barcodes = { path = "../crates/formats/barcodes", features = ["encode"] }
@@ -110,6 +111,13 @@ bench = false
 [[bin]]
 name = "zipguard_open"
 path = "fuzz_targets/zipguard_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sheetlayout_detect"
+path = "fuzz_targets/sheetlayout_detect.rs"
 test = false
 doc = false
 bench = false

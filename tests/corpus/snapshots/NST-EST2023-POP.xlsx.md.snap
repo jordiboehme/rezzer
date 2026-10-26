@@ -1,0 +1,504 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "NST-EST2023-POP.xlsx"
+resource: "<corpus>/office/NST-EST2023-POP.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "aec49456a006a06bdaba1ec90f032e0412617da40cdda26709074fbc6bb528e6"
+source_size: 14964
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+authors: ["sas user"]
+language: "en"
+created: "2023-12-05T02:34:45Z"
+modified: "2023-12-12T20:02:38Z"
+---
+
+# NST-EST2023-POP.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| NST-EST2023-POP | sheet | 58 rows x 6 columns |  |  |
+
+- Sheets: 1
+- Parameters: 357
+- Names: 3
+- Last changed: 2023-12-12T20:02:38Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| company | SAS Institute Inc |
+| iterative\_calculation | false |
+| last\_modified\_by | Joyce N Augustin (CENSUS/POP FED) |
+
+## NST-EST2023-POP
+
+### Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Ric...
+
+Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (A2)
+
+table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts) (A1)
+
+Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
+
+| Geographic Area | April 1, 2020 Estimates Base | Population Estimate (as of July 1) / 2020 | Population Estimate (as of July 1) / 2021 | Population Estimate (as of July 1) / 2022 | Population Estimate (as of July 1) / 2023 |
+| --- | --- | --- | --- | --- | --- |
+| United States | 331,464,948 | 331,526,933 | 332,048,977 | 333,271,411 | 334,914,895 |
+| Northeast | 57,614,141 | 57,430,477 | 57,243,423 | 57,026,847 | 56,983,517 |
+| Midwest | 68,987,296 | 68,969,794 | 68,850,246 | 68,783,028 | 68,909,283 |
+| South | 126,268,529 | 126,465,281 | 127,353,282 | 128,702,030 | 130,125,290 |
+| West | 78,594,982 | 78,661,381 | 78,602,026 | 78,759,506 | 78,896,805 |
+| .Alabama | 5,024,294 | 5,031,864 | 5,050,380 | 5,073,903 | 5,108,468 |
+| .Alaska | 733,374 | 732,964 | 734,923 | 733,276 | 733,406 |
+| .Arizona | 7,157,902 | 7,186,683 | 7,272,487 | 7,365,684 | 7,431,344 |
+| .Arkansas | 3,011,490 | 3,014,348 | 3,028,443 | 3,046,404 | 3,067,732 |
+| .California | 39,538,212 | 39,503,200 | 39,145,060 | 39,040,616 | 38,965,193 |
+| .Colorado | 5,773,707 | 5,785,219 | 5,811,596 | 5,841,039 | 5,877,610 |
+| .Connecticut | 3,605,912 | 3,577,586 | 3,603,691 | 3,608,706 | 3,617,176 |
+| .Delaware | 989,946 | 991,862 | 1,004,881 | 1,019,459 | 1,031,890 |
+| .District of Columbia | 689,548 | 670,839 | 669,037 | 670,949 | 678,972 |
+| .Florida | 21,538,216 | 21,591,299 | 21,830,708 | 22,245,521 | 22,610,726 |
+| .Georgia | 10,713,771 | 10,732,390 | 10,790,385 | 10,913,150 | 11,029,227 |
+| .Hawaii | 1,455,274 | 1,451,181 | 1,446,745 | 1,439,399 | 1,435,138 |
+| .Idaho | 1,839,117 | 1,849,339 | 1,904,537 | 1,938,996 | 1,964,726 |
+| .Illinois | 12,813,469 | 12,790,357 | 12,690,341 | 12,582,515 | 12,549,689 |
+| .Indiana | 6,785,442 | 6,789,098 | 6,813,798 | 6,832,274 | 6,862,199 |
+| .Iowa | 3,190,427 | 3,190,904 | 3,197,944 | 3,199,693 | 3,207,004 |
+| .Kansas | 2,937,835 | 2,938,124 | 2,937,946 | 2,936,716 | 2,940,546 |
+| .Kentucky | 4,506,297 | 4,508,155 | 4,507,600 | 4,511,563 | 4,526,154 |
+| .Louisiana | 4,657,785 | 4,652,022 | 4,627,047 | 4,588,023 | 4,573,749 |
+| .Maine | 1,363,177 | 1,364,517 | 1,378,787 | 1,389,338 | 1,395,722 |
+| .Maryland | 6,177,253 | 6,173,689 | 6,175,045 | 6,163,981 | 6,180,253 |
+| .Massachusetts | 7,032,933 | 6,997,713 | 6,991,951 | 6,982,740 | 7,001,399 |
+| .Michigan | 10,077,674 | 10,070,627 | 10,038,117 | 10,033,281 | 10,037,261 |
+| .Minnesota | 5,706,804 | 5,710,578 | 5,717,968 | 5,714,300 | 5,737,915 |
+| .Mississippi | 2,961,306 | 2,958,409 | 2,949,582 | 2,938,928 | 2,939,690 |
+| .Missouri | 6,154,889 | 6,154,426 | 6,170,393 | 6,177,168 | 6,196,156 |
+| .Montana | 1,084,244 | 1,087,211 | 1,106,366 | 1,122,878 | 1,132,812 |
+| .Nebraska | 1,961,965 | 1,963,273 | 1,964,253 | 1,968,060 | 1,978,379 |
+| .Nevada | 3,104,617 | 3,115,840 | 3,146,632 | 3,177,421 | 3,194,176 |
+| .New Hampshire | 1,377,524 | 1,378,702 | 1,387,494 | 1,399,003 | 1,402,054 |
+| .New Jersey | 9,289,039 | 9,272,392 | 9,269,175 | 9,260,817 | 9,290,841 |
+| .New Mexico | 2,117,525 | 2,118,488 | 2,116,950 | 2,113,476 | 2,114,371 |
+| .New York | 20,202,320 | 20,104,710 | 19,854,526 | 19,673,200 | 19,571,216 |
+| .North Carolina | 10,439,459 | 10,453,812 | 10,567,100 | 10,695,965 | 10,835,491 |
+| .North Dakota | 779,079 | 779,563 | 777,982 | 778,912 | 783,926 |
+| .Ohio | 11,799,331 | 11,798,292 | 11,765,227 | 11,759,697 | 11,785,935 |
+| .Oklahoma | 3,959,411 | 3,965,234 | 3,991,634 | 4,019,271 | 4,053,824 |
+| .Oregon | 4,237,279 | 4,245,044 | 4,256,465 | 4,239,379 | 4,233,358 |
+| .Pennsylvania | 13,002,788 | 12,995,477 | 13,013,614 | 12,972,091 | 12,961,683 |
+| .Rhode Island | 1,097,371 | 1,096,444 | 1,097,092 | 1,093,842 | 1,095,962 |
+| .South Carolina | 5,118,422 | 5,132,151 | 5,193,848 | 5,282,955 | 5,373,555 |
+| .South Dakota | 886,668 | 887,852 | 896,299 | 909,869 | 919,318 |
+| .Tennessee | 6,910,786 | 6,926,091 | 6,963,709 | 7,048,976 | 7,126,489 |
+| .Texas | 29,145,459 | 29,234,361 | 29,561,286 | 30,029,848 | 30,503,301 |
+| .Utah | 3,271,614 | 3,283,982 | 3,339,284 | 3,381,236 | 3,417,734 |
+| .Vermont | 643,077 | 642,936 | 647,093 | 647,110 | 647,464 |
+| .Virginia | 8,631,373 | 8,637,193 | 8,657,348 | 8,679,099 | 8,715,698 |
+| .Washington | 7,705,267 | 7,724,566 | 7,741,433 | 7,784,477 | 7,812,880 |
+| .West Virginia | 1,793,713 | 1,791,562 | 1,785,249 | 1,774,035 | 1,770,071 |
+| .Wisconsin | 5,893,713 | 5,896,700 | 5,879,978 | 5,890,543 | 5,910,955 |
+| .Wyoming | 576,850 | 577,664 | 579,548 | 581,629 | 584,057 |
+|  |  |  |  |  |  |
+| .Puerto Rico | 3,285,874 | 3,281,557 | 3,262,693 | 3,220,113 | 3,205,691 |
+
+Vintage 2023 data products are associated with Data Management System projects P-6000042, P-7501659, and P-7527355. The U.S. Census Bureau reviewed these data products for unauthorized disclosure of confidential information and approved the disclosure avoidance practices applied to this release (CBDRB-FY24-0085). (A63)
+
+Note: The estimates are developed from a base that integrates the 2020 Census, Vintage 2020 estimates, and (for the U.S. only) 2020 Demographic Analysis estimates.  For population estimates methodology statements, see https://www.census.gov/programs-surveys/popest/technical-documentation/methodology.html. See Geographic Terms and Definitions at https://www.census.gov/programs-surveys/popest/guidance-geographies/terms-and-definitions.html for a list of the states that are included in each region. All geographic boundaries for the 2023 population estimates series are as of January 1, 2023. (A64)
+
+Suggested Citation: (A65)
+
+Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (NST-EST2023-POP) (A66)
+
+Source: U.S. Census Bureau, Population Division (A67)
+
+Release Date: December 2023 (A68)
+
+## Logic
+
+### NST-EST2023-POP
+
+#### Parameters
+
+A row with a cell range stands for values next to each other that play one part.
+
+Parameters in Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023:
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 |  |  | table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts) |  |  | 0 |
+| A2 |  |  | Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 |  |  | 0 |
+| A3 |  |  | Geographic Area |  |  | 0 |
+| B3 |  | Geographic Area | April 1, 2020 Estimates Base |  |  | 0 |
+| C3 |  | April 1, 2020 Estimates Base | Population Estimate (as of July 1) |  |  | 0 |
+| C4 |  | Population Estimate (as of July 1) | 2020 |  |  | 0 |
+| D4:F4 |  |  | 2021, 2022, 2023 (3 values) |  |  | 0 each |
+| A5 |  | Geographic Area | United States |  |  | 0 |
+| B5 |  | April 1, 2020 Estimates Base / United States | 331464948 |  |  | 0 |
+| C5 |  | 2020 / United States | 331526933 |  |  | 0 |
+| D5 |  | 2021 / United States | 332048977 |  |  | 0 |
+| E5 |  | 2022 / United States | 333271411 |  |  | 0 |
+| F5 |  | 2023 / United States | 334914895 |  |  | 0 |
+| A6 |  | Geographic Area | Northeast |  |  | 0 |
+| B6 |  | April 1, 2020 Estimates Base / Northeast | 57614141 |  |  | 0 |
+| C6 |  | 2020 / Northeast | 57430477 |  |  | 0 |
+| D6 |  | 2021 / Northeast | 57243423 |  |  | 0 |
+| E6 |  | 2022 / Northeast | 57026847 |  |  | 0 |
+| F6 |  | 2023 / Northeast | 56983517 |  |  | 0 |
+| A7 |  | Geographic Area | Midwest |  |  | 0 |
+| B7 |  | April 1, 2020 Estimates Base / Midwest | 68987296 |  |  | 0 |
+| C7 |  | 2020 / Midwest | 68969794 |  |  | 0 |
+| D7 |  | 2021 / Midwest | 68850246 |  |  | 0 |
+| E7 |  | 2022 / Midwest | 68783028 |  |  | 0 |
+| F7 |  | 2023 / Midwest | 68909283 |  |  | 0 |
+| A8 |  | Geographic Area | South |  |  | 0 |
+| B8 |  | April 1, 2020 Estimates Base / South | 126268529 |  |  | 0 |
+| C8 |  | 2020 / South | 126465281 |  |  | 0 |
+| D8 |  | 2021 / South | 127353282 |  |  | 0 |
+| E8 |  | 2022 / South | 128702030 |  |  | 0 |
+| F8 |  | 2023 / South | 130125290 |  |  | 0 |
+| A9 |  | Geographic Area | West |  |  | 0 |
+| B9 |  | April 1, 2020 Estimates Base / West | 78594982 |  |  | 0 |
+| C9 |  | 2020 / West | 78661381 |  |  | 0 |
+| D9 |  | 2021 / West | 78602026 |  |  | 0 |
+| E9 |  | 2022 / West | 78759506 |  |  | 0 |
+| F9 |  | 2023 / West | 78896805 |  |  | 0 |
+| A10 |  | Geographic Area | .Alabama |  |  | 0 |
+| B10 |  | April 1, 2020 Estimates Base / .Alabama | 5024294 |  |  | 0 |
+| C10 |  | 2020 / .Alabama | 5031864 |  |  | 0 |
+| D10 |  | 2021 / .Alabama | 5050380 |  |  | 0 |
+| E10 |  | 2022 / .Alabama | 5073903 |  |  | 0 |
+| F10 |  | 2023 / .Alabama | 5108468 |  |  | 0 |
+| A11 |  | Geographic Area | .Alaska |  |  | 0 |
+| B11 |  | April 1, 2020 Estimates Base / .Alaska | 733374 |  |  | 0 |
+| C11 |  | 2020 / .Alaska | 732964 |  |  | 0 |
+| D11 |  | 2021 / .Alaska | 734923 |  |  | 0 |
+| E11 |  | 2022 / .Alaska | 733276 |  |  | 0 |
+| F11 |  | 2023 / .Alaska | 733406 |  |  | 0 |
+| A12 |  | Geographic Area | .Arizona |  |  | 0 |
+| B12 |  | April 1, 2020 Estimates Base / .Arizona | 7157902 |  |  | 0 |
+| C12 |  | 2020 / .Arizona | 7186683 |  |  | 0 |
+| D12 |  | 2021 / .Arizona | 7272487 |  |  | 0 |
+| E12 |  | 2022 / .Arizona | 7365684 |  |  | 0 |
+| F12 |  | 2023 / .Arizona | 7431344 |  |  | 0 |
+| A13 |  | Geographic Area | .Arkansas |  |  | 0 |
+| B13 |  | April 1, 2020 Estimates Base / .Arkansas | 3011490 |  |  | 0 |
+| C13 |  | 2020 / .Arkansas | 3014348 |  |  | 0 |
+| D13 |  | 2021 / .Arkansas | 3028443 |  |  | 0 |
+| E13 |  | 2022 / .Arkansas | 3046404 |  |  | 0 |
+| F13 |  | 2023 / .Arkansas | 3067732 |  |  | 0 |
+| A14 |  | Geographic Area | .California |  |  | 0 |
+| B14 |  | April 1, 2020 Estimates Base / .California | 39538212 |  |  | 0 |
+| C14 |  | 2020 / .California | 39503200 |  |  | 0 |
+| D14 |  | 2021 / .California | 39145060 |  |  | 0 |
+| E14 |  | 2022 / .California | 39040616 |  |  | 0 |
+| F14 |  | 2023 / .California | 38965193 |  |  | 0 |
+| A15 |  | Geographic Area | .Colorado |  |  | 0 |
+| B15 |  | April 1, 2020 Estimates Base / .Colorado | 5773707 |  |  | 0 |
+| C15 |  | 2020 / .Colorado | 5785219 |  |  | 0 |
+| D15 |  | 2021 / .Colorado | 5811596 |  |  | 0 |
+| E15 |  | 2022 / .Colorado | 5841039 |  |  | 0 |
+| F15 |  | 2023 / .Colorado | 5877610 |  |  | 0 |
+| A16 |  | Geographic Area | .Connecticut |  |  | 0 |
+| B16 |  | April 1, 2020 Estimates Base / .Connecticut | 3605912 |  |  | 0 |
+| C16 |  | 2020 / .Connecticut | 3577586 |  |  | 0 |
+| D16 |  | 2021 / .Connecticut | 3603691 |  |  | 0 |
+| E16 |  | 2022 / .Connecticut | 3608706 |  |  | 0 |
+| F16 |  | 2023 / .Connecticut | 3617176 |  |  | 0 |
+| A17 |  | Geographic Area | .Delaware |  |  | 0 |
+| B17 |  | April 1, 2020 Estimates Base / .Delaware | 989946 |  |  | 0 |
+| C17 |  | 2020 / .Delaware | 991862 |  |  | 0 |
+| D17 |  | 2021 / .Delaware | 1004881 |  |  | 0 |
+| E17 |  | 2022 / .Delaware | 1019459 |  |  | 0 |
+| F17 |  | 2023 / .Delaware | 1031890 |  |  | 0 |
+| A18 |  | Geographic Area | .District of Columbia |  |  | 0 |
+| B18 |  | April 1, 2020 Estimates Base / .District of Columbia | 689548 |  |  | 0 |
+| C18 |  | 2020 / .District of Columbia | 670839 |  |  | 0 |
+| D18 |  | 2021 / .District of Columbia | 669037 |  |  | 0 |
+| E18 |  | 2022 / .District of Columbia | 670949 |  |  | 0 |
+| F18 |  | 2023 / .District of Columbia | 678972 |  |  | 0 |
+| A19 |  | Geographic Area | .Florida |  |  | 0 |
+| B19 |  | April 1, 2020 Estimates Base / .Florida | 21538216 |  |  | 0 |
+| C19 |  | 2020 / .Florida | 21591299 |  |  | 0 |
+| D19 |  | 2021 / .Florida | 21830708 |  |  | 0 |
+| E19 |  | 2022 / .Florida | 22245521 |  |  | 0 |
+| F19 |  | 2023 / .Florida | 22610726 |  |  | 0 |
+| A20 |  | Geographic Area | .Georgia |  |  | 0 |
+| B20 |  | April 1, 2020 Estimates Base / .Georgia | 10713771 |  |  | 0 |
+| C20 |  | 2020 / .Georgia | 10732390 |  |  | 0 |
+| D20 |  | 2021 / .Georgia | 10790385 |  |  | 0 |
+| E20 |  | 2022 / .Georgia | 10913150 |  |  | 0 |
+| F20 |  | 2023 / .Georgia | 11029227 |  |  | 0 |
+| A21 |  | Geographic Area | .Hawaii |  |  | 0 |
+| B21 |  | April 1, 2020 Estimates Base / .Hawaii | 1455274 |  |  | 0 |
+| C21 |  | 2020 / .Hawaii | 1451181 |  |  | 0 |
+| D21 |  | 2021 / .Hawaii | 1446745 |  |  | 0 |
+| E21 |  | 2022 / .Hawaii | 1439399 |  |  | 0 |
+| F21 |  | 2023 / .Hawaii | 1435138 |  |  | 0 |
+| A22 |  | Geographic Area | .Idaho |  |  | 0 |
+| B22 |  | April 1, 2020 Estimates Base / .Idaho | 1839117 |  |  | 0 |
+| C22 |  | 2020 / .Idaho | 1849339 |  |  | 0 |
+| D22 |  | 2021 / .Idaho | 1904537 |  |  | 0 |
+| E22 |  | 2022 / .Idaho | 1938996 |  |  | 0 |
+| F22 |  | 2023 / .Idaho | 1964726 |  |  | 0 |
+| A23 |  | Geographic Area | .Illinois |  |  | 0 |
+| B23 |  | April 1, 2020 Estimates Base / .Illinois | 12813469 |  |  | 0 |
+| C23 |  | 2020 / .Illinois | 12790357 |  |  | 0 |
+| D23 |  | 2021 / .Illinois | 12690341 |  |  | 0 |
+| E23 |  | 2022 / .Illinois | 12582515 |  |  | 0 |
+| F23 |  | 2023 / .Illinois | 12549689 |  |  | 0 |
+| A24 |  | Geographic Area | .Indiana |  |  | 0 |
+| B24 |  | April 1, 2020 Estimates Base / .Indiana | 6785442 |  |  | 0 |
+| C24 |  | 2020 / .Indiana | 6789098 |  |  | 0 |
+| D24 |  | 2021 / .Indiana | 6813798 |  |  | 0 |
+| E24 |  | 2022 / .Indiana | 6832274 |  |  | 0 |
+| F24 |  | 2023 / .Indiana | 6862199 |  |  | 0 |
+| A25 |  | Geographic Area | .Iowa |  |  | 0 |
+| B25 |  | April 1, 2020 Estimates Base / .Iowa | 3190427 |  |  | 0 |
+| C25 |  | 2020 / .Iowa | 3190904 |  |  | 0 |
+| D25 |  | 2021 / .Iowa | 3197944 |  |  | 0 |
+| E25 |  | 2022 / .Iowa | 3199693 |  |  | 0 |
+| F25 |  | 2023 / .Iowa | 3207004 |  |  | 0 |
+| A26 |  | Geographic Area | .Kansas |  |  | 0 |
+| B26 |  | April 1, 2020 Estimates Base / .Kansas | 2937835 |  |  | 0 |
+| C26 |  | 2020 / .Kansas | 2938124 |  |  | 0 |
+| D26 |  | 2021 / .Kansas | 2937946 |  |  | 0 |
+| E26 |  | 2022 / .Kansas | 2936716 |  |  | 0 |
+| F26 |  | 2023 / .Kansas | 2940546 |  |  | 0 |
+| A27 |  | Geographic Area | .Kentucky |  |  | 0 |
+| B27 |  | April 1, 2020 Estimates Base / .Kentucky | 4506297 |  |  | 0 |
+| C27 |  | 2020 / .Kentucky | 4508155 |  |  | 0 |
+| D27 |  | 2021 / .Kentucky | 4507600 |  |  | 0 |
+| E27 |  | 2022 / .Kentucky | 4511563 |  |  | 0 |
+| F27 |  | 2023 / .Kentucky | 4526154 |  |  | 0 |
+| A28 |  | Geographic Area | .Louisiana |  |  | 0 |
+| B28 |  | April 1, 2020 Estimates Base / .Louisiana | 4657785 |  |  | 0 |
+| C28 |  | 2020 / .Louisiana | 4652022 |  |  | 0 |
+| D28 |  | 2021 / .Louisiana | 4627047 |  |  | 0 |
+| E28 |  | 2022 / .Louisiana | 4588023 |  |  | 0 |
+| F28 |  | 2023 / .Louisiana | 4573749 |  |  | 0 |
+| A29 |  | Geographic Area | .Maine |  |  | 0 |
+| B29 |  | April 1, 2020 Estimates Base / .Maine | 1363177 |  |  | 0 |
+| C29 |  | 2020 / .Maine | 1364517 |  |  | 0 |
+| D29 |  | 2021 / .Maine | 1378787 |  |  | 0 |
+| E29 |  | 2022 / .Maine | 1389338 |  |  | 0 |
+| F29 |  | 2023 / .Maine | 1395722 |  |  | 0 |
+| A30 |  | Geographic Area | .Maryland |  |  | 0 |
+| B30 |  | April 1, 2020 Estimates Base / .Maryland | 6177253 |  |  | 0 |
+| C30 |  | 2020 / .Maryland | 6173689 |  |  | 0 |
+| D30 |  | 2021 / .Maryland | 6175045 |  |  | 0 |
+| E30 |  | 2022 / .Maryland | 6163981 |  |  | 0 |
+| F30 |  | 2023 / .Maryland | 6180253 |  |  | 0 |
+| A31 |  | Geographic Area | .Massachusetts |  |  | 0 |
+| B31 |  | April 1, 2020 Estimates Base / .Massachusetts | 7032933 |  |  | 0 |
+| C31 |  | 2020 / .Massachusetts | 6997713 |  |  | 0 |
+| D31 |  | 2021 / .Massachusetts | 6991951 |  |  | 0 |
+| E31 |  | 2022 / .Massachusetts | 6982740 |  |  | 0 |
+| F31 |  | 2023 / .Massachusetts | 7001399 |  |  | 0 |
+| A32 |  | Geographic Area | .Michigan |  |  | 0 |
+| B32 |  | April 1, 2020 Estimates Base / .Michigan | 10077674 |  |  | 0 |
+| C32 |  | 2020 / .Michigan | 10070627 |  |  | 0 |
+| D32 |  | 2021 / .Michigan | 10038117 |  |  | 0 |
+| E32 |  | 2022 / .Michigan | 10033281 |  |  | 0 |
+| F32 |  | 2023 / .Michigan | 10037261 |  |  | 0 |
+| A33 |  | Geographic Area | .Minnesota |  |  | 0 |
+| B33 |  | April 1, 2020 Estimates Base / .Minnesota | 5706804 |  |  | 0 |
+| C33 |  | 2020 / .Minnesota | 5710578 |  |  | 0 |
+| D33 |  | 2021 / .Minnesota | 5717968 |  |  | 0 |
+| E33 |  | 2022 / .Minnesota | 5714300 |  |  | 0 |
+| F33 |  | 2023 / .Minnesota | 5737915 |  |  | 0 |
+| A34 |  | Geographic Area | .Mississippi |  |  | 0 |
+| B34 |  | April 1, 2020 Estimates Base / .Mississippi | 2961306 |  |  | 0 |
+| C34 |  | 2020 / .Mississippi | 2958409 |  |  | 0 |
+| D34 |  | 2021 / .Mississippi | 2949582 |  |  | 0 |
+| E34 |  | 2022 / .Mississippi | 2938928 |  |  | 0 |
+| F34 |  | 2023 / .Mississippi | 2939690 |  |  | 0 |
+| A35 |  | Geographic Area | .Missouri |  |  | 0 |
+| B35 |  | April 1, 2020 Estimates Base / .Missouri | 6154889 |  |  | 0 |
+| C35 |  | 2020 / .Missouri | 6154426 |  |  | 0 |
+| D35 |  | 2021 / .Missouri | 6170393 |  |  | 0 |
+| E35 |  | 2022 / .Missouri | 6177168 |  |  | 0 |
+| F35 |  | 2023 / .Missouri | 6196156 |  |  | 0 |
+| A36 |  | Geographic Area | .Montana |  |  | 0 |
+| B36 |  | April 1, 2020 Estimates Base / .Montana | 1084244 |  |  | 0 |
+| C36 |  | 2020 / .Montana | 1087211 |  |  | 0 |
+| D36 |  | 2021 / .Montana | 1106366 |  |  | 0 |
+| E36 |  | 2022 / .Montana | 1122878 |  |  | 0 |
+| F36 |  | 2023 / .Montana | 1132812 |  |  | 0 |
+| A37 |  | Geographic Area | .Nebraska |  |  | 0 |
+| B37 |  | April 1, 2020 Estimates Base / .Nebraska | 1961965 |  |  | 0 |
+| C37 |  | 2020 / .Nebraska | 1963273 |  |  | 0 |
+| D37 |  | 2021 / .Nebraska | 1964253 |  |  | 0 |
+| E37 |  | 2022 / .Nebraska | 1968060 |  |  | 0 |
+| F37 |  | 2023 / .Nebraska | 1978379 |  |  | 0 |
+| A38 |  | Geographic Area | .Nevada |  |  | 0 |
+| B38 |  | April 1, 2020 Estimates Base / .Nevada | 3104617 |  |  | 0 |
+| C38 |  | 2020 / .Nevada | 3115840 |  |  | 0 |
+| D38 |  | 2021 / .Nevada | 3146632 |  |  | 0 |
+| E38 |  | 2022 / .Nevada | 3177421 |  |  | 0 |
+| F38 |  | 2023 / .Nevada | 3194176 |  |  | 0 |
+| A39 |  | Geographic Area | .New Hampshire |  |  | 0 |
+| B39 |  | April 1, 2020 Estimates Base / .New Hampshire | 1377524 |  |  | 0 |
+| C39 |  | 2020 / .New Hampshire | 1378702 |  |  | 0 |
+| D39 |  | 2021 / .New Hampshire | 1387494 |  |  | 0 |
+| E39 |  | 2022 / .New Hampshire | 1399003 |  |  | 0 |
+| F39 |  | 2023 / .New Hampshire | 1402054 |  |  | 0 |
+| A40 |  | Geographic Area | .New Jersey |  |  | 0 |
+| B40 |  | April 1, 2020 Estimates Base / .New Jersey | 9289039 |  |  | 0 |
+| C40 |  | 2020 / .New Jersey | 9272392 |  |  | 0 |
+| D40 |  | 2021 / .New Jersey | 9269175 |  |  | 0 |
+| E40 |  | 2022 / .New Jersey | 9260817 |  |  | 0 |
+| F40 |  | 2023 / .New Jersey | 9290841 |  |  | 0 |
+| A41 |  | Geographic Area | .New Mexico |  |  | 0 |
+| B41 |  | April 1, 2020 Estimates Base / .New Mexico | 2117525 |  |  | 0 |
+| C41 |  | 2020 / .New Mexico | 2118488 |  |  | 0 |
+| D41 |  | 2021 / .New Mexico | 2116950 |  |  | 0 |
+| E41 |  | 2022 / .New Mexico | 2113476 |  |  | 0 |
+| F41 |  | 2023 / .New Mexico | 2114371 |  |  | 0 |
+| A42 |  | Geographic Area | .New York |  |  | 0 |
+| B42 |  | April 1, 2020 Estimates Base / .New York | 20202320 |  |  | 0 |
+| C42 |  | 2020 / .New York | 20104710 |  |  | 0 |
+| D42 |  | 2021 / .New York | 19854526 |  |  | 0 |
+| E42 |  | 2022 / .New York | 19673200 |  |  | 0 |
+| F42 |  | 2023 / .New York | 19571216 |  |  | 0 |
+| A43 |  | Geographic Area | .North Carolina |  |  | 0 |
+| B43 |  | April 1, 2020 Estimates Base / .North Carolina | 10439459 |  |  | 0 |
+| C43 |  | 2020 / .North Carolina | 10453812 |  |  | 0 |
+| D43 |  | 2021 / .North Carolina | 10567100 |  |  | 0 |
+| E43 |  | 2022 / .North Carolina | 10695965 |  |  | 0 |
+| F43 |  | 2023 / .North Carolina | 10835491 |  |  | 0 |
+| A44 |  | Geographic Area | .North Dakota |  |  | 0 |
+| B44 |  | April 1, 2020 Estimates Base / .North Dakota | 779079 |  |  | 0 |
+| C44 |  | 2020 / .North Dakota | 779563 |  |  | 0 |
+| D44 |  | 2021 / .North Dakota | 777982 |  |  | 0 |
+| E44 |  | 2022 / .North Dakota | 778912 |  |  | 0 |
+| F44 |  | 2023 / .North Dakota | 783926 |  |  | 0 |
+| A45 |  | Geographic Area | .Ohio |  |  | 0 |
+| B45 |  | April 1, 2020 Estimates Base / .Ohio | 11799331 |  |  | 0 |
+| C45 |  | 2020 / .Ohio | 11798292 |  |  | 0 |
+| D45 |  | 2021 / .Ohio | 11765227 |  |  | 0 |
+| E45 |  | 2022 / .Ohio | 11759697 |  |  | 0 |
+| F45 |  | 2023 / .Ohio | 11785935 |  |  | 0 |
+| A46 |  | Geographic Area | .Oklahoma |  |  | 0 |
+| B46 |  | April 1, 2020 Estimates Base / .Oklahoma | 3959411 |  |  | 0 |
+| C46 |  | 2020 / .Oklahoma | 3965234 |  |  | 0 |
+| D46 |  | 2021 / .Oklahoma | 3991634 |  |  | 0 |
+| E46 |  | 2022 / .Oklahoma | 4019271 |  |  | 0 |
+| F46 |  | 2023 / .Oklahoma | 4053824 |  |  | 0 |
+| A47 |  | Geographic Area | .Oregon |  |  | 0 |
+| B47 |  | April 1, 2020 Estimates Base / .Oregon | 4237279 |  |  | 0 |
+| C47 |  | 2020 / .Oregon | 4245044 |  |  | 0 |
+| D47 |  | 2021 / .Oregon | 4256465 |  |  | 0 |
+| E47 |  | 2022 / .Oregon | 4239379 |  |  | 0 |
+| F47 |  | 2023 / .Oregon | 4233358 |  |  | 0 |
+| A48 |  | Geographic Area | .Pennsylvania |  |  | 0 |
+| B48 |  | April 1, 2020 Estimates Base / .Pennsylvania | 13002788 |  |  | 0 |
+| C48 |  | 2020 / .Pennsylvania | 12995477 |  |  | 0 |
+| D48 |  | 2021 / .Pennsylvania | 13013614 |  |  | 0 |
+| E48 |  | 2022 / .Pennsylvania | 12972091 |  |  | 0 |
+| F48 |  | 2023 / .Pennsylvania | 12961683 |  |  | 0 |
+| A49 |  | Geographic Area | .Rhode Island |  |  | 0 |
+| B49 |  | April 1, 2020 Estimates Base / .Rhode Island | 1097371 |  |  | 0 |
+| C49 |  | 2020 / .Rhode Island | 1096444 |  |  | 0 |
+| D49 |  | 2021 / .Rhode Island | 1097092 |  |  | 0 |
+| E49 |  | 2022 / .Rhode Island | 1093842 |  |  | 0 |
+| F49 |  | 2023 / .Rhode Island | 1095962 |  |  | 0 |
+| A50 |  | Geographic Area | .South Carolina |  |  | 0 |
+| B50 |  | April 1, 2020 Estimates Base / .South Carolina | 5118422 |  |  | 0 |
+| C50 |  | 2020 / .South Carolina | 5132151 |  |  | 0 |
+| D50 |  | 2021 / .South Carolina | 5193848 |  |  | 0 |
+| E50 |  | 2022 / .South Carolina | 5282955 |  |  | 0 |
+| F50 |  | 2023 / .South Carolina | 5373555 |  |  | 0 |
+| A51 |  | Geographic Area | .South Dakota |  |  | 0 |
+| B51 |  | April 1, 2020 Estimates Base / .South Dakota | 886668 |  |  | 0 |
+| C51 |  | 2020 / .South Dakota | 887852 |  |  | 0 |
+| D51 |  | 2021 / .South Dakota | 896299 |  |  | 0 |
+| E51 |  | 2022 / .South Dakota | 909869 |  |  | 0 |
+| F51 |  | 2023 / .South Dakota | 919318 |  |  | 0 |
+| A52 |  | Geographic Area | .Tennessee |  |  | 0 |
+| B52 |  | April 1, 2020 Estimates Base / .Tennessee | 6910786 |  |  | 0 |
+| C52 |  | 2020 / .Tennessee | 6926091 |  |  | 0 |
+| D52 |  | 2021 / .Tennessee | 6963709 |  |  | 0 |
+| E52 |  | 2022 / .Tennessee | 7048976 |  |  | 0 |
+| F52 |  | 2023 / .Tennessee | 7126489 |  |  | 0 |
+| A53 |  | Geographic Area | .Texas |  |  | 0 |
+| B53 |  | April 1, 2020 Estimates Base / .Texas | 29145459 |  |  | 0 |
+| C53 |  | 2020 / .Texas | 29234361 |  |  | 0 |
+| D53 |  | 2021 / .Texas | 29561286 |  |  | 0 |
+| E53 |  | 2022 / .Texas | 30029848 |  |  | 0 |
+| F53 |  | 2023 / .Texas | 30503301 |  |  | 0 |
+| A54 |  | Geographic Area | .Utah |  |  | 0 |
+| B54 |  | April 1, 2020 Estimates Base / .Utah | 3271614 |  |  | 0 |
+| C54 |  | 2020 / .Utah | 3283982 |  |  | 0 |
+| D54 |  | 2021 / .Utah | 3339284 |  |  | 0 |
+| E54 |  | 2022 / .Utah | 3381236 |  |  | 0 |
+| F54 |  | 2023 / .Utah | 3417734 |  |  | 0 |
+| A55 |  | Geographic Area | .Vermont |  |  | 0 |
+| B55 |  | April 1, 2020 Estimates Base / .Vermont | 643077 |  |  | 0 |
+| C55 |  | 2020 / .Vermont | 642936 |  |  | 0 |
+| D55 |  | 2021 / .Vermont | 647093 |  |  | 0 |
+| E55 |  | 2022 / .Vermont | 647110 |  |  | 0 |
+| F55 |  | 2023 / .Vermont | 647464 |  |  | 0 |
+| A56 |  | Geographic Area | .Virginia |  |  | 0 |
+| B56 |  | April 1, 2020 Estimates Base / .Virginia | 8631373 |  |  | 0 |
+| C56 |  | 2020 / .Virginia | 8637193 |  |  | 0 |
+| D56 |  | 2021 / .Virginia | 8657348 |  |  | 0 |
+| E56 |  | 2022 / .Virginia | 8679099 |  |  | 0 |
+| F56 |  | 2023 / .Virginia | 8715698 |  |  | 0 |
+| A57 |  | Geographic Area | .Washington |  |  | 0 |
+| B57 |  | April 1, 2020 Estimates Base / .Washington | 7705267 |  |  | 0 |
+| C57 |  | 2020 / .Washington | 7724566 |  |  | 0 |
+| D57 |  | 2021 / .Washington | 7741433 |  |  | 0 |
+| E57 |  | 2022 / .Washington | 7784477 |  |  | 0 |
+| F57 |  | 2023 / .Washington | 7812880 |  |  | 0 |
+| A58 |  | Geographic Area | .West Virginia |  |  | 0 |
+| B58 |  | April 1, 2020 Estimates Base / .West Virginia | 1793713 |  |  | 0 |
+| C58 |  | 2020 / .West Virginia | 1791562 |  |  | 0 |
+| D58 |  | 2021 / .West Virginia | 1785249 |  |  | 0 |
+| E58 |  | 2022 / .West Virginia | 1774035 |  |  | 0 |
+| F58 |  | 2023 / .West Virginia | 1770071 |  |  | 0 |
+| A59 |  | Geographic Area | .Wisconsin |  |  | 0 |
+| B59 |  | April 1, 2020 Estimates Base / .Wisconsin | 5893713 |  |  | 0 |
+| C59 |  | 2020 / .Wisconsin | 5896700 |  |  | 0 |
+| D59 |  | 2021 / .Wisconsin | 5879978 |  |  | 0 |
+| E59 |  | 2022 / .Wisconsin | 5890543 |  |  | 0 |
+| F59 |  | 2023 / .Wisconsin | 5910955 |  |  | 0 |
+| A60 |  | Geographic Area | .Wyoming |  |  | 0 |
+| B60 |  | April 1, 2020 Estimates Base / .Wyoming | 576850 |  |  | 0 |
+| C60 |  | 2020 / .Wyoming | 577664 |  |  | 0 |
+| D60 |  | 2021 / .Wyoming | 579548 |  |  | 0 |
+| E60 |  | 2022 / .Wyoming | 581629 |  |  | 0 |
+| F60 |  | 2023 / .Wyoming | 584057 |  |  | 0 |
+| A62 |  | Geographic Area | .Puerto Rico |  |  | 0 |
+| B62 |  | April 1, 2020 Estimates Base / .Puerto Rico | 3285874 |  |  | 0 |
+| C62 |  | 2020 / .Puerto Rico | 3281557 |  |  | 0 |
+| D62 |  | 2021 / .Puerto Rico | 3262693 |  |  | 0 |
+| E62 |  | 2022 / .Puerto Rico | 3220113 |  |  | 0 |
+| F62 |  | 2023 / .Puerto Rico | 3205691 |  |  | 0 |
+| A63 |  |  | Vintage 2023 data products are associated with Data Management System projects P-6000042, P-7501659, and P-7527355. The U.S. Census Bureau reviewed these data products for unauthorized disclosure of confidential information and approved the disclosure avoidance practices applied to this release (CBDRB-FY24-0085).   |  |  | 0 |
+| A64 |  |  | Note: The estimates are developed from a base that integrates the 2020 Census, Vintage 2020 estimates, and (for the U.S. only) 2020 Demographic Analysis estimates.  For population estimates methodology statements, see https://www.census.gov/programs-surveys/popest/technical-documentation/methodology.html. See Geographic Terms and Definitions at https://www.census.gov/programs-surveys/popest/guidance-geographies/terms-and-definitions.html for a list of the states that are included in each region. All geographic boundaries for the 2023 population estimates series are as of January 1, 2023. |  |  | 0 |
+| A65 |  |  | Suggested Citation: |  |  | 0 |
+| A66 |  |  | Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (NST-EST2023-POP) |  |  | 0 |
+| A67 |  |  | Source: U.S. Census Bureau, Population Division |  |  | 0 |
+| A68 |  |  | Release Date: December 2023 |  |  | 0 |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| \_NST01 | workbook | name | `'NST-EST2023-POP'!$A$4:$F$62` |  |  |  |
+| \_xlnm.Print\_Area | NST-EST2023-POP | name | `'NST-EST2023-POP'!$A$2:$F$68` |  |  |  |
+| \_xlnm.Print\_Titles | NST-EST2023-POP | name | `'NST-EST2023-POP'!$A:$A,'NST-EST2023-POP'!$2:$4` |  |  |  |

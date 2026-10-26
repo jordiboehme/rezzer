@@ -1,0 +1,1040 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "Sheet1",
+      "blocks": [
+        {
+          "anchor": "Sheet1!A1:C5",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A2:C5",
+            "found_by": [
+              {
+                "kind": "list_object",
+                "name": "Inventory"
+              }
+            ],
+            "header_paths": [
+              "Item",
+              "Type",
+              "Quantity"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "table:Inventory",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C5"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Sheet1!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Type",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Quantity",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Apple",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Banana",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "200",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Orange",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "60",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet1!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pear",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "100",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Excel tables",
+          "header_rows": 1,
+          "role": "excel-table",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Table",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Range",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Columns",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "table:Inventory",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Inventory",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet1!A1:C5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "A1:C5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item, Type, Quantity",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Sheet1",
+      "type": "section"
+    },
+    {
+      "anchor": "Sheet2",
+      "blocks": [
+        {
+          "anchor": "Sheet2!A1:B5",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A2:B5",
+            "found_by": [
+              {
+                "kind": "list_object",
+                "name": "Pricing"
+              }
+            ],
+            "header_paths": [
+              "Item",
+              "Price"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "table:Pricing",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:B5"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Sheet2!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Price",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet2!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.85",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet2!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.75",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet2!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.55",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet2!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "0.45",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Excel tables",
+          "header_rows": 1,
+          "role": "excel-table",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Table",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Range",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Columns",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "table:Pricing",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Pricing",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet2!A1:B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "A1:B5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item, Price",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Sheet2",
+      "type": "section"
+    },
+    {
+      "anchor": "Sheet3",
+      "blocks": [
+        {
+          "anchor": "table:Sales_Alice",
+          "inlines": [
+            {
+              "text": "Sales_Alice",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Sheet3!A1:B5",
+          "caption": "Sales_Alice",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A2:B5",
+            "found_by": [
+              {
+                "kind": "list_object",
+                "name": "Sales_Alice"
+              }
+            ],
+            "header_paths": [
+              "Item",
+              "Units"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "table:Sales_Alice",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:B5"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Sheet3!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Units",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1000",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "500",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "200",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "50",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "table:Sales_Bob",
+          "inlines": [
+            {
+              "text": "Sales_Bob",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "Sheet3!A7:B11",
+          "caption": "Sales_Bob",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "A8:B11",
+            "found_by": [
+              {
+                "kind": "list_object",
+                "name": "Sales_Bob"
+              }
+            ],
+            "header_paths": [
+              "Item",
+              "Units"
+            ],
+            "header_rows": [
+              7
+            ],
+            "key": "table:Sales_Bob",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A7:B11"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "Sheet3!A7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B7",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Units",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "1",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B8",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "750",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B9",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "800",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B10",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "100",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "Sheet3!A11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "70",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "caption": "Excel tables",
+          "header_rows": 1,
+          "role": "excel-table",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Table",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Range",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Columns",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "table:Sales_Bob",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sales_Bob",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!A7:B11",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "A7:B11",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item, Units",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "table:Sales_Alice",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Sales_Alice",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "Sheet3!A1:B5",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "A1:B5",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Item, Units",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "Sheet3",
+      "type": "section"
+    }
+  ],
+  "facets": {},
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "3"
+      ],
+      [
+        "Last changed",
+        "2025-07-08T23:00:40Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "Sheet1",
+        "kind": "sheet",
+        "name": "Sheet1",
+        "size": "4 rows x 3 columns"
+      },
+      {
+        "id": "Sheet2",
+        "kind": "sheet",
+        "name": "Sheet2",
+        "size": "4 rows x 2 columns"
+      },
+      {
+        "id": "Sheet3",
+        "kind": "sheet",
+        "name": "Sheet3",
+        "size": "4 rows x 2 columns, 2 regions"
+      }
+    ]
+  },
+  "properties": {
+    "authors": [
+      "John"
+    ],
+    "created": {
+      "type": "date_time",
+      "value": "2025-07-07T22:15:34Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      },
+      "last_modified_by": {
+        "type": "text",
+        "value": "John"
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2025-07-08T23:00:40Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "table-multiple.xlsx",
+    "path": "<corpus>/office/table-multiple.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "8d39e98b17bcd2937171dacbae296c2f3cd975bbf41809738c05c7ffdccc977f",
+    "size": 11520
+  }
+}

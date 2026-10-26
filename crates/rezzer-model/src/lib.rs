@@ -12,9 +12,11 @@ mod document;
 mod facet;
 mod format;
 mod inline;
+mod layout;
 mod loss;
 mod reader;
 mod registry;
+mod sheet;
 mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
@@ -28,7 +30,12 @@ pub use facet::{
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
+pub use layout::{
+    Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, SheetCell, TableLayout,
+    a1_position, sheet_cell, split_rows, table_key,
+};
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use registry::Registry;
+pub use sheet::{CellArea, locate_cells, table_headings};
 pub use value::Value;

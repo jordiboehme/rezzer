@@ -1,0 +1,3653 @@
+{
+  "cells": [
+    [
+      "Design_Basis!A1",
+      "UNDERGROUND TUNNEL STRUCTURAL ANALYSIS"
+    ],
+    [
+      "Design_Basis!A11",
+      "KEY GEOMETRIC PARAMETERS (shared across sheets)"
+    ],
+    [
+      "Design_Basis!A12",
+      "Excavated (bored) diameter"
+    ],
+    [
+      "Design_Basis!A13",
+      "Tunnel length"
+    ],
+    [
+      "Design_Basis!A14",
+      "Overburden depth to crown"
+    ],
+    [
+      "Design_Basis!A15",
+      "Ground type"
+    ],
+    [
+      "Design_Basis!A16",
+      "Traffic"
+    ],
+    [
+      "Design_Basis!A18",
+      "DESIGN CODES / REFERENCES USED (conceptual guidance)"
+    ],
+    [
+      "Design_Basis!A19",
+      "- IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance"
+    ],
+    [
+      "Design_Basis!A2",
+      "Conceptual design calculations - structural stability, drainage, ventilation & safety"
+    ],
+    [
+      "Design_Basis!A20",
+      "- IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design)"
+    ],
+    [
+      "Design_Basis!A21",
+      "- IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire & life safety)"
+    ],
+    [
+      "Design_Basis!A22",
+      "- PIARC Technical Committee Reports - Road Tunnel Operations (ventilation & smoke control)"
+    ],
+    [
+      "Design_Basis!A23",
+      "- Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory)"
+    ],
+    [
+      "Design_Basis!A24",
+      "- Einstein, H.H. & Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory)"
+    ],
+    [
+      "Design_Basis!A25",
+      "- Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires"
+    ],
+    [
+      "Design_Basis!A27",
+      "HOW TO USE THIS WORKBOOK"
+    ],
+    [
+      "Design_Basis!A28",
+      "- Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate."
+    ],
+    [
+      "Design_Basis!A29",
+      "- Sheet 'Structural_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress & FOS check."
+    ],
+    [
+      "Design_Basis!A30",
+      "- Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count."
+    ],
+    [
+      "Design_Basis!A31",
+      "- Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump."
+    ],
+    [
+      "Design_Basis!A32",
+      "- These mirror the Python scripts in /python (same method & formulas) for cross-verification."
+    ],
+    [
+      "Design_Basis!A4",
+      "PROJECT DESCRIPTION"
+    ],
+    [
+      "Design_Basis!A5",
+      "Project type"
+    ],
+    [
+      "Design_Basis!A6",
+      "Prepared by"
+    ],
+    [
+      "Design_Basis!A7",
+      "Tools used"
+    ],
+    [
+      "Design_Basis!A8",
+      "Scope"
+    ],
+    [
+      "Design_Basis!A9",
+      "Disclaimer"
+    ],
+    [
+      "Design_Basis!B12",
+      "10.0 m"
+    ],
+    [
+      "Design_Basis!B13",
+      "800 m"
+    ],
+    [
+      "Design_Basis!B14",
+      "25 m"
+    ],
+    [
+      "Design_Basis!B15",
+      "Weathered rock / dense soil (assumed)"
+    ],
+    [
+      "Design_Basis!B16",
+      "Two-lane, design-hour volume 1200 veh/hr"
+    ],
+    [
+      "Design_Basis!B5",
+      "Two-lane single-tube underground road tunnel (conceptual design)"
+    ],
+    [
+      "Design_Basis!B6",
+      "Alok"
+    ],
+    [
+      "Design_Basis!B7",
+      "AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets)"
+    ],
+    [
+      "Design_Basis!B8",
+      "Structural lining stability, ventilation, drainage, and life-safety checks at concept stage"
+    ],
+    [
+      "Design_Basis!B9",
+      "Preliminary / conceptual calculations for a portfolio project. NOT for construction use."
+    ],
+    [
+      "Drainage!A1",
+      "DRAINAGE SYSTEM SIZING"
+    ],
+    [
+      "Drainage!A10",
+      "Portal catchment area"
+    ],
+    [
+      "Drainage!A11",
+      "Manning's roughness, n"
+    ],
+    [
+      "Drainage!A12",
+      "Trial pipe diameter"
+    ],
+    [
+      "Drainage!A13",
+      "Sump retention time"
+    ],
+    [
+      "Drainage!A14",
+      "Pump duty factor"
+    ],
+    [
+      "Drainage!A16",
+      "INFLOW ESTIMATES"
+    ],
+    [
+      "Drainage!A17",
+      "Groundwater seepage inflow"
+    ],
+    [
+      "Drainage!A18",
+      "Portal rainfall runoff (Rational Method)"
+    ],
+    [
+      "Drainage!A19",
+      "Total design drain flow"
+    ],
+    [
+      "Drainage!A2",
+      "Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check"
+    ],
+    [
+      "Drainage!A21",
+      "INVERT DRAIN PIPE SIZING (Manning's, full-bore)"
+    ],
+    [
+      "Drainage!A22",
+      "Pipe area"
+    ],
+    [
+      "Drainage!A23",
+      "Hydraulic radius, R = D/4"
+    ],
+    [
+      "Drainage!A24",
+      "Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2)"
+    ],
+    [
+      "Drainage!A25",
+      "Trial pipe status"
+    ],
+    [
+      "Drainage!A27",
+      "STANDARD PIPE SIZE CHECK"
+    ],
+    [
+      "Drainage!A4",
+      "INPUTS"
+    ],
+    [
+      "Drainage!A40",
+      "Minimum standard pipe size required"
+    ],
+    [
+      "Drainage!A42",
+      "SUMP & PUMP SIZING"
+    ],
+    [
+      "Drainage!A43",
+      "Peak design inflow to sump"
+    ],
+    [
+      "Drainage!A44",
+      "Required sump volume"
+    ],
+    [
+      "Drainage!A45",
+      "Required pump capacity"
+    ],
+    [
+      "Drainage!A5",
+      "Tunnel length, L"
+    ],
+    [
+      "Drainage!A6",
+      "Longitudinal gradient"
+    ],
+    [
+      "Drainage!A7",
+      "Seepage rate assumed"
+    ],
+    [
+      "Drainage!A8",
+      "Runoff coefficient, C"
+    ],
+    [
+      "Drainage!A9",
+      "Design rainfall intensity, i"
+    ],
+    [
+      "Drainage!B10",
+      "0.6"
+    ],
+    [
+      "Drainage!B11",
+      "0.013"
+    ],
+    [
+      "Drainage!B12",
+      "0.3"
+    ],
+    [
+      "Drainage!B13",
+      "10"
+    ],
+    [
+      "Drainage!B14",
+      "1.25"
+    ],
+    [
+      "Drainage!B17",
+      "16.00"
+    ],
+    [
+      "Drainage!B18",
+      "106.25"
+    ],
+    [
+      "Drainage!B19",
+      "122.25"
+    ],
+    [
+      "Drainage!B22",
+      "0.0707"
+    ],
+    [
+      "Drainage!B23",
+      "0.0750"
+    ],
+    [
+      "Drainage!B24",
+      "68.38"
+    ],
+    [
+      "Drainage!B25",
+      "UNDERSIZED - increase diameter"
+    ],
+    [
+      "Drainage!B40",
+      "0.4"
+    ],
+    [
+      "Drainage!B43",
+      "152.81"
+    ],
+    [
+      "Drainage!B44",
+      "91.69"
+    ],
+    [
+      "Drainage!B45",
+      "152.81"
+    ],
+    [
+      "Drainage!B5",
+      "800"
+    ],
+    [
+      "Drainage!B6",
+      "0.005"
+    ],
+    [
+      "Drainage!B7",
+      "0.02"
+    ],
+    [
+      "Drainage!B8",
+      "0.85"
+    ],
+    [
+      "Drainage!B9",
+      "75"
+    ],
+    [
+      "Drainage!C10",
+      "ha"
+    ],
+    [
+      "Drainage!C11",
+      "-"
+    ],
+    [
+      "Drainage!C12",
+      "m"
+    ],
+    [
+      "Drainage!C13",
+      "min"
+    ],
+    [
+      "Drainage!C14",
+      "-"
+    ],
+    [
+      "Drainage!C17",
+      "l/s"
+    ],
+    [
+      "Drainage!C18",
+      "l/s"
+    ],
+    [
+      "Drainage!C19",
+      "l/s"
+    ],
+    [
+      "Drainage!C22",
+      "m2"
+    ],
+    [
+      "Drainage!C23",
+      "m"
+    ],
+    [
+      "Drainage!C24",
+      "l/s"
+    ],
+    [
+      "Drainage!C40",
+      "m"
+    ],
+    [
+      "Drainage!C43",
+      "l/s"
+    ],
+    [
+      "Drainage!C44",
+      "m3"
+    ],
+    [
+      "Drainage!C45",
+      "l/s"
+    ],
+    [
+      "Drainage!C5",
+      "m"
+    ],
+    [
+      "Drainage!C6",
+      "fraction"
+    ],
+    [
+      "Drainage!C7",
+      "l/s per m"
+    ],
+    [
+      "Drainage!C8",
+      "-"
+    ],
+    [
+      "Drainage!C9",
+      "mm/hr"
+    ],
+    [
+      "Drainage!E28",
+      "D (m)"
+    ],
+    [
+      "Drainage!E29",
+      "0.15"
+    ],
+    [
+      "Drainage!E30",
+      "0.2"
+    ],
+    [
+      "Drainage!E31",
+      "0.25"
+    ],
+    [
+      "Drainage!E32",
+      "0.3"
+    ],
+    [
+      "Drainage!E33",
+      "0.4"
+    ],
+    [
+      "Drainage!E34",
+      "0.45"
+    ],
+    [
+      "Drainage!E35",
+      "0.5"
+    ],
+    [
+      "Drainage!E36",
+      "0.6"
+    ],
+    [
+      "Drainage!E37",
+      "0.75"
+    ],
+    [
+      "Drainage!E38",
+      "0.9"
+    ],
+    [
+      "Drainage!F28",
+      "Capacity (l/s)"
+    ],
+    [
+      "Drainage!F29",
+      "10.77"
+    ],
+    [
+      "Drainage!F30",
+      "23.19"
+    ],
+    [
+      "Drainage!F31",
+      "42.05"
+    ],
+    [
+      "Drainage!F32",
+      "68.38"
+    ],
+    [
+      "Drainage!F33",
+      "147.26"
+    ],
+    [
+      "Drainage!F34",
+      "201.60"
+    ],
+    [
+      "Drainage!F35",
+      "267.00"
+    ],
+    [
+      "Drainage!F36",
+      "434.17"
+    ],
+    [
+      "Drainage!F37",
+      "787.21"
+    ],
+    [
+      "Drainage!F38",
+      "1280.08"
+    ],
+    [
+      "Structural_Lining!A1",
+      "STRUCTURAL STABILITY - TUNNEL LINING CHECK"
+    ],
+    [
+      "Structural_Lining!A10",
+      "Cohesion, c"
+    ],
+    [
+      "Structural_Lining!A11",
+      "Concrete grade, fck"
+    ],
+    [
+      "Structural_Lining!A12",
+      "Steel grade, fy"
+    ],
+    [
+      "Structural_Lining!A13",
+      "Target Factor of Safety"
+    ],
+    [
+      "Structural_Lining!A15",
+      "TERZAGHI LOOSENING PRESSURE"
+    ],
+    [
+      "Structural_Lining!A16",
+      "Tunnel radius, R"
+    ],
+    [
+      "Structural_Lining!A17",
+      "Loosening zone width, B1"
+    ],
+    [
+      "Structural_Lining!A18",
+      "At-rest coeff., K0 = 1-sin(phi)"
+    ],
+    [
+      "Structural_Lining!A19",
+      "tan(phi)"
+    ],
+    [
+      "Structural_Lining!A2",
+      "Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check"
+    ],
+    [
+      "Structural_Lining!A20",
+      "Terzaghi vertical pressure, Pv"
+    ],
+    [
+      "Structural_Lining!A21",
+      "Lower-bound floor (0.3*gamma*D)"
+    ],
+    [
+      "Structural_Lining!A22",
+      "Design vertical pressure, Pv"
+    ],
+    [
+      "Structural_Lining!A23",
+      "Lateral pressure at springline, Ph = K0*Pv"
+    ],
+    [
+      "Structural_Lining!A25",
+      "RING THRUST & MOMENT (crown = 0deg, springline = 90deg)"
+    ],
+    [
+      "Structural_Lining!A26",
+      "Mean pressure, p_mean"
+    ],
+    [
+      "Structural_Lining!A27",
+      "Deviatoric pressure, p_dev"
+    ],
+    [
+      "Structural_Lining!A28",
+      "Thrust at crown, N(0)"
+    ],
+    [
+      "Structural_Lining!A29",
+      "Thrust at springline, N(90)"
+    ],
+    [
+      "Structural_Lining!A30",
+      "Max ring thrust, N_max"
+    ],
+    [
+      "Structural_Lining!A31",
+      "Moment at crown, M(0)"
+    ],
+    [
+      "Structural_Lining!A32",
+      "Moment at springline, M(90)"
+    ],
+    [
+      "Structural_Lining!A33",
+      "Max ring moment, M_max"
+    ],
+    [
+      "Structural_Lining!A35",
+      "RCC LINING SECTION CHECK (1 m wide strip)"
+    ],
+    [
+      "Structural_Lining!A36",
+      "Section area, A = 1 x t"
+    ],
+    [
+      "Structural_Lining!A37",
+      "Section modulus, Z = 1 x t^2/6"
+    ],
+    [
+      "Structural_Lining!A38",
+      "Axial stress = N_max/A /1000"
+    ],
+    [
+      "Structural_Lining!A39",
+      "Bending stress = M_max/Z /1000"
+    ],
+    [
+      "Structural_Lining!A4",
+      "INPUTS"
+    ],
+    [
+      "Structural_Lining!A40",
+      "Combined max compressive stress"
+    ],
+    [
+      "Structural_Lining!A41",
+      "Combined stress, opposite fibre"
+    ],
+    [
+      "Structural_Lining!A42",
+      "Permissible stress = 0.33 fck"
+    ],
+    [
+      "Structural_Lining!A43",
+      "Factor of Safety (actual)"
+    ],
+    [
+      "Structural_Lining!A44",
+      "Status"
+    ],
+    [
+      "Structural_Lining!A45",
+      "Note: net tension on inner fibre - provide crack-control reinforcement"
+    ],
+    [
+      "Structural_Lining!A47",
+      "LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)"
+    ],
+    [
+      "Structural_Lining!A5",
+      "Excavated diameter, D"
+    ],
+    [
+      "Structural_Lining!A6",
+      "Trial lining thickness, t"
+    ],
+    [
+      "Structural_Lining!A7",
+      "Overburden depth, H"
+    ],
+    [
+      "Structural_Lining!A74",
+      "Min. lining thickness for target FOS"
+    ],
+    [
+      "Structural_Lining!A8",
+      "Unit weight of ground, gamma"
+    ],
+    [
+      "Structural_Lining!A9",
+      "Friction angle, phi"
+    ],
+    [
+      "Structural_Lining!B10",
+      "20"
+    ],
+    [
+      "Structural_Lining!B11",
+      "30"
+    ],
+    [
+      "Structural_Lining!B12",
+      "500"
+    ],
+    [
+      "Structural_Lining!B13",
+      "2"
+    ],
+    [
+      "Structural_Lining!B16",
+      "5.00"
+    ],
+    [
+      "Structural_Lining!B17",
+      "7.89"
+    ],
+    [
+      "Structural_Lining!B18",
+      "0.50"
+    ],
+    [
+      "Structural_Lining!B19",
+      "0.58"
+    ],
+    [
+      "Structural_Lining!B20",
+      "194.15"
+    ],
+    [
+      "Structural_Lining!B21",
+      "66.00"
+    ],
+    [
+      "Structural_Lining!B22",
+      "194.15"
+    ],
+    [
+      "Structural_Lining!B23",
+      "97.08"
+    ],
+    [
+      "Structural_Lining!B26",
+      "145.62"
+    ],
+    [
+      "Structural_Lining!B27",
+      "48.54"
+    ],
+    [
+      "Structural_Lining!B28",
+      "485.38"
+    ],
+    [
+      "Structural_Lining!B29",
+      "970.77"
+    ],
+    [
+      "Structural_Lining!B30",
+      "970.77"
+    ],
+    [
+      "Structural_Lining!B31",
+      "606.73"
+    ],
+    [
+      "Structural_Lining!B32",
+      "606.73"
+    ],
+    [
+      "Structural_Lining!B33",
+      "606.73"
+    ],
+    [
+      "Structural_Lining!B36",
+      "0.350"
+    ],
+    [
+      "Structural_Lining!B37",
+      "0.020"
+    ],
+    [
+      "Structural_Lining!B38",
+      "2.77"
+    ],
+    [
+      "Structural_Lining!B39",
+      "29.72"
+    ],
+    [
+      "Structural_Lining!B40",
+      "32.49"
+    ],
+    [
+      "Structural_Lining!B41",
+      "-26.94"
+    ],
+    [
+      "Structural_Lining!B42",
+      "9.90"
+    ],
+    [
+      "Structural_Lining!B43",
+      "0.30"
+    ],
+    [
+      "Structural_Lining!B44",
+      "NOT SAFE - increase thickness"
+    ],
+    [
+      "Structural_Lining!B5",
+      "10"
+    ],
+    [
+      "Structural_Lining!B6",
+      "0.35"
+    ],
+    [
+      "Structural_Lining!B7",
+      "25"
+    ],
+    [
+      "Structural_Lining!B74",
+      "1"
+    ],
+    [
+      "Structural_Lining!B8",
+      "22"
+    ],
+    [
+      "Structural_Lining!B9",
+      "30"
+    ],
+    [
+      "Structural_Lining!C10",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C11",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C12",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C13",
+      "-"
+    ],
+    [
+      "Structural_Lining!C16",
+      "m"
+    ],
+    [
+      "Structural_Lining!C17",
+      "m"
+    ],
+    [
+      "Structural_Lining!C18",
+      "-"
+    ],
+    [
+      "Structural_Lining!C19",
+      "-"
+    ],
+    [
+      "Structural_Lining!C20",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C21",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C22",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C23",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C26",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C27",
+      "kPa"
+    ],
+    [
+      "Structural_Lining!C28",
+      "kN/m"
+    ],
+    [
+      "Structural_Lining!C29",
+      "kN/m"
+    ],
+    [
+      "Structural_Lining!C30",
+      "kN/m"
+    ],
+    [
+      "Structural_Lining!C31",
+      "kNm/m"
+    ],
+    [
+      "Structural_Lining!C32",
+      "kNm/m"
+    ],
+    [
+      "Structural_Lining!C33",
+      "kNm/m"
+    ],
+    [
+      "Structural_Lining!C36",
+      "m2"
+    ],
+    [
+      "Structural_Lining!C37",
+      "m3"
+    ],
+    [
+      "Structural_Lining!C38",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C39",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C40",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C41",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C42",
+      "MPa"
+    ],
+    [
+      "Structural_Lining!C43",
+      "-"
+    ],
+    [
+      "Structural_Lining!C5",
+      "m"
+    ],
+    [
+      "Structural_Lining!C6",
+      "m"
+    ],
+    [
+      "Structural_Lining!C7",
+      "m"
+    ],
+    [
+      "Structural_Lining!C74",
+      "m"
+    ],
+    [
+      "Structural_Lining!C8",
+      "kN/m3"
+    ],
+    [
+      "Structural_Lining!C9",
+      "deg"
+    ],
+    [
+      "Structural_Lining!E48",
+      "t (m)"
+    ],
+    [
+      "Structural_Lining!E49",
+      "0.15"
+    ],
+    [
+      "Structural_Lining!E50",
+      "0.2"
+    ],
+    [
+      "Structural_Lining!E51",
+      "0.25"
+    ],
+    [
+      "Structural_Lining!E52",
+      "0.3"
+    ],
+    [
+      "Structural_Lining!E53",
+      "0.35"
+    ],
+    [
+      "Structural_Lining!E54",
+      "0.4"
+    ],
+    [
+      "Structural_Lining!E55",
+      "0.45"
+    ],
+    [
+      "Structural_Lining!E56",
+      "0.5"
+    ],
+    [
+      "Structural_Lining!E57",
+      "0.55"
+    ],
+    [
+      "Structural_Lining!E58",
+      "0.6"
+    ],
+    [
+      "Structural_Lining!E59",
+      "0.65"
+    ],
+    [
+      "Structural_Lining!E60",
+      "0.7"
+    ],
+    [
+      "Structural_Lining!E61",
+      "0.75"
+    ],
+    [
+      "Structural_Lining!E62",
+      "0.8"
+    ],
+    [
+      "Structural_Lining!E63",
+      "0.85"
+    ],
+    [
+      "Structural_Lining!E64",
+      "0.9"
+    ],
+    [
+      "Structural_Lining!E65",
+      "0.95"
+    ],
+    [
+      "Structural_Lining!E66",
+      "1"
+    ],
+    [
+      "Structural_Lining!E67",
+      "1.05"
+    ],
+    [
+      "Structural_Lining!E68",
+      "1.1"
+    ],
+    [
+      "Structural_Lining!E69",
+      "1.15"
+    ],
+    [
+      "Structural_Lining!E70",
+      "1.2"
+    ],
+    [
+      "Structural_Lining!E71",
+      "1.25"
+    ],
+    [
+      "Structural_Lining!E72",
+      "1.3"
+    ],
+    [
+      "Structural_Lining!F48",
+      "FOS"
+    ],
+    [
+      "Structural_Lining!F49",
+      "0.06"
+    ],
+    [
+      "Structural_Lining!F50",
+      "0.10"
+    ],
+    [
+      "Structural_Lining!F51",
+      "0.16"
+    ],
+    [
+      "Structural_Lining!F52",
+      "0.23"
+    ],
+    [
+      "Structural_Lining!F53",
+      "0.30"
+    ],
+    [
+      "Structural_Lining!F54",
+      "0.39"
+    ],
+    [
+      "Structural_Lining!F55",
+      "0.49"
+    ],
+    [
+      "Structural_Lining!F56",
+      "0.60"
+    ],
+    [
+      "Structural_Lining!F57",
+      "0.72"
+    ],
+    [
+      "Structural_Lining!F58",
+      "0.84"
+    ],
+    [
+      "Structural_Lining!F59",
+      "0.98"
+    ],
+    [
+      "Structural_Lining!F60",
+      "1.12"
+    ],
+    [
+      "Structural_Lining!F61",
+      "1.27"
+    ],
+    [
+      "Structural_Lining!F62",
+      "1.43"
+    ],
+    [
+      "Structural_Lining!F63",
+      "1.60"
+    ],
+    [
+      "Structural_Lining!F64",
+      "1.78"
+    ],
+    [
+      "Structural_Lining!F65",
+      "1.96"
+    ],
+    [
+      "Structural_Lining!F66",
+      "2.15"
+    ],
+    [
+      "Structural_Lining!F67",
+      "2.34"
+    ],
+    [
+      "Structural_Lining!F68",
+      "2.54"
+    ],
+    [
+      "Structural_Lining!F69",
+      "2.75"
+    ],
+    [
+      "Structural_Lining!F70",
+      "2.97"
+    ],
+    [
+      "Structural_Lining!F71",
+      "3.19"
+    ],
+    [
+      "Structural_Lining!F72",
+      "3.41"
+    ],
+    [
+      "Ventilation!A1",
+      "LONGITUDINAL VENTILATION DESIGN CHECK"
+    ],
+    [
+      "Ventilation!A10",
+      "CO emission factor - HDV"
+    ],
+    [
+      "Ventilation!A11",
+      "Permissible CO (15-min)"
+    ],
+    [
+      "Ventilation!A12",
+      "Design fire heat release rate"
+    ],
+    [
+      "Ventilation!A13",
+      "Air density"
+    ],
+    [
+      "Ventilation!A14",
+      "Specific heat of air"
+    ],
+    [
+      "Ventilation!A15",
+      "Ambient temperature"
+    ],
+    [
+      "Ventilation!A16",
+      "Darcy friction factor"
+    ],
+    [
+      "Ventilation!A17",
+      "Jet fan thrust (each)"
+    ],
+    [
+      "Ventilation!A19",
+      "GEOMETRY"
+    ],
+    [
+      "Ventilation!A2",
+      "Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control"
+    ],
+    [
+      "Ventilation!A20",
+      "Cross-sectional area, A = pi.D^2/4"
+    ],
+    [
+      "Ventilation!A21",
+      "Hydraulic diameter (circular = D)"
+    ],
+    [
+      "Ventilation!A23",
+      "CO DILUTION - FRESH AIR DEMAND"
+    ],
+    [
+      "Ventilation!A24",
+      "Heavy diesel vehicles"
+    ],
+    [
+      "Ventilation!A25",
+      "Light vehicles"
+    ],
+    [
+      "Ventilation!A26",
+      "Total CO emission rate"
+    ],
+    [
+      "Ventilation!A27",
+      "Permissible CO, mass basis"
+    ],
+    [
+      "Ventilation!A28",
+      "Fresh air required, Q"
+    ],
+    [
+      "Ventilation!A29",
+      "Required velocity (CO dilution)"
+    ],
+    [
+      "Ventilation!A31",
+      "CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)"
+    ],
+    [
+      "Ventilation!A32",
+      "Critical velocity, Vc"
+    ],
+    [
+      "Ventilation!A33",
+      "Governing design velocity"
+    ],
+    [
+      "Ventilation!A34",
+      "Comfort/safety check (1-10 m/s)"
+    ],
+    [
+      "Ventilation!A36",
+      "JET FAN COUNT"
+    ],
+    [
+      "Ventilation!A37",
+      "Friction pressure loss, dP"
+    ],
+    [
+      "Ventilation!A38",
+      "Total thrust required"
+    ],
+    [
+      "Ventilation!A39",
+      "No. of jet fans required"
+    ],
+    [
+      "Ventilation!A4",
+      "INPUTS"
+    ],
+    [
+      "Ventilation!A5",
+      "Tunnel length, L"
+    ],
+    [
+      "Ventilation!A6",
+      "Tunnel diameter, D"
+    ],
+    [
+      "Ventilation!A7",
+      "Design-hour traffic volume"
+    ],
+    [
+      "Ventilation!A8",
+      "Heavy diesel vehicle share"
+    ],
+    [
+      "Ventilation!A9",
+      "CO emission factor - LMV"
+    ],
+    [
+      "Ventilation!B10",
+      "12"
+    ],
+    [
+      "Ventilation!B11",
+      "100"
+    ],
+    [
+      "Ventilation!B12",
+      "30"
+    ],
+    [
+      "Ventilation!B13",
+      "1.2"
+    ],
+    [
+      "Ventilation!B14",
+      "1.005"
+    ],
+    [
+      "Ventilation!B15",
+      "298"
+    ],
+    [
+      "Ventilation!B16",
+      "0.02"
+    ],
+    [
+      "Ventilation!B17",
+      "1500"
+    ],
+    [
+      "Ventilation!B20",
+      "78.54"
+    ],
+    [
+      "Ventilation!B21",
+      "10.00"
+    ],
+    [
+      "Ventilation!B24",
+      "120"
+    ],
+    [
+      "Ventilation!B25",
+      "1080"
+    ],
+    [
+      "Ventilation!B26",
+      "2.2400"
+    ],
+    [
+      "Ventilation!B27",
+      "0.1145"
+    ],
+    [
+      "Ventilation!B28",
+      "19.56"
+    ],
+    [
+      "Ventilation!B29",
+      "0.25"
+    ],
+    [
+      "Ventilation!B32",
+      "2.18"
+    ],
+    [
+      "Ventilation!B33",
+      "2.18"
+    ],
+    [
+      "Ventilation!B34",
+      "OK"
+    ],
+    [
+      "Ventilation!B37",
+      "4.58"
+    ],
+    [
+      "Ventilation!B38",
+      "359.85"
+    ],
+    [
+      "Ventilation!B39",
+      "1"
+    ],
+    [
+      "Ventilation!B5",
+      "800"
+    ],
+    [
+      "Ventilation!B6",
+      "10"
+    ],
+    [
+      "Ventilation!B7",
+      "1200"
+    ],
+    [
+      "Ventilation!B8",
+      "0.1"
+    ],
+    [
+      "Ventilation!B9",
+      "8"
+    ],
+    [
+      "Ventilation!C10",
+      "g/km/veh"
+    ],
+    [
+      "Ventilation!C11",
+      "ppm"
+    ],
+    [
+      "Ventilation!C12",
+      "MW"
+    ],
+    [
+      "Ventilation!C13",
+      "kg/m3"
+    ],
+    [
+      "Ventilation!C14",
+      "kJ/kg.K"
+    ],
+    [
+      "Ventilation!C15",
+      "K"
+    ],
+    [
+      "Ventilation!C16",
+      "-"
+    ],
+    [
+      "Ventilation!C17",
+      "N"
+    ],
+    [
+      "Ventilation!C20",
+      "m2"
+    ],
+    [
+      "Ventilation!C21",
+      "m"
+    ],
+    [
+      "Ventilation!C24",
+      "veh/hr"
+    ],
+    [
+      "Ventilation!C25",
+      "veh/hr"
+    ],
+    [
+      "Ventilation!C26",
+      "g/s"
+    ],
+    [
+      "Ventilation!C27",
+      "g/m3"
+    ],
+    [
+      "Ventilation!C28",
+      "m3/s"
+    ],
+    [
+      "Ventilation!C29",
+      "m/s"
+    ],
+    [
+      "Ventilation!C32",
+      "m/s"
+    ],
+    [
+      "Ventilation!C33",
+      "m/s"
+    ],
+    [
+      "Ventilation!C37",
+      "Pa"
+    ],
+    [
+      "Ventilation!C38",
+      "N"
+    ],
+    [
+      "Ventilation!C39",
+      "nos"
+    ],
+    [
+      "Ventilation!C5",
+      "m"
+    ],
+    [
+      "Ventilation!C6",
+      "m"
+    ],
+    [
+      "Ventilation!C7",
+      "veh/hr"
+    ],
+    [
+      "Ventilation!C8",
+      "fraction"
+    ],
+    [
+      "Ventilation!C9",
+      "g/km/veh"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Structural_Lining!B16",
+      "cached": {
+        "type": "number",
+        "value": 5.0
+      },
+      "dialect": "excel",
+      "expression": "=B5/2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B5}}{2}",
+      "references": [
+        "Structural_Lining!B5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B17",
+      "cached": {
+        "type": "number",
+        "value": 7.886751345948129
+      },
+      "dialect": "excel",
+      "expression": "=B16+B16*TAN(RADIANS(45-B9/2))",
+      "kind": "cell",
+      "latex": "\\mathrm{B16}+\\mathrm{B16} \\cdot \\operatorname{TAN}(\\operatorname{RADIANS}(45-\\frac{\\mathrm{B9}}{2}))",
+      "references": [
+        "Structural_Lining!B16",
+        "Structural_Lining!B9"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B18",
+      "cached": {
+        "type": "number",
+        "value": 0.5
+      },
+      "dialect": "excel",
+      "expression": "=1-SIN(RADIANS(B9))",
+      "kind": "cell",
+      "latex": "1-\\operatorname{SIN}(\\operatorname{RADIANS}(\\mathrm{B9}))",
+      "references": [
+        "Structural_Lining!B9"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B19",
+      "cached": {
+        "type": "number",
+        "value": 0.5773502691896257
+      },
+      "dialect": "excel",
+      "expression": "=TAN(RADIANS(B9))",
+      "kind": "cell",
+      "latex": "\\operatorname{TAN}(\\operatorname{RADIANS}(\\mathrm{B9}))",
+      "references": [
+        "Structural_Lining!B9"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B20",
+      "cached": {
+        "type": "number",
+        "value": 194.15366401923717
+      },
+      "dialect": "excel",
+      "expression": "=(B17*(B8-2*B10/B17)/(2*B18*B19))*(1-EXP(-2*B18*B19*B7/B17))",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B17} \\cdot (\\mathrm{B8}-\\frac{2 \\cdot \\mathrm{B10}}{\\mathrm{B17}})}{2 \\cdot \\mathrm{B18} \\cdot \\mathrm{B19}} \\cdot (1-\\operatorname{EXP}(\\frac{-2 \\cdot \\mathrm{B18} \\cdot \\mathrm{B19} \\cdot \\mathrm{B7}}{\\mathrm{B17}}))",
+      "references": [
+        "Structural_Lining!B17",
+        "Structural_Lining!B8",
+        "Structural_Lining!B10",
+        "Structural_Lining!B18",
+        "Structural_Lining!B19",
+        "Structural_Lining!B7"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B21",
+      "cached": {
+        "type": "number",
+        "value": 66.0
+      },
+      "dialect": "excel",
+      "expression": "=0.3*B8*B5",
+      "kind": "cell",
+      "latex": "0.3 \\cdot \\mathrm{B8} \\cdot \\mathrm{B5}",
+      "references": [
+        "Structural_Lining!B8",
+        "Structural_Lining!B5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B22",
+      "cached": {
+        "type": "number",
+        "value": 194.15366401923717
+      },
+      "dialect": "excel",
+      "expression": "=MAX(B20,B21)",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\mathrm{B20}, \\mathrm{B21})",
+      "references": [
+        "Structural_Lining!B20",
+        "Structural_Lining!B21"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B23",
+      "cached": {
+        "type": "number",
+        "value": 97.07683200961858
+      },
+      "dialect": "excel",
+      "expression": "=B18*B22",
+      "kind": "cell",
+      "latex": "\\mathrm{B18} \\cdot \\mathrm{B22}",
+      "references": [
+        "Structural_Lining!B18",
+        "Structural_Lining!B22"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B26",
+      "cached": {
+        "type": "number",
+        "value": 145.6152480144279
+      },
+      "dialect": "excel",
+      "expression": "=(B22+B23)/2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B22}+\\mathrm{B23}}{2}",
+      "references": [
+        "Structural_Lining!B22",
+        "Structural_Lining!B23"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B27",
+      "cached": {
+        "type": "number",
+        "value": 48.53841600480929
+      },
+      "dialect": "excel",
+      "expression": "=(B22-B23)/2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B22}-\\mathrm{B23}}{2}",
+      "references": [
+        "Structural_Lining!B22",
+        "Structural_Lining!B23"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B28",
+      "cached": {
+        "type": "number",
+        "value": 485.384160048093
+      },
+      "dialect": "excel",
+      "expression": "=B16*(B26-B27)",
+      "kind": "cell",
+      "latex": "\\mathrm{B16} \\cdot (\\mathrm{B26}-\\mathrm{B27})",
+      "references": [
+        "Structural_Lining!B16",
+        "Structural_Lining!B26",
+        "Structural_Lining!B27"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B29",
+      "cached": {
+        "type": "number",
+        "value": 970.7683200961858
+      },
+      "dialect": "excel",
+      "expression": "=B16*(B26+B27)",
+      "kind": "cell",
+      "latex": "\\mathrm{B16} \\cdot (\\mathrm{B26}+\\mathrm{B27})",
+      "references": [
+        "Structural_Lining!B16",
+        "Structural_Lining!B26",
+        "Structural_Lining!B27"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B30",
+      "cached": {
+        "type": "number",
+        "value": 970.7683200961858
+      },
+      "dialect": "excel",
+      "expression": "=MAX(ABS(B28),ABS(B29))",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\operatorname{ABS}(\\mathrm{B28}), \\operatorname{ABS}(\\mathrm{B29}))",
+      "pattern": "p1",
+      "range": "Structural_Lining!B30:B33",
+      "references": [
+        "Structural_Lining!B28",
+        "Structural_Lining!B29"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B31",
+      "cached": {
+        "type": "number",
+        "value": 606.7302000601162
+      },
+      "dialect": "excel",
+      "expression": "=B16^2*B27/2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B16}^{2} \\cdot \\mathrm{B27}}{2}",
+      "references": [
+        "Structural_Lining!B16",
+        "Structural_Lining!B27"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B32",
+      "cached": {
+        "type": "number",
+        "value": 606.7302000601162
+      },
+      "dialect": "excel",
+      "expression": "=-B16^2*B27/2",
+      "kind": "cell",
+      "latex": "\\frac{(-\\mathrm{B16})^{2} \\cdot \\mathrm{B27}}{2}",
+      "references": [
+        "Structural_Lining!B16",
+        "Structural_Lining!B27"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B33",
+      "cached": {
+        "type": "number",
+        "value": 606.7302000601162
+      },
+      "dialect": "excel",
+      "expression": "=MAX(ABS(B31),ABS(B32))",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\operatorname{ABS}(\\mathrm{B31}), \\operatorname{ABS}(\\mathrm{B32}))",
+      "pattern": "p1",
+      "range": "Structural_Lining!B30:B33",
+      "references": [
+        "Structural_Lining!B31",
+        "Structural_Lining!B32"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B36",
+      "cached": {
+        "type": "number",
+        "value": 0.35
+      },
+      "dialect": "excel",
+      "expression": "=1*B6",
+      "kind": "cell",
+      "latex": "1 \\cdot \\mathrm{B6}",
+      "references": [
+        "Structural_Lining!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B37",
+      "cached": {
+        "type": "number",
+        "value": 0.020416666666666663
+      },
+      "dialect": "excel",
+      "expression": "=1*B6^2/6",
+      "kind": "cell",
+      "latex": "\\frac{1 \\cdot \\mathrm{B6}^{2}}{6}",
+      "references": [
+        "Structural_Lining!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B38",
+      "cached": {
+        "type": "number",
+        "value": 2.773623771703388
+      },
+      "dialect": "excel",
+      "expression": "=(B30/B36)/1000",
+      "kind": "cell",
+      "latex": "\\frac{\\frac{\\mathrm{B30}}{\\mathrm{B36}}}{1000}",
+      "references": [
+        "Structural_Lining!B30",
+        "Structural_Lining!B36"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B39",
+      "cached": {
+        "type": "number",
+        "value": 29.717397553964883
+      },
+      "dialect": "excel",
+      "expression": "=(B33/B37)/1000",
+      "kind": "cell",
+      "latex": "\\frac{\\frac{\\mathrm{B33}}{\\mathrm{B37}}}{1000}",
+      "references": [
+        "Structural_Lining!B33",
+        "Structural_Lining!B37"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B40",
+      "cached": {
+        "type": "number",
+        "value": 32.49102132566827
+      },
+      "dialect": "excel",
+      "expression": "=B38+B39",
+      "kind": "cell",
+      "references": [
+        "Structural_Lining!B38",
+        "Structural_Lining!B39"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B41",
+      "cached": {
+        "type": "number",
+        "value": -26.943773782261495
+      },
+      "dialect": "excel",
+      "expression": "=B38-B39",
+      "kind": "cell",
+      "references": [
+        "Structural_Lining!B38",
+        "Structural_Lining!B39"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B42",
+      "cached": {
+        "type": "number",
+        "value": 9.9
+      },
+      "dialect": "excel",
+      "expression": "=0.33*B11",
+      "kind": "cell",
+      "latex": "0.33 \\cdot \\mathrm{B11}",
+      "references": [
+        "Structural_Lining!B11"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B43",
+      "cached": {
+        "type": "number",
+        "value": 0.30469956301985773
+      },
+      "dialect": "excel",
+      "expression": "=B42/B40",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\mathrm{B40}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B40"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B44",
+      "cached": {
+        "type": "text",
+        "value": "NOT SAFE - increase thickness"
+      },
+      "dialect": "excel",
+      "expression": "=IF(B43>=B13,\"SAFE\",\"NOT SAFE - increase thickness\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IF}(\\mathrm{B43} \\geq \\mathrm{B13}, \\text{\"SAFE\"}, \\text{\"NOT SAFE - increase thickness\"})",
+      "references": [
+        "Structural_Lining!B43",
+        "Structural_Lining!B13"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Structural_Lining!A45",
+      "cached": {
+        "type": "text",
+        "value": "Note: net tension on inner fibre - provide crack-control reinforcement"
+      },
+      "dialect": "excel",
+      "expression": "=IF(B41<0,\"Note: net tension on inner fibre - provide crack-control reinforcement\",\"No net tension\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IF}(\\mathrm{B41}<0, \\text{\"Note: net tension on inner fibre - provide crack-control reinforcement\"}, \\text{\"No net tension\"})",
+      "references": [
+        "Structural_Lining!B41"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Structural_Lining!F49",
+      "cached": {
+        "type": "number",
+        "value": 0.05883523744339483
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E49))/1000+(B33/(1*E49^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E49}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E49}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E49",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F50",
+      "cached": {
+        "type": "number",
+        "value": 0.10327197795971416
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E50))/1000+(B33/(1*E50^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E50}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E50}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E50",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F51",
+      "cached": {
+        "type": "number",
+        "value": 0.1593454347425277
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E51))/1000+(B33/(1*E51^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E51}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E51}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E51",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F52",
+      "cached": {
+        "type": "number",
+        "value": 0.2266246183004838
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E52))/1000+(B33/(1*E52^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E52}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E52}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E52",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F53",
+      "cached": {
+        "type": "number",
+        "value": 0.30469956301985773
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E53))/1000+(B33/(1*E53^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E53}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E53}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E53",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F54",
+      "cached": {
+        "type": "number",
+        "value": 0.3931800606658997
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E54))/1000+(B33/(1*E54^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E54}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E54}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E54",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F55",
+      "cached": {
+        "type": "number",
+        "value": 0.4916944843483711
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E55))/1000+(B33/(1*E55^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E55}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E55}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E55",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F56",
+      "cached": {
+        "type": "number",
+        "value": 0.5998886955012807
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E56))/1000+(B33/(1*E56^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E56}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E56}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E56",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F57",
+      "cached": {
+        "type": "number",
+        "value": 0.7174250271198455
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E57))/1000+(B33/(1*E57^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E57}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E57}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E57",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F58",
+      "cached": {
+        "type": "number",
+        "value": 0.843981337119043
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E58))/1000+(B33/(1*E58^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E58}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E58}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E58",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F59",
+      "cached": {
+        "type": "number",
+        "value": 0.9792501262358976
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E59))/1000+(B33/(1*E59^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E59}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E59}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E59",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F60",
+      "cached": {
+        "type": "number",
+        "value": 1.1229377153990263
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E60))/1000+(B33/(1*E60^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E60}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E60}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E60",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F61",
+      "cached": {
+        "type": "number",
+        "value": 1.2747634779402215
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E61))/1000+(B33/(1*E61^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E61}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E61}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E61",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F62",
+      "cached": {
+        "type": "number",
+        "value": 1.434459122429436
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E62))/1000+(B33/(1*E62^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E62}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E62}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E62",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F63",
+      "cached": {
+        "type": "number",
+        "value": 1.6017680222814084
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E63))/1000+(B33/(1*E63^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E63}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E63}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E63",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F64",
+      "cached": {
+        "type": "number",
+        "value": 1.77644458861347
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E64))/1000+(B33/(1*E64^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E64}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E64}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E64",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F65",
+      "cached": {
+        "type": "number",
+        "value": 1.9582536831337016
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E65))/1000+(B33/(1*E65^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E65}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E65}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E65",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F66",
+      "cached": {
+        "type": "number",
+        "value": 2.1469700681098467
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E66))/1000+(B33/(1*E66^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E66}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E66}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E66",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F67",
+      "cached": {
+        "type": "number",
+        "value": 2.3423778907151567
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E67))/1000+(B33/(1*E67^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E67}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E67}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E67",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F68",
+      "cached": {
+        "type": "number",
+        "value": 2.54427019927038
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E68))/1000+(B33/(1*E68^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E68}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E68}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E68",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F69",
+      "cached": {
+        "type": "number",
+        "value": 2.7524484891035796
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E69))/1000+(B33/(1*E69^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E69}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E69}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E69",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F70",
+      "cached": {
+        "type": "number",
+        "value": 2.966722275933606
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E70))/1000+(B33/(1*E70^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E70}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E70}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E70",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F71",
+      "cached": {
+        "type": "number",
+        "value": 3.1869086948505534
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E71))/1000+(B33/(1*E71^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E71}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E71}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E71",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!F72",
+      "cached": {
+        "type": "number",
+        "value": 3.412832123119167
+      },
+      "dialect": "excel",
+      "expression": "=B42/((B30/(1*E72))/1000+(B33/(1*E72^2/6))/1000)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B42}}{\\frac{\\frac{\\mathrm{B30}}{1 \\cdot \\mathrm{E72}}}{1000}+\\frac{\\frac{\\mathrm{B33}}{\\frac{1 \\cdot \\mathrm{E72}^{2}}{6}}}{1000}}",
+      "references": [
+        "Structural_Lining!B42",
+        "Structural_Lining!B30",
+        "Structural_Lining!E72",
+        "Structural_Lining!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Structural_Lining!B74",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=IFERROR(INDEX(E49:E72,COUNTIF(F49:F72,\"<\"&B13)+1),\"Increase table range\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IFERROR}(\\operatorname{INDEX}(\\mathrm{E49{:}E72}, \\operatorname{COUNTIF}(\\mathrm{F49{:}F72}, \\text{\"<\"} \\mathbin{\\&} \\mathrm{B13})+1), \\text{\"Increase table range\"})",
+      "references": [
+        "Structural_Lining!E49:E72",
+        "Structural_Lining!F49:F72",
+        "Structural_Lining!B13"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Ventilation!B20",
+      "cached": {
+        "type": "number",
+        "value": 78.53981633974483
+      },
+      "dialect": "excel",
+      "expression": "=PI()*B6^2/4",
+      "kind": "cell",
+      "latex": "\\frac{\\pi \\cdot \\mathrm{B6}^{2}}{4}",
+      "references": [
+        "Ventilation!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B21",
+      "cached": {
+        "type": "number",
+        "value": 10.0
+      },
+      "dialect": "excel",
+      "expression": "=B6",
+      "kind": "cell",
+      "references": [
+        "Ventilation!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B24",
+      "cached": {
+        "type": "number",
+        "value": 120.0
+      },
+      "dialect": "excel",
+      "expression": "=B7*B8",
+      "kind": "cell",
+      "latex": "\\mathrm{B7} \\cdot \\mathrm{B8}",
+      "references": [
+        "Ventilation!B7",
+        "Ventilation!B8"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B25",
+      "cached": {
+        "type": "number",
+        "value": 1080.0
+      },
+      "dialect": "excel",
+      "expression": "=B7*(1-B8)",
+      "kind": "cell",
+      "latex": "\\mathrm{B7} \\cdot (1-\\mathrm{B8})",
+      "references": [
+        "Ventilation!B7",
+        "Ventilation!B8"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B26",
+      "cached": {
+        "type": "number",
+        "value": 2.24
+      },
+      "dialect": "excel",
+      "expression": "=((B25*B9)+(B24*B10))*(B5/1000)/3600",
+      "kind": "cell",
+      "latex": "\\frac{(\\mathrm{B25} \\cdot \\mathrm{B9}+\\mathrm{B24} \\cdot \\mathrm{B10}) \\cdot \\frac{\\mathrm{B5}}{1000}}{3600}",
+      "references": [
+        "Ventilation!B25",
+        "Ventilation!B9",
+        "Ventilation!B24",
+        "Ventilation!B10",
+        "Ventilation!B5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B27",
+      "cached": {
+        "type": "number",
+        "value": 0.114519427402863
+      },
+      "dialect": "excel",
+      "expression": "=(B11*(28/24.45))/1000",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B11} \\cdot \\frac{28}{24.45}}{1000}",
+      "references": [
+        "Ventilation!B11"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B28",
+      "cached": {
+        "type": "number",
+        "value": 19.56
+      },
+      "dialect": "excel",
+      "expression": "=B26/B27",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B26}}{\\mathrm{B27}}",
+      "references": [
+        "Ventilation!B26",
+        "Ventilation!B27"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B29",
+      "cached": {
+        "type": "number",
+        "value": 0.24904565495019784
+      },
+      "dialect": "excel",
+      "expression": "=B28/B20",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B28}}{\\mathrm{B20}}",
+      "references": [
+        "Ventilation!B28",
+        "Ventilation!B20"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B32",
+      "cached": {
+        "type": "number",
+        "value": 2.184635246920501
+      },
+      "dialect": "excel",
+      "expression": "=(9.81*B12*1000/(B13*B14*B15*B20))^(1/3)",
+      "kind": "cell",
+      "latex": "(\\frac{9.81 \\cdot \\mathrm{B12} \\cdot 1000}{\\mathrm{B13} \\cdot \\mathrm{B14} \\cdot \\mathrm{B15} \\cdot \\mathrm{B20}})^{\\frac{1}{3}}",
+      "references": [
+        "Ventilation!B12",
+        "Ventilation!B13",
+        "Ventilation!B14",
+        "Ventilation!B15",
+        "Ventilation!B20"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B33",
+      "cached": {
+        "type": "number",
+        "value": 2.184635246920501
+      },
+      "dialect": "excel",
+      "expression": "=MAX(B29,B32)",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\mathrm{B29}, \\mathrm{B32})",
+      "references": [
+        "Ventilation!B29",
+        "Ventilation!B32"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B34",
+      "cached": {
+        "type": "text",
+        "value": "OK"
+      },
+      "dialect": "excel",
+      "expression": "=IF(AND(B33>=1,B33<=10),\"OK\",\"CHECK RANGE\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IF}(\\operatorname{AND}(\\mathrm{B33} \\geq 1, \\mathrm{B33} \\leq 10), \\text{\"OK\"}, \\text{\"CHECK RANGE\"})",
+      "references": [
+        "Ventilation!B33"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Ventilation!B37",
+      "cached": {
+        "type": "number",
+        "value": 4.5817259156039025
+      },
+      "dialect": "excel",
+      "expression": "=B16*(B5/B21)*(B13*B33^2/2)",
+      "kind": "cell",
+      "latex": "\\mathrm{B16} \\cdot \\frac{\\mathrm{B5}}{\\mathrm{B21}} \\cdot \\frac{\\mathrm{B13} \\cdot \\mathrm{B33}^{2}}{2}",
+      "references": [
+        "Ventilation!B16",
+        "Ventilation!B5",
+        "Ventilation!B21",
+        "Ventilation!B13",
+        "Ventilation!B33"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B38",
+      "cached": {
+        "type": "number",
+        "value": 359.84791193057976
+      },
+      "dialect": "excel",
+      "expression": "=B37*B20",
+      "kind": "cell",
+      "latex": "\\mathrm{B37} \\cdot \\mathrm{B20}",
+      "references": [
+        "Ventilation!B37",
+        "Ventilation!B20"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Ventilation!B39",
+      "cached": {
+        "type": "number",
+        "value": 1.0
+      },
+      "dialect": "excel",
+      "expression": "=ROUNDUP(B38/B17,0)",
+      "kind": "cell",
+      "latex": "\\operatorname{ROUNDUP}(\\frac{\\mathrm{B38}}{\\mathrm{B17}}, 0)",
+      "references": [
+        "Ventilation!B38",
+        "Ventilation!B17"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Drainage!B17",
+      "cached": {
+        "type": "number",
+        "value": 16.0
+      },
+      "dialect": "excel",
+      "expression": "=B7*B5",
+      "kind": "cell",
+      "latex": "\\mathrm{B7} \\cdot \\mathrm{B5}",
+      "references": [
+        "Drainage!B7",
+        "Drainage!B5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B18",
+      "cached": {
+        "type": "number",
+        "value": 106.25
+      },
+      "dialect": "excel",
+      "expression": "=B8*B9*B10/360*1000",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B8} \\cdot \\mathrm{B9} \\cdot \\mathrm{B10}}{360} \\cdot 1000",
+      "references": [
+        "Drainage!B8",
+        "Drainage!B9",
+        "Drainage!B10"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B19",
+      "cached": {
+        "type": "number",
+        "value": 122.25
+      },
+      "dialect": "excel",
+      "expression": "=B17+B18",
+      "kind": "cell",
+      "references": [
+        "Drainage!B17",
+        "Drainage!B18"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B22",
+      "cached": {
+        "type": "number",
+        "value": 0.07068583470577035
+      },
+      "dialect": "excel",
+      "expression": "=PI()*B12^2/4",
+      "kind": "cell",
+      "latex": "\\frac{\\pi \\cdot \\mathrm{B12}^{2}}{4}",
+      "references": [
+        "Drainage!B12"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B23",
+      "cached": {
+        "type": "number",
+        "value": 0.075
+      },
+      "dialect": "excel",
+      "expression": "=B12/4",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B12}}{4}",
+      "references": [
+        "Drainage!B12"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B24",
+      "cached": {
+        "type": "number",
+        "value": 68.37776210496042
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*B22*B23^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\mathrm{B22} \\cdot \\mathrm{B23}^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!B22",
+        "Drainage!B23",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B25",
+      "cached": {
+        "type": "text",
+        "value": "UNDERSIZED - increase diameter"
+      },
+      "dialect": "excel",
+      "expression": "=IF(B24>=B19,\"OK - adequate\",\"UNDERSIZED - increase diameter\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IF}(\\mathrm{B24} \\geq \\mathrm{B19}, \\text{\"OK - adequate\"}, \\text{\"UNDERSIZED - increase diameter\"})",
+      "references": [
+        "Drainage!B24",
+        "Drainage!B19"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Drainage!F29",
+      "cached": {
+        "type": "number",
+        "value": 10.768822727592948
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E29^2/4)*(E29/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E29}^{2}}{4} \\cdot (\\frac{\\mathrm{E29}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E29",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F30",
+      "cached": {
+        "type": "number",
+        "value": 23.191999453473095
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E30^2/4)*(E30/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E30}^{2}}{4} \\cdot (\\frac{\\mathrm{E30}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E30",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F31",
+      "cached": {
+        "type": "number",
+        "value": 42.049892848591554
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E31^2/4)*(E31/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E31}^{2}}{4} \\cdot (\\frac{\\mathrm{E31}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E31",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F32",
+      "cached": {
+        "type": "number",
+        "value": 68.37776210496042
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E32^2/4)*(E32/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E32}^{2}}{4} \\cdot (\\frac{\\mathrm{E32}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E32",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F33",
+      "cached": {
+        "type": "number",
+        "value": 147.26001731875647
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E33^2/4)*(E33/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E33}^{2}}{4} \\cdot (\\frac{\\mathrm{E33}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E33",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F34",
+      "cached": {
+        "type": "number",
+        "value": 201.60048554081808
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E34^2/4)*(E34/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E34}^{2}}{4} \\cdot (\\frac{\\mathrm{E34}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E34",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F35",
+      "cached": {
+        "type": "number",
+        "value": 267.00017657201727
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E35^2/4)*(E35/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E35}^{2}}{4} \\cdot (\\frac{\\mathrm{E35}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E35",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F36",
+      "cached": {
+        "type": "number",
+        "value": 434.17172598658186
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E36^2/4)*(E36/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E36}^{2}}{4} \\cdot (\\frac{\\mathrm{E36}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E36",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F37",
+      "cached": {
+        "type": "number",
+        "value": 787.2057168787912
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E37^2/4)*(E37/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E37}^{2}}{4} \\cdot (\\frac{\\mathrm{E37}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E37",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!F38",
+      "cached": {
+        "type": "number",
+        "value": 1280.083291299177
+      },
+      "dialect": "excel",
+      "expression": "=(1/B11)*(PI()*E38^2/4)*(E38/4)^(2/3)*B6^0.5*1000",
+      "kind": "cell",
+      "latex": "\\frac{1}{\\mathrm{B11}} \\cdot \\frac{\\pi \\cdot \\mathrm{E38}^{2}}{4} \\cdot (\\frac{\\mathrm{E38}}{4})^{\\frac{2}{3}} \\cdot \\mathrm{B6}^{0.5} \\cdot 1000",
+      "references": [
+        "Drainage!B11",
+        "Drainage!E38",
+        "Drainage!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B40",
+      "cached": {
+        "type": "number",
+        "value": 0.4
+      },
+      "dialect": "excel",
+      "expression": "=IFERROR(INDEX(E29:E38,COUNTIF(F29:F38,\"<\"&B19)+1),\"Increase table range\")",
+      "kind": "cell",
+      "latex": "\\operatorname{IFERROR}(\\operatorname{INDEX}(\\mathrm{E29{:}E38}, \\operatorname{COUNTIF}(\\mathrm{F29{:}F38}, \\text{\"<\"} \\mathbin{\\&} \\mathrm{B19})+1), \\text{\"Increase table range\"})",
+      "references": [
+        "Drainage!E29:E38",
+        "Drainage!F29:F38",
+        "Drainage!B19"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Drainage!B43",
+      "cached": {
+        "type": "number",
+        "value": 152.8125
+      },
+      "dialect": "excel",
+      "expression": "=B19*B14",
+      "kind": "cell",
+      "latex": "\\mathrm{B19} \\cdot \\mathrm{B14}",
+      "references": [
+        "Drainage!B19",
+        "Drainage!B14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Drainage!B44",
+      "cached": {
+        "type": "number",
+        "value": 91.6875
+      },
+      "dialect": "excel",
+      "expression": "=(B43/1000)*(B13*60)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B43}}{1000} \\cdot \\mathrm{B13} \\cdot 60",
+      "references": [
+        "Drainage!B43",
+        "Drainage!B13"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Drainage!B45",
+      "cached": {
+        "type": "number",
+        "value": 152.8125
+      },
+      "dialect": "excel",
+      "expression": "=B43",
+      "kind": "cell",
+      "references": [
+        "Drainage!B43"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Structural_Lining!B5",
+      "label": "Excavated diameter, D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B6",
+      "label": "Trial lining thickness, t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 0.35
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B7",
+      "label": "Overburden depth, H",
+      "read_by": 1,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 25.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B8",
+      "label": "Unit weight of ground, gamma",
+      "read_by": 2,
+      "unit": "kN/m3",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 22.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B9",
+      "label": "Friction angle, phi",
+      "read_by": 3,
+      "unit": "deg",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 30.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B10",
+      "label": "Cohesion, c",
+      "read_by": 1,
+      "unit": "kPa",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 20.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B11",
+      "label": "Concrete grade, fck",
+      "read_by": 1,
+      "unit": "MPa",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 30.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!B13",
+      "label": "Target Factor of Safety",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 2.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E49",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.15
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E50",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.2
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E51",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.25
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E52",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.3
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E53",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.35
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E54",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.4
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E55",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.45
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E56",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.5
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E57",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.55
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E58",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.6
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E59",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.65
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E60",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.7
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E61",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.75
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E62",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.8
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E63",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.85
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E64",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.9
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E65",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.95
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E66",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E67",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.05
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E68",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.1
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E69",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.15
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E70",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.2
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E71",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.25
+      }
+    },
+    {
+      "anchor": "Structural_Lining!E72",
+      "label": "t",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 1.3
+      }
+    },
+    {
+      "anchor": "Ventilation!B5",
+      "label": "Tunnel length, L",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 800.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B6",
+      "label": "Tunnel diameter, D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B7",
+      "label": "Design-hour traffic volume",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 1200.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B8",
+      "label": "Heavy diesel vehicle share",
+      "read_by": 2,
+      "value": {
+        "type": "number",
+        "value": 0.1
+      }
+    },
+    {
+      "anchor": "Ventilation!B9",
+      "label": "CO emission factor - LMV",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 8.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B10",
+      "label": "CO emission factor - HDV",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 12.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B11",
+      "label": "Permissible CO (15-min)",
+      "read_by": 1,
+      "unit": "ppm",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 100.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B12",
+      "label": "Design fire heat release rate",
+      "read_by": 1,
+      "unit": "MW",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 30.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B13",
+      "label": "Air density",
+      "read_by": 2,
+      "unit": "kg/m3",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 1.2
+      }
+    },
+    {
+      "anchor": "Ventilation!B14",
+      "label": "Specific heat of air",
+      "read_by": 1,
+      "unit": "kJ/kg.K",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 1.005
+      }
+    },
+    {
+      "anchor": "Ventilation!B15",
+      "label": "Ambient temperature",
+      "read_by": 1,
+      "unit": "K",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 298.0
+      }
+    },
+    {
+      "anchor": "Ventilation!B16",
+      "label": "Darcy friction factor",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.02
+      }
+    },
+    {
+      "anchor": "Ventilation!B17",
+      "label": "Jet fan thrust (each)",
+      "read_by": 1,
+      "unit": "N",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 1500.0
+      }
+    },
+    {
+      "anchor": "Drainage!B5",
+      "label": "Tunnel length, L",
+      "read_by": 1,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 800.0
+      }
+    },
+    {
+      "anchor": "Drainage!B6",
+      "label": "Longitudinal gradient",
+      "read_by": 11,
+      "value": {
+        "type": "number",
+        "value": 0.005
+      }
+    },
+    {
+      "anchor": "Drainage!B7",
+      "label": "Seepage rate assumed",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.02
+      }
+    },
+    {
+      "anchor": "Drainage!B8",
+      "label": "Runoff coefficient, C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.85
+      }
+    },
+    {
+      "anchor": "Drainage!B9",
+      "label": "Design rainfall intensity, i",
+      "read_by": 1,
+      "unit": "mm/hr",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 75.0
+      }
+    },
+    {
+      "anchor": "Drainage!B10",
+      "label": "Portal catchment area",
+      "read_by": 1,
+      "unit": "ha",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 0.6
+      }
+    },
+    {
+      "anchor": "Drainage!B11",
+      "label": "Manning's roughness, n",
+      "read_by": 11,
+      "value": {
+        "type": "number",
+        "value": 0.013
+      }
+    },
+    {
+      "anchor": "Drainage!B12",
+      "label": "Trial pipe diameter",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 0.3
+      }
+    },
+    {
+      "anchor": "Drainage!B13",
+      "label": "Sump retention time",
+      "read_by": 1,
+      "unit": "min",
+      "unit_source": "unit-cell",
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Drainage!B14",
+      "label": "Pump duty factor",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.25
+      }
+    },
+    {
+      "anchor": "Drainage!E29",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.15
+      }
+    },
+    {
+      "anchor": "Drainage!E30",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.2
+      }
+    },
+    {
+      "anchor": "Drainage!E31",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.25
+      }
+    },
+    {
+      "anchor": "Drainage!E32",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.3
+      }
+    },
+    {
+      "anchor": "Drainage!E33",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.4
+      }
+    },
+    {
+      "anchor": "Drainage!E34",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.45
+      }
+    },
+    {
+      "anchor": "Drainage!E35",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.5
+      }
+    },
+    {
+      "anchor": "Drainage!E36",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.6
+      }
+    },
+    {
+      "anchor": "Drainage!E37",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.75
+      }
+    },
+    {
+      "anchor": "Drainage!E38",
+      "label": "D",
+      "read_by": 2,
+      "unit": "m",
+      "unit_source": "header",
+      "value": {
+        "type": "number",
+        "value": 0.9
+      }
+    }
+  ],
+  "rules": []
+}

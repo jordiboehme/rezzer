@@ -8,7 +8,15 @@
 //! lines, and a part still too large at a blank line. Breaks never fall inside a fence, the
 //! frontmatter or the title, never before an indented line (it would turn into code) and
 //! never before a `---` line (it would look like frontmatter), and a heading stays with the
-//! block after it. Joining the pages gives the input back unchanged.
+//! block after it. A table stays with what comes before it and its notes with it; a sheet
+//! region's layout line stays with what comes before it and with the table or list after
+//! it.
+//!
+//! Inside `## Logic` only (spec 8.7), a page that starts at a blank line begins with the
+//! heading line of the `##` or `###` section it lies in and, inside a parameter group, with
+//! the group's title line, each followed by ` (continued)`. Joining the pages without these
+//! lines gives the input back unchanged; outside `## Logic` joining the pages gives the
+//! input back as it is.
 
 /// The token estimate: characters divided by four.
 pub(crate) fn tokens(text: &str) -> usize {
@@ -35,12 +43,63 @@ fn fence_run(line: &str) -> Option<(char, usize, &str)> {
     (run >= 3).then(|| (ch, run, &rest[run..]))
 }
 
-/// The border before each line, and each line's start offset.
-fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
+/// The starts of the row kind line under a sheet table.
+const ROW_KINDS: [&str; 4] = ["Subtotal row", "Total row", "Group row", "Total column"];
+
+/// The words that start a sheet region's layout line or lead line, before its range.
+const REGION_WORDS: [&str; 4] = ["Table ", "Grid ", "Label and value pairs ", "Text "];
+
+/// A cell address such as `B12` at the start of `text`: what follows it.
+fn after_cell(text: &str) -> Option<&str> {
+    let letters = text.bytes().take_while(u8::is_ascii_uppercase).count();
+    let digits = text[letters..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    ((1..=3).contains(&letters) && (1..=7).contains(&digits)).then(|| &text[letters + digits..])
+}
+
+/// True for the layout line of a sheet region (`Table A1:F9, header row 1, ...`) or the
+/// lead line of a label and value or text region (`Text A19:A25:`).
+fn layout_line(text: &str) -> bool {
+    REGION_WORDS.iter().any(|word| {
+        let Some(rest) = text.strip_prefix(word).and_then(after_cell) else {
+            return false;
+        };
+        let rest = match rest.strip_prefix(':').and_then(after_cell) {
+            Some(after) => after,
+            None => rest,
+        };
+        rest.starts_with([',', '.', ':']) || rest.starts_with(" (data ")
+    })
+}
+
+/// The words that start the title line of a parameter group in `## Logic`.
+const GROUP_TITLE: &str = "Parameters in ";
+
+/// What a line stands in, inside `## Logic`: the line of the `##` or `###` section it lies
+/// in (the innermost), and of the parameter group title it lies under, as line numbers.
+#[derive(Debug, Clone, Copy, Default)]
+struct Context {
+    section: Option<usize>,
+    group: Option<usize>,
+}
+
+/// The border before each line, each line's start offset and its context.
+fn borders(md: &str) -> (Vec<usize>, Vec<Border>, Vec<Context>) {
     let lines: Vec<&str> = md.split_inclusive('\n').collect();
     let mut starts = Vec::with_capacity(lines.len());
     let mut kinds = Vec::with_capacity(lines.len());
+    let mut contexts = Vec::with_capacity(lines.len());
     let mut offset = 0;
+    // The open `##` and `###` heading lines, whether the `##` is `## Logic`, and the open
+    // group title.
+    let mut h2: Option<usize> = None;
+    let mut h3: Option<usize> = None;
+    let mut logic = false;
+    let mut group: Option<usize> = None;
+    // The last line that is not blank.
+    let mut last_text: Option<usize> = None;
 
     // Frontmatter and the title heading right after it are never split.
     let mut protected_until = 0;
@@ -79,6 +138,10 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             // A table stays with its caption, and a merge note with its table.
             && !text.starts_with('|')
             && !text.starts_with("Merged cells: ")
+            // A sheet region's layout line stays with what comes before it, and its row
+            // kinds with its table.
+            && !layout_line(text)
+            && !ROW_KINDS.iter().any(|k| text.starts_with(k))
             && !text.ends_with("not shown (see the model JSON).")
         {
             Border::Blank
@@ -86,6 +149,28 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
             Border::None
         };
         kinds.push(kind);
+        if n >= protected_until && fence.is_none() {
+            if kind == Border::H2 {
+                (h2, h3, group) = (Some(n), None, None);
+                logic = text == "## Logic";
+            } else if kind == Border::H3 {
+                (h3, group) = (Some(n), None);
+            } else if text.starts_with('#') {
+                group = None;
+            } else if logic && prev_blank && text.starts_with(GROUP_TITLE) && text.ends_with(':') {
+                group = Some(n);
+            } else if prev_blank && text.starts_with('|') && last_text != group {
+                // A table with no title line right before it starts a group without a title.
+                group = None;
+            }
+        }
+        contexts.push(Context {
+            section: if logic { h3.or(h2) } else { None },
+            group,
+        });
+        if !text.trim().is_empty() {
+            last_text = Some(n);
+        }
         if n >= protected_until {
             match fence {
                 None => {
@@ -106,10 +191,11 @@ fn borders(md: &str) -> (Vec<usize>, Vec<Border>) {
         }
         prev_blank = text.trim().is_empty();
         if !prev_blank {
-            after_heading = fence.is_none() && text.starts_with('#');
+            // A layout line stays with the table or list under it, like a heading.
+            after_heading = fence.is_none() && (text.starts_with('#') || layout_line(text));
         }
     }
-    (starts, kinds)
+    (starts, kinds, contexts)
 }
 
 /// Splits `range` before every line whose border is in `at`.
@@ -135,11 +221,42 @@ fn split(
     out
 }
 
+/// The lines a page starting at `start` begins with: when it starts at a blank-line border
+/// inside a section, the section's heading line, then the title of the group it starts
+/// inside (none when it starts at the title), each marked continued.
+fn continued(
+    md: &str,
+    start: usize,
+    starts: &[usize],
+    kinds: &[Border],
+    contexts: &[Context],
+) -> String {
+    let Ok(n) = starts.binary_search(&start) else {
+        return String::new();
+    };
+    if kinds[n] != Border::Blank {
+        return String::new();
+    }
+    let line = |i: usize| {
+        let end = starts.get(i + 1).copied().unwrap_or(md.len());
+        md[starts[i]..end].trim_end_matches(['\n', '\r'])
+    };
+    let mut out = String::new();
+    let context = contexts[n];
+    if let Some(h) = context.section {
+        out.push_str(&format!("{} (continued)\n\n", line(h)));
+        if let Some(g) = context.group.filter(|&g| g != n) {
+            out.push_str(&format!("{} (continued)\n\n", line(g)));
+        }
+    }
+    out
+}
+
 pub(crate) fn paginate(md: &str, page_tokens: usize) -> Vec<String> {
     if page_tokens == 0 || tokens(md) <= page_tokens {
         return vec![md.to_string()];
     }
-    let (starts, kinds) = borders(md);
+    let (starts, kinds, contexts) = borders(md);
     let fits = |r: &(usize, usize)| tokens(&md[r.0..r.1]) <= page_tokens;
 
     // Atomic pieces: whole sections where they fit, else their `###` parts, else blank-line
@@ -159,25 +276,28 @@ pub(crate) fn paginate(md: &str, page_tokens: usize) -> Vec<String> {
         }
     }
 
-    // Greedy packing on character counts, so each piece is counted once.
+    // Greedy packing on character counts, so each piece is counted once. A page after the
+    // first counts the lines it begins with.
     let limit_chars = page_tokens.saturating_mul(4).saturating_add(3);
     let mut pages = Vec::new();
-    let mut current: Option<(usize, usize, usize)> = None;
+    let mut current: Option<(usize, usize, usize, String)> = None;
     for piece in pieces {
         let chars = md[piece.0..piece.1].chars().count();
         current = match current {
-            None => Some((piece.0, piece.1, chars)),
-            Some((from, _, have)) if have + chars <= limit_chars => {
-                Some((from, piece.1, have + chars))
+            None => Some((piece.0, piece.1, chars, String::new())),
+            Some((from, _, have, lead)) if have + chars <= limit_chars => {
+                Some((from, piece.1, have + chars, lead))
             }
-            Some((from, to, _)) => {
-                pages.push(md[from..to].to_string());
-                Some((piece.0, piece.1, chars))
+            Some((from, to, _, lead)) => {
+                pages.push(format!("{lead}{}", &md[from..to]));
+                let lead = continued(md, piece.0, &starts, &kinds, &contexts);
+                let have = lead.chars().count() + chars;
+                Some((piece.0, piece.1, have, lead))
             }
         };
     }
-    if let Some((from, to, _)) = current {
-        pages.push(md[from..to].to_string());
+    if let Some((from, to, _, lead)) = current {
+        pages.push(format!("{lead}{}", &md[from..to]));
     }
     pages
 }

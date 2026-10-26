@@ -1,0 +1,149 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "4"
+    ],
+    [
+      "Sheet1!B3",
+      "38"
+    ],
+    [
+      "Sheet1!D10",
+      "1"
+    ],
+    [
+      "Sheet1!D11",
+      "2"
+    ],
+    [
+      "Sheet1!D12",
+      "3"
+    ],
+    [
+      "Sheet1!D13",
+      "4"
+    ],
+    [
+      "Sheet1!D4",
+      "9"
+    ],
+    [
+      "Sheet1!D5",
+      "#NAME?"
+    ],
+    [
+      "Sheet1!D6",
+      "34"
+    ],
+    [
+      "Sheet1!F1",
+      "34"
+    ],
+    [
+      "Sheet1!F10",
+      "8"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet1!A1",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "excel",
+      "expression": "=LET(x,1,SUM(x,3))",
+      "kind": "cell",
+      "latex": "\\operatorname{LET}(\\mathrm{x}, 1, \\operatorname{SUM}(\\mathrm{x}, 3))",
+      "original": "=_xlfn.LET(_xlpm.x,1,SUM(_xlpm.x,3))",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!B3",
+      "cached": {
+        "type": "number",
+        "value": 38.0
+      },
+      "dialect": "excel",
+      "expression": "=LET(x,A1,y,34, x+y)",
+      "kind": "cell",
+      "latex": "\\operatorname{LET}(\\mathrm{x}, \\mathrm{A1}, \\mathrm{y}, 34, \\mathrm{x}+\\mathrm{y})",
+      "original": "=_xlfn.LET(_xlpm.x,A1,_xlpm.y,34, _xlpm.x+_xlpm.y)",
+      "references": [
+        "Sheet1!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!D4",
+      "cached": {
+        "type": "number",
+        "value": 9.0
+      },
+      "dialect": "excel",
+      "expression": "=1+LET(x,1,x*8)",
+      "kind": "cell",
+      "latex": "1+\\operatorname{LET}(\\mathrm{x}, 1, \\mathrm{x} \\cdot 8)",
+      "original": "=1+_xlfn.LET(_xlpm.x,1,_xlpm.x*8)",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!D5",
+      "cached": {
+        "type": "text",
+        "value": "#NAME?"
+      },
+      "dialect": "excel",
+      "expression": "=x+LET(x,1,x)",
+      "kind": "spill",
+      "latex": "\\mathrm{x}+\\operatorname{LET}(\\mathrm{x}, 1, \\mathrm{x})",
+      "original": "=x+_xlfn.LET(_xlpm.x,1,_xlpm.x)",
+      "range": "Sheet1!D5",
+      "references": [
+        "name:x"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!D6",
+      "cached": {
+        "type": "number",
+        "value": 34.0
+      },
+      "dialect": "excel",
+      "expression": "=2+LET(x,8,LET(x,2, x+x)*x)",
+      "kind": "cell",
+      "latex": "2+\\operatorname{LET}(\\mathrm{x}, 8, \\operatorname{LET}(\\mathrm{x}, 2, \\mathrm{x}+\\mathrm{x}) \\cdot \\mathrm{x})",
+      "original": "=2+_xlfn.LET(_xlpm.x,8,_xlfn.LET(_xlpm.x,2, _xlpm.x+_xlpm.x)*_xlpm.x)",
+      "role": "constant"
+    },
+    {
+      "anchor": "Sheet1!F10",
+      "cached": {
+        "type": "number",
+        "value": 8.0
+      },
+      "dialect": "excel",
+      "expression": "=LET(a,D10+7, SUM(a))",
+      "kind": "cell",
+      "latex": "\\operatorname{LET}(\\mathrm{a}, \\mathrm{D10}+7, \\operatorname{SUM}(\\mathrm{a}))",
+      "original": "=_xlfn.LET(_xlpm.a,D10+7, SUM(_xlpm.a))",
+      "references": [
+        "Sheet1!D10"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet1!D10",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    }
+  ],
+  "rules": []
+}

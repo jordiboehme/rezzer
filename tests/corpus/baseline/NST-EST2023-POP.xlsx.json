@@ -1,0 +1,4437 @@
+{
+  "cells": [
+    [
+      "'NST-EST2023-POP'!A1",
+      "table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts)"
+    ],
+    [
+      "'NST-EST2023-POP'!A10",
+      ".Alabama"
+    ],
+    [
+      "'NST-EST2023-POP'!A11",
+      ".Alaska"
+    ],
+    [
+      "'NST-EST2023-POP'!A12",
+      ".Arizona"
+    ],
+    [
+      "'NST-EST2023-POP'!A13",
+      ".Arkansas"
+    ],
+    [
+      "'NST-EST2023-POP'!A14",
+      ".California"
+    ],
+    [
+      "'NST-EST2023-POP'!A15",
+      ".Colorado"
+    ],
+    [
+      "'NST-EST2023-POP'!A16",
+      ".Connecticut"
+    ],
+    [
+      "'NST-EST2023-POP'!A17",
+      ".Delaware"
+    ],
+    [
+      "'NST-EST2023-POP'!A18",
+      ".District of Columbia"
+    ],
+    [
+      "'NST-EST2023-POP'!A19",
+      ".Florida"
+    ],
+    [
+      "'NST-EST2023-POP'!A2",
+      "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023"
+    ],
+    [
+      "'NST-EST2023-POP'!A20",
+      ".Georgia"
+    ],
+    [
+      "'NST-EST2023-POP'!A21",
+      ".Hawaii"
+    ],
+    [
+      "'NST-EST2023-POP'!A22",
+      ".Idaho"
+    ],
+    [
+      "'NST-EST2023-POP'!A23",
+      ".Illinois"
+    ],
+    [
+      "'NST-EST2023-POP'!A24",
+      ".Indiana"
+    ],
+    [
+      "'NST-EST2023-POP'!A25",
+      ".Iowa"
+    ],
+    [
+      "'NST-EST2023-POP'!A26",
+      ".Kansas"
+    ],
+    [
+      "'NST-EST2023-POP'!A27",
+      ".Kentucky"
+    ],
+    [
+      "'NST-EST2023-POP'!A28",
+      ".Louisiana"
+    ],
+    [
+      "'NST-EST2023-POP'!A29",
+      ".Maine"
+    ],
+    [
+      "'NST-EST2023-POP'!A3",
+      "Geographic Area"
+    ],
+    [
+      "'NST-EST2023-POP'!A30",
+      ".Maryland"
+    ],
+    [
+      "'NST-EST2023-POP'!A31",
+      ".Massachusetts"
+    ],
+    [
+      "'NST-EST2023-POP'!A32",
+      ".Michigan"
+    ],
+    [
+      "'NST-EST2023-POP'!A33",
+      ".Minnesota"
+    ],
+    [
+      "'NST-EST2023-POP'!A34",
+      ".Mississippi"
+    ],
+    [
+      "'NST-EST2023-POP'!A35",
+      ".Missouri"
+    ],
+    [
+      "'NST-EST2023-POP'!A36",
+      ".Montana"
+    ],
+    [
+      "'NST-EST2023-POP'!A37",
+      ".Nebraska"
+    ],
+    [
+      "'NST-EST2023-POP'!A38",
+      ".Nevada"
+    ],
+    [
+      "'NST-EST2023-POP'!A39",
+      ".New Hampshire"
+    ],
+    [
+      "'NST-EST2023-POP'!A40",
+      ".New Jersey"
+    ],
+    [
+      "'NST-EST2023-POP'!A41",
+      ".New Mexico"
+    ],
+    [
+      "'NST-EST2023-POP'!A42",
+      ".New York"
+    ],
+    [
+      "'NST-EST2023-POP'!A43",
+      ".North Carolina"
+    ],
+    [
+      "'NST-EST2023-POP'!A44",
+      ".North Dakota"
+    ],
+    [
+      "'NST-EST2023-POP'!A45",
+      ".Ohio"
+    ],
+    [
+      "'NST-EST2023-POP'!A46",
+      ".Oklahoma"
+    ],
+    [
+      "'NST-EST2023-POP'!A47",
+      ".Oregon"
+    ],
+    [
+      "'NST-EST2023-POP'!A48",
+      ".Pennsylvania"
+    ],
+    [
+      "'NST-EST2023-POP'!A49",
+      ".Rhode Island"
+    ],
+    [
+      "'NST-EST2023-POP'!A5",
+      "United States"
+    ],
+    [
+      "'NST-EST2023-POP'!A50",
+      ".South Carolina"
+    ],
+    [
+      "'NST-EST2023-POP'!A51",
+      ".South Dakota"
+    ],
+    [
+      "'NST-EST2023-POP'!A52",
+      ".Tennessee"
+    ],
+    [
+      "'NST-EST2023-POP'!A53",
+      ".Texas"
+    ],
+    [
+      "'NST-EST2023-POP'!A54",
+      ".Utah"
+    ],
+    [
+      "'NST-EST2023-POP'!A55",
+      ".Vermont"
+    ],
+    [
+      "'NST-EST2023-POP'!A56",
+      ".Virginia"
+    ],
+    [
+      "'NST-EST2023-POP'!A57",
+      ".Washington"
+    ],
+    [
+      "'NST-EST2023-POP'!A58",
+      ".West Virginia"
+    ],
+    [
+      "'NST-EST2023-POP'!A59",
+      ".Wisconsin"
+    ],
+    [
+      "'NST-EST2023-POP'!A6",
+      "Northeast"
+    ],
+    [
+      "'NST-EST2023-POP'!A60",
+      ".Wyoming"
+    ],
+    [
+      "'NST-EST2023-POP'!A62",
+      ".Puerto Rico"
+    ],
+    [
+      "'NST-EST2023-POP'!A63",
+      "Vintage 2023 data products are associated with Data Management System projects P-6000042, P-7501659, and P-7527355. The U.S. Census Bureau reviewed these data products for unauthorized disclosure of confidential information and approved the disclosure avoidance practices applied to this release (CBDRB-FY24-0085).  "
+    ],
+    [
+      "'NST-EST2023-POP'!A64",
+      "Note: The estimates are developed from a base that integrates the 2020 Census, Vintage 2020 estimates, and (for the U.S. only) 2020 Demographic Analysis estimates.  For population estimates methodology statements, see https://www.census.gov/programs-surveys/popest/technical-documentation/methodology.html. See Geographic Terms and Definitions at https://www.census.gov/programs-surveys/popest/guidance-geographies/terms-and-definitions.html for a list of the states that are included in each region. All geographic boundaries for the 2023 population estimates series are as of January 1, 2023."
+    ],
+    [
+      "'NST-EST2023-POP'!A65",
+      "Suggested Citation:"
+    ],
+    [
+      "'NST-EST2023-POP'!A66",
+      "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (NST-EST2023-POP)"
+    ],
+    [
+      "'NST-EST2023-POP'!A67",
+      "Source: U.S. Census Bureau, Population Division"
+    ],
+    [
+      "'NST-EST2023-POP'!A68",
+      "Release Date: December 2023"
+    ],
+    [
+      "'NST-EST2023-POP'!A7",
+      "Midwest"
+    ],
+    [
+      "'NST-EST2023-POP'!A8",
+      "South"
+    ],
+    [
+      "'NST-EST2023-POP'!A9",
+      "West"
+    ],
+    [
+      "'NST-EST2023-POP'!B10",
+      "5,024,294"
+    ],
+    [
+      "'NST-EST2023-POP'!B11",
+      "733,374"
+    ],
+    [
+      "'NST-EST2023-POP'!B12",
+      "7,157,902"
+    ],
+    [
+      "'NST-EST2023-POP'!B13",
+      "3,011,490"
+    ],
+    [
+      "'NST-EST2023-POP'!B14",
+      "39,538,212"
+    ],
+    [
+      "'NST-EST2023-POP'!B15",
+      "5,773,707"
+    ],
+    [
+      "'NST-EST2023-POP'!B16",
+      "3,605,912"
+    ],
+    [
+      "'NST-EST2023-POP'!B17",
+      "989,946"
+    ],
+    [
+      "'NST-EST2023-POP'!B18",
+      "689,548"
+    ],
+    [
+      "'NST-EST2023-POP'!B19",
+      "21,538,216"
+    ],
+    [
+      "'NST-EST2023-POP'!B20",
+      "10,713,771"
+    ],
+    [
+      "'NST-EST2023-POP'!B21",
+      "1,455,274"
+    ],
+    [
+      "'NST-EST2023-POP'!B22",
+      "1,839,117"
+    ],
+    [
+      "'NST-EST2023-POP'!B23",
+      "12,813,469"
+    ],
+    [
+      "'NST-EST2023-POP'!B24",
+      "6,785,442"
+    ],
+    [
+      "'NST-EST2023-POP'!B25",
+      "3,190,427"
+    ],
+    [
+      "'NST-EST2023-POP'!B26",
+      "2,937,835"
+    ],
+    [
+      "'NST-EST2023-POP'!B27",
+      "4,506,297"
+    ],
+    [
+      "'NST-EST2023-POP'!B28",
+      "4,657,785"
+    ],
+    [
+      "'NST-EST2023-POP'!B29",
+      "1,363,177"
+    ],
+    [
+      "'NST-EST2023-POP'!B3",
+      "April 1, 2020 Estimates Base"
+    ],
+    [
+      "'NST-EST2023-POP'!B30",
+      "6,177,253"
+    ],
+    [
+      "'NST-EST2023-POP'!B31",
+      "7,032,933"
+    ],
+    [
+      "'NST-EST2023-POP'!B32",
+      "10,077,674"
+    ],
+    [
+      "'NST-EST2023-POP'!B33",
+      "5,706,804"
+    ],
+    [
+      "'NST-EST2023-POP'!B34",
+      "2,961,306"
+    ],
+    [
+      "'NST-EST2023-POP'!B35",
+      "6,154,889"
+    ],
+    [
+      "'NST-EST2023-POP'!B36",
+      "1,084,244"
+    ],
+    [
+      "'NST-EST2023-POP'!B37",
+      "1,961,965"
+    ],
+    [
+      "'NST-EST2023-POP'!B38",
+      "3,104,617"
+    ],
+    [
+      "'NST-EST2023-POP'!B39",
+      "1,377,524"
+    ],
+    [
+      "'NST-EST2023-POP'!B40",
+      "9,289,039"
+    ],
+    [
+      "'NST-EST2023-POP'!B41",
+      "2,117,525"
+    ],
+    [
+      "'NST-EST2023-POP'!B42",
+      "20,202,320"
+    ],
+    [
+      "'NST-EST2023-POP'!B43",
+      "10,439,459"
+    ],
+    [
+      "'NST-EST2023-POP'!B44",
+      "779,079"
+    ],
+    [
+      "'NST-EST2023-POP'!B45",
+      "11,799,331"
+    ],
+    [
+      "'NST-EST2023-POP'!B46",
+      "3,959,411"
+    ],
+    [
+      "'NST-EST2023-POP'!B47",
+      "4,237,279"
+    ],
+    [
+      "'NST-EST2023-POP'!B48",
+      "13,002,788"
+    ],
+    [
+      "'NST-EST2023-POP'!B49",
+      "1,097,371"
+    ],
+    [
+      "'NST-EST2023-POP'!B5",
+      "331,464,948"
+    ],
+    [
+      "'NST-EST2023-POP'!B50",
+      "5,118,422"
+    ],
+    [
+      "'NST-EST2023-POP'!B51",
+      "886,668"
+    ],
+    [
+      "'NST-EST2023-POP'!B52",
+      "6,910,786"
+    ],
+    [
+      "'NST-EST2023-POP'!B53",
+      "29,145,459"
+    ],
+    [
+      "'NST-EST2023-POP'!B54",
+      "3,271,614"
+    ],
+    [
+      "'NST-EST2023-POP'!B55",
+      "643,077"
+    ],
+    [
+      "'NST-EST2023-POP'!B56",
+      "8,631,373"
+    ],
+    [
+      "'NST-EST2023-POP'!B57",
+      "7,705,267"
+    ],
+    [
+      "'NST-EST2023-POP'!B58",
+      "1,793,713"
+    ],
+    [
+      "'NST-EST2023-POP'!B59",
+      "5,893,713"
+    ],
+    [
+      "'NST-EST2023-POP'!B6",
+      "57,614,141"
+    ],
+    [
+      "'NST-EST2023-POP'!B60",
+      "576,850"
+    ],
+    [
+      "'NST-EST2023-POP'!B62",
+      "3,285,874"
+    ],
+    [
+      "'NST-EST2023-POP'!B7",
+      "68,987,296"
+    ],
+    [
+      "'NST-EST2023-POP'!B8",
+      "126,268,529"
+    ],
+    [
+      "'NST-EST2023-POP'!B9",
+      "78,594,982"
+    ],
+    [
+      "'NST-EST2023-POP'!C10",
+      "5,031,864"
+    ],
+    [
+      "'NST-EST2023-POP'!C11",
+      "732,964"
+    ],
+    [
+      "'NST-EST2023-POP'!C12",
+      "7,186,683"
+    ],
+    [
+      "'NST-EST2023-POP'!C13",
+      "3,014,348"
+    ],
+    [
+      "'NST-EST2023-POP'!C14",
+      "39,503,200"
+    ],
+    [
+      "'NST-EST2023-POP'!C15",
+      "5,785,219"
+    ],
+    [
+      "'NST-EST2023-POP'!C16",
+      "3,577,586"
+    ],
+    [
+      "'NST-EST2023-POP'!C17",
+      "991,862"
+    ],
+    [
+      "'NST-EST2023-POP'!C18",
+      "670,839"
+    ],
+    [
+      "'NST-EST2023-POP'!C19",
+      "21,591,299"
+    ],
+    [
+      "'NST-EST2023-POP'!C20",
+      "10,732,390"
+    ],
+    [
+      "'NST-EST2023-POP'!C21",
+      "1,451,181"
+    ],
+    [
+      "'NST-EST2023-POP'!C22",
+      "1,849,339"
+    ],
+    [
+      "'NST-EST2023-POP'!C23",
+      "12,790,357"
+    ],
+    [
+      "'NST-EST2023-POP'!C24",
+      "6,789,098"
+    ],
+    [
+      "'NST-EST2023-POP'!C25",
+      "3,190,904"
+    ],
+    [
+      "'NST-EST2023-POP'!C26",
+      "2,938,124"
+    ],
+    [
+      "'NST-EST2023-POP'!C27",
+      "4,508,155"
+    ],
+    [
+      "'NST-EST2023-POP'!C28",
+      "4,652,022"
+    ],
+    [
+      "'NST-EST2023-POP'!C29",
+      "1,364,517"
+    ],
+    [
+      "'NST-EST2023-POP'!C3",
+      "Population Estimate (as of July 1)"
+    ],
+    [
+      "'NST-EST2023-POP'!C30",
+      "6,173,689"
+    ],
+    [
+      "'NST-EST2023-POP'!C31",
+      "6,997,713"
+    ],
+    [
+      "'NST-EST2023-POP'!C32",
+      "10,070,627"
+    ],
+    [
+      "'NST-EST2023-POP'!C33",
+      "5,710,578"
+    ],
+    [
+      "'NST-EST2023-POP'!C34",
+      "2,958,409"
+    ],
+    [
+      "'NST-EST2023-POP'!C35",
+      "6,154,426"
+    ],
+    [
+      "'NST-EST2023-POP'!C36",
+      "1,087,211"
+    ],
+    [
+      "'NST-EST2023-POP'!C37",
+      "1,963,273"
+    ],
+    [
+      "'NST-EST2023-POP'!C38",
+      "3,115,840"
+    ],
+    [
+      "'NST-EST2023-POP'!C39",
+      "1,378,702"
+    ],
+    [
+      "'NST-EST2023-POP'!C4",
+      "2020"
+    ],
+    [
+      "'NST-EST2023-POP'!C40",
+      "9,272,392"
+    ],
+    [
+      "'NST-EST2023-POP'!C41",
+      "2,118,488"
+    ],
+    [
+      "'NST-EST2023-POP'!C42",
+      "20,104,710"
+    ],
+    [
+      "'NST-EST2023-POP'!C43",
+      "10,453,812"
+    ],
+    [
+      "'NST-EST2023-POP'!C44",
+      "779,563"
+    ],
+    [
+      "'NST-EST2023-POP'!C45",
+      "11,798,292"
+    ],
+    [
+      "'NST-EST2023-POP'!C46",
+      "3,965,234"
+    ],
+    [
+      "'NST-EST2023-POP'!C47",
+      "4,245,044"
+    ],
+    [
+      "'NST-EST2023-POP'!C48",
+      "12,995,477"
+    ],
+    [
+      "'NST-EST2023-POP'!C49",
+      "1,096,444"
+    ],
+    [
+      "'NST-EST2023-POP'!C5",
+      "331,526,933"
+    ],
+    [
+      "'NST-EST2023-POP'!C50",
+      "5,132,151"
+    ],
+    [
+      "'NST-EST2023-POP'!C51",
+      "887,852"
+    ],
+    [
+      "'NST-EST2023-POP'!C52",
+      "6,926,091"
+    ],
+    [
+      "'NST-EST2023-POP'!C53",
+      "29,234,361"
+    ],
+    [
+      "'NST-EST2023-POP'!C54",
+      "3,283,982"
+    ],
+    [
+      "'NST-EST2023-POP'!C55",
+      "642,936"
+    ],
+    [
+      "'NST-EST2023-POP'!C56",
+      "8,637,193"
+    ],
+    [
+      "'NST-EST2023-POP'!C57",
+      "7,724,566"
+    ],
+    [
+      "'NST-EST2023-POP'!C58",
+      "1,791,562"
+    ],
+    [
+      "'NST-EST2023-POP'!C59",
+      "5,896,700"
+    ],
+    [
+      "'NST-EST2023-POP'!C6",
+      "57,430,477"
+    ],
+    [
+      "'NST-EST2023-POP'!C60",
+      "577,664"
+    ],
+    [
+      "'NST-EST2023-POP'!C62",
+      "3,281,557"
+    ],
+    [
+      "'NST-EST2023-POP'!C7",
+      "68,969,794"
+    ],
+    [
+      "'NST-EST2023-POP'!C8",
+      "126,465,281"
+    ],
+    [
+      "'NST-EST2023-POP'!C9",
+      "78,661,381"
+    ],
+    [
+      "'NST-EST2023-POP'!D10",
+      "5,050,380"
+    ],
+    [
+      "'NST-EST2023-POP'!D11",
+      "734,923"
+    ],
+    [
+      "'NST-EST2023-POP'!D12",
+      "7,272,487"
+    ],
+    [
+      "'NST-EST2023-POP'!D13",
+      "3,028,443"
+    ],
+    [
+      "'NST-EST2023-POP'!D14",
+      "39,145,060"
+    ],
+    [
+      "'NST-EST2023-POP'!D15",
+      "5,811,596"
+    ],
+    [
+      "'NST-EST2023-POP'!D16",
+      "3,603,691"
+    ],
+    [
+      "'NST-EST2023-POP'!D17",
+      "1,004,881"
+    ],
+    [
+      "'NST-EST2023-POP'!D18",
+      "669,037"
+    ],
+    [
+      "'NST-EST2023-POP'!D19",
+      "21,830,708"
+    ],
+    [
+      "'NST-EST2023-POP'!D20",
+      "10,790,385"
+    ],
+    [
+      "'NST-EST2023-POP'!D21",
+      "1,446,745"
+    ],
+    [
+      "'NST-EST2023-POP'!D22",
+      "1,904,537"
+    ],
+    [
+      "'NST-EST2023-POP'!D23",
+      "12,690,341"
+    ],
+    [
+      "'NST-EST2023-POP'!D24",
+      "6,813,798"
+    ],
+    [
+      "'NST-EST2023-POP'!D25",
+      "3,197,944"
+    ],
+    [
+      "'NST-EST2023-POP'!D26",
+      "2,937,946"
+    ],
+    [
+      "'NST-EST2023-POP'!D27",
+      "4,507,600"
+    ],
+    [
+      "'NST-EST2023-POP'!D28",
+      "4,627,047"
+    ],
+    [
+      "'NST-EST2023-POP'!D29",
+      "1,378,787"
+    ],
+    [
+      "'NST-EST2023-POP'!D30",
+      "6,175,045"
+    ],
+    [
+      "'NST-EST2023-POP'!D31",
+      "6,991,951"
+    ],
+    [
+      "'NST-EST2023-POP'!D32",
+      "10,038,117"
+    ],
+    [
+      "'NST-EST2023-POP'!D33",
+      "5,717,968"
+    ],
+    [
+      "'NST-EST2023-POP'!D34",
+      "2,949,582"
+    ],
+    [
+      "'NST-EST2023-POP'!D35",
+      "6,170,393"
+    ],
+    [
+      "'NST-EST2023-POP'!D36",
+      "1,106,366"
+    ],
+    [
+      "'NST-EST2023-POP'!D37",
+      "1,964,253"
+    ],
+    [
+      "'NST-EST2023-POP'!D38",
+      "3,146,632"
+    ],
+    [
+      "'NST-EST2023-POP'!D39",
+      "1,387,494"
+    ],
+    [
+      "'NST-EST2023-POP'!D4",
+      "2021"
+    ],
+    [
+      "'NST-EST2023-POP'!D40",
+      "9,269,175"
+    ],
+    [
+      "'NST-EST2023-POP'!D41",
+      "2,116,950"
+    ],
+    [
+      "'NST-EST2023-POP'!D42",
+      "19,854,526"
+    ],
+    [
+      "'NST-EST2023-POP'!D43",
+      "10,567,100"
+    ],
+    [
+      "'NST-EST2023-POP'!D44",
+      "777,982"
+    ],
+    [
+      "'NST-EST2023-POP'!D45",
+      "11,765,227"
+    ],
+    [
+      "'NST-EST2023-POP'!D46",
+      "3,991,634"
+    ],
+    [
+      "'NST-EST2023-POP'!D47",
+      "4,256,465"
+    ],
+    [
+      "'NST-EST2023-POP'!D48",
+      "13,013,614"
+    ],
+    [
+      "'NST-EST2023-POP'!D49",
+      "1,097,092"
+    ],
+    [
+      "'NST-EST2023-POP'!D5",
+      "332,048,977"
+    ],
+    [
+      "'NST-EST2023-POP'!D50",
+      "5,193,848"
+    ],
+    [
+      "'NST-EST2023-POP'!D51",
+      "896,299"
+    ],
+    [
+      "'NST-EST2023-POP'!D52",
+      "6,963,709"
+    ],
+    [
+      "'NST-EST2023-POP'!D53",
+      "29,561,286"
+    ],
+    [
+      "'NST-EST2023-POP'!D54",
+      "3,339,284"
+    ],
+    [
+      "'NST-EST2023-POP'!D55",
+      "647,093"
+    ],
+    [
+      "'NST-EST2023-POP'!D56",
+      "8,657,348"
+    ],
+    [
+      "'NST-EST2023-POP'!D57",
+      "7,741,433"
+    ],
+    [
+      "'NST-EST2023-POP'!D58",
+      "1,785,249"
+    ],
+    [
+      "'NST-EST2023-POP'!D59",
+      "5,879,978"
+    ],
+    [
+      "'NST-EST2023-POP'!D6",
+      "57,243,423"
+    ],
+    [
+      "'NST-EST2023-POP'!D60",
+      "579,548"
+    ],
+    [
+      "'NST-EST2023-POP'!D62",
+      "3,262,693"
+    ],
+    [
+      "'NST-EST2023-POP'!D7",
+      "68,850,246"
+    ],
+    [
+      "'NST-EST2023-POP'!D8",
+      "127,353,282"
+    ],
+    [
+      "'NST-EST2023-POP'!D9",
+      "78,602,026"
+    ],
+    [
+      "'NST-EST2023-POP'!E10",
+      "5,073,903"
+    ],
+    [
+      "'NST-EST2023-POP'!E11",
+      "733,276"
+    ],
+    [
+      "'NST-EST2023-POP'!E12",
+      "7,365,684"
+    ],
+    [
+      "'NST-EST2023-POP'!E13",
+      "3,046,404"
+    ],
+    [
+      "'NST-EST2023-POP'!E14",
+      "39,040,616"
+    ],
+    [
+      "'NST-EST2023-POP'!E15",
+      "5,841,039"
+    ],
+    [
+      "'NST-EST2023-POP'!E16",
+      "3,608,706"
+    ],
+    [
+      "'NST-EST2023-POP'!E17",
+      "1,019,459"
+    ],
+    [
+      "'NST-EST2023-POP'!E18",
+      "670,949"
+    ],
+    [
+      "'NST-EST2023-POP'!E19",
+      "22,245,521"
+    ],
+    [
+      "'NST-EST2023-POP'!E20",
+      "10,913,150"
+    ],
+    [
+      "'NST-EST2023-POP'!E21",
+      "1,439,399"
+    ],
+    [
+      "'NST-EST2023-POP'!E22",
+      "1,938,996"
+    ],
+    [
+      "'NST-EST2023-POP'!E23",
+      "12,582,515"
+    ],
+    [
+      "'NST-EST2023-POP'!E24",
+      "6,832,274"
+    ],
+    [
+      "'NST-EST2023-POP'!E25",
+      "3,199,693"
+    ],
+    [
+      "'NST-EST2023-POP'!E26",
+      "2,936,716"
+    ],
+    [
+      "'NST-EST2023-POP'!E27",
+      "4,511,563"
+    ],
+    [
+      "'NST-EST2023-POP'!E28",
+      "4,588,023"
+    ],
+    [
+      "'NST-EST2023-POP'!E29",
+      "1,389,338"
+    ],
+    [
+      "'NST-EST2023-POP'!E30",
+      "6,163,981"
+    ],
+    [
+      "'NST-EST2023-POP'!E31",
+      "6,982,740"
+    ],
+    [
+      "'NST-EST2023-POP'!E32",
+      "10,033,281"
+    ],
+    [
+      "'NST-EST2023-POP'!E33",
+      "5,714,300"
+    ],
+    [
+      "'NST-EST2023-POP'!E34",
+      "2,938,928"
+    ],
+    [
+      "'NST-EST2023-POP'!E35",
+      "6,177,168"
+    ],
+    [
+      "'NST-EST2023-POP'!E36",
+      "1,122,878"
+    ],
+    [
+      "'NST-EST2023-POP'!E37",
+      "1,968,060"
+    ],
+    [
+      "'NST-EST2023-POP'!E38",
+      "3,177,421"
+    ],
+    [
+      "'NST-EST2023-POP'!E39",
+      "1,399,003"
+    ],
+    [
+      "'NST-EST2023-POP'!E4",
+      "2022"
+    ],
+    [
+      "'NST-EST2023-POP'!E40",
+      "9,260,817"
+    ],
+    [
+      "'NST-EST2023-POP'!E41",
+      "2,113,476"
+    ],
+    [
+      "'NST-EST2023-POP'!E42",
+      "19,673,200"
+    ],
+    [
+      "'NST-EST2023-POP'!E43",
+      "10,695,965"
+    ],
+    [
+      "'NST-EST2023-POP'!E44",
+      "778,912"
+    ],
+    [
+      "'NST-EST2023-POP'!E45",
+      "11,759,697"
+    ],
+    [
+      "'NST-EST2023-POP'!E46",
+      "4,019,271"
+    ],
+    [
+      "'NST-EST2023-POP'!E47",
+      "4,239,379"
+    ],
+    [
+      "'NST-EST2023-POP'!E48",
+      "12,972,091"
+    ],
+    [
+      "'NST-EST2023-POP'!E49",
+      "1,093,842"
+    ],
+    [
+      "'NST-EST2023-POP'!E5",
+      "333,271,411"
+    ],
+    [
+      "'NST-EST2023-POP'!E50",
+      "5,282,955"
+    ],
+    [
+      "'NST-EST2023-POP'!E51",
+      "909,869"
+    ],
+    [
+      "'NST-EST2023-POP'!E52",
+      "7,048,976"
+    ],
+    [
+      "'NST-EST2023-POP'!E53",
+      "30,029,848"
+    ],
+    [
+      "'NST-EST2023-POP'!E54",
+      "3,381,236"
+    ],
+    [
+      "'NST-EST2023-POP'!E55",
+      "647,110"
+    ],
+    [
+      "'NST-EST2023-POP'!E56",
+      "8,679,099"
+    ],
+    [
+      "'NST-EST2023-POP'!E57",
+      "7,784,477"
+    ],
+    [
+      "'NST-EST2023-POP'!E58",
+      "1,774,035"
+    ],
+    [
+      "'NST-EST2023-POP'!E59",
+      "5,890,543"
+    ],
+    [
+      "'NST-EST2023-POP'!E6",
+      "57,026,847"
+    ],
+    [
+      "'NST-EST2023-POP'!E60",
+      "581,629"
+    ],
+    [
+      "'NST-EST2023-POP'!E62",
+      "3,220,113"
+    ],
+    [
+      "'NST-EST2023-POP'!E7",
+      "68,783,028"
+    ],
+    [
+      "'NST-EST2023-POP'!E8",
+      "128,702,030"
+    ],
+    [
+      "'NST-EST2023-POP'!E9",
+      "78,759,506"
+    ],
+    [
+      "'NST-EST2023-POP'!F10",
+      "5,108,468"
+    ],
+    [
+      "'NST-EST2023-POP'!F11",
+      "733,406"
+    ],
+    [
+      "'NST-EST2023-POP'!F12",
+      "7,431,344"
+    ],
+    [
+      "'NST-EST2023-POP'!F13",
+      "3,067,732"
+    ],
+    [
+      "'NST-EST2023-POP'!F14",
+      "38,965,193"
+    ],
+    [
+      "'NST-EST2023-POP'!F15",
+      "5,877,610"
+    ],
+    [
+      "'NST-EST2023-POP'!F16",
+      "3,617,176"
+    ],
+    [
+      "'NST-EST2023-POP'!F17",
+      "1,031,890"
+    ],
+    [
+      "'NST-EST2023-POP'!F18",
+      "678,972"
+    ],
+    [
+      "'NST-EST2023-POP'!F19",
+      "22,610,726"
+    ],
+    [
+      "'NST-EST2023-POP'!F20",
+      "11,029,227"
+    ],
+    [
+      "'NST-EST2023-POP'!F21",
+      "1,435,138"
+    ],
+    [
+      "'NST-EST2023-POP'!F22",
+      "1,964,726"
+    ],
+    [
+      "'NST-EST2023-POP'!F23",
+      "12,549,689"
+    ],
+    [
+      "'NST-EST2023-POP'!F24",
+      "6,862,199"
+    ],
+    [
+      "'NST-EST2023-POP'!F25",
+      "3,207,004"
+    ],
+    [
+      "'NST-EST2023-POP'!F26",
+      "2,940,546"
+    ],
+    [
+      "'NST-EST2023-POP'!F27",
+      "4,526,154"
+    ],
+    [
+      "'NST-EST2023-POP'!F28",
+      "4,573,749"
+    ],
+    [
+      "'NST-EST2023-POP'!F29",
+      "1,395,722"
+    ],
+    [
+      "'NST-EST2023-POP'!F30",
+      "6,180,253"
+    ],
+    [
+      "'NST-EST2023-POP'!F31",
+      "7,001,399"
+    ],
+    [
+      "'NST-EST2023-POP'!F32",
+      "10,037,261"
+    ],
+    [
+      "'NST-EST2023-POP'!F33",
+      "5,737,915"
+    ],
+    [
+      "'NST-EST2023-POP'!F34",
+      "2,939,690"
+    ],
+    [
+      "'NST-EST2023-POP'!F35",
+      "6,196,156"
+    ],
+    [
+      "'NST-EST2023-POP'!F36",
+      "1,132,812"
+    ],
+    [
+      "'NST-EST2023-POP'!F37",
+      "1,978,379"
+    ],
+    [
+      "'NST-EST2023-POP'!F38",
+      "3,194,176"
+    ],
+    [
+      "'NST-EST2023-POP'!F39",
+      "1,402,054"
+    ],
+    [
+      "'NST-EST2023-POP'!F4",
+      "2023"
+    ],
+    [
+      "'NST-EST2023-POP'!F40",
+      "9,290,841"
+    ],
+    [
+      "'NST-EST2023-POP'!F41",
+      "2,114,371"
+    ],
+    [
+      "'NST-EST2023-POP'!F42",
+      "19,571,216"
+    ],
+    [
+      "'NST-EST2023-POP'!F43",
+      "10,835,491"
+    ],
+    [
+      "'NST-EST2023-POP'!F44",
+      "783,926"
+    ],
+    [
+      "'NST-EST2023-POP'!F45",
+      "11,785,935"
+    ],
+    [
+      "'NST-EST2023-POP'!F46",
+      "4,053,824"
+    ],
+    [
+      "'NST-EST2023-POP'!F47",
+      "4,233,358"
+    ],
+    [
+      "'NST-EST2023-POP'!F48",
+      "12,961,683"
+    ],
+    [
+      "'NST-EST2023-POP'!F49",
+      "1,095,962"
+    ],
+    [
+      "'NST-EST2023-POP'!F5",
+      "334,914,895"
+    ],
+    [
+      "'NST-EST2023-POP'!F50",
+      "5,373,555"
+    ],
+    [
+      "'NST-EST2023-POP'!F51",
+      "919,318"
+    ],
+    [
+      "'NST-EST2023-POP'!F52",
+      "7,126,489"
+    ],
+    [
+      "'NST-EST2023-POP'!F53",
+      "30,503,301"
+    ],
+    [
+      "'NST-EST2023-POP'!F54",
+      "3,417,734"
+    ],
+    [
+      "'NST-EST2023-POP'!F55",
+      "647,464"
+    ],
+    [
+      "'NST-EST2023-POP'!F56",
+      "8,715,698"
+    ],
+    [
+      "'NST-EST2023-POP'!F57",
+      "7,812,880"
+    ],
+    [
+      "'NST-EST2023-POP'!F58",
+      "1,770,071"
+    ],
+    [
+      "'NST-EST2023-POP'!F59",
+      "5,910,955"
+    ],
+    [
+      "'NST-EST2023-POP'!F6",
+      "56,983,517"
+    ],
+    [
+      "'NST-EST2023-POP'!F60",
+      "584,057"
+    ],
+    [
+      "'NST-EST2023-POP'!F62",
+      "3,205,691"
+    ],
+    [
+      "'NST-EST2023-POP'!F7",
+      "68,909,283"
+    ],
+    [
+      "'NST-EST2023-POP'!F8",
+      "130,125,290"
+    ],
+    [
+      "'NST-EST2023-POP'!F9",
+      "78,896,805"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "name:_NST01",
+      "dialect": "excel",
+      "expression": "'NST-EST2023-POP'!$A$4:$F$62",
+      "kind": "name",
+      "references": [
+        "'NST-EST2023-POP'!A4:F62"
+      ]
+    },
+    {
+      "anchor": "name:'NST-EST2023-POP'!_xlnm.Print_Area",
+      "dialect": "excel",
+      "expression": "'NST-EST2023-POP'!$A$2:$F$68",
+      "kind": "name",
+      "references": [
+        "'NST-EST2023-POP'!A2:F68"
+      ]
+    },
+    {
+      "anchor": "name:'NST-EST2023-POP'!_xlnm.Print_Titles",
+      "dialect": "excel",
+      "expression": "'NST-EST2023-POP'!$A:$A,'NST-EST2023-POP'!$2:$4",
+      "kind": "name",
+      "references": [
+        "'NST-EST2023-POP'!A:A",
+        "'NST-EST2023-POP'!2:4"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "'NST-EST2023-POP'!A1",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "table with row headers in column A and column headers in rows 3 through 4. (leading dots indicate sub-parts)"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A2",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A3",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Geographic Area"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B3",
+      "label": "Geographic Area",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "April 1, 2020 Estimates Base"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C3",
+      "label": "April 1, 2020 Estimates Base",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Population Estimate (as of July 1)"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C4",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2020.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D4",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2021.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E4",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2022.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F4",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2023.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A5",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "United States"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B5",
+      "label": "United States",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 331464948.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C5",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 331526933.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D5",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 332048977.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E5",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 333271411.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F5",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 334914895.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A6",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Northeast"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B6",
+      "label": "Northeast",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 57614141.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C6",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 57430477.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D6",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 57243423.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E6",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 57026847.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F6",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 56983517.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A7",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Midwest"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B7",
+      "label": "Midwest",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 68987296.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C7",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 68969794.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D7",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 68850246.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E7",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 68783028.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F7",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 68909283.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A8",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "South"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B8",
+      "label": "South",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 126268529.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C8",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 126465281.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D8",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 127353282.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E8",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 128702030.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F8",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 130125290.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A9",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "West"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B9",
+      "label": "West",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 78594982.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C9",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 78661381.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D9",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 78602026.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E9",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 78759506.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F9",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 78896805.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A10",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Alabama"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B10",
+      "label": ".Alabama",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5024294.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C10",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5031864.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D10",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5050380.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E10",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5073903.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F10",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5108468.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A11",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Alaska"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B11",
+      "label": ".Alaska",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 733374.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C11",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 732964.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D11",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 734923.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E11",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 733276.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F11",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 733406.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A12",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Arizona"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B12",
+      "label": ".Arizona",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7157902.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C12",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7186683.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D12",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7272487.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E12",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7365684.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F12",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7431344.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A13",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Arkansas"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B13",
+      "label": ".Arkansas",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3011490.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C13",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3014348.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D13",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3028443.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E13",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3046404.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F13",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3067732.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A14",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".California"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B14",
+      "label": ".California",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 39538212.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C14",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 39503200.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D14",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 39145060.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E14",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 39040616.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F14",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 38965193.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A15",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Colorado"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B15",
+      "label": ".Colorado",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5773707.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C15",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5785219.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D15",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5811596.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E15",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5841039.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F15",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5877610.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A16",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Connecticut"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B16",
+      "label": ".Connecticut",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3605912.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C16",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3577586.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D16",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3603691.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E16",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3608706.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F16",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3617176.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A17",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Delaware"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B17",
+      "label": ".Delaware",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 989946.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C17",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 991862.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D17",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1004881.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E17",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1019459.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F17",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1031890.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A18",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".District of Columbia"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B18",
+      "label": ".District of Columbia",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 689548.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C18",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 670839.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D18",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 669037.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E18",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 670949.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F18",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 678972.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A19",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Florida"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B19",
+      "label": ".Florida",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 21538216.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C19",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 21591299.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D19",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 21830708.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E19",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 22245521.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F19",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 22610726.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A20",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Georgia"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B20",
+      "label": ".Georgia",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10713771.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C20",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10732390.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D20",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10790385.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E20",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10913150.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F20",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11029227.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A21",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Hawaii"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B21",
+      "label": ".Hawaii",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1455274.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C21",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1451181.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D21",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1446745.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E21",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1439399.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F21",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1435138.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A22",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Idaho"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B22",
+      "label": ".Idaho",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1839117.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C22",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1849339.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D22",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1904537.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E22",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1938996.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F22",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1964726.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A23",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Illinois"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B23",
+      "label": ".Illinois",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12813469.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C23",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12790357.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D23",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12690341.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E23",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12582515.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F23",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12549689.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A24",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Indiana"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B24",
+      "label": ".Indiana",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6785442.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C24",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6789098.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D24",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6813798.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E24",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6832274.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F24",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6862199.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A25",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Iowa"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B25",
+      "label": ".Iowa",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3190427.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C25",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3190904.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D25",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3197944.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E25",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3199693.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F25",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3207004.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A26",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Kansas"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B26",
+      "label": ".Kansas",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2937835.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C26",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2938124.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D26",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2937946.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E26",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2936716.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F26",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2940546.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A27",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Kentucky"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B27",
+      "label": ".Kentucky",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4506297.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C27",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4508155.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D27",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4507600.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E27",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4511563.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F27",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4526154.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A28",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Louisiana"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B28",
+      "label": ".Louisiana",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4657785.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C28",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4652022.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D28",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4627047.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E28",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4588023.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F28",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4573749.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A29",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Maine"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B29",
+      "label": ".Maine",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1363177.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C29",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1364517.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D29",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1378787.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E29",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1389338.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F29",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1395722.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A30",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Maryland"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B30",
+      "label": ".Maryland",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6177253.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C30",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6173689.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D30",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6175045.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E30",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6163981.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F30",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6180253.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A31",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Massachusetts"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B31",
+      "label": ".Massachusetts",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7032933.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C31",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6997713.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D31",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6991951.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E31",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6982740.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F31",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7001399.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A32",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Michigan"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B32",
+      "label": ".Michigan",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10077674.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C32",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10070627.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D32",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10038117.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E32",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10033281.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F32",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10037261.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A33",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Minnesota"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B33",
+      "label": ".Minnesota",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5706804.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C33",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5710578.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D33",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5717968.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E33",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5714300.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F33",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5737915.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A34",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Mississippi"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B34",
+      "label": ".Mississippi",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2961306.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C34",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2958409.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D34",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2949582.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E34",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2938928.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F34",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2939690.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A35",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Missouri"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B35",
+      "label": ".Missouri",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6154889.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C35",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6154426.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D35",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6170393.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E35",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6177168.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F35",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6196156.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A36",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Montana"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B36",
+      "label": ".Montana",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1084244.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C36",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1087211.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D36",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1106366.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E36",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1122878.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F36",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1132812.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A37",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Nebraska"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B37",
+      "label": ".Nebraska",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1961965.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C37",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1963273.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D37",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1964253.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E37",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1968060.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F37",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1978379.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A38",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Nevada"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B38",
+      "label": ".Nevada",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3104617.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C38",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3115840.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D38",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3146632.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E38",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3177421.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F38",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3194176.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A39",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".New Hampshire"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B39",
+      "label": ".New Hampshire",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1377524.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C39",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1378702.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D39",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1387494.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E39",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1399003.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F39",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1402054.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A40",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".New Jersey"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B40",
+      "label": ".New Jersey",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 9289039.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C40",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 9272392.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D40",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 9269175.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E40",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 9260817.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F40",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 9290841.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A41",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".New Mexico"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B41",
+      "label": ".New Mexico",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2117525.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C41",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2118488.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D41",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2116950.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E41",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2113476.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F41",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 2114371.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A42",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".New York"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B42",
+      "label": ".New York",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 20202320.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C42",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 20104710.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D42",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 19854526.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E42",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 19673200.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F42",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 19571216.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A43",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".North Carolina"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B43",
+      "label": ".North Carolina",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10439459.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C43",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10453812.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D43",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10567100.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E43",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10695965.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F43",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 10835491.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A44",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".North Dakota"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B44",
+      "label": ".North Dakota",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 779079.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C44",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 779563.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D44",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 777982.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E44",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 778912.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F44",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 783926.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A45",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Ohio"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B45",
+      "label": ".Ohio",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11799331.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C45",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11798292.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D45",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11765227.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E45",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11759697.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F45",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 11785935.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A46",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Oklahoma"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B46",
+      "label": ".Oklahoma",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3959411.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C46",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3965234.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D46",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3991634.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E46",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4019271.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F46",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4053824.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A47",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Oregon"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B47",
+      "label": ".Oregon",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4237279.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C47",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4245044.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D47",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4256465.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E47",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4239379.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F47",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 4233358.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A48",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Pennsylvania"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B48",
+      "label": ".Pennsylvania",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 13002788.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C48",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12995477.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D48",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 13013614.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E48",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12972091.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F48",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 12961683.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A49",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Rhode Island"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B49",
+      "label": ".Rhode Island",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1097371.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C49",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1096444.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D49",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1097092.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E49",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1093842.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F49",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1095962.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A50",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".South Carolina"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B50",
+      "label": ".South Carolina",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5118422.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C50",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5132151.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D50",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5193848.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E50",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5282955.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F50",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5373555.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A51",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".South Dakota"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B51",
+      "label": ".South Dakota",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 886668.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C51",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 887852.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D51",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 896299.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E51",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 909869.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F51",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 919318.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A52",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Tennessee"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B52",
+      "label": ".Tennessee",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6910786.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C52",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6926091.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D52",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 6963709.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E52",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7048976.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F52",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7126489.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A53",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Texas"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B53",
+      "label": ".Texas",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 29145459.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C53",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 29234361.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D53",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 29561286.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E53",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 30029848.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F53",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 30503301.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A54",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Utah"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B54",
+      "label": ".Utah",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3271614.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C54",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3283982.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D54",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3339284.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E54",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3381236.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F54",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3417734.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A55",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Vermont"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B55",
+      "label": ".Vermont",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 643077.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C55",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 642936.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D55",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 647093.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E55",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 647110.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F55",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 647464.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A56",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Virginia"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B56",
+      "label": ".Virginia",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 8631373.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C56",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 8637193.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D56",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 8657348.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E56",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 8679099.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F56",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 8715698.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A57",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Washington"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B57",
+      "label": ".Washington",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7705267.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C57",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7724566.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D57",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7741433.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E57",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7784477.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F57",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 7812880.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A58",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".West Virginia"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B58",
+      "label": ".West Virginia",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1793713.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C58",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1791562.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D58",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1785249.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E58",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1774035.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F58",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 1770071.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A59",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Wisconsin"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B59",
+      "label": ".Wisconsin",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5893713.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C59",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5896700.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D59",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5879978.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E59",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5890543.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F59",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 5910955.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A60",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Wyoming"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B60",
+      "label": ".Wyoming",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 576850.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C60",
+      "label": "Population Estimate (as of July 1)",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 577664.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D60",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 579548.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E60",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 581629.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F60",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 584057.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A62",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": ".Puerto Rico"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!B62",
+      "label": ".Puerto Rico",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3285874.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!C62",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3281557.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!D62",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3262693.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!E62",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3220113.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!F62",
+      "read_by": 0,
+      "value": {
+        "type": "number",
+        "value": 3205691.0
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A63",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Vintage 2023 data products are associated with Data Management System projects P-6000042, P-7501659, and P-7527355. The U.S. Census Bureau reviewed these data products for unauthorized disclosure of confidential information and approved the disclosure avoidance practices applied to this release (CBDRB-FY24-0085).  "
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A64",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Note: The estimates are developed from a base that integrates the 2020 Census, Vintage 2020 estimates, and (for the U.S. only) 2020 Demographic Analysis estimates.  For population estimates methodology statements, see https://www.census.gov/programs-surveys/popest/technical-documentation/methodology.html. See Geographic Terms and Definitions at https://www.census.gov/programs-surveys/popest/guidance-geographies/terms-and-definitions.html for a list of the states that are included in each region. All geographic boundaries for the 2023 population estimates series are as of January 1, 2023."
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A65",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Suggested Citation:"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A66",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Annual Estimates of the Resident Population for the United States, Regions, States, District of Columbia, and Puerto Rico: April 1, 2020 to July 1, 2023 (NST-EST2023-POP)"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A67",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Source: U.S. Census Bureau, Population Division"
+      }
+    },
+    {
+      "anchor": "'NST-EST2023-POP'!A68",
+      "read_by": 0,
+      "value": {
+        "type": "text",
+        "value": "Release Date: December 2023"
+      }
+    }
+  ],
+  "rules": []
+}

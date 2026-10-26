@@ -1,0 +1,870 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+{
+  "body": [
+    {
+      "anchor": "ExcelTable",
+      "blocks": [
+        {
+          "anchor": "name:NonTable",
+          "inlines": [
+            {
+              "text": "NonTable",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "ExcelTable!A1:C4",
+          "caption": "NonTable",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C4",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "kind": "defined_name",
+                "name": "NonTable"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              },
+              {
+                "detail": "label column A",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Name",
+              "Age",
+              "AgeGroup"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "ExcelTable!A1",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "A1:C4"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "ExcelTable!A1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!B1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Age",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!C1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AgeGroup",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!A2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Anton",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!B2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "44",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!C2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!A3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bertha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!B3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "33",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!C3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!A4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Cäsar",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!B4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "21",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!C4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "anchor": "table:TableName",
+          "inlines": [
+            {
+              "text": "TableName",
+              "type": "text"
+            }
+          ],
+          "level": 3,
+          "type": "heading"
+        },
+        {
+          "anchor": "ExcelTable!G1:I4",
+          "caption": "TableName",
+          "header_rows": 1,
+          "layout": {
+            "certainty": "exact",
+            "data": "G2:I4",
+            "found_by": [
+              {
+                "kind": "list_object",
+                "name": "TableName"
+              },
+              {
+                "detail": "label column G",
+                "id": "L",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "Name",
+              "Age",
+              "AgeGroup"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "table:TableName",
+            "kind": "table",
+            "label_cols": 1,
+            "range": "G1:I4"
+          },
+          "rows": [
+            [
+              {
+                "anchor": "ExcelTable!G1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Name",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!H1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Age",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!I1",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "AgeGroup",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!G2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Anton",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!H2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "44",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!I2",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!G3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Bertha",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!H3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "33",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!I3",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "3",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "ExcelTable!G4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Cäsar",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!H4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "21",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!I4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "2",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "inlines": [
+            {
+              "text": "Hidden columns: K to XFD.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "caption": "Excel tables",
+          "header_rows": 1,
+          "role": "excel-table",
+          "rows": [
+            [
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Table",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Range",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Columns",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ],
+            [
+              {
+                "anchor": "table:TableName",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "TableName",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "anchor": "ExcelTable!G1:I4",
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "G1:I4",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              },
+              {
+                "col_span": 1,
+                "inlines": [
+                  {
+                    "text": "Name, Age, AgeGroup",
+                    "type": "text"
+                  }
+                ],
+                "row_span": 1
+              }
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "kind": "sheet",
+      "title": "ExcelTable",
+      "type": "section"
+    }
+  ],
+  "facets": {
+    "formulas": [
+      {
+        "anchor": "ExcelTable!C2",
+        "cached": {
+          "type": "number",
+          "value": 4.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(B2/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{B2}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!B2"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "ExcelTable!I2",
+        "cached": {
+          "type": "number",
+          "value": 4.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(H2/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{H2}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!H2"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "ExcelTable!C3",
+        "cached": {
+          "type": "number",
+          "value": 3.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(B3/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{B3}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!B3"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "ExcelTable!I3",
+        "cached": {
+          "type": "number",
+          "value": 3.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(H3/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{H3}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!H3"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "ExcelTable!C4",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(B4/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{B4}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!B4"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "ExcelTable!I4",
+        "cached": {
+          "type": "number",
+          "value": 2.0
+        },
+        "dialect": "excel",
+        "expression": "=INT(H4/10)",
+        "kind": "cell",
+        "latex": "\\operatorname{INT}(\\frac{\\mathrm{H4}}{10})",
+        "pattern": "p1",
+        "range": "ExcelTable!C2:I4",
+        "references": [
+          "ExcelTable!H4"
+        ],
+        "role": "result"
+      },
+      {
+        "anchor": "name:NonTable",
+        "dialect": "excel",
+        "expression": "ExcelTable!$A$1:$C$4",
+        "kind": "name",
+        "references": [
+          "ExcelTable!A1:C4"
+        ]
+      },
+      {
+        "anchor": "name:TableAsRangeName",
+        "dialect": "excel",
+        "expression": "TableName[#All]",
+        "kind": "name",
+        "references": [
+          "table:TableName"
+        ]
+      }
+    ],
+    "graphs": [
+      {
+        "edges": [
+          {
+            "from": "v1",
+            "kind": "feeds",
+            "to": "p1"
+          }
+        ],
+        "id": "dependencies",
+        "kind": "dependency",
+        "nodes": [
+          {
+            "anchor": "ExcelTable!C2:I4",
+            "id": "p1",
+            "kind": "group",
+            "label": "ExcelTable!C2:I4"
+          },
+          {
+            "anchor": "ExcelTable!B2:H4",
+            "id": "v1",
+            "kind": "parameters",
+            "label": "ExcelTable!B2:H4"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "anchor": "ExcelTable!A1",
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Name"
+        }
+      },
+      {
+        "anchor": "ExcelTable!B1",
+        "label": "NonTable / Name",
+        "path": [
+          "NonTable",
+          "Name"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Age"
+        }
+      },
+      {
+        "anchor": "ExcelTable!C1",
+        "label": "NonTable / Age",
+        "path": [
+          "NonTable",
+          "Age"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "AgeGroup"
+        }
+      },
+      {
+        "anchor": "ExcelTable!G1",
+        "label": "TableName / AgeGroup",
+        "path": [
+          "TableName",
+          "AgeGroup"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Name"
+        }
+      },
+      {
+        "anchor": "ExcelTable!H1",
+        "label": "TableName / Name",
+        "path": [
+          "TableName",
+          "Name"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Age"
+        }
+      },
+      {
+        "anchor": "ExcelTable!I1",
+        "label": "TableName / Age",
+        "path": [
+          "TableName",
+          "Age"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "AgeGroup"
+        }
+      },
+      {
+        "anchor": "ExcelTable!A2",
+        "label": "NonTable / Name",
+        "path": [
+          "NonTable",
+          "Name"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Anton"
+        }
+      },
+      {
+        "anchor": "ExcelTable!B2",
+        "label": "NonTable / Age / Anton",
+        "path": [
+          "NonTable",
+          "Age",
+          "Anton"
+        ],
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 44.0
+        }
+      },
+      {
+        "anchor": "ExcelTable!G2",
+        "label": "TableName / Name",
+        "path": [
+          "TableName",
+          "Name"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Anton"
+        }
+      },
+      {
+        "anchor": "ExcelTable!H2",
+        "label": "TableName / Age / Anton",
+        "path": [
+          "TableName",
+          "Age",
+          "Anton"
+        ],
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 44.0
+        }
+      },
+      {
+        "anchor": "ExcelTable!A3",
+        "label": "NonTable / Name",
+        "path": [
+          "NonTable",
+          "Name"
+        ],
+        "read_by": 0,
+        "value": {
+          "type": "text",
+          "value": "Bertha"
+        }
+      },
+      {
+        "anchor": "ExcelTable!B3",
+        "label": "NonTable / Age / Bertha",
+        "path": [
+          "NonTable",
+          "Age",
+          "Bertha"
+        ],
+        "read_by": 1,
+        "value": {
+          "type": "number",
+          "value": 33.0
+        }
+      },
+      "<6 more items>"
+    ]
+  },
+  "model_version": 1,
+  "overview": {
+    "facts": [
+      [
+        "Sheets",
+        "1"
+      ],
+      [
+        "Formulas",
+        "6"
+      ],
+      [
+        "Patterns",
+        "1"
+      ],
+      [
+        "Parameters",
+        "18"
+      ],
+      [
+        "Results",
+        "6"
+      ],
+      [
+        "Names",
+        "2"
+      ],
+      [
+        "Last changed",
+        "2013-07-16T07:00:19Z"
+      ]
+    ],
+    "parts": [
+      {
+        "id": "ExcelTable",
+        "kind": "sheet",
+        "name": "ExcelTable",
+        "role": "result",
+        "size": "3 rows x 3 columns, 2 regions"
+      }
+    ]
+  },
+  "properties": {
+    "created": {
+      "type": "date_time",
+      "value": "2006-09-21T08:52:22Z"
+    },
+    "custom": {
+      "application": {
+        "type": "text",
+        "value": "Microsoft Excel"
+      },
+      "calc_mode": {
+        "type": "text",
+        "value": "auto"
+      },
+      "iterative_calculation": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "modified": {
+      "type": "date_time",
+      "value": "2013-07-16T07:00:19Z"
+    }
+  },
+  "source": {
+    "detection": {
+      "confidence": "certain",
+      "evidence": "zip with [Content_Types].xml main part spreadsheetml"
+    },
+    "format": "xlsx",
+    "modified": "<modified>",
+    "name": "ExcelTables.xlsx",
+    "path": "<corpus>/office/ExcelTables.xlsx",
+    "reader": {
+      "id": "sheet",
+      "version": "0.1.0"
+    },
+    "sha256": "1e43011440eb39000d1751abaf9ded42d37b26f91b4f586a94bf91ce8ecbe9e5",
+    "size": 9457
+  }
+}

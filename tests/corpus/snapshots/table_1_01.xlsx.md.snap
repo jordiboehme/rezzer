@@ -1,0 +1,164 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: document
+title: "table_1_01.xlsx"
+resource: "<corpus>/office/table_1_01.xlsx"
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: high
+source_sha256: "1ad53bb04a8ac5144b55efa97dec3678035826ce9f04a3833fe061bf322b840d"
+source_size: 20505
+format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
+reader: "sheet/0.1.0"
+completeness: complete
+losses: 0
+language: "en"
+created: "2026-09-21T19:29:46Z"
+modified: "2026-09-21T19:29:46Z"
+---
+
+# table\_1\_01.xlsx
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| Table\_1\_01 | sheet | 52 rows x 16 columns |  |  |
+
+- Sheets: 1
+- Parameters: 22
+- Names: 1
+- Last changed: 2026-09-21T19:29:46Z
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| application | Microsoft Excel |
+| calc\_mode | auto |
+| iterative\_calculation | false |
+| last\_modified\_by | Betancourt, Maria |
+
+## Table\_1\_01
+
+### Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026
+
+(Thousand Megawatthours) (A2)
+
+Table A1:P57 (data A5:P56), header rows 3 to 4, found by: frozen panes, print titles; rules: no gaps, caption rows 1 to 2, header by type change, bold header.
+
+| Period | Generation at Utility Scale Facilities / Coal | Generation at Utility Scale Facilities / Petroleum Liquids | Generation at Utility Scale Facilities / Petroleum Coke | Generation at Utility Scale Facilities / Natural Gas | Generation at Utility Scale Facilities / Other Fossil Gas | Generation at Utility Scale Facilities / Nuclear | Generation at Utility Scale Facilities / Hydroelectric Conventional | Generation at Utility Scale Facilities / Solar | Generation at Utility Scale Facilities / Renewable Sources Excluding Hydroelectric and Solar | Generation at Utility Scale Facilities / Hydroelectric Pumped Storage | Generation at Utility Scale Facilities / Other | Generation at Utility Scale Facilities / Total Generation at Utility Scale Facilities | Small Scale Generation / Estimated Solar Photovoltaic | Net Generation From Utility and Small Scale Facilities / Estimated Total Solar Photovoltaic | Net Generation From Utility and Small Scale Facilities / Estimated Total Solar |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Annual Totals | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| 2016 | 1,239,149 | 13,008 | 11,197 | 1,379,271 | 12,807 | 805,694 | 267,812 | 36,054 | 305,579 | -6,686 | 13,689 | 4,077,574 | 18,812 | 51,483 | 54,866 |
+| 2017 | 1,205,835 | 12,414 | 8,976 | 1,297,703 | 12,469 | 804,950 | 300,333 | 53,287 | 332,963 | -6,495 | 13,008 | 4,035,443 | 23,990 | 74,008 | 77,277 |
+| 2018 | 1,149,487 | 16,245 | 8,981 | 1,471,843 | 13,463 | 807,084 | 292,524 | 63,825 | 350,467 | -5,905 | 12,973 | 4,180,988 | 29,539 | 89,773 | 93,365 |
+| 2019 | 964,957 | 11,522 | 6,819 | 1,588,533 | 12,591 | 809,409 | 287,874 | 71,937 | 368,862 | -5,261 | 13,331 | 4,130,574 | 34,957 | 103,676 | 106,894 |
+| 2020 | 773,393 | 9,662 | 7,679 | 1,626,790 | 11,818 | 789,879 | 285,274 | 89,199 | 408,539 | -5,321 | 12,855 | 4,009,767 | 41,522 | 127,588 | 130,721 |
+| 2021 | 897,999 | 11,663 | 7,511 | 1,579,190 | 11,397 | 779,645 | 251,585 | 115,258 | 448,424 | -5,112 | 12,140 | 4,109,699 | 49,164 | 161,499 | 164,422 |
+| 2022 | 831,512 | 15,805 | 7,126 | 1,687,065 | 11,722 | 771,537 | 254,789 | 143,792 | 502,234 | -6,028 | 11,114 | 4,230,668 | 61,282 | 202,075 | 205,074 |
+| 2023 | 675,115 | 11,397 | 4,836 | 1,806,063 | 11,778 | 774,873 | 245,002 | 165,530 | 484,708 | -5,990 | 9,957 | 4,183,270 | 73,406 | 236,090 | 238,937 |
+| 2024 | 652,156 | 11,456 | 3,629 | 1,869,902 | 10,845 | 781,865 | 242,896 | 219,834 | 513,733 | -5,852 | 8,170 | 4,308,634 | 83,918 | 300,634 | 303,752 |
+| 2025 | 737,151 | 14,370 | 4,889 | 1,807,338 | 10,697 | 784,781 | 247,023 | 295,671 | 526,246 | -5,320 | 6,654 | 4,429,502 | 93,148 | 385,965 | 388,820 |
+| Year 2024 | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| January | 75,618 | 1,469 | 360 | 161,667 | 1,074 | 69,080 | 21,554 | 9,583 | 40,334 | -414 | 799 | 381,122 | 4,726 | 14,230 | 14,309 |
+| February | 44,137 | 740 | 217 | 131,845 | 931 | 64,584 | 20,795 | 12,540 | 46,108 | -404 | 720 | 322,214 | 5,342 | 17,763 | 17,882 |
+| March | 38,505 | 784 | 207 | 131,137 | 882 | 63,346 | 23,363 | 16,019 | 50,354 | -349 | 689 | 324,938 | 7,113 | 22,911 | 23,132 |
+| April | 37,246 | 866 | 278 | 121,532 | 913 | 57,542 | 20,916 | 19,241 | 51,940 | -338 | 644 | 310,780 | 7,832 | 26,741 | 27,073 |
+| May | 45,812 | 850 | 304 | 143,993 | 889 | 64,973 | 24,477 | 22,371 | 44,360 | -284 | 738 | 348,485 | 8,539 | 30,496 | 30,910 |
+| June | 61,339 | 890 | 389 | 169,156 | 941 | 68,192 | 22,397 | 24,459 | 43,755 | -579 | 694 | 391,632 | 8,553 | 32,598 | 33,012 |
+| July | 71,565 | 997 | 451 | 205,959 | 949 | 69,851 | 21,384 | 24,484 | 33,593 | -639 | 723 | 429,317 | 8,778 | 32,901 | 33,262 |
+| August | 68,760 | 993 | 432 | 202,915 | 911 | 69,760 | 20,491 | 24,328 | 34,653 | -798 | 682 | 423,127 | 8,412 | 32,387 | 32,741 |
+| Sept | 54,559 | 839 | 236 | 169,671 | 836 | 62,660 | 15,911 | 20,538 | 34,165 | -637 | 619 | 359,397 | 7,511 | 27,714 | 28,049 |
+| October | 46,890 | 929 | 232 | 146,711 | 801 | 58,773 | 15,352 | 19,828 | 44,334 | -439 | 570 | 333,980 | 6,736 | 26,331 | 26,564 |
+| November | 44,924 | 875 | 220 | 137,687 | 800 | 61,904 | 16,723 | 13,841 | 45,214 | -490 | 652 | 322,351 | 5,393 | 19,098 | 19,234 |
+| December | 62,800 | 1,224 | 304 | 147,630 | 919 | 71,200 | 19,533 | 12,601 | 44,923 | -481 | 639 | 361,292 | 4,984 | 17,465 | 17,585 |
+| Year 2025 | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| January | 83,153 | 2,751 | 538 | 157,001 | 1,104 | 71,739 | 21,431 | 15,454 | 49,002 | -467 | 640 | 402,345 | 5,397 | 20,763 | 20,851 |
+| February | 62,306 | 1,182 | 336 | 131,374 | 1,111 | 61,829 | 19,543 | 16,448 | 44,290 | -410 | 584 | 338,592 | 5,805 | 22,114 | 22,253 |
+| March | 49,215 | 857 | 412 | 118,118 | 772 | 62,457 | 22,451 | 23,238 | 55,917 | -399 | 590 | 333,629 | 7,961 | 31,029 | 31,199 |
+| April | 45,526 | 856 | 319 | 114,642 | 648 | 57,893 | 22,839 | 26,781 | 50,648 | -259 | 584 | 320,478 | 8,758 | 35,240 | 35,538 |
+| May | 48,778 | 763 | 344 | 135,072 | 634 | 62,145 | 24,356 | 29,746 | 41,911 | -271 | 556 | 344,034 | 9,306 | 38,721 | 39,051 |
+| June | 64,502 | 1,115 | 417 | 164,793 | 962 | 66,222 | 22,159 | 32,034 | 40,959 | -420 | 542 | 393,285 | 9,423 | 41,070 | 41,458 |
+| July | 80,260 | 1,107 | 567 | 201,991 | 887 | 70,781 | 19,982 | 33,424 | 37,224 | -486 | 582 | 446,320 | 9,857 | 42,913 | 43,281 |
+| August | 69,728 | 1,019 | 501 | 192,894 | 864 | 70,705 | 20,098 | 31,809 | 32,693 | -568 | 499 | 420,242 | 9,319 | 40,791 | 41,128 |
+| Sept | 58,302 | 907 | 390 | 167,876 | 963 | 65,458 | 15,285 | 28,149 | 30,805 | -457 | 467 | 368,145 | 8,176 | 36,069 | 36,325 |
+| October | 54,019 | 942 | 437 | 143,985 | 1,086 | 59,222 | 16,545 | 24,605 | 44,429 | -513 | 497 | 345,253 | 7,589 | 31,960 | 32,195 |
+| November | 54,490 | 981 | 334 | 131,565 | 867 | 63,809 | 18,415 | 18,592 | 45,989 | -610 | 554 | 334,986 | 5,987 | 24,450 | 24,580 |
+| December | 66,871 | 1,890 | 293 | 148,027 | 800 | 72,521 | 23,920 | 15,392 | 52,379 | -462 | 561 | 382,194 | 5,569 | 20,846 | 20,962 |
+| Year 2026 | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| January | 72,503 | 5,141 | 407 | 151,630 | 912 | 73,251 | 27,909 | 17,985 | 49,844 | -515 | 463 | 399,529 | 6,051 | 23,959 | 24,036 |
+| February | 55,859 | 3,110 | 336 | 132,089 | 797 | 62,384 | 22,462 | 21,305 | 44,608 | -539 | 390 | 342,801 | 6,433 | 27,619 | 27,739 |
+| March | 44,132 | 986 | 276 | 127,375 | 875 | 62,096 | 26,922 | 29,000 | 57,262 | -591 | 424 | 348,756 | 8,953 | 37,730 | 37,953 |
+| April | 39,777 | 908 | 348 | 124,449 | 872 | 57,373 | 22,494 | 31,104 | 53,541 | -463 | 302 | 330,707 | 9,808 | 40,648 | 40,912 |
+| May | 45,119 | 1,044 | 403 | 137,271 | 608 | 65,001 | 22,738 | 36,418 | 46,157 | -409 | 341 | 354,691 | 10,728 | 46,790 | 47,147 |
+| June | 56,290 | 970 | 391 | 163,237 | 583 | 68,786 | 23,725 | 38,923 | 46,916 | -468 | 319 | 399,671 | 10,724 | 49,281 | 49,648 |
+| July | 75,785 | 1,341 | 463 | 205,294 | 705 | 71,172 | 20,266 | 41,412 | 37,533 | -524 | 298 | 453,744 | 10,925 | 52,022 | 52,337 |
+| Year to Date | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| 2024 | 374,222 | 6,596 | 2,206 | 1,065,289 | 6,579 | 457,567 | 154,885 | 128,697 | 310,444 | -3,007 | 5,009 | 2,508,488 | 50,882 | 177,639 | 179,579 |
+| 2025 | 433,741 | 8,631 | 2,934 | 1,022,991 | 6,118 | 453,065 | 152,761 | 177,124 | 319,951 | -2,710 | 4,076 | 2,578,682 | 56,507 | 231,850 | 233,631 |
+| 2026 | 389,464 | 13,499 | 2,624 | 1,041,345 | 5,353 | 460,063 | 166,516 | 216,148 | 335,860 | -3,510 | 2,537 | 2,629,899 | 63,623 | 278,050 | 279,771 |
+| Rolling 12 Months Ending in July | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← | ← |
+| 2025 | 711,674 | 13,490 | 4,357 | 1,827,605 | 10,384 | 777,363 | 240,772 | 268,261 | 523,240 | -5,556 | 7,237 | 4,378,829 | 89,543 | 354,845 | 357,804 |
+| 2026 | 692,874 | 19,239 | 4,579 | 1,825,692 | 9,932 | 791,778 | 260,778 | 334,696 | 542,155 | -6,120 | 5,115 | 4,480,718 | 100,264 | 432,165 | 434,960 |
+
+Merged cells: 〃 same as above, ← same as left. Ranges: A5:P5, A16:P16, A29:P29, A42:P42, A50:P50, A54:P54
+Group rows: 5, 16, 29, 42, 50, 54 (one merged area across the table).
+
+Coal includes anthracite, bituminous, subbituminous, lignite, and waste coal; synthetic coal and refined coal; and beginning in 2011, coal-derived synthesis gas. Prior to 2011 coal-derived synthesis gas was included in Other Fossil Gas.\
+Petroleum Liquids includes distillate and residual fuel oils, jet fuel, kerosene, waste oil, and beginning in 2011, propane. Prior to 2011 propane was included in Other Fossil Gas.\
+Petroleum Coke includes petroleum coke-derived synthesis gas. Prior to 2011, petroleum coke-derived synthesis gas was included in Other Fossil Gas.\
+Other Fossil Gas includes gaseous propane, blast furnace gas, other manufactured and waste gases derived from fossil fuels other than hydrogen.\
+See the Technical Notes for fuel conversion factors.\
+Renewable Sources include wood, black liquor, other wood waste, biogenic municipal solid waste, landfill gas, sludge waste, agriculture byproducts, other biomass, geothermal, solar thermal, photovoltaic energy, and wind.\
+Other includes hydrogen, non-biogenic municipal solid waste, batteries, purchased steam, sulfur, tire-derived fuel, and other miscellaneous energy sources.\
+Notes: Beginning with 2001 data, non-biogenic municipal solid waste and tire-derived fuels are reclassified as non-renewable energy sources and included in Other. Biogenic municipal solid waste is included in Other Renewable Sources.\
+See Glossary for definitions. Values for 2024 and prior years are final. Values for 2025 and 2026 are preliminary. See Technical Notes for a discussion of the sample design for the Form EIA-923 and predecessor forms.\
+Totals may not equal sum of components because of independent rounding. NM=Not meaningful due to large standard error. W=Withheld to avoid disclosure of individual company data.\
+Displayed values of zero may represent small values that round to zero.  The Excel version of this table provides additional precision which may be accessed by selecting individual cells.\
+Sources: U.S. Energy Information Administration, Form EIA-923, Power Plant Operations Report; U.S. Energy Information Administration, Form EIA-906, Power Plant Report; U.S. Energy Information Administration, Form EIA-920 Combined Heat and Power Plant Report; and predecessor forms.\
+Beginning with 2008 data, the Form EIA-923, Power Plant Operations Report, replaced the following: Form EIA-906, Power Plant Report; Form EIA-920, Combined Heat and Power Plant Report;\
+   Form EIA-423, Monthly Cost and Quality of Fuels for Electric Plants Report; and Federal Energy Regulatory Commission, FERC Form 423, Monthly Report of Cost and Quality of Fuels for Electric Plants.\
+Estimated small scale solar photovoltaic generation and small scale solar photovoltaic capacity are based on data from Form EIA-861M, Form EIA-861 and from estimation methods described in the technical notes. (A57)
+
+## Logic
+
+### Table\_1\_01
+
+#### Parameters
+
+Parameters in Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026:
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 |  |  | Table 1.1. Net Generation by Energy Source:  Total (All Sectors), 2016-July 2026 |  |  | 0 |
+| A2 |  |  | (Thousand Megawatthours) |  |  | 0 |
+| A3 |  |  |  |  |  | 0 |
+| B3 |  |  | Generation at Utility Scale Facilities |  |  | 0 |
+| N3 |  |  | Small Scale Generation |  |  | 0 |
+| O3 |  | Small Scale Generation | Net Generation From Utility and Small Scale Facilities |  |  | 0 |
+| A4 |  |  | Period |  |  | 0 |
+| B4 |  | Period | Coal |  |  | 0 |
+| C4 |  | Coal | Petroleum Liquids |  |  | 0 |
+| D4 |  | Petroleum Liquids | Petroleum Coke |  |  | 0 |
+| E4 |  | Petroleum Coke | Natural Gas |  |  | 0 |
+| F4 |  | Natural Gas | Other Fossil Gas |  |  | 0 |
+| G4 |  | Other Fossil Gas | Nuclear |  |  | 0 |
+| H4 |  | Nuclear | Hydroelectric Conventional |  |  | 0 |
+| I4 |  | Hydroelectric Conventional | Solar |  |  | 0 |
+| J4 |  | Solar | Renewable Sources Excluding Hydroelectric and Solar |  |  | 0 |
+| K4 |  | Renewable Sources Excluding Hydroelectric and Solar | Hydroelectric Pumped Storage |  |  | 0 |
+| L4 |  | Hydroelectric Pumped Storage | Other |  |  | 0 |
+| M4 |  | Other | Total Generation at Utility Scale Facilities |  |  | 0 |
+| N4 |  | Total Generation at Utility Scale Facilities | Estimated Solar Photovoltaic |  |  | 0 |
+| O4 |  | Estimated Solar Photovoltaic | Estimated Total Solar Photovoltaic |  |  | 0 |
+| P4 |  | Estimated Total Solar Photovoltaic | Estimated Total Solar |  |  | 0 |
+
+### Names
+
+| Name | Scope | Kind | Refers to | Value | Read by | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| \_xlnm.Print\_Titles | Table\_1\_01 | name | `Table_1_01!$1:$4` |  |  |  |

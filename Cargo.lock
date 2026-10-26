@@ -1780,6 +1780,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rezzer-layout"
+version = "0.1.0"
+dependencies = [
+ "rezzer-limits",
+ "rezzer-model",
+ "sheetlayout",
+]
+
+[[package]]
 name = "rezzer-limits"
 version = "0.1.0"
 dependencies = [
@@ -1799,6 +1808,7 @@ dependencies = [
  "rezzer-pipeline",
  "rezzer-read-csv",
  "rezzer-read-markdown",
+ "rezzer-read-sheet",
  "rezzer-read-text",
  "rezzer-render",
  "rmcp",
@@ -1813,6 +1823,7 @@ dependencies = [
 name = "rezzer-model"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "memmap2",
  "rezzer-limits",
  "schemars",
@@ -1832,6 +1843,7 @@ dependencies = [
  "rezzer-limits",
  "rezzer-model",
  "rezzer-read-csv",
+ "rezzer-read-sheet",
  "rezzer-read-text",
  "rezzer-render",
  "serde",
@@ -1848,8 +1860,13 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "csvsniff",
+ "formulakit",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
+ "rezzer-render",
+ "sheetlayout",
+ "sheetparts",
  "textenc",
 ]
 
@@ -1896,10 +1913,13 @@ dependencies = [
  "calamine",
  "cfb",
  "formulakit",
+ "libc",
  "quick-xml",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-render",
+ "sheetlayout",
  "sheetparts",
  "zip",
  "zipguard",
@@ -2138,9 +2158,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheetlayout"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "sheetparts"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "quick-xml",
  "zip",
  "zipguard",

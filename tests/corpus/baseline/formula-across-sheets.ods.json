@@ -1,0 +1,861 @@
+{
+  "cells": [
+    [
+      "Calculation!A1",
+      "Semi //"
+    ],
+    [
+      "Calculation!A4",
+      "Indice"
+    ],
+    [
+      "Calculation!A5",
+      "titre"
+    ],
+    [
+      "Calculation!A6",
+      "rapport"
+    ],
+    [
+      "Calculation!A7",
+      "débit"
+    ],
+    [
+      "Calculation!A9",
+      "Aexp"
+    ],
+    [
+      "Calculation!B1",
+      "Colonne a"
+    ],
+    [
+      "Calculation!B2",
+      "bas (1)"
+    ],
+    [
+      "Calculation!B3",
+      "L"
+    ],
+    [
+      "Calculation!B4",
+      "1.4666"
+    ],
+    [
+      "Calculation!B5",
+      "20.49%"
+    ],
+    [
+      "Calculation!B6",
+      "25.78%"
+    ],
+    [
+      "Calculation!B7",
+      "12"
+    ],
+    [
+      "Calculation!B9",
+      "10"
+    ],
+    [
+      "Calculation!C2",
+      "haut (n)"
+    ],
+    [
+      "Calculation!C3",
+      "L"
+    ],
+    [
+      "Calculation!C4",
+      "1.4870"
+    ],
+    [
+      "Calculation!C5",
+      "6.51%"
+    ],
+    [
+      "Calculation!C6",
+      "6.96%"
+    ],
+    [
+      "Calculation!C7",
+      "10"
+    ],
+    [
+      "Calculation!D1",
+      "Colonne b"
+    ],
+    [
+      "Calculation!D2",
+      "bas (1)"
+    ],
+    [
+      "Calculation!D3",
+      "L"
+    ],
+    [
+      "Calculation!D5",
+      "6.51%"
+    ],
+    [
+      "Calculation!D6",
+      "6.96%"
+    ],
+    [
+      "Calculation!D9",
+      "10"
+    ],
+    [
+      "Calculation!E2",
+      "haut (n)"
+    ],
+    [
+      "Calculation!E3",
+      "L"
+    ],
+    [
+      "Calculation!E4",
+      "1.4907"
+    ],
+    [
+      "Calculation!E5",
+      "3.98%"
+    ],
+    [
+      "Calculation!E6",
+      "4.14%"
+    ],
+    [
+      "Calculation!E7",
+      "1.00E+01"
+    ],
+    [
+      "Calculation!G1",
+      "1.4965"
+    ],
+    [
+      "Calculation!G2",
+      "-0.1459"
+    ],
+    [
+      "Data!A1",
+      "66"
+    ],
+    [
+      "Data!A2",
+      "L0a"
+    ],
+    [
+      "Data!A3",
+      "1.4666"
+    ],
+    [
+      "Data!A4",
+      "12.078"
+    ],
+    [
+      "Data!B1",
+      "170"
+    ],
+    [
+      "Data!B2",
+      "Lna"
+    ],
+    [
+      "Data!B3",
+      "1.4870"
+    ],
+    [
+      "Data!B4",
+      "10.271"
+    ],
+    [
+      "Data!C1",
+      "(b)"
+    ],
+    [
+      "Data!C2",
+      "L0b"
+    ],
+    [
+      "Data!C3",
+      "1.4870"
+    ],
+    [
+      "Data!C4",
+      "10.271"
+    ],
+    [
+      "Data!D1",
+      "107"
+    ],
+    [
+      "Data!D2",
+      "Lnb"
+    ],
+    [
+      "Data!D3",
+      "1.4907"
+    ],
+    [
+      "Data!D4",
+      "10.000"
+    ],
+    [
+      "indiceOrga!A1",
+      "1.4965"
+    ],
+    [
+      "indiceOrga!A2",
+      "-0.1459"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Calculation!B4",
+      "cached": {
+        "type": "number",
+        "value": 1.4666
+      },
+      "dialect": "openformula",
+      "expression": "=Data!A3",
+      "kind": "cell",
+      "original": "of:=[$Data.A3]",
+      "pattern": "p1",
+      "range": "Calculation!B4:E4",
+      "references": [
+        "Data!A3"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!C4",
+      "cached": {
+        "type": "number",
+        "value": 1.487
+      },
+      "dialect": "openformula",
+      "expression": "=Data!B3",
+      "kind": "cell",
+      "original": "of:=[$Data.B3]",
+      "pattern": "p1",
+      "range": "Calculation!B4:E4",
+      "references": [
+        "Data!B3"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!E4",
+      "cached": {
+        "type": "number",
+        "value": 1.4907
+      },
+      "dialect": "openformula",
+      "expression": "=Data!D3",
+      "kind": "cell",
+      "original": "of:=[$Data.D3]",
+      "pattern": "p1",
+      "range": "Calculation!B4:E4",
+      "references": [
+        "Data!D3"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!B5",
+      "cached": {
+        "type": "percent",
+        "value": 0.20493488690884
+      },
+      "dialect": "openformula",
+      "expression": "=(B4-$G$1)/$G$2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B4}-\\mathrm{G1}}{\\mathrm{G2}}",
+      "original": "of:=([.B4]-[.$G$1])/[.$G$2]",
+      "pattern": "p2",
+      "range": "Calculation!B5:E5",
+      "references": [
+        "Calculation!B4",
+        "Calculation!G1",
+        "Calculation!G2"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!C5",
+      "cached": {
+        "type": "percent",
+        "value": 0.0651130911583265
+      },
+      "dialect": "openformula",
+      "expression": "=(C4-$G$1)/$G$2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{C4}-\\mathrm{G1}}{\\mathrm{G2}}",
+      "original": "of:=([.C4]-[.$G$1])/[.$G$2]",
+      "pattern": "p2",
+      "range": "Calculation!B5:E5",
+      "references": [
+        "Calculation!C4",
+        "Calculation!G1",
+        "Calculation!G2"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!D5",
+      "cached": {
+        "type": "percent",
+        "value": 0.0651130911583265
+      },
+      "dialect": "openformula",
+      "expression": "=C5",
+      "kind": "cell",
+      "original": "of:=[.C5]",
+      "references": [
+        "Calculation!C5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!E5",
+      "cached": {
+        "type": "percent",
+        "value": 0.0397532556545581
+      },
+      "dialect": "openformula",
+      "expression": "=(E4-$G$1)/$G$2",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{E4}-\\mathrm{G1}}{\\mathrm{G2}}",
+      "original": "of:=([.E4]-[.$G$1])/[.$G$2]",
+      "pattern": "p2",
+      "range": "Calculation!B5:E5",
+      "references": [
+        "Calculation!E4",
+        "Calculation!G1",
+        "Calculation!G2"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!B6",
+      "cached": {
+        "type": "percent",
+        "value": 0.257758620689653
+      },
+      "dialect": "openformula",
+      "expression": "=B5/(1-B5)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{B5}}{1-\\mathrm{B5}}",
+      "original": "of:=[.B5]/(1-[.B5])",
+      "pattern": "p3",
+      "range": "Calculation!B6:E6",
+      "references": [
+        "Calculation!B5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!C6",
+      "cached": {
+        "type": "percent",
+        "value": 0.069648093841641
+      },
+      "dialect": "openformula",
+      "expression": "=C5/(1-C5)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{C5}}{1-\\mathrm{C5}}",
+      "original": "of:=[.C5]/(1-[.C5])",
+      "pattern": "p3",
+      "range": "Calculation!B6:E6",
+      "references": [
+        "Calculation!C5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!D6",
+      "cached": {
+        "type": "percent",
+        "value": 0.069648093841641
+      },
+      "dialect": "openformula",
+      "expression": "=D5/(1-D5)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{D5}}{1-\\mathrm{D5}}",
+      "original": "of:=[.D5]/(1-[.D5])",
+      "pattern": "p3",
+      "range": "Calculation!B6:E6",
+      "references": [
+        "Calculation!D5"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Calculation!E6",
+      "cached": {
+        "type": "percent",
+        "value": 0.0413990007137761
+      },
+      "dialect": "openformula",
+      "expression": "=E5/(1-E5)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{E5}}{1-\\mathrm{E5}}",
+      "original": "of:=[.E5]/(1-[.E5])",
+      "pattern": "p3",
+      "range": "Calculation!B6:E6",
+      "references": [
+        "Calculation!E5"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!B7",
+      "cached": {
+        "type": "number",
+        "value": 12.0775862068965
+      },
+      "dialect": "openformula",
+      "expression": "=B9*(1+B6)",
+      "kind": "cell",
+      "latex": "\\mathrm{B9} \\cdot (1+\\mathrm{B6})",
+      "original": "of:=[.B9]*(1+[.B6])",
+      "references": [
+        "Calculation!B9",
+        "Calculation!B6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!C7",
+      "cached": {
+        "type": "number",
+        "value": 10.2712609970674
+      },
+      "dialect": "openformula",
+      "expression": "=B9*(1+C6)",
+      "kind": "cell",
+      "latex": "\\mathrm{B9} \\cdot (1+\\mathrm{C6})",
+      "original": "of:=[.B9]*(1+[.C6])",
+      "references": [
+        "Calculation!B9",
+        "Calculation!C6"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!E7",
+      "cached": {
+        "type": "number",
+        "value": 10.0
+      },
+      "dialect": "openformula",
+      "expression": "=Data!D4",
+      "kind": "cell",
+      "original": "of:=[$Data.D4]",
+      "references": [
+        "Data!D4"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!B9",
+      "cached": {
+        "type": "number",
+        "value": 9.60246744345442
+      },
+      "dialect": "openformula",
+      "expression": "=L_nb/(1+Xnb)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{L\\_nb}}{1+\\mathrm{Xnb}}",
+      "original": "of:=L_nb/(1+Xnb)",
+      "pattern": "p4",
+      "range": "Calculation!B9:D9",
+      "references": [
+        "name:L_nb",
+        "name:Xnb"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Calculation!D9",
+      "cached": {
+        "type": "number",
+        "value": 9.60246744345442
+      },
+      "dialect": "openformula",
+      "expression": "=L_nb/(1+Xnb)",
+      "kind": "cell",
+      "latex": "\\frac{\\mathrm{L\\_nb}}{1+\\mathrm{Xnb}}",
+      "original": "of:=L_nb/(1+Xnb)",
+      "pattern": "p4",
+      "range": "Calculation!B9:D9",
+      "references": [
+        "name:L_nb",
+        "name:Xnb"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Data!A3",
+      "cached": {
+        "type": "number",
+        "value": 1.4666
+      },
+      "dialect": "openformula",
+      "expression": "=1.46+A1/10000",
+      "kind": "cell",
+      "latex": "1.46+\\frac{\\mathrm{A1}}{10000}",
+      "original": "of:=1.46+[.A1]/10000",
+      "references": [
+        "Data!A1"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Data!B3",
+      "cached": {
+        "type": "number",
+        "value": 1.487
+      },
+      "dialect": "openformula",
+      "expression": "=1.47+B1/10000",
+      "kind": "cell",
+      "latex": "1.47+\\frac{\\mathrm{B1}}{10000}",
+      "original": "of:=1.47+[.B1]/10000",
+      "references": [
+        "Data!B1"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Data!C3",
+      "cached": {
+        "type": "number",
+        "value": 1.487
+      },
+      "dialect": "openformula",
+      "expression": "=B3",
+      "kind": "cell",
+      "original": "of:=[.B3]",
+      "pattern": "p5",
+      "range": "Data!C3:C4",
+      "references": [
+        "Data!B3"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Data!D3",
+      "cached": {
+        "type": "number",
+        "value": 1.4907
+      },
+      "dialect": "openformula",
+      "expression": "=1.48+D1/10000",
+      "kind": "cell",
+      "latex": "1.48+\\frac{\\mathrm{D1}}{10000}",
+      "original": "of:=1.48+[.D1]/10000",
+      "references": [
+        "Data!D1"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Data!A4",
+      "cached": {
+        "type": "number",
+        "value": 12.0775862068965
+      },
+      "dialect": "openformula",
+      "expression": "=Calculation!B7",
+      "kind": "cell",
+      "original": "of:=[$Calculation.B7]",
+      "pattern": "p6",
+      "range": "Data!A4:B4",
+      "references": [
+        "Calculation!B7"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Data!B4",
+      "cached": {
+        "type": "number",
+        "value": 10.2712609970674
+      },
+      "dialect": "openformula",
+      "expression": "=Calculation!C7",
+      "kind": "cell",
+      "original": "of:=[$Calculation.C7]",
+      "pattern": "p6",
+      "range": "Data!A4:B4",
+      "references": [
+        "Calculation!C7"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Data!C4",
+      "cached": {
+        "type": "number",
+        "value": 10.2712609970674
+      },
+      "dialect": "openformula",
+      "expression": "=B4",
+      "kind": "cell",
+      "original": "of:=[.B4]",
+      "pattern": "p5",
+      "range": "Data!C3:C4",
+      "references": [
+        "Data!B4"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:A_ab",
+      "dialect": "excel",
+      "expression": "Calculation!$B$9",
+      "kind": "name",
+      "references": [
+        "Calculation!B9"
+      ]
+    },
+    {
+      "anchor": "name:A_ab_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:B_a",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:B_ab",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:B_b",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:L_nb",
+      "dialect": "excel",
+      "expression": "Calculation!$E$7",
+      "kind": "name",
+      "references": [
+        "Calculation!E7"
+      ]
+    },
+    {
+      "anchor": "name:L_nb_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:M_A",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:M_B",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:M_C",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:V_1a",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:V_1a_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:V_1b",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:X1a",
+      "dialect": "excel",
+      "expression": "Calculation!$B$6",
+      "kind": "name",
+      "references": [
+        "Calculation!B6"
+      ]
+    },
+    {
+      "anchor": "name:X1a_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:X1b",
+      "dialect": "excel",
+      "expression": "Calculation!$D$6",
+      "kind": "name",
+      "references": [
+        "Calculation!D6"
+      ]
+    },
+    {
+      "anchor": "name:X1b_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Xna",
+      "dialect": "excel",
+      "expression": "Calculation!$C$6",
+      "kind": "name",
+      "references": [
+        "Calculation!C6"
+      ]
+    },
+    {
+      "anchor": "name:Xna_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Xnb",
+      "dialect": "excel",
+      "expression": "Calculation!$E$6",
+      "kind": "name",
+      "references": [
+        "Calculation!E6"
+      ]
+    },
+    {
+      "anchor": "name:Xnb_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Y1a",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Y1a_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Y1b",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Y1b_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Yna",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Yna_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Ynb",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    },
+    {
+      "anchor": "name:Ynb_2",
+      "dialect": "excel",
+      "expression": "#REF!",
+      "kind": "name"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Calculation!G1",
+      "label": "Colonne b",
+      "read_by": 3,
+      "value": {
+        "type": "number",
+        "value": 1.4965
+      }
+    },
+    {
+      "anchor": "Calculation!G2",
+      "label": "haut (n)",
+      "read_by": 3,
+      "value": {
+        "type": "number",
+        "value": -0.1459
+      }
+    },
+    {
+      "anchor": "Data!A1",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 66.0
+      }
+    },
+    {
+      "anchor": "Data!B1",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 170.0
+      }
+    },
+    {
+      "anchor": "Data!D1",
+      "label": "(b)",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 107.0
+      }
+    },
+    {
+      "anchor": "Data!D4",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    }
+  ],
+  "rules": []
+}

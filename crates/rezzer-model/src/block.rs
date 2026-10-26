@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::inline::{Anchor, Inline};
+use crate::layout::TableLayout;
 
 /// Block-level content of a document body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -61,6 +62,9 @@ pub enum Block {
         alignments: Vec<Align>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
+        /// The layout of a sheet region; boxed so a block stays small.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layout: Option<Box<TableLayout>>,
     },
     Code {
         #[serde(default, skip_serializing_if = "Option::is_none")]

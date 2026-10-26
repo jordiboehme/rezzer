@@ -162,33 +162,66 @@ pub(super) fn read_pivot(
     part: &str,
     sources: &mut PivotSources,
 ) -> Option<Pivot> {
-    let mut found: Option<(String, String, String)> = None;
+    let mut found: Option<Pivot> = None;
+    let mut cache_id = String::new();
+    let cap = u32::try_from(ctx.limits.max_items).unwrap_or(u32::MAX);
+    // 1 inside rowFields, 2 inside colFields: their `field` children are counted.
+    let mut axis = 0u8;
     ctx.scan(part, true, &mut |ev, _| {
+        if let Ev::End(name) = ev
+            && matches!(name, "rowFields" | "colFields")
+        {
+            axis = 0;
+        }
         if let Ev::Start(e) | Ev::Empty(e) = ev {
+            let number = |key: &str| e.attr(key).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            // The grand totals are on unless the file says `0` or `false`.
+            let on = |key: &str| !matches!(e.attr(key), Some("0" | "false"));
             match e.name.as_str() {
                 "pivotTableDefinition" if found.is_none() => {
-                    found = Some((
-                        e.attr("name").unwrap_or("").to_string(),
-                        e.attr("cacheId").unwrap_or("").to_string(),
-                        String::new(),
-                    ));
+                    cache_id = e.attr("cacheId").unwrap_or("").to_string();
+                    found = Some(Pivot {
+                        name: e.attr("name").unwrap_or("").to_string(),
+                        location: String::new(),
+                        source: None,
+                        first_header_row: 0,
+                        first_data_row: 0,
+                        first_data_col: 0,
+                        row_grand_totals: on("rowGrandTotals"),
+                        col_grand_totals: on("colGrandTotals"),
+                        row_fields: 0,
+                        col_fields: 0,
+                    });
                 }
                 "location" => {
-                    if let Some(f) = found.as_mut() {
-                        f.2 = e.attr("ref").unwrap_or("").to_string();
+                    if let Some(p) = found.as_mut() {
+                        p.location = e.attr("ref").unwrap_or("").to_string();
+                        p.first_header_row = number("firstHeaderRow");
+                        p.first_data_row = number("firstDataRow");
+                        p.first_data_col = number("firstDataCol");
+                    }
+                }
+                "rowFields" if matches!(ev, Ev::Start(_)) => axis = 1,
+                "colFields" if matches!(ev, Ev::Start(_)) => axis = 2,
+                // `x="-2"` is the values pseudo field, no field of the data: a pivot with
+                // only it on an axis has no grand total band on that axis.
+                "field" if axis != 0 && e.attr("x") != Some("-2") => {
+                    if let Some(p) = found.as_mut() {
+                        let n = if axis == 1 {
+                            &mut p.row_fields
+                        } else {
+                            &mut p.col_fields
+                        };
+                        *n = n.saturating_add(1).min(cap);
                     }
                 }
                 _ => {}
             }
         }
     });
-    let (name, cache_id, location) = found?;
-    let source = sources.source(ctx, &cache_id);
-    Some(Pivot {
-        name,
-        location,
-        source,
-    })
+    let mut pivot = found?;
+    pivot.source = sources.source(ctx, &cache_id);
+    Some(pivot)
 }
 
 /// Reads the charts a drawing part points at.

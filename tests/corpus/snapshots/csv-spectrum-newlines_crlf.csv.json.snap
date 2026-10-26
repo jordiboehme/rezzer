@@ -4,14 +4,43 @@ source: crates/rezzer/tests/corpus.rs
 {
   "body": [
     {
-      "anchor": "csv-spectrum-newlines_crlf",
+      "anchor": "'csv-spectrum-newlines_crlf'",
       "blocks": [
         {
+          "anchor": "'csv-spectrum-newlines_crlf'!A1:C4",
           "header_rows": 1,
+          "layout": {
+            "certainty": "rule",
+            "data": "A2:C4",
+            "found_by": [
+              {
+                "detail": "no gaps",
+                "id": "G",
+                "kind": "rule"
+              },
+              {
+                "detail": "header row 1 by type change",
+                "id": "H1",
+                "kind": "rule"
+              }
+            ],
+            "header_paths": [
+              "a",
+              "b",
+              "c"
+            ],
+            "header_rows": [
+              1
+            ],
+            "key": "'csv-spectrum-newlines_crlf'!A1",
+            "kind": "table",
+            "label_cols": 0,
+            "range": "A1:C4"
+          },
           "rows": [
             [
               {
-                "anchor": "csv-spectrum-newlines_crlf!A1",
+                "anchor": "'csv-spectrum-newlines_crlf'!A1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -22,7 +51,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!B1",
+                "anchor": "'csv-spectrum-newlines_crlf'!B1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -33,7 +62,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!C1",
+                "anchor": "'csv-spectrum-newlines_crlf'!C1",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -46,7 +75,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-newlines_crlf!A2",
+                "anchor": "'csv-spectrum-newlines_crlf'!A2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -57,7 +86,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!B2",
+                "anchor": "'csv-spectrum-newlines_crlf'!B2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -68,7 +97,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!C2",
+                "anchor": "'csv-spectrum-newlines_crlf'!C2",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -81,7 +110,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-newlines_crlf!A3",
+                "anchor": "'csv-spectrum-newlines_crlf'!A3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -99,7 +128,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!B3",
+                "anchor": "'csv-spectrum-newlines_crlf'!B3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -110,7 +139,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!C3",
+                "anchor": "'csv-spectrum-newlines_crlf'!C3",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -123,7 +152,7 @@ source: crates/rezzer/tests/corpus.rs
             ],
             [
               {
-                "anchor": "csv-spectrum-newlines_crlf!A4",
+                "anchor": "'csv-spectrum-newlines_crlf'!A4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -134,7 +163,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!B4",
+                "anchor": "'csv-spectrum-newlines_crlf'!B4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -145,7 +174,7 @@ source: crates/rezzer/tests/corpus.rs
                 "row_span": 1
               },
               {
-                "anchor": "csv-spectrum-newlines_crlf!C4",
+                "anchor": "'csv-spectrum-newlines_crlf'!C4",
                 "col_span": 1,
                 "inlines": [
                   {
@@ -160,7 +189,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "table"
         },
         {
-          "caption": "Columns",
+          "caption": "Columns A1:C4",
           "header_rows": 1,
           "role": "summary",
           "rows": [
@@ -426,7 +455,7 @@ source: crates/rezzer/tests/corpus.rs
   "overview": {
     "parts": [
       {
-        "id": "csv-spectrum-newlines_crlf",
+        "id": "'csv-spectrum-newlines_crlf'",
         "kind": "sheet",
         "name": "csv-spectrum-newlines_crlf",
         "size": "3 rows x 3 columns"

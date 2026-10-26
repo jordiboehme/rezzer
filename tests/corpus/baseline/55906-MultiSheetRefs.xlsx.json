@@ -1,0 +1,383 @@
+{
+  "cells": [
+    [
+      "Sheet1!A1",
+      "11"
+    ],
+    [
+      "Sheet1!A3",
+      "66"
+    ],
+    [
+      "Sheet1!B3",
+      "22"
+    ],
+    [
+      "Sheet1!B4",
+      "11"
+    ],
+    [
+      "Sheet1!B5",
+      "33"
+    ],
+    [
+      "Sheet1!B6",
+      "3"
+    ],
+    [
+      "Sheet1!C1",
+      "Hello!"
+    ],
+    [
+      "Sheet1!C3",
+      "3"
+    ],
+    [
+      "Sheet1!D3",
+      "0"
+    ],
+    [
+      "Sheet1!E1",
+      "Sh1"
+    ],
+    [
+      "Sheet1!E3",
+      "3"
+    ],
+    [
+      "Sheet1!H3",
+      "110"
+    ],
+    [
+      "Sheet1!I3",
+      "27.5"
+    ],
+    [
+      "Sheet1!I4",
+      "11"
+    ],
+    [
+      "Sheet1!I5",
+      "44"
+    ],
+    [
+      "Sheet1!I6",
+      "4"
+    ],
+    [
+      "Sheet2!A1",
+      "22"
+    ],
+    [
+      "Sheet2!B1",
+      "44"
+    ],
+    [
+      "Sheet2!C1",
+      "Middle!"
+    ],
+    [
+      "Sheet2!E1",
+      "Sh2"
+    ],
+    [
+      "Sheet3!A1",
+      "33"
+    ],
+    [
+      "Sheet3!C1",
+      "Bye!"
+    ],
+    [
+      "Sheet3!E1",
+      "Sh3"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Sheet1!A3",
+      "cached": {
+        "type": "number",
+        "value": 66.0
+      },
+      "dialect": "excel",
+      "expression": "=SUM(Sheet1:Sheet3!A1)",
+      "kind": "cell",
+      "references": [
+        "Sheet1:Sheet3!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!B3",
+      "cached": {
+        "type": "number",
+        "value": 22.0
+      },
+      "dialect": "excel",
+      "expression": "=AVERAGE(Sheet1:Sheet3!A1)",
+      "kind": "cell",
+      "latex": "\\operatorname{AVERAGE}(\\mathrm{Sheet1{:}Sheet3!A1})",
+      "references": [
+        "Sheet1:Sheet3!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!C3",
+      "cached": {
+        "type": "number",
+        "value": 3.0
+      },
+      "dialect": "excel",
+      "expression": "=COUNTA(Sheet1:Sheet3!C1)",
+      "kind": "cell",
+      "latex": "\\operatorname{COUNTA}(\\mathrm{Sheet1{:}Sheet3!C1})",
+      "pattern": "p1",
+      "range": "Sheet1!C3:E3",
+      "references": [
+        "Sheet1:Sheet3!C1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!D3",
+      "cached": {
+        "type": "number",
+        "value": 0.0
+      },
+      "dialect": "excel",
+      "expression": "=COUNTA(Sheet1:Sheet3!D1)",
+      "kind": "cell",
+      "latex": "\\operatorname{COUNTA}(\\mathrm{Sheet1{:}Sheet3!D1})",
+      "pattern": "p1",
+      "range": "Sheet1!C3:E3",
+      "references": [
+        "Sheet1:Sheet3!D1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!E3",
+      "cached": {
+        "type": "number",
+        "value": 3.0
+      },
+      "dialect": "excel",
+      "expression": "=COUNTA(Sheet1:Sheet3!E1)",
+      "kind": "cell",
+      "latex": "\\operatorname{COUNTA}(\\mathrm{Sheet1{:}Sheet3!E1})",
+      "pattern": "p1",
+      "range": "Sheet1!C3:E3",
+      "references": [
+        "Sheet1:Sheet3!E1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!H3",
+      "cached": {
+        "type": "number",
+        "value": 110.0
+      },
+      "dialect": "excel",
+      "expression": "=SUM(Sheet1:Sheet3!A1:B2)",
+      "kind": "cell",
+      "references": [
+        "Sheet1:Sheet3!A1:B2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!I3",
+      "cached": {
+        "type": "number",
+        "value": 27.5
+      },
+      "dialect": "excel",
+      "expression": "=AVERAGE(Sheet1:Sheet3!A1:B2)",
+      "kind": "cell",
+      "latex": "\\operatorname{AVERAGE}(\\mathrm{Sheet1{:}Sheet3!A1{:}B2})",
+      "references": [
+        "Sheet1:Sheet3!A1:B2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!B4",
+      "cached": {
+        "type": "number",
+        "value": 11.0
+      },
+      "dialect": "excel",
+      "expression": "=MIN(Sheet1:Sheet3!A$1)",
+      "kind": "cell",
+      "latex": "\\operatorname{MIN}(\\mathrm{Sheet1{:}Sheet3!A1})",
+      "references": [
+        "Sheet1:Sheet3!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!I4",
+      "cached": {
+        "type": "number",
+        "value": 11.0
+      },
+      "dialect": "excel",
+      "expression": "=MIN(Sheet1:Sheet3!A$1:B$2)",
+      "kind": "cell",
+      "latex": "\\operatorname{MIN}(\\mathrm{Sheet1{:}Sheet3!A1{:}B2})",
+      "references": [
+        "Sheet1:Sheet3!A1:B2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!B5",
+      "cached": {
+        "type": "number",
+        "value": 33.0
+      },
+      "dialect": "excel",
+      "expression": "=MAX(Sheet1:Sheet3!A$1)",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\mathrm{Sheet1{:}Sheet3!A1})",
+      "references": [
+        "Sheet1:Sheet3!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!I5",
+      "cached": {
+        "type": "number",
+        "value": 44.0
+      },
+      "dialect": "excel",
+      "expression": "=MAX(Sheet1:Sheet3!A$1:B$2)",
+      "kind": "cell",
+      "latex": "\\operatorname{MAX}(\\mathrm{Sheet1{:}Sheet3!A1{:}B2})",
+      "references": [
+        "Sheet1:Sheet3!A1:B2"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!B6",
+      "cached": {
+        "type": "number",
+        "value": 3.0
+      },
+      "dialect": "excel",
+      "expression": "=COUNT(Sheet1:Sheet3!A$1)",
+      "kind": "cell",
+      "latex": "\\operatorname{COUNT}(\\mathrm{Sheet1{:}Sheet3!A1})",
+      "references": [
+        "Sheet1:Sheet3!A1"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "Sheet1!I6",
+      "cached": {
+        "type": "number",
+        "value": 4.0
+      },
+      "dialect": "excel",
+      "expression": "=COUNT(Sheet1:Sheet3!$A$1:$B$2)",
+      "kind": "cell",
+      "latex": "\\operatorname{COUNT}(\\mathrm{Sheet1{:}Sheet3!A1{:}B2})",
+      "references": [
+        "Sheet1:Sheet3!A1:B2"
+      ],
+      "role": "result"
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Sheet1!A1",
+      "read_by": 10,
+      "value": {
+        "type": "number",
+        "value": 11.0
+      }
+    },
+    {
+      "anchor": "Sheet1!C1",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Hello!"
+      }
+    },
+    {
+      "anchor": "Sheet1!E1",
+      "label": "Hello!",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Sh1"
+      }
+    },
+    {
+      "anchor": "Sheet2!A1",
+      "read_by": 10,
+      "value": {
+        "type": "number",
+        "value": 22.0
+      }
+    },
+    {
+      "anchor": "Sheet2!B1",
+      "read_by": 5,
+      "value": {
+        "type": "number",
+        "value": 44.0
+      }
+    },
+    {
+      "anchor": "Sheet2!C1",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Middle!"
+      }
+    },
+    {
+      "anchor": "Sheet2!E1",
+      "label": "Middle!",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Sh2"
+      }
+    },
+    {
+      "anchor": "Sheet3!A1",
+      "read_by": 10,
+      "value": {
+        "type": "number",
+        "value": 33.0
+      }
+    },
+    {
+      "anchor": "Sheet3!C1",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Bye!"
+      }
+    },
+    {
+      "anchor": "Sheet3!E1",
+      "label": "Bye!",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "Sh3"
+      }
+    }
+  ],
+  "rules": []
+}

@@ -11,8 +11,11 @@ pub struct Dialect {
     pub delimiter: u8,
     /// Quote character (always `"` for now).
     pub quote: u8,
-    /// Whether the first record looks like a header row. This is a heuristic;
-    /// for header-less files it is a guess and callers should say so.
+    /// Short records before the table that were left out when the dialect was chosen: title
+    /// lines above it (`Station report 2024`). Usually 0. [`crate::analyze`] skips them.
+    pub lead_records: usize,
+    /// Whether the first record after the [`Dialect::lead_records`] looks like a header row.
+    /// This is a heuristic; for header-less files it is a guess and callers should say so.
     pub has_header: bool,
     /// Share (0.0 to 1.0) of the sampled records that have the modal field count.
     pub consistent_rows: f32,

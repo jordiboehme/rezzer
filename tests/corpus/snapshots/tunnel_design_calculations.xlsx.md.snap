@@ -27,10 +27,10 @@ modified: "2026-08-24T17:24:13Z"
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| Design\_Basis | sheet | 32 rows x 2 columns |  |  |
-| Structural\_Lining | sheet | 74 rows x 6 columns | result |  |
-| Ventilation | sheet | 39 rows x 3 columns | result |  |
-| Drainage | sheet | 45 rows x 6 columns | result |  |
+| Design\_Basis | sheet | 5 regions |  |  |
+| Structural\_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
+| Ventilation | sheet | 6 regions | result |  |
+| Drainage | sheet | 10 rows x 2 columns, 7 regions | result |  |
 
 - Sheets: 4
 - Formulas: 86
@@ -50,221 +50,280 @@ modified: "2026-08-24T17:24:13Z"
 
 ## Design\_Basis
 
-|  |  |
-| --- | --- |
-| UNDERGROUND TUNNEL STRUCTURAL ANALYSIS |  |
-| Conceptual design calculations - structural stability, drainage, ventilation \& safety |  |
-|  |  |
-| PROJECT DESCRIPTION | ← |
-| Project type | Two-lane single-tube underground road tunnel (conceptual design) |
-| Prepared by | Alok |
-| Tools used | AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets) |
-| Scope | Structural lining stability, ventilation, drainage, and life-safety checks at concept stage |
-| Disclaimer | Preliminary / conceptual calculations for a portfolio project. NOT for construction use. |
-|  |  |
-| KEY GEOMETRIC PARAMETERS (shared across sheets) | ← |
-| Excavated (bored) diameter | 10.0 m |
-| Tunnel length | 800 m |
-| Overburden depth to crown | 25 m |
-| Ground type | Weathered rock / dense soil (assumed) |
-| Traffic | Two-lane, design-hour volume 1200 veh/hr |
-|  |  |
-| DESIGN CODES / REFERENCES USED (conceptual guidance) | ← |
-| - IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance | ← |
-| - IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) | ← |
-| - IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) | ← |
-| - PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) | ← |
-| - Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) | ← |
-| - Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) | ← |
-| - Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires | ← |
-|  |  |
-| HOW TO USE THIS WORKBOOK | ← |
-| - Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. | ← |
-| - Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. | ← |
-| - Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. | ← |
-| - Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. | ← |
-| - These mirror the Python scripts in /python (same method \& formulas) for cross-verification. | ← |
+### UNDERGROUND TUNNEL STRUCTURAL ANALYSIS
 
-Merged cells: 〃 same as above, ← same as left. Ranges: A4:B4, A11:B11, A18:B18, A19:B19, A20:B20, A21:B21, A22:B22, A23:B23, A24:B24, A25:B25, A27:B27, A28:B28, A29:B29, A30:B30, A31:B31, A32:B32
+Conceptual design calculations - structural stability, drainage, ventilation \& safety (A2)
+
+### PROJECT DESCRIPTION
+
+Label and value pairs A5:B9:
+
+- Project type: Two-lane single-tube underground road tunnel (conceptual design) (B5)
+- Prepared by: Alok (B6)
+- Tools used: AutoCAD (geometry/drawings), Python (engineering calculations), Excel (calc sheets) (B7)
+- Scope: Structural lining stability, ventilation, drainage, and life-safety checks at concept stage (B8)
+- Disclaimer: Preliminary / conceptual calculations for a portfolio project. NOT for construction use. (B9)
+
+### KEY GEOMETRIC PARAMETERS (shared across sheets)
+
+Label and value pairs A12:B16:
+
+- Excavated (bored) diameter: 10.0 m (B12)
+- Tunnel length: 800 m (B13)
+- Overburden depth to crown: 25 m (B14)
+- Ground type: Weathered rock / dense soil (assumed) (B15)
+- Traffic: Two-lane, design-hour volume 1200 veh/hr (B16)
+
+### DESIGN CODES / REFERENCES USED (conceptual guidance)
+
+Text A19:A25:
+
+- \- IS 4880 (Parts 1-9) - Code of Practice for Design of Tunnels Conveying Water / general tunnel design guidance (A19)
+- \- IS 456:2000 - Plain and Reinforced Concrete - Code of Practice (permissible stresses, section design) (A20)
+- \- IRC:SP:91-2019 - Guidelines for Road Tunnels (ventilation, fire \& life safety) (A21)
+- \- PIARC Technical Committee Reports - Road Tunnel Operations (ventilation \& smoke control) (A22)
+- \- Terzaghi, K. (1946) - Rock Defects and Loads on Tunnel Supports (loosening pressure theory) (A23)
+- \- Einstein, H.H. \& Schwartz, C.W. (1979) - Simplified Analysis for Tunnel Supports (elastic ring theory) (A24)
+- \- Kennedy, W.D. et al. (1996) - Fundamentals of critical velocity in tunnel fires (A25)
+
+### HOW TO USE THIS WORKBOOK
+
+Text A28:A32:
+
+- \- Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. (A28)
+- \- Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. (A29)
+- \- Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. (A30)
+- \- Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. (A31)
+- \- These mirror the Python scripts in /python (same method \& formulas) for cross-verification. (A32)
 
 ## Structural\_Lining
 
-|  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- |
-| STRUCTURAL STABILITY - TUNNEL LINING CHECK |  |  |  |  |  |
-| Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check |  |  |  |  |  |
-|  |  |  |  |  |  |
-| INPUTS | ← | ← |  |  |  |
-| Excavated diameter, D | 10 | m |  |  |  |
-| Trial lining thickness, t | 0.35 | m |  |  |  |
-| Overburden depth, H | 25 | m |  |  |  |
-| Unit weight of ground, gamma | 22 | kN/m3 |  |  |  |
-| Friction angle, phi | 30 | deg |  |  |  |
-| Cohesion, c | 20 | kPa |  |  |  |
-| Concrete grade, fck | 30 | MPa |  |  |  |
-| Steel grade, fy | 500 | MPa |  |  |  |
-| Target Factor of Safety | 2 | - |  |  |  |
-|  |  |  |  |  |  |
-| TERZAGHI LOOSENING PRESSURE | ← | ← |  |  |  |
-| Tunnel radius, R | 5.00 | m |  |  |  |
-| Loosening zone width, B1 | 7.89 | m |  |  |  |
-| At-rest coeff., K0 = 1-sin(phi) | 0.50 | - |  |  |  |
-| tan(phi) | 0.58 | - |  |  |  |
-| Terzaghi vertical pressure, Pv | 194.15 | kPa |  |  |  |
-| Lower-bound floor (0.3\*gamma\*D) | 66.00 | kPa |  |  |  |
-| Design vertical pressure, Pv | 194.15 | kPa |  |  |  |
-| Lateral pressure at springline, Ph = K0\*Pv | 97.08 | kPa |  |  |  |
-|  |  |  |  |  |  |
-| RING THRUST \& MOMENT (crown = 0deg, springline = 90deg) | ← | ← |  |  |  |
-| Mean pressure, p\_mean | 145.62 | kPa |  |  |  |
-| Deviatoric pressure, p\_dev | 48.54 | kPa |  |  |  |
-| Thrust at crown, N(0) | 485.38 | kN/m |  |  |  |
-| Thrust at springline, N(90) | 970.77 | kN/m |  |  |  |
-| Max ring thrust, N\_max | 970.77 | kN/m |  |  |  |
-| Moment at crown, M(0) | 606.73 | kNm/m |  |  |  |
-| Moment at springline, M(90) | 606.73 | kNm/m |  |  |  |
-| Max ring moment, M\_max | 606.73 | kNm/m |  |  |  |
-|  |  |  |  |  |  |
-| RCC LINING SECTION CHECK (1 m wide strip) | ← | ← |  |  |  |
-| Section area, A = 1 x t | 0.350 | m2 |  |  |  |
-| Section modulus, Z = 1 x t^2/6 | 0.020 | m3 |  |  |  |
-| Axial stress = N\_max/A /1000 | 2.77 | MPa |  |  |  |
-| Bending stress = M\_max/Z /1000 | 29.72 | MPa |  |  |  |
-| Combined max compressive stress | 32.49 | MPa |  |  |  |
-| Combined stress, opposite fibre | -26.94 | MPa |  |  |  |
-| Permissible stress = 0.33 fck | 9.90 | MPa |  |  |  |
-| Factor of Safety (actual) | 0.30 | - |  |  |  |
-| Status | NOT SAFE - increase thickness |  |  |  |  |
-| Note: net tension on inner fibre - provide crack-control reinforcement | ← | ← |  |  |  |
-|  |  |  |  |  |  |
-| LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety) | ← | ← |  |  |  |
-|  |  |  |  | t (m) | FOS |
-|  |  |  |  | 0.15 | 0.06 |
-|  |  |  |  | 0.2 | 0.10 |
-|  |  |  |  | 0.25 | 0.16 |
-|  |  |  |  | 0.3 | 0.23 |
-|  |  |  |  | 0.35 | 0.30 |
-|  |  |  |  | 0.4 | 0.39 |
-|  |  |  |  | 0.45 | 0.49 |
-|  |  |  |  | 0.5 | 0.60 |
-|  |  |  |  | 0.55 | 0.72 |
-|  |  |  |  | 0.6 | 0.84 |
-|  |  |  |  | 0.65 | 0.98 |
-|  |  |  |  | 0.7 | 1.12 |
-|  |  |  |  | 0.75 | 1.27 |
-|  |  |  |  | 0.8 | 1.43 |
-|  |  |  |  | 0.85 | 1.60 |
-|  |  |  |  | 0.9 | 1.78 |
-|  |  |  |  | 0.95 | 1.96 |
-|  |  |  |  | 1 | 2.15 |
-|  |  |  |  | 1.05 | 2.34 |
-|  |  |  |  | 1.1 | 2.54 |
-|  |  |  |  | 1.15 | 2.75 |
-|  |  |  |  | 1.2 | 2.97 |
-|  |  |  |  | 1.25 | 3.19 |
-|  |  |  |  | 1.3 | 3.41 |
-|  |  |  |  |  |  |
-| Min. lining thickness for target FOS | 1 | m |  |  |  |
+### STRUCTURAL STABILITY - TUNNEL LINING CHECK
 
-Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A15:C15, A25:C25, A35:C35, A45:C45, A47:C47
+Method: Terzaghi loosening pressure + elastic ring (ovaling) theory + RCC section check (A2)
+
+### INPUTS
+
+Label and value pairs A5:C13:
+
+- Excavated diameter, D: 10 m (B5)
+- Trial lining thickness, t: 0.35 m (B6)
+- Overburden depth, H: 25 m (B7)
+- Unit weight of ground, gamma: 22 kN/m3 (B8)
+- Friction angle, phi: 30 deg (B9)
+- Cohesion, c: 20 kPa (B10)
+- Concrete grade, fck: 30 MPa (B11)
+- Steel grade, fy: 500 MPa (B12)
+- Target Factor of Safety: 2 - (B13)
+
+### TERZAGHI LOOSENING PRESSURE
+
+Label and value pairs A16:C23:
+
+- Tunnel radius, R: 5.00 m (B16)
+- Loosening zone width, B1: 7.89 m (B17)
+- At-rest coeff., K0 = 1-sin(phi): 0.50 - (B18)
+- tan(phi): 0.58 - (B19)
+- Terzaghi vertical pressure, Pv: 194.15 kPa (B20)
+- Lower-bound floor (0.3\*gamma\*D): 66.00 kPa (B21)
+- Design vertical pressure, Pv: 194.15 kPa (B22)
+- Lateral pressure at springline, Ph = K0\*Pv: 97.08 kPa (B23)
+
+### RING THRUST \& MOMENT (crown = 0deg, springline = 90deg)
+
+Label and value pairs A26:C33:
+
+- Mean pressure, p\_mean: 145.62 kPa (B26)
+- Deviatoric pressure, p\_dev: 48.54 kPa (B27)
+- Thrust at crown, N(0): 485.38 kN/m (B28)
+- Thrust at springline, N(90): 970.77 kN/m (B29)
+- Max ring thrust, N\_max: 970.77 kN/m (B30)
+- Moment at crown, M(0): 606.73 kNm/m (B31)
+- Moment at springline, M(90): 606.73 kNm/m (B32)
+- Max ring moment, M\_max: 606.73 kNm/m (B33)
+
+### RCC LINING SECTION CHECK (1 m wide strip)
+
+Label and value pairs A36:C45:
+
+- Section area, A = 1 x t: 0.350 m2 (B36)
+- Section modulus, Z = 1 x t^2/6: 0.020 m3 (B37)
+- Axial stress = N\_max/A /1000: 2.77 MPa (B38)
+- Bending stress = M\_max/Z /1000: 29.72 MPa (B39)
+- Combined max compressive stress: 32.49 MPa (B40)
+- Combined stress, opposite fibre: -26.94 MPa (B41)
+- Permissible stress = 0.33 fck: 9.90 MPa (B42)
+- Factor of Safety (actual): 0.30 - (B43)
+- Status: NOT SAFE - increase thickness (B44)
+- Note: net tension on inner fibre - provide crack-control reinforcement (A45)
+
+### LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety)
+
+Table A47:F72 (data E49:F72), header row 48, found by rules: empty-row and empty-column gaps, title in row 47, header by type change, bold header.
+
+| t (m) | FOS |
+| --- | --- |
+| 0.15 | 0.06 |
+| 0.2 | 0.10 |
+| 0.25 | 0.16 |
+| 0.3 | 0.23 |
+| 0.35 | 0.30 |
+| 0.4 | 0.39 |
+| 0.45 | 0.49 |
+| 0.5 | 0.60 |
+| 0.55 | 0.72 |
+| 0.6 | 0.84 |
+| 0.65 | 0.98 |
+| 0.7 | 1.12 |
+| 0.75 | 1.27 |
+| 0.8 | 1.43 |
+| 0.85 | 1.60 |
+| 0.9 | 1.78 |
+| 0.95 | 1.96 |
+| 1 | 2.15 |
+| 1.05 | 2.34 |
+| 1.1 | 2.54 |
+| 1.15 | 2.75 |
+| 1.2 | 2.97 |
+| 1.25 | 3.19 |
+| 1.3 | 3.41 |
+
+### Table A74:C74
+
+Table A74:C74, row labels in A, found by rules: empty-row gaps, no header found.
+
+| A | B | C |
+| --- | --- | --- |
+| Min. lining thickness for target FOS | 1 | m |
 
 ## Ventilation
 
-|  |  |  |
-| --- | --- | --- |
-| LONGITUDINAL VENTILATION DESIGN CHECK |  |  |
-| Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control |  |  |
-|  |  |  |
-| INPUTS | ← | ← |
-| Tunnel length, L | 800 | m |
-| Tunnel diameter, D | 10 | m |
-| Design-hour traffic volume | 1200 | veh/hr |
-| Heavy diesel vehicle share | 0.1 | fraction |
-| CO emission factor - LMV | 8 | g/km/veh |
-| CO emission factor - HDV | 12 | g/km/veh |
-| Permissible CO (15-min) | 100 | ppm |
-| Design fire heat release rate | 30 | MW |
-| Air density | 1.2 | kg/m3 |
-| Specific heat of air | 1.005 | kJ/kg.K |
-| Ambient temperature | 298 | K |
-| Darcy friction factor | 0.02 | - |
-| Jet fan thrust (each) | 1500 | N |
-|  |  |  |
-| GEOMETRY | ← | ← |
-| Cross-sectional area, A = pi.D^2/4 | 78.54 | m2 |
-| Hydraulic diameter (circular = D) | 10.00 | m |
-|  |  |  |
-| CO DILUTION - FRESH AIR DEMAND | ← | ← |
-| Heavy diesel vehicles | 120 | veh/hr |
-| Light vehicles | 1080 | veh/hr |
-| Total CO emission rate | 2.2400 | g/s |
-| Permissible CO, mass basis | 0.1145 | g/m3 |
-| Fresh air required, Q | 19.56 | m3/s |
-| Required velocity (CO dilution) | 0.25 | m/s |
-|  |  |  |
-| CRITICAL VELOCITY - SMOKE CONTROL (Kennedy) | ← | ← |
-| Critical velocity, Vc | 2.18 | m/s |
-| Governing design velocity | 2.18 | m/s |
-| Comfort/safety check (1-10 m/s) | OK |  |
-|  |  |  |
-| JET FAN COUNT | ← | ← |
-| Friction pressure loss, dP | 4.58 | Pa |
-| Total thrust required | 359.85 | N |
-| No. of jet fans required | 1 | nos |
+### LONGITUDINAL VENTILATION DESIGN CHECK
 
-Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A19:C19, A23:C23, A31:C31, A36:C36
+Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control (A2)
+
+### INPUTS
+
+Label and value pairs A5:C17:
+
+- Tunnel length, L: 800 m (B5)
+- Tunnel diameter, D: 10 m (B6)
+- Design-hour traffic volume: 1200 veh/hr (B7)
+- Heavy diesel vehicle share: 0.1 fraction (B8)
+- CO emission factor - LMV: 8 g/km/veh (B9)
+- CO emission factor - HDV: 12 g/km/veh (B10)
+- Permissible CO (15-min): 100 ppm (B11)
+- Design fire heat release rate: 30 MW (B12)
+- Air density: 1.2 kg/m3 (B13)
+- Specific heat of air: 1.005 kJ/kg.K (B14)
+- Ambient temperature: 298 K (B15)
+- Darcy friction factor: 0.02 - (B16)
+- Jet fan thrust (each): 1500 N (B17)
+
+### GEOMETRY
+
+Label and value pairs A20:C21:
+
+- Cross-sectional area, A = pi.D^2/4: 78.54 m2 (B20)
+- Hydraulic diameter (circular = D): 10.00 m (B21)
+
+### CO DILUTION - FRESH AIR DEMAND
+
+Label and value pairs A24:C29:
+
+- Heavy diesel vehicles: 120 veh/hr (B24)
+- Light vehicles: 1080 veh/hr (B25)
+- Total CO emission rate: 2.2400 g/s (B26)
+- Permissible CO, mass basis: 0.1145 g/m3 (B27)
+- Fresh air required, Q: 19.56 m3/s (B28)
+- Required velocity (CO dilution): 0.25 m/s (B29)
+
+### CRITICAL VELOCITY - SMOKE CONTROL (Kennedy)
+
+Label and value pairs A32:C34:
+
+- Critical velocity, Vc: 2.18 m/s (B32)
+- Governing design velocity: 2.18 m/s (B33)
+- Comfort/safety check (1-10 m/s): OK (B34)
+
+### JET FAN COUNT
+
+Label and value pairs A37:C39:
+
+- Friction pressure loss, dP: 4.58 Pa (B37)
+- Total thrust required: 359.85 N (B38)
+- No. of jet fans required: 1 nos (B39)
 
 ## Drainage
 
-|  |  |  |  |  |  |
-| --- | --- | --- | --- | --- | --- |
-| DRAINAGE SYSTEM SIZING |  |  |  |  |  |
-| Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check |  |  |  |  |  |
-|  |  |  |  |  |  |
-| INPUTS | ← | ← |  |  |  |
-| Tunnel length, L | 800 | m |  |  |  |
-| Longitudinal gradient | 0.005 | fraction |  |  |  |
-| Seepage rate assumed | 0.02 | l/s per m |  |  |  |
-| Runoff coefficient, C | 0.85 | - |  |  |  |
-| Design rainfall intensity, i | 75 | mm/hr |  |  |  |
-| Portal catchment area | 0.6 | ha |  |  |  |
-| Manning's roughness, n | 0.013 | - |  |  |  |
-| Trial pipe diameter | 0.3 | m |  |  |  |
-| Sump retention time | 10 | min |  |  |  |
-| Pump duty factor | 1.25 | - |  |  |  |
-|  |  |  |  |  |  |
-| INFLOW ESTIMATES | ← | ← |  |  |  |
-| Groundwater seepage inflow | 16.00 | l/s |  |  |  |
-| Portal rainfall runoff (Rational Method) | 106.25 | l/s |  |  |  |
-| Total design drain flow | 122.25 | l/s |  |  |  |
-|  |  |  |  |  |  |
-| INVERT DRAIN PIPE SIZING (Manning's, full-bore) | ← | ← |  |  |  |
-| Pipe area | 0.0707 | m2 |  |  |  |
-| Hydraulic radius, R = D/4 | 0.0750 | m |  |  |  |
-| Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2) | 68.38 | l/s |  |  |  |
-| Trial pipe status | UNDERSIZED - increase diameter |  |  |  |  |
-|  |  |  |  |  |  |
-| STANDARD PIPE SIZE CHECK | ← | ← |  |  |  |
-|  |  |  |  | D (m) | Capacity (l/s) |
-|  |  |  |  | 0.15 | 10.77 |
-|  |  |  |  | 0.2 | 23.19 |
-|  |  |  |  | 0.25 | 42.05 |
-|  |  |  |  | 0.3 | 68.38 |
-|  |  |  |  | 0.4 | 147.26 |
-|  |  |  |  | 0.45 | 201.60 |
-|  |  |  |  | 0.5 | 267.00 |
-|  |  |  |  | 0.6 | 434.17 |
-|  |  |  |  | 0.75 | 787.21 |
-|  |  |  |  | 0.9 | 1280.08 |
-|  |  |  |  |  |  |
-| Minimum standard pipe size required | 0.4 | m |  |  |  |
-|  |  |  |  |  |  |
-| SUMP \& PUMP SIZING | ← | ← |  |  |  |
-| Peak design inflow to sump | 152.81 | l/s |  |  |  |
-| Required sump volume | 91.69 | m3 |  |  |  |
-| Required pump capacity | 152.81 | l/s |  |  |  |
+### DRAINAGE SYSTEM SIZING
 
-Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A16:C16, A21:C21, A27:C27, A42:C42
+Method: seepage inflow + Rational Method runoff + Manning's pipe sizing + sump/pump check (A2)
+
+### INPUTS
+
+Label and value pairs A5:C14:
+
+- Tunnel length, L: 800 m (B5)
+- Longitudinal gradient: 0.005 fraction (B6)
+- Seepage rate assumed: 0.02 l/s per m (B7)
+- Runoff coefficient, C: 0.85 - (B8)
+- Design rainfall intensity, i: 75 mm/hr (B9)
+- Portal catchment area: 0.6 ha (B10)
+- Manning's roughness, n: 0.013 - (B11)
+- Trial pipe diameter: 0.3 m (B12)
+- Sump retention time: 10 min (B13)
+- Pump duty factor: 1.25 - (B14)
+
+### INFLOW ESTIMATES
+
+Label and value pairs A17:C19:
+
+- Groundwater seepage inflow: 16.00 l/s (B17)
+- Portal rainfall runoff (Rational Method): 106.25 l/s (B18)
+- Total design drain flow: 122.25 l/s (B19)
+
+### INVERT DRAIN PIPE SIZING (Manning's, full-bore)
+
+Label and value pairs A22:C25:
+
+- Pipe area: 0.0707 m2 (B22)
+- Hydraulic radius, R = D/4: 0.0750 m (B23)
+- Full-bore capacity, Q=(1/n)AR^(2/3)S^(1/2): 68.38 l/s (B24)
+- Trial pipe status: UNDERSIZED - increase diameter (B25)
+
+### STANDARD PIPE SIZE CHECK
+
+Table A27:F38 (data E29:F38), header row 28, found by rules: empty-row and empty-column gaps, title in row 27, header by type change, bold header.
+
+| D (m) | Capacity (l/s) |
+| --- | --- |
+| 0.15 | 10.77 |
+| 0.2 | 23.19 |
+| 0.25 | 42.05 |
+| 0.3 | 68.38 |
+| 0.4 | 147.26 |
+| 0.45 | 201.60 |
+| 0.5 | 267.00 |
+| 0.6 | 434.17 |
+| 0.75 | 787.21 |
+| 0.9 | 1280.08 |
+
+### Table A40:C40
+
+Table A40:C40, row labels in A, found by rules: empty-row gaps, no header found.
+
+| A | B | C |
+| --- | --- | --- |
+| Minimum standard pipe size required | 0.4 | m |
+
+### SUMP \& PUMP SIZING
+
+Label and value pairs A43:C45:
+
+- Peak design inflow to sump: 152.81 l/s (B43)
+- Required sump volume: 91.69 m3 (B44)
+- Required pump capacity: 152.81 l/s (B45)
 
 ## Logic
 
@@ -273,6 +332,8 @@ Merged cells: 〃 same as above, ← same as left. Ranges: A4:C4, A16:C16, A21:C
 #### Parameters
 
 A row with a cell range stands for values next to each other that play one part.
+
+Parameters in INPUTS:
 
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -284,6 +345,11 @@ A row with a cell range stands for values next to each other that play one part.
 | B10 |  | Cohesion, c | 20 | kPa | cell beside | 1 |
 | B11 |  | Concrete grade, fck | 30 | MPa | cell beside | 1 |
 | B13 |  | Target Factor of Safety | 2 |  |  | 2 |
+
+Parameters in LINING THICKNESS SENSITIVITY (trial t vs Factor of Safety):
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
 | E49:E72 |  | t | 0.15, 0.2, 0.25 ..., 1.3 (24 values) | m | column header | 2 each |
 
 #### Formulas
@@ -355,6 +421,8 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 #### Parameters
 
+Parameters in INPUTS:
+
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
 | B5 |  | Tunnel length, L | 800 | m | cell beside | 2 |
@@ -403,6 +471,8 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 A row with a cell range stands for values next to each other that play one part.
 
+Parameters in INPUTS:
+
 | Cell | Name | Label | Value | Unit | Unit from | Read by |
 | --- | --- | --- | --- | --- | --- | --- |
 | B5 |  | Tunnel length, L | 800 | m | cell beside | 1 |
@@ -415,6 +485,11 @@ A row with a cell range stands for values next to each other that play one part.
 | B12 |  | Trial pipe diameter | 0.3 | m | cell beside | 2 |
 | B13 |  | Sump retention time | 10 | min | cell beside | 1 |
 | B14 |  | Pump duty factor | 1.25 |  |  | 1 |
+
+Parameters in STANDARD PIPE SIZE CHECK:
+
+| Cell | Name | Label | Value | Unit | Unit from | Read by |
+| --- | --- | --- | --- | --- | --- | --- |
 | E29:E38 |  | D | 0.15, 0.2, 0.25 ..., 0.9 (10 values) | m | column header | 2 each |
 
 #### Formulas

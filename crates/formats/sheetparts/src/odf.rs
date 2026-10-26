@@ -15,6 +15,7 @@
 //! Nothing in the file is executed. The part is XML read through the bounded scanner.
 
 mod rules;
+mod settings;
 mod styles;
 
 use std::collections::{BTreeMap, HashMap};
@@ -22,13 +23,15 @@ use std::collections::{BTreeMap, HashMap};
 use zipguard::Archive;
 
 use crate::a1::a1;
-use crate::ooxml::{Ctx, DocProps, Validation};
+use crate::ooxml::{Ctx, DocProps, Frozen, Validation};
 use crate::xml::{Elem, Ev};
-use crate::{CellPos, DefinedName, Issue, IssueKind, Limits, PropValue, RowSpan};
-use rules::{parse_condition, range_text};
+use crate::{CellPos, DefinedName, Issue, IssueKind, Limits, Look, PropValue, RowSpan};
+use rules::{parse_condition, range_text, sheet_and_cell, split_char};
+use settings::Settings;
 use styles::StyleBook;
 
 const CONTENT: &str = "content.xml";
+const SETTINGS: &str = "settings.xml";
 const MAX_ROWS: u64 = 1_048_576;
 const MAX_COLS: u64 = 16_384;
 
@@ -61,6 +64,48 @@ pub struct OdsSheet {
     pub validations: Vec<Validation>,
     /// The number format code of each cell with content whose style has a data style.
     pub cell_formats: Vec<(CellPos, String)>,
+    /// Merged cells as (top left, bottom right), from `number-columns-spanned` and
+    /// `number-rows-spanned`. A span of one row and one column is no merge.
+    pub merges: Vec<(CellPos, CellPos)>,
+    /// The look of each cell whose look is not plain: cells with content and cells that name
+    /// a style of their own. The style comes from the cell, else its row, else its column.
+    pub looks: Vec<(CellPos, Look)>,
+    /// Whether the file had cell styles at all. When it did not, the looks are missing, which
+    /// is not the same as plain.
+    pub has_looks: bool,
+    /// The rows inside `table:table-header-rows`, as one span (first to last when there are
+    /// several groups).
+    pub header_rows: Option<RowSpan>,
+    /// Row groups: spans of rows and the nesting depth of `table:table-row-group` around them
+    /// (1 for the outermost). Rows outside any group are not listed. Sibling groups stay apart.
+    pub outline: Vec<(RowSpan, u8)>,
+    /// Rows and columns fixed by a frozen pane, from `settings.xml`.
+    pub frozen: Option<Frozen>,
+}
+
+/// A database range (`table:database-range`): a named table, an autofilter or a sort area.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatabaseRange {
+    pub name: String,
+    pub sheet: String,
+    /// The cells as an A1 range (`A1:C10`, `C4` for one cell).
+    pub range: String,
+    /// `table:contains-header`, true when the file does not say.
+    pub header: bool,
+    /// `calcext:contains-footer`.
+    pub footer: bool,
+    /// `table:display-filter-buttons`.
+    pub filter_buttons: bool,
+}
+
+/// A pivot table (`table:data-pilot-table`) and where it is drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataPilot {
+    pub name: String,
+    /// The sheet of the target range.
+    pub sheet: String,
+    /// The target range as an A1 range.
+    pub range: String,
 }
 
 /// What `read` finds in an ODF spreadsheet.
@@ -71,6 +116,8 @@ pub struct OdsParts {
     /// `refers_to` as a sheet reference (`Sheet1!$A$1:$B$2`); a named expression keeps its
     /// expression as written (`of:=0.19`).
     pub names: Vec<DefinedName>,
+    pub database_ranges: Vec<DatabaseRange>,
+    pub data_pilots: Vec<DataPilot>,
     /// Core keys: `creator` (the first author), `lastModifiedBy`, `created`, `modified`,
     /// `title`, `subject`, `description`, `keywords`, `language`. App keys: `Application`,
     /// `EditingDuration`, `EditingCycles`.
@@ -90,7 +137,11 @@ pub fn read(zip: &mut Archive<'_>, limits: &Limits, stop: &dyn Fn() -> bool) -> 
     let mut book = StyleBook::default();
     ctx.scan("styles.xml", false, &mut |ev, _| book.event(&ev));
 
+    let mut settings = Settings::default();
+    ctx.scan(SETTINGS, false, &mut |ev, depth| settings.event(&ev, depth));
+
     let mut content = Content::new(book, limits.max_items as u64);
+    content.frozen = settings.frozen();
     ctx.scan(CONTENT, true, &mut |ev, depth| content.event(&ev, depth));
     let props = read_meta(&mut ctx);
     let mut issues = ctx.issues;
@@ -99,6 +150,8 @@ pub fn read(zip: &mut Archive<'_>, limits: &Limits, stop: &dyn Fn() -> bool) -> 
     OdsParts {
         sheets: content.sheets,
         names: content.names,
+        database_ranges: content.database_ranges,
+        data_pilots: content.data_pilots,
         props,
         issues,
     }
@@ -161,6 +214,10 @@ struct SheetState {
     col_defs: u64,
     cols: Vec<ColDef>,
     in_row: bool,
+    in_header: bool,
+    group_depth: u8,
+    /// A row group opened since the last outline span: the next span starts a new entry.
+    group_break: bool,
     row_rep: u64,
     row_style: Option<String>,
     rows_clamped: bool,
@@ -173,13 +230,14 @@ struct Content {
     book: StyleBook,
     sheets: Vec<OdsSheet>,
     names: Vec<DefinedName>,
+    database_ranges: Vec<DatabaseRange>,
+    data_pilots: Vec<DataPilot>,
+    frozen: HashMap<String, Frozen>,
     issues: Vec<Issue>,
     cur: Option<SheetState>,
     /// Tables below the top level (inside a cell) and tables of a wrong shape are not read.
     skip_tables: usize,
-    used: u64,
-    limit: u64,
-    exhausted: bool,
+    shares: [Share; 6],
     bad_counts: u64,
     first_bad: String,
     vals: Vec<ValDef>,
@@ -188,6 +246,72 @@ struct Content {
     msg: Option<Msg>,
     msg_para: Option<String>,
     unknown_vals: BTreeMap<String, u64>,
+}
+
+/// The lists that are bounded one by one, so that running out of one never drops another.
+#[derive(Clone, Copy)]
+enum List {
+    /// Cells with content that get a number format, and notes.
+    Cells,
+    Merges,
+    Looks,
+    Outline,
+    Ranges,
+    Pilots,
+}
+
+impl List {
+    const ALL: [List; 6] = [
+        List::Cells,
+        List::Merges,
+        List::Looks,
+        List::Outline,
+        List::Ranges,
+        List::Pilots,
+    ];
+
+    fn what(self) -> &'static str {
+        match self {
+            List::Cells => {
+                "cells with content for number formats and notes (counted with their repeats)"
+            }
+            List::Merges => "cells that start a merged range (counted with their repeats)",
+            List::Looks => "cells with a look (counted with their repeats)",
+            List::Outline => "row group spans",
+            List::Ranges => "database ranges",
+            List::Pilots => "pivot tables",
+        }
+    }
+}
+
+/// Most database ranges, or pivot tables, in one file.
+const MAX_STRUCTURES: u64 = 10_000;
+
+struct Share {
+    used: u64,
+    limit: u64,
+    exhausted: bool,
+}
+
+impl Share {
+    /// The layout lists draw from the one total (`max_items`) in fixed shares: looks 30 %,
+    /// merges 20 %, row group spans 5 %, database ranges 2.5 % and pivot tables 2.5 % (those
+    /// two also at most 10,000 each). Cells with content (and copied text) get the whole total
+    /// less what the layout lists have charged, so a sheet without layout signals keeps all of it.
+    fn new(list: List, items: u64) -> Share {
+        let limit = match list {
+            List::Cells => items,
+            List::Looks => items / 10 * 3,
+            List::Merges => items / 10 * 2,
+            List::Outline => items / 20,
+            List::Ranges | List::Pilots => (items / 40).min(MAX_STRUCTURES),
+        };
+        Share {
+            used: 0,
+            limit,
+            exhausted: false,
+        }
+    }
 }
 
 fn hidden(e: &Elem) -> bool {
@@ -207,12 +331,13 @@ impl Content {
             book,
             sheets: Vec::new(),
             names: Vec::new(),
+            database_ranges: Vec::new(),
+            data_pilots: Vec::new(),
+            frozen: HashMap::new(),
             issues: Vec::new(),
             cur: None,
             skip_tables: 0,
-            used: 0,
-            limit,
-            exhausted: false,
+            shares: List::ALL.map(|l| Share::new(l, limit)),
             bad_counts: 0,
             first_bad: String::new(),
             vals: Vec::new(),
@@ -226,6 +351,13 @@ impl Content {
 
     /// Problems that can repeat a million times are said once with a count.
     fn summary(&self, issues: &mut Vec<Issue>) {
+        if self.book.chain_too_long() {
+            issues.push(Issue::new(
+                CONTENT,
+                IssueKind::Damaged,
+                "a cell style has parent styles more than 64 levels up: what they say about looks and number formats is not inherited",
+            ));
+        }
         if self.bad_counts > 0 {
             issues.push(Issue::new(
                 CONTENT,
@@ -279,23 +411,38 @@ impl Content {
         }
     }
 
-    fn charge(&mut self, n: u64) -> bool {
-        if self.exhausted {
+    fn charge(&mut self, list: List, n: u64) -> bool {
+        // Cells with content get the whole total less what the layout lists have charged.
+        let layout: u64 = match list {
+            List::Cells => self
+                .shares
+                .iter()
+                .skip(1)
+                .fold(0, |a, s| a.saturating_add(s.used)),
+            _ => 0,
+        };
+        let share = &mut self.shares[list as usize];
+        if share.exhausted {
             return false;
         }
-        self.used = self.used.saturating_add(n);
-        if self.used > self.limit {
-            self.exhausted = true;
+        let limit = share.limit.saturating_sub(layout);
+        if share.used.saturating_add(n) > limit {
+            // What did not fit is not charged: it was not listed.
+            share.exhausted = true;
             self.issue(
                 IssueKind::Limit,
-                format!(
-                    "more than {} cells with content in repeated rows or columns: the rest is not listed",
-                    self.limit
-                ),
+                format!("more than {limit} {}: the rest is not listed", list.what()),
             );
             return false;
         }
+        share.used += n;
         true
+    }
+
+    /// Copied text counts against the budget of the other copied strings (the notes).
+    fn charge_text(&mut self, parts: &[&str]) -> bool {
+        let bytes: usize = parts.iter().map(|p| p.len()).sum();
+        self.charge(List::Cells, bytes as u64 / 16)
     }
 
     fn event(&mut self, ev: &Ev<'_>, depth: usize) {
@@ -332,6 +479,14 @@ impl Content {
                 self.validation(e);
                 return;
             }
+            "database-range" => {
+                self.database_range(e);
+                return;
+            }
+            "data-pilot-table" => {
+                self.data_pilot(e);
+                return;
+            }
             "help-message" | "error-message" => {
                 self.msg = Some(if e.name == "help-message" {
                     Msg::Help
@@ -355,6 +510,17 @@ impl Content {
         }
         match e.name.as_str() {
             "table-column" => self.column(e),
+            "table-header-rows" if !empty => {
+                if let Some(s) = &mut self.cur {
+                    s.in_header = true;
+                }
+            }
+            "table-row-group" if !empty => {
+                if let Some(s) = &mut self.cur {
+                    s.group_depth = s.group_depth.saturating_add(1);
+                    s.group_break = true;
+                }
+            }
             "table-row" => {
                 self.row(e);
                 if empty {
@@ -425,6 +591,16 @@ impl Content {
         }
         match name {
             "table-row" => self.end_row(),
+            "table-header-rows" => {
+                if let Some(s) = &mut self.cur {
+                    s.in_header = false;
+                }
+            }
+            "table-row-group" => {
+                if let Some(s) = &mut self.cur {
+                    s.group_depth = s.group_depth.saturating_sub(1);
+                }
+            }
             "table-cell" | "covered-table-cell" => {
                 if let Some(s) = &mut self.cur {
                     s.cell = None;
@@ -459,6 +635,7 @@ impl Content {
             self.issue(IssueKind::Damaged, "a sheet has no name");
         }
         let hidden = self.book.sheet_hidden(e.attr("style-name"));
+        let frozen = self.frozen.get(&name).copied();
         self.cur = Some(SheetState {
             sheet: OdsSheet {
                 name,
@@ -468,12 +645,21 @@ impl Content {
                 annotations: Vec::new(),
                 validations: Vec::new(),
                 cell_formats: Vec::new(),
+                merges: Vec::new(),
+                looks: Vec::new(),
+                has_looks: self.book.has_looks(),
+                header_rows: None,
+                outline: Vec::new(),
+                frozen,
             },
             row: 0,
             col: 0,
             col_defs: 0,
             cols: Vec::new(),
             in_row: false,
+            in_header: false,
+            group_depth: 0,
+            group_break: false,
             row_rep: 1,
             row_style: None,
             rows_clamped: false,
@@ -597,6 +783,37 @@ impl Content {
             let last = (s.row + rep - 1).min(MAX_ROWS - 1);
             push_span(&mut s.sheet.hidden_rows, s.row as u32, last as u32);
         }
+        let mut pushed = false;
+        if s.row < MAX_ROWS {
+            let first = s.row as u32;
+            let last = (s.row + rep - 1).min(MAX_ROWS - 1) as u32;
+            if s.in_header {
+                s.sheet.header_rows = Some(match s.sheet.header_rows {
+                    Some(h) => RowSpan {
+                        first: h.first.min(first),
+                        last: h.last.max(last),
+                    },
+                    None => RowSpan { first, last },
+                });
+            }
+            if s.group_depth > 0 {
+                let depth = s.group_depth;
+                match s.sheet.outline.last_mut() {
+                    Some((prev, d))
+                        if !s.group_break
+                            && *d == depth
+                            && prev.last.saturating_add(1) == first =>
+                    {
+                        prev.last = last;
+                    }
+                    _ => {
+                        s.sheet.outline.push((RowSpan { first, last }, depth));
+                        pushed = true;
+                    }
+                }
+                s.group_break = false;
+            }
+        }
         if s.row.saturating_add(rep) > MAX_ROWS && !s.rows_clamped {
             s.rows_clamped = true;
             let name = s.sheet.name.clone();
@@ -604,6 +821,12 @@ impl Content {
                 IssueKind::Limit,
                 format!("sheet {name}: rows past 1,048,576 are ignored"),
             );
+        }
+        if pushed
+            && !self.charge(List::Outline, 1)
+            && let Some(s) = &mut self.cur
+        {
+            s.sheet.outline.pop();
         }
     }
 
@@ -666,17 +889,42 @@ impl Content {
                 None => *self.unknown_vals.entry(name.to_string()).or_insert(0) += 1,
             }
         }
-        if e.attr("value-type").is_some() || e.attr("formula").is_some() {
-            let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
-            if self.charge(cells) {
-                self.list_formats(e, rect);
+        let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
+        let cols = self.repeat(e, "number-columns-spanned");
+        let rows = self.repeat(e, "number-rows-spanned");
+        if (cols > 1 || rows > 1) && self.charge(List::Merges, cells) {
+            self.list_merges(rect, rows, cols);
+        }
+        let content = e.attr("value-type").is_some() || e.attr("formula").is_some();
+        if content || e.attr("style-name").is_some() {
+            let runs = self.style_runs(e, rect);
+            if content && self.charge(List::Cells, cells) {
+                self.list_formats(&runs, rect);
+            }
+            self.list_looks(&runs, rect);
+        }
+    }
+
+    /// One merge per copy of a repeated spanned cell, each clamped to the sheet.
+    fn list_merges(&mut self, rect: Rect, rows: u64, cols: u64) {
+        let Some(s) = &mut self.cur else { return };
+        for r in rect.r0..=rect.r1 {
+            for c in rect.c0..=rect.c1 {
+                let r1 = (u64::from(r) + rows - 1).min(MAX_ROWS - 1) as u32;
+                let c1 = (u64::from(c) + cols - 1).min(MAX_COLS - 1) as u32;
+                s.sheet
+                    .merges
+                    .push((CellPos { row: r, col: c }, CellPos { row: r1, col: c1 }));
             }
         }
     }
 
-    fn list_formats(&mut self, e: &Elem, rect: Rect) {
-        let Some(s) = &self.cur else { return };
-        // Which style each column run has: the cell's own, the row default or the column's.
+    /// Which style each run of columns of a cell has: the cell's own, the row default or the
+    /// column's. Runs follow the column definitions, so a repeat is never expanded.
+    fn style_runs(&self, e: &Elem, rect: Rect) -> Vec<(u32, u32, Option<String>)> {
+        let Some(s) = &self.cur else {
+            return Vec::new();
+        };
         let own = e
             .attr("style-name")
             .map(str::to_string)
@@ -702,24 +950,85 @@ impl Content {
                 }
             }
         }
+        runs
+    }
+
+    fn list_looks(&mut self, runs: &[(u32, u32, Option<String>)], rect: Rect) {
         for (c0, c1, style) in runs {
             let Some(style) = style else { continue };
-            let Some(code) = self.book.format_of(&style, &mut self.issues) else {
+            let look = self.book.look(style);
+            if look == Look::default() {
                 continue;
-            };
+            }
             let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(c1 - c0 + 1);
-            if !self.charge(cells.saturating_mul(code.len() as u64 / 32)) {
+            if !self.charge(List::Looks, cells) {
                 return;
             }
             let Some(s) = &mut self.cur else { return };
             for r in rect.r0..=rect.r1 {
-                for c in c0..=c1 {
+                for c in *c0..=*c1 {
+                    s.sheet.looks.push((CellPos { row: r, col: c }, look));
+                }
+            }
+        }
+    }
+
+    fn list_formats(&mut self, runs: &[(u32, u32, Option<String>)], rect: Rect) {
+        for (c0, c1, style) in runs {
+            let Some(style) = style else { continue };
+            let Some(code) = self.book.format_of(style, &mut self.issues) else {
+                continue;
+            };
+            let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(c1 - c0 + 1);
+            if !self.charge(List::Cells, cells.saturating_mul(code.len() as u64 / 32)) {
+                return;
+            }
+            let Some(s) = &mut self.cur else { return };
+            for r in rect.r0..=rect.r1 {
+                for c in *c0..=*c1 {
                     s.sheet
                         .cell_formats
                         .push((CellPos { row: r, col: c }, code.clone()));
                 }
             }
         }
+    }
+
+    fn database_range(&mut self, e: &Elem) {
+        let name = e.attr("name").unwrap_or("").to_string();
+        let Some((sheet, range)) = e.attr("target-range-address").and_then(target) else {
+            self.issue(
+                IssueKind::Damaged,
+                format!("the database range {name} has no readable target range"),
+            );
+            return;
+        };
+        if !self.charge(List::Ranges, 1) || !self.charge_text(&[&name, &sheet, &range]) {
+            return;
+        }
+        self.database_ranges.push(DatabaseRange {
+            name,
+            sheet,
+            range,
+            header: e.attr("contains-header") != Some("false"),
+            footer: e.attr("contains-footer") == Some("true"),
+            filter_buttons: e.attr("display-filter-buttons") == Some("true"),
+        });
+    }
+
+    fn data_pilot(&mut self, e: &Elem) {
+        let name = e.attr("name").unwrap_or("").to_string();
+        let Some((sheet, range)) = e.attr("target-range-address").and_then(target) else {
+            self.issue(
+                IssueKind::Damaged,
+                format!("the pivot table {name} has no readable target range"),
+            );
+            return;
+        };
+        if !self.charge(List::Pilots, 1) || !self.charge_text(&[&name, &sheet, &range]) {
+            return;
+        }
+        self.data_pilots.push(DataPilot { name, sheet, range });
     }
 
     fn validation(&mut self, e: &Elem) {
@@ -784,7 +1093,10 @@ impl Content {
                 let cells = u64::from(rect.r1 - rect.r0 + 1) * u64::from(rect.c1 - rect.c0 + 1);
                 let text = ann.paras.join("\n");
                 // Every copy of the text counts, so a long note on a wide repeat hits the limit.
-                if !self.charge(cells.saturating_mul(1 + text.len() as u64 / 16)) {
+                if !self.charge(
+                    List::Cells,
+                    cells.saturating_mul(1 + text.len() as u64 / 16),
+                ) {
                     return;
                 }
                 let trimmed = |v: String| {
@@ -807,6 +1119,38 @@ impl Content {
             _ => {}
         }
     }
+}
+
+/// A cell range address (`Sheet1.A1:Sheet1.C10`, `$'My Sheet'.$A$1:.$C$10`) as the sheet of its
+/// first cell and an A1 range without `$`. Both ends equal give the one cell.
+fn target(address: &str) -> Option<(String, String)> {
+    let ends = split_char(address.trim(), ':');
+    if ends.len() > 2 {
+        return None;
+    }
+    let (sheet, first) = sheet_and_cell(ends[0])?;
+    if let Some(end) = ends.get(1) {
+        // A range across two sheets is no rectangle on one sheet.
+        let (sheet2, _) = sheet_and_cell(end)?;
+        if !sheet2.is_empty() && sheet2 != sheet {
+            return None;
+        }
+    }
+    let clean = |c: &str| c.replace('$', "");
+    let first = clean(first);
+    let last = match ends.get(1) {
+        Some(end) => clean(sheet_and_cell(end)?.1),
+        None => first.clone(),
+    };
+    if first.is_empty() || last.is_empty() {
+        return None;
+    }
+    let range = if first == last {
+        first
+    } else {
+        format!("{first}:{last}")
+    };
+    Some((sheet, range))
 }
 
 /// Adds a rectangle, extending the previous one when they touch with the same shape.

@@ -25,3 +25,4 @@ tempfile.workspace = true
 [dev-dependencies]
 rezzer-read-text = { path = "../readers/rezzer-read-text" }
 rezzer-read-csv = { path = "../readers/rezzer-read-csv" }
+rezzer-read-sheet = { path = "../readers/rezzer-read-sheet" }

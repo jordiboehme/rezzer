@@ -103,6 +103,12 @@ pub struct Parameter {
     /// How many formulas read this parameter.
     #[serde(default)]
     pub read_by: u32,
+    /// The parts that name the parameter, from wide to narrow: for a cell in a sheet region
+    /// the region's caption heading, its section headings, the column header path parts and
+    /// the label of its row; else the one label found beside or above it. `label` is these
+    /// parts joined with " / ".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<String>,
 }
 
 /// A validation or conditional-format rule.

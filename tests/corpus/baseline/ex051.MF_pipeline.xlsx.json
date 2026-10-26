@@ -1,0 +1,2128 @@
+{
+  "cells": [
+    [
+      "Лист1!C10",
+      "muob_cP"
+    ],
+    [
+      "Лист1!C11",
+      "pvt_corr_set"
+    ],
+    [
+      "Лист1!C12",
+      "PVT"
+    ],
+    [
+      "Лист1!C13",
+      "q_liq_sm3day"
+    ],
+    [
+      "Лист1!C14",
+      "fw_perc"
+    ],
+    [
+      "Лист1!C15",
+      "rp_m3m3"
+    ],
+    [
+      "Лист1!C16",
+      "q_gas_free_sm3day"
+    ],
+    [
+      "Лист1!C17",
+      "feed"
+    ],
+    [
+      "Лист1!C25",
+      "trajectory"
+    ],
+    [
+      "Лист1!C26",
+      "diam"
+    ],
+    [
+      "Лист1!C27",
+      "t_model"
+    ],
+    [
+      "Лист1!C28",
+      "flow_correlation"
+    ],
+    [
+      "Лист1!C29",
+      "flow_along_coord"
+    ],
+    [
+      "Лист1!C3",
+      "gamma_gas"
+    ],
+    [
+      "Лист1!C30",
+      "calibr_grav"
+    ],
+    [
+      "Лист1!C31",
+      "calibr_fric"
+    ],
+    [
+      "Лист1!C32",
+      "h_start_m"
+    ],
+    [
+      "Лист1!C33",
+      "h_end_m"
+    ],
+    [
+      "Лист1!C34",
+      "znlf"
+    ],
+    [
+      "Лист1!C35",
+      "pipe"
+    ],
+    [
+      "Лист1!C4",
+      "gamma_oil"
+    ],
+    [
+      "Лист1!C5",
+      "gamma_wat"
+    ],
+    [
+      "Лист1!C6",
+      "rsb_m3m3"
+    ],
+    [
+      "Лист1!C7",
+      "pb_atma"
+    ],
+    [
+      "Лист1!C8",
+      "t_res_C"
+    ],
+    [
+      "Лист1!C9",
+      "bob_m3m3"
+    ],
+    [
+      "Лист1!D10",
+      "0.6"
+    ],
+    [
+      "Лист1!D11",
+      "0"
+    ],
+    [
+      "Лист1!D12",
+      "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0}"
+    ],
+    [
+      "Лист1!D13",
+      "30"
+    ],
+    [
+      "Лист1!D14",
+      "10"
+    ],
+    [
+      "Лист1!D15",
+      "120"
+    ],
+    [
+      "Лист1!D16",
+      "0"
+    ],
+    [
+      "Лист1!D17",
+      "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0,\"q_liq_sm3day\":30,\"fw_perc\":10,\"rp_m3m3\":120}"
+    ],
+    [
+      "Лист1!D25",
+      "{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]}"
+    ],
+    [
+      "Лист1!D26",
+      "{\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001}"
+    ],
+    [
+      "Лист1!D27",
+      "{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}}"
+    ],
+    [
+      "Лист1!D28",
+      "0"
+    ],
+    [
+      "Лист1!D29",
+      "0"
+    ],
+    [
+      "Лист1!D3",
+      "0.6"
+    ],
+    [
+      "Лист1!D30",
+      "1"
+    ],
+    [
+      "Лист1!D31",
+      "1"
+    ],
+    [
+      "Лист1!D35",
+      "{\"construction\":{\"h_list_m\":{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]},\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001},\"t_model\":{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}},\"flow_correlation\":0,\"flow_along_coord\":false,\"calibr_grav\":1,\"calibr_fric\":1,\"h_start_m\":0,\"h_end_m\":0,\"znlf\":false}"
+    ],
+    [
+      "Лист1!D4",
+      "0.86"
+    ],
+    [
+      "Лист1!D5",
+      "1.1"
+    ],
+    [
+      "Лист1!D6",
+      "120"
+    ],
+    [
+      "Лист1!D7",
+      "130"
+    ],
+    [
+      "Лист1!D8",
+      "80"
+    ],
+    [
+      "Лист1!D9",
+      "1.2"
+    ],
+    [
+      "Лист1!G3",
+      "trajectory"
+    ],
+    [
+      "Лист1!G4",
+      "trajectory"
+    ],
+    [
+      "Лист1!G5",
+      "hmes, m"
+    ],
+    [
+      "Лист1!G6",
+      "0"
+    ],
+    [
+      "Лист1!G7",
+      "1000"
+    ],
+    [
+      "Лист1!G8",
+      "2000"
+    ],
+    [
+      "Лист1!G9",
+      "2500"
+    ],
+    [
+      "Лист1!H3",
+      "{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]}"
+    ],
+    [
+      "Лист1!H5",
+      "hvert, m"
+    ],
+    [
+      "Лист1!H6",
+      "0"
+    ],
+    [
+      "Лист1!H7",
+      "1000"
+    ],
+    [
+      "Лист1!H8",
+      "1900"
+    ],
+    [
+      "Лист1!H9",
+      "2300"
+    ],
+    [
+      "Лист1!J25",
+      "p_atma"
+    ],
+    [
+      "Лист1!J26",
+      "t_C"
+    ],
+    [
+      "Лист1!J27",
+      "pipe_object"
+    ],
+    [
+      "Лист1!J28",
+      "feed"
+    ],
+    [
+      "Лист1!J29",
+      "calc_along_coord"
+    ],
+    [
+      "Лист1!J3",
+      "pipe diams"
+    ],
+    [
+      "Лист1!J30",
+      "param"
+    ],
+    [
+      "Лист1!J31",
+      "q_liq_sm3day"
+    ],
+    [
+      "Лист1!J32",
+      "fw_perc"
+    ],
+    [
+      "Лист1!J33",
+      "rp_m3m3"
+    ],
+    [
+      "Лист1!J34",
+      "q_gas_free_sm3day"
+    ],
+    [
+      "Лист1!J35",
+      "208"
+    ],
+    [
+      "Лист1!J36",
+      "p_result_atma"
+    ],
+    [
+      "Лист1!J37",
+      "h,m"
+    ],
+    [
+      "Лист1!J38",
+      "0"
+    ],
+    [
+      "Лист1!J39",
+      "147"
+    ],
+    [
+      "Лист1!J4",
+      "roughness_m"
+    ],
+    [
+      "Лист1!J40",
+      "294"
+    ],
+    [
+      "Лист1!J41",
+      "441"
+    ],
+    [
+      "Лист1!J42",
+      "500"
+    ],
+    [
+      "Лист1!J43",
+      "588"
+    ],
+    [
+      "Лист1!J44",
+      "735"
+    ],
+    [
+      "Лист1!J45",
+      "882"
+    ],
+    [
+      "Лист1!J46",
+      "1029"
+    ],
+    [
+      "Лист1!J47",
+      "1176"
+    ],
+    [
+      "Лист1!J48",
+      "1324"
+    ],
+    [
+      "Лист1!J49",
+      "1471"
+    ],
+    [
+      "Лист1!J5",
+      "diameter"
+    ],
+    [
+      "Лист1!J50",
+      "1618"
+    ],
+    [
+      "Лист1!J51",
+      "1765"
+    ],
+    [
+      "Лист1!J52",
+      "1912"
+    ],
+    [
+      "Лист1!J53",
+      "2059"
+    ],
+    [
+      "Лист1!J54",
+      "2100"
+    ],
+    [
+      "Лист1!J55",
+      "2206"
+    ],
+    [
+      "Лист1!J56",
+      "2353"
+    ],
+    [
+      "Лист1!J57",
+      "2500"
+    ],
+    [
+      "Лист1!J6",
+      "hmes, m"
+    ],
+    [
+      "Лист1!J7",
+      "0"
+    ],
+    [
+      "Лист1!J8",
+      "500"
+    ],
+    [
+      "Лист1!J9",
+      "2100"
+    ],
+    [
+      "Лист1!K25",
+      "25"
+    ],
+    [
+      "Лист1!K26",
+      "30"
+    ],
+    [
+      "Лист1!K27",
+      "{\"construction\":{\"h_list_m\":{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]},\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001},\"t_model\":{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}},\"flow_correlation\":0,\"flow_along_coord\":false,\"calibr_grav\":1,\"calibr_fric\":1,\"h_start_m\":0,\"h_end_m\":0,\"znlf\":false}"
+    ],
+    [
+      "Лист1!K28",
+      "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0,\"q_liq_sm3day\":30,\"fw_perc\":10,\"rp_m3m3\":120}"
+    ],
+    [
+      "Лист1!K29",
+      "1"
+    ],
+    [
+      "Лист1!K3",
+      "{\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001}"
+    ],
+    [
+      "Лист1!K30",
+      "{\"show_array\":1}"
+    ],
+    [
+      "Лист1!K35",
+      "25"
+    ],
+    [
+      "Лист1!K36",
+      "p_1, atma"
+    ],
+    [
+      "Лист1!K37",
+      "hvert,m"
+    ],
+    [
+      "Лист1!K38",
+      "0"
+    ],
+    [
+      "Лист1!K39",
+      "147"
+    ],
+    [
+      "Лист1!K4",
+      "0.0001"
+    ],
+    [
+      "Лист1!K40",
+      "294"
+    ],
+    [
+      "Лист1!K41",
+      "441"
+    ],
+    [
+      "Лист1!K42",
+      "500"
+    ],
+    [
+      "Лист1!K43",
+      "588"
+    ],
+    [
+      "Лист1!K44",
+      "735"
+    ],
+    [
+      "Лист1!K45",
+      "882"
+    ],
+    [
+      "Лист1!K46",
+      "1026"
+    ],
+    [
+      "Лист1!K47",
+      "1159"
+    ],
+    [
+      "Лист1!K48",
+      "1291"
+    ],
+    [
+      "Лист1!K49",
+      "1424"
+    ],
+    [
+      "Лист1!K50",
+      "1556"
+    ],
+    [
+      "Лист1!K51",
+      "1688"
+    ],
+    [
+      "Лист1!K52",
+      "1821"
+    ],
+    [
+      "Лист1!K53",
+      "1947"
+    ],
+    [
+      "Лист1!K54",
+      "1980"
+    ],
+    [
+      "Лист1!K55",
+      "2065"
+    ],
+    [
+      "Лист1!K56",
+      "2182"
+    ],
+    [
+      "Лист1!K57",
+      "2300"
+    ],
+    [
+      "Лист1!K6",
+      "diam, mm"
+    ],
+    [
+      "Лист1!K7",
+      "62"
+    ],
+    [
+      "Лист1!K8",
+      "72"
+    ],
+    [
+      "Лист1!K9",
+      "125"
+    ],
+    [
+      "Лист1!L35",
+      "10"
+    ],
+    [
+      "Лист1!L36",
+      "t_1, C"
+    ],
+    [
+      "Лист1!L37",
+      "p,atma"
+    ],
+    [
+      "Лист1!L38",
+      "25"
+    ],
+    [
+      "Лист1!L39",
+      "37"
+    ],
+    [
+      "Лист1!L40",
+      "49"
+    ],
+    [
+      "Лист1!L41",
+      "61"
+    ],
+    [
+      "Лист1!L42",
+      "66"
+    ],
+    [
+      "Лист1!L43",
+      "73"
+    ],
+    [
+      "Лист1!L44",
+      "85"
+    ],
+    [
+      "Лист1!L45",
+      "97"
+    ],
+    [
+      "Лист1!L46",
+      "108"
+    ],
+    [
+      "Лист1!L47",
+      "119"
+    ],
+    [
+      "Лист1!L48",
+      "129"
+    ],
+    [
+      "Лист1!L49",
+      "139"
+    ],
+    [
+      "Лист1!L50",
+      "150"
+    ],
+    [
+      "Лист1!L51",
+      "160"
+    ],
+    [
+      "Лист1!L52",
+      "170"
+    ],
+    [
+      "Лист1!L53",
+      "180"
+    ],
+    [
+      "Лист1!L54",
+      "183"
+    ],
+    [
+      "Лист1!L55",
+      "189"
+    ],
+    [
+      "Лист1!L56",
+      "198"
+    ],
+    [
+      "Лист1!L57",
+      "208"
+    ],
+    [
+      "Лист1!M10",
+      "thermal_conductivity_casing_WmC"
+    ],
+    [
+      "Лист1!M11",
+      "heat_transfer_casing_liquid_Wm2C"
+    ],
+    [
+      "Лист1!M12",
+      "heat_transfer_casing_gas_Wm2C"
+    ],
+    [
+      "Лист1!M13",
+      "heat_transfer_fluid_convection_Wm2C "
+    ],
+    [
+      "Лист1!M14",
+      "time_calc_hr"
+    ],
+    [
+      "Лист1!M15",
+      "param"
+    ],
+    [
+      "Лист1!M16",
+      "json"
+    ],
+    [
+      "Лист1!M17",
+      "ambient temperature"
+    ],
+    [
+      "Лист1!M18",
+      "hvert, m"
+    ],
+    [
+      "Лист1!M19",
+      "0"
+    ],
+    [
+      "Лист1!M20",
+      "1000"
+    ],
+    [
+      "Лист1!M21",
+      "2000"
+    ],
+    [
+      "Лист1!M22",
+      "2500"
+    ],
+    [
+      "Лист1!M3",
+      "t model"
+    ],
+    [
+      "Лист1!M35",
+      "208"
+    ],
+    [
+      "Лист1!M36",
+      "p_2, atma"
+    ],
+    [
+      "Лист1!M37",
+      "t,C"
+    ],
+    [
+      "Лист1!M38",
+      "10"
+    ],
+    [
+      "Лист1!M39",
+      "14"
+    ],
+    [
+      "Лист1!M4",
+      "t_start_C"
+    ],
+    [
+      "Лист1!M40",
+      "17"
+    ],
+    [
+      "Лист1!M41",
+      "21"
+    ],
+    [
+      "Лист1!M42",
+      "23"
+    ],
+    [
+      "Лист1!M43",
+      "25"
+    ],
+    [
+      "Лист1!M44",
+      "28"
+    ],
+    [
+      "Лист1!M45",
+      "32"
+    ],
+    [
+      "Лист1!M46",
+      "36"
+    ],
+    [
+      "Лист1!M47",
+      "42"
+    ],
+    [
+      "Лист1!M48",
+      "48"
+    ],
+    [
+      "Лист1!M49",
+      "54"
+    ],
+    [
+      "Лист1!M5",
+      "t_end_C"
+    ],
+    [
+      "Лист1!M50",
+      "60"
+    ],
+    [
+      "Лист1!M51",
+      "66"
+    ],
+    [
+      "Лист1!M52",
+      "72"
+    ],
+    [
+      "Лист1!M53",
+      "78"
+    ],
+    [
+      "Лист1!M54",
+      "79"
+    ],
+    [
+      "Лист1!M55",
+      "81"
+    ],
+    [
+      "Лист1!M56",
+      "84"
+    ],
+    [
+      "Лист1!M57",
+      "86"
+    ],
+    [
+      "Лист1!M6",
+      "thermal_conductivity_formation_WmC"
+    ],
+    [
+      "Лист1!M7",
+      "specific_heat_capacity_formation_JkgC"
+    ],
+    [
+      "Лист1!M8",
+      "thermal_conductivity_cement_WmC"
+    ],
+    [
+      "Лист1!M9",
+      "thermal_conductivity_tubing_WmC"
+    ],
+    [
+      "Лист1!N10",
+      "32"
+    ],
+    [
+      "Лист1!N11",
+      "200"
+    ],
+    [
+      "Лист1!N12",
+      "10"
+    ],
+    [
+      "Лист1!N13",
+      "200"
+    ],
+    [
+      "Лист1!N14",
+      "240"
+    ],
+    [
+      "Лист1!N15",
+      "{\"thermal_conductivity_formation_WmC\":2.4252,\"specific_heat_capacity_formation_JkgC\":200,\"thermal_conductivity_cement_WmC\":6.965,\"thermal_conductivity_tubing_WmC\":32,\"thermal_conductivity_casing_WmC\":32,\"heat_transfer_casing_liquid_Wm2C\":200,\"heat_transfer_casing_gas_Wm2C\":10,\"heat_transfer_fluid_convection_Wm2C \":200,\"time_calc_hr\":240}"
+    ],
+    [
+      "Лист1!N16",
+      "{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}}"
+    ],
+    [
+      "Лист1!N18",
+      "t amb, C"
+    ],
+    [
+      "Лист1!N19",
+      "10"
+    ],
+    [
+      "Лист1!N20",
+      "35"
+    ],
+    [
+      "Лист1!N21",
+      "80"
+    ],
+    [
+      "Лист1!N22",
+      "90"
+    ],
+    [
+      "Лист1!N3",
+      "1"
+    ],
+    [
+      "Лист1!N35",
+      "86"
+    ],
+    [
+      "Лист1!N36",
+      "t_2, C"
+    ],
+    [
+      "Лист1!N37",
+      "t_amb, C"
+    ],
+    [
+      "Лист1!N38",
+      "10"
+    ],
+    [
+      "Лист1!N39",
+      "14"
+    ],
+    [
+      "Лист1!N4",
+      "15"
+    ],
+    [
+      "Лист1!N40",
+      "17"
+    ],
+    [
+      "Лист1!N41",
+      "21"
+    ],
+    [
+      "Лист1!N42",
+      "23"
+    ],
+    [
+      "Лист1!N43",
+      "25"
+    ],
+    [
+      "Лист1!N44",
+      "28"
+    ],
+    [
+      "Лист1!N45",
+      "32"
+    ],
+    [
+      "Лист1!N46",
+      "36"
+    ],
+    [
+      "Лист1!N47",
+      "42"
+    ],
+    [
+      "Лист1!N48",
+      "48"
+    ],
+    [
+      "Лист1!N49",
+      "54"
+    ],
+    [
+      "Лист1!N5",
+      "80"
+    ],
+    [
+      "Лист1!N50",
+      "60"
+    ],
+    [
+      "Лист1!N51",
+      "66"
+    ],
+    [
+      "Лист1!N52",
+      "72"
+    ],
+    [
+      "Лист1!N53",
+      "78"
+    ],
+    [
+      "Лист1!N54",
+      "79"
+    ],
+    [
+      "Лист1!N55",
+      "81"
+    ],
+    [
+      "Лист1!N56",
+      "84"
+    ],
+    [
+      "Лист1!N57",
+      "86"
+    ],
+    [
+      "Лист1!N6",
+      "2.4252"
+    ],
+    [
+      "Лист1!N7",
+      "200"
+    ],
+    [
+      "Лист1!N8",
+      "6.965"
+    ],
+    [
+      "Лист1!N9",
+      "32"
+    ],
+    [
+      "Лист1!O35",
+      "1"
+    ],
+    [
+      "Лист1!O36",
+      "calibr_grav"
+    ],
+    [
+      "Лист1!O37",
+      "Hl, %"
+    ],
+    [
+      "Лист1!O38",
+      "100"
+    ],
+    [
+      "Лист1!O39",
+      "100"
+    ],
+    [
+      "Лист1!O40",
+      "100"
+    ],
+    [
+      "Лист1!O41",
+      "100"
+    ],
+    [
+      "Лист1!O42",
+      "100"
+    ],
+    [
+      "Лист1!O43",
+      "100"
+    ],
+    [
+      "Лист1!O44",
+      "100"
+    ],
+    [
+      "Лист1!O45",
+      "100"
+    ],
+    [
+      "Лист1!O46",
+      "100"
+    ],
+    [
+      "Лист1!O47",
+      "100"
+    ],
+    [
+      "Лист1!O48",
+      "100"
+    ],
+    [
+      "Лист1!O49",
+      "100"
+    ],
+    [
+      "Лист1!O50",
+      "100"
+    ],
+    [
+      "Лист1!O51",
+      "100"
+    ],
+    [
+      "Лист1!O52",
+      "100"
+    ],
+    [
+      "Лист1!O53",
+      "100"
+    ],
+    [
+      "Лист1!O54",
+      "100"
+    ],
+    [
+      "Лист1!O55",
+      "100"
+    ],
+    [
+      "Лист1!O56",
+      "100"
+    ],
+    [
+      "Лист1!O57",
+      "100"
+    ],
+    [
+      "Лист1!P35",
+      "1"
+    ],
+    [
+      "Лист1!P36",
+      "calibr_fric"
+    ],
+    [
+      "Лист1!P37",
+      "fpat"
+    ],
+    [
+      "Лист1!P38",
+      "0"
+    ],
+    [
+      "Лист1!P39",
+      "0"
+    ],
+    [
+      "Лист1!P40",
+      "0"
+    ],
+    [
+      "Лист1!P41",
+      "0"
+    ],
+    [
+      "Лист1!P42",
+      "0"
+    ],
+    [
+      "Лист1!P43",
+      "0"
+    ],
+    [
+      "Лист1!P44",
+      "0"
+    ],
+    [
+      "Лист1!P45",
+      "0"
+    ],
+    [
+      "Лист1!P46",
+      "0"
+    ],
+    [
+      "Лист1!P47",
+      "0"
+    ],
+    [
+      "Лист1!P48",
+      "0"
+    ],
+    [
+      "Лист1!P49",
+      "0"
+    ],
+    [
+      "Лист1!P50",
+      "0"
+    ],
+    [
+      "Лист1!P51",
+      "0"
+    ],
+    [
+      "Лист1!P52",
+      "0"
+    ],
+    [
+      "Лист1!P53",
+      "0"
+    ],
+    [
+      "Лист1!P54",
+      "0"
+    ],
+    [
+      "Лист1!P55",
+      "0"
+    ],
+    [
+      "Лист1!P56",
+      "0"
+    ],
+    [
+      "Лист1!P57",
+      "0"
+    ],
+    [
+      "Лист1!Q35",
+      "[\"set show_log=1 in param to show calc log\"]"
+    ],
+    [
+      "Лист1!Q36",
+      "log"
+    ],
+    [
+      "Лист1!Q37",
+      "diam, mm"
+    ],
+    [
+      "Лист1!Q38",
+      "62"
+    ],
+    [
+      "Лист1!Q39",
+      "62"
+    ],
+    [
+      "Лист1!Q40",
+      "62"
+    ],
+    [
+      "Лист1!Q41",
+      "62"
+    ],
+    [
+      "Лист1!Q42",
+      "72"
+    ],
+    [
+      "Лист1!Q43",
+      "72"
+    ],
+    [
+      "Лист1!Q44",
+      "72"
+    ],
+    [
+      "Лист1!Q45",
+      "72"
+    ],
+    [
+      "Лист1!Q46",
+      "72"
+    ],
+    [
+      "Лист1!Q47",
+      "72"
+    ],
+    [
+      "Лист1!Q48",
+      "72"
+    ],
+    [
+      "Лист1!Q49",
+      "72"
+    ],
+    [
+      "Лист1!Q50",
+      "72"
+    ],
+    [
+      "Лист1!Q51",
+      "72"
+    ],
+    [
+      "Лист1!Q52",
+      "72"
+    ],
+    [
+      "Лист1!Q53",
+      "72"
+    ],
+    [
+      "Лист1!Q54",
+      "125"
+    ],
+    [
+      "Лист1!Q55",
+      "125"
+    ],
+    [
+      "Лист1!Q56",
+      "125"
+    ],
+    [
+      "Лист1!Q57",
+      "125"
+    ]
+  ],
+  "formulas": [
+    {
+      "anchor": "Лист1!H3",
+      "cached": {
+        "type": "text",
+        "value": "{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_pipe_trajectory(G6:H9)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_pipe\\_trajectory}(\\mathrm{G6{:}H9})",
+      "references": [
+        "Лист1!G6:H9"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!K3",
+      "cached": {
+        "type": "text",
+        "value": "{\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_pipe_diam(J6:K9,K4)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_pipe\\_diam}(\\mathrm{J6{:}K9}, \\mathrm{K4})",
+      "references": [
+        "Лист1!J6:K9",
+        "Лист1!K4"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D12",
+      "cached": {
+        "type": "text",
+        "value": "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_PVT(D3,D4,D5,D6,D7,D8,D9,D10,D11)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_PVT}(\\mathrm{D3}, \\mathrm{D4}, \\mathrm{D5}, \\mathrm{D6}, \\mathrm{D7}, \\mathrm{D8}, \\mathrm{D9}, \\mathrm{D10}, \\mathrm{D11})",
+      "references": [
+        "Лист1!D3",
+        "Лист1!D4",
+        "Лист1!D5",
+        "Лист1!D6",
+        "Лист1!D7",
+        "Лист1!D8",
+        "Лист1!D9",
+        "Лист1!D10",
+        "Лист1!D11"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!N15",
+      "cached": {
+        "type": "text",
+        "value": "{\"thermal_conductivity_formation_WmC\":2.4252,\"specific_heat_capacity_formation_JkgC\":200,\"thermal_conductivity_cement_WmC\":6.965,\"thermal_conductivity_tubing_WmC\":32,\"thermal_conductivity_casing_WmC\":32,\"heat_transfer_casing_liquid_Wm2C\":200,\"heat_transfer_casing_gas_Wm2C\":10,\"heat_transfer_fluid_convection_Wm2C \":200,\"time_calc_hr\":240}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_json(M6:N14)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_json}(\\mathrm{M6{:}N14})",
+      "references": [
+        "Лист1!M6:N14"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!N16",
+      "cached": {
+        "type": "text",
+        "value": "{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_t_model(N3,M19:N22,N4,N5,N15)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_t\\_model}(\\mathrm{N3}, \\mathrm{M19{:}N22}, \\mathrm{N4}, \\mathrm{N5}, \\mathrm{N15})",
+      "references": [
+        "Лист1!N3",
+        "Лист1!M19:N22",
+        "Лист1!N4",
+        "Лист1!N5",
+        "Лист1!N15"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D17",
+      "cached": {
+        "type": "text",
+        "value": "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0,\"q_liq_sm3day\":30,\"fw_perc\":10,\"rp_m3m3\":120}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_feed(D13,D14,D15,D16,D12)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_feed}(\\mathrm{D13}, \\mathrm{D14}, \\mathrm{D15}, \\mathrm{D16}, \\mathrm{D12})",
+      "references": [
+        "Лист1!D13",
+        "Лист1!D14",
+        "Лист1!D15",
+        "Лист1!D16",
+        "Лист1!D12"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D25",
+      "cached": {
+        "type": "text",
+        "value": "{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]}"
+      },
+      "dialect": "excel",
+      "expression": "=pipe_trajectory",
+      "kind": "cell",
+      "references": [
+        "name:pipe_trajectory"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D26",
+      "cached": {
+        "type": "text",
+        "value": "{\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001}"
+      },
+      "dialect": "excel",
+      "expression": "=pipe_diam",
+      "kind": "cell",
+      "references": [
+        "name:pipe_diam"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D27",
+      "cached": {
+        "type": "text",
+        "value": "{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}}"
+      },
+      "dialect": "excel",
+      "expression": "=t_model",
+      "kind": "cell",
+      "references": [
+        "name:t_model"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!K27",
+      "cached": {
+        "type": "text",
+        "value": "{\"construction\":{\"h_list_m\":{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]},\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001},\"t_model\":{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}},\"flow_correlation\":0,\"flow_along_coord\":false,\"calibr_grav\":1,\"calibr_fric\":1,\"h_start_m\":0,\"h_end_m\":0,\"znlf\":false}"
+      },
+      "dialect": "excel",
+      "expression": "=pipe_object",
+      "kind": "cell",
+      "references": [
+        "name:pipe_object"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!K28",
+      "cached": {
+        "type": "text",
+        "value": "{\"gamma_gas\":0.6,\"gamma_oil\":0.86,\"gamma_wat\":1.1,\"rsb_m3m3\":120,\"pb_atma\":130,\"t_res_C\":80,\"bob_m3m3\":1.2,\"muob_cP\":0.6,\"PVT_corr_set\":0,\"q_liq_sm3day\":30,\"fw_perc\":10,\"rp_m3m3\":120}"
+      },
+      "dialect": "excel",
+      "expression": "=feed_json",
+      "kind": "cell",
+      "references": [
+        "name:feed_json"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!D35",
+      "cached": {
+        "type": "text",
+        "value": "{\"construction\":{\"h_list_m\":{\"hmes_m\":[0,1000,2000,2500],\"hvert_m\":[0,1000,1900,2300]},\"diam_list_mm\":{\"hmes_m\":[0,500,2100],\"diam_int_mm\":[62,72,125]},\"roughness_m\":0.0001},\"t_model\":{\"t_model\":1,\"t_list_C\":{\"hvert_m\":[0,1000,2000,2500],\"t_C\":[10,35,80,90]}},\"flow_correlation\":0,\"flow_along_coord\":false,\"calibr_grav\":1,\"calibr_fric\":1,\"h_start_m\":0,\"h_end_m\":0,\"znlf\":false}"
+      },
+      "dialect": "excel",
+      "expression": "=[1]!encode_pipe_object(D25,D26,D27,D28,D29,D30,D31,D32,D33,D34)",
+      "kind": "cell",
+      "latex": "\\text{[1]!encode\\_pipe\\_object}(\\mathrm{D25}, \\mathrm{D26}, \\mathrm{D27}, \\mathrm{D28}, \\mathrm{D29}, \\mathrm{D30}, \\mathrm{D31}, \\mathrm{D32}, \\mathrm{D33}, \\mathrm{D34})",
+      "references": [
+        "Лист1!D25",
+        "Лист1!D26",
+        "Лист1!D27",
+        "Лист1!D28",
+        "Лист1!D29",
+        "Лист1!D30",
+        "Лист1!D31",
+        "Лист1!D32",
+        "Лист1!D33",
+        "Лист1!D34"
+      ],
+      "role": "intermediate"
+    },
+    {
+      "anchor": "Лист1!J35",
+      "cached": {
+        "type": "number",
+        "value": 207.534
+      },
+      "dialect": "excel",
+      "expression": "=[1]!MF_pipe_p_atma(K25, K26, K27, K28, K29, K30, K31, K32, K33, K34)",
+      "kind": "array",
+      "latex": "\\text{[1]!MF\\_pipe\\_p\\_atma}(\\mathrm{K25}, \\mathrm{K26}, \\mathrm{K27}, \\mathrm{K28}, \\mathrm{K29}, \\mathrm{K30}, \\mathrm{K31}, \\mathrm{K32}, \\mathrm{K33}, \\mathrm{K34})",
+      "range": "Лист1!J35:Q57",
+      "references": [
+        "Лист1!K25",
+        "Лист1!K26",
+        "Лист1!K27",
+        "Лист1!K28",
+        "Лист1!K29",
+        "Лист1!K30",
+        "Лист1!K31",
+        "Лист1!K32",
+        "Лист1!K33",
+        "Лист1!K34"
+      ],
+      "role": "result"
+    },
+    {
+      "anchor": "name:feed_json",
+      "dialect": "excel",
+      "expression": "Лист1!$D$17",
+      "kind": "name",
+      "references": [
+        "Лист1!D17"
+      ]
+    },
+    {
+      "anchor": "name:pipe_diam",
+      "dialect": "excel",
+      "expression": "Лист1!$K$3",
+      "kind": "name",
+      "references": [
+        "Лист1!K3"
+      ]
+    },
+    {
+      "anchor": "name:pipe_object",
+      "dialect": "excel",
+      "expression": "Лист1!$D$35",
+      "kind": "name",
+      "references": [
+        "Лист1!D35"
+      ]
+    },
+    {
+      "anchor": "name:pipe_trajectory",
+      "dialect": "excel",
+      "expression": "Лист1!$H$3",
+      "kind": "name",
+      "references": [
+        "Лист1!H3"
+      ]
+    },
+    {
+      "anchor": "name:PVT_json",
+      "dialect": "excel",
+      "expression": "Лист1!$D$12",
+      "kind": "name",
+      "references": [
+        "Лист1!D12"
+      ]
+    },
+    {
+      "anchor": "name:t_model",
+      "dialect": "excel",
+      "expression": "Лист1!$N$16",
+      "kind": "name",
+      "references": [
+        "Лист1!N16"
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "anchor": "Лист1!D3",
+      "label": "gamma_gas",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.6
+      }
+    },
+    {
+      "anchor": "Лист1!N3",
+      "label": "t model",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Лист1!D4",
+      "label": "gamma_oil",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.86
+      }
+    },
+    {
+      "anchor": "Лист1!K4",
+      "label": "roughness_m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0001
+      }
+    },
+    {
+      "anchor": "Лист1!N4",
+      "label": "t_start_C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 15.0
+      }
+    },
+    {
+      "anchor": "Лист1!D5",
+      "label": "gamma_wat",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.1
+      }
+    },
+    {
+      "anchor": "Лист1!N5",
+      "label": "t_end_C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 80.0
+      }
+    },
+    {
+      "anchor": "Лист1!D6",
+      "label": "rsb_m3m3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 120.0
+      }
+    },
+    {
+      "anchor": "Лист1!G6",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!H6",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!J6",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "hmes, m"
+      }
+    },
+    {
+      "anchor": "Лист1!K6",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "diam, mm"
+      }
+    },
+    {
+      "anchor": "Лист1!M6",
+      "label": "diam, mm",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "thermal_conductivity_formation_WmC"
+      }
+    },
+    {
+      "anchor": "Лист1!N6",
+      "label": "thermal_conductivity_formation_WmC",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2.4252
+      }
+    },
+    {
+      "anchor": "Лист1!D7",
+      "label": "pb_atma",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 130.0
+      }
+    },
+    {
+      "anchor": "Лист1!G7",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1000.0
+      }
+    },
+    {
+      "anchor": "Лист1!H7",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1000.0
+      }
+    },
+    {
+      "anchor": "Лист1!J7",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!K7",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 62.0
+      }
+    },
+    {
+      "anchor": "Лист1!M7",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "specific_heat_capacity_formation_JkgC"
+      }
+    },
+    {
+      "anchor": "Лист1!N7",
+      "label": "specific_heat_capacity_formation_JkgC",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 200.0
+      }
+    },
+    {
+      "anchor": "Лист1!D8",
+      "label": "t_res_C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 80.0
+      }
+    },
+    {
+      "anchor": "Лист1!G8",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2000.0
+      }
+    },
+    {
+      "anchor": "Лист1!H8",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1900.0
+      }
+    },
+    {
+      "anchor": "Лист1!J8",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 500.0
+      }
+    },
+    {
+      "anchor": "Лист1!K8",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 72.0
+      }
+    },
+    {
+      "anchor": "Лист1!M8",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "thermal_conductivity_cement_WmC"
+      }
+    },
+    {
+      "anchor": "Лист1!N8",
+      "label": "thermal_conductivity_cement_WmC",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 6.965
+      }
+    },
+    {
+      "anchor": "Лист1!D9",
+      "label": "bob_m3m3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.2
+      }
+    },
+    {
+      "anchor": "Лист1!G9",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2500.0
+      }
+    },
+    {
+      "anchor": "Лист1!H9",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2300.0
+      }
+    },
+    {
+      "anchor": "Лист1!J9",
+      "label": "hmes, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2100.0
+      }
+    },
+    {
+      "anchor": "Лист1!K9",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 125.0
+      }
+    },
+    {
+      "anchor": "Лист1!M9",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "thermal_conductivity_tubing_WmC"
+      }
+    },
+    {
+      "anchor": "Лист1!N9",
+      "label": "thermal_conductivity_tubing_WmC",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 32.0
+      }
+    },
+    {
+      "anchor": "Лист1!D10",
+      "label": "muob_cP",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.6
+      }
+    },
+    {
+      "anchor": "Лист1!M10",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "thermal_conductivity_casing_WmC"
+      }
+    },
+    {
+      "anchor": "Лист1!N10",
+      "label": "thermal_conductivity_casing_WmC",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 32.0
+      }
+    },
+    {
+      "anchor": "Лист1!D11",
+      "label": "pvt_corr_set",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!M11",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "heat_transfer_casing_liquid_Wm2C"
+      }
+    },
+    {
+      "anchor": "Лист1!N11",
+      "label": "heat_transfer_casing_liquid_Wm2C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 200.0
+      }
+    },
+    {
+      "anchor": "Лист1!M12",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "heat_transfer_casing_gas_Wm2C"
+      }
+    },
+    {
+      "anchor": "Лист1!N12",
+      "label": "heat_transfer_casing_gas_Wm2C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Лист1!D13",
+      "label": "q_liq_sm3day",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 30.0
+      }
+    },
+    {
+      "anchor": "Лист1!M13",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "heat_transfer_fluid_convection_Wm2C "
+      }
+    },
+    {
+      "anchor": "Лист1!N13",
+      "label": "heat_transfer_fluid_convection_Wm2C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 200.0
+      }
+    },
+    {
+      "anchor": "Лист1!D14",
+      "label": "fw_perc",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Лист1!M14",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "time_calc_hr"
+      }
+    },
+    {
+      "anchor": "Лист1!N14",
+      "label": "time_calc_hr",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 240.0
+      }
+    },
+    {
+      "anchor": "Лист1!D15",
+      "label": "rp_m3m3",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 120.0
+      }
+    },
+    {
+      "anchor": "Лист1!D16",
+      "label": "q_gas_free_sm3day",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!M19",
+      "label": "hvert, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!N19",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 10.0
+      }
+    },
+    {
+      "anchor": "Лист1!M20",
+      "label": "hvert, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1000.0
+      }
+    },
+    {
+      "anchor": "Лист1!N20",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 35.0
+      }
+    },
+    {
+      "anchor": "Лист1!M21",
+      "label": "hvert, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2000.0
+      }
+    },
+    {
+      "anchor": "Лист1!N21",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 80.0
+      }
+    },
+    {
+      "anchor": "Лист1!M22",
+      "label": "hvert, m",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 2500.0
+      }
+    },
+    {
+      "anchor": "Лист1!N22",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 90.0
+      }
+    },
+    {
+      "anchor": "Лист1!K25",
+      "label": "p_atma",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 25.0
+      }
+    },
+    {
+      "anchor": "Лист1!K26",
+      "label": "t_C",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 30.0
+      }
+    },
+    {
+      "anchor": "Лист1!D28",
+      "label": "flow_correlation",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!D29",
+      "label": "flow_along_coord",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 0.0
+      }
+    },
+    {
+      "anchor": "Лист1!K29",
+      "label": "calc_along_coord",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Лист1!D30",
+      "label": "calibr_grav",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    },
+    {
+      "anchor": "Лист1!K30",
+      "label": "param",
+      "read_by": 1,
+      "value": {
+        "type": "text",
+        "value": "{\"show_array\":1}"
+      }
+    },
+    {
+      "anchor": "Лист1!D31",
+      "label": "calibr_fric",
+      "read_by": 1,
+      "value": {
+        "type": "number",
+        "value": 1.0
+      }
+    }
+  ],
+  "rules": []
+}
