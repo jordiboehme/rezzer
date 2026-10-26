@@ -907,3 +907,102 @@ fn a_trailing_section_over_the_limit_is_cut_into_numbered_parts() {
         assert!(u.markdown.contains("| Key | Value |"), "{}", u.file);
     }
 }
+
+#[test]
+fn long_fence_openers_stay_bounded() {
+    // An info string of 20,000 letters, and code with a run of 20,000 backticks (so the
+    // fence is longer still): both are cut within the limit into a few pieces.
+    let lines: String = (0..300)
+        .map(|i| format!("let y{i:03} = {};\n", words(40)))
+        .collect();
+    for (lang, code) in [
+        (Some("x".repeat(20_000)), lines.clone()),
+        (
+            Some("rust".to_string()),
+            format!("{}\n{lines}", "`".repeat(20_000)),
+        ),
+    ] {
+        let mut d = doc(FormatId::Markdown);
+        d.body.push(Block::Code {
+            lang,
+            text: code,
+            anchor: None,
+        });
+        let started = std::time::Instant::now();
+        let list = units(&d, 2_500);
+        assert_within(&list, 2_500);
+        assert!(list.len() < 20, "{} units", list.len());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        // The code lines are all there.
+        let joined: String = list.iter().map(|u| u.markdown.as_str()).collect();
+        assert!(joined.contains("let y000 ") && joined.contains("let y299 "));
+    }
+}
+
+#[test]
+fn a_heading_never_stands_alone() {
+    // "One" alone is over the part size: the chapter heading "Beta" goes with its first
+    // piece instead of making a part of its own.
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(heading(2, "Alpha"));
+    d.body.push(para(&words(5_000)));
+    d.body.push(heading(2, "Beta"));
+    d.body.push(heading(3, "One"));
+    for _ in 0..6 {
+        d.body.push(para(&words(1_500)));
+    }
+    d.body.push(heading(3, "Two"));
+    d.body.push(para(&words(5_000)));
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    for u in &list {
+        let content = u
+            .markdown
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'));
+        assert!(content.count() > 0, "{} holds only headings", u.file);
+    }
+    let first_of_one = list
+        .iter()
+        .find(|u| u.markdown.contains("### One"))
+        .expect("One");
+    assert!(
+        first_of_one.markdown.starts_with("## Beta"),
+        "{}",
+        first_of_one.markdown
+    );
+}
+
+#[test]
+fn packed_logic_parts_name_their_range() {
+    let mut d = doc(FormatId::Xlsx);
+    d.body.push(sheet("Alpha", vec![para(&words(5_000))]));
+    // Three sheets of small logic and one large: the small ones pack into one part.
+    for (s, count) in [("Aa", 3), ("Bb", 3), ("Cc", 3), ("Dd", 60)] {
+        d.body.push(sheet(s, vec![para("x")]));
+        for i in 1..=count {
+            d.facets.formulas.push(Formula {
+                anchor: Anchor(format!("{s}!C{i}")),
+                expression: format!("SUM({s}!A{i}:B{i}) + {}", words(60)),
+                dialect: "excel".into(),
+                references: Vec::new(),
+                cached: None,
+                role: Some(Role::Result),
+                pattern: None,
+                latex: None,
+                note: None,
+                kind: None,
+                range: None,
+                original: None,
+            });
+        }
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    let first = list
+        .iter()
+        .find(|u| u.file.starts_with("logic"))
+        .expect("logic");
+    assert_eq!(first.file, "logic-aa", "{:?}", names(&list));
+    assert_eq!(first.location, "Logic, Aa to Cc");
+}

@@ -277,6 +277,11 @@ struct Item<'a> {
     expand: Expand,
     /// It holds the last block of every section around it: a page's own notes close it.
     last: bool,
+    /// How many blocks at its start are headings of a part around it (a chapter heading
+    /// that went with its first section): they stay with its first piece.
+    lead: usize,
+    /// Only a heading: it goes with the item after it when it cannot be packed with it.
+    heading_only: bool,
 }
 
 /// A unit as planned: the item, and how many pieces its text is cut into (more than one only
@@ -532,6 +537,8 @@ impl<'a> Splitter<'a> {
                 to: 0,
             },
             expand: Expand::Chunk,
+            lead: 0,
+            heading_only: false,
             last: true,
         };
         let pages = body.iter().any(|b| page_number(b).is_some());
@@ -593,6 +600,8 @@ impl<'a> Splitter<'a> {
                     to: b,
                 },
                 expand: Expand::Group,
+                lead: 0,
+                heading_only: false,
                 last: true,
             });
         };
@@ -672,6 +681,8 @@ impl<'a> Splitter<'a> {
                 to: i + 1,
             },
             expand: Expand::Section,
+            lead: 0,
+            heading_only: false,
             last,
         }
     }
@@ -763,6 +774,8 @@ impl<'a> Splitter<'a> {
             wraps: wraps.to_vec(),
             content: Content::Slice { list, from, to },
             expand,
+            lead: 0,
+            heading_only: false,
             last,
         }
     }
@@ -855,7 +868,7 @@ impl<'a> Splitter<'a> {
 
     /// Packs `items` (one level, in order) into specs, cutting those over the limit further.
     fn plan(&mut self, items: Vec<Item<'a>>, out: &mut Vec<Spec<'a>>) {
-        let costs: Vec<usize> = items.iter().map(|item| self.cost(item)).collect();
+        let mut costs: Vec<usize> = items.iter().map(|item| self.cost(item)).collect();
         let mut items: Vec<Option<Item<'a>>> = items.into_iter().map(Some).collect();
         let mut i = 0;
         while i < items.len() {
@@ -865,6 +878,26 @@ impl<'a> Splitter<'a> {
             };
             if costs[i] > self.budget {
                 self.expand(item, out);
+                i += 1;
+                continue;
+            }
+            // A heading alone that cannot be packed with the item after it goes into that
+            // item, so no part holds only a heading.
+            if item.heading_only
+                && let Some(Some(next)) = items.get_mut(i + 1)
+                && next.expand == Expand::Chunk
+                && packs(&item, next)
+                && costs[i] + 2 + costs[i + 1] > self.budget
+                && let (
+                    Content::Slice { from, to, .. },
+                    Content::Slice {
+                        from: next_from, ..
+                    },
+                ) = (&item.content, &mut next.content)
+            {
+                next.lead += to - from;
+                *next_from = *from;
+                costs[i + 1] = self.cost(next);
                 i += 1;
                 continue;
             }
@@ -977,35 +1010,39 @@ impl<'a> Splitter<'a> {
     ) -> Vec<Item<'a>> {
         let mut parent = item.clone();
         parent.family = self.family(item);
-        let head = heading_level(&list[from]).is_some();
-        let rest = if head { from + 1 } else { from };
+        parent.lead = 0;
+        // The headings it took from a part around it stay in front of its own.
+        let own = (from + item.lead).min(to);
+        let head = own < to && heading_level(&list[own]).is_some();
+        let rest = if head { own + 1 } else { own };
         let deeper = list[rest..to].iter().any(|b| heading_level(b).is_some());
         if !deeper {
             return self.atoms(list, from, to, &item.wraps, &parent, item.last);
         }
         let mut children = self.chunks(list, rest, to, &item.wraps, &parent, item.last);
-        if head {
+        if rest > from {
             match children.first_mut() {
-                // The blocks before the first heading are a piece already: the heading joins
+                // The blocks before the first heading are a piece already: the headings join
                 // them.
                 Some(first) if first.family == parent.family => {
                     if let Content::Slice { from: f, .. } = &mut first.content {
                         *f = from;
                     }
                 }
-                _ => children.insert(
-                    0,
-                    self.titled_item(
+                _ => {
+                    let mut heading = self.titled_item(
                         None,
                         list,
                         from,
-                        from + 1,
+                        rest,
                         &item.wraps,
                         &parent,
                         Expand::Atom,
                         false,
-                    ),
-                ),
+                    );
+                    heading.heading_only = true;
+                    children.insert(0, heading);
+                }
             }
         }
         children
@@ -1091,6 +1128,8 @@ impl<'a> Splitter<'a> {
                 wraps: item.wraps.clone(),
                 content: Content::Owned(range.blocks),
                 expand: Expand::Text,
+                lead: 0,
+                heading_only: false,
                 last: item.last && k + 1 == count,
             };
             let mut s = if cost > self.budget {
@@ -1261,10 +1300,16 @@ impl<'a> Splitter<'a> {
             } else {
                 logic_part(&piece)
             };
+            // Packed `###` parts are located `<first> to <last>`.
+            let last = last_logic_part(&piece);
             let here = |title: &str| {
+                let shown = match &last {
+                    Some(l) if l != title => format!("{title} to {l}"),
+                    _ => title.to_string(),
+                };
                 (
                     format!("{base}-{}", slug(title)),
-                    capped(&format!("{location}, {title}"), TITLE_CAP),
+                    capped(&format!("{location}, {shown}"), TITLE_CAP),
                 )
             };
             let (piece_base, piece_location) = match (&part, &prev) {
@@ -1308,6 +1353,15 @@ fn logic_part(piece: &str) -> Option<PartStart> {
         Some(t) => PartStart::Continues(unescape(t)),
         None => PartStart::Begins(unescape(title)),
     })
+}
+
+/// The title of the last `###` part that begins in a piece of `## Logic`, without escapes.
+fn last_logic_part(piece: &str) -> Option<String> {
+    piece
+        .lines()
+        .filter_map(|l| l.strip_prefix("### "))
+        .rfind(|t| !t.ends_with(" (continued)"))
+        .map(unescape)
 }
 
 /// Rendered line text back as plain text: a backslash before ASCII punctuation goes.
@@ -1809,7 +1863,128 @@ fn heading_slug(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Names, capped, slug};
+    use super::{Names, capped, part_budget, part_measure, slug, split};
+    use crate::RenderOptions;
+    use crate::describe::body_tokens;
+    use rezzer_model::{
+        Anchor, Asset, Block, Confidence, Detection, Document, FormatId, Inline, SectionKind,
+        SourceInfo,
+    };
+
+    fn doc() -> Document {
+        Document::new(SourceInfo {
+            path: None,
+            name: "a report with a long name (final).md".into(),
+            sha256: "00".into(),
+            size: 1,
+            format: FormatId::Markdown,
+            detection: Detection {
+                confidence: Confidence::Certain,
+                evidence: "test".into(),
+            },
+            modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
+            encoding: None,
+            reader: None,
+        })
+    }
+
+    /// A part file as the part writer will make it at worst: the longest title, the
+    /// description and both relations around the unit's body.
+    fn part_file(title: &str, doc_title: &str, main: &str, body: &str) -> String {
+        let long = "y".repeat(super::TITLE_CAP);
+        format!(
+            "---\ntype: source\n---\n\n# {doc_title}: {title}, part 9999\n\nPart 9999 of 9999 of \"{doc_title}\": {long}.\n\n{body}\n\n## Relations\n\n- part_of [{doc_title}](<../{main}>)\n- follows [{doc_title}: {long}, part 9999]({}.md)\n",
+            "z".repeat(60)
+        )
+    }
+
+    #[test]
+    fn units_with_their_part_overhead_stay_within_the_part_size() {
+        // Pictures (import length) and anchor links to other units (file names) in every
+        // chapter: the finished part file is within the size by Crystalline's measure.
+        let mut d = doc();
+        for i in 0..40 {
+            let id = format!("p{i}");
+            d.assets.push(Asset {
+                id: id.clone(),
+                path: Some(format!("b.assets/{id}.png")),
+                sha256: "00".into(),
+                mime: "image/png".into(),
+                caption: None,
+                alt: Some("p".into()),
+                needs_vision: false,
+                codes: Vec::new(),
+                code_unread: false,
+            });
+        }
+        for c in 0..8 {
+            d.body.push(Block::Heading {
+                level: 2,
+                inlines: vec![Inline::plain(format!("Chapter {c}"))],
+                anchor: Some(Anchor(format!("h:chapter-{c}"))),
+            });
+            for k in 0..60 {
+                let mut inlines = vec![Inline::plain("see ")];
+                inlines.push(Inline::Link {
+                    target: format!("#chapter-{}", (c + 3) % 8),
+                    title: None,
+                    internal: true,
+                    wiki: false,
+                    inlines: vec![Inline::plain("there")],
+                });
+                inlines.push(Inline::plain(
+                    " and some words to fill the line up a bit more",
+                ));
+                d.body.push(Block::Paragraph {
+                    inlines,
+                    role: None,
+                    anchor: None,
+                });
+                if k % 10 == 0 {
+                    d.body.push(Block::Media {
+                        asset: format!("p{}", (c * 6 + k / 10) % 40),
+                        alt: None,
+                        anchor: None,
+                    });
+                }
+            }
+        }
+        d.body.push(Block::Section {
+            kind: SectionKind::Other,
+            title: Some("Tail".into()),
+            anchor: None,
+            blocks: vec![],
+        });
+        let opts = RenderOptions::default();
+        let bundle = "a-report-with-a-long-name-final-0123abcd";
+        let list = split(&d, &opts, 2_500, bundle).expect("over the size");
+        assert!(list.len() > 2);
+        let budget = part_budget(&d, &opts, 2_500);
+        let main = "a report with a long name (final).md-0123abcd.md";
+        for u in &list {
+            assert!(
+                part_measure(bundle).chars(&u.markdown) <= budget,
+                "{}",
+                u.file
+            );
+            let file = part_file(
+                &u.title,
+                "a report with a long name (final).md",
+                main,
+                &u.markdown,
+            );
+            let note = bundle.len() + 1 + u.file.len();
+            assert!(
+                body_tokens(&file, note) <= 2_500,
+                "{}: {}",
+                u.file,
+                body_tokens(&file, note)
+            );
+        }
+    }
 
     #[test]
     fn slugs_and_names() {

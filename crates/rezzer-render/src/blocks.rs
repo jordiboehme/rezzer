@@ -1391,14 +1391,19 @@ fn footnote(label: &str, inner: &[Block], ctx: &Ctx, depth: usize) -> String {
     )
 }
 
+/// The longest info string a fence writes.
+const MAX_INFO: usize = 64;
+
 /// A fenced block with a fence longer than any backtick run inside.
 pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
     let fence = "`".repeat(longest_run(text, '`').max(2) + 1);
+    // The info string is a language name: its first word, at most 64 characters.
     let info: String = lang
         .unwrap_or("")
         .chars()
         .take_while(|c| !c.is_whitespace())
         .filter(|c| *c != '`')
+        .take(MAX_INFO)
         .collect();
     let body = text.strip_suffix('\n').unwrap_or(text);
     if body.is_empty() {

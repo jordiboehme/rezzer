@@ -23,6 +23,7 @@
 //! ([`hard_cut`]): those pieces end and begin with `(continued)` lines, a cut fence is closed
 //! and opened again, and a cut table repeats its header.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 /// The token estimate: characters divided by four.
@@ -361,11 +362,17 @@ struct CutState {
     fence: Option<(char, usize, Rc<str>)>,
     /// The header and separator rows of the table the line stands in.
     table: Option<Rc<str>>,
+    /// The open fence's opener takes more than half the limit: its lines are written as an
+    /// indented code block instead, without opener and closer, so no piece repeats it.
+    indented: bool,
 }
 
 impl CutState {
     /// The fence closer a piece that ends here needs.
     fn closer(&self) -> String {
+        if self.indented {
+            return String::new();
+        }
         self.fence
             .as_ref()
             .map(|(ch, run, _)| format!("{}\n", ch.to_string().repeat(*run)))
@@ -416,7 +423,9 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
     // table row, the table's header.
     let lead = |state: &CutState, row: bool| -> String {
         let mut lead = format!("{CONTINUED}\n\n");
-        if let Some((_, _, opener)) = &state.fence {
+        if let Some((_, _, opener)) = &state.fence
+            && !state.indented
+        {
             lead.push_str(opener);
         }
         if row && let Some(header) = &state.table {
@@ -430,11 +439,18 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
         let mut after = state.clone();
         let content = line.trim_end_matches(['\n', '\r']);
         let mut row = false;
+        // What this line is written as: itself, or in an indented code block (see
+        // `CutState::indented`) its text indented and the fence lines as blank lines.
+        let mut written: Cow<'_, str> = Cow::Borrowed(line);
         match &state.fence {
             None => {
                 if let Some((ch, run, _)) = fence_run(content) {
                     after.fence = Some((ch, run, Rc::from(*line)));
                     after.table = None;
+                    if size(line) > limit / 2 {
+                        after.indented = true;
+                        written = Cow::Borrowed("\n");
+                    }
                 } else if content.starts_with('|') {
                     if state.table.is_some() {
                         row = !separator_row(content);
@@ -455,11 +471,17 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
                     && rest.trim().is_empty()
                 {
                     after.fence = None;
+                    after.indented = false;
+                    if state.indented {
+                        written = Cow::Borrowed("\n");
+                    }
+                } else if state.indented && !content.trim().is_empty() {
+                    written = Cow::Owned(format!("    {line}"));
                 }
             }
         }
 
-        let mut work: Vec<String> = vec![(*line).to_string()];
+        let mut work: Vec<String> = vec![written.into_owned()];
         let mut w = 0;
         while w < work.len() {
             let piece = std::mem::take(&mut work[w]);
@@ -520,9 +542,8 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
 /// within `room`, each ending with a newline: a table row (`row`) into full rows of the same
 /// column count, the cut cell marked `(continued)`; any other line at whitespace, else
 /// between characters. Outside a fence each line after the first loses its leading
-/// whitespace and gets a block marker at its start escaped; inside a fence a line never
-/// starts with the fence's character. The rooms are halved until every line fits, at most 8
-/// times.
+/// whitespace and gets a block marker at its start escaped; inside an indented code block each
+/// line keeps the indent. The rooms are halved until every line fits, at most 8 times.
 fn cut_line(
     line: &str,
     first: usize,
@@ -533,6 +554,12 @@ fn cut_line(
 ) -> Vec<String> {
     let content = line.trim_end_matches(['\n', '\r']);
     let fence = state.fence.as_ref().map(|(ch, _, _)| *ch);
+    if state.indented {
+        // Each piece of an indented code line keeps the indent.
+        let text = content.strip_prefix("    ").unwrap_or(content);
+        let lines = text_lines(text, first.saturating_sub(4), room.saturating_sub(4), fence);
+        return lines.into_iter().map(|l| format!("    {l}")).collect();
+    }
     let (mut a, mut b) = (first, room);
     let mut best: Vec<String> = Vec::new();
     for _ in 0..=8 {
@@ -560,8 +587,9 @@ fn after_chars(text: &str, n: usize) -> Option<usize> {
 }
 
 /// A cut at or before `end` in `text` (outside a fence: at the last whitespace in its second
-/// half, else at `end`), never after an odd run of backslashes (it would escape what follows)
-/// and, inside a fence, never before the fence's character. At least one character.
+/// half, else at `end`), never after an odd run of backslashes (it would escape what follows).
+/// At least one character. Inside a fence a piece may begin with the fence's character: the
+/// renderer makes every fence longer than any run inside, so such a piece never closes it.
 fn cut_at(text: &str, end: usize, fence: Option<char>) -> usize {
     let mut cut = end;
     if fence.is_none()
@@ -573,11 +601,6 @@ fn cut_at(text: &str, end: usize, fence: Option<char>) -> usize {
     let backslashes = |at: usize| text[..at].bytes().rev().take_while(|b| *b == b'\\').count();
     while cut > 0 && backslashes(cut) % 2 == 1 {
         cut -= 1;
-    }
-    if let Some(ch) = fence {
-        while cut > 0 && text[cut..].starts_with(ch) {
-            cut = text[..cut].char_indices().last().map_or(0, |(i, _)| i);
-        }
     }
     if cut == 0 {
         cut = text.chars().next().map_or(text.len(), char::len_utf8);
