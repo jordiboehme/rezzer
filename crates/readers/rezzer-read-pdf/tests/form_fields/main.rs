@@ -214,6 +214,23 @@ fn a_number_is_not_cut_into_a_field_with_a_value() {
     assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
 }
 
+/// A number in boxes drawn around each digit, standing on the rule under its row: the sides
+/// of the boxes reach the row's lower rule like dividers rising from it, but more than one of
+/// them stands in the number, so it is never cut at one; it stays whole with its loss.
+#[test]
+fn a_number_in_boxes_of_its_digits_stays_whole() {
+    let mut b = mark_row("123456", None, true);
+    let g = REAL;
+    let bottom = 760.0 - 2.4 * g.data;
+    for k in 0..6 {
+        let x = g.col(43 + k) - 0.06;
+        b.page.template += &format!("{x} {bottom} {} {} re S\n", g.pitch(), 1.21 * g.data);
+    }
+    let (text, kept) = kept_whole(&b);
+    assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
+    assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
 /// Labels printed under the rule their value stands on (a signature line) pair with the
 /// value over the same rule, never with the value of the next row, which stands under them
 /// between the same two rules (ruling P6-X).

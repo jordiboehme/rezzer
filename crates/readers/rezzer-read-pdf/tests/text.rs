@@ -87,6 +87,159 @@ fn two_columns_read_in_order() {
     );
 }
 
+/// A page of two columns of numbered lines, each column one text that flows from its top to
+/// its bottom past whatever is drawn across the page between `gap` (top and bottom of a
+/// stretch where no line stands, or none): `drawn` is added to the page.
+fn two_column_page(gap: Option<(f32, f32)>, drawn: &str) -> String {
+    let mut c = String::from(drawn);
+    for (side, x) in [("L", 56.0), ("R", 310.0)] {
+        let mut y = 760.0;
+        for k in 1..=40 {
+            if let Some((top, bottom)) = gap
+                && y < top
+                && y > bottom
+            {
+                y = bottom;
+            }
+            if y < 80.0 {
+                break;
+            }
+            c += &format!(
+                "BT /F1 10 Tf {x} {y} Td (Zeile {side}{k:02} der Spalte mit Text) Tj ET\n"
+            );
+            y -= 12.0;
+        }
+    }
+    c
+}
+
+/// Whether every numbered line of the left column comes before every line of the right one.
+fn column_by_column(t: &str) -> bool {
+    let at = |side: &str| {
+        let mut found = Vec::new();
+        for k in 1..=40 {
+            if let Some(p) = t.find(&format!("Zeile {side}{k:02} ")) {
+                found.push(p);
+            }
+        }
+        found
+    };
+    let (l, r) = (at("L"), at("R"));
+    !l.is_empty()
+        && !r.is_empty()
+        && l.windows(2).all(|w| w[0] < w[1])
+        && r.windows(2).all(|w| w[0] < w[1])
+        && l.iter().max() < r.iter().min()
+}
+
+/// A framed figure across both columns in the middle of the page, with no text across the
+/// gutter: each column flows past it, so the columns read one after the other.
+#[test]
+fn columns_flow_past_a_framed_figure_across_them() {
+    let frame = "q 0.5 w 56 390 484 130 re S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    assert!(column_by_column(&t), "{t}");
+}
+
+/// The same with the frame drawn as four lines that meet: it is no lone line either.
+#[test]
+fn columns_flow_past_a_figure_framed_by_four_lines() {
+    let frame = "q 0.5 w 56 390 m 540 390 l S 56 520 m 540 520 l S \
+                 56 390 m 56 520 l S 540 390 m 540 520 l S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    assert!(column_by_column(&t), "{t}");
+}
+
+/// A framed chart across both columns with one rule across it and one up it inside the frame
+/// (a grid with rules inside, but no text in its cells): its top rule parts the bands of the
+/// columns, so the columns above it are read before the columns under it (reported: a grid's
+/// top rule parts bands whether or not its cells hold text).
+#[test]
+fn columns_past_a_framed_chart_with_inner_rules_read_in_bands() {
+    let frame = "q 0.5 w 56 390 484 130 re S 56 455 m 540 455 l S 298 390 m 298 520 l S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    let at = |w: &str| t.find(w).unwrap_or(usize::MAX);
+    assert!(
+        at("Zeile L20 ") < at("Zeile R01 ")
+            && at("Zeile R20 ") < at("Zeile L21 ")
+            && at("Zeile L21 ") < usize::MAX,
+        "{t}"
+    );
+}
+
+/// Guard: a shaded band across both columns behind their text is a box the text in it is read
+/// in, as it was before drawn rules parted bands of columns: the columns above it, then the
+/// lines in it, then the columns under it, each column by column. Its edges add no band of
+/// their own.
+#[test]
+fn columns_read_through_a_shaded_band_across_them() {
+    let band = "q 0.9 g 50 400 496 100 re f Q\n";
+    let out = read(&pdf(&[Page::text(two_column_page(None, band))], ""));
+    let t = all_text(&out);
+    let order = [
+        "Zeile L01 ",
+        "Zeile L22 ",
+        "Zeile R01 ",
+        "Zeile R22 ",
+        "Zeile L23 ",
+        "Zeile L31 ",
+        "Zeile R23 ",
+        "Zeile R31 ",
+        "Zeile L32 ",
+        "Zeile L40 ",
+        "Zeile R32 ",
+        "Zeile R40 ",
+    ];
+    let at: Vec<Option<usize>> = order.iter().map(|w| t.find(w)).collect();
+    assert!(
+        at.iter().all(Option::is_some) && at.windows(2).all(|w| w[0] < w[1]),
+        "{t}"
+    );
+}
+
+/// Guard: a ruled grid of two columns of fields across a page (a rule under each row of fields
+/// over both columns, the grid's sides and a rule between the columns) is a table, read row by
+/// row as before drawn rules parted bands of columns; its rules add no band of their own.
+#[test]
+fn a_ruled_grid_of_two_field_columns_stays_a_table() {
+    let mut drawn = String::from("q 0.5 w\n");
+    for k in 0..=10 {
+        let y = 772.0 - 12.0 * k as f32;
+        drawn += &format!("50 {y} m 546 {y} l S\n");
+    }
+    for x in [50.0, 298.0, 546.0] {
+        drawn += &format!("{x} 652 m {x} 772 l S\n");
+    }
+    drawn += "Q\n";
+    let mut c = drawn;
+    for (side, x) in [("L", 56.0), ("R", 310.0)] {
+        for k in 1..=10 {
+            let y = 762.0 - 12.0 * (k - 1) as f32;
+            c += &format!("BT /F1 10 Tf {x} {y} Td (Zeile {side}{k:02} Feld) Tj ET\n");
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let t = all_text(&out);
+    for k in 1..=10 {
+        assert!(
+            t.contains(&format!("Zeile L{k:02} Feld|Zeile R{k:02} Feld|")),
+            "{t}"
+        );
+    }
+}
+
 #[test]
 fn tagged_headings_from_roles() {
     let out = read(&corpus("pdfjs-structure-simple.pdf"));
