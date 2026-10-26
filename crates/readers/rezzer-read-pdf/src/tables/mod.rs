@@ -9,6 +9,7 @@
 
 mod banded;
 mod borderless;
+mod pairs;
 mod ruled;
 mod sections;
 mod side;
@@ -18,6 +19,7 @@ use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
+pub(crate) use pairs::box_pairs;
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.

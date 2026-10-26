@@ -1316,6 +1316,30 @@ fn sparse_row_keeps_its_columns() {
     );
 }
 
+/// Guard: the header band of `sparse_row_keeps_its_columns` (a row of drawn cells, each
+/// with only its title) is no row of empty fields: it heads its table, and no note says
+/// label and value pairs were found.
+#[test]
+fn header_band_is_not_empty_fields() {
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(3, "20,00")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(3, "5,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].0, 1, "{found:?}");
+    assert_eq!(
+        found[0].1[0],
+        ["Art", "Basis", "Satz", "Betrag"],
+        "{found:?}"
+    );
+    let text = common::all_text(&out);
+    assert!(!text.contains("Found by: label and value"), "{text}");
+}
+
 #[test]
 fn wrapped_cell_still_joins() {
     // Guard: a second line of words in a column that has text above goes on that cell.

@@ -168,74 +168,11 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         return;
     }
     // The body: lines below the band, from the top.
-    let lo = sh.by_y.line_y.partition_point(|y| *y < b[1]);
-    let mut body: Vec<BodyLine> = Vec::new();
-    let mut last_y = b[1];
-    let mut misfit = false;
-    for &k in sh.by_y.lines[..lo].iter().rev() {
-        *work += 1;
-        let l = &sh.lines[k];
-        if l.y <= floor {
-            break;
-        }
-        if *work > BAND_WORK {
-            // The budget ran out in this body: no table and no refusal, the note says why.
-            return;
-        }
-        let runs: Vec<usize> = (l.start..l.end)
-            .filter(|&i| {
-                let r = &flow.runs[i];
-                let (cx, _) = middle(r);
-                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i, take) && !r.text.trim().is_empty()
-            })
-            .collect();
-        *work += l.end - l.start;
-        if runs.is_empty() {
-            continue;
-        }
-        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
-            break;
-        }
-        // A rule as wide as the band between this line and the one above ends the table.
-        let top = l.y + l.size;
-        let from = sh.hs.partition_point(|s| s.at < top);
-        let to = sh.hs.partition_point(|s| s.at < last_y);
-        let tol = SNAP.max(0.05 * (b[2] - b[0]));
-        *work += to.saturating_sub(from);
-        if sh.hs[from..to.max(from)]
-            .iter()
-            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
-        {
-            break;
-        }
-        // Pieces: runs apart by more than a cell gap; each must stand in one column.
-        let mut pieces: Vec<(f32, f32, Vec<usize>)> = Vec::new();
-        for &i in &runs {
-            let r = &flow.runs[i];
-            match pieces.last_mut() {
-                Some(p) if r.x - p.1 <= CELL_GAP * r.size.max(1.0) => {
-                    p.1 = p.1.max(r.x + r.w);
-                    p.2.push(i);
-                }
-                _ => pieces.push((r.x, r.x + r.w, vec![i])),
-            }
-        }
-        let mut placed: Vec<(usize, Vec<usize>)> = Vec::new();
-        for (x0, x1, ids) in pieces {
-            match column_of(xs, x0, x1) {
-                Some(c) => placed.push((c, ids)),
-                None => {
-                    misfit = true;
-                    break;
-                }
-            }
-        }
-        if misfit {
-            break;
-        }
-        body.push((l.y, l.size, placed));
-        last_y = l.y;
-    }
+    let free_now = |i: usize| free(i, take);
+    let Some((body, misfit)) = body_below(sh, b, xs, floor, &free_now, work) else {
+        // The budget ran out in this body: no table and no refusal, the note says why.
+        return;
+    };
     if *work > BAND_WORK {
         return;
     }
@@ -384,6 +321,116 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         caption: Vec::new(),
         found_by: None,
     });
+}
+
+/// The lines below the band `b` with cell edges `xs` that are its body, from the top: lines
+/// of runs `free` takes, above `floor`, each less than [`BODY_GAP`] line heights below the
+/// one before, with no rule as wide as the band between them, each piece of each standing in
+/// one column. Also whether a line that does not stand in the columns ended it. `None` once
+/// `work` passes [`BAND_WORK`].
+fn body_below(
+    sh: &Shared<'_>,
+    b: [f32; 4],
+    xs: &[f32],
+    floor: f32,
+    free: &dyn Fn(usize) -> bool,
+    work: &mut usize,
+) -> Option<(Vec<BodyLine>, bool)> {
+    let flow = sh.flow;
+    let lo = sh.by_y.line_y.partition_point(|y| *y < b[1]);
+    let mut body: Vec<BodyLine> = Vec::new();
+    let mut last_y = b[1];
+    let mut misfit = false;
+    for &k in sh.by_y.lines[..lo].iter().rev() {
+        *work += 1;
+        let l = &sh.lines[k];
+        if l.y <= floor {
+            break;
+        }
+        if *work > BAND_WORK {
+            return None;
+        }
+        let runs: Vec<usize> = (l.start..l.end)
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                let (cx, _) = middle(r);
+                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i) && !r.text.trim().is_empty()
+            })
+            .collect();
+        *work += l.end - l.start;
+        if runs.is_empty() {
+            continue;
+        }
+        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
+            break;
+        }
+        // A rule as wide as the band between this line and the one above ends the table.
+        let top = l.y + l.size;
+        let from = sh.hs.partition_point(|s| s.at < top);
+        let to = sh.hs.partition_point(|s| s.at < last_y);
+        let tol = SNAP.max(0.05 * (b[2] - b[0]));
+        *work += to.saturating_sub(from);
+        if sh.hs[from..to.max(from)]
+            .iter()
+            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
+        {
+            break;
+        }
+        // Pieces: runs apart by more than a cell gap; each must stand in one column.
+        let mut pieces: Vec<(f32, f32, Vec<usize>)> = Vec::new();
+        for &i in &runs {
+            let r = &flow.runs[i];
+            match pieces.last_mut() {
+                Some(p) if r.x - p.1 <= CELL_GAP * r.size.max(1.0) => {
+                    p.1 = p.1.max(r.x + r.w);
+                    p.2.push(i);
+                }
+                _ => pieces.push((r.x, r.x + r.w, vec![i])),
+            }
+        }
+        let mut placed: Vec<(usize, Vec<usize>)> = Vec::new();
+        for (x0, x1, ids) in pieces {
+            match column_of(xs, x0, x1) {
+                Some(c) => placed.push((c, ids)),
+                None => {
+                    misfit = true;
+                    break;
+                }
+            }
+        }
+        if misfit {
+            break;
+        }
+        body.push((l.y, l.size, placed));
+        last_y = l.y;
+    }
+    (*work <= BAND_WORK).then_some((body, misfit))
+}
+
+/// Whether the row of boxes `b` with cell edges `xs` heads lines of text below it that stand
+/// in its columns, as a header band heads its table (the body rule of [`one_band`]). `hs`
+/// are the page's horizontal lines, sorted by height.
+pub(super) fn heads_lines(flow: &Flow, hs: &[Seg], b: [f32; 4], xs: &[f32]) -> bool {
+    let lines = flow_lines(flow);
+    let by_y = ByY::new(flow, &lines);
+    let area = Area {
+        width: 0.0,
+        height: 0.0,
+        images: &[],
+        body_size: 0.0,
+    };
+    let sh = Shared {
+        page: 0,
+        flow,
+        lines: &lines,
+        by_y: &by_y,
+        area: &area,
+        hs,
+        stop: &|| false,
+    };
+    let mut work = 0;
+    let free = |i: usize| !flow.runs[i].off_axis;
+    body_below(&sh, b, xs, f32::MIN, &free, &mut work).is_some_and(|(body, _)| !body.is_empty())
 }
 
 /// For the lines of a body without rules from the top, each its pieces as (column, whether

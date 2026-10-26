@@ -570,6 +570,7 @@ fn lay_out(
                 rules: &items.rules,
                 images: if items.turned { &images } else { &items.images },
                 widgets: &fields,
+                boxes: &items.boxes,
                 lines_unsearched: items.lines_unsearched,
                 width,
                 body_size: style.body_size,

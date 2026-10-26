@@ -800,6 +800,8 @@ pub(crate) struct Drawn<'a> {
     pub images: &'a [[f32; 4]],
     /// Boxes of the form fields on the page.
     pub widgets: &'a [[f32; 4]],
+    /// The drawn boxes the page's runs are read in as reading regions.
+    pub boxes: &'a [[f32; 4]],
     /// The text pass found the page's lines too many to search for grids, and said so.
     pub lines_unsearched: bool,
     pub width: f32,
@@ -935,6 +937,18 @@ pub(crate) fn page_blocks_at(
     // take later: the values of a form are its data lines.
     let text_sizes = page_text_sizes(&flow.runs);
     if geometry && let Some(height) = height {
+        // Drawn boxes of a label over its value are taken first: a row of them is no header
+        // band. A page with form fields is the form's (see `tables::untagged`).
+        if drawn.widgets.is_empty() {
+            let (found, unsure) =
+                tables::box_pairs(page, &mut flow, drawn.boxes, drawn.rules, &text_sizes);
+            placed.extend(found.into_iter().map(Placed::Table));
+            notes.extend(
+                unsure
+                    .into_iter()
+                    .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+            );
+        }
         let stop = || time_over(cx.budget).is_err();
         let found = tables::untagged(page, &mut flow, drawn, height, &stop);
         placed.extend(found.tables.into_iter().map(Placed::Table));
@@ -2447,6 +2461,7 @@ mod tests {
         rules: &[],
         images: &[],
         widgets: &[],
+        boxes: &[],
         lines_unsearched: false,
         width: 595.0,
         body_size: 10.0,

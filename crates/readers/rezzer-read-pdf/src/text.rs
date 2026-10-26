@@ -137,6 +137,9 @@ pub(crate) struct PageItems {
     pub fallback: bool,
     /// Why the page's drawn boxes were not used as reading regions, while it is laid out.
     pub boxes_unused: Option<String>,
+    /// The drawn boxes the runs are read in as reading regions, in the frame of the runs:
+    /// where the layout looks for labels and values. Empty when none is used.
+    pub boxes: Vec<[f32; 4]>,
     /// The page's lines were too many to search for grids; a loss says so already, and the
     /// ruled detector does not search them again.
     pub lines_unsearched: bool,
@@ -163,6 +166,7 @@ impl PageItems {
         copy(&mut self.invisible);
         self.rules = self.rules.to_vec();
         self.marks = self.marks.to_vec();
+        self.boxes = self.boxes.to_vec();
         for (_, list) in &mut self.hidden_layers {
             copy(list);
         }
@@ -195,7 +199,9 @@ impl PageItems {
             .sum::<u64>();
         self.rules.shrink_to_fit();
         self.marks.shrink_to_fit();
+        self.boxes.shrink_to_fit();
         total
+            + (std::mem::size_of::<[f32; 4]>() * self.boxes.len()) as u64
             + 25 * self.images.len() as u64
             + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
             + CELL_BYTES * self.marks.len() as u64
@@ -3594,6 +3600,21 @@ fn lay_out(
     // A turned frame is moved so the page lies between 0 and its turned size, as the page
     // box does: running headers and footers are found by height there.
     let (sx, sy) = turn.shift(width, height);
+    // The boxes the runs were read in, in the same frame as the runs.
+    if items.boxes_unused.is_none() {
+        items.boxes = boxes
+            .iter()
+            .map(|b| {
+                let (a, c) = (turn.apply(b[0], b[1]), turn.apply(b[2], b[3]));
+                [
+                    a.0.min(c.0) + sx,
+                    a.1.min(c.1) + sy,
+                    a.0.max(c.0) + sx,
+                    a.1.max(c.1) + sy,
+                ]
+            })
+            .collect();
+    }
     if (sx, sy) != (0.0, 0.0) {
         let runs = items
             .runs

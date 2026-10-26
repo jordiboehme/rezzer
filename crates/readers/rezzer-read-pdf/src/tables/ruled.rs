@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
+use super::pairs::field_strips;
 use super::sections::{CUT_WORK, sections};
 use super::side::{
     Beside, SIDE_FOUND_BY, SIDE_GAP, SIDE_WORK, Side, StripKind, side_columns, totals_table,
@@ -115,13 +116,15 @@ pub(super) fn ruled(
     let mut tables: Vec<Planned> = Vec::new();
     // A column of totals beside the sections: its totals are pairs, taken first; its other
     // strips join the section beside them, below.
-    let sides = {
-        let mut taken = vec![false; hs.len()];
-        for (gh, _) in &groups {
-            for &j in gh {
-                taken[j] = true;
-            }
+    // The horizontal lines a grid takes; the others may bound a column of totals or a strip
+    // of fields.
+    let mut taken = vec![false; hs.len()];
+    for (gh, _) in &groups {
+        for &j in gh {
+            taken[j] = true;
         }
+    }
+    let sides = {
         let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
         let beside: Vec<Beside<'_>> = edged
             .iter()
@@ -198,6 +201,18 @@ pub(super) fn ruled(
             break;
         }
         let (mut xs, mut ys) = edges(&h, &v);
+        // A section below a cut reaches only as far left as its own top rule: where another
+        // block draws the rule at that height over its left part (fields beside it), the
+        // text under that part is the other block's.
+        if cut_above && let Some(&top) = ys.first() {
+            let from = own_left(&h, &hs, top, xs[0]);
+            if from > xs[0] {
+                xs.retain(|x| *x >= from - SNAP);
+                if xs.first().is_none_or(|x| *x > from + SNAP) {
+                    xs.insert(0, from);
+                }
+            }
+        }
         let mut title_above = pending.remove(&id).unwrap_or_default();
         if xs.len() >= 2 && ys.len() >= 2 {
             let mut place = TitlePlace {
@@ -713,6 +728,32 @@ pub(super) fn ruled(
             skipped: &mut found.skipped,
         },
     );
+    // Rows of fields between rules no grid takes, in the text no table took.
+    let strips_from = tables.len();
+    let busy = |i: usize| claimed[i].is_some() || held[i] || titles[i];
+    let mut strip_claims = vec![None; flow.runs.len()];
+    let text_sizes = crate::layout::page_text_sizes(&flow.runs);
+    if !field_strips(
+        flow,
+        &by_y,
+        &hs,
+        &taken,
+        &vs,
+        &busy,
+        &text_sizes,
+        &mut strip_claims,
+        &mut tables,
+    ) {
+        found.skipped.push(format!(
+            "label and value fields between rules on page {page} are looked for only in part: \
+             the page has too many lines"
+        ));
+    }
+    for (c, s) in claimed.iter_mut().zip(strip_claims) {
+        if s.is_some() {
+            *c = s;
+        }
+    }
     found.quiet = quiet;
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
@@ -760,11 +801,35 @@ pub(super) fn ruled(
         }
     }
     for (k, mut t) in tables.into_iter().enumerate() {
-        if t.header_rows == 0 && k >= pairs {
+        if t.header_rows == 0 && k >= pairs && k < strips_from {
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
     }
+}
+
+/// Where the own top rule of a section at height `top` starts, when it starts right of the
+/// section's left edge `left` and a rule of another block at that height (among the page's
+/// `hs`, sorted by height) covers most of the stretch from `left` up to it; else `left`. `h` are the
+/// section's own horizontal segments.
+fn own_left(h: &[Seg], hs: &[Seg], top: f32, left: f32) -> f32 {
+    let Some(from) = h
+        .iter()
+        .filter(|s| (s.at - top).abs() <= SNAP)
+        .map(|s| s.from)
+        .reduce(f32::min)
+    else {
+        return left;
+    };
+    if from <= left + SIDE_GAP {
+        return left;
+    }
+    let lo = hs.partition_point(|s| s.at < top - SNAP);
+    let other = hs[lo..]
+        .iter()
+        .take_while(|s| s.at <= top + SNAP)
+        .any(|s| s.from <= left + SNAP && s.to < from && s.to - left >= 0.9 * (from - left));
+    if other { from } else { left }
 }
 
 /// The column of totals of `sides` that stands beside the section of column edges `xs` and

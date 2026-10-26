@@ -1677,6 +1677,93 @@ fn columns_line(y: f32, parts: &[(usize, &str)]) -> DataLine {
     DataLine { y, text }
 }
 
+/// The data column of the pay slip's data font (Courier 9.5 from x 42.52) at `x`.
+fn column_at(x: f32) -> usize {
+    ((x - 42.52) / PITCH).round() as usize
+}
+
+/// A field of a grid row: the x of its left edge, its label and its value.
+type GridField = (f32, &'static str, &'static str);
+
+/// The rows of the pay slip's header field grid: the height of each row's top rule, and for
+/// each field of its left part the x of its left edge, its label and its value (empty for a
+/// field left empty). A field `Steuerklasse` carries a raised footnote marker.
+const HEADER_GRID: [(f32, [GridField; 4]); 3] = [
+    (
+        805.19,
+        [
+            (42.40, "Personalnummer", "00000"),
+            (116.56, "Eintritt", "01.01.2020"),
+            (190.00, "Steuerklasse", "1"),
+            (264.00, "Konfession", ""),
+        ],
+    ),
+    (
+        782.39,
+        [
+            (42.40, "Geburtsdatum", "01011970"),
+            (100.00, "Austritt", ""),
+            (175.00, "Kinder", "0,5"),
+            (250.00, "Kostenstelle", "4711"),
+        ],
+    ),
+    (
+        759.59,
+        [
+            (42.40, "Krankenkasse", "Muster BKK"),
+            (130.00, "Beitragsgruppe", "1111"),
+            (200.00, "Abteilung", "Muster"),
+            (290.00, "Freibetrag", "1.234,56"),
+        ],
+    ),
+];
+
+/// The header field grid of the pay slip, as the print run draws it: rules across its left
+/// part (42.40 to 390.16) and its right part (401.44 to 538.24), one row a pitch of 22.8;
+/// column dividers that hang 11.53 points from the rule above (no divider reaches the rule
+/// below), at other places in each row; a label of 6.6 points 8.17 under each row's rule and
+/// its value in the data font 21.17 under it. The birth date is printed without its points,
+/// which are drawn as marks rising 2 points from the rule below. The right part holds a date
+/// label with its date line. The real form has three rows and the heights of three rules
+/// only in the shape it was measured from; the top rule here is one row pitch above them.
+/// All text and values are invented.
+fn header_field_grid() -> (String, Vec<DataLine>) {
+    let mut t = String::new();
+    let mut lines = Vec::new();
+    for y in [805.19, 782.39, 759.59, 736.78] {
+        t += &bar_h(42.40, 390.16, y, 0.24);
+        t += &bar_h(401.44, 538.24, y, 0.24);
+    }
+    for (top, fields) in HEADER_GRID {
+        let mut parts: Vec<(usize, String)> = Vec::new();
+        for (k, (x, l, v)) in fields.iter().enumerate() {
+            if k > 0 {
+                t += &bar_v(*x, top - 11.53, top, 0.24);
+            }
+            t += &label(x + 1.5, top - 8.17, 6.6, l);
+            if *l == "Steuerklasse" {
+                t += &label(x + 1.5 + 36.0, top - 6.17, 4.0, "1");
+            }
+            if !v.is_empty() {
+                parts.push((column_at(x + 1.5), v.to_string()));
+            }
+        }
+        let parts: Vec<(usize, &str)> = parts.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        lines.push(columns_line(top - 21.17, &parts));
+    }
+    // The points of the birth date, after its second and fourth digit.
+    for k in [2.0, 4.0] {
+        t += &mark_b(42.52 + k * PITCH, 782.39 - 22.8 + 0.24, 2.0);
+    }
+    // The right part: the date of the slip in its first row.
+    t += &label(402.94, 805.19 - 8.17, 6.6, "Datum");
+    lines.push(columns_line(
+        805.19 - 21.17,
+        &[(column_at(402.94), "01.10.2026")],
+    ));
+    (t, lines)
+}
+
 /// The pay slip page. `marks` draws the separator marks as `mark_b` (fill and stroke) when
 /// true, as `re f` when false.
 fn pay_slip(stroked_marks: bool) -> FormPage {
@@ -1696,6 +1783,8 @@ fn pay_slip(stroked_marks: bool) -> FormPage {
         t += &bar_h(464.32, 538.00, y, 0.48);
     }
     t += &label(59.67, 632.28, 11.4, "Erika Mustermann");
+    let (grid, header_lines) = header_field_grid();
+    t += &grid;
     // Section E.
     t += &bar_h(42.40, 458.32, 554.51, 0.48);
     t += &bar_h(42.40, 458.32, 372.10, 0.48);
@@ -1805,7 +1894,8 @@ fn pay_slip(stroked_marks: bool) -> FormPage {
     }
     t += &bold(500.0, 113.26, 6.66, "Lm");
     t += &bold(493.36, 272.86, 6.66, "Ln");
-    let lines = vec![
+    let mut lines = header_lines;
+    lines.extend([
         columns_line(
             533.22,
             &[(2, "001 Gehalt"), (67, "X X Y"), (78, "1.234,56")],
@@ -1868,7 +1958,7 @@ fn pay_slip(stroked_marks: bool) -> FormPage {
                 (78, "9.876,54"),
             ],
         ),
-    ];
+    ]);
     FormPage {
         template: t,
         left: 42.52,
@@ -1893,29 +1983,75 @@ fn read_header_rows(out: &ReadOutcome) -> Vec<usize> {
     found
 }
 
-/// The tables of the pay slip: its sections E, T, S, the right middle and the bottom of L,
-/// each a header over its lines; no section is lost and none gives a loss. Each value of a
-/// value line stands in the column of its label, also where only one or two spaces part it
-/// from the next value across a column rule, and an empty field is an empty cell. The column
-/// of totals on the right joins each section beside it (its amounts in the section's rows),
-/// and each total label in it pairs with the amount under it (ruling P6-O).
+/// The words of the paragraphs of a read that look like amounts or dates (digits with a
+/// point or a comma), besides notes, captions and page markers: values without a label.
+fn values_alone(out: &ReadOutcome) -> Vec<String> {
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        let Block::Section { blocks, .. } = b else {
+            continue;
+        };
+        for inner in blocks {
+            if let Block::Paragraph { inlines, role, .. } = inner
+                && !matches!(role.as_deref(), Some("found-by" | "caption" | "page"))
+            {
+                found.extend(
+                    plain_text(inlines)
+                        .split_whitespace()
+                        .filter(|w| w.chars().any(|c| c.is_ascii_digit()) && w.contains([',', '.']))
+                        .map(str::to_string),
+                );
+            }
+        }
+    }
+    found
+}
+
+/// The tables of the pay slip: its header field grid as label and value pairs (ruling P6-H);
+/// its sections E, T, S, the right middle and the bottom of L, each a header over its lines;
+/// no section is lost and none gives a loss. Each value of a value line stands in the column
+/// of its label, also where only one or two spaces part it from the next value across a
+/// column rule, and an empty field is an empty cell. The column of totals on the right joins
+/// each section beside it (its amounts in the section's rows), and each total label in it
+/// pairs with the amount under it (ruling P6-O). The block of labels with their values left
+/// in L and the bank row under it are label and value pairs, an empty field marked empty.
+/// No amount stands alone.
 fn assert_pay_slip(out: &ReadOutcome) {
     let found = read_tables(out);
-    assert_eq!(found.len(), 7, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found.len(), 10, "{found:#?} {:?}", out.document.losses);
     let header = |t: &Vec<Vec<String>>| t[0].join("|");
     let body = |t: &Vec<Vec<String>>| t[1..].iter().map(|r| r.join("|")).collect::<Vec<_>>();
-    // Each section's label row is its table's header row; the totals have none.
-    assert_eq!(read_header_rows(out), [1, 0, 1, 1, 0, 1, 1], "{found:#?}");
+    let pairs = |t: &Vec<Vec<String>>| t.iter().map(|r| r.join(": ")).collect::<Vec<_>>();
+    // Each section's label row is its table's header row; the pairs have none.
+    assert_eq!(
+        read_header_rows(out),
+        [0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+        "{found:#?}"
+    );
+    // The header field grid, row by row, with the date of its right part.
+    assert_eq!(found[0].len(), 13, "{found:#?}");
+    assert_eq!(
+        pairs(&found[0])[..6],
+        [
+            "Personalnummer: 00000",
+            "Eintritt: 01.01.2020",
+            "Steuerklasse 1: 1",
+            "Konfession: empty",
+            "Datum: 01.10.2026",
+            "Geburtsdatum: 01.01.1970"
+        ],
+        "{found:#?}"
+    );
     // E: 8 columns and the amounts of the column on the right, a row for each earning; the
     // label over two columns and the three flags one character apart are cut at the column
     // rules.
     assert_eq!(
-        header(&found[0]),
+        header(&found[1]),
         "Ea|Eb|Ec Ed|Ee|Ef|Eg|Eh|Ei|Ej",
         "{found:#?}"
     );
     assert_eq!(
-        body(&found[0]),
+        body(&found[1]),
         [
             "001|Gehalt||||X|X|Y|1.234,56",
             "002|Zulage Muster||||X|X|Y|12,34",
@@ -1924,31 +2060,30 @@ fn assert_pay_slip(out: &ReadOutcome) {
         ]
     );
     // The total under E's amounts, with its label.
-    assert_eq!(found[1], [["Ek", "1.302,90"]], "{found:#?}");
+    assert_eq!(found[2], [["Ek", "1.302,90"]], "{found:#?}");
     // T and S: their headers and one row of values, the marks read as separators.
-    assert_eq!(header(&found[2]), "Ta|Tb|Tc|Td|Te||Tf", "{found:#?}");
+    assert_eq!(header(&found[3]), "Ta|Tb|Tc|Td|Te||Tf", "{found:#?}");
     assert_eq!(
-        body(&found[2]),
+        body(&found[3]),
         ["X|12.345,67|1.234,00||||1.234,00"],
         "{found:#?}"
     );
     assert_eq!(
-        header(&found[3]),
+        header(&found[4]),
         "Sa|Sb|Sc|Sd|Se|Sf|Sg|Sh|Si|Sj",
         "{found:#?}"
     );
     assert_eq!(
-        body(&found[3]),
+        body(&found[4]),
         ["X||1.111,00|2.222,00|||333,44|444,55|7|555,66"],
         "{found:#?}"
     );
     // The total in the band of L's titles, with its label.
-    assert_eq!(found[4], [["Ln", "8.765,43"]], "{found:#?}");
-    // L: the right middle Le | Lf | Lg over four rows, the bottom right Lk | Ll | Lm over a
-    // value.
-    assert_eq!(header(&found[5]), "Le|Lf|Lg", "{found:#?}");
+    assert_eq!(found[5], [["Ln", "8.765,43"]], "{found:#?}");
+    // L: the right middle Le | Lf | Lg over four rows.
+    assert_eq!(header(&found[6]), "Le|Lf|Lg", "{found:#?}");
     assert_eq!(
-        body(&found[5]),
+        body(&found[6]),
         [
             "9001|Muster A|11,11",
             "9002|Muster B|22,22-",
@@ -1956,39 +2091,52 @@ fn assert_pay_slip(out: &ReadOutcome) {
             "9004|Muster D|4.444,44-"
         ]
     );
-    // The left block (Lh, Li and their values) still reads into the first column here; Task
-    // 9 reads it as label and value pairs and changes these two rows.
-    assert!(header(&found[6]).ends_with("Lj|Lk|Ll|Lm"), "{found:#?}");
+    // L's left block: its two columns of labels, each with the value on its line, column by
+    // column; the fields with only their marks are empty.
+    let left = pairs(&found[7]);
+    assert_eq!(left.len(), 16, "{found:#?}");
     assert_eq!(
-        body(&found[6]),
-        ["Li DE00 0000 0000 0000 0000 00 1.234,56|||9.876,54"],
+        left[..4],
+        [
+            "Lc1: 99.999,99",
+            "Lc2: 99.999,99",
+            "Lc3: 7.777,00",
+            "Lc4: empty"
+        ],
+        "{left:?}"
+    );
+    assert_eq!(
+        left[9..12],
+        ["Ld1: 88.888,00", "Ld2: empty", "Ld3: 6.666,00"],
+        "{left:?}"
+    );
+    // The bank row: its labels with the bank and the account, and the fields beside it as a
+    // header over their values.
+    assert_eq!(
+        pairs(&found[8]),
+        ["Lh: Musterbank", "Li: DE00 0000 0000 0000 0000 00"],
         "{found:#?}"
     );
+    assert_eq!(header(&found[9]), "Lj|Lk|Ll|Lm", "{found:#?}");
+    assert_eq!(body(&found[9]), ["1.234,56|||9.876,54"], "{found:#?}");
     // The title right above a section's top rule is that table's caption, never a row of
     // the table above (the rows of E and S above show none): T's in E's band, L's in the
     // band under S, and E's over the grid, as the grid is cut (ruling P6-Q).
-    assert_eq!(
-        read_captions(out),
-        [
-            Some("Bezuege A".to_string()),
-            None,
-            Some("Abzuege B".to_string()),
-            None,
-            None,
-            Some("La Lb".to_string()),
-            None
-        ]
-    );
-    // The column of totals is said once, before the first table it adds to.
+    let mut captions = vec![None; 10];
+    captions[1] = Some("Bezuege A".to_string());
+    captions[3] = Some("Abzuege B".to_string());
+    captions[6] = Some("La Lb".to_string());
+    assert_eq!(read_captions(out), captions);
+    // Each rule that pairs is said once, before the first table it found.
     let notes = found_by(out);
-    assert_eq!(
-        notes
-            .iter()
-            .filter(|n| n.contains("column of amounts"))
-            .count(),
-        1,
-        "{notes:?}"
-    );
+    for rule in ["column of amounts", "rows of fields"] {
+        assert_eq!(
+            notes.iter().filter(|n| n.contains(rule)).count(),
+            1,
+            "{notes:?}"
+        );
+    }
+    assert_eq!(values_alone(out), Vec::<String>::new());
     assert_no_loss(out);
 }
 
@@ -2334,11 +2482,15 @@ fn a_boxed_column_beside_a_section_stays_apart() {
     let page = section_with_totals(&[700.0, 660.0, 630.0], true);
     let out = read(&print_form(&[page], "", ""));
     let found = read_tables(&out);
-    assert!(
-        found.iter().all(|t| !t[0].iter().any(|c| c == "Af")),
-        "{found:#?}"
-    );
-    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+    assert_eq!(found[0][0], ["Aa", "Ab", "Ac", "Ad", "Ae"], "{found:#?}");
+    assert!(!side_noted(&out), "{:?}", found_by(&out));
+}
+
+/// Whether the read says a column of totals joined a table.
+fn side_noted(out: &ReadOutcome) -> bool {
+    found_by(out)
+        .iter()
+        .any(|n| n.contains("column of amounts"))
 }
 
 /// Guard: a column whose rules do not line up with the section's rules stays apart.
@@ -2348,7 +2500,7 @@ fn a_column_off_the_rules_of_a_section_stays_apart() {
     let out = read(&print_form(&[page], "", ""));
     let found = read_tables(&out);
     assert_eq!(found[0][0], ["Aa", "Ab", "Ac", "Ad", "Ae"], "{found:#?}");
-    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+    assert!(!side_noted(&out), "{:?}", found_by(&out));
 }
 
 /// A rule inside a word cuts nothing: the run stays whole in the column of its middle. A rule
@@ -3311,4 +3463,252 @@ fn footnote_without_reference_is_a_paragraph() {
     assert_eq!(plain, ["** ohne Verweis"], "{blocks:#?}");
     let note = found_by(&out);
     assert!(note[0].contains("1 of them are linked"), "{note:?}");
+}
+
+// ---------------------------------------------------------------------------------------
+// Labels and values of drawn boxes and of rows of fields
+
+/// The note before the first table of boxed fields of a page.
+const BOX_NOTE: &str = "Found by: label and value pairs from drawn boxes; the label is the \
+     smaller text at the top of each box.";
+
+/// Three boxes in a row (touching, 120 by 24 points from x 40, 160 and 280 at y 700) with a
+/// label of 6 points at the top of each, and `values` on one data line padded into the boxes
+/// (an empty value leaves its box with only its label). Three lines of an address in the
+/// data font elsewhere make the data font a text size of the page. `third` replaces the
+/// third box's label when given (template content).
+fn boxed_fields(values: [&str; 3], third: Option<String>) -> FormPage {
+    let labels = ["Personalnummer", "Eintritt", "Steuerklasse"];
+    let mut t = String::new();
+    let mut line = String::new();
+    for (k, x) in [40.0f32, 160.0, 280.0].into_iter().enumerate() {
+        t += &boxed(x, 700.0, 120.0, 24.0);
+        if k < 2 || third.is_none() {
+            t += &label(x + 3.0, 716.0, 6.0, labels[k]);
+        }
+        if !values[k].is_empty() {
+            line = format!("{line:<0$}{1}", pad_to(x + 5.0), values[k]);
+        }
+    }
+    if let Some(third) = third {
+        t += &third;
+    }
+    let mut lines = vec![DataLine {
+        y: 703.0,
+        text: line,
+    }];
+    for (k, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        lines.push(DataLine {
+            y: 600.0 - 12.0 * k as f32,
+            text: (*l).into(),
+        });
+    }
+    FormPage {
+        template: t,
+        lines,
+        ..FormPage::default()
+    }
+}
+
+/// Three boxed fields in a row are one table of label and value pairs, the field without a
+/// value marked empty, after one note.
+#[test]
+fn boxed_fields_become_pairs() {
+    let out = read(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", ""], None)],
+        "",
+        "",
+    ));
+    let found = read_tables(&out);
+    assert_eq!(
+        found,
+        [[
+            ["Personalnummer", "00000"],
+            ["Eintritt", "01.01.2020"],
+            ["Steuerklasse", "empty"]
+        ]],
+        "{found:#?} {:?}",
+        out.document.losses
+    );
+    assert_eq!(read_header_rows(&out), [0]);
+    assert_eq!(found_by(&out), [BOX_NOTE]);
+    // The empty value is a grey status, not text.
+    let empty = page_blocks(&out).iter().any(|b| match b {
+        Block::Table { rows, .. } => matches!(
+            rows[2][1].inlines.as_slice(),
+            [Inline::Status { text, color: rezzer_model::StatusColor::Grey }] if text == "empty"
+        ),
+        _ => false,
+    });
+    assert!(empty, "{:#?}", page_blocks(&out));
+    assert_no_loss(&out);
+}
+
+/// A box of three styles beside boxed fields is not paired: its text stays as it is, and a
+/// loss says why; the fields beside it are still pairs.
+#[test]
+fn box_of_three_styles_is_not_paired() {
+    let third = label(283.0, 716.0, 6.0, "Steuerklasse") + &bold(283.0, 708.0, 8.0, "Hinweis");
+    let out = read(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", "1"], Some(third))],
+        "",
+        "",
+    ));
+    let found = read_tables(&out);
+    assert_eq!(
+        found,
+        [[["Personalnummer", "00000"], ["Eintritt", "01.01.2020"]]],
+        "{found:#?}"
+    );
+    assert!(all_text(&out).contains("Hinweis"), "{}", all_text(&out));
+    let losses: Vec<&rezzer_model::Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("three styles"))
+        .collect();
+    assert_eq!(losses.len(), 1, "{:?}", out.document.losses);
+    assert_eq!(
+        (losses[0].why, losses[0].severity),
+        (LossReason::Uncertain, Severity::Info)
+    );
+    assert!(losses[0].what.contains("page 1"), "{:?}", losses[0]);
+}
+
+/// A box whose label stands below its value is not paired, with a loss that says why.
+#[test]
+fn box_with_its_label_below_is_not_paired() {
+    let third = label(283.0, 701.0, 6.0, "Steuerklasse");
+    let mut page = boxed_fields(["00000", "01.01.2020", ""], Some(third));
+    page.lines.push(DataLine {
+        y: 712.0,
+        text: padded(pad_to(285.0), "1"),
+    });
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(
+        found,
+        [[["Personalnummer", "00000"], ["Eintritt", "01.01.2020"]]],
+        "{found:#?}"
+    );
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("its label stands below its value")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// Boxed fields one under the other (a column of boxes) are one table too.
+#[test]
+fn boxed_fields_in_a_column_become_pairs() {
+    let mut t = String::new();
+    let mut lines = Vec::new();
+    for (k, (l, v)) in [("Name", "Erika Mustermann"), ("Ort", "Musterstadt")]
+        .iter()
+        .enumerate()
+    {
+        let y = 700.0 - 24.0 * k as f32;
+        t += &boxed(40.0, y, 200.0, 24.0);
+        t += &label(43.0, y + 16.0, 6.0, l);
+        lines.push(DataLine {
+            y: y + 3.0,
+            text: padded(1, v),
+        });
+    }
+    for (k, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        lines.push(DataLine {
+            y: 600.0 - 12.0 * k as f32,
+            text: (*l).into(),
+        });
+    }
+    let page = FormPage {
+        template: t,
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(
+        found,
+        [[["Name", "Erika Mustermann"], ["Ort", "Musterstadt"]]],
+        "{found:#?}"
+    );
+    assert_eq!(found_by(&out), [BOX_NOTE]);
+}
+
+/// Guard: a box that holds a form field is the form's, not a field pair (it stays as today).
+#[test]
+fn widget_box_is_not_paired() {
+    let mut page = boxed_fields(["00000", "01.01.2020", ""], None);
+    page.annots
+        .push("<< /Type /Annot /Subtype /Widget /FT /Tx /T (pnr) /Rect [42 701 158 712] >>".into());
+    let out = read(&print_form(
+        &[page],
+        "",
+        "/AcroForm << /Fields [{annots}] >>",
+    ));
+    assert!(read_tables(&out).is_empty(), "{:#?}", read_tables(&out));
+    assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+    assert!(
+        all_text(&out).contains("Personalnummer"),
+        "{}",
+        all_text(&out)
+    );
+}
+
+/// The header field grid of a pay slip (label rows over value rows, dividers that hang from
+/// the rule above, a raised footnote marker in a label, a date line in a part of its own to
+/// the right) reads as label and value pairs, row by row; an empty field is marked empty
+/// (ruling P6-H).
+#[test]
+fn header_field_grid_reads_as_pairs() {
+    let (template, lines) = header_field_grid();
+    let page = FormPage {
+        template,
+        left: 42.52,
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let rows: Vec<String> = found[0].iter().map(|r| r.join(": ")).collect();
+    assert_eq!(
+        rows,
+        [
+            "Personalnummer: 00000",
+            "Eintritt: 01.01.2020",
+            "Steuerklasse 1: 1",
+            "Konfession: empty",
+            "Datum: 01.10.2026",
+            "Geburtsdatum: 01.01.1970",
+            "Austritt: empty",
+            "Kinder: 0,5",
+            "Kostenstelle: 4711",
+            "Krankenkasse: Muster BKK",
+            "Beitragsgruppe: 1111",
+            "Abteilung: Muster",
+            "Freibetrag: 1.234,56"
+        ],
+        "{found:#?}"
+    );
+    let notes = found_by(&out);
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.contains("rows of fields"))
+            .count(),
+        1,
+        "{notes:?}"
+    );
+    assert_no_loss(&out);
 }

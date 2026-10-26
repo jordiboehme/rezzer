@@ -388,6 +388,53 @@ pub(crate) fn boxes(
     Ok(kept)
 }
 
+/// The innermost of `boxes` each of `points` lies in, as an index into `boxes`. A box that
+/// holds another box a point lies in is no region: the inner one is, and the points of the
+/// outer one outside it have none. Past the bounds of the lookup, the reason.
+pub(crate) fn regions_of(
+    points: &[(f32, f32)],
+    boxes: &[[f32; 4]],
+) -> Result<Vec<Option<u32>>, String> {
+    let Some(mut index) = Index::new(boxes) else {
+        return Err("its boxes overlap too much".into());
+    };
+    let too_much = || Err("its boxes take too many steps to look up".to_string());
+    let mut held = vec![false; boxes.len()];
+    let mut out = Vec::with_capacity(points.len());
+    for &(x, y) in points {
+        let r = index.innermost(x, y);
+        if let Some(b) = r {
+            held[b as usize] = true;
+        }
+        out.push(r);
+        if index.work > BOX_WORK {
+            return too_much();
+        }
+    }
+    // Boxes that hold a box with text are outer ones.
+    let mut outer = vec![false; boxes.len()];
+    for (k, b) in boxes.iter().enumerate() {
+        if !held[k] {
+            continue;
+        }
+        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, |o| {
+            let a = boxes[o as usize];
+            if o as usize != k && a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3] {
+                outer[o as usize] = true;
+            }
+        });
+        if index.work > BOX_WORK {
+            return too_much();
+        }
+    }
+    for r in &mut out {
+        if r.is_some_and(|b| outer[b as usize]) {
+            *r = None;
+        }
+    }
+    Ok(out)
+}
+
 /// Cells of the map of where a page has text, along each side.
 const INKED_SIDE: usize = 64;
 

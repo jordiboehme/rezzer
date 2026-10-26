@@ -11,7 +11,7 @@ use std::rc::Rc;
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::{Gap, Gaps, Run};
-use crate::regions::{BOX_WORK, Index, Part, offset_baselines};
+use crate::regions::{Part, offset_baselines};
 use crate::tables::Rule;
 use crate::text::{Gl, Link, Texts};
 
@@ -167,7 +167,7 @@ impl Turn {
     }
 
     /// A point or a direction in the turned frame (directions are never moved).
-    fn apply(self, x: f32, y: f32) -> (f32, f32) {
+    pub(crate) fn apply(self, x: f32, y: f32) -> (f32, f32) {
         match self {
             Turn::None => (x, y),
             Turn::Up => (y, -x),
@@ -1238,52 +1238,28 @@ pub(crate) fn runs_in(
     (runs, unused)
 }
 
-/// Tags each fragment with the innermost of `boxes` its middle lies in. A box that holds
-/// another box with text is no region: the inner one is. Past the bounds no fragment is
-/// tagged, and the reason is given.
+/// Tags each fragment with the innermost of `boxes` its middle lies in (see
+/// [`crate::regions::regions_of`]). Past the bounds no fragment is tagged, and the reason is
+/// given.
 fn tag_regions(frags: &mut [Frag], boxes: &[[f32; 4]]) -> Result<(), String> {
-    let cut = |frags: &mut [Frag], why: &str| {
-        frags.iter_mut().for_each(|f| f.region = None);
-        Err(why.to_string())
-    };
-    let Some(mut index) = Index::new(boxes) else {
-        return cut(frags, "its boxes overlap too much");
-    };
-    let mut held = vec![false; boxes.len()];
-    for f in frags.iter_mut() {
-        // The middle of the ink: padding on either side does not move the run into the box
-        // beside it.
-        let (x, y) = ((f.x + f.end.max(f.x)) / 2.0, f.y + 0.25 * f.size);
-        f.region = index.innermost(x, y);
-        if let Some(b) = f.region {
-            held[b as usize] = true;
-        }
-        if index.work > BOX_WORK {
-            return cut(frags, "its boxes take too many steps to look up");
-        }
-    }
-    // Boxes that hold a box with text are outer ones.
-    let mut outer = vec![false; boxes.len()];
-    for (k, b) in boxes.iter().enumerate() {
-        if !held[k] {
-            continue;
-        }
-        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, |o| {
-            let a = boxes[o as usize];
-            if o as usize != k && a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3] {
-                outer[o as usize] = true;
+    // The middle of the ink: padding on either side does not move the run into the box
+    // beside it.
+    let points: Vec<(f32, f32)> = frags
+        .iter()
+        .map(|f| ((f.x + f.end.max(f.x)) / 2.0, f.y + 0.25 * f.size))
+        .collect();
+    match crate::regions::regions_of(&points, boxes) {
+        Ok(regions) => {
+            for (f, r) in frags.iter_mut().zip(regions) {
+                f.region = r;
             }
-        });
-        if index.work > BOX_WORK {
-            return cut(frags, "its boxes take too many steps to look up");
+            Ok(())
+        }
+        Err(why) => {
+            frags.iter_mut().for_each(|f| f.region = None);
+            Err(why)
         }
     }
-    for f in frags.iter_mut() {
-        if f.region.is_some_and(|b| outer[b as usize]) {
-            f.region = None;
-        }
-    }
-    Ok(())
 }
 
 /// The frame that first turns by `a` and then reads text of direction `b` (in the frame `a`)
