@@ -110,4 +110,4 @@ Extreme cases the test suite holds, at the default limits unless a limit is name
 - 100 MB of short rows with a time limit of 50 ms: the read stops in time and says so
 - 3,000 columns by 200 rows: the table shows 1,000 columns and 200,000 cells, the Columns table 500 columns. The output says what is not shown
 
-Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.02 seconds with a peak memory of 9 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
+Speed: `csv-semicolon-latin1-dwd-stations.txt` (148 KB, 1,091 rows x 7 columns) reads in 0.02 seconds with a peak memory of 8 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 4.7), release build (cargo profile release) of Rezzer 0.1.0 at commit be1efc2, 2026-10-26.

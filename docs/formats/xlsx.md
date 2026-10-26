@@ -188,4 +188,4 @@ Extreme cases the test suite holds, at the default limits unless a limit is name
 - 100,000 nested XML elements after the cells: the read stops at 256 levels and keeps the cells before
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
-Speed: `ex012.PVT_z_factor.xlsm` (130 KB, 2,133 formulas) reads in 0.02 seconds with a peak memory of 14 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
+Speed: `ex012.PVT_z_factor.xlsm` (130 KB, 2,133 formulas) reads in 0.02 seconds with a peak memory of 11 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 4.7), release build (cargo profile release) of Rezzer 0.1.0 at commit be1efc2, 2026-10-26.

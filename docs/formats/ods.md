@@ -97,4 +97,4 @@ Extreme cases the test suite holds, at the default limits unless a limit is name
 - 100,000 nested spans in one cell: refused for its depth before any parser reads it
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 
-Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 7 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
+Speed: `formula-across-sheets.ods` (16 KB, 23 formulas) reads in under 0.01 seconds with a peak memory of 4 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 4.7), release build (cargo profile release) of Rezzer 0.1.0 at commit be1efc2, 2026-10-26.
