@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
-use super::pairs::{field_strips, frames};
+use super::pairs::{field_cuts, field_strips, frames};
 use super::sections::{CUT_WORK, sections};
 use super::side::{
     Beside, SIDE_FOUND_BY, SIDE_GAP, SIDE_WORK, Side, StripKind, side_columns, totals_table,
@@ -119,11 +119,10 @@ pub(super) fn ruled(
         ));
     }
     let frames = frames.unwrap_or_default();
-    let dividers: Vec<(f32, f32, f32)> = frames
-        .iter()
-        .flat_map(|f| f.dividers.iter().map(|&x| (x, f.bottom, f.top)))
-        .collect();
-    if !cut_at_columns(flow, &grids, &dividers, COLUMN_CUT_WORK) {
+    if !frames.is_empty() {
+        apply_cuts(flow, field_cuts(flow, &frames));
+    }
+    if !cut_at_columns(flow, &grids, COLUMN_CUT_WORK) {
         found.skipped.push(format!(
             "text across column lines on page {page} is cut at them only in part: the page has \
              too many runs across its column lines"
@@ -1298,9 +1297,9 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// the text size of a gap cuts there; a rule inside a word cuts nothing. A cut part keeps
 /// the run's place in the reading order. False when more than `budget` steps were needed:
 /// the runs past them stay whole.
-fn cut_at_columns(flow: &mut Flow, parts: &[Part], extra: &[Span], budget: usize) -> bool {
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
     // The rules as drawn, and the inner column edges of hanging headers below their feet.
-    let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (extra.to_vec(), Vec::new());
+    let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
     for p in parts {
         let (xs, ys) = edges(&p.h, &p.v);
         if xs.len() < 3 || ys.len() < 2 {
@@ -1393,8 +1392,15 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], extra: &[Span], budget: usize
             cuts.push((i, at));
         }
     }
+    apply_cuts(flow, cuts);
+    done
+}
+
+/// Cuts each run `cuts` names (by its place in `flow`, in order) at its gaps listed (sorted):
+/// the parts keep the run's slot and its place in the reading order.
+fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
     if cuts.is_empty() {
-        return done;
+        return;
     }
     let all = std::mem::take(flow);
     let extra: usize = cuts.iter().map(|c| c.1.len()).sum();
@@ -1430,7 +1436,6 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], extra: &[Span], budget: usize
         }
     }
     *flow = out;
-    done
 }
 
 /// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
@@ -1801,7 +1806,6 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
-            &[],
             100
         ));
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
@@ -1819,7 +1823,6 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 9.0, 100.0])],
-            &[],
             100
         ));
         assert_eq!(flow.runs.len(), 1);
@@ -1834,7 +1837,6 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
-            &[],
             100
         ));
         assert_eq!(flow.runs.len(), 1);
@@ -1847,7 +1849,6 @@ mod tests {
         assert!(!cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
-            &[],
             2
         ));
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();

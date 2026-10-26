@@ -996,6 +996,13 @@ pub(crate) fn page_blocks_at(
                 let mut runs: Vec<&Run> = t.runs.iter().collect();
                 runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
                 built.heading(SIZE_LEVELS as u8, runs, cx);
+                // The lines of its frame follow it, as the text of the page is laid out.
+                let mut text = t.text;
+                text.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+                if !text.is_empty() {
+                    let slots = vec![Slot::Free; text.len()];
+                    lay(&text, &slots, &mut built);
+                }
             }
             Placed::Unsure(u) => {
                 let what = u.text.unwrap_or_else(|| {

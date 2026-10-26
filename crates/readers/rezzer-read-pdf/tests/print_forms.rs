@@ -3824,30 +3824,46 @@ fn header_field_grid_reads_as_pairs() {
 }
 
 /// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
-/// labels and one data line, dividers that hang 11.53 points from the rule above. Row 1: three
-/// short values one or two spaces apart, each in its own field; row 2: an ID and a name in
-/// two fields; row 3: a value that runs over the divider without a word gap there; row 4:
-/// two labels without a divider, a date under the first. All values are invented.
+/// labels and one data line, dividers that hang 11.53 points from the rule above and end over
+/// the value line. Row 1: three short values one or two spaces apart, each in its own field;
+/// row 2: an ID and a name in two fields; row 3: a value that runs over the divider without a
+/// word gap there; row 4: two labels without a divider, a date under the first; row 5: an ID
+/// and a two-word name whose word gap lies left of the divider; row 6: two fields with a
+/// divider, a date in the first and the second empty. All values are invented.
 fn field_rows() -> FormPage {
-    // Each row: the fields' left edges (the first is the frame's) with their labels, and the
-    // data line as (column, text) parts.
-    type Row<'a> = (&'a [(f32, &'a str)], &'a [(usize, &'a str)]);
-    let rows: [Row<'_>; 4] = [
+    // Each row: the fields' left edges (the first is the frame's) with their labels, the
+    // data line as (column, text) parts, and whether its fields have dividers.
+    type Row<'a> = (&'a [(f32, &'a str)], &'a [(usize, &'a str)], bool);
+    let rows: [Row<'_>; 6] = [
         (
             &[(42.40, "Pers.-Nr."), (76.72, "Eintritt"), (133.0, "Stkl")],
             &[(0, "00123"), (7, "01.01.80"), (16, "1")],
+            true,
         ),
         (
             &[(42.40, "Kasse-Nr."), (115.0, "Krankenkasse")],
             &[(0, "00000000X000"), (13, "Muster Kasse")],
+            true,
         ),
         (
             &[(42.40, "Betrag"), (90.0, "Zuschlag")],
             &[(0, "123456789012")],
+            true,
         ),
         (
             &[(42.40, "Eintritt"), (120.0, "Austritt")],
             &[(0, "01.04.2020")],
+            false,
+        ),
+        (
+            &[(42.40, "SV-Nummer"), (119.5, "Krankenkasse")],
+            &[(0, "00000000X000"), (13, "Muster Kasse")],
+            true,
+        ),
+        (
+            &[(42.40, "Eintritt"), (110.0, "Austritt")],
+            &[(0, "01.04.2020")],
+            true,
         ),
     ];
     let mut t = String::new();
@@ -3856,11 +3872,10 @@ fn field_rows() -> FormPage {
     for k in 0..=rows.len() {
         t += &bar_h(42.40, 200.0, top0 - 22.8 * k as f32, 0.24);
     }
-    for (k, (fields, values)) in rows.iter().enumerate() {
+    for (k, (fields, values, dividers)) in rows.iter().enumerate() {
         let top = top0 - 22.8 * k as f32;
         for (n, (x, l)) in fields.iter().enumerate() {
-            // The last row has no dividers: its labels alone part its fields.
-            if n > 0 && k < 3 {
+            if n > 0 && *dividers {
                 t += &bar_v(*x, top - 11.53, top, 0.24);
             }
             t += &label(x + 1.5, top - 8.17, 6.6, l);
@@ -3882,10 +3897,10 @@ fn field_rows() -> FormPage {
     }
 }
 
-/// A value line over several fields is cut at the dividers where a word gap falls there,
-/// each value paired with the field it stands in; a row whose value runs over a divider is
-/// not paired, and a loss names it; labels alone part the fields of a row without dividers
-/// (ruling P6-X: never a wrong pair).
+/// A value line over several fields is cut at the word gap nearest each divider, each value
+/// paired with the field it stands in; a row whose value runs over a divider is not paired,
+/// and a loss names it; labels alone part the fields of a row without dividers (ruling P6-X:
+/// never a wrong pair).
 #[test]
 fn values_over_several_fields_pair_with_their_own_fields() {
     let out = read(&print_form(&[field_rows()], "", ""));
@@ -3904,7 +3919,14 @@ fn values_over_several_fields_pair_with_their_own_fields() {
                 "Kasse-Nr.: 00000000X000",
                 "Krankenkasse: Muster Kasse"
             ],
-            vec!["Eintritt: 01.04.2020", "Austritt: empty"]
+            vec![
+                "Eintritt: 01.04.2020",
+                "Austritt: empty",
+                "SV-Nummer: 00000000X000",
+                "Krankenkasse: Muster Kasse",
+                "Eintritt: 01.04.2020",
+                "Austritt: empty"
+            ]
         ],
         "{found:#?}"
     );
@@ -3959,4 +3981,70 @@ fn bold_box_title_is_no_empty_field() {
         page_blocks(&out)
     );
     assert_no_loss(&out);
+}
+
+/// A framed box of a pay slip with a bold title of 6.66 points at its top left and two lines
+/// of the data font in it (a date and an amount); `title_box` draws the title in a box of its
+/// own inside the frame's top, so the frame holds a box with text and is no region itself:
+/// its lines are read later, in the page's order. Beside it, boxed fields and text elsewhere
+/// on the page.
+fn titled_box(title_box: bool) -> FormPage {
+    let mut page = boxed_fields(["00000", "01.01.2020", "1"], None);
+    page.template += &boxed(40.0, 420.0, 360.0, 60.0);
+    if title_box {
+        page.template += &boxed(43.5, 463.5, 120.0, 13.0);
+    }
+    page.template += &bold(46.0, 468.0, 6.66, "Hinweise zur Abrechnung");
+    for (k, l) in ["Abschlag vom 01.10.2026 ueberwiesen", "Restbetrag 1.234,56"]
+        .iter()
+        .enumerate()
+    {
+        page.lines.push(DataLine {
+            y: 450.0 - 12.0 * k as f32,
+            text: padded(1, l),
+        });
+    }
+    page
+}
+
+/// A framed box with a bold title at its top and lines of text under it in the frame reads
+/// as the title as a heading and then its lines, found by the frame, not by the order the
+/// text comes in; it is no label with a value.
+#[test]
+fn framed_box_title_heads_its_lines() {
+    for title_box in [false, true] {
+        let out = read(&print_form(&[titled_box(title_box)], "", ""));
+        let blocks = page_blocks(&out);
+        let at = blocks.iter().position(|b| {
+            matches!(b, Block::Heading { inlines, .. } if plain_text(inlines) == "Hinweise zur Abrechnung")
+        });
+        let text: Vec<String> = at
+            .map(|k| {
+                blocks[k + 1..]
+                    .iter()
+                    .take(2)
+                    .map(|b| match b {
+                        Block::Paragraph { inlines, .. } => plain_text(inlines),
+                        _ => String::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            at.is_some()
+                && text
+                    .join(" ")
+                    .contains("Abschlag vom 01.10.2026 ueberwiesen")
+                && text.join(" ").contains("Restbetrag 1.234,56"),
+            "title box {title_box}: {blocks:#?}"
+        );
+        assert!(
+            read_tables(&out)
+                .iter()
+                .flatten()
+                .all(|r| !r.iter().any(|c| c.contains("Hinweise"))),
+            "{:#?}",
+            read_tables(&out)
+        );
+    }
 }

@@ -7,11 +7,11 @@
 //! drawn rules (a header field grid of label rows over value rows, a block of labels with
 //! their values beside them).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::banded::heads_lines;
 use super::*;
-use crate::regions::{Seg, grids, regions_of};
+use crate::regions::{Index, Seg, grids, regions_of};
 
 /// The note before the first table of drawn boxes of a page.
 pub(crate) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
@@ -44,13 +44,16 @@ const DIVIDER: f32 = 3.0 * SNAP;
 /// Steps the search for fields between rules may take on one page.
 const STRIP_WORK: usize = 1_000_000;
 
-/// The title of a box beside boxed fields: bold text alone in its box, read as a heading
-/// where the box stands.
+/// The title of a drawn box, read as a heading where the box stands: bold text alone in a box
+/// beside boxed fields, or the bold line at the top of a framed box over lines of text, which
+/// follow it as its text.
 #[derive(Debug)]
 pub(crate) struct BoxTitle {
     pub at: usize,
     pub top: f32,
     pub runs: Vec<Run>,
+    /// The lines in the frame under the title.
+    pub text: Vec<Run>,
 }
 
 /// One field: the runs of its label and of its value (none: the field is empty).
@@ -384,6 +387,15 @@ pub(crate) fn box_pairs(
             in_box[*b as usize].push(i);
         }
     }
+    // Framed boxes with a title over their lines, found by the frame: the frame's text is
+    // what lies in it outside any box inside it with text.
+    let framed = framed_titles(flow, boxes, &points, &regions, &in_box);
+    let mut consumed = vec![false; boxes.len()];
+    for f in &framed {
+        for &b in &f.boxes {
+            consumed[b] = true;
+        }
+    }
     let how = Reading {
         one_field: true,
         smaller: false,
@@ -392,7 +404,7 @@ pub(crate) fn box_pairs(
     let mut fields: Vec<Option<Field>> = (0..boxes.len()).map(|_| None).collect();
     let mut unsure: Vec<(usize, &'static str)> = Vec::new();
     for (b, ids) in in_box.iter().enumerate() {
-        if ids.is_empty() {
+        if ids.is_empty() || consumed[b] {
             continue;
         }
         match parse(flow, ids, how) {
@@ -481,7 +493,7 @@ pub(crate) fn box_pairs(
             ));
         }
     }
-    if groups.is_empty() {
+    if groups.is_empty() && framed.is_empty() {
         return (Vec::new(), Vec::new(), said);
     }
     let mut planned: Vec<Planned> = Vec::new();
@@ -494,10 +506,29 @@ pub(crate) fn box_pairs(
             planned.push(p);
         }
     }
-    // Boxes beside the fields that hold bold text alone are titles.
+    // Boxes beside the fields that hold bold text alone are titles, and so are the titles of
+    // framed boxes, with their text.
     let mut titles: Vec<BoxTitle> = Vec::new();
-    let mut title_of: Vec<Option<usize>> = vec![None; flow.runs.len()];
+    let mut title_of: Vec<Option<(usize, bool)>> = vec![None; flow.runs.len()];
+    for f in &framed {
+        for &i in &f.title {
+            title_of[i] = Some((titles.len(), false));
+        }
+        for &i in &f.text {
+            title_of[i] = Some((titles.len(), true));
+        }
+        let first = f.title.iter().chain(&f.text).min().copied().unwrap_or(0);
+        titles.push(BoxTitle {
+            at: flow.at[first],
+            top: f.top,
+            runs: Vec::new(),
+            text: Vec::new(),
+        });
+    }
     for (b, ids) in in_box.iter().enumerate() {
+        if consumed[b] {
+            continue;
+        }
         let inked_ids: Vec<usize> = ids
             .iter()
             .copied()
@@ -512,12 +543,13 @@ pub(crate) fn box_pairs(
             continue;
         }
         for &i in ids {
-            title_of[i] = Some(titles.len());
+            title_of[i] = Some((titles.len(), false));
         }
         titles.push(BoxTitle {
             at: flow.at[ids[0]],
             top: boxes[b][3],
             runs: Vec::new(),
+            text: Vec::new(),
         });
     }
     // The runs of the tables and the titles leave the flow at once.
@@ -530,11 +562,145 @@ pub(crate) fn box_pairs(
             (Some((t, r, c)), _) => planned[t as usize].rows[r as usize][c as usize]
                 .runs
                 .push(run),
-            (None, Some(k)) => titles[k].runs.push(run),
+            (None, Some((k, false))) => titles[k].runs.push(run),
+            (None, Some((k, true))) => titles[k].text.push(run),
             (None, None) => {}
         }
     }
     (planned, titles, said)
+}
+
+/// A framed box read as a title over its lines: the boxes it takes (the frame and a title
+/// box in it), the runs of its title and of its text, and the frame's top.
+struct Framed {
+    boxes: Vec<usize>,
+    title: Vec<usize>,
+    text: Vec<usize>,
+    top: f32,
+}
+
+/// The framed boxes of a page that hold a title over lines of text: a bold line or two at the
+/// top of the frame (or alone in a box in the frame above its lines), smaller than the lines
+/// under it, which are in one style, none of them bold, two lines or more. The frame's own
+/// text is what lies in it outside its boxes with text: runs `regions` gives no box (the
+/// frame holds a box with text, so it is no region of its own) whose smallest holder it is,
+/// and runs of the frame itself. `points` are the runs' ink middles.
+fn framed_titles(
+    flow: &Flow,
+    boxes: &[[f32; 4]],
+    points: &[(f32, f32)],
+    regions: &[Option<u32>],
+    in_box: &[Vec<usize>],
+) -> Vec<Framed> {
+    let Some(mut index) = Index::new(boxes) else {
+        return Vec::new();
+    };
+    let area = |b: [f32; 4]| (b[2] - b[0]) * (b[3] - b[1]);
+    let mut own: Vec<Vec<usize>> = in_box.to_vec();
+    for (i, r) in regions.iter().enumerate() {
+        if r.is_some() || !inked(&flow.runs[i]) {
+            continue;
+        }
+        let (x, y) = points[i];
+        let mut best: Option<u32> = None;
+        index.holders(x, y, |b| {
+            if best.is_none_or(|o| area(boxes[b as usize]) < area(boxes[o as usize])) {
+                best = Some(b);
+            }
+        });
+        if index.work > crate::regions::BOX_WORK {
+            return Vec::new();
+        }
+        if let Some(b) = best {
+            own[b as usize].push(i);
+        }
+    }
+    let bold_lines = |ids: &[usize]| -> Option<Vec<Vec<usize>>> {
+        let ids: Vec<usize> = ids
+            .iter()
+            .copied()
+            .filter(|&i| inked(&flow.runs[i]))
+            .collect();
+        let lines = lines_of(flow, &ids);
+        (!lines.is_empty()
+            && lines.len() <= LABEL_LINES
+            && lines.iter().flatten().all(|&i| flow.runs[i].bold))
+        .then_some(lines)
+    };
+    // The text under a title: lines of one style, none bold, larger than the title.
+    let text_of = |lines: &[Vec<usize>], title_size: f32| {
+        let mut styles: Vec<Style> = lines
+            .iter()
+            .flatten()
+            .map(|&i| style_of(&flow.runs[i]))
+            .collect();
+        styles.sort_unstable();
+        styles.dedup();
+        lines.len() >= 2
+            && styles.len() == 1
+            && !styles[0].1
+            && styles[0].0 as f32 / 2.0 - title_size >= 0.5
+    };
+    let mut out = Vec::new();
+    for (b, ids) in own.iter().enumerate() {
+        let mut ids = ids.clone();
+        ids.retain(|&i| inked(&flow.runs[i]) && !flow.runs[i].off_axis);
+        if ids.is_empty() {
+            continue;
+        }
+        let fb = boxes[b];
+        let lines = lines_of(flow, &ids);
+        let size = |l: &Vec<usize>| l.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
+        // The title at the top of the frame itself.
+        let lead = lines
+            .iter()
+            .take_while(|l| l.iter().all(|&i| flow.runs[i].bold))
+            .count();
+        if (1..=LABEL_LINES).contains(&lead) {
+            let title_size = lines[..lead].iter().map(size).fold(0.0f32, f32::max);
+            if text_of(&lines[lead..], title_size) {
+                out.push(Framed {
+                    boxes: vec![b],
+                    title: lines[..lead].iter().flatten().copied().collect(),
+                    text: lines[lead..].iter().flatten().copied().collect(),
+                    top: fb[3],
+                });
+                continue;
+            }
+        }
+        // A title in a box of its own at the top of the frame.
+        if lead > 0 {
+            continue;
+        }
+        // The top of the frame's own lines: the title box stands above them.
+        let lines_top = ids
+            .iter()
+            .map(|&i| flow.runs[i].y + 0.75 * flow.runs[i].size)
+            .fold(f32::MIN, f32::max);
+        let inner = (0..boxes.len()).find(|&t| {
+            let tb = boxes[t];
+            t != b
+                && tb[0] >= fb[0] - SNAP
+                && tb[2] <= fb[2] + SNAP
+                && tb[3] <= fb[3] + SNAP
+                && tb[1] >= lines_top - SNAP
+                && bold_lines(&own[t]).is_some()
+        });
+        let Some(t) = inner else {
+            continue;
+        };
+        let title = bold_lines(&own[t]).unwrap_or_default();
+        let title_size = title.iter().map(size).fold(0.0f32, f32::max);
+        if text_of(&lines, title_size) {
+            out.push(Framed {
+                boxes: vec![b, t],
+                title: title.into_iter().flatten().collect(),
+                text: ids,
+                top: fb[3],
+            });
+        }
+    }
+    out
 }
 
 /// One strip of fields between two rules: its rules' heights, its left and right ends, and
@@ -614,6 +780,117 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
 /// Why a row of fields that crosses its field edges is not paired.
 const ACROSS: &str = "a value stands across two fields";
 
+/// The width of a character of a data font, as a share of its size: a value line padded
+/// into its fields has one to three of them between two fields.
+const CHAR: f32 = 0.6;
+
+/// A word gap this many characters from a field edge or nearer is where the value line is
+/// cut for it.
+const NEAR_EDGE: f32 = 3.0;
+
+/// The edges of the fields of a frame: its dividers, and in each cell between them the start
+/// of each later label of its first line (see [`label_starts`]); with the frame's ends.
+fn field_edges(flow: &Flow, fr: &Frame, ids: &[usize]) -> Vec<f32> {
+    let mut xs = vec![fr.x0];
+    xs.extend(&fr.dividers);
+    xs.push(fr.x1);
+    let mut edges = xs.clone();
+    for cell in cells_of(flow, &xs, ids) {
+        edges.extend(label_starts(flow, &cell));
+    }
+    edges.sort_by(f32::total_cmp);
+    edges
+}
+
+/// The runs `ids` by the cell between the edges `xs` their middle lies in.
+fn cells_of(flow: &Flow, xs: &[f32], ids: &[usize]) -> Vec<Vec<usize>> {
+    let mut cells: Vec<Vec<usize>> = vec![Vec::new(); xs.len() - 1];
+    for &i in ids {
+        let (cx, _) = middle(&flow.runs[i]);
+        let c = xs
+            .partition_point(|e| *e < cx)
+            .saturating_sub(1)
+            .min(cells.len() - 1);
+        cells[c].push(i);
+    }
+    cells
+}
+
+/// The runs of a frame: their middle inside it, with ink, in the page's direction.
+fn frame_runs(flow: &Flow, by_y: &ByY, fr: &Frame, busy: &dyn Fn(usize) -> bool) -> Vec<usize> {
+    by_y.runs_between(fr.bottom, fr.top)
+        .into_iter()
+        .filter(|&i| {
+            let r = &flow.runs[i];
+            let (cx, _) = middle(r);
+            !busy(i) && !r.off_axis && inked(r) && cx > fr.x0 && cx < fr.x1
+        })
+        .collect()
+}
+
+/// Whether the run stands across the field edge `e`: more than a character of it on each
+/// side.
+fn across(r: &Run, e: f32) -> bool {
+    let c = CHAR * r.size.max(1.0);
+    e - r.x > c && r.x + r.w - e > c
+}
+
+/// Where to cut the runs of the page's frames of fields: a run that stands across a field
+/// edge (see [`field_edges`]) is cut at its word gap nearest the edge, when that gap lies at
+/// most [`NEAR_EDGE`] characters from it. Each run with its gaps, in the order of the flow.
+pub(super) fn field_cuts(flow: &Flow, frames: &[Frame]) -> Vec<(usize, Vec<usize>)> {
+    let lines = flow_lines(flow);
+    let by_y = ByY::new(flow, &lines);
+    let mut at: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut work = 0usize;
+    for fr in frames {
+        let ids = frame_runs(flow, &by_y, fr, &|_| false);
+        work += ids.len();
+        if work > STRIP_WORK {
+            break;
+        }
+        if ids.is_empty() {
+            continue;
+        }
+        let edges = field_edges(flow, fr, &ids);
+        let inner = &edges[1..edges.len() - 1];
+        for &i in &ids {
+            let r = &flow.runs[i];
+            for &e in inner.iter().filter(|&&e| across(r, e)) {
+                let distance = |g: &crate::layout::Gap| {
+                    if e < g.from {
+                        g.from - e
+                    } else if e > g.to {
+                        e - g.to
+                    } else {
+                        0.0
+                    }
+                };
+                let near = r
+                    .gaps
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)));
+                if let Some((k, g)) = near
+                    && distance(g) <= NEAR_EDGE * CHAR * r.size.max(1.0)
+                {
+                    at.entry(i).or_default().push(k);
+                }
+            }
+        }
+    }
+    let mut out: Vec<(usize, Vec<usize>)> = at
+        .into_iter()
+        .map(|(i, mut ks)| {
+            ks.sort_unstable();
+            ks.dedup();
+            (i, ks)
+        })
+        .collect();
+    out.sort_by_key(|c| c.0);
+    out
+}
+
 /// Fields between drawn rules, in the `frames` of the page: when the text of each cell of a
 /// frame is fields (see [`parse`]; the label smaller than its value by half a point) and
 /// short, the strip is a row of fields. A cell is cut further at the start of each label of
@@ -644,40 +921,12 @@ pub(super) fn field_strips(
     };
     let mut strips: Vec<Strip> = Vec::new();
     for fr in frames {
-        let ids: Vec<usize> = by_y
-            .runs_between(fr.bottom, fr.top)
-            .into_iter()
-            .filter(|&i| {
-                let r = &flow.runs[i];
-                let (cx, _) = middle(r);
-                !busy(i) && !r.off_axis && inked(r) && cx > fr.x0 && cx < fr.x1
-            })
-            .collect();
+        let ids = frame_runs(flow, by_y, fr, busy);
         if ids.is_empty() || lines_of(flow, &ids).len() > STRIP_LINES {
             continue;
         }
-        let mut xs = vec![fr.x0];
-        xs.extend(&fr.dividers);
-        xs.push(fr.x1);
-        let cut = |xs: &[f32], ids: &[usize]| {
-            let mut cells: Vec<Vec<usize>> = vec![Vec::new(); xs.len() - 1];
-            for &i in ids {
-                let (cx, _) = middle(&flow.runs[i]);
-                let c = xs
-                    .partition_point(|e| *e < cx)
-                    .saturating_sub(1)
-                    .min(cells.len() - 1);
-                cells[c].push(i);
-            }
-            cells
-        };
-        // Each cell further at the labels of its first line.
-        let mut edges = xs.clone();
-        for cell in cut(&xs, &ids) {
-            edges.extend(label_starts(flow, &cell));
-        }
-        edges.sort_by(f32::total_cmp);
-        let cells = cut(&edges, &ids);
+        let edges = field_edges(flow, fr, &ids);
+        let cells = cells_of(flow, &edges, &ids);
         let mut fields: Vec<Field> = Vec::new();
         let mut fits = true;
         for cell in cells.iter().filter(|c| !c.is_empty()) {
@@ -694,12 +943,10 @@ pub(super) fn field_strips(
         }
         // Never a wrong pair: a run over a field edge leaves the row as text.
         let inner = &edges[1..edges.len() - 1];
-        let across = ids.iter().any(|&i| {
-            let r = &flow.runs[i];
-            let tol = 0.1 * r.size.max(1.0);
-            inner.iter().any(|e| r.x < e - tol && r.x + r.w > e + tol)
-        });
-        if across {
+        if ids
+            .iter()
+            .any(|&i| inner.iter().any(|&e| across(&flow.runs[i], e)))
+        {
             let labels: Vec<String> = fields.iter().map(|f| words(flow, &f.label)).collect();
             unsure.push(format!(
                 "the row of fields {} on page {page} is not read as labels and values ({ACROSS}): \
