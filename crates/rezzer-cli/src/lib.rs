@@ -65,11 +65,14 @@ struct ReadArgs {
     /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
     /// for example budget.xlsx.md. Some names get a short hash added. A document over the
     /// part size is written as <file name>.md plus parts in a folder next to it,
-    /// <file name>.parts. Pictures go to a folder next to it. Older files that Rezzer wrote
-    /// there and this read does not write are removed. Rezzer only replaces or removes files
-    /// it wrote for the same source. Anything else in the way stops the read, also the output
-    /// of another file with the same name and other content, or with a name that differs
-    /// only in case on a file system that ignores case (the macOS default).
+    /// <file name>.parts. Pictures go to a folder next to it, <file name>.assets. In these
+    /// folder names every character other than A to Z, a to z, 0 to 9, '.', '_' and '-'
+    /// becomes '_', and the name then gets a short hash: 'Q3 report.pdf' gives
+    /// Q3_report.pdf-6f38fa03.parts. Older files that Rezzer wrote there and this read does
+    /// not write are removed. Rezzer only replaces or removes files it wrote for the same
+    /// source. Anything else in the way stops the read. This includes the output of another
+    /// file with the same name and other content. It also includes a name that differs only
+    /// in case, on a file system that ignores case (the macOS default).
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
     /// Largest part in tokens when writing with -o. A larger document is written as a main

@@ -59,7 +59,7 @@ rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
 
-With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. Larger parts go over Crystalline's size check. Rezzer only replaces or removes files it wrote for the same source. A file of yours in the way stops the run with a message. So does the output of another file with the same name and other content, or with a name that differs only in letter case (`Notes.pdf` and `notes.pdf`) on a file system that ignores case, like the macOS default. Write such files to different folders.
+With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. With a larger value, parts can fail Crystalline's size check. Rezzer only replaces or removes files it wrote for the same source. A file of yours in the way stops the run with a message. The output of another file with the same name and other content stops it too. So does a name that differs only in letter case (`Notes.pdf` and `notes.pdf`) on a file system that ignores case, like the macOS default. Write such files to different folders.
 
 Use it from an agent (Claude Code shown, any MCP client works):
 

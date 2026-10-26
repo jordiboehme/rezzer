@@ -52,6 +52,11 @@
 //! folder can be overwritten or removed. Closing it needs writes relative to an open folder
 //! handle (`openat` with `O_NOFOLLOW`), which the standard library does not offer.
 //!
+//! Known gap, same plan: the assets folder is found by its name only, not by its source.
+//! A source whose plain name equals another source's hashed stem (`a_b.pdf-<hash>` next to
+//! `a b.pdf`) shares that folder, and its run removes the other one's pictures as stale.
+//! Such a name has to copy the hash on purpose.
+//!
 //! Order: the pictures are planned while the document is read, because the Markdown links
 //! name them. After the render the part paths are checked, so a run that fails there has
 //! written and removed nothing. Then the pictures, the parts, the main document and the
