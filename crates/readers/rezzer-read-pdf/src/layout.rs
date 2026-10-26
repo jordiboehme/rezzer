@@ -938,9 +938,12 @@ pub(crate) fn page_blocks_at(
         }
     }
     lay(&flow.runs[start..], &flow.slots[start..], &mut built);
+    // Only the footnotes written are said: a stop writes none.
+    let before = built.blocks.len();
     for note in &legend {
         built.paragraph(note.iter().collect(), Some("footnote"), cx);
     }
+    let footnotes_written = built.blocks.len() - before;
     for l in lines(&footers) {
         built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
     }
@@ -969,7 +972,7 @@ pub(crate) fn page_blocks_at(
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes);
     laid.probes_cut = probes_cut;
-    laid.found_by = legend_note(page, legend.len());
+    laid.found_by = legend_note(page, footnotes_written);
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -1748,14 +1751,17 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
     Some((true, text.len() - after.trim_start().len()))
 }
 
-/// Whether a line opens with a `*`, `-` or U+2013 run that a piece gap parts from the text
-/// after it: padding written as one space (see `order::line_runs`), no bullet.
+/// Whether a line opens with a `*`, `-` or U+2013 run whose padding a piece gap parts from
+/// the text after it: padding written as one space (see `order::line_runs`), no bullet.
 fn padded_mark(line: &Line<'_>) -> bool {
     let mut inked = line.runs.iter().filter(|r| ink(&r.text) > 0);
     let (Some(mark), Some(next)) = (inked.next(), inked.next()) else {
         return false;
     };
+    // `line_runs` writes padding across a piece gap as one space after the run before it; a
+    // bullet set at a tab stop has its space before the text instead.
     matches!(mark.text.trim(), "*" | "-" | "\u{2013}")
+        && mark.text.ends_with(char::is_whitespace)
         && next.x - (mark.x + mark.w) > crate::order::PIECE_GAP * mark.size.max(next.size)
 }
 
@@ -2063,8 +2069,8 @@ fn legend_note(page: u32, n: usize) -> Option<String> {
         ),
         _ => format!(
             "{n} paragraphs at the bottom of page {page} are read as footnotes: they are set in \
-             the page's smallest size below all other text and each opens with a note marker \
-             that also stands after a word above"
+             the page's smallest size below all other text, each opens with a note marker, and \
+             the first marker also stands after a word above"
         ),
     };
     Some(what)
@@ -2157,7 +2163,14 @@ fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
     {
         return Some(NoteMark::Raised(n));
     }
-    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    // The marker and the start of the text after it stand in the first two runs with ink.
+    let head = runs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| ink(&r.text) > 0)
+        .nth(1)
+        .map_or(runs.len(), |(i, _)| i + 1);
+    let text: String = runs[..head].iter().map(|r| r.text.as_str()).collect();
     let text = text.trim_start();
     let stars = text.len() - text.trim_start_matches('*').len();
     if stars > 0 {
@@ -2217,9 +2230,9 @@ fn references(lines: &[Line<'_>]) -> HashSet<NoteMark> {
 /// The footnotes of an untagged page, each as the indices of its runs, in order. They are
 /// the lines of the page's lowest block, below every other line and in its smallest size,
 /// from the first one that opens with a note marker which also stands as a reference in the
-/// text above. Each line of the legend opens a footnote with a marker, or goes on the one
-/// of its column; a legend set in columns is cut where a piece gap meets a marker. A block
-/// that does not read so gives none.
+/// text above. Each later line of the legend opens a footnote with a marker, or goes on the
+/// one of its column; a legend set in columns is cut where a piece gap meets a marker that
+/// stands as a reference. A block that does not read so gives none.
 fn footnotes(runs: &[Run]) -> Vec<Vec<usize>> {
     let all = lines(runs);
     let mut starts = Vec::with_capacity(all.len());
@@ -2295,7 +2308,9 @@ fn footnotes(runs: &[Run]) -> Vec<Vec<usize>> {
                 continue;
             };
             let ids = (starts[k] + w[0])..(starts[k] + w[1]);
-            if marked(piece, &refs).is_some() {
+            // Once the legend has begun, a line that opens with a marker opens a footnote also
+            // when its reference above was not found: it is never glued to the one before.
+            if opening_mark(piece).is_some() {
                 notes.push((x, ids.collect()));
                 continue;
             }
@@ -3305,6 +3320,69 @@ mod tests {
         assert!(padded_mark(&line(&padded)));
         let bullet = [mark, near];
         assert!(!padded_mark(&line(&bullet)));
+        // A dash bullet at a tab stop: its space stands before the text.
+        let dash = Run {
+            w: 6.0,
+            ..run("-", 0, 700.0, 10.0)
+        };
+        let tabbed = Run {
+            x: 120.0,
+            ..run(" Punkt", 0, 700.0, 10.0)
+        };
+        let tab_stop = [dash, tabbed];
+        assert!(!padded_mark(&line(&tab_stop)));
+    }
+
+    /// Runs of a page with references raised after `Einheit` and `Beitrag`, a line of body text,
+    /// and the legend lines `legend` (text, x, line) in 6 pt at the bottom.
+    fn legend_page(legend: &[(&str, f32, u32, f32)]) -> Vec<Run> {
+        let at = |text: &str, x: f32, line: u32, y: f32, size: f32| Run {
+            x,
+            w: text.len() as f32 * size * 0.5,
+            ..run(text, line, y, size)
+        };
+        let mut runs = vec![
+            at("Einheit", 40.0, 0, 720.0, 9.0),
+            at(" 2", 72.0, 0, 724.0, 5.0),
+            at(" Beitrag", 200.0, 0, 720.0, 9.0),
+            at(" 3", 232.0, 0, 724.0, 5.0),
+            at("die Werte werden monatlich gemeldet", 40.0, 1, 690.0, 9.0),
+        ];
+        for &(text, x, line, y) in legend {
+            runs.push(at(text, x, line, y, 6.0));
+        }
+        runs
+    }
+
+    fn legend_texts(runs: &[Run]) -> Vec<String> {
+        footnotes(runs)
+            .iter()
+            .map(|ids| ids.iter().map(|&i| runs[i].text.as_str()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn a_legend_line_of_two_columns_is_cut() {
+        let runs = legend_page(&[
+            ("2 Std = Stunden", 40.0, 2, 70.0),
+            (" 3 Gegebenenfalls anteilig", 300.0, 2, 70.0),
+        ]);
+        assert_eq!(
+            legend_texts(&runs),
+            ["2 Std = Stunden", " 3 Gegebenenfalls anteilig"]
+        );
+    }
+
+    #[test]
+    fn a_marker_without_its_reference_opens_its_own_footnote() {
+        let runs = legend_page(&[
+            ("2 Std = Stunden", 40.0, 2, 70.0),
+            ("5 Muster ohne Verweis", 40.0, 3, 62.0),
+        ]);
+        assert_eq!(
+            legend_texts(&runs),
+            ["2 Std = Stunden", "5 Muster ohne Verweis"]
+        );
     }
 
     #[test]
