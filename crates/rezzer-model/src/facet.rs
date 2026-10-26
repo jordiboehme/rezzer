@@ -34,6 +34,22 @@ pub struct Facets {
     /// Digital signatures and signature-like marks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signatures: Vec<Signature>,
+    /// The document's outline (bookmarks), in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outline: Vec<OutlineEntry>,
+}
+
+/// One item of a document's outline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OutlineEntry {
+    /// How deep the item stands: 1 for the top level, one more per nested level.
+    pub level: u8,
+    pub title: String,
+    /// The page the item points at: the 1-based page of the file, as the page anchor `p<n>`
+    /// names it, not its label. `None` when it points at no page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

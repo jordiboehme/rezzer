@@ -6,8 +6,8 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, CalloutKind, Cell, Completeness, Confidence,
     Detection, Document, Edge, Embedded, Event as TimelineEvent, FormatId, Formula, FormulaKind,
-    Graph, Inline, Loss, LossReason, Node, Overview, OverviewPart, Parameter, ReaderInfo, Role,
-    Rule, SectionKind, Severity, SourceInfo, StatusColor, TaskState, Value,
+    Graph, Inline, Loss, LossReason, Node, OutlineEntry, Overview, OverviewPart, Parameter,
+    ReaderInfo, Role, Rule, SectionKind, Severity, SourceInfo, StatusColor, TaskState, Value,
 };
 use rezzer_render::{OutputSection, RenderOptions, paginate, render, render_overview};
 
@@ -6623,8 +6623,18 @@ fn description_template_pdf() {
         kind: SectionKind::Other,
         title: Some("Outline".into()),
         anchor: None,
-        blocks: vec![para("Intro, page 1")],
+        blocks: vec![para("Intro, page 1"), para("Scope, page 2")],
     });
+    // The outline counts once, however many entries it has.
+    d.facets.outline = ["Intro", "Scope"]
+        .into_iter()
+        .zip(1..)
+        .map(|(title, page)| OutlineEntry {
+            level: 1,
+            title: title.into(),
+            page: Some(page),
+        })
+        .collect();
     d.assets = (0..12).map(|i| vision_asset(&format!("img{i}"))).collect();
     let md = render(&d, Completeness::Complete, &opts());
     assert_eq!(

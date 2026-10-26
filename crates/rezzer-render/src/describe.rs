@@ -94,7 +94,7 @@ pub(crate) struct Counts {
     /// Tables without a role (a reader's summary has one); in a sheet only the table
     /// regions, not grids, label and value pairs or text.
     pub(crate) tables: usize,
-    /// Outline sections (the PDF outline).
+    /// 1 when the document keeps an outline (the PDF bookmarks), else 0.
     pub(crate) outlines: usize,
     /// Formulas without the defined names and lambdas.
     pub(crate) formulas: usize,
@@ -113,6 +113,7 @@ pub(crate) fn counts(doc: &Document) -> Counts {
         form_fields: doc.facets.fields.len(),
         signatures: doc.facets.signatures.len(),
         annotations: doc.facets.annotations.len(),
+        outlines: usize::from(!doc.facets.outline.is_empty()),
         vision: doc.assets.iter().filter(|a| a.needs_vision).count(),
         not_read: doc.losses.iter().filter(|l| l.is_not_read()).count(),
         ..Counts::default()
@@ -121,7 +122,7 @@ pub(crate) fn counts(doc: &Document) -> Counts {
     counts
 }
 
-/// Adds the tables and outlines in `list` to `counts`.
+/// Adds the tables in `list` to `counts`.
 fn count_blocks(list: &[Block], depth: usize, counts: &mut Counts) {
     if depth > MAX_DEPTH {
         return;
@@ -134,19 +135,9 @@ fn count_blocks(list: &[Block], depth: usize, counts: &mut Counts) {
                     counts.tables += 1;
                 }
             }
-            Block::Section {
-                kind,
-                title,
-                blocks,
-                ..
-            } => {
-                if *kind == SectionKind::Other && title.as_deref() == Some("Outline") {
-                    counts.outlines += 1;
-                } else {
-                    count_blocks(blocks, depth + 1, counts);
-                }
-            }
-            Block::Quote { blocks, .. } | Block::Callout { blocks, .. } => {
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => {
                 count_blocks(blocks, depth + 1, counts);
             }
             Block::List { items, .. } => {

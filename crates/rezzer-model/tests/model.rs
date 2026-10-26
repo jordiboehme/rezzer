@@ -10,9 +10,9 @@ use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
     Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
     FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
-    MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role, RowKind, RowNote,
-    Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor, TableLayout,
-    TaskState, Value,
+    MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions, ReaderInfo, Role,
+    RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor,
+    TableLayout, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -501,6 +501,38 @@ fn format_ids_serialize_snake_case() {
         serde_json::to_string(&FormatId::PostScript).unwrap(),
         "\"post_script\""
     );
+}
+
+#[test]
+fn outline_roundtrips() {
+    let mut doc = Document::new(src());
+    doc.facets.outline = vec![
+        OutlineEntry {
+            level: 1,
+            title: "Intro".into(),
+            page: Some(3),
+        },
+        OutlineEntry {
+            level: 2,
+            title: "Web site".into(),
+            page: None,
+        },
+    ];
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(
+        json.contains(
+            r#""outline":[{"level":1,"title":"Intro","page":3},{"level":2,"title":"Web site"}]"#
+        ),
+        "{json}"
+    );
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert_eq!(doc, back);
+    // An empty outline is left out, and a model without the key reads as empty.
+    doc.facets.outline.clear();
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(!json.contains("outline"), "{json}");
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert!(back.facets.outline.is_empty());
 }
 
 #[test]

@@ -26,7 +26,7 @@ pub use document::{
 };
 pub use facet::{
     Annotation, Edge, Embedded, Event, Facets, FieldAction, FileFacts, FormField, Formula,
-    FormulaKind, Graph, Node, Parameter, Role, Rule, Signature,
+    FormulaKind, Graph, Node, OutlineEntry, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};

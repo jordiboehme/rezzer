@@ -211,7 +211,8 @@ pub fn sheet_cell(anchor: &str) -> Option<SheetCell<'_>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowRange {
     /// The first sheet row the range holds, 1-based: of its data rows, or for the notes
-    /// range of its notes. 0 when the table stores no data row.
+    /// range of its notes. For a table without layout it counts the table's own rows instead.
+    /// 0 when the table stores no data row.
     pub first: u32,
     /// The last sheet row the range holds, 1-based, as `first`.
     pub last: u32,
@@ -252,10 +253,16 @@ const CELL_BASE: usize = 6;
 /// one range per row, and a range holds at most about 1.5 times `max_tokens` while the fixed
 /// part is below `max_tokens`, or the fixed part plus half of `max_tokens` above it.
 ///
-/// A table without layout, a block that is no table, a table that stores no data row, or a
-/// table that fits with its notes gives one range with the blocks unchanged. Its `first` and
-/// `last` are the sheet rows of its data part; without layout they count the table's own
-/// rows, 1-based. With no data row they are 0 and 0, with or without layout.
+/// A table without layout (a Markdown table, for example) is cut the same way, with three
+/// differences: `first` and `last` count the table's own rows, 1-based, header rows
+/// included; no column has a header path, so a cell counts only its text (each style writes
+/// such a table as a plain table, never as records); and only a `row_span` keeps rows
+/// together. Its ranges stay without layout, and a notes range after them has the row after
+/// the table's last row as its `first` and `last`.
+///
+/// A block that is no table, a table that stores no data row, or a table that fits with its
+/// notes gives one range with the blocks unchanged. Its `first` and `last` are the rows of
+/// its data part as above. With no data row they are 0 and 0, with or without layout.
 pub fn split_rows(
     lead: &[Block],
     table: &Block,
@@ -284,23 +291,21 @@ pub fn split_rows(
         return vec![whole(0, 0, true)];
     };
     let head = (*header_rows).min(rows.len());
-    let Some(layout) = layout else {
-        return vec![if rows.len() > head {
-            whole(head as u32 + 1, rows.len() as u32, true)
-        } else {
-            whole(0, 0, true)
-        }];
-    };
+    let layout = layout.as_deref();
     let data = &rows[head..];
-    let numbers = sheet_rows(layout, data);
+    let numbers: Vec<u32> = match layout {
+        Some(layout) => sheet_rows(layout, data),
+        None => (1..=rows.len() as u32).skip(head).collect(),
+    };
     let (Some(&first), Some(&last)) = (numbers.first(), numbers.last()) else {
         return vec![whole(0, 0, true)];
     };
-    let columns = columns(rows, layout.header_paths.len());
+    let paths: &[String] = layout.map_or(&[], |l| &l.header_paths);
+    let columns = columns(rows, paths.len());
     let tokens: Vec<usize> = rows
         .iter()
         .zip(&columns)
-        .map(|(row, cols)| row_tokens(row, cols, &layout.header_paths))
+        .map(|(row, cols)| row_tokens(row, cols, paths))
         .collect();
     let block_tokens = |list: &[Block]| -> usize {
         list.iter()
@@ -334,7 +339,9 @@ pub fn split_rows(
     }
     let tail_fits = tail.is_empty() || fits(size.saturating_add(block_tokens(tail)));
     let notes = (!tail_fits).then(|| {
-        let (first, last) = tail_rows(tail).unwrap_or((last + 1, last + 1));
+        let (first, last) = layout
+            .and_then(|_| tail_rows(tail))
+            .unwrap_or((last + 1, last + 1));
         RowRange {
             first,
             last,
@@ -353,10 +360,14 @@ pub fn split_rows(
     for (i, (start, end)) in parts.into_iter().enumerate() {
         let (first, last) = (numbers[start], numbers[end]);
         let is_last = i + 1 == n;
-        let mut part = layout.as_ref().clone();
-        part.data = Some(data_range(layout, first, last));
-        part.rows
-            .retain(|note| prev_last.is_none_or(|p| note.row > p) && (is_last || note.row <= last));
+        let part = layout.map(|layout| {
+            let mut part = layout.clone();
+            part.data = Some(data_range(layout, first, last));
+            part.rows.retain(|note| {
+                prev_last.is_none_or(|p| note.row > p) && (is_last || note.row <= last)
+            });
+            Box::new(part)
+        });
         prev_last = Some(last);
         let mut cut = table.clone();
         if let Block::Table {
@@ -368,7 +379,7 @@ pub fn split_rows(
                 .chain(&data[start..=end])
                 .cloned()
                 .collect();
-            *l = Some(Box::new(part));
+            *l = part;
         }
         let mut blocks: Vec<Block> = lead.to_vec();
         blocks.push(cut);
@@ -529,13 +540,13 @@ fn row_tokens(row: &[Cell], cols: &[usize], paths: &[String]) -> usize {
 }
 
 /// The data rows that may not be cut apart, as (first, last) indexes into `data`: a group
-/// row goes with the next row that is neither a group nor a blank row, and a cell over
-/// several rows keeps them together.
-fn units(layout: &TableLayout, data: &[Vec<Cell>], numbers: &[u32]) -> Vec<(usize, usize)> {
+/// row of the layout goes with the next row that is neither a group nor a blank row, and a
+/// cell over several rows keeps them together. `data` is not empty.
+fn units(layout: Option<&TableLayout>, data: &[Vec<Cell>], numbers: &[u32]) -> Vec<(usize, usize)> {
     let of_kind = |kind: RowKind| -> HashSet<u32> {
         layout
-            .rows
             .iter()
+            .flat_map(|l| &l.rows)
             .filter(|n| n.kind == kind)
             .map(|n| n.row)
             .collect()
