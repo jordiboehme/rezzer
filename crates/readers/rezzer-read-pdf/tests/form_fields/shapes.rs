@@ -1082,9 +1082,15 @@ pub(crate) enum Neighbour {
     /// The column titles of the next table in the labels' style, as far under the last rule
     /// of labels as labels stand under their rules and at the field starts of the last row,
     /// no rule under them; with lines of that table in the data font under them, or alone.
-    ColumnTitles { body: bool },
+    ColumnTitles {
+        body: bool,
+    },
     /// A grid of two fields a row beside it on the same top rule, with rows of another pitch.
     Beside,
+    /// A rule across the page a row pitch and a half over the grid's top rule (a section's
+    /// rule), or as far under its last rule, its two rules framing nothing of the grid.
+    RuleOver,
+    RuleUnder,
     /// A short data line at the values' depth over the top rule from the first field's start,
     /// and the column titles alone under the last rule. When they could head every lowest
     /// field with a value, the same page is a grid of labels under their values whose first row
@@ -1180,6 +1186,15 @@ pub(crate) fn neighbour(g: &Geo, b: &mut Built, at: GridAt, n: Neighbour) {
         }
         Neighbour::Beside => {
             beside_grid(g, b, at.top, &[3.2, 2.0, 3.2, 2.0], true);
+        }
+        Neighbour::RuleOver | Neighbour::RuleUnder => {
+            let h = 2.4 * d;
+            let y = if n == Neighbour::RuleOver {
+                at.top + 1.5 * h
+            } else {
+                at.bottom - 1.5 * h
+            };
+            b.page.template += &g.hrule(g.col(0) - 0.6 * d, g.col(70), y);
         }
         Neighbour::LineAndTitles => {
             let t = "Abrechnung";

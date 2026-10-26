@@ -351,7 +351,7 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
 /// one table, when it has two fields or more and one of them a value; one field alone with a
 /// value is named in a loss. Text just beyond such a group, at both its ends, can show that
 /// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
-/// fields holds and no frame encloses counts): its fields are then read that way (see
+/// fields holds counts, every group read the normal way first): its fields are then read that way (see
 /// [`pair_under`]), or left as text with a loss when that is not clear. Runs `busy` names are
 /// not looked at. The runs of each table found go to `claimed` under
 /// its place in `tables`.
@@ -490,19 +490,14 @@ pub(in crate::tables) fn field_strips(
         overflow_back(flow, &mut strips, g);
     }
     // Text beyond a group is only what no row of fields holds: every group is read the
-    // normal way first, and runs between the rules of any frame are part of no group's ends.
+    // normal way first. Text between two rules that hold no fields still counts: the values of
+    // a first row under a section's rule, or the last labels over a rule drawn under them.
     let held: HashSet<usize> = strips
         .iter()
         .flat_map(|s| &s.fields)
         .flat_map(|f| f.label.iter().chain(&f.value))
         .copied()
         .collect();
-    let in_frame = |i: usize| {
-        let (cx, cy) = middle(&flow.runs[i]);
-        frames
-            .iter()
-            .any(|f| cx > f.x0 && cx < f.x1 && cy > f.bottom && cy < f.top)
-    };
     // Runs beyond a group that a group read with its labels under their values took.
     let mut outside: HashSet<usize> = HashSet::new();
     for g in groups {
@@ -517,8 +512,7 @@ pub(in crate::tables) fn field_strips(
             say(unsure, &names, LONE);
             continue;
         }
-        let free =
-            |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i) && !in_frame(i);
+        let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
         let under: Vec<Field>;
         let list: Vec<&Field> = match ends(flow, by_y, &free, frames, &strips, &g) {
             Ends::Over => list,
@@ -725,13 +719,14 @@ fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
 /// The text just beyond the group `g` of `strips` that shows its labels stand under the rule
 /// their values stand on (a signature line). Only a group whose every strip is one line of
 /// labels over one line of values can show it, and only by evidence at both ends, among the
-/// runs `free` allows (the runs of no row of fields and of no frame):
-/// - under the bottom rule of every strip with values and no strip under it, runs in the role
-///   (style and font family) of the group's labels, as far under the rule as its labels stand
-///   under theirs (half a size of play), with no run in the values' role under them within one
-///   row pitch or up to the next rule of a frame; each label heads a field of that strip that
-///   holds one of its values, at the offset from label to value the group shows inside its
-///   strips (a character of play), and crosses no divider;
+/// runs `free` allows (the runs of no row of fields):
+/// - under the bottom rule of every strip with values and no values under it, runs in the
+///   role (style and font family) of the group's labels, as far under the rule as its labels
+///   stand under theirs (half a size of play): the labels of a strip of labels only under it
+///   (a rule drawn under the last labels), or else free runs with no run in the values' role
+///   under them within one row pitch or up to the next rule of a frame; each label heads a
+///   field of that strip that holds one of its values, at the offset from label to value the
+///   group shows inside its strips (a character of play), and crosses no divider;
 /// - over the top rule of every strip with no strip over it, runs in the values' role as far
 ///   over the rule as its values stand over theirs, with no label over them within the same
 ///   reach; each value starts within a character of the start of a field of that strip (where
@@ -822,35 +817,48 @@ fn ends(
         v.sort_by(|&p, &q| flow.runs[p].x.total_cmp(&flow.runs[q].x));
         v
     };
-    // Under the bottom rule: labels under every strip with values and none under it.
+    // Under the bottom rule: labels under every strip with values and no values under it.
+    // A strip of labels only under it (a rule drawn under the last labels) holds them.
     let mut below = Vec::new();
     for (s, (_, values)) in &rows {
-        let last = !rows
+        let under: Vec<_> = rows
             .iter()
-            .any(|(t, _)| near(t.top, s.bottom) && overlaps(s, t));
-        if !last || values.is_empty() {
+            .filter(|(t, _)| near(t.top, s.bottom) && overlaps(s, t))
+            .collect();
+        if values.is_empty() || under.iter().any(|(_, r)| !r.1.is_empty()) {
             continue;
         }
         let pitch = s.top - s.bottom;
-        let found: Vec<usize> = by_y
-            .runs_between(s.bottom - pitch, s.bottom)
-            .into_iter()
-            .filter(|&i| {
-                let r = &flow.runs[i];
-                usable(i)
-                    && r.y < s.bottom
-                    && inside(i, s)
-                    && in_role(&ls, r)
-                    && ((s.bottom - r.y) - a).abs() <= 0.5 * r.size
-                    && !by_y
-                        .runs_between(reach(r, s.bottom, pitch, false), r.y)
-                        .into_iter()
-                        .any(|j| {
-                            let o = &flow.runs[j];
-                            usable(j) && o.y < r.y && in_role(&vs, o) && side_by_side(o, r)
-                        })
-            })
-            .collect();
+        let at_depth = |i: usize| {
+            let r = &flow.runs[i];
+            r.y < s.bottom
+                && inside(i, s)
+                && in_role(&ls, r)
+                && ((s.bottom - r.y) - a).abs() <= 0.5 * r.size
+        };
+        let found: Vec<usize> = if under.is_empty() {
+            by_y.runs_between(s.bottom - pitch, s.bottom)
+                .into_iter()
+                .filter(|&i| {
+                    let r = &flow.runs[i];
+                    usable(i)
+                        && at_depth(i)
+                        && !by_y
+                            .runs_between(reach(r, s.bottom, pitch, false), r.y)
+                            .into_iter()
+                            .any(|j| {
+                                let o = &flow.runs[j];
+                                usable(j) && o.y < r.y && in_role(&vs, o) && side_by_side(o, r)
+                            })
+                })
+                .collect()
+        } else {
+            under
+                .iter()
+                .flat_map(|(_, r)| r.0.iter().copied())
+                .filter(|&i| at_depth(i))
+                .collect()
+        };
         if found.is_empty() {
             return Ends::Over;
         }

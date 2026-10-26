@@ -867,6 +867,8 @@ fn neighbours(under: bool) -> Vec<(&'static str, Neighbour)> {
             Neighbour::ColumnTitles { body: false },
         ),
         ("a grid beside it of another pitch", Neighbour::Beside),
+        ("a rule over it", Neighbour::RuleOver),
+        ("a rule under it", Neighbour::RuleUnder),
     ];
     if !under {
         out.extend([
