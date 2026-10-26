@@ -556,8 +556,7 @@ fn open_reads_a_file() {
     assert_eq!(src.bytes(), b"%PDF-1.4\n");
     assert_eq!(src.format, FormatId::Pdf);
     let modified = src.modified.expect("modified time");
-    assert_eq!(modified.len(), 20, "{modified}");
-    assert!(modified.ends_with('Z'), "{modified}");
+    assert!(is_rfc3339_utc(&modified), "{modified}");
 }
 
 #[test]
