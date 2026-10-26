@@ -223,7 +223,8 @@ Planned after that:
 | Lotus Notes | 🔭 | NSF mail databases |
 | Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
 | Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
-| Diagrams | 🔭 | draw.io, Visio, Lucidchart |
+| Diagrams | 🔭 | draw.io, Visio, Lucidchart, Excalidraw |
+| Design | 🔭 | Figma: frames, components, text and comments |
 | [Calculation sheets](docs/formats/mathcad.md) | 🔭 | Mathcad Prime, Mathcad 12-15, SMath |
 | Automation | 🔭 | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports |
 | Plant and product data | 🔭 | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF |

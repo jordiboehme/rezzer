@@ -41,7 +41,8 @@ Release 0.2.0 brings HTML first, then the office formats, then EPUB.
 | Lotus Notes | NSF mail databases | 🔭 Later |
 | Photos and scans | JPEG, PNG, TIFF, HEIC | 🔭 Later |
 | Archives | ZIP, 7z, TAR | 🔭 Later |
-| Diagrams | draw.io, Visio, Lucidchart | 🔭 Later |
+| Diagrams | draw.io, Visio, Lucidchart, Excalidraw | 🔭 Later |
+| Design | Figma | 🔭 Later |
 | Automation | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports | 🔭 Later |
 | Plant and product data | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF | 🔭 Later |
 | Lab data | ELN exports, ChemDraw, Allotrope, instrument files | 🔭 Later |
