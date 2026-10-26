@@ -316,6 +316,13 @@ source: crates/rezzer/tests/corpus.rs
         ],
         "role": "input"
       }
+    ],
+    "outline": [
+      {
+        "level": 1,
+        "page": 1,
+        "title": "Blank Page"
+      }
     ]
   },
   "model_version": 1,

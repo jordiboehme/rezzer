@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "Standard Form 1199A, Direct Deposit Sign-up Form, June 1987"
+description: "PDF, 4 pages, \"Standard Form 1199A, Direct Deposit Sign-up Form, June 1987\", 2015-11-24. 35 form fields."
 resource: "<corpus>/pdf/pdfbox-sf1199a-direct-deposit.pdf"
+tags: ["rezzer", "pdf", "form"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "61d5dd9542b40b7dcff2e23f217e12d7c930ca2fb7a62cfdd4177711f5b47567"
 source_size: 79004
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

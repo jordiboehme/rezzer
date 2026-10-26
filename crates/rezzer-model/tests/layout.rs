@@ -6,7 +6,7 @@
 
 use rezzer_model::{
     Anchor, Block, Cell, Certainty, Evidence, Inline, LayoutKind, RowKind, RowNote, RowRange,
-    TableLayout, split_rows, table_key,
+    TableLayout, join_ranges, split_rows, table_key,
 };
 
 fn name(n: &str) -> String {
@@ -348,7 +348,7 @@ fn small_table_is_one_range() {
     assert_eq!(ranges.len(), 1);
     assert_eq!((ranges[0].first, ranges[0].last), (2, 11));
     assert_eq!(ranges[0].blocks, vec![heading(), t.clone(), note()]);
-    // A table without layout is one range too, whatever the size.
+    // A table without layout that fits is one range too.
     let Block::Table { rows, .. } = t else {
         unreachable!()
     };
@@ -361,9 +361,23 @@ fn small_table_is_one_range() {
         anchor: None,
         layout: None,
     };
-    let ranges = split_rows(&[heading()], &plain, &[note()], 1);
+    let ranges = split_rows(&[heading()], &plain, &[note()], 20_000);
     assert_eq!(ranges.len(), 1);
-    assert_eq!(ranges[0].blocks, vec![heading(), plain, note()]);
+    assert_eq!((ranges[0].first, ranges[0].last), (2, 11));
+    assert_eq!(ranges[0].blocks, vec![heading(), plain.clone(), note()]);
+    // Over the limit it is cut at row borders like a table with layout: a part size of 1
+    // gives one range per data row, each with the header row, and the notes after them.
+    let ranges = split_rows(&[heading()], &plain, &[note()], 1);
+    assert_eq!(
+        borders(&ranges),
+        (2..=11)
+            .map(|r| (r, r))
+            .chain([(12, 12)])
+            .collect::<Vec<_>>()
+    );
+    assert!(ranges[..10].iter().all(|r| plain_rows(r).0.len() == 2));
+    assert_eq!(ranges[10].table, None);
+    assert_eq!(ranges[10].blocks, vec![heading(), note()]);
     // A part size of 0 means no limit.
     assert_eq!(split_rows(&[], &table(11), &[], 0).len(), 1);
 }
@@ -581,6 +595,105 @@ fn fitting_table_with_large_notes_gives_two_ranges() {
     assert_eq!(ranges[0].blocks, vec![heading(), t, tail[0].clone()]);
 }
 
+/// Joins `ranges` from the first on, each to the one before.
+fn joined(ranges: &[RowRange]) -> RowRange {
+    let mut out = ranges[0].clone();
+    for r in &ranges[1..] {
+        out = join_ranges(&out, r).expect("neighbours join");
+    }
+    out
+}
+
+#[test]
+fn joined_ranges_are_the_whole_table() {
+    // Every range of a cut joined again gives the table as one range: the lead and the
+    // header band once, every row, the notes at the end, the whole data range.
+    let t = table(11);
+    let tail = vec![note_of(76, Some("A13"))];
+    let whole = split_rows(&[heading()], &t, &tail, 0);
+    let ranges = split_rows(&[heading()], &t, &tail, 39);
+    assert_eq!(ranges.last().unwrap().table, None, "a notes range");
+    let all = joined(&ranges);
+    assert_eq!(all.blocks, whole[0].blocks);
+    assert_eq!((all.first, all.last), (2, 11));
+    assert_eq!(all.table, Some(1));
+    // Two in the middle: their rows only, the data range of both.
+    let middle = join_ranges(&ranges[1], &ranges[2]).unwrap();
+    assert_eq!((middle.first, middle.last), (5, 10));
+    let (rows, _, layout) = table_of(&middle);
+    assert_eq!(rows.len(), 1 + 6);
+    assert_eq!(layout.data.as_deref(), Some("A5:B10"));
+    assert_eq!(middle.blocks.len(), 2);
+    // Row notes of both are kept, in order.
+    let notes = vec![
+        RowNote {
+            row: 3,
+            kind: RowKind::Subtotal,
+            level: None,
+            parent: None,
+            why: String::new(),
+        },
+        RowNote {
+            row: 9,
+            kind: RowKind::Subtotal,
+            level: None,
+            parent: None,
+            why: String::new(),
+        },
+    ];
+    let mut noted = t.clone();
+    if let Block::Table {
+        layout: Some(l), ..
+    } = &mut noted
+    {
+        l.rows = notes.clone();
+    }
+    let ranges = split_rows(&[], &noted, &[], 39);
+    assert!(ranges.len() > 2);
+    let all = joined(&ranges);
+    let (_, _, layout) = table_of(&all);
+    assert_eq!(layout.rows, notes);
+}
+
+#[test]
+fn joined_ranges_without_layout_count_table_rows() {
+    // A Markdown table: no layout, rows counted from the table's first row.
+    let mut rows = vec![vec![
+        Cell::new(vec![txt("Name")]),
+        Cell::new(vec![txt("Value")]),
+    ]];
+    rows.extend((0..20).map(|_| vec![Cell::new(vec![txt("a")]), Cell::new(vec![txt("1")])]));
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    let ranges = split_rows(&[], &t, &[], 20);
+    assert!(ranges.len() > 2, "{:?}", borders(&ranges));
+    let pair = join_ranges(&ranges[0], &ranges[1]).unwrap();
+    assert_eq!((pair.first, pair.last), (ranges[0].first, ranges[1].last));
+    assert_eq!(joined(&ranges).blocks, vec![t]);
+}
+
+#[test]
+fn ranges_that_do_not_follow_each_other_do_not_join() {
+    let t = table(11);
+    let tail = vec![note_of(76, Some("A13"))];
+    let ranges = split_rows(&[heading()], &t, &tail, 39);
+    let notes = ranges.last().unwrap();
+    // The notes range comes last, and a range with the tail is closed.
+    assert_eq!(join_ranges(notes, &ranges[0]), None);
+    let closed = joined(&ranges);
+    assert_eq!(join_ranges(&closed, &ranges[1]), None);
+    // Another lead length.
+    let other = split_rows(&[], &t, &[], 39);
+    assert_eq!(join_ranges(&ranges[0], &other[1]), None);
+}
+
 #[test]
 fn oversized_notes_stay_one_range() {
     // Two notes, each larger than the part on its own: one notes range, never cut.
@@ -782,5 +895,170 @@ fn sheet_cell_splits_a_cell_anchor() {
     );
     for anchor in ["name:'S'!Local", "S!A1:B2", "B5", "S!"] {
         assert_eq!(rezzer_model::sheet_cell(anchor), None, "{anchor}");
+    }
+}
+
+/// A table without layout, as the Markdown reader gives it: one header row `Id | Text`,
+/// then `count` data rows `r<n> | <text>`, no anchors.
+fn plain_table(count: usize, text: &str) -> Block {
+    let mut rows = vec![vec![
+        Cell::new(vec![txt("Id")]),
+        Cell::new(vec![txt("Text")]),
+    ]];
+    rows.extend((1..=count).map(|n| {
+        vec![
+            Cell::new(vec![txt(&format!("r{n}"))]),
+            Cell::new(vec![txt(text)]),
+        ]
+    }));
+    Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }
+}
+
+fn plain_rows(range: &RowRange) -> (&Vec<Vec<Cell>>, usize) {
+    let Block::Table {
+        rows,
+        header_rows,
+        layout: None,
+        ..
+    } = &range.blocks[range.table.expect("a range with a table")]
+    else {
+        panic!("a table without layout stays without layout");
+    };
+    (rows, *header_rows)
+}
+
+fn texts(row: &[Cell]) -> Vec<String> {
+    row.iter()
+        .map(|c| rezzer_model::plain_text(&c.inlines))
+        .collect()
+}
+
+#[test]
+fn rows_split_without_layout() {
+    let t = plain_table(2_000, &"word ".repeat(10));
+    let ranges = split_rows(&[heading()], &t, &[note()], 1_000);
+    assert!(ranges.len() > 1, "{}", ranges.len());
+    // The ranges cover every data row once and in order; `first` and `last` count the
+    // table's own rows, 1-based, so the header is row 1 and the data rows are 2 to 2,001.
+    let mut next = 2;
+    let mut seen = Vec::new();
+    for (i, range) in ranges.iter().enumerate() {
+        assert_eq!(range.first, next, "{:?}", borders(&ranges));
+        assert!(range.last >= range.first);
+        next = range.last + 1;
+        assert_eq!(range.blocks[0], heading());
+        let (rows, header_rows) = plain_rows(range);
+        // Every range repeats the header row.
+        assert_eq!(header_rows, 1);
+        assert_eq!(texts(&rows[0]), ["Id", "Text"]);
+        assert_eq!(rows.len() as u32 - 1, range.last - range.first + 1);
+        seen.extend(rows[1..].iter().map(|r| texts(r)[0].clone()));
+        // Each range stays within the part size: the header and the lead count against
+        // it, the data rows by the formula with no header path.
+        let size: usize = rows
+            .iter()
+            .map(|r| row_tokens(&[("", &texts(r)[0]), ("", &texts(r)[1])]))
+            .sum::<usize>()
+            + 2;
+        assert!(size <= 1_000, "range {i} is {size} tokens");
+        // Only the last range takes the notes.
+        assert_eq!(
+            range.blocks.last() == Some(&note()),
+            i + 1 == ranges.len(),
+            "{i}"
+        );
+    }
+    assert_eq!(next, 2_002);
+    let expected: Vec<String> = (1..=2_000).map(|n| format!("r{n}")).collect();
+    assert_eq!(seen, expected);
+}
+
+#[test]
+fn rows_split_without_layout_keeps_row_spans() {
+    // Table rows 4 to 7 (data rows r3 to r6) hold one cell over four rows; rows 5 to 7 have
+    // only their second cell.
+    let Block::Table { mut rows, .. } = plain_table(40, &"x".repeat(40)) else {
+        unreachable!()
+    };
+    rows[3][0].row_span = 4;
+    for row in &mut rows[4..=6] {
+        row.remove(0);
+    }
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    // A data row is ceil((10 + 2 + 6 + 40 + 6) / 4) = 16 tokens, the header 7: each range
+    // takes at most two plain rows, but the four spanned rows stay together.
+    let ranges = split_rows(&[], &t, &[], 40);
+    let b = borders(&ranges);
+    assert!(b.contains(&(4, 7)), "{b:?}");
+    for (first, last) in &b {
+        assert!(!(5..=7).contains(first), "{b:?}");
+        assert!(!(4..=6).contains(last), "{b:?}");
+    }
+    assert_eq!(b.first().map(|r| r.0), Some(2));
+    assert_eq!(b.last().map(|r| r.1), Some(41));
+    // A span past the end of the table is clipped, never a panic.
+    let Block::Table { mut rows, .. } = t else {
+        unreachable!()
+    };
+    rows[40][0].row_span = 1_000_000;
+    let hostile = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    assert_eq!(split_rows(&[], &hostile, &[], 40).last().unwrap().last, 41);
+}
+
+#[test]
+fn header_spans_stay_inside_the_header_band() {
+    // A header cell whose span reaches into the data rows would cover data cells in every
+    // range that repeats it: a cut range clips it to the header band.
+    let Block::Table { mut rows, .. } = plain_table(40, &"x".repeat(40)) else {
+        unreachable!()
+    };
+    rows[0][0].row_span = 3;
+    let t = Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows,
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    };
+    let ranges = split_rows(&[], &t, &[], 40);
+    assert!(ranges.len() > 1);
+    for range in &ranges {
+        let (rows, _) = plain_rows(range);
+        assert_eq!(rows[0][0].row_span, 1);
+        assert_eq!(rows[1].len(), 2);
+    }
+    // The table with layout is clipped the same way.
+    let mut t = table(11);
+    if let Block::Table { rows, .. } = &mut t {
+        rows[0][1].row_span = 2;
+    }
+    for range in split_rows(&[], &t, &[], 20) {
+        assert_eq!(table_of(&range).0[0][1].row_span, 1);
     }
 }

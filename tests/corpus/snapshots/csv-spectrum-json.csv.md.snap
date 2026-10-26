@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-spectrum-json.csv"
+description: "CSV, 1 row x 2 columns. 1 table."
 resource: "<corpus>/web-text/csv-spectrum-json.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "27bebe48687aa0cc5858692c49e390f129b79063cd032caf8e329ca8b5ded355"
 source_size: 65
+file_modified: <modified>
 format: csv
 detected_by: "extension .csv and 2 fields in every record; content sniffing declined"
 encoding: "UTF-8"

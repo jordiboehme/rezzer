@@ -49,6 +49,9 @@ fn read_with(bytes: &[u8], extract: bool) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let opts = ReadOptions {
         extract_assets: extract,
@@ -70,6 +73,9 @@ fn read_with_limits(bytes: &[u8], extract: bool, limits: Limits) -> ReadOutcome 
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let opts = ReadOptions {
         extract_assets: extract,

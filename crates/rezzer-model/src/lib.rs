@@ -17,6 +17,7 @@ mod loss;
 mod reader;
 mod registry;
 mod sheet;
+pub mod text;
 mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
@@ -26,13 +27,13 @@ pub use document::{
 };
 pub use facet::{
     Annotation, Edge, Embedded, Event, Facets, FieldAction, FileFacts, FormField, Formula,
-    FormulaKind, Graph, Node, Parameter, Role, Rule, Signature,
+    FormulaKind, Graph, Node, OutlineEntry, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
 pub use layout::{
     Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, SheetCell, TableLayout,
-    a1_position, sheet_cell, split_rows, table_key,
+    a1_position, join_ranges, sheet_cell, split_rows, table_key,
 };
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};

@@ -27,7 +27,7 @@ Built on (versions as tested on 2026-10-19):
 
 - Links by kind: inline, reference, autolink, wikilink; internal, external or anchor
 - Whether each link target can be found
-- Wikilinks as relations. Wikilinks inside code are ignored
+- Wikilinks as relations. They are kept in the link graph. In the body they are written as plain text, because Rezzer does not know the name of the linked note in the output. In the Markdown file this looks like `\[\[graph-view\]\]`. Wikilinks inside code stay as they are
 - Frontmatter keys that point to other pages, like aliases or redirects
 
 ## How it shows up in the output

@@ -710,6 +710,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3296eb97d869113eaf148a6bdf01884e90b3828ad7ae2340b0f93362fc158611"
 
 [[package]]
+name = "fileattrs"
+version = "0.1.0"
+dependencies = [
+ "fileattrs",
+ "libc",
+ "tempfile",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1712,6 +1721,7 @@ dependencies = [
  "hex",
  "insta",
  "libc",
+ "percent-encoding",
  "predicates",
  "rezzer-cli",
  "rezzer-limits",
@@ -1722,6 +1732,7 @@ dependencies = [
  "rezzer-read-pdf",
  "rezzer-read-sheet",
  "rezzer-read-text",
+ "saphyr-parser",
  "serde_json",
  "sha2",
  "tempfile",
@@ -1748,12 +1759,15 @@ dependencies = [
  "cfb",
  "csv",
  "csvsniff",
+ "fileattrs",
  "flate2",
  "hex",
  "libc",
  "memmap2",
  "rezzer-limits",
  "rezzer-model",
+ "serde",
+ "serde_json",
  "sha2",
  "tempfile",
  "textenc",
@@ -1794,6 +1808,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "insta",
  "percent-encoding",
  "rezzer-limits",
  "rezzer-model",
@@ -1829,12 +1844,16 @@ name = "rezzer-pipeline"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "fileattrs",
  "hex",
+ "libc",
+ "percent-encoding",
  "rezzer-detect",
  "rezzer-enrich",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-read-csv",
+ "rezzer-read-pdf",
  "rezzer-read-sheet",
  "rezzer-read-text",
  "rezzer-render",
@@ -1844,6 +1863,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "unicode-normalization",
 ]
 
 [[package]]

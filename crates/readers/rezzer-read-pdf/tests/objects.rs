@@ -36,6 +36,9 @@ fn source(bytes: &[u8]) -> Source {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     }
 }
 
@@ -215,6 +218,34 @@ fn outline_section_with_page_labels() {
     assert!(outline.contains(", page iv"), "{outline}");
     assert!(!outline.contains("]("), "{outline}");
     assert!(!outline.contains("](#"), "{outline}");
+}
+
+#[test]
+fn outline_entries_with_levels_and_pages() {
+    let out = read(&corpus("qpdf-page-labels-and-outlines.pdf"));
+    let entries = &out.document.facets.outline;
+    // The levels the Outline section shows, and the page in the file (1-based, as the page
+    // anchors `p<n>`), not the page label: the title's `-> n` is the 0-based page.
+    let levels: Vec<u8> = entries.iter().map(|e| e.level).collect();
+    assert_eq!(levels, [1, 2, 3, 4, 4, 3, 4, 2, 3, 3, 1]);
+    let pages: Vec<Option<u32>> = entries.iter().map(|e| e.page).collect();
+    assert_eq!(pages, [6, 12, 13, 19, 20, 13, 23, 14, 2, 1, 16].map(Some));
+    assert_eq!(entries[0].title, "Isís 1 -> 5: /XYZ null null null");
+    assert_eq!(entries[10].title, "Trepak 2 -> 15: /XYZ 66 756 3");
+    // The same items in the same order as the section.
+    let Block::Section { blocks, .. } = &out.document.body[0] else {
+        panic!("an outline section");
+    };
+    let mut items = Vec::new();
+    list_items(&blocks[0], 1, &mut items);
+    assert_eq!(entries.len(), items.len());
+    for (entry, (depth, text)) in entries.iter().zip(&items) {
+        assert_eq!(usize::from(entry.level), *depth);
+        assert!(
+            text.starts_with(&format!("{}, page ", entry.title)),
+            "{text}"
+        );
+    }
 }
 
 #[test]

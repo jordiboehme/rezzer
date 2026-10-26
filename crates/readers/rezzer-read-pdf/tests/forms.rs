@@ -37,6 +37,9 @@ fn read(bytes: &[u8]) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     PdfReader.read(
         &src,

@@ -25,13 +25,26 @@
 //!   marks the other parts of the overview. The frontmatter names a chosen style and
 //!   selection
 //! - A hard line break is a backslash at the line end
+//! - A list item that Crystalline would read as an observation or a relation (a bullet that
+//!   opens with `[category]`, or one word before a link to a `.md` file) gets the `* `
+//!   bullet, so it stays text (P5-S)
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list
+//! - A body with fewer than 3 non-blank lines outside fences (Crystalline's Q001) gets the
+//!   frontmatter description as a paragraph under the title. When it is still short, a last
+//!   line says there is no content, or that it ends here when there is some (speaking of
+//!   the chosen sections when the caller chose some)
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
+//! - A document whose body is over the part size is cut into units at its own borders by
+//!   [`split`] (spec 5); the units' links are written for their place one folder down.
+//!   [`render_output`] writes them as part files with `part_of` and `follows` relations, and
+//!   a main document with the stats, capped extracts and the list of the parts
 
 mod blocks;
+mod bullets;
+mod describe;
 mod facets;
 mod form;
 mod frontmatter;
@@ -39,13 +52,18 @@ mod layout;
 mod mermaid;
 mod overview;
 mod paging;
+mod parts;
+mod split;
 mod workbook;
 
 use std::collections::HashSet;
 
-use rezzer_model::{Block, Completeness, Document, SectionKind, plain_text};
+use rezzer_model::{Block, Completeness, Document, Inline, SectionKind, plain_text};
 
 use crate::blocks::{Ctx, MAX_DEPTH, Notes};
+
+pub use crate::parts::{Output, PartFile, render_output};
+pub use crate::split::{MAIN_NAME_MAX, Unit, split};
 
 /// A part of the output that a caller can ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +286,23 @@ pub struct RenderOptions {
     /// The titles of the sheets to write (see [`resolve_sheets`]); `None` or an empty list
     /// writes all.
     pub sheets: Option<Vec<String>>,
+    /// Set when this output is one part of a split document: its place, location and title.
+    pub part: Option<PartMeta>,
+    /// Set on the main document of a split document: how many parts it has.
+    pub parts: Option<usize>,
+}
+
+/// Where a part file stands in a split document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartMeta {
+    /// The part's number, counted from 1.
+    pub index: usize,
+    /// How many parts the document has.
+    pub count: usize,
+    /// Where the part lies in the document, for example `pages 12 to 20` or `Data!A1:F400`.
+    pub location: String,
+    /// The part's own title, for example `Report: Results`.
+    pub title: String,
 }
 
 impl Default for RenderOptions {
@@ -280,36 +315,43 @@ impl Default for RenderOptions {
             math: true,
             table_style: TableStyle::Table,
             sheets: None,
+            part: None,
+            parts: None,
         }
     }
 }
 
 /// Whether the tables of a document name a column without a header by its number: CSV and
 /// TSV have no column letters of their own.
-fn column_numbers(doc: &Document) -> bool {
+pub(crate) fn column_numbers(doc: &Document) -> bool {
     matches!(
         doc.source.format,
         rezzer_model::FormatId::Csv | rezzer_model::FormatId::Tsv
     )
 }
 
+/// A frontmatter value as Rezzer writes it: double-quoted and escaped, for example the
+/// `resource` of a source. Lets a caller compare a written file's line with a source.
+pub fn frontmatter_value(value: &str) -> String {
+    frontmatter::quote(value)
+}
+
 /// Renders a document as OKF Markdown.
 pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let want = |s: OutputSection| opts.sections.as_ref().is_none_or(|l| l.contains(&s));
     let mut out = frontmatter::render(doc, completeness, opts);
-    let title = frontmatter::title(doc).trim();
-    out.push('\n');
+    // A part has its own title; a leading heading equal to it is the title line.
+    let shown = frontmatter::shown_title(doc, opts).trim();
     // The heading that became the title keeps its links.
     let title_line = match doc.body.first() {
         Some(Block::Heading {
             level: 1, inlines, ..
-        }) if plain_text(inlines).trim() == title => blocks::inlines(inlines, blocks::Mode::Line)
+        }) if plain_text(inlines).trim() == shown => blocks::inlines(inlines, blocks::Mode::Line)
             .trim()
             .to_string(),
-        _ => blocks::line_text(title),
+        _ => blocks::line_text(shown),
     };
-    out.push_str(&blocks::heading_line(1, &title_line));
-    out.push('\n');
+    let heading = format!("\n{}\n", blocks::heading_line(1, &title_line));
 
     let selection = chosen_sheets(opts).map(|titles| Selection::of(doc, titles));
     let selection = selection.as_ref();
@@ -324,7 +366,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     }
     let notes = Notes::new(&doc.facets.annotations);
     if want(OutputSection::Content) {
-        parts.push(content(doc, title, &notes, opts.table_style, selection));
+        parts.push(content(doc, shown, &notes, opts.table_style, selection));
     }
     if want(OutputSection::Logic) {
         parts.extend(facets::logic(doc, opts.math, selection));
@@ -332,6 +374,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let ctx = Ctx {
         codes_shown: Default::default(),
         assets: &doc.assets,
+        link_base: "",
         heading_offset: 0,
         notes: None,
         in_sheet: Default::default(),
@@ -339,30 +382,71 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         column_numbers: column_numbers(doc),
     };
     if want(OutputSection::Annotations) {
-        parts.extend(facets::annotations(doc, &ctx, &notes, selection));
+        parts.extend(facets::annotations(
+            &doc.facets.annotations,
+            &ctx,
+            &notes,
+            selection,
+        ));
     }
     if want(OutputSection::Changes) {
         parts.extend(facets::changes(doc));
     }
     if want(OutputSection::Embedded) {
-        parts.extend(facets::embedded(doc));
+        parts.extend(facets::embedded(doc, ""));
     }
     if want(OutputSection::NotRead) {
         parts.extend(facets::not_read(doc));
     }
+    // Crystalline wants 3 lines of content (Q001): a shorter body gets the description as
+    // a paragraph under the title, and a body that is still short says it has nothing more.
+    let content = parts
+        .iter()
+        .map(|p| describe::content_lines(p))
+        .sum::<usize>();
+    let lines = describe::content_lines(&heading) + content;
+    if lines < MIN_CONTENT_LINES {
+        let description = blocks::paragraph(&[Inline::Text {
+            text: frontmatter::shown_description(doc, opts),
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }]);
+        if lines + describe::content_lines(&description) < MIN_CONTENT_LINES {
+            parts.push(closing_line(content, opts.sections.is_some()).to_string());
+        }
+        parts.insert(0, description);
+    }
     // One growth for all parts, so a huge part is not doubled by the push.
     out.reserve_exact(
-        parts
-            .iter()
-            .map(|p| p.len() + if p.is_empty() { 0 } else { 2 })
-            .sum(),
+        heading.len()
+            + parts
+                .iter()
+                .map(|p| p.len() + if p.is_empty() { 0 } else { 2 })
+                .sum::<usize>(),
     );
+    out.push_str(&heading);
     for part in parts.iter().filter(|p| !p.is_empty()) {
         out.push('\n');
-        out.push_str(part);
+        out.push_str(&bullets::guard(part));
         out.push('\n');
     }
     out
+}
+
+/// Crystalline's least number of content lines in a body (its rule Q001).
+const MIN_CONTENT_LINES: usize = 3;
+
+/// The last line of a body still under [`MIN_CONTENT_LINES`] with its description: it says
+/// there is no content only when there is none (`content` counts the lines under the title).
+/// With chosen sections it speaks of them, as the document may hold more in others.
+fn closing_line(content: usize, sections_chosen: bool) -> &'static str {
+    match (content, sections_chosen) {
+        (0, false) => "The document has no content.",
+        (0, true) => "The chosen sections have no content.",
+        (_, false) => "The document ends here.",
+        (_, true) => "The chosen sections end here.",
+    }
 }
 
 /// `## Overview`: the parts with kind, size, role and what they read from, the facts, and a
@@ -383,7 +467,7 @@ pub(crate) struct Selection<'a> {
 }
 
 impl<'a> Selection<'a> {
-    fn of(doc: &'a Document, titles: &'a [String]) -> Selection<'a> {
+    pub(crate) fn of(doc: &'a Document, titles: &'a [String]) -> Selection<'a> {
         let titles: HashSet<&str> = titles.iter().map(String::as_str).collect();
         let mut chosen = HashSet::new();
         let mut sheets = HashSet::new();
@@ -481,6 +565,7 @@ fn content(
     let ctx = Ctx {
         codes_shown: Default::default(),
         assets: &doc.assets,
+        link_base: "",
         heading_offset: 2u8.saturating_sub(min),
         notes: Some(notes),
         in_sheet: Default::default(),
@@ -505,7 +590,7 @@ fn content(
 }
 
 /// The smallest heading level anywhere in `list`.
-fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
+pub(crate) fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -530,4 +615,20 @@ fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
         }
     }
     min
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closing_line;
+
+    #[test]
+    fn closing_line_says_no_content_only_when_there_is_none() {
+        assert_eq!(closing_line(0, false), "The document has no content.");
+        assert_eq!(
+            closing_line(0, true),
+            "The chosen sections have no content."
+        );
+        assert_eq!(closing_line(1, false), "The document ends here.");
+        assert_eq!(closing_line(1, true), "The chosen sections end here.");
+    }
 }

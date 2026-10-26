@@ -62,11 +62,26 @@ pub struct RezParams {
     #[serde(default)]
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
-    /// Absolute path of an existing directory. Pictures (for example rendered PDF pages) are
-    /// written to `<output_dir>/<file name>.assets/` and the Markdown links to them. Older
-    /// files there that this read does not write are removed. Without it nothing is written.
+    /// Absolute path of an existing directory. The Markdown is written there too, as
+    /// <file name>.md. Some names get a short hash added. A document over part_size is
+    /// written as <file name>.md plus parts in a folder next to it, <file name>.parts.
+    /// Pictures (for example rendered PDF pages) go to a folder next to it,
+    /// <file name>.assets, and the Markdown links to them. In these folder names every
+    /// character other than A to Z, a to z, 0 to 9, '.', '_' and '-' becomes '_', and the
+    /// name then gets a short hash: 'Q3 report.pdf' gives Q3_report.pdf-6f38fa03.parts.
+    /// Older files that Rezzer wrote there and this read does not write are removed. Rezzer
+    /// only replaces or removes files it wrote for the same source. Anything else in the way
+    /// stops the read. This includes the output of another file with the same name and
+    /// other content. It also includes a name that differs only in case, on a file system
+    /// that ignores case. Without it nothing is written.
     #[serde(default)]
     pub output_dir: Option<String>,
+    /// Largest part in tokens when output_dir is set. A larger document is written as a main
+    /// document plus parts, and the main document is returned. 0 writes one file. Default
+    /// 10000.
+    #[serde(default)]
+    #[schemars(range(min = 0), extend("default" = 10000))]
+    pub part_size: Option<i64>,
     /// The password of an encrypted file. It is never stored or cached.
     #[serde(default)]
     pub password: Option<String>,
@@ -112,6 +127,7 @@ impl std::fmt::Debug for RezParams {
             .field("math", &self.math)
             .field("format", &self.format)
             .field("output_dir", &self.output_dir)
+            .field("part_size", &self.part_size)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("table_style", &self.table_style)
             .field("sheets", &self.sheets)
@@ -174,6 +190,15 @@ impl RezParams {
                 ));
             }
         };
+        let part_size = match take(&mut args, "part_size") {
+            None => None,
+            Some(value) => Some(integer(&value).filter(|n| *n >= 0).ok_or_else(|| {
+                format!(
+                    "part_size must be an integer (0 or higher), not {}",
+                    shown(&value)
+                )
+            })?),
+        };
         let math = match take(&mut args, "math") {
             None => None,
             Some(Value::Bool(b)) => Some(b),
@@ -192,6 +217,7 @@ impl RezParams {
             math,
             format: string(&mut args, "format")?,
             output_dir: string(&mut args, "output_dir")?,
+            part_size,
             password: string(&mut args, "password")?,
             table_style: string(&mut args, "table_style")?,
             sheets,
@@ -337,12 +363,26 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
             Some(dir)
         }
     };
+    let part_size = match params.part_size {
+        None => None,
+        Some(_) if output_dir.is_none() => {
+            return rez_failed("part_size needs output_dir".to_string());
+        }
+        Some(n) => {
+            let n = usize::try_from(n).unwrap_or(usize::MAX);
+            if let Err(message) = rezzer_pipeline::check_part_size(n) {
+                return rez_failed(message);
+            }
+            Some(n)
+        }
+    };
     let request = Request {
         output,
         sections,
         math: params.math.unwrap_or(true),
         password: params.password.take(),
         output_dir,
+        part_size,
         cancel,
         table_style,
         sheets: params.sheets.take().unwrap_or_default(),
@@ -387,6 +427,40 @@ pub struct RezOutput {
     /// Why the call failed or what went wrong, in one line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The parts written next to the main document, in order, with their paths relative to
+    /// output_dir. Empty when the document is one file or nothing was written.
+    pub parts: Vec<RezPart>,
+    /// Absolute path of the main document written to output_dir; null without output_dir.
+    pub main_file: Option<String>,
+}
+
+/// One part file in the `rez` structured content.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RezPart {
+    /// Relative to output_dir, for example `report.pdf.parts/introduction.md`.
+    pub path: String,
+    /// The part's title.
+    pub title: String,
+    /// Where the part lies in the document, for example `pages 12 to 20`.
+    pub location: String,
+}
+
+/// The parts and the main file of a run, for [`RezOutput`].
+fn written(result: &RunResult) -> (Vec<RezPart>, Option<String>) {
+    let parts = result
+        .parts
+        .iter()
+        .map(|p| RezPart {
+            path: p.path.clone(),
+            title: p.title.clone(),
+            location: p.location.clone(),
+        })
+        .collect();
+    let main_file = result
+        .main_file
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
+    (parts, main_file)
 }
 
 /// The answer for a run: the requested page (or the JSON), else the reason it failed.
@@ -408,6 +482,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             .message
             .clone()
             .unwrap_or_else(|| "The file was read, but no output came out of it".to_string());
+        let (parts, main_file) = written(&result);
         let structured = RezOutput {
             status: "failed",
             page: None,
@@ -418,6 +493,8 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             assets: document.assets.len(),
             needs_vision: needs_vision(document),
             message: Some(message.clone()),
+            parts,
+            main_file,
         };
         return Answer {
             text: message,
@@ -436,6 +513,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             (text, pages)
         }
     };
+    let (parts, main_file) = written(&result);
     let mut structured = RezOutput {
         status: status(result.completeness),
         page: Some(page),
@@ -446,6 +524,8 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         assets: document.assets.len(),
         needs_vision: needs_vision(document),
         message: result.message.clone(),
+        parts,
+        main_file,
     };
     let Some(text) = text.filter(|_| page <= pages) else {
         let noun = if pages == 1 { "page" } else { "pages" };
@@ -499,6 +579,8 @@ fn rez_failed(message: String) -> Answer {
         assets: 0,
         needs_vision: Vec::new(),
         message: Some(message.clone()),
+        parts: Vec::new(),
+        main_file: None,
     };
     Answer {
         structured: to_value(&structured),

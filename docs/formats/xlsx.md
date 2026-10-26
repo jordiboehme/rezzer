@@ -128,6 +128,8 @@ Records repeat the header, so they cost about four times as much as a table line
 
 Each sheet becomes its tables and blocks as above. Then a Logic section follows with one part per sheet: parameters, formulas grouped by pattern, results, rules. After that come the defined names, a Mermaid dependency graph and the hidden logic (user functions, add-ins, other workbooks, data tables, spill ranges, VBA modules, calculation settings). Formulas can also be shown as LaTeX math (`--no-math` turns that off). In the graph a copied formula is one box, not one box per cell.
 
+A large workbook written with `-o` becomes `<file name>.md` plus parts in `<file name>.parts/`. A part holds one or more sheets, or the Logic of one or more sheets. A table that is too big for one part is cut at row borders, and each piece repeats the title and header rows. Its file name has the table and the sheet rows, like `table-1-1-net-generation-by-energy-source-total-rows-5-56.md`.
+
 ## Example
 
 Real output of `rezzer read` for `tunnel_design_calculations.xlsx` from the test corpus. The part for the Ventilation sheet, cut to two of its 13 parameters and three of its 14 formula rows:

@@ -10,9 +10,9 @@ use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
     Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
     FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
-    MODEL_VERSION, Node, Parameter, Properties, ReadOptions, ReaderInfo, Role, RowKind, RowNote,
-    Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor, TableLayout,
-    TaskState, Value,
+    MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions, ReaderInfo, Role,
+    RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor,
+    TableLayout, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -27,6 +27,9 @@ fn src() -> SourceInfo {
             evidence: "zip with xl/workbook.xml".into(),
         },
         modified: Some("2026-10-19T10:00:00Z".into()),
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: None,
         reader: Some(ReaderInfo {
             id: "xlsx".into(),
@@ -501,6 +504,38 @@ fn format_ids_serialize_snake_case() {
 }
 
 #[test]
+fn outline_roundtrips() {
+    let mut doc = Document::new(src());
+    doc.facets.outline = vec![
+        OutlineEntry {
+            level: 1,
+            title: "Intro".into(),
+            page: Some(3),
+        },
+        OutlineEntry {
+            level: 2,
+            title: "Web site".into(),
+            page: None,
+        },
+    ];
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(
+        json.contains(
+            r#""outline":[{"level":1,"title":"Intro","page":3},{"level":2,"title":"Web site"}]"#
+        ),
+        "{json}"
+    );
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert_eq!(doc, back);
+    // An empty outline is left out, and a model without the key reads as empty.
+    doc.facets.outline.clear();
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(!json.contains("outline"), "{json}");
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert!(back.facets.outline.is_empty());
+}
+
+#[test]
 fn json_schema_generates() {
     let schema = schemars::schema_for!(Document);
     let value = serde_json::to_value(&schema).unwrap();
@@ -564,6 +599,9 @@ fn source_exposes_bytes() {
             evidence: "utf-8".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     assert_eq!(src.bytes(), b"hello");
     assert!(format!("{src:?}").contains("5 bytes"));
@@ -593,6 +631,9 @@ fn minimal_document_json_deserializes() {
             evidence: "utf-8".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: None,
         reader: None,
     });
@@ -742,6 +783,9 @@ fn source_info_copies_the_source_fields() {
             evidence: "utf-8".into(),
         },
         modified: Some("2026-10-19T00:00:00Z".into()),
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let info = rezzer_model::source_info(&src);
     assert_eq!(info.path.as_deref(), Some("/data/a.txt"));
@@ -1015,4 +1059,54 @@ fn table_headings_follow_the_heading_nesting() {
             ("D1:E2", vec![]),
         ]
     );
+}
+
+#[test]
+fn source_info_roundtrip_with_file_facts() {
+    let src = Source {
+        path: Some(std::path::PathBuf::from("/data/a.pdf")),
+        name: "a.pdf".into(),
+        bytes: Bytes::Owned(Arc::new(b"%PDF-1.4\n".to_vec())),
+        sha256: "abc".into(),
+        size: 9,
+        format: FormatId::Pdf,
+        detection: Detection {
+            confidence: Confidence::Certain,
+            evidence: "%PDF- header".into(),
+        },
+        modified: Some("2026-10-19T00:00:00Z".into()),
+        created: Some("2026-10-18T07:00:00Z".into()),
+        downloaded_from: Some("https://example.org/a.pdf".into()),
+        file_tags: vec!["Rot".into(), "Projekt".into()],
+    };
+    let info = rezzer_model::source_info(&src);
+    assert_eq!(info.created.as_deref(), Some("2026-10-18T07:00:00Z"));
+    assert_eq!(
+        info.downloaded_from.as_deref(),
+        Some("https://example.org/a.pdf")
+    );
+    assert_eq!(info.file_tags, ["Rot", "Projekt"]);
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["created"], "2026-10-18T07:00:00Z");
+    assert_eq!(json["downloaded_from"], "https://example.org/a.pdf");
+    assert_eq!(json["file_tags"], serde_json::json!(["Rot", "Projekt"]));
+    let back: SourceInfo = serde_json::from_value(json).unwrap();
+    assert_eq!(back, info);
+}
+
+#[test]
+fn old_json_without_file_facts_reads() {
+    let json = include_str!("fixtures/plan1-document.json");
+    let doc: Document = serde_json::from_str(json).expect("plan 1 document reads");
+    assert_eq!(doc.source.created, None);
+    assert_eq!(doc.source.downloaded_from, None);
+    assert!(doc.source.file_tags.is_empty());
+    let back = serde_json::to_value(&doc).unwrap();
+    for key in ["created", "downloaded_from", "file_tags"] {
+        assert!(
+            back["source"].get(key).is_none(),
+            "{key} leaked into {back}"
+        );
+    }
+    assert_eq!(MODEL_VERSION, 1);
 }

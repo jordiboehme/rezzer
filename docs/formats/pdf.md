@@ -26,6 +26,7 @@ Built on (versions as used in the development version):
 - Links: web links in the text, internal targets and named destinations. Internal links stay text, because there is no target to link to in the output. Only `http`, `https` and `mailto` addresses become links. Other addresses, such as `file:` or `ftp:`, stay text with the address as code
 - Article threads (reading paths across pages)
 - Arabic text and vertical Japanese text in logical order
+- A large PDF written with `-o` becomes `<file name>.md` plus parts in `<file name>.parts/`: one part per chapter of the outline with its pages, like `pages 53 to 61`, and long tables cut into row ranges
 
 ### Metadata
 

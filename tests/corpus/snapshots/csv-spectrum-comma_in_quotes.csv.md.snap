@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-spectrum-comma_in_quotes.csv"
+description: "CSV, 1 row x 5 columns. 1 table."
 resource: "<corpus>/web-text/csv-spectrum-comma_in_quotes.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "f7654bf8e69586c8fe7f7f89392d2ed551be0e468e7101187bb482357d9a7815"
 source_size: 68
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
 encoding: "UTF-8"

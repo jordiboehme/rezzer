@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "qpdf-page-labels-and-outlines.pdf"
+description: "PDF, 30 pages. 1 outline."
 resource: "<corpus>/pdf/qpdf-page-labels-and-outlines.pdf"
+tags: ["rezzer", "pdf"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "08b0f999c02abb75cae0854eb042f4ed75ad0b65017a0a584276b90d5e8194b7"
 source_size: 15986
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

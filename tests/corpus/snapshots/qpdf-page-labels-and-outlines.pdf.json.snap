@@ -489,7 +489,65 @@ source: crates/rezzer/tests/corpus.rs
     },
     "<19 more items>"
   ],
-  "facets": {},
+  "facets": {
+    "outline": [
+      {
+        "level": 1,
+        "page": 6,
+        "title": "Isís 1 -> 5: /XYZ null null null"
+      },
+      {
+        "level": 2,
+        "page": 12,
+        "title": "Amanda 1.1 -> 11: /Fit"
+      },
+      {
+        "level": 3,
+        "page": 13,
+        "title": "Isosicle 1.1.1 -> 12: /FitV 100"
+      },
+      {
+        "level": 4,
+        "page": 19,
+        "title": "Isosicle 1.1.1.1 -> 18: /XYZ null null null"
+      },
+      {
+        "level": 4,
+        "page": 20,
+        "title": "Isosicle 1.1.1.2 -> 19: /XYZ null null null"
+      },
+      {
+        "level": 3,
+        "page": 13,
+        "title": "Isosicle 1.1.2 -> 12: /XYZ null null null"
+      },
+      {
+        "level": 4,
+        "page": 23,
+        "title": "Isosicle 1.1.2.1 -> 22: /XYZ null null null"
+      },
+      {
+        "level": 2,
+        "page": 14,
+        "title": "Sandy ÷Σανδι÷ 1.2 -> 13: /FitH 792"
+      },
+      {
+        "level": 3,
+        "page": 2,
+        "title": "Trepsichord 1.2.1 -> 1: /FitR 66 714 180 770"
+      },
+      {
+        "level": 3,
+        "page": 1,
+        "title": "Trepsicle 1.2.2 -> 0: /XYZ null null null"
+      },
+      {
+        "level": 1,
+        "page": 16,
+        "title": "Trepak 2 -> 15: /XYZ 66 756 3"
+      }
+    ]
+  },
   "model_version": 1,
   "overview": {
     "facts": [

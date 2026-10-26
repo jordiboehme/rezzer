@@ -222,6 +222,9 @@ pub fn source(bytes: Vec<u8>, name: &str, format: FormatId) -> Source {
             evidence: "test".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     }
 }
 

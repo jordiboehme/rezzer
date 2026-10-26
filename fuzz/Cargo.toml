@@ -28,6 +28,7 @@ rezzer-read-sheet = { path = "../crates/readers/rezzer-read-sheet" }
 pdfparts = { path = "../crates/formats/pdfparts" }
 barcodes = { path = "../crates/formats/barcodes", features = ["encode"] }
 rezzer-read-pdf = { path = "../crates/readers/rezzer-read-pdf" }
+fileattrs = { path = "../crates/formats/fileattrs" }
 # Builds the small packages of the part reader targets (stored entries only).
 zip = { version = "=9.0.5", default-features = false }
 
@@ -159,6 +160,13 @@ bench = false
 [[bin]]
 name = "barcodes_worker"
 path = "fuzz_targets/barcodes_worker.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fileattrs_bplist"
+path = "fuzz_targets/fileattrs_bplist.rs"
 test = false
 doc = false
 bench = false

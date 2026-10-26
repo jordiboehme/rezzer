@@ -63,10 +63,22 @@ struct ReadArgs {
     /// The file to read.
     path: PathBuf,
     /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
-    /// for example budget.xlsx.md. Pictures go to <DIR>/<file name>.assets/; older files
-    /// there that this read does not write are removed.
+    /// for example budget.xlsx.md. Some names get a short hash added. A document over the
+    /// part size is written as <file name>.md plus parts in a folder next to it,
+    /// <file name>.parts. Pictures go to a folder next to it, <file name>.assets. In these
+    /// folder names every character other than A to Z, a to z, 0 to 9, '.', '_' and '-'
+    /// becomes '_', and the name then gets a short hash: 'Q3 report.pdf' gives
+    /// Q3_report.pdf-6f38fa03.parts. Older files that Rezzer wrote there and this read does
+    /// not write are removed. Rezzer only replaces or removes files it wrote for the same
+    /// source. Anything else in the way stops the read. This includes the output of another
+    /// file with the same name and other content. It also includes a name that differs only
+    /// in case, on a file system that ignores case (the macOS default).
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
+    /// Largest part in tokens when writing with -o. A larger document is written as a main
+    /// document plus parts in a folder next to it. 0 writes one file. Default 10000.
+    #[arg(long, value_name = "TOKENS", requires = "output_dir", value_parser = part_size)]
+    part_size: Option<usize>,
     /// Read the password of an encrypted file from the first line of stdin. Needs a file path.
     #[arg(long)]
     password_stdin: bool,
@@ -95,6 +107,16 @@ struct ReadArgs {
     /// for more sheets. It changes only the Markdown: --json prints all sheets.
     #[arg(long = "sheet", value_name = "SELECTOR")]
     sheets: Vec<String>,
+}
+
+/// A `--part-size` value: a whole number, 0 or at least 2500.
+fn part_size(text: &str) -> Result<usize, String> {
+    let n: usize = text
+        .trim()
+        .parse()
+        .map_err(|_| format!("{text:?} is not a whole number"))?;
+    rezzer_limits::check_part_size(n)?;
+    Ok(n)
 }
 
 /// Runs the command line with the readers of this build.

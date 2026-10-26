@@ -17,6 +17,7 @@
 //! max_elements = 2000000
 //! max_text_bytes = 268435456
 //! page_tokens = 20000
+//! part_size = 10000
 //!
 //! [enrich]
 //! disabled = ["language"]
@@ -148,6 +149,8 @@ impl Config {
                 dir.display()
             )));
         }
+        rezzer_limits::check_part_size(file.limits.part_size)
+            .map_err(|e| invalid(format!("limits.{e}")))?;
         let known: Vec<&str> = rezzer_enrich::passes().iter().map(|p| p.name()).collect();
         if let Some(bad) = file
             .enrich
@@ -206,7 +209,8 @@ fn line_of(text: &str, offset: usize) -> usize {
         + 1
 }
 
-/// Collapses every run of whitespace, line breaks included, to one space.
+/// Collapses every run of whitespace and control characters, line breaks included, to one
+/// space.
 pub(crate) fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+    rezzer_model::text::one_line(s)
 }

@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-semicolon-latin1-dwd-stations.txt"
+description: "CSV, 1091 rows x 7 columns. 1 table."
 resource: "<corpus>/web-text/csv-semicolon-latin1-dwd-stations.txt"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "6d2b0ee5d3c33f27cb36e773b0fa35bfc3468cbac4306d89010f7b3f5bd8387b"
 source_size: 148456
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (windows-1252), delimiter ';', 100% of rows with the same field count"
 encoding: "windows-1252"

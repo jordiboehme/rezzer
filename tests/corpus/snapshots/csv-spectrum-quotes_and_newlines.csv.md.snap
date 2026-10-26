@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-spectrum-quotes_and_newlines.csv"
+description: "CSV, 2 rows x 2 columns. 1 table."
 resource: "<corpus>/web-text/csv-spectrum-quotes_and_newlines.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "f4d99e9a37ab4e7384c494f75a1f252e5e13efed0b7de0dc00050f3517930c2f"
 source_size: 27
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
 encoding: "UTF-8"

@@ -19,6 +19,7 @@ use pulldown_cmark::{
     TagEnd,
 };
 use rezzer_limits::{Budget, DepthGuard};
+use rezzer_model::text::{heading_slug, percent_decode};
 use rezzer_model::{
     Align, Anchor, Block, CalloutKind, Cell, Completeness, Document, Edge, Embedded, FormatId,
     Graph, Inline, Loss, LossReason, Node, ReadOptions, ReadOutcome, Reader, ReaderInfo,
@@ -880,7 +881,7 @@ impl<'b> Builder<'b> {
     }
 
     fn unique_slug(&mut self, text: &str) -> String {
-        let mut slug = slugify(text);
+        let mut slug = heading_slug(text);
         if slug.is_empty() {
             slug = "section".into();
         }
@@ -1156,7 +1157,7 @@ impl<'b> Builder<'b> {
                 } else {
                     // The same slug as the heading anchors, so `#Hello-World` and
                     // `#hello%20world` both point to `h:hello-world`.
-                    let slug = slugify(&percent_decode(frag));
+                    let slug = heading_slug(&percent_decode(frag));
                     if slug.is_empty() {
                         format!("h:{frag}")
                     } else {
@@ -1483,48 +1484,6 @@ fn push_merged(inlines: &mut Vec<Inline>, inline: Inline) {
     inlines.push(inline);
 }
 
-/// Decodes `%XX` escapes; invalid UTF-8 after decoding becomes U+FFFD, a `%` without two hex
-/// digits stays as it is.
-fn percent_decode(text: &str) -> String {
-    if !text.contains('%') {
-        return text.to_string();
-    }
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        if bytes[i] == b'%'
-            && let (Some(hi), Some(lo)) = (
-                bytes.get(i + 1).and_then(|&b| hex(b)),
-                bytes.get(i + 2).and_then(|&b| hex(b)),
-            )
-        {
-            out.push((hi * 16 + lo) as u8);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// A heading id the way GitHub builds it: lowercase, spaces to hyphens, punctuation dropped.
-fn slugify(text: &str) -> String {
-    let mut slug = String::new();
-    for c in strip_html_tags(text).trim().chars() {
-        if c.is_alphanumeric() {
-            slug.extend(c.to_lowercase());
-        } else if c == ' ' || c == '-' {
-            slug.push('-');
-        } else if c == '_' {
-            slug.push('_');
-        }
-    }
-    slug
-}
-
 /// True for a target inside this document or a relative path; false for any URL with a scheme.
 fn is_internal(target: &str) -> bool {
     if target.is_empty() {
@@ -1545,29 +1504,6 @@ fn is_internal(target: &str) -> bool {
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
     });
     !has_scheme
-}
-
-/// Removes `<tag>`, `</tag>` and `<!-- -->` spans; a lone `<` followed by a space stays.
-fn strip_html_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(i) = rest.find('<') {
-        out.push_str(&rest[..i]);
-        let tail = &rest[i..];
-        let is_tag = tail[1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '/' || c == '!');
-        match tail.find('>') {
-            Some(j) if is_tag => rest = &tail[j + 1..],
-            _ => {
-                out.push('<');
-                rest = &tail[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 fn strip_one_newline(mut text: String) -> String {

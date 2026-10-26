@@ -21,7 +21,7 @@ use pdfparts::{Issue, IssueKind, Link, LinkTarget, PageInfo, Pdf, PdfDate, Revis
 use rezzer_limits::Budget;
 use rezzer_model::{
     Anchor, Asset, Blob, Block, Edge, Embedded, Event, Graph, Inline, LossReason, Node,
-    ReadOptions, SectionKind, Severity, link_target_written_len,
+    OutlineEntry, ReadOptions, SectionKind, Severity, link_target_written_len,
 };
 use sha2::{Digest, Sha256};
 
@@ -273,10 +273,7 @@ impl<'a> PageNames<'a> {
 
 /// A title on one line: runs of white space and control characters become one space.
 fn one_line(text: &str) -> String {
-    text.split(|c: char| c.is_whitespace() || c.is_control())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+    rezzer_model::text::one_line(text)
 }
 
 /// Nested lists built from items with levels. A deeper item opens a list in the item before
@@ -309,7 +306,8 @@ impl Nest {
         }
     }
 
-    fn push(&mut self, level: u8, item: Block) {
+    /// Places `item` at `level` and returns the depth it is shown at, 1 for the top list.
+    fn push(&mut self, level: u8, item: Block) -> u8 {
         while self.open.len() > 1 && self.open.last().is_some_and(|(l, _)| *l > level) {
             self.close();
         }
@@ -325,6 +323,8 @@ impl Nest {
         }
         let (_, top) = self.open.last_mut().expect("a list");
         top.push(vec![item]);
+        // At most OUTLINE_DEPTH lists are open.
+        self.open.len() as u8
     }
 
     fn finish(mut self) -> (Vec<Vec<Block>>, usize) {
@@ -338,7 +338,8 @@ impl Nest {
 
 /// The outline as a section before the first page: a nested list whose items read
 /// `<title>, page <label>` as plain text. An item with a URI action names it in a code span;
-/// it is never followed.
+/// it is never followed. Each item kept is also an [`OutlineEntry`] in the facets, at the
+/// depth the section shows it, with the page of the file it points at.
 fn outline(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
     let items = pdf.outline();
     if items.is_empty() {
@@ -347,33 +348,42 @@ fn outline(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
     let total = items.len();
     let names = PageNames::new(pages);
     let mut nest = Nest::new();
+    let mut entries: Vec<OutlineEntry> = Vec::new();
     let mut cut: Option<(usize, String)> = None;
     for (k, item) in items.iter().enumerate() {
         let title = one_line(&item.title);
-        let (inlines, charged) = match (item.page, &item.uri) {
-            (Some(p), _) => {
-                let text = format!("{title}, {}", names.of(p));
-                (vec![Inline::plain(text.clone())], vec![text])
-            }
-            (None, Some(uri)) => (
-                vec![
-                    Inline::plain(format!("{title}, link to ")),
-                    Inline::Code {
-                        text: uri.to_string(),
-                    },
-                ],
-                vec![title.clone(), uri.to_string()],
-            ),
-            (None, None) => (vec![Inline::plain(title.clone())], vec![title]),
+        let inlines = match (item.page, &item.uri) {
+            (Some(p), _) => vec![Inline::plain(format!("{title}, {}", names.of(p)))],
+            (None, Some(uri)) => vec![
+                Inline::plain(format!("{title}, link to ")),
+                Inline::Code {
+                    text: uri.to_string(),
+                },
+            ],
+            (None, None) => vec![Inline::plain(title.clone())],
         };
-        let texts: Vec<&str> = charged.iter().map(String::as_str).collect();
-        // The item, its paragraph and its inlines.
-        if let Err(why) = kept.take(2 + inlines.len() as u64, &texts) {
+        let texts: Vec<&str> = inlines
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Text { text, .. } | Inline::Code { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        // The item, its paragraph and its inlines, and the entry. The entry's title is a
+        // copy of the paragraph's text and shares its charge (P5-L), so the outline keeps as
+        // many items as the section alone would.
+        if let Err(why) = kept.take(3 + inlines.len() as u64, &texts) {
             cut = Some((k + 1, why));
             break;
         }
-        nest.push(item.level, Block::paragraph(inlines));
+        let level = nest.push(item.level, Block::paragraph(inlines));
+        entries.push(OutlineEntry {
+            level,
+            title,
+            page: item.page,
+        });
     }
+    out.doc.facets.outline = entries;
     let (list, flattened) = nest.finish();
     let blocks = if list.is_empty() {
         Vec::new()

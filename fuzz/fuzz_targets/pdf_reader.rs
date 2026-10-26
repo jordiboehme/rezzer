@@ -38,6 +38,9 @@ fuzz_target!(|data: &[u8]| {
             evidence: "fuzz".to_string(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let opts = ReadOptions {
         extract_assets: pick % 2 == 1,

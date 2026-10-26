@@ -28,3 +28,4 @@ rezzer-read-sheet = { path = "../readers/rezzer-read-sheet" }
 rmcp = { workspace = true, features = ["client"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util"] }
 tempfile.workspace = true
+insta.workspace = true

@@ -925,3 +925,242 @@ async fn rez_sheets_must_be_strings() {
     assert!(shown.contains("table_style: Some(\"records\")"), "{shown}");
     assert!(shown.contains("sheets: Some([\"Data\"])"), "{shown}");
 }
+
+// ---------------------------------------------------------------------------------------
+// Writing files with output_dir: a main document and its parts (spec 8a.4)
+
+/// Markdown far over 10,000 tokens, in chapters.
+fn book() -> String {
+    let mut text = String::from("# Book\n\n");
+    for c in 1..=30 {
+        text.push_str(&format!("## Chapter {c}\n\n"));
+        for _ in 0..8 {
+            text.push_str(&"Words of a chapter that fill its pages. ".repeat(12));
+            text.push_str("\n\n");
+        }
+    }
+    text
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_output_dir_returns_main_document() {
+    let src = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let path = write(src.path(), "book.markdown", &book());
+    let client = connect(config()).await;
+    let result = call(
+        &client,
+        "rez",
+        json!({ "path": path, "output_dir": out.path().to_string_lossy() }),
+    )
+    .await;
+    assert_ne!(result.is_error, Some(true));
+    let main = out.path().join("book.markdown.md");
+    let written = std::fs::read_to_string(&main).unwrap();
+    assert_eq!(text(&result), written, "the text is the main document");
+    let s = structured(&result);
+    assert_eq!(s["status"], "complete", "{s}");
+    assert_eq!(s["pages"], 1);
+    assert_eq!(s["main_file"], main.to_string_lossy().as_ref());
+    let parts = s["parts"].as_array().unwrap();
+    assert!(parts.len() >= 3, "{s}");
+    for part in parts {
+        let rel = part["path"].as_str().unwrap();
+        assert!(rel.starts_with("book.markdown.parts/"), "{rel}");
+        assert!(out.path().join(rel).is_file(), "{rel}");
+        assert!(written.contains(&format!("]({rel})")), "{rel}");
+        assert!(
+            part["title"].as_str().unwrap().starts_with("Book: "),
+            "{part}"
+        );
+        assert!(!part["location"].as_str().unwrap().is_empty(), "{part}");
+    }
+    // part_size 0 writes one file and removes the parts.
+    let one = call(
+        &client,
+        "rez",
+        json!({ "path": path, "output_dir": out.path().to_string_lossy(), "part_size": 0 }),
+    )
+    .await;
+    assert_eq!(structured(&one)["parts"], json!([]));
+    assert!(!out.path().join("book.markdown.parts").exists());
+    // The one file is over a page, so the text is its first page.
+    let whole = std::fs::read_to_string(&main).unwrap();
+    assert!(!whole.contains("](book.markdown.parts/"));
+    assert_eq!(structured(&one)["pages"], 2);
+    let first = text(&one).split("\n\nPage 1 of 2.").next().unwrap();
+    assert!(whole.starts_with(first));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_without_output_dir_pages_as_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "book.markdown", &book());
+    let direct = Pipeline::new(config(), registry())
+        .run_path(Path::new(&path), &rezzer_pipeline::Request::default());
+    let client = connect(config()).await;
+    let result = call(&client, "rez", json!({ "path": path, "page": 2 })).await;
+    let s = structured(&result);
+    assert_eq!(s["pages"], direct.markdown_pages.len(), "{s}");
+    assert!(
+        text(&result).starts_with(direct.markdown_pages[1].as_str()),
+        "the page as the renderer wrote it"
+    );
+    assert_eq!(s["parts"], json!([]));
+    assert_eq!(s["main_file"], Value::Null);
+    let keys: Vec<&str> = s.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(
+        keys,
+        [
+            "assets",
+            "format",
+            "losses",
+            "main_file",
+            "needs_vision",
+            "page",
+            "pages",
+            "parts",
+            "sha256",
+            "status"
+        ]
+    );
+    // Nothing was written next to the source.
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_part_size_needs_output_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let client = connect(config()).await;
+    let result = call(&client, "rez", json!({ "path": path, "part_size": 5000 })).await;
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(text(&result), "part_size needs output_dir");
+    assert_eq!(structured(&result)["status"], "failed");
+    let below = call(
+        &client,
+        "rez",
+        json!({ "path": path, "output_dir": dir.path().to_string_lossy(), "part_size": 2499 }),
+    )
+    .await;
+    assert_eq!(text(&below), "part_size must be 0 or at least 2500");
+    assert!(!dir.path().join("a.txt.md").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_part_size_must_be_integer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "some text\n");
+    let out = dir.path().to_string_lossy().into_owned();
+    let client = connect(config()).await;
+    for bad in [
+        json!("many"),
+        json!(2500.5),
+        json!(-1),
+        json!(true),
+        json!([2500]),
+    ] {
+        let result = call(
+            &client,
+            "rez",
+            json!({ "path": path, "output_dir": out, "part_size": bad }),
+        )
+        .await;
+        assert_eq!(result.is_error, Some(true), "{bad}");
+        assert!(
+            text(&result).starts_with("part_size must be an integer (0 or higher), not "),
+            "{bad}: {}",
+            text(&result)
+        );
+    }
+    // Lenient like page: an integral number or a numeric string.
+    for good in [json!(2500), json!(2500.0), json!("2500")] {
+        let result = call(
+            &client,
+            "rez",
+            json!({ "path": path, "output_dir": out, "part_size": good }),
+        )
+        .await;
+        assert_eq!(structured(&result)["status"], "complete", "{good}");
+    }
+    let tools = client.list_all_tools().await.unwrap();
+    let rez = tools.iter().find(|t| t.name == "rez").unwrap();
+    let schema = &rez.input_schema["properties"]["part_size"];
+    assert_eq!(schema["minimum"], 0, "{schema}");
+    assert_eq!(schema["default"], 10000, "{schema}");
+    // Doc comments keep their line breaks; compare the words.
+    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        words(schema["description"].as_str().unwrap()),
+        "Largest part in tokens when output_dir is set. A larger document is written as a main document plus parts, and the main document is returned. 0 writes one file. Default 10000."
+    );
+    let output_dir = words(
+        rez.input_schema["properties"]["output_dir"]["description"]
+            .as_str()
+            .unwrap(),
+    );
+    assert!(
+        output_dir.contains("The Markdown is written there too, as <file name>.md."),
+        "{output_dir}"
+    );
+    assert!(output_dir.contains("a folder next to it"), "{output_dir}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_json_names_parts() {
+    let src = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let path = write(src.path(), "book.markdown", &book());
+    let client = connect(config()).await;
+    let result = call(
+        &client,
+        "rez",
+        json!({ "path": path, "output_dir": out.path().to_string_lossy(), "format": "json" }),
+    )
+    .await;
+    let doc: Value = serde_json::from_str(text(&result)).expect("the text is the model");
+    assert!(doc["body"].as_array().unwrap().len() > 30);
+    let s = structured(&result);
+    let parts = s["parts"].as_array().unwrap();
+    assert!(parts.len() >= 3, "{s}");
+    let json = std::fs::read_to_string(out.path().join("book.markdown.json")).unwrap();
+    assert_eq!(json.trim_end(), text(&result).trim_end());
+    assert!(out.path().join("book.markdown.md").is_file());
+}
+
+/// A paged result without output_dir, fixed as a snapshot: page 2 of a short document at a
+/// small page size, which holds no frontmatter, plus its paging line.
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_without_output_dir_page_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut garden = String::from("# Garden\n\n");
+    for (name, plants) in [
+        ("Spring", "Tulips, crocus and snowdrops come first."),
+        ("Summer", "Roses and lavender need sun and little water."),
+        (
+            "Autumn",
+            "Asters bloom late, and the leaves go on the compost.",
+        ),
+        ("Winter", "The beds rest under straw until March."),
+    ] {
+        garden.push_str(&format!("## {name}\n\n"));
+        for _ in 0..12 {
+            garden.push_str(plants);
+            garden.push(' ');
+        }
+        garden.push_str("\n\n");
+    }
+    let path = write(dir.path(), "garden.md", &garden);
+    let mut cfg = config();
+    cfg.limits.page_tokens = 300;
+    let client = connect(cfg).await;
+    let result = call(&client, "rez", json!({ "path": path, "page": 2 })).await;
+    let s = structured(&result);
+    assert!(s["pages"].as_u64().unwrap() > 2, "{s}");
+    let page = text(&result);
+    assert!(
+        !page.contains("\n---\n") && !page.starts_with("---"),
+        "{page}"
+    );
+    insta::assert_snapshot!(page);
+}

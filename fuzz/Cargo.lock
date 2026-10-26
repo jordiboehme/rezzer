@@ -494,6 +494,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3296eb97d869113eaf148a6bdf01884e90b3828ad7ae2340b0f93362fc158611"
 
 [[package]]
+name = "fileattrs"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,6 +1328,7 @@ dependencies = [
  "cfb",
  "csv",
  "csvsniff",
+ "fileattrs",
  "flate2",
  "hex",
  "libc",
@@ -1346,6 +1354,7 @@ version = "0.0.0"
 dependencies = [
  "barcodes",
  "csvsniff",
+ "fileattrs",
  "formulakit",
  "libfuzzer-sys",
  "pdfparts",

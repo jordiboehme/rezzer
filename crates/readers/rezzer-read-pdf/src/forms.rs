@@ -145,7 +145,7 @@ fn signatures(sigs: &[Sig], history: &History, kept: &Kept<'_>, out: &mut Out) {
             anchor: s.field.as_deref().map(anchor),
             kind: match s.kind {
                 SigKind::Field => "field",
-                SigKind::UsageRights => "usage-rights",
+                SigKind::UsageRights => Signature::USAGE_RIGHTS,
                 SigKind::DocMdp => "doc-mdp",
             }
             .into(),
