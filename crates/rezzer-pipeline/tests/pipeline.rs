@@ -1424,6 +1424,9 @@ fn chapters_pipeline(cfg: Config) -> Pipeline {
 const LARGE: &[u8] = b"30 4000";
 /// Input for [`Chapters`] that fits one file.
 const SMALL: &[u8] = b"2 600";
+/// [`LARGE`] and [`SMALL`] with other content (another hash) and the same chapter titles.
+const OTHER_LARGE: &[u8] = b"30 4001";
+const OTHER_SMALL: &[u8] = b"2 601";
 
 fn written(out: &Path) -> Request {
     Request {
@@ -2223,17 +2226,18 @@ fn a_rerun_of_the_same_source_replaces_its_files() {
 
 #[test]
 fn output_of_another_source_stops_the_run() {
-    // Ruling P5-AG: `Note.txt` and then `note.txt` into one folder on a file system that
-    // ignores case. The clash is made with a file that has another `resource`, so the test
-    // runs on any file system.
+    // Ruling P5-AG: `Note.txt` and then `note.txt` with other content into one folder on a
+    // file system that ignores case. The clash is made with a file that has another
+    // `resource`, so the test runs on any file system.
     let pipeline = chapters_pipeline(config(None));
     let json = |dir: &Path| Request {
         output: OutputKind::Json,
         ..written(dir)
     };
-    for (what, input) in [("small", SMALL), ("large", LARGE)] {
+    for (what, input, other_input) in [("small", SMALL, OTHER_SMALL), ("large", LARGE, OTHER_LARGE)]
+    {
         let other = tempfile::tempdir().unwrap();
-        pipeline.run_bytes("Note.txt", input.to_vec(), None, &json(other.path()));
+        pipeline.run_bytes("Note.txt", other_input.to_vec(), None, &json(other.path()));
         let out = tempfile::tempdir().unwrap();
         // The main document of `Note.txt` at the path of `note.txt`.
         std::fs::copy(
@@ -2281,11 +2285,101 @@ fn output_of_another_source_stops_the_run() {
     }
 }
 
+/// `path` as a path relative to the working directory, built with `..` up to the root.
+fn relative_to_cwd(path: &Path) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap();
+    let mut rel = PathBuf::new();
+    for _ in cwd.components().skip(1) {
+        rel.push("..");
+    }
+    rel.join(path.strip_prefix("/").unwrap())
+}
+
+#[cfg(unix)]
+#[test]
+fn one_file_by_any_path_or_a_copy_is_the_same_source() {
+    // Ruling P5-AG refined: the same canonical path or the same content is the same source.
+    let root = tempfile::tempdir().unwrap();
+    let real = std::fs::canonicalize(root.path()).unwrap();
+    let src = real.join("src");
+    std::fs::create_dir_all(src.join("sub")).unwrap();
+    let file = src.join("report.txt");
+    std::fs::write(&file, LARGE).unwrap();
+    std::os::unix::fs::symlink(&file, src.join("link.txt")).unwrap();
+    let out = real.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    for (what, path) in [
+        ("absolute", file.clone()),
+        ("relative", relative_to_cwd(&file)),
+        ("dot-dot", src.join("sub/../report.txt")),
+    ] {
+        let res = pipeline.run_path(&path, &written(&out));
+        assert_eq!(
+            res.completeness,
+            Completeness::Complete,
+            "{what}: {:?}",
+            res.message
+        );
+    }
+    // A symlink keeps its own name, so its `resource` differs. Its output names hold the
+    // output of the file itself, and the file was edited since: only the canonical path
+    // tells that it is the same source.
+    let link_out = real.join("link-out");
+    std::fs::create_dir_all(&link_out).unwrap();
+    for name in names_in(&out) {
+        let from = out.join(&name);
+        if from.is_file() {
+            let to = link_out.join(name.replacen("report.txt", "link.txt", 1));
+            std::fs::copy(&from, &to).unwrap();
+        }
+    }
+    std::fs::write(&file, OTHER_LARGE).unwrap();
+    let res = pipeline.run_path(&src.join("link.txt"), &written(&link_out));
+    assert_eq!(
+        res.completeness,
+        Completeness::Complete,
+        "{:?}",
+        res.message
+    );
+    std::fs::write(&file, LARGE).unwrap();
+    // A copy with the same content at another path, and the original moved away.
+    let copy = real.join("elsewhere");
+    std::fs::create_dir_all(&copy).unwrap();
+    std::fs::copy(&file, copy.join("report.txt")).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    let res = pipeline.run_path(&copy.join("report.txt"), &written(&out));
+    assert_eq!(
+        res.completeness,
+        Completeness::Complete,
+        "{:?}",
+        res.message
+    );
+    // Another `report.txt` with other content stops the run and names both.
+    let b = real.join("b");
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(b.join("report.txt"), OTHER_LARGE).unwrap();
+    let before = snapshot_files(&out);
+    let res = pipeline.run_path(&b.join("report.txt"), &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    let first = format!("\"{}\"", copy.join("report.txt").display());
+    let second = format!("\"{}\"", b.join("report.txt").display());
+    assert!(message.contains(&first), "{message}");
+    assert!(message.contains(&second), "{message}");
+    assert_eq!(snapshot_files(&out), before);
+}
+
 #[test]
 fn a_part_of_another_source_stops_the_run_and_is_never_removed() {
     let pipeline = chapters_pipeline(config(None));
     let other = tempfile::tempdir().unwrap();
-    let first = pipeline.run_bytes("Note.txt", LARGE.to_vec(), None, &written(other.path()));
+    let first = pipeline.run_bytes(
+        "Note.txt",
+        OTHER_LARGE.to_vec(),
+        None,
+        &written(other.path()),
+    );
     let part = first.parts[0].path.clone();
     let out = tempfile::tempdir().unwrap();
     let ours = pipeline.run_bytes("note.txt", LARGE.to_vec(), None, &written(out.path()));

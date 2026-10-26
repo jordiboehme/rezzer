@@ -406,10 +406,12 @@ impl Pipeline {
                 .path
                 .clone()
                 .unwrap_or_else(|| document.source.name.clone());
+            let sha256 = document.source.sha256.clone();
             // Writes the rendered files; the paths are checked first.
             let write = |(_, parts, main_markdown): &Rendered, json: Option<&str>| {
                 let files = files::Files {
                     source: &source,
+                    sha256: &sha256,
                     main,
                     folder,
                     main_markdown,
@@ -425,6 +427,7 @@ impl Pipeline {
             // before a picture is written (rulings P5-AB and P5-AG).
             let check = files::Files {
                 source: &source,
+                sha256: &sha256,
                 main,
                 folder,
                 main_markdown: "",
