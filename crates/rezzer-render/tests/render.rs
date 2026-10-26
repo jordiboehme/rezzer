@@ -1924,10 +1924,24 @@ fn render_inline(inline: Inline) -> String {
     body.trim().replace("# ", "").to_string()
 }
 
+/// Ruling P5-AD: a wikilink of the source is written as escaped text, never as a live
+/// wikilink (its target's output name is unknown, so it would be broken on every import).
+/// Crystalline reads `[[` also after a backslash, so every bracket is escaped.
 #[test]
-fn wikilinks_are_written_as_wikilinks() {
-    assert!(render_inline(wiki_link("graph-view", "graph-view")).ends_with("[[graph-view]]"));
-    assert!(render_inline(wiki_link("a#sec", "label")).ends_with("[[a#sec|label]]"));
+fn wikilinks_are_written_as_escaped_text() {
+    let out = render_inline(wiki_link("graph-view", "graph-view"));
+    assert!(out.ends_with(r"\[\[graph-view\]\]"), "{out}");
+    let out = render_inline(wiki_link("a#sec", "label"));
+    assert!(out.ends_with(r"\[\[a#sec\|label\]\]"), "{out}");
+    assert!(!out.contains("[["), "{out}");
+}
+
+#[test]
+fn a_wikilink_inside_code_stays_as_it_is() {
+    let out = render_inline(Inline::Code {
+        text: "[[graph-view]]".into(),
+    });
+    assert!(out.ends_with("`[[graph-view]]`"), "{out}");
 }
 
 #[test]
@@ -2005,7 +2019,7 @@ fn wikilinks_with_formatting_in_the_text_fall_back() {
 fn plain_wikilinks_in_any_script_are_written() {
     assert!(
         render_inline(wiki_link("Straße/日本語 note-1x.md#Sec, it's", "Straße"))
-            .ends_with("[[Straße/日本語 note-1x.md#Sec, it's|Straße]]")
+            .ends_with(r"\[\[Straße/日本語 note-1x.md#Sec, it's\|Straße\]\]")
     );
     assert!(!render_inline(wiki_link("http://x", "http://x")).contains("[["));
 }
@@ -2050,7 +2064,7 @@ fn underscores_keep_a_wikilink_from_being_written() {
 }
 
 #[test]
-fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
+fn wikilinks_in_table_cells_keep_the_cell() {
     let mut d = doc();
     d.body = vec![Block::Table {
         caption: None,
@@ -2065,10 +2079,11 @@ fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
         layout: None,
     }];
     let md = render(&d, Completeness::Complete, &opts());
-    assert!(!md.contains("[[x|y]]"), "{md}");
     let row = md.lines().find(|l| l.contains("same")).expect("row");
     assert_eq!(row.matches(" | ").count(), 1, "{row}");
-    assert!(row.contains("[[same]]"), "{row}");
+    assert!(row.contains(r"\[\[x\|y\]\]"), "{row}");
+    assert!(row.contains(r"\[\[same\]\]"), "{row}");
+    assert!(!md.contains("[["), "{md}");
 }
 
 #[test]

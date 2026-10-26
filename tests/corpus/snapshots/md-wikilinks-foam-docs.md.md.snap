@@ -39,7 +39,7 @@ Wikilinks are internal links that connect files in your knowledge base using `[[
 3. **Navigate** with `Ctrl+Click` (`Cmd+Click` on Mac) or `F12`
 4. **Create new notes** by clicking on non-existent wikilinks
 
-Example: [[graph-view]]
+Example: \[\[graph-view\]\]
 
 ## Placeholders
 
@@ -60,7 +60,7 @@ Examples:
 
 Link to a specific paragraph, list item, heading, or blockquote using `[[note-name#^blockid]]` syntax. Add a `^your-id` anchor at the end of any block element, then reference it from other notes.
 
-See [[block-anchors]] for full details.
+See \[\[block-anchors\]\] for full details.
 
 ## Directory Links
 
@@ -97,7 +97,7 @@ When the same filename exists in multiple locations, `[[todo]]` is ambiguous. Fo
 
 ## Markdown Compatibility
 
-Foam can automatically generate [[link-reference-definitions]] at the bottom of files to make wikilinks compatible with standard Markdown processors.
+Foam can automatically generate \[\[link-reference-definitions\]\] at the bottom of files to make wikilinks compatible with standard Markdown processors.
 
 ## Compatibility with Other Apps
 
@@ -114,9 +114,9 @@ Foam can automatically generate [[link-reference-definitions]] at the bottom of 
 
 ## Related
 
-- [[footnotes]] - Adding references and side notes
-- [[block-anchors]] - Linking to specific blocks within a note
-- [[templates]] - Creating new notes
+- \[\[footnotes\]\] - Adding references and side notes
+- \[\[block-anchors\]\] - Linking to specific blocks within a note
+- \[\[templates\]\] - Creating new notes
 
 ## Logic
 

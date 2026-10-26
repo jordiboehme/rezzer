@@ -2055,16 +2055,21 @@ fn model_table(
     out
 }
 
-/// Characters allowed in a wikilink written as `[[...]]`: letters and digits of any script,
-/// space and `- . / # ' ,` (no `_`: it can mean emphasis). Nothing here has a Markdown or HTML meaning inside `[[ ]]`.
+/// Characters allowed in a wikilink written as the text `[[...]]`: letters and digits of any
+/// script, space and `- . / # ' ,` (no `_`: it can mean emphasis). Nothing here has a Markdown
+/// or HTML meaning inside `[[ ]]`.
 fn wiki_plain(text: &str) -> bool {
     text.chars()
         .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '/' | '#' | '\'' | ','))
 }
 
-/// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None unless the
-/// target (without a `:`) and the text are plain (see [`wiki_plain`]) and the text has no
-/// formatting, image or code; the link is then written as a normal, escaped link.
+/// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, every
+/// bracket and `|` escaped (ruling P5-AD): Rezzer cannot know the name the target is written
+/// under, so a live wikilink would be broken on every import. Crystalline reads a wikilink
+/// wherever `[[` stands, also after a backslash, so each bracket is escaped. The link itself
+/// stays in the link facts. None unless the target (without a `:`) and the text are plain
+/// (see [`wiki_plain`]) and the text has no formatting, image or code; the link is then
+/// written as a normal, escaped link.
 fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
     let mut text = String::new();
     for inline in content {
@@ -2082,14 +2087,14 @@ fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
     if target.is_empty() || !wiki_plain(target) || !wiki_plain(&text) {
         return None;
     }
-    if text.is_empty() || text == target {
-        Some(format!("[[{target}]]"))
-    } else if mode == Mode::Cell {
-        // The `|` of `[[target|text]]` would split the table cell.
-        None
+    let spelled = if text.is_empty() || text == target {
+        format!("[[{target}]]")
     } else {
-        Some(format!("[[{target}|{text}]]"))
-    }
+        format!("[[{target}|{text}]]")
+    };
+    let mut out = String::new();
+    escape_text(&spelled, line_mode(mode), &mut out);
+    Some(out)
 }
 
 #[cfg(test)]
