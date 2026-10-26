@@ -47,12 +47,20 @@ struct TooLong {
 }
 
 /// The server side of a line transport over `read` and `write`. A line over `max` bytes is
-/// not read; it gets an error answer with the `id` of its request, or a null `id` when none
-/// is found.
+/// not read; it gets an error answer with the `id` of its request. When no `id` is found
+/// (a notification, or an `id` the scan cannot read) the answer has no `id`, as rmcp writes
+/// an error without one.
+///
+/// Memory: rmcp keeps the buffer of the longest line it has read for the rest of the
+/// connection, so after one line near `max` the server holds about `max` bytes. While such a
+/// message is read, the parsed `file` text and the decoded file come on top.
 pub struct LineTransport<R: AsyncRead + Unpin, W: AsyncWrite> {
     inner: AsyncRwTransport<RoleServer, Guard<R>, W>,
     too_long: mpsc::UnboundedReceiver<TooLong>,
     max: usize,
+    /// The send of the last error answer. Each answer runs as its own task after the one
+    /// before, so rmcp dropping a `receive` future never drops or reorders an answer.
+    answering: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl<R, W> LineTransport<R, W>
@@ -61,17 +69,7 @@ where
     W: AsyncWrite + Send + Unpin + 'static,
 {
     pub fn new(read: R, write: W, max: usize) -> Self {
-        let (tx, too_long) = mpsc::unbounded_channel();
-        let guard = Guard {
-            inner: read,
-            chunk: vec![0; CHUNK].into_boxed_slice(),
-            pos: 0,
-            filled: 0,
-            line: 0,
-            max,
-            scan: IdScan::default(),
-            too_long: tx,
-        };
+        let (guard, too_long) = Guard::new(read, max);
         // The guard passes at most `max` bytes of a line and its line end, so rmcp drops
         // every line the guard reports, and reads every other line.
         let inner = AsyncRwTransport::new_server(guard, write).with_max_line_length(max);
@@ -79,6 +77,7 @@ where
             inner,
             too_long,
             max,
+            answering: None,
         }
     }
 }
@@ -101,22 +100,48 @@ where
         loop {
             tokio::select! {
                 biased;
-                Some(line) = self.too_long.recv() => {
-                    let answer = ServerJsonRpcMessage::error(
-                        ErrorData::invalid_request(too_long_message(self.max), None),
-                        line.id,
-                    );
-                    if self.inner.send(answer).await.is_err() {
-                        return None;
+                Some(line) = self.too_long.recv() => self.answer(line),
+                message = self.inner.receive() => {
+                    if message.is_none() {
+                        // The input ended: lines reported just before the end still get
+                        // their answer.
+                        while let Ok(line) = self.too_long.try_recv() {
+                            self.answer(line);
+                        }
                     }
+                    return message;
                 }
-                message = self.inner.receive() => return message,
             }
         }
     }
 
     async fn close(&mut self) -> Result<(), Self::Error> {
         self.inner.close().await
+    }
+}
+
+impl<R, W> LineTransport<R, W>
+where
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    /// Sends the error answer for a line that was too long. The send runs as its own task,
+    /// after the one before: rmcp drops a `receive` future when another branch of its loop
+    /// is ready first, and an answer sent inside it would go with it.
+    fn answer(&mut self, line: TooLong) {
+        let answer = ServerJsonRpcMessage::error(
+            ErrorData::invalid_request(too_long_message(self.max), None),
+            line.id,
+        );
+        let send = self.inner.send(answer);
+        let before = self.answering.take();
+        self.answering = Some(tokio::spawn(async move {
+            if let Some(before) = before {
+                let _ = before.await;
+            }
+            // An error here means the connection is closed; nobody waits for the answer then.
+            let _ = send.await;
+        }));
     }
 }
 
@@ -140,6 +165,23 @@ struct Guard<R> {
     max: usize,
     scan: IdScan,
     too_long: mpsc::UnboundedSender<TooLong>,
+}
+
+impl<R> Guard<R> {
+    fn new(inner: R, max: usize) -> (Self, mpsc::UnboundedReceiver<TooLong>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let guard = Guard {
+            inner,
+            chunk: vec![0; CHUNK].into_boxed_slice(),
+            pos: 0,
+            filled: 0,
+            line: 0,
+            max,
+            scan: IdScan::default(),
+            too_long: tx,
+        };
+        (guard, rx)
+    }
 }
 
 impl<R: AsyncRead + Unpin> AsyncRead for Guard<R> {
@@ -299,7 +341,228 @@ impl IdScan {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+
+    use rmcp::model::JsonRpcMessage;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
     use super::*;
+
+    /// A reader that gives at most `step` bytes per read.
+    struct Trickle {
+        data: Vec<u8>,
+        pos: usize,
+        step: usize,
+    }
+
+    impl AsyncRead for Trickle {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            out: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let this = self.get_mut();
+            let n = this
+                .step
+                .min(out.remaining())
+                .min(this.data.len() - this.pos);
+            out.put_slice(&this.data[this.pos..this.pos + n]);
+            this.pos += n;
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// What the guard must give for `input`: every line as it is, but cut after `max` bytes
+    /// with its line end kept, and a report for each line whose length with the line end is
+    /// over `max`, as rmcp counts it.
+    fn expected(input: &[u8], max: usize) -> (Vec<u8>, usize) {
+        let mut out = Vec::new();
+        let mut reports = 0;
+        for line in input.split_inclusive(|&b| b == b'\n') {
+            let (content, end) = match line.strip_suffix(b"\n") {
+                Some(c) => (c, true),
+                None => (line, false),
+            };
+            out.extend_from_slice(&content[..content.len().min(max)]);
+            if end {
+                out.push(b'\n');
+                if line.len() > max {
+                    reports += 1;
+                }
+            }
+        }
+        (out, reports)
+    }
+
+    /// The guard's output for `input`, read `step` bytes at a time from the source into a
+    /// buffer of `room` bytes, and the ids it reported.
+    async fn guarded(
+        input: &[u8],
+        max: usize,
+        step: usize,
+        room: usize,
+    ) -> (Vec<u8>, Vec<Option<RequestId>>) {
+        let source = Trickle {
+            data: input.to_vec(),
+            pos: 0,
+            step,
+        };
+        let (mut guard, mut rx) = Guard::new(source, max);
+        let mut out = Vec::new();
+        let mut buf = vec![0; room];
+        loop {
+            let n = guard.read(&mut buf).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+        }
+        let mut ids = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            ids.push(line.id);
+        }
+        (out, ids)
+    }
+
+    #[tokio::test]
+    async fn the_guard_cuts_lines_as_rmcp_counts_them() {
+        let max = 16;
+        let mut input = Vec::new();
+        for len in [max - 2, max - 1, max, max + 1, 40, 0, 3] {
+            input.extend(std::iter::repeat_n(b'x', len));
+            input.push(b'\n');
+        }
+        // CRLF: the carriage return counts, as in rmcp.
+        input.extend_from_slice(&[b'y'; 14]);
+        input.extend_from_slice(b"\r\n");
+        input.extend_from_slice(&[b'y'; 15]);
+        input.extend_from_slice(b"\r\n");
+        // A last line without a line end is passed, cut, and not reported.
+        input.extend_from_slice(&[b'z'; 30]);
+        let (want, reports) = expected(&input, max);
+        assert_eq!(reports, 4);
+        for step in [1, 2, 7, 16, 17, CHUNK] {
+            for room in [1, 2, 5, 15, 16, 17, 8192] {
+                let (out, ids) = guarded(&input, max, step, room).await;
+                assert_eq!(out, want, "step {step}, room {room}");
+                assert_eq!(ids.len(), reports, "step {step}, room {room}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_line_end_on_a_full_buffer_waits_for_the_next_read() {
+        // The content fills the buffer exactly; the line end comes with the next read.
+        let input = b"abcd\nefgh\n";
+        let (out, ids) = guarded(input, 8, CHUNK, 4).await;
+        assert_eq!(out, input);
+        assert!(ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_id_after_the_cut_is_found() {
+        let mut line =
+            br#"{"jsonrpc":"2.0","method":"tools/call","params":{"id":1,"file":""#.to_vec();
+        line.extend(std::iter::repeat_n(b'a', 500));
+        line.extend_from_slice(br#""},"id":"late"}"#);
+        line.push(b'\n');
+        let (out, ids) = guarded(&line, 64, 3, 10).await;
+        assert_eq!(out.len(), 65);
+        assert_eq!(ids, [Some(RequestId::String("late".into()))]);
+    }
+
+    /// A ping request with `id`, padded with spaces to `len` bytes without its line end.
+    fn ping(id: u32, len: usize) -> Vec<u8> {
+        let head = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping""#);
+        let mut line = head.into_bytes();
+        assert!(line.len() < len);
+        line.resize(len - 1, b' ');
+        line.push(b'}');
+        line
+    }
+
+    /// The ids of the error answers written to `out`, read until `n` came.
+    async fn answers<R: AsyncRead + Unpin>(out: R, n: usize) -> BTreeSet<u64> {
+        let mut lines = BufReader::new(out).lines();
+        let mut ids = BTreeSet::new();
+        while ids.len() < n {
+            let line = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
+                .await
+                .expect("an answer in time")
+                .unwrap()
+                .expect("a line");
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(v["error"]["code"], -32600, "{line}");
+            ids.insert(v["id"].as_u64().expect("an id"));
+        }
+        ids
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn every_line_gets_exactly_one_answer_at_the_bound() {
+        let max = 64;
+        let mut input = Vec::new();
+        let mut add = |id: u32, len: usize, crlf: bool| {
+            input.extend(ping(id, len));
+            input.extend_from_slice(if crlf { b"\r\n" } else { b"\n" });
+        };
+        add(1, max - 2, false); // max - 1 bytes with the line end
+        add(2, max - 1, false); // max
+        add(3, max, false); // max + 1
+        add(4, 200, false);
+        add(5, 40, false); // right after a line that was too long
+        add(6, max - 2, true); // max with CRLF
+        add(7, max - 1, true); // max + 1 with CRLF
+        for step in [1, CHUNK] {
+            let (server, client) = tokio::io::duplex(1 << 16);
+            let (read, write) = tokio::io::split(server);
+            let source = Trickle {
+                data: input.clone(),
+                pos: 0,
+                step,
+            };
+            drop(read);
+            let mut transport = LineTransport::new(source, write, max);
+            let mut read_ids = BTreeSet::new();
+            while let Some(message) = transport.receive().await {
+                let JsonRpcMessage::Request(request) = message else {
+                    panic!("a request");
+                };
+                let RequestId::Number(id) = request.id else {
+                    panic!("a number id");
+                };
+                read_ids.insert(id as u64);
+            }
+            assert_eq!(read_ids, BTreeSet::from([1, 2, 5, 6]), "step {step}");
+            let (client_read, _client_write) = tokio::io::split(client);
+            assert_eq!(
+                answers(client_read, 3).await,
+                BTreeSet::from([3, 4, 7]),
+                "step {step}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dropped_receive_keeps_the_answer() {
+        // The answer cannot be written while the client does not read: the pipe holds 8 bytes.
+        let (server, client) = tokio::io::duplex(8);
+        let (read, write) = tokio::io::split(server);
+        let (client_read, mut client_write) = tokio::io::split(client);
+        let mut transport = LineTransport::new(read, write, 64);
+        let mut line = ping(9, 100);
+        line.push(b'\n');
+        let writer = tokio::spawn(async move {
+            client_write.write_all(&line).await.unwrap();
+            client_write
+        });
+        // rmcp drops the receive future when another branch of its loop is ready first.
+        let dropped = tokio::time::timeout(Duration::from_millis(300), transport.receive()).await;
+        assert!(dropped.is_err(), "no message is read");
+        let _client_write = writer.await.unwrap();
+        assert_eq!(answers(client_read, 1).await, BTreeSet::from([9]));
+    }
 
     fn id_of(text: &str) -> Option<RequestId> {
         let mut scan = IdScan::default();
