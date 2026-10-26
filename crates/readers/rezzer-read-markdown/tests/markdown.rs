@@ -1183,3 +1183,44 @@ fn list_item_with_a_reference_and_a_tab_reads() {
         out.document.losses
     );
 }
+
+#[test]
+fn empty_block_scalar_reads_as_empty_text() {
+    // As the last key the block ends where the frontmatter ends; the YAML spec makes an
+    // empty block scalar an empty string, with or without a key after it.
+    let out = read("---\ntitle: Note\nnext: |\nafter: x\nsummary: |\n---\n\nBody\n");
+    let p = &out.document.properties;
+    assert_eq!(p.custom["summary"], text(""));
+    assert_eq!(p.custom["next"], text(""));
+    assert_eq!(p.custom["after"], text("x"));
+    let out = read("---\nsummary: >-\n---\n");
+    assert_eq!(out.document.properties.custom["summary"], text(""));
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn byte_order_mark_inside_frontmatter_is_a_loss() {
+    // A byte order mark at the start of a file is not text, but inside a YAML document it
+    // is an error. The frontmatter is then not read and the loss says why.
+    let out = read("---\ntitle: Note\n\u{feff}author: Jordi\n---\n\nBody\n");
+    let loss = out
+        .document
+        .losses
+        .iter()
+        .find(|l| l.location == "frontmatter")
+        .unwrap_or_else(|| panic!("{:?}", out.document.losses));
+    assert_eq!(loss.why, LossReason::Damaged);
+    assert!(loss.what.contains("byte order mark"), "{}", loss.what);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert!(
+        matches!(&out.document.body[0], Block::Code { lang: Some(l), text, .. }
+        if l == "yaml" && text.contains("author: Jordi"))
+    );
+    // At the start of the file it is skipped and the frontmatter is read.
+    let out = read("\u{feff}---\ntitle: Note\n---\n\nBody\n");
+    assert_eq!(out.document.properties.title.as_deref(), Some("Note"));
+    assert_eq!(out.completeness, Completeness::Complete);
+    // Inside a quoted value it is text.
+    let out = read("---\ntitle: \"a\u{feff}b\"\n---\n");
+    assert_eq!(out.document.properties.title.as_deref(), Some("a\u{feff}b"));
+}
