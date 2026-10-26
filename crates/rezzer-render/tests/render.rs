@@ -6411,6 +6411,20 @@ fn form_and_signed_kind_words() {
         fm_line(&md, "tags"),
         Some("[\"rezzer\", \"pdf\", \"form\"]")
     );
+    // Nor when the reader could not say whether the file is signed.
+    d.properties.facts.signed = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\"]")
+    );
+    // A signing signature in the list then signs it.
+    d.facets.signatures[0].kind = "field".into();
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\", \"signed\"]")
+    );
 }
 
 #[test]
@@ -6767,4 +6781,43 @@ fn long_body_unchanged() {
     let md = render(&d, Completeness::Complete, &opts());
     assert_eq!(after_frontmatter(&md), "\n# report.md\n\nOne.\n\nTwo.\n");
     assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn part_heading_equal_to_its_title_is_written_once() {
+    let mut d = doc();
+    d.properties.title = Some("Big Report".into());
+    d.body = vec![
+        Block::Heading {
+            level: 1,
+            inlines: vec![txt("Big Report: Results")],
+            anchor: None,
+        },
+        para("One."),
+        para("Two."),
+    ];
+    let mut o = opts();
+    o.part = Some(rezzer_render::PartMeta {
+        index: 2,
+        count: 3,
+        location: "Results".into(),
+        title: "Big Report: Results".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(md.matches("Big Report: Results\n").count(), 1, "{md}");
+    assert!(
+        after_frontmatter(&md).starts_with("\n# Big Report: Results\n\nOne.\n"),
+        "{md}"
+    );
+    // A part that opens with the document's own heading keeps it, one level down.
+    d.body[0] = Block::Heading {
+        level: 1,
+        inlines: vec![txt("Big Report")],
+        anchor: None,
+    };
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(
+        after_frontmatter(&md).starts_with("\n# Big Report: Results\n\n## Big Report\n"),
+        "{md}"
+    );
 }

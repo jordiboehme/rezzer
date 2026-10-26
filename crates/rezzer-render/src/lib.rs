@@ -319,7 +319,7 @@ fn column_numbers(doc: &Document) -> bool {
 pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let want = |s: OutputSection| opts.sections.as_ref().is_none_or(|l| l.contains(&s));
     let mut out = frontmatter::render(doc, completeness, opts);
-    let title = frontmatter::title(doc).trim();
+    // A part has its own title; a leading heading equal to it is the title line.
     let shown = frontmatter::shown_title(doc, opts).trim();
     // The heading that became the title keeps its links.
     let title_line = match doc.body.first() {
@@ -345,7 +345,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     }
     let notes = Notes::new(&doc.facets.annotations);
     if want(OutputSection::Content) {
-        parts.push(content(doc, title, &notes, opts.table_style, selection));
+        parts.push(content(doc, shown, &notes, opts.table_style, selection));
     }
     if want(OutputSection::Logic) {
         parts.extend(facets::logic(doc, opts.math, selection));

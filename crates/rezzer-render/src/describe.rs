@@ -74,7 +74,12 @@ pub(crate) fn kind_words(doc: &Document) -> Vec<&'static str> {
     }
     let signed = match facts.signed {
         Some(signed) => signed,
-        None => !doc.facets.signatures.is_empty(),
+        // The reader could not say: a signature in the list that is not a usage rights one.
+        None => doc
+            .facets
+            .signatures
+            .iter()
+            .any(|s| s.kind != "usage-rights"),
     };
     if signed {
         out.push("signed");
