@@ -114,8 +114,6 @@ pub(super) fn ruled(
     // Runs a grid took, and for each the table and the row and cell it goes to.
     let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
     let mut tables: Vec<Planned> = Vec::new();
-    // A column of totals beside the sections: its totals are pairs, taken first; its other
-    // strips join the section beside them, below.
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
     let mut taken = vec![false; hs.len()];
@@ -124,6 +122,8 @@ pub(super) fn ruled(
             taken[j] = true;
         }
     }
+    // A column of totals beside the sections: its totals are pairs, taken first; its other
+    // strips join the section beside them, below.
     let sides = {
         let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
         let beside: Vec<Beside<'_>> = edged
@@ -810,8 +810,8 @@ pub(super) fn ruled(
 
 /// Where the own top rule of a section at height `top` starts, when it starts right of the
 /// section's left edge `left` and a rule of another block at that height (among the page's
-/// `hs`, sorted by height) covers most of the stretch from `left` up to it; else `left`. `h` are the
-/// section's own horizontal segments.
+/// `hs`, sorted by height) covers most of the stretch from `left` up to it; else `left`.
+/// `h` are the section's own horizontal segments.
 fn own_left(h: &[Seg], hs: &[Seg], top: f32, left: f32) -> f32 {
     let Some(from) = h
         .iter()

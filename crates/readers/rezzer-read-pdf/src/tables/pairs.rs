@@ -434,17 +434,13 @@ pub(crate) fn box_pairs(
             xs[xs.len() - 1],
             c.iter().map(|&b| boxes[b][3]).fold(f32::MIN, f32::max),
         ];
-        let hs = hs.get_or_insert_with(|| grids(rules).map(|g| g.hs).unwrap_or_default());
-        if heads_lines(flow, hs, b, &xs) {
-            for &k in &c {
-                used[k] = true;
-            }
-            continue;
-        }
         for &k in &c {
             used[k] = true;
         }
-        groups.push(c);
+        let hs = hs.get_or_insert_with(|| grids(rules).map(|g| g.hs).unwrap_or_default());
+        if !heads_lines(flow, hs, b, &xs) {
+            groups.push(c);
+        }
     }
     let mut rest: Vec<usize> = order.into_iter().filter(|&b| !used[b]).collect();
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
@@ -457,12 +453,11 @@ pub(crate) fn box_pairs(
     }
     // A box that is no field beside the boxes of fields says why.
     let paired: Vec<usize> = groups.iter().flatten().copied().collect();
-    let mut reasons: Vec<&str> = unsure
+    let reasons: Vec<&str> = unsure
         .iter()
         .filter(|(b, _)| paired.iter().any(|&p| near(boxes[*b], boxes[p])))
         .map(|(_, why)| *why)
         .collect();
-    reasons.sort_unstable();
     let mut said: Vec<String> = Vec::new();
     for why in [THREE_STYLES, LABEL_BELOW] {
         let n = reasons.iter().filter(|w| **w == why).count();
