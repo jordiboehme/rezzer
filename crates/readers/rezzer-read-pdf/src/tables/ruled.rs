@@ -570,6 +570,12 @@ pub(super) fn ruled(
             caption: Vec::new(),
         });
     }
+    if title_work > TITLE_WORK {
+        found.skipped.push(format!(
+            "titles over ruled grids on page {page} are looked for only in part: the page has \
+             too many column lines"
+        ));
+    }
     // Regions without rules never run across a band.
     found.cuts = bands.iter().flat_map(|b| [b.b[1], b.b[3]]).collect();
     found.cuts.sort_by(f32::total_cmp);
@@ -737,6 +743,31 @@ fn title_over(
     }
 }
 
+/// Whether a column rule of `vs` (sorted by place) strictly between `left` and `right`
+/// crosses the heights `lo..hi`. Each rule looked at is counted in `work`; past
+/// [`TITLE_WORK`] the answer is yes, so no title is taken without the look.
+fn column_across(
+    vs: &[Seg],
+    (left, right): (f32, f32),
+    (lo, hi): (f32, f32),
+    work: &mut usize,
+) -> bool {
+    let first = vs.partition_point(|s| s.at <= left);
+    for s in &vs[first..] {
+        *work += 1;
+        if *work > TITLE_WORK {
+            return true;
+        }
+        if s.at >= right {
+            break;
+        }
+        if s.from < hi && s.to > lo {
+            return true;
+        }
+    }
+    false
+}
+
 /// What the title search of a section looks at and marks.
 struct TitlePlace<'a> {
     flow: &'a Flow,
@@ -780,23 +811,8 @@ impl TitlePlace<'_> {
     fn over_grid(&mut self, vs: &[Seg], top: f32) -> Vec<usize> {
         let runs = self.free(top, top + 2.0 * MAX_CAPTION_SIZE);
         let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
-        let lo = vs.partition_point(|s| s.at <= left);
         let work = &mut *self.work;
-        let mut crossed = |a: f32, b: f32| {
-            for s in &vs[lo..] {
-                *work += 1;
-                if *work > TITLE_WORK {
-                    return true;
-                }
-                if s.at >= right {
-                    break;
-                }
-                if s.from < b && s.to > a {
-                    return true;
-                }
-            }
-            false
-        };
+        let mut crossed = |a: f32, b: f32| column_across(vs, (left, right), (a, b), work);
         let title = title_over(self.flow, &runs, top, f32::MAX, &mut crossed);
         self.take(&title);
         title
@@ -1202,6 +1218,19 @@ mod tests {
 
     fn seg(at: f32, from: f32, to: f32) -> Seg {
         Seg { at, from, to }
+    }
+
+    #[test]
+    fn column_rules_across_a_title_are_looked_for_within_a_budget() {
+        let vs = [seg(100.0, 0.0, 50.0), seg(200.0, 60.0, 90.0)];
+        let mut work = 0;
+        assert!(column_across(&vs, (50.0, 300.0), (10.0, 20.0), &mut work));
+        assert!(!column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+        assert!(!column_across(&vs, (150.0, 300.0), (10.0, 20.0), &mut work));
+        // Out of steps: the answer is yes, so no line is taken as a title.
+        let mut work = TITLE_WORK;
+        assert!(column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+        assert!(work > TITLE_WORK);
     }
 
     #[test]

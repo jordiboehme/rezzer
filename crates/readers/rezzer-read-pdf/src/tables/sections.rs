@@ -392,6 +392,10 @@ mod tests {
         });
         page.sort_by(|a, b| a.at.total_cmp(&b.at));
         assert_eq!(sections(&h, &v, &page, &mut 0).len(), 2);
+        // With the page's budget for such rules spent, the rule with gaps no longer cuts.
+        let mut work = CUT_WORK;
+        assert_eq!(sections(&h, &v, &page, &mut work).len(), 1);
+        assert!(work > CUT_WORK);
     }
 
     #[test]

@@ -1114,26 +1114,40 @@ impl Built {
         } else {
             self.pending = Pending::Block;
             let refs: Vec<&Run> = title.iter().collect();
+            // The title's mark stays: a stop before the title is pushed or the table is
+            // kept gives its link counts back with the table's.
             let built = self.inlines(&refs, cx);
-            self.mark = None;
             if built.is_none() {
                 return;
             }
             built
         };
-        // A title that does not go with a table stands before its text as a paragraph.
+        // A title is the table's caption when a table is built and the title is plain text;
+        // otherwise it is a paragraph with role `caption` right before what it titles.
         let title_paragraph = |built: &mut Self, title: Option<Vec<Inline>>| {
             if let Some(inlines) = title {
                 built.pending = Pending::Block;
                 built.push(
                     Block::Paragraph {
                         inlines,
-                        role: None,
+                        role: Some("caption".into()),
                         anchor: None,
                     },
                     cx,
                 );
             }
+        };
+        // A title with a link goes first, before the table is set aside, as a caption is
+        // plain text.
+        let title = match title {
+            Some(t) if t.iter().any(|i| matches!(i, Inline::Link { .. })) => {
+                title_paragraph(self, Some(t));
+                if self.stop.is_some() {
+                    return;
+                }
+                None
+            }
+            other => other,
         };
         // What the table's cells and rows cost beyond their text is set aside at once. When it
         // does not fit, the table's text is laid out as paragraphs: the overhead of a table
@@ -1143,7 +1157,7 @@ impl Built {
             + ROW_COST * plan.rows.len() as u64
             + CELL_COST * cells as u64;
         if !plan.rows.is_empty() {
-            let mark = cx.links.mark();
+            let mark = self.mark.take().unwrap_or_else(|| cx.links.mark());
             if cx.links.take_bytes(overhead).is_err() {
                 cx.links.restore(mark);
                 let rows = std::mem::take(&mut plan.rows);
@@ -1217,28 +1231,9 @@ impl Built {
             }
             None => {
                 self.tagged.push(plan.tagged);
-                // A title with a link stands as a caption paragraph before the table, as a
-                // caption is plain text; any other title is the caption.
-                let linked = title
-                    .as_ref()
-                    .is_some_and(|t| t.iter().any(|i| matches!(i, Inline::Link { .. })));
-                let caption = if linked {
-                    if let Some(inlines) = title {
-                        self.push(
-                            Block::Paragraph {
-                                inlines,
-                                role: Some("caption".into()),
-                                anchor: None,
-                            },
-                            cx,
-                        );
-                    }
-                    None
-                } else {
-                    title
-                        .map(|t| rezzer_model::plain_text(&t).trim().to_string())
-                        .filter(|t| !t.is_empty())
-                };
+                let caption = title
+                    .map(|t| rezzer_model::plain_text(&t).trim().to_string())
+                    .filter(|t| !t.is_empty());
                 self.blocks.push(Block::Table {
                     caption,
                     header_rows: plan.header_rows.min(rows.len()),
@@ -2522,7 +2517,10 @@ mod tests {
         let k = kinds(&blocks);
         assert_eq!(
             k[0],
-            ("paragraph None".to_string(), "Muster Titel".to_string())
+            (
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )
         );
         assert!(k[1..].iter().any(|(_, t)| t == "cell"), "{k:?}");
         assert!(
@@ -2536,7 +2534,10 @@ mod tests {
         let blocks = titled_table(0, false, 10_000);
         assert_eq!(
             kinds(&blocks),
-            [("paragraph None".to_string(), "Muster Titel".to_string())]
+            [(
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )]
         );
     }
 
