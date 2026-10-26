@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
-use super::pairs::{field_cuts, field_strips, frames};
+use super::pairs::{field_cuts, field_strips, frames, taken_by_grids};
 use super::sections::{CUT_WORK, sections};
 use super::side::{
     Beside, SIDE_FOUND_BY, SIDE_GAP, SIDE_WORK, Side, StripKind, side_columns, totals_table,
@@ -104,12 +104,7 @@ pub(super) fn ruled(
     });
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
-    let mut taken = vec![false; hs.len()];
-    for (gh, _) in &groups {
-        for &j in gh {
-            taken[j] = true;
-        }
-    }
+    let taken = taken_by_grids(hs.len(), &groups);
     // The dividers of strips of fields cut the runs across them too, at a word gap.
     let frames = frames(&hs, &taken, &vs);
     if frames.is_none() {

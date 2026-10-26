@@ -601,6 +601,105 @@ fn title_over_a_bar_heads_its_lines() {
     assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
 }
 
+/// A row of fields like F1 (labels over a value line, dividers hanging from the upper rule
+/// at data columns 13, 43, 47 and 51) whose rate field (columns 43 to 47) holds `digits`
+/// from column 43, a drawn mark after its first two digits, and `next` (column, text) on the
+/// value line after it; with `frame` false only the divider at column 47 is drawn and no
+/// rule over or under the row. Two amounts elsewhere set the page's style of amounts.
+fn mark_row(digits: &str, next: Option<(usize, &str)>, frame: bool) -> Built {
+    let g = REAL;
+    let mut b = Built {
+        page: FormPage {
+            left: 42.52,
+            size: g.data,
+            bold_data: true,
+            ..FormPage::default()
+        },
+        values: Vec::new(),
+        fields: Vec::new(),
+    };
+    let top = 760.0;
+    if frame {
+        b.page.template += &bar_h(g.col(0) - 0.12, g.col(61), top, g.rule);
+        b.page.template += &bar_h(g.col(0) - 0.12, g.col(61), top - 2.4 * g.data, g.rule);
+    }
+    for k in [13, 43, 47, 51] {
+        if frame || k == 47 {
+            b.page.template += &bar_v(g.col(k) - 0.06, top - 1.21 * g.data, top, g.rule);
+        }
+    }
+    let base = top - 0.86 * g.data;
+    for (k, l) in [
+        (0, "Feld A"),
+        (13, "Feld B"),
+        (43, "Satz"),
+        (47, "Gr C"),
+        (51, "Gr D"),
+    ] {
+        b.page.template += &label(g.col(k) + 0.18 * g.label, base, g.label, l);
+    }
+    let y = top - 2.23 * g.data;
+    let mut parts = vec![(0, "12345678X012"), (13, "Muster Kasse"), (43, digits)];
+    parts.extend(next);
+    parts.push((51, "8901"));
+    g.values(&mut b, y, &parts);
+    b.page.template += &mark_b(
+        g.col(43) + 2.0 * g.pitch(),
+        y - 0.087 * g.data,
+        0.2 * g.data,
+    );
+    for (k, l) in ["Summe 9.876,54", "Netto 1.234,56"].iter().enumerate() {
+        g.values(&mut b, 120.0 - 1.2 * g.data * k as f32, &[(0, l)]);
+    }
+    b
+}
+
+/// The text of a read and the losses that keep a number without its separators.
+fn kept_whole(b: &Built) -> (String, Vec<String>) {
+    let out = read(&print_form(std::slice::from_ref(&b.page), "", ""));
+    let kept = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("is kept without"))
+        .map(|l| l.what.clone())
+        .collect();
+    (all_text(&out), kept)
+}
+
+/// A number under a vertical rule that divides no row of fields (no rule over or under the
+/// row) is never cut at it: it stays whole, with the loss that its separator is not read.
+#[test]
+fn a_number_under_a_lone_rule_stays_whole() {
+    let (text, kept) = kept_whole(&mark_row("123456", None, false));
+    assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
+    assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
+/// A number that reads as a whole number in groups of three (a thousands value, or a value of
+/// three decimals) is never cut at a divider, even when the part before it would read as an
+/// amount: it stays whole with its loss.
+#[test]
+fn a_number_in_groups_of_three_stays_whole_at_a_divider() {
+    for digits in ["12500", "12345"] {
+        let (text, kept) = kept_whole(&mark_row(digits, None, true));
+        assert!(text.contains(digits), "{digits}: {text}");
+        assert!(
+            kept.iter().any(|w| w.contains(digits)),
+            "{digits}: {kept:?}"
+        );
+    }
+}
+
+/// A number is cut at a divider only when the part after it is the whole value of the next
+/// field: with another value in that field it stays whole with its loss.
+#[test]
+fn a_number_is_not_cut_into_a_field_with_a_value() {
+    let (text, kept) = kept_whole(&mark_row("123456", Some((50, "7")), true));
+    assert!(text.contains("123456") && !text.contains("12,34"), "{text}");
+    assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
+}
+
 /// Where a text stands in its field.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Align {

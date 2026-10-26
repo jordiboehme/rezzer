@@ -669,30 +669,44 @@ pub(crate) fn insert(
     whole
 }
 
-/// A divider stands over a line of digits when its foot lies between these many font sizes
+/// A divider stands over a line of digits when its foot lies at least this many font sizes
 /// over the baseline: over the digits (a digit is at most about three quarters of the size
 /// high, so the sides of boxes drawn around each digit, which reach under the baseline, are
-/// no dividers) and in the row of the line (it hangs from the rule above it).
+/// no dividers).
 const DIVIDER_FOOT: f32 = 0.75;
-const DIVIDER_OVER: f32 = 3.0;
 
-/// Puts a word space at a field divider inside a number whose drawn separators read as no
-/// number (see [`kinds`]) when the digits before the divider read as one with them: a value
-/// that fills its field and touches the next field's value, its separator drawn as a mark. A
-/// divider is a vertical rule of `rules` between the middles of two neighbouring digits of
-/// one baseline, hanging over the line (see [`DIVIDER_FOOT`]). Only the first such divider of a
-/// number cuts, and only with that evidence: a number without a drawn separator, or one that
-/// reads whole, is never cut. Runs only in the direction of the page's text.
+/// The width of a character of a data font, as a share of its size: how near a value starts
+/// to its field's edge.
+const CHAR: f32 = 0.6;
+
+/// Glyphs the search for divided numbers may look at on one page; past them no more number is
+/// cut.
+const CUT_WORK: usize = 1_000_000;
+
+/// Puts a word space at a divider of a row of fields inside a number whose drawn separators
+/// read as no number (see [`kinds`]): a value that fills its field and touches the value of
+/// the next field, its separator drawn as a mark. Each piece of evidence is needed, else the
+/// number stays whole and its separators unread:
+/// - the divider is one of a frame of fields between rules (see
+///   [`crate::tables::field_frames`]) the number stands in, hanging from the frame's top over
+///   the digits (see [`DIVIDER_FOOT`]), between the middles of two neighbouring digits;
+/// - the frame holds smaller text over the number (its labels);
+/// - the digits before the divider, with their separators, read as a number, and the whole
+///   does not read as a whole number in groups of three (a thousands value, or a value of three
+///   decimals, which only lacks its kind);
+/// - the number starts at its field's start, the digits after the divider start within a
+///   character of it, and nothing else stands in the next field on the number's line.
+///
+/// Only the first divider of a number cuts. Runs only in the direction of the page's text.
 pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[Rule]) {
-    let mut dividers: Vec<(f32, f32, f32)> = rules
-        .iter()
-        .filter(|r| r.kind == RuleKind::Line && (r.x0 - r.x1).abs() <= 0.5)
-        .map(|r| ((r.x0 + r.x1) / 2.0, r.y0.min(r.y1), r.y0.max(r.y1)))
-        .collect();
-    if dividers.is_empty() || !text.contains(SEP) {
+    let upright = |r: &Rule| r.kind == RuleKind::Line && (r.x1 - r.x0).abs() < (r.y1 - r.y0).abs();
+    if !text.contains(SEP) || !rules.iter().any(upright) {
         return;
     }
-    dividers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let frames = crate::tables::field_frames(rules);
+    if frames.iter().all(|f| f.dividers.is_empty()) {
+        return;
+    }
     let bytes = text.as_bytes();
     let char_at = |g: &Gl| text[g.start as usize..].chars().next();
     let digit = |g: &Gl| {
@@ -703,6 +717,32 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
     };
     let placeholder = |g: &Gl| char_at(g) == Some(SEP);
     let flat = |g: &Gl| !g.vertical && g.dx > 0.99 && g.dy.abs() < 0.01;
+    let ink = |g: &Gl| {
+        !g.invisible
+            && g.layer.is_none()
+            && !placeholder(g)
+            && char_at(g).is_some_and(|c| !c.is_whitespace())
+    };
+    // The glyphs with ink by baseline, to look at a line or a band of the page.
+    let mut by_y: Vec<usize> = (0..glyphs.len()).filter(|&k| ink(&glyphs[k])).collect();
+    by_y.sort_by(|&a, &b| glyphs[a].y.total_cmp(&glyphs[b].y));
+    let work = std::cell::Cell::new(0usize);
+    // Whether a glyph of `by_y` with a baseline in `lo..hi` passes `test`; looked at glyphs
+    // count as work.
+    let any = |lo: f32, hi: f32, test: &dyn Fn(&Gl, usize) -> bool| {
+        let from = by_y.partition_point(|&k| glyphs[k].y < lo);
+        for &k in &by_y[from..] {
+            let g = &glyphs[k];
+            if g.y > hi {
+                break;
+            }
+            work.set(work.get() + 1);
+            if work.get() > CUT_WORK || test(g, k) {
+                return true;
+            }
+        }
+        false
+    };
     // After which glyph a space goes, and where.
     let mut spaces: Vec<(usize, f32)> = Vec::new();
     let mut i = 0;
@@ -737,13 +777,24 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
                 *lens.last_mut().expect("a group") += 1;
             }
         }
-        if lens.len() < 2 || kinds(&lens).is_some() {
+        let thousands =
+            (1..=3).contains(&lens[0]) && lens.len() >= 2 && lens[1..].iter().all(|&n| n == 3);
+        if lens.len() < 2 || kinds(&lens).is_some() || thousands {
             continue;
         }
+        let (head, tail) = (&glyphs[number.start], &glyphs[number.end - 1]);
+        let size = head.size.max(0.1);
+        let ch = CHAR * size;
+        let line = (head.y, tail.x + tail.adv.unwrap_or(0.5 * size));
+        // The frames the number stands in, with labels over it.
+        let held: Vec<&crate::tables::Frame> = frames
+            .iter()
+            .filter(|f| f.bottom < line.0 && line.0 < f.top && f.x0 < head.x && line.1 < f.x1 + ch)
+            .collect();
         // The first divider between two digits after a separator where the digits before it
         // read as a number.
         let mut prefix: Vec<usize> = vec![0];
-        let ids: Vec<usize> = number.collect();
+        let ids: Vec<usize> = number.clone().collect();
         for w in ids.windows(2) {
             let (a, b) = (&glyphs[w[0]], &glyphs[w[1]]);
             if placeholder(a) {
@@ -754,20 +805,44 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
             if placeholder(b) || prefix.len() < 2 || kinds(&prefix).is_none() {
                 continue;
             }
-            let size = a.size.max(0.1);
             let (from, to) = (
                 a.x + a.adv.unwrap_or(0.5 * size) / 2.0,
                 b.x + b.adv.unwrap_or(0.5 * size) / 2.0,
             );
-            let lo = dividers.partition_point(|d| d.0 <= from);
-            let over = dividers[lo..]
-                .iter()
-                .take_while(|d| d.0 < to)
-                .find(|d| d.1 >= a.y + DIVIDER_FOOT * size && d.1 <= a.y + DIVIDER_OVER * size);
-            if let Some(d) = over {
-                spaces.push((w[0], d.0));
-                break;
+            let at = held.iter().find_map(|f| {
+                f.dividers
+                    .iter()
+                    .zip(&f.spans)
+                    .position(|(&x, &(low, high))| {
+                        x > from
+                            && x < to
+                            && low >= a.y + DIVIDER_FOOT * size
+                            && (high - f.top).abs() <= DIVIDER_FOOT * size
+                    })
+                    .map(|k| (*f, k))
+            });
+            let Some((f, k)) = at else {
+                continue;
+            };
+            let x = f.dividers[k];
+            let start = if k == 0 { f.x0 } else { f.dividers[k - 1] };
+            let end = f.dividers.get(k + 1).copied().unwrap_or(f.x1);
+            let fits = (head.x - start).abs() <= ch && b.x - x <= ch;
+            // Smaller text over the number in the frame: its labels.
+            let labelled = fits
+                && any(line.0 + 0.5 * size, f.top, &|g, _| {
+                    g.size <= size - 0.5 && g.x > f.x0 && g.x < f.x1
+                });
+            // Nothing else in the next field on the number's line.
+            let alone = labelled
+                && !any(line.0 - 0.3 * size, line.0 + 0.3 * size, &|g, k| {
+                    let mid = g.x + g.adv.unwrap_or(0.5 * g.size) / 2.0;
+                    !number.contains(&k) && mid > x && mid < end
+                });
+            if alone && work.get() <= CUT_WORK {
+                spaces.push((w[0], x));
             }
+            break;
         }
     }
     if spaces.is_empty() {

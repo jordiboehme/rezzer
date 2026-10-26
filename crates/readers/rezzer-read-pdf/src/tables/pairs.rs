@@ -976,13 +976,35 @@ struct Strip {
 /// one's stretch when it lies within the upper one; dividers in it that reach its top or its
 /// bottom part it.
 #[derive(Debug, Clone)]
-pub(super) struct Frame {
+pub(crate) struct Frame {
     pub x0: f32,
     pub x1: f32,
     pub bottom: f32,
     pub top: f32,
     /// The places of its dividers, left to right.
     pub dividers: Vec<f32>,
+    /// The low and high end of each of its dividers.
+    pub spans: Vec<(f32, f32)>,
+}
+
+/// The frames of fields between rules among the page's `rules` (see [`frames`]); none on a
+/// page without rules of both directions or with too many of them.
+pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
+    let Ok(g) = grids(rules) else {
+        return Vec::new();
+    };
+    frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs).unwrap_or_default()
+}
+
+/// Which of `n` horizontal lines the grids of `groups` take.
+pub(super) fn taken_by_grids(n: usize, groups: &[(Vec<usize>, Vec<usize>)]) -> Vec<bool> {
+    let mut taken = vec![false; n];
+    for (gh, _) in groups {
+        for &j in gh {
+            taken[j] = true;
+        }
+    }
+    taken
 }
 
 /// The frames of the page's horizontal lines `hs` (sorted by height) that no grid takes
@@ -1021,7 +1043,7 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
         };
         let (bottom, top) = (low.at, up.at);
         let lo = vs.partition_point(|v| v.at <= x0 + SNAP);
-        let mut dividers = Vec::new();
+        let (mut dividers, mut spans) = (Vec::new(), Vec::new());
         for v in &vs[lo..] {
             work += 1;
             if work > STRIP_WORK {
@@ -1034,6 +1056,7 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
             if reaches && v.to - v.from >= DIVIDER && v.from >= bottom - SNAP && v.to <= top + SNAP
             {
                 dividers.push(v.at);
+                spans.push((v.from, v.to));
             }
         }
         out.push(Frame {
@@ -1042,6 +1065,7 @@ pub(super) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame
             bottom,
             top,
             dividers,
+            spans,
         });
     }
     Some(out)
