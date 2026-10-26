@@ -928,11 +928,14 @@ pub(crate) fn page_blocks_at(
     }
     // Footnotes are found before tables and lists: a legend set in columns is no table, and
     // a star that opens a footnote is no bullet. A tagged file says its notes.
-    let legend = if cx.tree.is_none() {
+    let mut legend = if cx.tree.is_none() {
         footnotes::take(page, &mut flow, cx.style.legends.get(&page))
     } else {
         footnotes::Legend::default()
     };
+    if let Some(why) = legend.refused.take() {
+        notes.push((why, LossReason::Uncertain, Severity::Info));
+    }
     // The text sizes are counted over all text of the page but its legend, also what tables
     // take later: the values of a form are its data lines.
     let text_sizes = page_text_sizes(&flow.runs);

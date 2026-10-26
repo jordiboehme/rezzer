@@ -72,6 +72,8 @@ pub(super) struct Legend {
     pub notes: Vec<(String, Vec<Run>, usize)>,
     /// The label of each marker the legend holds.
     labels: HashMap<NoteMark, String>,
+    /// Why a legend the style pass found is not used, as a loss.
+    pub refused: Option<String>,
 }
 
 /// One footnote while the legend is read.
@@ -230,10 +232,20 @@ impl Found {
 /// the legend's runs out of `flow`.
 pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend {
     let at = std::mem::take(&mut flow.at);
-    let found = found.and_then(|f| f.placed(|i| at.binary_search(&i).ok()));
+    let placed = found.and_then(|f| f.placed(|i| at.binary_search(&i).ok()));
     flow.at = at;
-    let Some(found) = found else {
-        return Legend::default();
+    let Some(found) = placed else {
+        // A legend whose lines are no longer all in the page's text is not used, and the
+        // read says so.
+        return Legend {
+            refused: found.map(|_| {
+                format!(
+                    "footnotes on page {page} are not linked to their markers: the lines of \
+                     their legend are not all in the page's text; the legend stays text"
+                )
+            }),
+            ..Legend::default()
+        };
     };
     let mut entries = found.entries;
     // Reading order: column by column, top down.
@@ -308,6 +320,7 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
             .map(|((label, runs), e)| (label, runs, e.cut))
             .collect(),
         labels,
+        refused: None,
     }
 }
 
@@ -1039,6 +1052,29 @@ mod tests {
                 " 3 Gegebenenfalls anteilig"
             ]
         );
+    }
+
+    /// A legend the style pass found whose runs the page's text no longer holds is not used,
+    /// and says so (Task 7 carry: no silent refusal).
+    #[test]
+    fn a_legend_not_found_again_is_refused_with_a_note() {
+        let runs = vec![
+            run("Betrag*", 0, 40.0, 700.0, 9.0),
+            run("die Werte werden monatlich gemeldet", 1, 40.0, 690.0, 9.0),
+            run("* steuerfrei", 2, 40.0, 60.0, 6.0),
+        ];
+        let found = find(&runs);
+        assert!(found.is_some());
+        // The page's text without its last line: the legend's run is gone.
+        let mut flow = Flow::new(runs[..2].to_vec(), vec![super::super::Slot::Free; 2]);
+        let legend = take(1, &mut flow, found.as_ref());
+        assert!(legend.notes.is_empty());
+        let why = legend.refused.expect("a note");
+        assert!(why.contains("page 1"), "{why}");
+        assert_eq!(flow.runs.len(), 2);
+        // Without a legend found, nothing is said.
+        let mut flow = Flow::new(runs[..2].to_vec(), vec![super::super::Slot::Free; 2]);
+        assert!(take(1, &mut flow, None).refused.is_none());
     }
 
     #[test]

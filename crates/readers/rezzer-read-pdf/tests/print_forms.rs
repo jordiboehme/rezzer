@@ -2973,6 +2973,88 @@ fn footnotes_form_a_legend() {
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
 }
 
+/// A legend on pages with a running header and a running footer (three pages, so both
+/// repeat): the furniture lines are taken out of the page's text before the legend's lines
+/// are found again, and each reference still links to its footnote (Task 7 carry: the place
+/// of each run is mapped across the lines taken out).
+#[test]
+fn legend_under_running_header_and_footer_is_linked() {
+    let notes = ["steuerfrei", "beitragsfrei", "pauschal versteuert"];
+    let page = |n: usize| {
+        let template = common::show("FL", 8.0, 40.0, 815.0, "Muster GmbH Abrechnung")
+            + &common::show("FL", 14.0, 40.0, 600.0, "Erika Mustermann")
+            + &common::show("FL", 9.0, 40.0, 500.0, "Betrag* 1.234,56")
+            + &common::show(
+                "FL",
+                9.0,
+                40.0,
+                488.0,
+                "Die Ware wird wie vereinbart geliefert.",
+            )
+            + &common::show("FL", 6.0, 40.0, 60.0, &format!("* {}", notes[n - 1]))
+            + &common::show("FL", 8.0, 40.0, 25.0, &format!("Seite {n} von 3"));
+        FormPage {
+            template,
+            ..FormPage::default()
+        }
+    };
+    let out = read(&print_form(&[page(1), page(2), page(3)], "", ""));
+    let furniture: Vec<String> = out
+        .document
+        .body
+        .iter()
+        .flat_map(|b| match b {
+            Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => &[],
+        })
+        .filter_map(|b| match b {
+            Block::Paragraph {
+                role: Some(r),
+                inlines,
+                ..
+            } if r.starts_with("page-") => Some(format!("{r}: {}", plain_text(inlines))),
+            _ => None,
+        })
+        .collect();
+    let mut expected = Vec::new();
+    for n in 1..=3 {
+        expected.push("page-header: Muster GmbH Abrechnung".to_string());
+        expected.push(format!("page-footer: Seite {n} von 3"));
+    }
+    assert_eq!(furniture, expected, "{:#?}", out.document.body);
+    let linked: Vec<(String, String)> = (1..=3)
+        .map(|n| (format!("p{n}-star"), notes[n - 1].to_string()))
+        .collect();
+    // The footnotes of every page, by their anchors.
+    let mut found: Vec<(String, String)> = Vec::new();
+    for b in &out.document.body {
+        let Block::Section { blocks, .. } = b else {
+            continue;
+        };
+        for inner in blocks {
+            if let Block::Section {
+                anchor: Some(a),
+                blocks,
+                ..
+            } = inner
+                && let Some(label) = a.0.strip_prefix("fn:")
+            {
+                let text: Vec<String> = blocks
+                    .iter()
+                    .map(|b| match b {
+                        Block::Paragraph { inlines, .. } => plain_text(inlines),
+                        _ => String::new(),
+                    })
+                    .collect();
+                found.push((label.to_string(), text.join(" ")));
+            }
+        }
+    }
+    assert_eq!(found, linked, "{:#?}", out.document.body);
+    assert_eq!(references(&out), ["p1-star", "p2-star", "p3-star"]);
+    assert_no_loss(&out);
+}
+
 /// Guard: a title at 1.5 times the body size or more stays a level-1 heading, also when it is
 /// not bold (Task 8 takes the document title from it).
 #[test]
