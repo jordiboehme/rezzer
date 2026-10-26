@@ -2186,7 +2186,7 @@ fn relation_lines_parse_like_crystalline() {
         "{first}"
     );
     assert!(first.contains("\n* [^1] noted\n"), "{first}");
-    assert!(first.contains("\n- plain item\n"), "{first}");
+    assert!(first.contains("\n* plain item\n"), "{first}");
     assert!(
         first.contains("\n* Wrapped\\\n  [Two](chapter-2.md#chapter-2)\n"),
         "{first}"
@@ -2270,7 +2270,7 @@ fn list_items_crystalline_would_read_get_a_star_in_one_file_too() {
         anchor: None,
     });
     let md = render(&d, Completeness::Complete, &opts());
-    assert!(md.contains("\n* See [other](other.md)\n- plain\n"), "{md}");
+    assert!(md.contains("\n* See [other](other.md)\n* plain\n"), "{md}");
     assert_eq!(crystalline_reads(body(&md)), []);
 }
 
@@ -2574,4 +2574,45 @@ fn main_document_fits_with_huge_own_texts() {
          people."
     ));
     assert!(out.parts.iter().any(|p| p.path == "b/contents.md"));
+}
+
+#[test]
+fn a_list_with_one_item_crystalline_would_read_stays_one_list() {
+    let mut d = doc(FormatId::Markdown);
+    let item = |inlines: Vec<Inline>| {
+        vec![Block::Paragraph {
+            inlines,
+            role: None,
+            anchor: None,
+        }]
+    };
+    d.body.push(Block::List {
+        ordered: false,
+        items: vec![
+            item(vec![Inline::plain("first item")]),
+            item(vec![
+                Inline::FootnoteRef { id: "1".into() },
+                Inline::plain(" noted"),
+            ]),
+            item(vec![Inline::plain("last item")]),
+        ],
+        anchor: None,
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\n* first item\n* [^1] noted\n* last item\n"),
+        "{md}"
+    );
+    // CommonMark reads one list with three items.
+    use pulldown_cmark::{Event, Parser, Tag};
+    let (mut lists, mut items) = (0, 0);
+    for event in Parser::new(body(&md)) {
+        match event {
+            Event::Start(Tag::List(None)) => lists += 1,
+            Event::Start(Tag::Item) => items += 1,
+            _ => {}
+        }
+    }
+    assert_eq!((lists, items), (1, 3));
+    assert_eq!(crystalline_reads(body(&md)), []);
 }

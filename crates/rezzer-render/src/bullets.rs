@@ -14,8 +14,9 @@
 
 use std::borrow::Cow;
 
-/// `md` with the marker of every item Crystalline would read as an observation or a
-/// relation changed from `- ` to `* `. Unchanged (borrowed) when there is none.
+/// `md` with the marker of every list that holds an item Crystalline would read as an
+/// observation or a relation changed from `- ` to `* ` (`+ ` when a `* ` list stands right
+/// next to it), for all items of that list. Unchanged (borrowed) when there is none.
 pub(crate) fn guard(md: &str) -> Cow<'_, str> {
     if !md.starts_with("- ") && !md.contains("\n- ") {
         return Cow::Borrowed(md);
@@ -49,21 +50,74 @@ pub(crate) fn guard(md: &str) -> Cow<'_, str> {
     if flagged.is_empty() {
         return Cow::Borrowed(md);
     }
+    // Every item of a list with a flagged item gets the new marker, so the list stays one
+    // list (P5-X). Nested lists are indented and keep their own markers.
+    let mut marker: Vec<Option<&str>> = vec![None; lines.len()];
+    let mut flagged = flagged.into_iter().peekable();
+    while let Some(&at) = flagged.peek() {
+        let (start, end, items) = list_around(&lines, &fenced, at);
+        while flagged.peek().is_some_and(|f| *f < end) {
+            flagged.next();
+        }
+        // A `* ` list right before or after would join this one: then `+ `.
+        let star_next = |line: Option<&&str>| line.is_some_and(|l| text(l).starts_with("* "));
+        let before = lines[..start]
+            .iter()
+            .rev()
+            .find(|l| !text(l).trim().is_empty() && !text(l).starts_with([' ', '\t']));
+        let after = lines[end..].iter().find(|l| !text(l).trim().is_empty());
+        let new = if star_next(before) || star_next(after) {
+            "+ "
+        } else {
+            "* "
+        };
+        for i in items {
+            marker[i] = Some(new);
+        }
+    }
     let mut out = String::with_capacity(md.len());
-    let mut next = flagged.into_iter().peekable();
     for (i, line) in lines.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        if next.peek() == Some(&i) {
-            next.next();
-            out.push_str("* ");
-            out.push_str(&line[2..]);
-        } else {
-            out.push_str(line);
+        match marker[i] {
+            Some(new) => {
+                out.push_str(new);
+                out.push_str(&line[2..]);
+            }
+            None => out.push_str(line),
         }
     }
     Cow::Owned(out)
+}
+
+/// The list the zero-indent `- ` item at `at` belongs to: its first line, the line after its
+/// end, and the lines of its items. A list goes on over blank lines, indented lines and
+/// further `- ` items; any other line at the left edge ends it.
+fn list_around(lines: &[&str], fenced: &[bool], at: usize) -> (usize, usize, Vec<usize>) {
+    let item = |i: usize| !fenced[i] && text(lines[i]).starts_with("- ");
+    let inside = |i: usize| {
+        let t = text(lines[i]);
+        t.trim().is_empty() || t.starts_with([' ', '\t']) || item(i)
+    };
+    let mut start = at;
+    let mut i = at;
+    while i > 0 && inside(i - 1) {
+        i -= 1;
+        if item(i) {
+            start = i;
+        }
+    }
+    let mut end = at + 1;
+    while end < lines.len() && inside(end) {
+        end += 1;
+    }
+    // Blank lines at the end belong after the list.
+    while end > at + 1 && text(lines[end - 1]).trim().is_empty() {
+        end -= 1;
+    }
+    let items = (start..end).filter(|&i| item(i)).collect();
+    (start, end, items)
 }
 
 /// A line without its carriage return.
@@ -302,8 +356,15 @@ mod tests {
         // Over the lines that continue the item, as a hard break writes them.
         assert_eq!(
             guard("a\n\n- See\\\n  [x](y.md)\n- b"),
-            "a\n\n* See\\\n  [x](y.md)\n- b"
+            "a\n\n* See\\\n  [x](y.md)\n* b"
         );
+        // The whole list changes, its nested lists keep their markers; a `* ` list next to
+        // it makes the marker `+ `; a list after other text is a list of its own.
+        assert_eq!(
+            guard("- a\n  - n\n\n- [c] x\n- b\n\ntext\n\n- d"),
+            "* a\n  - n\n\n* [c] x\n* b\n\ntext\n\n- d"
+        );
+        assert_eq!(guard("- [c] x\n- b\n\n* other"), "+ [c] x\n+ b\n\n* other");
         // Not read: more words before the link, a web page, a task box, an indent, a fence,
         // a link that opens later, an escaped bracket.
         for md in [

@@ -67,8 +67,8 @@ See [[block-anchors]] for full details.
 Linking to a folder name navigates to that folder's index file — either `index.md` or `README.md`. This works for both wikilinks and regular markdown links:
 
 * `[[projects]]` → opens `projects/index.md` (or `projects/README.md`)
-- `[Projects](projects)` → same
-- `[Projects](projects/)` → trailing slash is ignored
+* `[Projects](projects)` → same
+* `[Projects](projects/)` → trailing slash is ignored
 
 If a file named `projects.md` exists alongside the `projects/` folder, it takes priority.
 
