@@ -392,11 +392,17 @@ fn formats_lists_text_markdown_csv() {
 #[test]
 fn version_and_help_exit_0() {
     let env = Env::new();
-    env.cmd()
-        .arg("--version")
-        .assert()
-        .code(0)
-        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+    let expected = format!(
+        "rezzer {}\nCopyright (C) 2026 Jordi Böhme - MPL-2.0\nhttps://github.com/jordiboehme/rezzer\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    for flag in ["--version", "-V"] {
+        env.cmd()
+            .arg(flag)
+            .assert()
+            .code(0)
+            .stdout(predicate::eq(expected.clone()));
+    }
     env.cmd().arg("--help").assert().code(0);
 }
 

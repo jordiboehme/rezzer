@@ -19,10 +19,22 @@ use clap::{Args, Parser, Subcommand};
 use rezzer_model::Registry;
 use rezzer_pipeline::{Config, OutputSection, TableStyle};
 
+/// What `-V` and `--version` print: the version, the copyright with the license and the
+/// source link, in the same three lines as Crystalline. clap puts the program name in front
+/// of the first line itself. Read from Cargo.toml, so the version, license and repository
+/// never drift from the manifest.
+const VERSION_BLOCK: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "\nCopyright (C) 2026 Jordi Böhme - ",
+    env!("CARGO_PKG_LICENSE"),
+    "\n",
+    env!("CARGO_PKG_REPOSITORY"),
+);
+
 #[derive(Debug, Parser)]
 #[command(
     name = "rezzer",
-    version,
+    version = VERSION_BLOCK,
     about = "Turns files into knowledge for AI agents: Markdown with frontmatter, tables and diagrams."
 )]
 struct Cli {
