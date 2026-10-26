@@ -3732,6 +3732,7 @@ mod tests {
             uri,
             line: 0,
             off_axis: false,
+            note: false,
             gaps: crate::layout::Gaps::default(),
         };
         // Link 0 is on a run with text; link 1 only on a run of white space.

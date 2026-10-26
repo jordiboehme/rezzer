@@ -16,10 +16,12 @@ use std::rc::Rc;
 
 use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
-use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, Severity};
+use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity};
 
 use crate::scan;
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
+
+mod footnotes;
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -48,6 +50,8 @@ pub(crate) struct Run {
     /// The run reads in another direction than the page's text (margin notes, stamps,
     /// vertical writing); its `x` and `y` are where it starts.
     pub off_axis: bool,
+    /// The run is a reference to a footnote of its page: its text is the footnote's label.
+    pub note: bool,
     /// Where the white space between its words lies, from the glyphs: what a column rule
     /// that crosses the run may cut it at. Empty when the run has one word, reads in another
     /// direction or from right to left, or its text was not laid out from glyphs. They are
@@ -460,13 +464,14 @@ impl Style {
     }
 
     /// Whether an untagged line may be a heading by its own text and style: large enough,
-    /// short, not data, and led by bold ink (see [`bold_led`]) when it is smaller than
-    /// [`HEADING_PLAIN_RATIO`] times the body size.
+    /// short, not ending in an amount, and, when it is smaller than [`HEADING_PLAIN_RATIO`]
+    /// times the body size, led by bold ink (see [`bold_led`]) and not only data.
     fn may_head(&self, line: &Line<'_>) -> bool {
+        // A number set large (a form or file number) stays a heading.
+        let large = line.size >= HEADING_PLAIN_RATIO * self.body_size;
         self.is_heading_size(line)
             && !ends_in_amount(&line.text)
-            && !data_only(&line.text)
-            && (line.size >= HEADING_PLAIN_RATIO * self.body_size || bold_led(line))
+            && (large || (!data_only(&line.text) && bold_led(line)))
     }
 
     /// The heading level of an untagged line, `None` for body text.
@@ -886,11 +891,10 @@ pub(crate) fn page_blocks_at(
     // Footnotes are found before tables and lists: a legend set in columns is no table, and
     // a star that opens a footnote is no bullet. A tagged file says its notes.
     let legend = if cx.tree.is_none() {
-        footnotes(&flow.runs)
+        footnotes::take(page, &mut flow)
     } else {
-        Vec::new()
+        footnotes::Legend::default()
     };
-    let legend = take_legend(&mut flow, legend);
     if geometry && let Some(height) = height {
         let stop = || time_over(cx.budget).is_err();
         let found = tables::untagged(page, &mut flow, drawn, height, &stop);
@@ -938,10 +942,12 @@ pub(crate) fn page_blocks_at(
         }
     }
     lay(&flow.runs[start..], &flow.slots[start..], &mut built);
-    // Only the footnotes written are said: a stop writes none.
+    // Markers that end a word above refer to the footnotes too. Only the footnotes written
+    // are said: a stop writes none.
+    footnotes::link_words(&mut built.blocks, &legend);
     let before = built.blocks.len();
-    for note in &legend {
-        built.paragraph(note.iter().collect(), Some("footnote"), cx);
+    for (label, runs) in &legend.notes {
+        built.footnote(label, runs.iter().collect(), cx);
     }
     let footnotes_written = built.blocks.len() - before;
     for l in lines(&footers) {
@@ -972,7 +978,7 @@ pub(crate) fn page_blocks_at(
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes);
     laid.probes_cut = probes_cut;
-    laid.found_by = legend_note(page, footnotes_written);
+    laid.found_by = footnotes::note(page, footnotes_written);
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -1494,6 +1500,35 @@ impl Built {
         }
     }
 
+    /// A footnote: a footnote section labelled `label` that holds its text as a paragraph
+    /// with the role `footnote`.
+    fn footnote(&mut self, label: &str, runs: Vec<&Run>, cx: &Context<'_>) {
+        self.pending = Pending::Block;
+        if self.stop.is_some() {
+            return;
+        }
+        // The paragraph inside the section is an element too.
+        if let Err(hit) = cx.budget.add_elements(1) {
+            self.stop_at(hit, cx);
+            return;
+        }
+        if let Some(inlines) = self.inlines(&runs, cx) {
+            self.push(
+                Block::Section {
+                    kind: SectionKind::Other,
+                    title: None,
+                    anchor: Some(Anchor(format!("fn:{label}"))),
+                    blocks: vec![Block::Paragraph {
+                        inlines,
+                        role: Some("footnote".into()),
+                        anchor: None,
+                    }],
+                },
+                cx,
+            );
+        }
+    }
+
     fn heading(&mut self, level: u8, runs: Vec<&Run>, cx: &Context<'_>) {
         self.pending = Pending::Block;
         if let Some(mut inlines) = self.inlines(&runs, cx) {
@@ -1574,6 +1609,8 @@ fn inlines(
         page: u32,
         /// A line break stands before it.
         broken: bool,
+        /// A footnote reference, its text the label.
+        note: bool,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
@@ -1603,8 +1640,19 @@ fn inlines(
             let end = p.text.trim_end().len();
             p.text.truncate(end);
         }
+        if r.note {
+            // A reference stands right after its word.
+            text = r.text.trim().to_string();
+        }
         match pieces.last_mut() {
-            Some(p) if !broken && p.bold == r.bold && p.italic == r.italic && p.uri == r.uri => {
+            Some(p)
+                if !broken
+                    && !r.note
+                    && !p.note
+                    && p.bold == r.bold
+                    && p.italic == r.italic
+                    && p.uri == r.uri =>
+            {
                 p.text.push_str(&text)
             }
             _ => pieces.push(Piece {
@@ -1614,6 +1662,7 @@ fn inlines(
                 uri: r.uri.clone(),
                 page: r.page,
                 broken,
+                note: r.note,
             }),
         }
     }
@@ -1640,6 +1689,20 @@ fn inlines(
             trail.clear();
             refused = None;
             out.push(Inline::LineBreak);
+        }
+        if p.note {
+            let rest = std::mem::take(&mut trail);
+            if !rest.is_empty() {
+                out.push(Inline::plain(rest));
+            }
+            // The white space before a reference goes: it stands at its word.
+            if let Some(Inline::Text { text, .. }) = out.last_mut() {
+                let end = text.trim_end().len();
+                text.truncate(end);
+            }
+            refused = None;
+            out.push(Inline::FootnoteRef { id: p.text });
+            continue;
         }
         // White space at the edge of a link belongs outside it.
         let (inner, lead) = match p.uri {
@@ -2036,298 +2099,6 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
         out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
-}
-
-/// The runs of each footnote of `legend` (run indices into the flow, each list in order),
-/// taken out of `flow`.
-fn take_legend(flow: &mut Flow, legend: Vec<Vec<usize>>) -> Vec<Vec<Run>> {
-    if legend.is_empty() {
-        return Vec::new();
-    }
-    let mut owner: Vec<Option<usize>> = vec![None; flow.runs.len()];
-    for (n, ids) in legend.iter().enumerate() {
-        for &i in ids {
-            owner[i] = Some(n);
-        }
-    }
-    let mut notes: Vec<Vec<Run>> = vec![Vec::new(); legend.len()];
-    let taken = flow.take(|i, _| owner[i].is_some());
-    for ((r, _, _), n) in taken.into_iter().zip(owner.into_iter().flatten()) {
-        notes[n].push(r);
-    }
-    notes
-}
-
-/// The `found-by` note of a page with `n` footnotes.
-fn legend_note(page: u32, n: usize) -> Option<String> {
-    let what = match n {
-        0 => return None,
-        1 => format!(
-            "1 paragraph at the bottom of page {page} is read as a footnote: it is set in the \
-             page's smallest size below all other text and opens with a note marker that also \
-             stands after a word above"
-        ),
-        _ => format!(
-            "{n} paragraphs at the bottom of page {page} are read as footnotes: they are set in \
-             the page's smallest size below all other text, each opens with a note marker, and \
-             the first marker also stands after a word above"
-        ),
-    };
-    Some(what)
-}
-
-/// A run of digits is raised against the run beside it when it is this many times its size or
-/// smaller, or its baseline stands this many times that size higher.
-const RAISED_SIZE: f32 = 0.8;
-const RAISED_RISE: f32 = 0.25;
-
-/// The superscript digits 0 to 9.
-const SUPERSCRIPTS: [char; 10] = [
-    '\u{2070}', '\u{b9}', '\u{b2}', '\u{b3}', '\u{2074}', '\u{2075}', '\u{2076}', '\u{2077}',
-    '\u{2078}', '\u{2079}',
-];
-
-/// A note marker: one to three stars, a number with `)`, or a raised number (a superscript
-/// digit, or digits set smaller or higher than the text beside them).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum NoteMark {
-    Stars(u8),
-    Paren(u8),
-    Raised(u8),
-}
-
-/// Whether `run` holds one or two digits raised against `base`.
-fn raised_digits(run: &Run, base: &Run) -> Option<u8> {
-    let t = run.text.trim();
-    let raised = run.size < RAISED_SIZE * base.size || run.y > base.y + RAISED_RISE * base.size;
-    (raised && (1..=2).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_digit()))
-        .then(|| t.parse().ok())
-        .flatten()
-}
-
-/// The value of one or two superscript digits.
-fn superscript_value(digits: &str) -> Option<u8> {
-    let mut n: u8 = 0;
-    let mut count = 0;
-    for c in digits.chars() {
-        let d = SUPERSCRIPTS.iter().position(|s| *s == c)?;
-        n = n * 10 + d as u8;
-        count += 1;
-    }
-    (1..=2).contains(&count).then_some(n)
-}
-
-/// The note markers a word ends with, after an alphanumeric character: `Betrag*`,
-/// `Betrag1)`, `Betrag` followed by a superscript digit.
-fn word_mark(word: &str) -> Option<NoteMark> {
-    let w = word.trim_end_matches([':', ',', '.', ';']);
-    let stars = w.len() - w.trim_end_matches('*').len();
-    if stars > 0 {
-        let before = w[..w.len() - stars].chars().next_back()?;
-        return (stars <= 3 && before.is_alphanumeric()).then_some(NoteMark::Stars(stars as u8));
-    }
-    if let Some(open) = w.strip_suffix(')') {
-        let digits = open.len() - open.trim_end_matches(|c: char| c.is_ascii_digit()).len();
-        let before = open[..open.len() - digits].chars().next_back()?;
-        return ((1..=2).contains(&digits) && before.is_alphabetic())
-            .then(|| {
-                open[open.len() - digits..]
-                    .parse()
-                    .ok()
-                    .map(NoteMark::Paren)
-            })
-            .flatten();
-    }
-    let tail: String = w
-        .chars()
-        .rev()
-        .take_while(|c| SUPERSCRIPTS.contains(c))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let before = w[..w.len() - tail.len()].chars().next_back()?;
-    (before.is_alphanumeric())
-        .then(|| superscript_value(&tail).map(NoteMark::Raised))
-        .flatten()
-}
-
-/// The marker a piece of a legend line opens with: stars, a number with `)` or a superscript
-/// number before its text, a run of digits raised against the run after it, or plain digits
-/// and a space (which only a raised reference above makes a marker).
-fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
-    let mut inked = runs.iter().filter(|r| ink(&r.text) > 0);
-    let first = inked.next()?;
-    if let Some(next) = inked.next()
-        && let Some(n) = raised_digits(first, next)
-    {
-        return Some(NoteMark::Raised(n));
-    }
-    // The marker and the start of the text after it stand in the first two runs with ink.
-    let head = runs
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| ink(&r.text) > 0)
-        .nth(1)
-        .map_or(runs.len(), |(i, _)| i + 1);
-    let text: String = runs[..head].iter().map(|r| r.text.as_str()).collect();
-    let text = text.trim_start();
-    let stars = text.len() - text.trim_start_matches('*').len();
-    if stars > 0 {
-        let rest = &text[stars..];
-        return (stars <= 3
-            && rest
-                .trim()
-                .chars()
-                .next()
-                .is_some_and(char::is_alphanumeric))
-        .then_some(NoteMark::Stars(stars as u8));
-    }
-    let digits = text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-    if (1..=2).contains(&digits) {
-        let n: u8 = text[..digits].parse().ok()?;
-        let rest = &text[digits..];
-        if let Some(after) = rest.strip_prefix(')') {
-            return after
-                .starts_with(char::is_whitespace)
-                .then_some(NoteMark::Paren(n));
-        }
-        return rest
-            .starts_with(char::is_whitespace)
-            .then_some(NoteMark::Raised(n));
-    }
-    let sup: String = text
-        .chars()
-        .take_while(|c| SUPERSCRIPTS.contains(c))
-        .collect();
-    let n = superscript_value(&sup)?;
-    text[sup.len()..]
-        .trim_start()
-        .chars()
-        .next()
-        .is_some_and(char::is_alphanumeric)
-        .then_some(NoteMark::Raised(n))
-}
-
-/// The note references of lines: markers that end a word, and digits raised after a run
-/// that ends in a letter or digit (`PV-Beitrag` and a raised `6`).
-fn references(lines: &[Line<'_>]) -> HashSet<NoteMark> {
-    let mut found = HashSet::new();
-    for l in lines {
-        found.extend(l.text.split_whitespace().filter_map(word_mark));
-        let inked: Vec<&Run> = l.runs.iter().filter(|r| ink(&r.text) > 0).collect();
-        for w in inked.windows(2) {
-            if w[0].text.trim_end().ends_with(char::is_alphanumeric)
-                && let Some(n) = raised_digits(w[1], w[0])
-            {
-                found.insert(NoteMark::Raised(n));
-            }
-        }
-    }
-    found
-}
-
-/// The footnotes of an untagged page, each as the indices of its runs, in order. They are
-/// the lines of the page's lowest block, below every other line and in its smallest size,
-/// from the first one that opens with a note marker which also stands as a reference in the
-/// text above. Each later line of the legend opens a footnote with a marker, or goes on the
-/// one of its column; a legend set in columns is cut where a piece gap meets a marker that
-/// stands as a reference. A block that does not read so gives none.
-fn footnotes(runs: &[Run]) -> Vec<Vec<usize>> {
-    let all = lines(runs);
-    let mut starts = Vec::with_capacity(all.len());
-    let mut at = 0;
-    for l in &all {
-        starts.push(at);
-        at += l.runs.len();
-    }
-    let inked = |l: &Line<'_>| !l.text.is_empty();
-    let Some(smallest) = all
-        .iter()
-        .filter(|l| inked(l))
-        .map(|l| l.size)
-        .reduce(f32::min)
-    else {
-        return Vec::new();
-    };
-    let small = |l: &Line<'_>| !inked(l) || (l.size - smallest).abs() <= SIZE_SLACK;
-    let tail = all.len() - all.iter().rev().take_while(|l| small(l)).count();
-    if tail == 0 || tail == all.len() {
-        return Vec::new();
-    }
-    let above = all[..tail]
-        .iter()
-        .filter(|l| inked(l))
-        .map(|l| l.y)
-        .fold(f32::MAX, f32::min);
-    if all[tail..].iter().any(|l| inked(l) && l.y >= above) {
-        return Vec::new();
-    }
-    let marked =
-        |piece: &[Run], refs: &HashSet<NoteMark>| opening_mark(piece).filter(|m| refs.contains(m));
-    // The references are looked for above the first line that opens a footnote.
-    let mut refs = references(&all[..tail]);
-    let mut first = None;
-    for k in tail..all.len() {
-        if inked(&all[k]) && marked(all[k].runs, &refs).is_some() {
-            first = Some(k);
-            break;
-        }
-        refs.extend(references(&all[k..=k]));
-    }
-    let Some(first) = first else {
-        return Vec::new();
-    };
-    // Each footnote: where it starts (x) and its runs.
-    let mut notes: Vec<(f32, Vec<usize>)> = Vec::new();
-    let mut prev: Option<usize> = None;
-    for k in first..all.len() {
-        let l = &all[k];
-        if !inked(l) {
-            continue;
-        }
-        // The pieces of the line: cut where a piece gap meets a marker.
-        let mut cuts = vec![0];
-        let mut end: Option<f32> = None;
-        for (i, r) in l.runs.iter().enumerate() {
-            if ink(&r.text) == 0 {
-                continue;
-            }
-            if let Some(e) = end
-                && r.x - e > crate::order::PIECE_GAP * r.size
-                && marked(&l.runs[i..], &refs).is_some()
-            {
-                cuts.push(i);
-            }
-            end = Some(r.x + r.w);
-        }
-        cuts.push(l.runs.len());
-        for w in cuts.windows(2) {
-            let piece = &l.runs[w[0]..w[1]];
-            let Some(x) = piece.iter().find(|r| ink(&r.text) > 0).map(|r| r.x) else {
-                continue;
-            };
-            let ids = (starts[k] + w[0])..(starts[k] + w[1]);
-            // Once the legend has begun, a line that opens with a marker opens a footnote also
-            // when its reference above was not found: it is never glued to the one before.
-            if opening_mark(piece).is_some() {
-                notes.push((x, ids.collect()));
-                continue;
-            }
-            // A piece without a marker goes on the footnote of its column, on the next line.
-            let goes_on = prev.is_some_and(|p| continues(&all[p], l));
-            let column = notes
-                .iter_mut()
-                .filter(|n| n.0 <= x + EDGE)
-                .max_by(|a, b| a.0.total_cmp(&b.0));
-            match column {
-                Some(n) if goes_on => n.1.extend(ids),
-                _ => return Vec::new(),
-            }
-        }
-        prev = Some(k);
-    }
-    notes.into_iter().map(|n| n.1).collect()
 }
 
 /// Lines of a block whose widest line is at most this many font sizes are short lines.
@@ -2801,6 +2572,7 @@ mod tests {
             uri: None,
             line,
             off_axis: false,
+            note: false,
             gaps: Gaps::default(),
         }
     }
@@ -3333,58 +3105,6 @@ mod tests {
         assert!(!padded_mark(&line(&tab_stop)));
     }
 
-    /// Runs of a page with references raised after `Einheit` and `Beitrag`, a line of body text,
-    /// and the legend lines `legend` (text, x, line) in 6 pt at the bottom.
-    fn legend_page(legend: &[(&str, f32, u32, f32)]) -> Vec<Run> {
-        let at = |text: &str, x: f32, line: u32, y: f32, size: f32| Run {
-            x,
-            w: text.len() as f32 * size * 0.5,
-            ..run(text, line, y, size)
-        };
-        let mut runs = vec![
-            at("Einheit", 40.0, 0, 720.0, 9.0),
-            at(" 2", 72.0, 0, 724.0, 5.0),
-            at(" Beitrag", 200.0, 0, 720.0, 9.0),
-            at(" 3", 232.0, 0, 724.0, 5.0),
-            at("die Werte werden monatlich gemeldet", 40.0, 1, 690.0, 9.0),
-        ];
-        for &(text, x, line, y) in legend {
-            runs.push(at(text, x, line, y, 6.0));
-        }
-        runs
-    }
-
-    fn legend_texts(runs: &[Run]) -> Vec<String> {
-        footnotes(runs)
-            .iter()
-            .map(|ids| ids.iter().map(|&i| runs[i].text.as_str()).collect())
-            .collect()
-    }
-
-    #[test]
-    fn a_legend_line_of_two_columns_is_cut() {
-        let runs = legend_page(&[
-            ("2 Std = Stunden", 40.0, 2, 70.0),
-            (" 3 Gegebenenfalls anteilig", 300.0, 2, 70.0),
-        ]);
-        assert_eq!(
-            legend_texts(&runs),
-            ["2 Std = Stunden", " 3 Gegebenenfalls anteilig"]
-        );
-    }
-
-    #[test]
-    fn a_marker_without_its_reference_opens_its_own_footnote() {
-        let runs = legend_page(&[
-            ("2 Std = Stunden", 40.0, 2, 70.0),
-            ("5 Muster ohne Verweis", 40.0, 3, 62.0),
-        ]);
-        assert_eq!(
-            legend_texts(&runs),
-            ["2 Std = Stunden", "5 Muster ohne Verweis"]
-        );
-    }
-
     #[test]
     fn text_sizes_of_a_page() {
         // 800 ink characters of labels, 300 of data lines with padding on 3 lines, 20 of a
@@ -3488,34 +3208,6 @@ mod tests {
         assert!(!bold_led(&line(&value)));
         let plain_first = [plain("Seite"), bold(" 1")];
         assert!(!bold_led(&line(&plain_first)));
-    }
-
-    #[test]
-    fn note_markers() {
-        assert_eq!(word_mark("Betrag*"), Some(NoteMark::Stars(1)));
-        assert_eq!(word_mark("Betrag**:"), Some(NoteMark::Stars(2)));
-        assert_eq!(word_mark("Betrag1)"), Some(NoteMark::Paren(1)));
-        assert_eq!(word_mark("Beitrag\u{b2}"), Some(NoteMark::Raised(2)));
-        assert_eq!(word_mark("*"), None);
-        assert_eq!(word_mark("12)"), None);
-        assert_eq!(word_mark("Betrag"), None);
-        let opens = |text: &str| opening_mark(&[run(text, 0, 60.0, 6.0)]);
-        assert_eq!(opens("* steuerfrei"), Some(NoteMark::Stars(1)));
-        assert_eq!(opens("*** ohne"), Some(NoteMark::Stars(3)));
-        assert_eq!(opens("1) laut Vertrag"), Some(NoteMark::Paren(1)));
-        assert_eq!(opens("\u{b3} anteilig"), Some(NoteMark::Raised(3)));
-        assert_eq!(opens("2 Std = Stunden"), Some(NoteMark::Raised(2)));
-        assert_eq!(opens("2025 war"), None);
-        assert_eq!(opens("*"), None);
-        // A digit run raised against the text after it.
-        let raised = [
-            Run {
-                y: 62.0,
-                ..run("4", 0, 60.0, 4.0)
-            },
-            run(" anteilig", 0, 60.0, 6.0),
-        ];
-        assert_eq!(opening_mark(&raised), Some(NoteMark::Raised(4)));
     }
 
     #[test]

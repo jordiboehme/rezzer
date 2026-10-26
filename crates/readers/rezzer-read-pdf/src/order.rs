@@ -946,6 +946,7 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         uri: uri(f),
         line,
         off_axis: false,
+        note: false,
         gaps: Gaps::default(),
     };
     let rtl = ids.iter().any(|&i| frags[i].text.chars().any(is_rtl));
@@ -1115,6 +1116,7 @@ fn vertical_runs(
                 uri: None,
                 line: 0,
                 off_axis: true,
+                note: false,
                 gaps: Gaps::default(),
             },
             y,

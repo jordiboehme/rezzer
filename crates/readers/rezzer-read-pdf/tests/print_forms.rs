@@ -2660,27 +2660,33 @@ fn footnotes_form_a_legend() {
     };
     let out = read(&print_form(&[page], "", ""));
     let blocks = page_blocks(&out);
-    let notes: Vec<String> = blocks
-        .iter()
-        .filter_map(|b| match b {
-            Block::Paragraph {
-                inlines,
-                role: Some(r),
-                ..
-            } if r == "footnote" => Some(plain_text(inlines)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(notes, ["* steuerfrei"], "{blocks:#?}");
+    assert_eq!(
+        footnote_texts(&out),
+        [("p1-star".to_string(), "* steuerfrei".to_string())],
+        "{blocks:#?}"
+    );
     assert!(
         !blocks.iter().any(|b| matches!(b, Block::List { .. })),
         "{blocks:#?}"
     );
-    // The legend closes the page.
+    // The legend closes the page, and the star after `Betrag` refers to it.
     assert!(
-        matches!(blocks.last(), Some(Block::Paragraph { role: Some(r), .. }) if r == "footnote"),
+        matches!(blocks.last(), Some(Block::Section { anchor: Some(a), .. }) if a.0 == "fn:p1-star"),
         "{blocks:#?}"
     );
+    assert_eq!(references(&out), ["p1-star"], "{blocks:#?}");
+    assert!(
+        all_text(&out).contains("Betrag 1.234,56"),
+        "{}",
+        all_text(&out)
+    );
+    let md = rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
+    );
+    assert!(md.contains("Betrag[^p1-star] 1.234,56"), "{md}");
+    assert!(md.contains("[^p1-star]: \\* steuerfrei"), "{md}");
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
 }
 
@@ -2712,18 +2718,61 @@ fn form_title_stays_a_heading() {
 }
 
 /// The footnote paragraphs of the first page section.
-fn footnote_texts(out: &ReadOutcome) -> Vec<String> {
+fn footnote_texts(out: &ReadOutcome) -> Vec<(String, String)> {
     page_blocks(out)
         .iter()
         .filter_map(|b| match b {
-            Block::Paragraph {
-                inlines,
-                role: Some(r),
+            Block::Section {
+                anchor: Some(a),
+                blocks,
                 ..
-            } if r == "footnote" => Some(plain_text(inlines)),
+            } => {
+                let label = a.0.strip_prefix("fn:")?;
+                match blocks.as_slice() {
+                    [
+                        Block::Paragraph {
+                            inlines,
+                            role: Some(r),
+                            ..
+                        },
+                    ] if r == "footnote" => Some((label.to_string(), plain_text(inlines))),
+                    _ => None,
+                }
+            }
             _ => None,
         })
         .collect()
+}
+
+/// The labels of the footnote references of the read, in order, also in table cells.
+fn references(out: &ReadOutcome) -> Vec<String> {
+    fn inlines(found: &mut Vec<String>, inlines: &[rezzer_model::Inline]) {
+        for i in inlines {
+            if let rezzer_model::Inline::FootnoteRef { id } = i {
+                found.push(id.clone());
+            }
+        }
+    }
+    fn walk(blocks: &[Block], found: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Paragraph { inlines: i, .. } | Block::Heading { inlines: i, .. } => {
+                    inlines(found, i);
+                }
+                Block::Table { rows, .. } => {
+                    rows.iter()
+                        .flatten()
+                        .for_each(|c| inlines(found, &c.inlines));
+                }
+                Block::Section { blocks, .. } => walk(blocks, found),
+                Block::List { items, .. } => items.iter().for_each(|i| walk(i, found)),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(&out.document.body, &mut found);
+    found
 }
 
 /// Footnote numbers raised after labels above, and a legend of two columns on one line: each
@@ -2751,10 +2800,17 @@ fn raised_numbers_and_a_legend_in_columns() {
     let out = read(&print_form(&[page], "", ""));
     assert_eq!(
         footnote_texts(&out),
-        ["2 Std = Stunden", "3 Gegebenenfalls anteilig nach Vertrag"],
+        [
+            ("p1-2".to_string(), "2 Std = Stunden".to_string()),
+            (
+                "p1-3".to_string(),
+                "3 Gegebenenfalls anteilig nach Vertrag".to_string()
+            )
+        ],
         "{:#?}",
         page_blocks(&out)
     );
+    assert_eq!(references(&out), ["p1-2", "p1-3"]);
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
 }
 
@@ -2778,4 +2834,110 @@ fn numbered_bottom_line_without_reference_is_no_footnote() {
     let out = read(&print_form(&[page], "", ""));
     assert!(footnote_texts(&out).is_empty(), "{:#?}", page_blocks(&out));
     assert!(found_by(&out).is_empty(), "{:?}", found_by(&out));
+}
+
+/// A header label with a reference number raised right after it, nearly in its size.
+fn referenced(x: f32, y: f32, text: &str, number: &str) -> String {
+    let w = common::helvetica_width(text, 8.0);
+    common::show("FL", 8.0, x, y, text) + &common::show("FL", 7.0, x + w + 0.5, y + 2.0, number)
+}
+
+/// The legend of a pay slip: three columns side by side at the bottom (entries 1 to 3, 4,
+/// and 5 to 8), entries that wrap onto a second line, a form number between the columns,
+/// and the references raised after labels in the header cells of a drawn table and in a
+/// header field line.
+#[test]
+fn legend_of_three_columns_links_its_references() {
+    let xs = [30.0, 130.0, 230.0, 330.0, 430.0, 565.0];
+    let mut template = grid(&xs, &[600.0, 620.0, 640.0, 660.0, 680.0]);
+    let header = [
+        ("Einheit", "2"),
+        ("Menge", "3"),
+        ("St", "4"),
+        ("SV", "4"),
+        ("GB", "5"),
+    ];
+    for (c, (text, number)) in header.iter().enumerate() {
+        template += &referenced(xs[c] + 6.0, 666.0, text, number);
+    }
+    for (r, y) in [646.0, 626.0, 606.0].iter().enumerate() {
+        for (c, x) in xs[..5].iter().enumerate() {
+            template += &common::show("FL", 8.0, x + 6.0, *y, &format!("{}0,{r}0", c + 1));
+        }
+    }
+    for (k, (text, number)) in [
+        ("Name", "1"),
+        ("Datum", "1"),
+        ("Abzug", "6"),
+        ("Zuschlag", "7"),
+        ("Rest", "8"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        template += &referenced(40.0 + 100.0 * k as f32, 720.0, text, number);
+    }
+    template += &common::show(
+        "FL",
+        9.0,
+        40.0,
+        560.0,
+        "die Werte werden von der Muster GmbH monatlich abgerechnet und gemeldet",
+    );
+    let legend = [
+        (40.0, 90.0, "1 A = Muster, B = Beispiel"),
+        (40.0, 82.0, "2 Std = Stunden, Min = Minuten,"),
+        (46.0, 74.0, "Tg = Tage"),
+        (40.0, 66.0, "3 Gegebenenfalls anteilig"),
+        (220.0, 90.0, "4 SV = Sozialversicherung, KV ="),
+        (226.0, 82.0, "Krankenversicherung"),
+        (400.0, 90.0, "5 GB = Grundbetrag"),
+        (400.0, 82.0, "6 Abz = Abzug, Zu = Zuschlag"),
+        (400.0, 74.0, "7 Rest = Restbetrag nach"),
+        (406.0, 66.0, "Abzug aller Posten"),
+        (400.0, 58.0, "8 Mio = Million Euro"),
+        (300.0, 58.0, "Muster-Nr. 0000 00"),
+    ];
+    for (x, y, text) in legend {
+        template += &common::show("FL", 6.0, x, y, text);
+    }
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let blocks = page_blocks(&out);
+    let label = |n: u32| format!("p1-{n}");
+    let want: Vec<(String, String)> = [
+        (1, "1 A = Muster, B = Beispiel"),
+        (2, "2 Std = Stunden, Min = Minuten, Tg = Tage"),
+        (3, "3 Gegebenenfalls anteilig"),
+        (4, "4 SV = Sozialversicherung, KV = Krankenversicherung"),
+        (5, "5 GB = Grundbetrag"),
+        (6, "6 Abz = Abzug, Zu = Zuschlag"),
+        (7, "7 Rest = Restbetrag nach Abzug aller Posten"),
+        (8, "8 Mio = Million Euro"),
+    ]
+    .iter()
+    .map(|(n, t)| (label(*n), t.to_string()))
+    .collect();
+    assert_eq!(footnote_texts(&out), want, "{blocks:#?}");
+    // Every reference has its footnote; the header cells hold theirs.
+    let refs = references(&out);
+    for n in 1..=8 {
+        assert!(refs.contains(&label(n)), "{n}: {refs:?}");
+    }
+    let tables = read_tables(&out);
+    assert_eq!(tables.len(), 1, "{blocks:#?}");
+    assert_eq!(
+        tables[0][0],
+        ["Einheit", "Menge", "St", "SV", "GB"],
+        "{tables:?}"
+    );
+    assert!(
+        all_text(&out).contains("Muster-Nr. 0000 00"),
+        "{}",
+        all_text(&out)
+    );
+    assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
 }

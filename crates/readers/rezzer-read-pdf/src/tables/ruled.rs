@@ -1595,6 +1595,7 @@ mod tests {
             uri: None,
             line: 0,
             off_axis: false,
+            note: false,
             gaps: crate::layout::Gaps::new(gaps),
         }
     }
