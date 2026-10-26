@@ -2271,3 +2271,79 @@ fn a_write_error_keeps_the_old_pictures() {
     assert_eq!(res.completeness, Completeness::Failed);
     assert_eq!(names_in(&assets), pictures);
 }
+
+#[test]
+fn the_assets_cleanup_keeps_files_a_user_put_there() {
+    // Ruling P5-AC: only names Rezzer gives pictures are removed.
+    let out = tempfile::tempdir().unwrap();
+    let assets = out.path().join("scan.txt.assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    for name in [
+        "page-9.png",
+        "old-2.bin",
+        "My Photo.png",
+        "notes.txt",
+        "page-1.gif",
+    ] {
+        std::fs::write(assets.join(name), b"old").unwrap();
+    }
+    let (registry, _) = pictures(&["page-1"]);
+    Pipeline::new(config(None), registry).run_bytes(
+        "scan.txt",
+        b"x".to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(
+        names_in(&assets),
+        ["My Photo.png", "notes.txt", "page-1.gif", "page-1.png"]
+    );
+}
+
+/// A reader that always panics, for a failed read.
+struct Panicking;
+
+impl Reader for Panicking {
+    fn id(&self) -> &'static str {
+        "panicking"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, _src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        panic!("boom in the reader");
+    }
+}
+
+#[test]
+fn a_failed_read_keeps_the_old_pictures() {
+    let out = tempfile::tempdir().unwrap();
+    chapters_pipeline(config(None)).run_bytes(
+        "notes.txt",
+        SMALL.to_vec(),
+        None,
+        &written(out.path()),
+    );
+    let assets = out.path().join("notes.txt.assets");
+    let pictures = names_in(&assets);
+    assert_eq!(pictures, ["pic-1.png"]);
+    // The reader fails, and detection fails.
+    let mut registry = Registry::new();
+    registry.register(Box::new(Panicking));
+    let res = Pipeline::new(config(None), registry).run_bytes(
+        "notes.txt",
+        b"text".to_vec(),
+        None,
+        &written(out.path()),
+    );
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert_eq!(names_in(&assets), pictures);
+    let mut pipeline = chapters_pipeline(config(None));
+    pipeline.set_detector(panicking_detector);
+    let res = pipeline.run_bytes("notes.txt", SMALL.to_vec(), None, &written(out.path()));
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert_eq!(names_in(&assets), pictures);
+}

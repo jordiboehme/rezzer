@@ -20,9 +20,10 @@
 //! an edited file keeps its addresses. No name starts with `.` (ruling P5-Z): Crystalline
 //! skips hidden files.
 //!
-//! Files an earlier run left that this run does not write are removed: in the assets folder
-//! every regular file but Markdown, in the parts folder only Markdown parts that Rezzer wrote
-//! ([`is_rezzer_part`]). A part path held by anything else fails the run before a file of
+//! Files an earlier run left that this run does not write are removed, but only files
+//! Rezzer names itself (rulings P5-Y and P5-AC): in the assets folder regular files named as
+//! Rezzer names pictures ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
+//! wrote ([`is_rezzer_part`]). A file a user put there stays. A part path held by anything else fails the run before a file of
 //! it is written (ruling P5-AB). An empty parts folder is removed, also one Rezzer did not
 //! make. Symlinks and folders inside are never followed or removed. The check of a folder
 //! and the removal of its files are separate steps, so a folder that is swapped for a
@@ -33,7 +34,10 @@
 //! written and removed nothing. Then the pictures, the parts, the main document and the
 //! JSON are written; the stale parts and the stale pictures go last. A write error on the
 //! way leaves the new files written so far and keeps every old file, so the old links of an
-//! earlier run still resolve; the next run that works cleans up.
+//! earlier run still resolve; the next run that works cleans up. A failed read removes no
+//! old picture. When a picture cannot be written, the Markdown is rendered again; should
+//! the new render name a part path that the check then refuses, the run fails with the
+//! pictures already written: only pictures of the same name were replaced, nothing is lost.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -198,6 +202,16 @@ fn safe_asset_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// The extensions Rezzer gives pictures ([`asset_extension`]).
+const ASSET_EXTENSIONS: [&str; 4] = ["png", "jpg", "pdf", "bin"];
+
+/// Whether `name` is a name Rezzer gives a picture: a safe asset id, `.` and one of
+/// [`ASSET_EXTENSIONS`].
+fn is_asset_name(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(id, ext)| safe_asset_id(id) && ASSET_EXTENSIONS.contains(&ext))
 }
 
 fn asset_extension(mime: &str) -> &'static str {
@@ -424,8 +438,8 @@ fn remove_if_empty(folder: &Path) {
 /// Which files [`remove_stale`] may remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stale {
-    /// An assets folder: every regular file but Markdown (a parts folder of another source
-    /// may have the same name).
+    /// An assets folder: only files named as Rezzer names pictures, never Markdown (a parts
+    /// folder of another source may have the same name) or a file a user put there.
     Assets,
     /// A parts folder: only Markdown parts Rezzer wrote, so a folder of the user's own notes
     /// that happens to have the name loses nothing.
@@ -479,12 +493,15 @@ fn remove_stale(folder: &Path, keep: &HashSet<OsString>, which: Stale) -> std::i
         if !entry.file_type()?.is_file() || keep.contains(&entry.file_name()) {
             continue;
         }
-        let markdown = Path::new(&entry.file_name())
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        let name = entry.file_name();
         let remove = match which {
-            Stale::Assets => !markdown,
-            Stale::Parts => markdown && is_rezzer_part(&entry.path()),
+            Stale::Assets => name.to_str().is_some_and(is_asset_name),
+            Stale::Parts => {
+                let markdown = Path::new(&name)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+                markdown && is_rezzer_part(&entry.path())
+            }
         };
         if remove {
             std::fs::remove_file(entry.path())?;

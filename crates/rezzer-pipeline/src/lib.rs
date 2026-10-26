@@ -439,7 +439,9 @@ impl Pipeline {
                     Ok(r) => write(r, json_of(&document).as_deref()),
                     Err(e) => Err(e.clone()),
                 };
+                // A failed read keeps the old pictures.
                 if outcome.is_ok()
+                    && completeness != Completeness::Failed
                     && let Err(what) = files::clean_assets(dir, &stem, &written)
                 {
                     document.losses.push(Loss {
