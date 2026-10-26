@@ -640,6 +640,43 @@ fn title_over_a_bar_heads_its_lines() {
     assert!(broken.is_empty(), "{broken:#?}\n{:#?}", blocks(&out));
 }
 
+/// A page of prose: a small bold heading over a drawn rule, then two paragraphs of regular
+/// text half a point larger, of three lines each, with no field, grid or box on the page.
+/// The heading and the rule are no form's title: the lines keep their paragraphs.
+#[test]
+fn a_heading_over_a_rule_on_a_prose_page_keeps_its_paragraphs() {
+    let mut c = String::from("BT /F2 9 Tf 72 700 Td (Ergebnisse der Messung) Tj ET\n");
+    c += "q 0.5 w 72 697.5 m 400 697.5 l S Q\n";
+    let lines = [
+        "Die Messung zeigt einen klaren Anstieg der Werte im",
+        "zweiten Abschnitt, der sich bis zum Ende der Reihe",
+        "fortsetzt und im letzten Monat am hoechsten ist.",
+        "Im Vergleich mit dem Vorjahr liegt der Wert damit",
+        "deutlich hoeher, obwohl die Zahl der Proben gleich",
+        "geblieben ist und die Methode nicht geaendert wurde.",
+    ];
+    for (k, l) in lines.iter().enumerate() {
+        let y = 682.0 - 11.4 * k as f32 - if k >= 3 { 8.0 } else { 0.0 };
+        c += &format!("BT /F1 9.5 Tf 72 {y} Td ({l}) Tj ET\n");
+    }
+    let out = read(&common::pdf(&[common::Page::text(c)], ""));
+    let paragraphs: Vec<String> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph { inlines, .. } => Some(plain_text(inlines)),
+            _ => None,
+        })
+        .collect();
+    for (a, b) in [(0, 2), (3, 5)] {
+        assert!(
+            paragraphs
+                .iter()
+                .any(|p| p.contains(lines[a]) && p.contains(lines[b])),
+            "{paragraphs:#?}"
+        );
+    }
+}
+
 /// A row of fields like F1 (labels over a value line, dividers hanging from the upper rule
 /// at data columns 13, 43, 47 and 51) whose rate field (columns 43 to 47) holds `digits`
 /// from column 43, a drawn mark after its first two digits, and `next` (column, text) on the

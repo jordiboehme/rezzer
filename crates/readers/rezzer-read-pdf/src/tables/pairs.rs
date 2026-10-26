@@ -996,6 +996,22 @@ pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
     frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs).unwrap_or_default()
 }
 
+/// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
+/// of rules, or a frame of fields between rules with a divider (see [`frames`]). An underlined
+/// title is looked for only there: on a page of prose a heading over a rule is a heading of
+/// the prose.
+pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
+    if !boxes.is_empty() {
+        return true;
+    }
+    let Ok(g) = grids(rules) else {
+        return false;
+    };
+    !g.groups.is_empty()
+        || frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs)
+            .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
+}
+
 /// Which of `n` horizontal lines the grids of `groups` take.
 pub(super) fn taken_by_grids(n: usize, groups: &[(Vec<usize>, Vec<usize>)]) -> Vec<bool> {
     let mut taken = vec![false; n];

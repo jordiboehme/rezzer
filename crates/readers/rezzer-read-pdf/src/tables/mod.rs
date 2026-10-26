@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
-pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, underlined_titles};
+pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.

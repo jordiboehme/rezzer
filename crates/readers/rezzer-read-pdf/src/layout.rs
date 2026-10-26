@@ -943,8 +943,12 @@ pub(crate) fn page_blocks_at(
         // Drawn boxes of a label over its value are taken first: a row of them is no header
         // band. A page with form fields is the form's (see `tables::untagged`).
         if drawn.widgets.is_empty() {
-            let titles = tables::underlined_titles(&mut flow, drawn.rules);
-            placed.extend(titles.into_iter().map(Placed::Title));
+            // A title over a bar is a form's: a page of prose keeps its headings and
+            // paragraphs.
+            if tables::form_drawn(drawn.rules, drawn.boxes) {
+                let titles = tables::underlined_titles(&mut flow, drawn.rules);
+                placed.extend(titles.into_iter().map(Placed::Title));
+            }
             let (found, titles, unsure) =
                 tables::box_pairs(page, &mut flow, drawn.boxes, drawn.rules, &text_sizes);
             placed.extend(found.into_iter().map(Placed::Table));
