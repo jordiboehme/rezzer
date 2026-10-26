@@ -1388,9 +1388,10 @@ fn parser_cut(body: &str, cap: u64) -> Option<usize> {
     None
 }
 
-/// pulldown-cmark 0.13.4 repeats the rest of the paragraph and loses the next wikilink's
-/// target after an empty pothole `[[x|]]`. Written as `[[x]]` it means the same. Code spans,
-/// fenced and indented code stay as they are.
+/// An empty pothole `[[x|]]` is written as `[[x]]`, which means the same. pulldown-cmark
+/// 0.13.4 repeated the rest of the paragraph and lost the next wikilink's target after one;
+/// 0.13.5 reads it, but as a link with no text. Code spans, fenced and indented code stay as
+/// they are.
 fn fix_empty_potholes(body: &str) -> std::borrow::Cow<'_, str> {
     if !body.contains("|]]") {
         return std::borrow::Cow::Borrowed(body);

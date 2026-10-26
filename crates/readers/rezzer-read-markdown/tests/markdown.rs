@@ -1163,3 +1163,23 @@ fn empty_inline_math_is_a_loss() {
     // A doubtful reading does not make the document partial.
     assert_eq!(out.completeness, Completeness::Complete);
 }
+
+#[test]
+fn list_item_with_a_reference_and_a_tab_reads() {
+    // These 13 bytes made pulldown-cmark 0.13.4 panic in `into_offset_iter`.
+    let out = read("- [o]:u\n    \t");
+    assert_ne!(
+        out.completeness,
+        Completeness::Failed,
+        "{:?}",
+        out.document.losses
+    );
+    assert!(
+        !out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("internal error")),
+        "{:?}",
+        out.document.losses
+    );
+}
