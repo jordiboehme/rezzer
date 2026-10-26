@@ -1461,6 +1461,21 @@ mod tests {
         assert_eq!(runs.len(), 1, "{runs:?}");
         assert_eq!(runs[0].text, "Erika");
         assert!((runs[0].x - 62.8).abs() < 0.01, "{runs:?}");
+        // Text that reads upward keeps the start of its ink in the page's frame too.
+        let (text, mut glyphs) = pitched(&[("      Muster GmbH", false)], 40.0, 0.0, 9.5, 5.7);
+        for g in &mut glyphs {
+            (g.x, g.y, g.dx, g.dy) = (100.0, g.x, 0.0, 1.0);
+        }
+        let texts = Texts {
+            text: &text,
+            actuals: &[],
+        };
+        let runs = runs_of(1, &glyphs, &texts, Turn::None, &[]);
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert_eq!(runs[0].text, "Muster GmbH");
+        assert!(runs[0].off_axis, "{runs:?}");
+        assert!((runs[0].x - 100.0).abs() < 0.01, "{runs:?}");
+        assert!((runs[0].y - 74.2).abs() < 0.01, "{runs:?}");
     }
 
     /// Guard: a run cut at a change of style that begins with a word space goes on the run
