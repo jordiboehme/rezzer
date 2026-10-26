@@ -22,6 +22,7 @@ pub(crate) struct Prep<'a> {
 impl<'a> Prep<'a> {
     pub fn new(input: &'a Input<'a>) -> Self {
         let n = input.cells.len().min(u32::MAX as usize);
+        crate::work::add(n as u64);
         let mut cells: Vec<u32> = (0..n as u32)
             .filter(|&i| input.cells[i as usize].occupied())
             .collect();

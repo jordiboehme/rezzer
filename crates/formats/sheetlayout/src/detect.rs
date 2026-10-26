@@ -44,6 +44,7 @@ impl<'a> Tick<'a> {
 
     /// One step of work. Gives true when the work must end.
     pub fn step(&self) -> bool {
+        crate::work::add(1);
         if self.hit.get() {
             return true;
         }
