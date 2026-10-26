@@ -20,11 +20,18 @@
 //! an edited file keeps its addresses. No name starts with `.` (ruling P5-Z): Crystalline
 //! skips hidden files.
 //!
+//! Rezzer replaces a Markdown file or JSON only when it wrote it for the same source (ruling
+//! P5-AG): its frontmatter has `generated: { by: rezzer/` and the same `resource` (a part also
+//! its `part:` key), or the JSON starts with `model_version` and the same source path or name.
+//! A main document, JSON or part path held by anything else, a file of the user's or the
+//! output of another source (`Note.md` and `note.md` on a file system that ignores case),
+//! fails the run before a file of it is written (rulings P5-AB and P5-AG). The message names
+//! the file and, for another source, both sources.
+//!
 //! Files an earlier run left that this run does not write are removed, but only files
 //! Rezzer names itself (rulings P5-Y and P5-AC): in the assets folder regular files named as
 //! Rezzer names pictures ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
-//! wrote ([`is_rezzer_part`]). A file a user put there stays. A part path held by anything
-//! else fails the run before a file of it is written (ruling P5-AB). An empty parts folder
+//! wrote for this source ([`holder`]). A file a user put there stays. An empty parts folder
 //! is removed, also one Rezzer did not make. Symlinks and folders inside are never followed
 //! or removed. The check of a folder and the removal of its files are separate steps, so a
 //! folder that is swapped for a symlink in between is a known gap (planned for the
@@ -328,6 +335,9 @@ pub(crate) fn clean_assets(
 
 /// What the files of one run are: the main document, its parts and the JSON.
 pub(crate) struct Files<'a> {
+    /// The source as the frontmatter's `resource` names it, unquoted: its path, else its
+    /// name.
+    pub source: &'a str,
     /// The main document's name without `.md` ([`main_name`]).
     pub main: &'a str,
     /// The parts folder ([`parts_folder`]).
@@ -341,8 +351,7 @@ pub(crate) struct Files<'a> {
 /// Writes the files of one run into `dir` (made when missing): the parts into `<folder>/`,
 /// then the main document and the JSON. Parts of an earlier run that this one does not
 /// write are removed, and the parts folder too when it is empty then. A symlink is never
-/// written through. Before anything is written, every part path is checked: one that holds
-/// anything but a part Rezzer wrote fails the run (ruling P5-AB). The error names the file.
+/// written through. Before anything is written, every path is checked ([`check_paths`]).
 pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     let shown = |path: &Path, e: std::io::Error| {
         format!(
@@ -352,9 +361,8 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
         )
     };
     let folder = dir.join(files.folder);
-    if !files.parts.is_empty() {
-        check_part_paths(dir, &folder, files)?;
-    }
+    check_paths(dir, files)?;
+    let resource = rezzer_render::frontmatter_value(files.source);
     std::fs::create_dir_all(dir).map_err(|e| shown(dir, e))?;
     let mut keep: HashSet<OsString> = HashSet::new();
     if !files.parts.is_empty() {
@@ -375,7 +383,7 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
         }
         write_new(&target, text.as_bytes()).map_err(|e| shown(&target, e))?;
     }
-    remove_stale(&folder, &keep, Stale::Parts).map_err(|e| {
+    remove_stale(&folder, &keep, Stale::Parts(&resource)).map_err(|e| {
         format!(
             "cannot remove the parts of an earlier run in {}: {}",
             folder.display(),
@@ -388,10 +396,36 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// Checks the parts folder and every part path before anything is written: the folder must
-/// be missing or a plain directory, and each path missing or a part Rezzer wrote.
-pub(crate) fn check_part_paths(dir: &Path, folder: &Path, files: &Files<'_>) -> Result<(), String> {
-    match std::fs::symlink_metadata(folder) {
+/// Checks every path of a run before anything is written (rulings P5-AB and P5-AG): the
+/// main document, the JSON when the run writes one, the parts folder (missing or a plain
+/// directory) and each part path. Each must be missing or a file Rezzer wrote for this
+/// source.
+pub(crate) fn check_paths(dir: &Path, files: &Files<'_>) -> Result<(), String> {
+    let resource = rezzer_render::frontmatter_value(files.source);
+    let refuse = |target: &Path, holder: Holder, what: &str| match holder {
+        Holder::Free | Holder::Same => Ok(()),
+        Holder::Foreign => Err(format!(
+            "cannot write {}: it is in the way and is not {what} Rezzer wrote",
+            target.display()
+        )),
+        Holder::Other(other) => Err(format!(
+            "cannot write {}: it holds Rezzer's output for {other}, and this read is of \
+             {resource}. Sources with the same name, or names that differ only in letter \
+             case on a file system that ignores case, need different output folders",
+            target.display()
+        )),
+    };
+    let main = dir.join(format!("{}.md", files.main));
+    refuse(&main, holder(&main, &resource, Kind::Main), "a file")?;
+    if files.json.is_some() {
+        let json = dir.join(format!("{}.json", files.main));
+        refuse(&json, json_holder(&json, files.source), "a file")?;
+    }
+    if files.parts.is_empty() {
+        return Ok(());
+    }
+    let folder = dir.join(files.folder);
+    match std::fs::symlink_metadata(&folder) {
         Ok(meta) if meta.is_dir() => {}
         Ok(_) => {
             return Err(format!(
@@ -410,16 +444,14 @@ pub(crate) fn check_part_paths(dir: &Path, folder: &Path, files: &Files<'_>) -> 
     }
     for (path, _) in &files.parts {
         let target = dir.join(path);
-        let ours = match std::fs::symlink_metadata(&target) {
-            Ok(meta) => meta.is_file() && is_rezzer_part(&target),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-            Err(_) => false,
-        };
-        if !ours {
-            return Err(format!(
-                "cannot write the parts: {} is in the way and is not a part Rezzer wrote",
-                target.display()
-            ));
+        match holder(&target, &resource, Kind::Part) {
+            Holder::Foreign => {
+                return Err(format!(
+                    "cannot write the parts: {} is in the way and is not a part Rezzer wrote",
+                    target.display()
+                ));
+            }
+            other => refuse(&target, other, "a part")?,
         }
     }
     Ok(())
@@ -438,43 +470,134 @@ fn remove_if_empty(folder: &Path) {
 
 /// Which files [`remove_stale`] may remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stale {
+enum Stale<'a> {
     /// An assets folder: only files named as Rezzer names pictures, never Markdown (a parts
     /// folder of another source may have the same name) or a file a user put there.
     Assets,
-    /// A parts folder: only Markdown parts Rezzer wrote, so a folder of the user's own notes
-    /// that happens to have the name loses nothing.
-    Parts,
+    /// A parts folder: only Markdown parts Rezzer wrote for the source with this quoted
+    /// `resource`, so a folder of the user's own notes, or the parts of another source, lose
+    /// nothing.
+    Parts(&'a str),
 }
 
-/// The most bytes read to find the `part:` key of a part file. Rezzer's own frontmatter
-/// can be long (keyword tags, file tags), so this is generous; it only bounds a hostile file.
-const PART_HEAD_MAX: u64 = 16 * 1024 * 1024;
+/// The most bytes read to find the frontmatter keys of a Markdown file, or the source of a
+/// JSON file. Rezzer's own frontmatter can be long (keyword tags, file tags), so this is
+/// generous; it only bounds a hostile file.
+const HEAD_MAX: u64 = 16 * 1024 * 1024;
 
-/// Whether `path` is a part file Rezzer wrote: frontmatter with a `part:` key and a
-/// `generated:` line by `rezzer/`. Read line by line up to the closing `---`, without
-/// following a symlink (the caller checked the entry type).
-fn is_rezzer_part(path: &Path) -> bool {
+/// Who holds a path Rezzer wants to write.
+#[derive(Debug, PartialEq, Eq)]
+enum Holder {
+    /// Nothing is there.
+    Free,
+    /// A file Rezzer wrote for the same source.
+    Same,
+    /// A file Rezzer wrote for another source, named by its quoted `resource`.
+    Other(String),
+    /// Anything else: a file of the user's, a symlink, a folder.
+    Foreign,
+}
+
+/// Which Markdown file [`holder`] looks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// A main document: no `part:` key.
+    Main,
+    /// A part: a `part:` key.
+    Part,
+}
+
+/// Who holds the Markdown path `path`, for a source whose quoted `resource` is `resource`.
+/// The frontmatter is read line by line up to the closing `---`, without following a
+/// symlink: a symlink, a folder or a file without Rezzer's `generated` line is
+/// [`Holder::Foreign`].
+fn holder(path: &Path, resource: &str, kind: Kind) -> Holder {
     use std::io::BufRead;
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut lines = std::io::BufReader::new(file.take(PART_HEAD_MAX)).split(b'\n');
-    if !matches!(lines.next(), Some(Ok(first)) if first == b"---") {
-        return false;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => {}
+        Ok(_) => return Holder::Foreign,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Holder::Free,
+        Err(_) => return Holder::Foreign,
     }
-    let (mut part, mut generated) = (false, false);
+    let Ok(file) = std::fs::File::open(path) else {
+        return Holder::Foreign;
+    };
+    let mut lines = std::io::BufReader::new(file.take(HEAD_MAX)).split(b'\n');
+    if !matches!(lines.next(), Some(Ok(first)) if first == b"---") {
+        return Holder::Foreign;
+    }
+    let (mut part, mut generated, mut written_for) = (false, false, None);
     for line in lines {
         let Ok(line) = line else {
-            return false;
+            return Holder::Foreign;
         };
         if line == b"---" {
             break;
         }
         part |= line.starts_with(b"part: ");
         generated |= line.starts_with(b"generated: { by: rezzer/");
+        if written_for.is_none()
+            && let Some(value) = line.strip_prefix(b"resource: ")
+        {
+            written_for = Some(String::from_utf8_lossy(value).into_owned());
+        }
     }
-    part && generated
+    match written_for {
+        Some(value) if generated && part == (kind == Kind::Part) => {
+            if value == resource {
+                Holder::Same
+            } else {
+                Holder::Other(value)
+            }
+        }
+        _ => Holder::Foreign,
+    }
+}
+
+/// Who holds the JSON path `path`, for the source `source` (unquoted). Rezzer's JSON is
+/// pretty-printed and starts with `"model_version"`, then the `"source"` object with its
+/// `"path"` (when there is one) and `"name"`; only that shape counts as Rezzer's.
+fn json_holder(path: &Path, source: &str) -> Holder {
+    use std::io::BufRead;
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => {}
+        Ok(_) => return Holder::Foreign,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Holder::Free,
+        Err(_) => return Holder::Foreign,
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return Holder::Foreign;
+    };
+    let mut lines = std::io::BufReader::new(file.take(HEAD_MAX)).lines();
+    let mut next = || lines.next().and_then(Result::ok);
+    if next().as_deref() != Some("{")
+        || !next().is_some_and(|l| l.starts_with("  \"model_version\": "))
+        || next().as_deref() != Some("  \"source\": {")
+    {
+        return Holder::Foreign;
+    }
+    // A JSON string value of a `"key": value,` line inside the source object.
+    let value = |line: &str, key: &str| -> Option<String> {
+        let rest = line.strip_prefix(&format!("    \"{key}\": "))?;
+        serde_json::from_str::<String>(rest.strip_suffix(',').unwrap_or(rest)).ok()
+    };
+    let (mut path_value, mut name_value) = (None, None);
+    while let Some(line) = next() {
+        if !line.starts_with("    ") {
+            break;
+        }
+        if path_value.is_none() && name_value.is_none() {
+            path_value = value(&line, "path");
+        }
+        if name_value.is_none() {
+            name_value = value(&line, "name");
+        }
+    }
+    match path_value.or(name_value) {
+        Some(written_for) if written_for == source => Holder::Same,
+        Some(written_for) => Holder::Other(rezzer_render::frontmatter_value(&written_for)),
+        None => Holder::Foreign,
+    }
 }
 
 /// Removes the regular files in `folder` whose names are not in `keep` and that `which`
@@ -497,11 +620,11 @@ fn remove_stale(folder: &Path, keep: &HashSet<OsString>, which: Stale) -> std::i
         let name = entry.file_name();
         let remove = match which {
             Stale::Assets => name.to_str().is_some_and(is_asset_name),
-            Stale::Parts => {
+            Stale::Parts(resource) => {
                 let markdown = Path::new(&name)
                     .extension()
                     .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-                markdown && is_rezzer_part(&entry.path())
+                markdown && holder(&entry.path(), resource, Kind::Part) == Holder::Same
             }
         };
         if remove {

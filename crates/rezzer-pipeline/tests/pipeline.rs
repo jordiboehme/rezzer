@@ -1764,7 +1764,7 @@ fn rerun_removes_stale_parts() {
     .unwrap();
     // A stale part of ours with a long frontmatter before its `part:` key.
     let long = format!(
-        "---\ntags: [\"{}\"]\ngenerated: {{ by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }}\npart: 50\n---\n\nold\n",
+        "---\nresource: \"grow.txt\"\ntags: [\"{}\"]\ngenerated: {{ by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }}\npart: 50\n---\n\nold\n",
         "a".repeat(200_000)
     );
     std::fs::write(parts_folder.join("chapter-50.md"), long).unwrap();
@@ -2157,26 +2157,157 @@ fn a_symlinked_parts_folder_is_never_followed() {
 
 #[cfg(unix)]
 #[test]
-fn the_main_document_replaces_a_file_or_link_without_following_it() {
+fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
+    // Ruling P5-AG: a hand-written file, a symlink or a folder at the main document's path
+    // stops the run before anything is written, and stays as it is.
     let root = tempfile::tempdir().unwrap();
-    let out = root.path().join("out");
-    std::fs::create_dir_all(&out).unwrap();
     let victim = root.path().join("victim");
     std::fs::write(&victim, "keep").unwrap();
-    std::os::unix::fs::symlink(&victim, out.join("notes.txt.md")).unwrap();
-    std::fs::write(out.join("other.txt.md"), "an older output").unwrap();
     let pipeline = chapters_pipeline(config(None));
-    for name in ["notes.txt", "other.txt"] {
-        let res = pipeline.run_bytes(name, SMALL.to_vec(), None, &written(&out));
-        assert_eq!(res.completeness, Completeness::Complete, "{name}");
-        let main = out.join(format!("{name}.md"));
-        assert!(!std::fs::symlink_metadata(&main).unwrap().is_symlink());
+    for (what, input) in [("small", SMALL), ("large", LARGE)] {
+        let out = root.path().join(format!("out-{what}"));
+        std::fs::create_dir_all(&out).unwrap();
+        std::os::unix::fs::symlink(&victim, out.join("link.txt.md")).unwrap();
+        std::fs::write(out.join("x.txt.md"), "# My own notes\n").unwrap();
+        std::fs::create_dir(out.join("dir.txt.md")).unwrap();
+        for name in ["link.txt", "x.txt", "dir.txt"] {
+            let res = pipeline.run_bytes(name, input.to_vec(), None, &written(&out));
+            assert_eq!(res.completeness, Completeness::Failed, "{what} {name}");
+            let message = res.message.unwrap();
+            assert!(message.contains(&format!("{name}.md")), "{message}");
+            assert!(
+                message.contains("is not a file Rezzer wrote"),
+                "{what} {name}: {message}"
+            );
+            assert!(res.document.is_some(), "{what} {name}");
+        }
         assert_eq!(
-            std::fs::read_to_string(&main).unwrap(),
-            res.markdown_pages.concat()
+            names_in(&out),
+            ["dir.txt.md", "link.txt.md", "x.txt.md"],
+            "{what}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("x.txt.md")).unwrap(),
+            "# My own notes\n"
+        );
+        assert!(
+            std::fs::symlink_metadata(out.join("link.txt.md"))
+                .unwrap()
+                .is_symlink()
         );
     }
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+}
+
+#[test]
+fn a_rerun_of_the_same_source_replaces_its_files() {
+    let out = tempfile::tempdir().unwrap();
+    let pipeline = chapters_pipeline(config(None));
+    let json = |dir: &Path| Request {
+        output: OutputKind::Json,
+        ..written(dir)
+    };
+    for input in [SMALL, LARGE, SMALL] {
+        let res = pipeline.run_bytes("notes.txt", input.to_vec(), None, &json(out.path()));
+        assert_eq!(
+            res.completeness,
+            Completeness::Complete,
+            "{:?}",
+            res.message
+        );
+        let main = std::fs::read_to_string(out.path().join("notes.txt.md")).unwrap();
+        assert!(main.starts_with("---\ntype: source\n"), "{main}");
+        assert!(out.path().join("notes.txt.json").is_file());
+    }
+}
+
+#[test]
+fn output_of_another_source_stops_the_run() {
+    // Ruling P5-AG: `Note.txt` and then `note.txt` into one folder on a file system that
+    // ignores case. The clash is made with a file that has another `resource`, so the test
+    // runs on any file system.
+    let pipeline = chapters_pipeline(config(None));
+    let json = |dir: &Path| Request {
+        output: OutputKind::Json,
+        ..written(dir)
+    };
+    for (what, input) in [("small", SMALL), ("large", LARGE)] {
+        let other = tempfile::tempdir().unwrap();
+        pipeline.run_bytes("Note.txt", input.to_vec(), None, &json(other.path()));
+        let out = tempfile::tempdir().unwrap();
+        // The main document of `Note.txt` at the path of `note.txt`.
+        std::fs::copy(
+            other.path().join("Note.txt.md"),
+            out.path().join("note.txt.md"),
+        )
+        .unwrap();
+        let before = snapshot_files(out.path());
+        let res = pipeline.run_bytes("note.txt", input.to_vec(), None, &json(out.path()));
+        assert_eq!(res.completeness, Completeness::Failed, "{what}");
+        let message = res.message.unwrap();
+        assert!(message.contains("note.txt.md"), "{what}: {message}");
+        assert!(message.contains("\"Note.txt\""), "{what}: {message}");
+        assert!(message.contains("\"note.txt\""), "{what}: {message}");
+        assert!(message.contains("letter case"), "{what}: {message}");
+        assert_eq!(snapshot_files(out.path()), before, "{what}");
+        // The JSON of `Note.txt` at the JSON path of `note.txt`.
+        std::fs::remove_file(out.path().join("note.txt.md")).unwrap();
+        std::fs::copy(
+            other.path().join("Note.txt.json"),
+            out.path().join("note.txt.json"),
+        )
+        .unwrap();
+        let res = pipeline.run_bytes("note.txt", input.to_vec(), None, &json(out.path()));
+        assert_eq!(res.completeness, Completeness::Failed, "{what}");
+        let message = res.message.unwrap();
+        assert!(message.contains("note.txt.json"), "{what}: {message}");
+        assert!(message.contains("\"Note.txt\""), "{what}: {message}");
+        assert_eq!(names_in(out.path()), ["note.txt.json"], "{what}");
+        // A JSON of the user's own stops it too.
+        std::fs::write(out.path().join("note.txt.json"), "{\"mine\": true}\n").unwrap();
+        let res = pipeline.run_bytes("note.txt", input.to_vec(), None, &json(out.path()));
+        assert_eq!(res.completeness, Completeness::Failed, "{what}");
+        assert!(
+            res.message.unwrap().contains("is not a file Rezzer wrote"),
+            "{what}"
+        );
+        // Without JSON output the JSON path is not touched, so the run works.
+        let res = pipeline.run_bytes("note.txt", input.to_vec(), None, &written(out.path()));
+        assert_eq!(res.completeness, Completeness::Complete, "{what}");
+        assert_eq!(
+            std::fs::read_to_string(out.path().join("note.txt.json")).unwrap(),
+            "{\"mine\": true}\n"
+        );
+    }
+}
+
+#[test]
+fn a_part_of_another_source_stops_the_run_and_is_never_removed() {
+    let pipeline = chapters_pipeline(config(None));
+    let other = tempfile::tempdir().unwrap();
+    let first = pipeline.run_bytes("Note.txt", LARGE.to_vec(), None, &written(other.path()));
+    let part = first.parts[0].path.clone();
+    let out = tempfile::tempdir().unwrap();
+    let ours = pipeline.run_bytes("note.txt", LARGE.to_vec(), None, &written(out.path()));
+    assert_eq!(ours.completeness, Completeness::Complete);
+    let folder = out.path().join("note.txt.parts");
+    // A part of `Note.txt` at a path this run writes stops it.
+    let target = out.path().join(part.replacen("Note.txt", "note.txt", 1));
+    std::fs::copy(other.path().join(&part), &target).unwrap();
+    let res = pipeline.run_bytes("note.txt", LARGE.to_vec(), None, &written(out.path()));
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(message.contains("\"Note.txt\""), "{message}");
+    // A part of `Note.txt` that this run does not write stays when the run cleans up.
+    std::fs::rename(&target, folder.join("chapter-99.md")).unwrap();
+    let res = pipeline.run_bytes("note.txt", SMALL.to_vec(), None, &written(out.path()));
+    assert_eq!(
+        res.completeness,
+        Completeness::Complete,
+        "{:?}",
+        res.message
+    );
+    assert_eq!(names_in(&folder), ["chapter-99.md"]);
 }
 
 #[test]

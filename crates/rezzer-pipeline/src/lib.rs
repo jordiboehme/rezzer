@@ -400,9 +400,16 @@ impl Pipeline {
         let mut rendered = render(&document, completeness);
         let mut main_file = None;
         if let (Some(dir), Some((main, folder)), Ok(first)) = (&req.output_dir, &names, &rendered) {
-            // Writes the rendered files; the part paths are checked first.
+            // The source as the frontmatter's `resource` names it.
+            let source = document
+                .source
+                .path
+                .clone()
+                .unwrap_or_else(|| document.source.name.clone());
+            // Writes the rendered files; the paths are checked first.
             let write = |(_, parts, main_markdown): &Rendered, json: Option<&str>| {
                 let files = files::Files {
+                    source: &source,
                     main,
                     folder,
                     main_markdown,
@@ -414,20 +421,17 @@ impl Pipeline {
                 };
                 files::write_files(dir, &files)
             };
-            // A part path held by a file Rezzer did not write fails the run before a
-            // picture is written (ruling P5-AB).
+            // A path held by anything but Rezzer's output for this source fails the run
+            // before a picture is written (rulings P5-AB and P5-AG).
             let check = files::Files {
+                source: &source,
                 main,
                 folder,
                 main_markdown: "",
                 parts: first.1.iter().map(|p| (p.path.as_str(), "")).collect(),
-                json: None,
+                json: (req.output == OutputKind::Json).then_some(""),
             };
-            let mut outcome = if check.parts.is_empty() {
-                Ok(())
-            } else {
-                files::check_part_paths(dir, &dir.join(folder), &check)
-            };
+            let mut outcome = files::check_paths(dir, &check);
             if outcome.is_ok() {
                 let (written, lost) = files::write_assets(&mut document, planned, dir, &stem);
                 if lost {
