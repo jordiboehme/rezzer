@@ -71,11 +71,13 @@ pub struct RezParams {
     #[serde(default)]
     pub password: Option<String>,
     /// How sheet tables are written: `table` (default) as Markdown tables, or `records` as
-    /// one list item per row with the column header of each value.
+    /// one list item per row with the column header of each value. Markdown only: `json`
+    /// gives the full model.
     #[serde(default)]
     #[schemars(schema_with = "table_style_schema", extend("default" = "table"))]
     pub table_style: Option<String>,
     /// Only these sheets, by name or by position as `#1`, `#2` and so on. Default all.
+    /// Markdown only: `json` gives all sheets.
     #[serde(default)]
     pub sheets: Option<Vec<String>>,
 }

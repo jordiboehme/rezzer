@@ -89,7 +89,7 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 
 ## How it is tested
 
-The corpus has 4 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+The corpus has 13 public ODS test files from LibreOffice and calamine. One of them is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 

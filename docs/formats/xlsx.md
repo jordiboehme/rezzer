@@ -90,7 +90,7 @@ Facts from the file come first. Excel tables, pivot tables and filters give the 
 
 When the rules do not agree on a header, Rezzer does not pick one. The table is shown as a raw grid with the column letters as header, and "Not read" lists it as unsure.
 
-Totals come from facts and formulas only: a totals row of an Excel table, a grand total of a pivot table or a row with `SUBTOTAL`, `AGGREGATE` or a `SUM` over the rows above it. A word like "Total" or "Summe" is not enough, so a pasted total row without a formula is not marked.
+Totals come from facts and formulas only: a totals row of an Excel table, the grand total row or column of a pivot table or a row with `SUBTOTAL`, `AGGREGATE` or a `SUM` over the rows above it. A word like "Total" or "Summe" is not enough, so a pasted total row without a formula is not marked.
 
 ### How it shows up
 
@@ -100,7 +100,7 @@ Each part gets a heading: its title when it has one, else the name of its Excel 
 Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
 ```
 
-A merged cell keeps its text once. `〃` marks a cell merged from above and `←` a cell merged from the left, with a note that lists the merged ranges. Group, subtotal and total rows are named in a line under the table. No cell text is changed.
+A merged cell keeps its text once. `〃` marks a cell merged from above and `←` a cell merged from the left, with a note that lists the merged ranges. Group, subtotal and total rows are named in a line under the table, and so is the grand total column of a pivot table: `Total column: D (pivot table grand total).` No cell text is changed.
 
 With `--table-style records` (MCP `table_style: "records"`, or `table_style = "records"` under `[read]` in the config file) every table row becomes one list item, with the header path of each value:
 
@@ -111,15 +111,17 @@ With `--table-style records` (MCP `table_style: "records"`, or `table_style = "r
   - Generation at Utility Scale Facilities / Petroleum Liquids: 740
 ```
 
-Records repeat the header, so they cost about four times as much as a table line. In return each row stands on its own. Empty cells are left out. A raw grid stays a grid. A table without a header row stays a table too, because there is no header to name the fields: its layout line says so. Label and value blocks and text lists look the same in both styles.
+Records repeat the header, so they cost about four times as much as a table line. In return each row stands on its own. Empty cells are left out. A value in the grand total column of a pivot table ends with `(total)`. A raw grid stays a grid. A table without a header row stays a table too, because there is no header to name the fields: its layout line says so. Label and value blocks and text lists look the same in both styles.
 
-`--sheet <name>` (MCP `sheets`) reads only some sheets, by name or by position like `#2`. Give it more than once for more sheets. Rezzer still reads the whole workbook, so formulas that read other sheets stay correct. The overview marks the other sheets as not selected.
+`--sheet <name>` (MCP `sheets`) reads only some sheets, by name or by position like `#2`. Give it more than once for more sheets. Rezzer still reads the whole workbook, so formulas that read other sheets stay correct. The overview marks the other sheets as not selected. `--table-style` and `--sheet` change only the Markdown: `--json` gives the full model with all sheets.
 
 ### Limits
 
 - Two tables that touch with no empty row or column between them are one table. One table with an empty row inside it can become two (a defined name over the whole range joins them)
 - A cross table whose header rows sit above and to the right of its corner labels becomes two tables. Every cell is kept
 - A total row without a formula is not marked as a total
+- A pivot table with more than one value field can have more than one grand total row or column. Only the last one is marked
+- A unit found in a label and value block, like `veh/hr` in `Traffic volume: 1200 veh/hr`, may not show up in the Logic section. There the label of the value cell is read by its own rule
 - For XLSB Rezzer reads values only, no styles, Excel tables or filters. It finds the tables from the values and says so under "Not read"
 
 ## How it shows up in the output
@@ -166,7 +168,7 @@ Parameters in INPUTS:
 Rezzer reads every file as untrusted data:
 
 - Each entry is measured before it is unpacked. Defaults: 2 GB per file, 4 GB unpacked, at most 100 times the packed size per entry, XML nesting up to 256 levels, 120 seconds, 2 GB of memory and 2 million elements. The unpacked limit is checked against what the file really unpacks to. Each part counts once, even when Rezzer reads it more than once
-- A value table shows at most 1,000 columns and 200,000 cells. The output says what was cut. Its formulas still show up in the Logic section
+- A table shows at most 1,000 columns, and a sheet at most 200,000 cells. The output says what was cut. Its formulas still show up in the Logic section
 - A formula longer than 8,192 characters (the Excel maximum) is kept as text and not analyzed
 - A DOCTYPE in a part is refused, so entity bombs don't expand
 - A package that can be read in two ways is refused as damaged: two main workbook parts, two relationships with one id, two sheets with one name, part paths with `.` or `..`, entries that differ only in case, relationship or sheet markup Excel never writes, control characters in sheet names
@@ -174,7 +176,7 @@ Rezzer reads every file as untrusted data:
 
 ## How it is tested
 
-The corpus has 24 XLSX, 3 XLSM and 2 XLSB public test files from Apache POI, Apache Tika, LibreOffice, calamine, IronCalc and two open engineering projects. One XLSB file is broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
+The corpus has 33 XLSX, 3 XLSM and 2 XLSB public test files from Apache POI, Apache Tika, LibreOffice, calamine, IronCalc, two open engineering projects, the US Census Bureau and the US Energy Information Administration. One XLSX file and one XLSB file are broken on purpose. See [MANIFEST.md](../../tests/corpus/MANIFEST.md).
 
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 

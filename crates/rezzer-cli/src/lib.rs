@@ -76,10 +76,11 @@ struct ReadArgs {
     no_math: bool,
     /// How sheet tables are written: table (Markdown tables) or records (one list item per
     /// row with the column header of each value). Default from the config file, else table.
+    /// It changes only the Markdown: --json prints the full model.
     #[arg(long, value_name = "table|records")]
     table_style: Option<TableStyle>,
     /// Only this sheet, by name or by position as #1, #2 and so on. Give it more than once
-    /// for more sheets.
+    /// for more sheets. It changes only the Markdown: --json prints all sheets.
     #[arg(long = "sheet", value_name = "SELECTOR")]
     sheets: Vec<String>,
 }

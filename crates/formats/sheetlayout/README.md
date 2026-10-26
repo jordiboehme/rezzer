@@ -107,12 +107,14 @@ After the header, `detect` looks at the rows of each table.
   length of leading spaces or dots. The parent of a row is the nearest row above it with a
   lower level. Group rows can be parents. When no row gets a parent, no levels are given.
 - A row is a subtotal or a total only by a fact or a formula: an Excel table totals row, a
-  database range footer, a pivot total row, a formula with SUBTOTAL or AGGREGATE, or a SUM
+  database range footer, a pivot total row, a formula with SUBTOTAL or AGGREGATE or a SUM
   over the rows above in its own column. A SUM or SUBTOTAL that a later total reads is a
   subtotal. A SUM or SUBTOTAL that no later total reads and that covers the table, from
   its first data row past the last group row, is the total. AGGREGATE always gives a
   subtotal. A SUM that also reads its own row, such as a running balance, marks nothing. A row
   with the word "Total" and no formula stays a data row.
+- The grand total column of a pivot table, when the pivot fact states one, is given as a
+  total column of the region.
 - Header-less tables get the same row rules.
 
 ## Report sheets
