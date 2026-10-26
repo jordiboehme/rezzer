@@ -352,18 +352,17 @@ pub(crate) fn passage_note(a: &Annotation) -> Block {
     }
 }
 
-/// `## Annotations`: comments, notes and highlights with author, date and passage; the ones
+/// `## Annotations`: the document's annotations (`list`, in the order `notes` counts them),
+/// comments, notes and highlights with author, date and passage; the ones
 /// the content showed at their passage (`notes`) are left out, and so are those on sheets
 /// that are not selected.
 pub(crate) fn annotations(
-    doc: &Document,
+    list: &[Annotation],
     ctx: &Ctx,
     notes: &Notes,
     selection: Option<&Selection>,
 ) -> Option<String> {
-    let items: Vec<Vec<Block>> = doc
-        .facets
-        .annotations
+    let items: Vec<Vec<Block>> = list
         .iter()
         .enumerate()
         .filter(|(i, _)| !notes.shown(*i))

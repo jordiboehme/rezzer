@@ -61,6 +61,9 @@ pub(crate) const TITLE_CAP: usize = 120;
 /// The longest file name of a part, without `.md`.
 const NAME_CAP: usize = 60;
 
+/// The longest table key in a row range name.
+const KEY_CAP: usize = 24;
+
 /// The names a part never takes: Crystalline reserves `index` and `log`, the main document
 /// writer `not-read` and `contents`.
 const RESERVED: [&str; 4] = ["index", "log", "not-read", "contents"];
@@ -181,18 +184,24 @@ fn cut_slug(slug: &str, max: usize) -> &str {
 #[derive(Debug)]
 pub(crate) struct Names {
     taken: HashSet<String>,
+    /// The next number to try for a base and suffix, so many pieces of one base do not try
+    /// every number again.
+    next: HashMap<(String, String), usize>,
 }
 
 impl Names {
     pub(crate) fn new() -> Names {
         Names {
             taken: RESERVED.iter().map(|r| (*r).to_string()).collect(),
+            next: HashMap::new(),
         }
     }
 
     /// A free name from `base` (slugged) and `suffix` (already a slug part, such as
     /// `-rows-2-300`): `-2`, `-3` and so on when it is taken; `part-<order>` when both are
-    /// empty. At most 60 bytes: the base is cut at a hyphen to make room.
+    /// empty. At most 60 bytes: the base is cut at a hyphen to make room, and a name still
+    /// longer is cut at a hyphen and ends with `-<8 hex>` of the whole name, so it stays
+    /// unique.
     pub(crate) fn take(&mut self, base: &str, suffix: &str, order: usize) -> String {
         let base = slug(base);
         let (base, suffix) = match (base.is_empty(), suffix.trim_start_matches('-')) {
@@ -200,7 +209,9 @@ impl Names {
             (true, rest) => (rest.to_string(), String::new()),
             (false, _) => (base, suffix.to_string()),
         };
-        for n in 1usize.. {
+        let key = (base.clone(), suffix.clone());
+        let start = self.next.get(&key).copied().unwrap_or(1);
+        for n in start.. {
             let tail = if n == 1 {
                 suffix.clone()
             } else {
@@ -208,13 +219,28 @@ impl Names {
             };
             let room = NAME_CAP.saturating_sub(tail.len());
             let name = format!("{}{tail}", cut_slug(&base, room));
-            let name = name.trim_start_matches('-').to_string();
+            let mut name = name.trim_matches('-').to_string();
+            if name.len() > NAME_CAP {
+                name = hashed(&name);
+            }
             if !name.is_empty() && self.taken.insert(name.clone()) {
+                self.next.insert(key, n + 1);
                 return name;
             }
         }
         unreachable!("some suffix is always free")
     }
+}
+
+/// `name` cut at a hyphen to make room for `-<8 hex>`, the FNV-1a hash of the whole name.
+fn hashed(name: &str) -> String {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in name.bytes() {
+        hash ^= u32::from(b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    let head = cut_slug(name, NAME_CAP - 9).trim_end_matches('-');
+    format!("{head}-{hash:08x}")
 }
 
 /// A section around a unit's blocks: the unit keeps its heading and context.
@@ -332,19 +358,52 @@ impl<'a> Splitter<'a> {
         let title = frontmatter::shown_title(doc, opts).trim();
         let body = content_body(doc, title);
         let min = crate::min_heading(body, 0).unwrap_or(2).max(1);
-        // Cited from outside the definitions: a definition cited only by itself stays where
-        // it is, so it is never lost.
-        let mut cited = HashSet::new();
-        for b in doc.body.iter().filter(|b| footnote_label(b).is_none()) {
+        let selection = chosen_sheets(opts).map(|titles| Selection::of(doc, titles));
+        // Every footnote definition, on the top level or in the Markdown reader's
+        // `Footnotes` section, in body order.
+        let mut defs: HashMap<&'a str, (usize, &'a Block)> = HashMap::new();
+        for b in &doc.body {
+            let inner = match footnotes_section(b) {
+                Some(list) => list,
+                None => std::slice::from_ref(b),
+            };
+            for d in inner {
+                if let Some(label) = footnote_label(d) {
+                    let n = defs.len();
+                    defs.entry(label).or_insert((n, d));
+                }
+            }
+        }
+        // The ones a unit cites, and those they cite in turn. The definitions themselves and
+        // what no unit writes (the title, unchosen sheets, the PDF outline) do not count: a
+        // definition nothing in a unit cites stays where it is, so it is never lost.
+        let skip_first = doc.body.len() - body.len();
+        let mut cited: HashSet<String> = HashSet::new();
+        for (i, b) in doc.body.iter().enumerate() {
+            if i < skip_first
+                || footnote_label(b).is_some()
+                || footnotes_section(b).is_some()
+                || is_pdf_outline(doc, b)
+                || selection.as_ref().is_some_and(|s| !s.keeps_block(b))
+            {
+                continue;
+            }
             cited_footnotes(std::slice::from_ref(b), 0, &mut cited);
         }
-        let footnotes = doc
-            .body
-            .iter()
-            .enumerate()
-            .filter_map(|(i, b)| footnote_label(b).map(|label| (label, (i, b))))
-            .filter(|(label, _)| cited.contains(*label))
-            .collect();
+        let mut queue: Vec<String> = cited.iter().cloned().collect();
+        while let Some(label) = queue.pop() {
+            if let Some((_, def)) = defs.get(label.as_str()) {
+                let mut inner = HashSet::new();
+                cited_footnotes(std::slice::from_ref(*def), 0, &mut inner);
+                for l in inner {
+                    if cited.insert(l.clone()) {
+                        queue.push(l);
+                    }
+                }
+            }
+        }
+        defs.retain(|label, _| cited.contains(*label));
+        let footnotes = defs;
         Splitter {
             doc,
             opts,
@@ -352,7 +411,7 @@ impl<'a> Splitter<'a> {
             measure: part_measure(bundle),
             heading_offset: 2u8.saturating_sub(min),
             column_numbers: crate::column_numbers(doc),
-            selection: chosen_sheets(opts).map(|titles| Selection::of(doc, titles)),
+            selection,
             footnotes,
             trial: Notes::new(&doc.facets.annotations),
             next_family: 0,
@@ -502,26 +561,55 @@ impl<'a> Splitter<'a> {
         let skip_first = body.len() - content_body(doc, title).len();
         // The blocks that are no unit's: the title, unchosen sheets, the PDF outline (a
         // trailing unit) and the cited footnote definitions.
+        // A `Footnotes` section keeps only the definitions no unit cites; with none left it
+        // is no unit's either.
         let left_out = |i: usize, b: &Block| {
             i < skip_first
                 || self.selection.as_ref().is_some_and(|s| !s.keeps_block(b))
                 || is_pdf_outline(doc, b)
                 || footnote_label(b).is_some_and(|l| self.footnotes.contains_key(l))
+                || footnotes_section(b).is_some()
         };
-        let mut runs: Vec<(usize, usize)> = Vec::new();
+        let mut runs: Vec<Run> = Vec::new();
         let mut from = None;
         for (i, b) in body.iter().enumerate() {
             match (left_out(i, b), from) {
                 (true, Some(f)) => {
-                    runs.push((f, i));
+                    runs.push(Run::Blocks(f, i));
                     from = None;
                 }
                 (false, None) => from = Some(i),
                 _ => {}
             }
+            if let Some(list) = footnotes_section(b)
+                && i >= skip_first
+            {
+                let rest: Vec<Block> = list
+                    .iter()
+                    .filter(|d| footnote_label(d).is_none_or(|l| !self.footnotes.contains_key(l)))
+                    .cloned()
+                    .collect();
+                if !rest.is_empty() {
+                    let Block::Section {
+                        kind,
+                        title,
+                        anchor,
+                        ..
+                    } = b
+                    else {
+                        continue;
+                    };
+                    runs.push(Run::Owned(Block::Section {
+                        kind: *kind,
+                        title: title.clone(),
+                        anchor: anchor.clone(),
+                        blocks: rest,
+                    }));
+                }
+            }
         }
         if let Some(f) = from {
-            runs.push((f, body.len()));
+            runs.push(Run::Blocks(f, body.len()));
         }
         let start = Item {
             base: "start".into(),
@@ -544,7 +632,21 @@ impl<'a> Splitter<'a> {
         let pages = body.iter().any(|b| page_number(b).is_some());
         let chapters = if pages { chapters(doc) } else { Vec::new() };
         let mut items = Vec::new();
-        for (from, to) in runs {
+        for run in runs {
+            let (from, to) = match run {
+                Run::Blocks(from, to) => (from, to),
+                Run::Owned(section) => {
+                    items.push(Item {
+                        base: "footnotes".into(),
+                        title: "Footnotes".into(),
+                        location: "Footnotes".into(),
+                        content: Content::Owned(vec![section]),
+                        expand: Expand::Text,
+                        ..start.clone()
+                    });
+                    continue;
+                }
+            };
             if !chapters.is_empty() {
                 items.extend(self.chapter_items(body, from, to, &chapters, &start));
             } else if pages {
@@ -939,7 +1041,7 @@ impl<'a> Splitter<'a> {
             out.push(cut_spec(item, self));
             return;
         };
-        let children = match item.expand {
+        let mut children = match item.expand {
             Expand::Group => {
                 let mut children = Vec::new();
                 for i in from..to {
@@ -991,6 +1093,15 @@ impl<'a> Splitter<'a> {
             }
             Expand::Text => Vec::new(),
         };
+        // A section that holds only a section: go down to it without measuring again.
+        if item.expand == Expand::Section
+            && children.len() == 1
+            && children[0].expand == Expand::Section
+            && let Some(child) = children.pop()
+        {
+            self.expand(child, out);
+            return;
+        }
         // A border that gives nothing finer is cut as text.
         if children.is_empty() || (children.len() == 1 && children[0].expand == item.expand) {
             out.push(cut_spec(item, self));
@@ -1077,20 +1188,40 @@ impl<'a> Splitter<'a> {
         let fit = |costs: &[usize]| costs.iter().all(|c| *c <= self.budget);
         let mut ranges = split_rows(lead, table, tail, max);
         let mut costs = costs_of(&ranges);
-        let mut tries = 0;
-        while !fit(&costs) && tries < ROW_RETRIES && max > 1 {
-            tries += 1;
-            max = (max / 2).max(1);
-            ranges = split_rows(lead, table, tail, max);
-            costs = costs_of(&ranges);
-        }
-        // The row estimate is careful: when every range fits on the first try, ranges of
-        // twice the size are taken if they fit too, so the parts are fuller.
-        if tries == 0 && ranges.len() > 1 {
+        if fit(&costs) && ranges.len() > 1 {
+            // The row estimate is careful: when every range fits, ranges of twice the size
+            // are taken if they fit too, so the parts are fuller.
             let wider = split_rows(lead, table, tail, max.saturating_mul(2));
             let wider_costs = costs_of(&wider);
             if fit(&wider_costs) {
                 (ranges, costs) = (wider, wider_costs);
+            }
+        }
+        // Only a range over the limit is cut again, with half the size, up to 8 times; the
+        // others keep their size. A range of one row over the limit is cut as text.
+        let mut tries = 0;
+        while !fit(&costs) && tries < ROW_RETRIES && max > 1 {
+            tries += 1;
+            max = (max / 2).max(1);
+            let mut next: Vec<(rezzer_model::RowRange, usize)> = Vec::new();
+            let mut changed = false;
+            for (range, cost) in ranges.into_iter().zip(costs) {
+                if cost <= self.budget || range.first >= range.last {
+                    next.push((range, cost));
+                    continue;
+                }
+                let sub = resplit(&range, max);
+                if sub.len() <= 1 {
+                    next.push((range, cost));
+                    continue;
+                }
+                changed = true;
+                let sub_costs = costs_of(&sub);
+                next.extend(sub.into_iter().zip(sub_costs));
+            }
+            (ranges, costs) = next.into_iter().unzip();
+            if !changed {
+                break;
             }
         }
         if ranges.len() == 1 {
@@ -1151,30 +1282,28 @@ impl<'a> Splitter<'a> {
     /// Names the units, renders them with their links and adds the trailing sections.
     fn write(&self, specs: Vec<Spec<'a>>) -> Vec<Unit> {
         let mut names = Names::new();
+        // Each unit's first name comes first, in document order: the anchors lead to it. A
+        // further piece gets its name when it is written, so a piece fewer leaves no gap.
         let mut order = 0usize;
-        let mut files: Vec<Vec<String>> = Vec::with_capacity(specs.len());
+        let mut files: Vec<String> = Vec::with_capacity(specs.len());
         for s in &specs {
-            let mut list = Vec::with_capacity(s.pieces);
-            for _ in 0..s.pieces.max(1) {
-                order += 1;
-                list.push(names.take(&s.item.base, &s.suffix, order));
-            }
-            files.push(list);
+            files.push(names.take(&s.item.base, &s.suffix, order + 1));
+            order += s.pieces.max(1);
         }
-        // The unit of each anchor: the first unit that holds it.
+        // The unit of each anchor: the first unit that holds it. A section cut into units
+        // leads to the first of them.
         let mut at: HashMap<&'a str, usize> = HashMap::new();
         for (k, s) in specs.iter().enumerate() {
-            let source = match (&s.anchors, &s.item.content) {
-                (Some(list), _) => Some(*list),
-                (None, Content::Slice { list, from, to }) => Some(&list[*from..*to]),
-                (None, Content::Owned(_)) => None,
-            };
-            if let Some(list) = source {
+            for anchor in s.item.wraps.iter().filter_map(|w| w.anchor) {
+                at.entry(anchor).or_insert(k);
+            }
+            if let Some(list) = anchor_source(s) {
                 collect_anchors(list, 0, &mut |anchor| {
                     at.entry(anchor).or_insert(k);
                 });
             }
         }
+        let frags = fragments(&specs, &at);
 
         let notes = Notes::new(&self.doc.facets.annotations);
         let mut units: Vec<Unit> = Vec::new();
@@ -1183,6 +1312,7 @@ impl<'a> Splitter<'a> {
             let links = Links {
                 at: &at,
                 files: &files,
+                frags: &frags,
                 current: k,
             };
             let text = self.render(
@@ -1196,12 +1326,10 @@ impl<'a> Splitter<'a> {
             let lone = pieces.len() == 1 && s.item.family.is_none();
             let family = s.item.family.unwrap_or(usize::MAX - k);
             for (p, piece) in pieces.into_iter().enumerate() {
-                let file = match files[k].get(p) {
-                    Some(name) => name.clone(),
-                    None => {
-                        order += 1;
-                        names.take(&s.item.base, &s.suffix, order)
-                    }
+                let file = if p == 0 {
+                    files[k].clone()
+                } else {
+                    names.take(&s.item.base, &s.suffix, units.len() + 1)
                 };
                 let n = families.entry(family).or_insert(0);
                 *n += 1;
@@ -1218,7 +1346,15 @@ impl<'a> Splitter<'a> {
                 });
             }
         }
-        for (base, location, text) in self.trailing(&notes) {
+        // The trailing sections are in no unit of the content: every anchor link from them
+        // leads to another file.
+        let links = Links {
+            at: &at,
+            files: &files,
+            frags: &frags,
+            current: usize::MAX,
+        };
+        for (base, location, text) in self.trailing(&notes, &links) {
             self.push_trailing(&mut units, &mut names, base, location, &text);
         }
         units
@@ -1236,7 +1372,11 @@ impl<'a> Splitter<'a> {
 
     /// The trailing sections in order, each with its name and location: properties, logic,
     /// annotations (those the content did not show), changes, embedded and the PDF outline.
-    fn trailing(&self, notes: &Notes<'a>) -> Vec<(&'static str, &'static str, String)> {
+    fn trailing(
+        &self,
+        notes: &Notes<'a>,
+        links: &Links<'_>,
+    ) -> Vec<(&'static str, &'static str, String)> {
         let selection = self.selection.as_ref();
         let mut out = Vec::new();
         if self.want(OutputSection::Properties)
@@ -1253,7 +1393,18 @@ impl<'a> Splitter<'a> {
             let mut ctx = self.ctx(notes);
             ctx.heading_offset = 0;
             ctx.notes = None;
-            if let Some(text) = facets::annotations(self.doc, &ctx, notes, selection) {
+            let list = &self.doc.facets.annotations;
+            let list: Cow<'_, [rezzer_model::Annotation]> =
+                if list.iter().any(|a| annotation_needs_rewrite(a, links, 0)) {
+                    let mut owned = list.clone();
+                    for a in &mut owned {
+                        rewrite_annotation(a, links, 0);
+                    }
+                    Cow::Owned(owned)
+                } else {
+                    Cow::Borrowed(list)
+                };
+            if let Some(text) = facets::annotations(&list, &ctx, notes, selection) {
                 out.push(("annotations", "Annotations", text));
             }
         }
@@ -1409,6 +1560,32 @@ fn cut_spec<'a>(mut item: Item<'a>, splitter: &mut Splitter<'a>) -> Spec<'a> {
     }
 }
 
+/// A row range cut again into ranges of at most `max` tokens, with the same lead, header
+/// band and notes. A table without layout counts its own rows, so the new ranges' numbers
+/// are moved to the rows of the whole table.
+fn resplit(range: &rezzer_model::RowRange, max: usize) -> Vec<rezzer_model::RowRange> {
+    let Some(t) = range.table else {
+        return Vec::new();
+    };
+    let blocks = &range.blocks;
+    let mut sub = split_rows(&blocks[..t], &blocks[t], &blocks[t + 1..], max);
+    if let Block::Table {
+        layout: None,
+        header_rows,
+        ..
+    } = &blocks[t]
+    {
+        let offset = range.first.saturating_sub(*header_rows as u32 + 1);
+        for r in &mut sub {
+            if r.first > 0 {
+                r.first += offset;
+                r.last += offset;
+            }
+        }
+    }
+    sub
+}
+
 /// Whether `next` can be packed after `prev`: both runs of one block list, next to each
 /// other, inside the same sections.
 fn packs(prev: &Item<'_>, next: &Item<'_>) -> bool {
@@ -1527,6 +1704,31 @@ fn is_pdf_outline(doc: &Document, b: &Block) -> bool {
         } if title == "Outline")
 }
 
+/// A run of the body's top level for the units: blocks of the body, or a section made anew
+/// (the footnote definitions no unit cites).
+enum Run {
+    Blocks(usize, usize),
+    Owned(Block),
+}
+
+/// The definitions of the Markdown reader's `Footnotes` section: a titled section that holds
+/// only footnote definitions.
+fn footnotes_section(b: &Block) -> Option<&[Block]> {
+    match b {
+        Block::Section {
+            title: Some(title),
+            blocks,
+            ..
+        } if title == "Footnotes"
+            && !blocks.is_empty()
+            && blocks.iter().all(|d| footnote_label(d).is_some()) =>
+        {
+            Some(blocks)
+        }
+        _ => None,
+    }
+}
+
 /// The label of a footnote definition (`fn:<label>`, no title).
 fn footnote_label(b: &Block) -> Option<&str> {
     match b {
@@ -1584,6 +1786,7 @@ fn table_key(list: &[Block], table: &Block) -> String {
     {
         let key = layout.key.rsplit(['!', ':']).next().unwrap_or(&layout.key);
         let key = slug(key);
+        let key = cut_slug(&key, KEY_CAP);
         if !key.is_empty() {
             return format!("-{key}");
         }
@@ -1712,14 +1915,18 @@ fn block_anchor(b: &Block) -> Option<&str> {
 /// Where the units' anchors are, for the links of unit `current`.
 struct Links<'x> {
     at: &'x HashMap<&'x str, usize>,
-    files: &'x [Vec<String>],
+    /// Each unit's first file name.
+    files: &'x [String],
+    /// The fragment a heading anchor has in the part file that holds it.
+    frags: &'x HashMap<&'x str, String>,
     current: usize,
 }
 
 impl Links<'_> {
     /// The new target of an anchor link `#frag` whose anchor lies in another unit:
-    /// `<file>.md#<anchor slug>`. The anchor is the fragment itself, `h:<fragment>`, or the
-    /// heading slug of the decoded fragment.
+    /// `<file>.md#<fragment>`, the fragment the heading has in that file (a second
+    /// `Summary` is `summary` in a part where it comes first). The anchor is the fragment
+    /// itself, `h:<fragment>`, or the heading slug of the decoded fragment.
     fn anchor_target(&self, frag: &str) -> Option<String> {
         let decoded = heading_slug(&percent_decode(frag));
         let candidates = [
@@ -1732,8 +1939,12 @@ impl Links<'_> {
                 if k == self.current {
                     return None;
                 }
-                let file = self.files.get(k).and_then(|f| f.first())?;
-                return Some(format!("{file}.md#{}", c.strip_prefix("h:").unwrap_or(c)));
+                let file = self.files.get(k)?;
+                let frag = match self.frags.get(c.as_str()) {
+                    Some(f) => f.as_str(),
+                    None => c.strip_prefix("h:").unwrap_or(c),
+                };
+                return Some(format!("{file}.md#{frag}"));
             }
         }
         None
@@ -1754,6 +1965,91 @@ impl Links<'_> {
             Inline::Image { target, .. } => relative_path(target).then(|| format!("../{target}")),
             _ => None,
         }
+    }
+}
+
+/// The blocks whose anchors lead to a spec's unit.
+fn anchor_source<'a>(s: &Spec<'a>) -> Option<&'a [Block]> {
+    match (&s.anchors, &s.item.content) {
+        (Some(list), _) => Some(*list),
+        (None, Content::Slice { list, from, to }) => Some(&list[*from..*to]),
+        (None, Content::Owned(_)) => None,
+    }
+}
+
+/// The fragment each heading anchor has in the part file of its unit: the headings of the
+/// unit in order (its sections' titles first), slugged as the Markdown reader does, a
+/// repeated slug numbered `-1`, `-2` within the file.
+fn fragments<'a>(specs: &[Spec<'a>], at: &HashMap<&'a str, usize>) -> HashMap<&'a str, String> {
+    let mut out: HashMap<&'a str, String> = HashMap::new();
+    for (k, s) in specs.iter().enumerate() {
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut unique = |text: &str| {
+            let slug = heading_slug(text);
+            let n = seen.entry(slug.clone()).or_insert(0);
+            let frag = if *n == 0 { slug } else { format!("{slug}-{n}") };
+            *n += 1;
+            frag
+        };
+        let mut take = |anchor: Option<&'a str>, frag: String| {
+            if let Some(a) = anchor
+                && at.get(a) == Some(&k)
+            {
+                out.entry(a).or_insert(frag);
+            }
+        };
+        for w in &s.item.wraps {
+            if let Some(title) = w.title.filter(|t| !t.trim().is_empty()) {
+                let frag = unique(title);
+                take(w.anchor, frag);
+            }
+        }
+        if let Some(list) = anchor_source(s) {
+            walk(list, 0, &mut |node| match node {
+                Node::Block(Block::Heading {
+                    inlines, anchor, ..
+                }) => {
+                    let frag = unique(&rezzer_model::plain_text(inlines));
+                    take(anchor.as_ref().map(|a| a.0.as_str()), frag);
+                }
+                Node::Block(Block::Section {
+                    title: Some(title),
+                    anchor,
+                    ..
+                }) if !title.trim().is_empty() => {
+                    let frag = unique(title);
+                    take(anchor.as_ref().map(|a| a.0.as_str()), frag);
+                }
+                _ => {}
+            });
+        }
+    }
+    out
+}
+
+fn annotation_needs_rewrite(a: &rezzer_model::Annotation, links: &Links<'_>, depth: usize) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    let mut found = false;
+    walk_inlines(&a.body, depth, &mut |node| {
+        if !found && let Node::Inline(inline) = node {
+            found = links.target(inline).is_some();
+        }
+    });
+    found
+        || a.replies
+            .iter()
+            .any(|r| annotation_needs_rewrite(r, links, depth + 1))
+}
+
+fn rewrite_annotation(a: &mut rezzer_model::Annotation, links: &Links<'_>, depth: usize) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    rewrite_inlines(&mut a.body, links, depth);
+    for r in &mut a.replies {
+        rewrite_annotation(r, links, depth + 1);
     }
 }
 
@@ -1893,10 +2189,15 @@ mod tests {
 
     /// A part file as the part writer will make it at worst: the longest title, the
     /// description and both relations around the unit's body.
+    /// The main name is percent-encoded as the renderer writes a destination.
     fn part_file(title: &str, doc_title: &str, main: &str, body: &str) -> String {
         let long = "y".repeat(super::TITLE_CAP);
+        let main = main
+            .replace(' ', "%20")
+            .replace('(', "%28")
+            .replace(')', "%29");
         format!(
-            "---\ntype: source\n---\n\n# {doc_title}: {title}, part 9999\n\nPart 9999 of 9999 of \"{doc_title}\": {long}.\n\n{body}\n\n## Relations\n\n- part_of [{doc_title}](<../{main}>)\n- follows [{doc_title}: {long}, part 9999]({}.md)\n",
+            "---\ntype: source\n---\n\n# {doc_title}: {title}, part 9999\n\nPart 9999 of 9999 of \"{doc_title}\": {long}.\n\n{body}\n\n## Relations\n\n- part_of [{doc_title}](../{main})\n- follows [{doc_title}: {long}, part 9999]({}.md)\n",
             "z".repeat(60)
         )
     }

@@ -368,7 +368,12 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         column_numbers: column_numbers(doc),
     };
     if want(OutputSection::Annotations) {
-        parts.extend(facets::annotations(doc, &ctx, &notes, selection));
+        parts.extend(facets::annotations(
+            &doc.facets.annotations,
+            &ctx,
+            &notes,
+            selection,
+        ));
     }
     if want(OutputSection::Changes) {
         parts.extend(facets::changes(doc));

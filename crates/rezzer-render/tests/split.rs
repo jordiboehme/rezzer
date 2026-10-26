@@ -12,6 +12,11 @@ use rezzer_model::{
     Document, Embedded, Event, Evidence, FormatId, Formula, Inline, LayoutKind, OutlineEntry,
     ReaderInfo, Role, SectionKind, SourceInfo, TableLayout, Value,
 };
+use std::sync::Arc;
+
+use rezzer_limits::{Budget, Limits};
+use rezzer_model::{Bytes, ReadOptions, Reader, Source};
+use rezzer_read_markdown::MarkdownReader;
 use rezzer_render::{RenderOptions, Unit, render, split};
 
 fn source(name: &str, format: FormatId) -> SourceInfo {
@@ -808,8 +813,8 @@ fn sheet_selection_applies_before_the_split() {
         names(&list)
     );
     // Sections: only the chosen ones are cut into units.
-    let mut logic_only = opts();
-    logic_only.sections = Some(vec![rezzer_render::OutputSection::Content]);
+    let mut content_only = opts();
+    content_only.sections = Some(vec![rezzer_render::OutputSection::Content]);
     let mut d = doc(FormatId::Markdown);
     for i in 0..4 {
         d.body.push(heading(2, &format!("Part {i}")));
@@ -821,7 +826,7 @@ fn sheet_selection_applies_before_the_split() {
             value: "Apollo".into(),
         },
     )]);
-    let list = split(&d, &logic_only, 2_500, "b").expect("over the size");
+    let list = split(&d, &content_only, 2_500, "b").expect("over the size");
     assert_eq!(names(&list), ["part-0", "part-1", "part-2", "part-3"]);
 }
 
@@ -933,9 +938,10 @@ fn long_fence_openers_stay_bounded() {
         assert_within(&list, 2_500);
         assert!(list.len() < 20, "{} units", list.len());
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
-        // The code lines are all there.
+        // The code lines are all there, and the language is still named.
         let joined: String = list.iter().map(|u| u.markdown.as_str()).collect();
         assert!(joined.contains("let y000 ") && joined.contains("let y299 "));
+        assert!(list[0].markdown.contains("xxxx") || list[0].markdown.contains("rust"));
     }
 }
 
@@ -1005,4 +1011,244 @@ fn packed_logic_parts_name_their_range() {
         .expect("logic");
     assert_eq!(first.file, "logic-aa", "{:?}", names(&list));
     assert_eq!(first.location, "Logic, Aa to Cc");
+}
+
+/// A document as the Markdown reader makes it.
+fn read_markdown(text: &str) -> Document {
+    let src = Source {
+        path: None,
+        name: "note.md".into(),
+        bytes: Bytes::Owned(Arc::new(text.as_bytes().to_vec())),
+        sha256: "00".repeat(32),
+        size: text.len() as u64,
+        format: FormatId::Markdown,
+        detection: Detection {
+            confidence: Confidence::Likely,
+            evidence: "md".into(),
+        },
+        modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
+    };
+    MarkdownReader
+        .read(
+            &src,
+            &ReadOptions::default(),
+            &Budget::new(Limits::default()),
+        )
+        .document
+}
+
+#[test]
+fn footnotes_from_the_markdown_reader_follow_their_citations() {
+    // The reader puts every definition into one `Footnotes` section at the end.
+    let text = format!(
+        "## Alpha\n\n{}\n\nAlpha cites[^a].\n\n## Beta\n\n{}\n\nBeta cites[^a] and[^b].\n\n\
+         [^a]: Note A.\n\n[^b]: Note B cites[^c].\n\n[^c]: Note C.\n",
+        words(5_000),
+        words(5_000)
+    );
+    let d = read_markdown(&text);
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    assert_eq!(names(&list), ["alpha", "beta"]);
+    assert!(
+        list[0].markdown.contains("[^a]: Note A."),
+        "{}",
+        list[0].markdown
+    );
+    assert!(!list[0].markdown.contains("Note B"));
+    for note in ["[^a]: Note A.", "[^b]: Note B cites[^c]", "[^c]: Note C."] {
+        assert!(
+            list[1].markdown.contains(note),
+            "{note}: {}",
+            list[1].markdown
+        );
+    }
+    // A definition nothing cites stays in a footnotes part; the cited ones are not repeated
+    // there.
+    let d = read_markdown(&format!("{text}\n[^z]: Lonely.\n"));
+    let list = units(&d, 2_500);
+    let lonely = list
+        .iter()
+        .find(|u| u.markdown.contains("Lonely."))
+        .expect("the uncited note");
+    assert!(!lonely.markdown.contains("Note A."), "{}", lonely.markdown);
+}
+
+/// A sheet table with data rows 2 to `last`; row `big` holds a cell of 45,000 characters.
+fn sheet_table_with_big_row(sheet: &str, last: u32, big: Option<u32>) -> Block {
+    let mut t = sheet_table(sheet, last);
+    if let (Some(big), Block::Table { rows, .. }) = (big, &mut t) {
+        rows[(big - 1) as usize][0] = cell(&words(45_000), &format!("{sheet}!A{big}"));
+    }
+    t
+}
+
+#[test]
+fn one_huge_row_leaves_the_other_ranges_as_they_were() {
+    let count = |big: Option<u32>| {
+        let mut d = doc(FormatId::Xlsx);
+        d.body.push(sheet(
+            "Data",
+            vec![sheet_table_with_big_row("Data", 2_001, big)],
+        ));
+        let list = units(&d, 2_500);
+        assert_within(&list, 2_500);
+        list.len()
+    };
+    let normal = count(None);
+    let with_big = count(Some(1_000));
+    // The big row is cut into about 6 pieces of its own; the other ranges keep their size.
+    assert!(
+        with_big <= normal * 12 / 10 + 8,
+        "{with_big} units with the big row, {normal} without"
+    );
+}
+
+#[test]
+fn part_names_stay_within_60_bytes() {
+    let title = "A sheet with a very long name that goes on and on for many words";
+    let key = "Sales_figures_for_every_region_and_every_quarter_of_the_whole_year_and_more";
+    let mut d = doc(FormatId::Xlsx);
+    let mut tables = Vec::new();
+    for k in 0..2 {
+        let mut t = sheet_table(title, 2_001);
+        if let Block::Table {
+            layout: Some(layout),
+            ..
+        } = &mut t
+        {
+            layout.key = format!("table:{key}{k}");
+        }
+        tables.push(t);
+    }
+    d.body.push(sheet(title, tables));
+    let list = units(&d, 2_500);
+    let mut seen = std::collections::HashSet::new();
+    for u in &list {
+        assert!(u.file.len() <= 60, "{} is {} bytes", u.file, u.file.len());
+        assert!(seen.insert(u.file.clone()), "{} twice", u.file);
+        assert!(
+            !u.file.starts_with('-') && !u.file.ends_with('-'),
+            "{}",
+            u.file
+        );
+    }
+    assert!(list.len() > 4);
+}
+
+#[test]
+fn math_blocks_are_closed_and_opened_again() {
+    let latex: String = (0..2_000)
+        .map(|i| format!("a_{{{i}}} + b_{{{i}}} = c \\\\\n"))
+        .collect();
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(Block::Math {
+        latex,
+        source_kind: "latex".into(),
+        anchor: None,
+    });
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    assert!(list.len() > 1);
+    for u in &list {
+        let mut open = false;
+        for line in u.markdown.lines() {
+            if line == "$$" {
+                open = !open;
+            } else if line == "(continued)" {
+                assert!(!open, "{}: a continued line inside the math", u.file);
+            }
+        }
+        assert!(!open, "{}: math left open", u.file);
+        assert!(u.markdown.contains("$$"), "{}", u.file);
+    }
+}
+
+#[test]
+fn a_repeated_heading_is_linked_by_its_slug_in_its_part() {
+    let text = format!(
+        "## Summary\n\n{}\n\nSee [the later one](#summary-1).\n\n## Summary\n\n{}\n",
+        words(5_000),
+        words(5_000)
+    );
+    let list = units(&read_markdown(&text), 2_500);
+    // The reader's link graph adds a Logic part after them.
+    assert_eq!(names(&list)[..2], ["summary", "summary-2"]);
+    assert!(
+        list[0]
+            .markdown
+            .contains("[the later one](summary-2.md#summary)"),
+        "{}",
+        list[0].markdown
+    );
+}
+
+#[test]
+fn links_in_trailing_sections_follow_their_targets() {
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(heading(2, "Alpha"));
+    d.body.push(para(&words(5_000)));
+    d.body.push(heading(2, "Beta"));
+    d.body.push(para(&words(5_000)));
+    d.facets.annotations.push(Annotation {
+        kind: "comment".into(),
+        author: None,
+        date: None,
+        anchor: None,
+        quoted: None,
+        body: vec![Inline::Link {
+            target: "#alpha".into(),
+            title: None,
+            internal: true,
+            wiki: false,
+            inlines: vec![Inline::plain("see alpha")],
+        }],
+        replies: Vec::new(),
+        resolved: None,
+    });
+    let list = units(&d, 2_500);
+    let notes = list
+        .iter()
+        .find(|u| u.file == "annotations")
+        .expect("annotations");
+    assert!(
+        notes.markdown.contains("](alpha.md#alpha)"),
+        "{}",
+        notes.markdown
+    );
+}
+
+#[test]
+fn a_section_inside_a_section_is_cut_at_its_headings() {
+    let mut inner = Vec::new();
+    for i in 0..6 {
+        inner.push(heading(3, &format!("Part {i}")));
+        inner.push(para(&words(4_000)));
+    }
+    let mut d = doc(FormatId::Markdown);
+    d.body.push(Block::Section {
+        kind: SectionKind::Chapter,
+        title: Some("Outer".into()),
+        anchor: None,
+        blocks: vec![Block::Section {
+            kind: SectionKind::Chapter,
+            title: Some("Inner".into()),
+            anchor: None,
+            blocks: inner,
+        }],
+    });
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    // The parts are named by the inner section's headings, two to a part.
+    assert_eq!(names(&list), ["part-0", "part-2", "part-4"]);
+    for u in &list {
+        assert!(
+            !u.markdown.contains("(continued)"),
+            "{} was cut as text",
+            u.file
+        );
+    }
 }

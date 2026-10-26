@@ -340,8 +340,27 @@ fn pages(md: &str, limit: usize, size: &dyn Fn(&str) -> usize, hard: bool) -> Ve
                 let lead = start
                     .map(|s| continued(md, s, &starts, &kinds, &contexts))
                     .unwrap_or_default();
-                let have = size(&lead) + cost;
-                Some((lead + text, have))
+                let lead_cost = size(&lead);
+                if hard && lead_cost + cost > limit && lead_cost < limit / 2 {
+                    // The lines the page begins with push it over: cut the part to the room
+                    // they leave; its pieces after the first begin with `(continued)`.
+                    let mut cut = hard_cut(text, limit - lead_cost, size).into_iter();
+                    let first = format!("{lead}{}", cut.next().unwrap_or_default());
+                    let rest: Vec<String> = cut.collect();
+                    match rest.split_last() {
+                        None => {
+                            let have = size(&first);
+                            Some((first, have))
+                        }
+                        Some((last, middle)) => {
+                            pages.push(first);
+                            pages.extend(middle.iter().cloned());
+                            Some((last.clone(), size(last)))
+                        }
+                    }
+                } else {
+                    Some((lead + text, lead_cost + cost))
+                }
             }
         };
     }
@@ -365,19 +384,53 @@ struct CutState {
     /// The open fence's opener takes more than half the limit: its lines are written as an
     /// indented code block instead, without opener and closer, so no piece repeats it.
     indented: bool,
+    /// The line start of the open fence or math block: its quote markers and indent, which
+    /// its closer and opener take too.
+    prefix: Rc<str>,
+    /// A `$$` math block is open.
+    math: bool,
 }
 
 impl CutState {
     /// The fence closer a piece that ends here needs.
     fn closer(&self) -> String {
+        if self.math {
+            return format!("{}$$\n", self.prefix);
+        }
         if self.indented {
             return String::new();
         }
         self.fence
             .as_ref()
-            .map(|(ch, run, _)| format!("{}\n", ch.to_string().repeat(*run)))
+            .map(|(ch, run, _)| format!("{}{}\n", self.prefix, ch.to_string().repeat(*run)))
             .unwrap_or_default()
     }
+}
+
+/// The start of a line that a piece of it keeps: quote markers (`>` with up to 3 spaces
+/// before and one after) and then its indent; and the rest.
+fn line_prefix(line: &str) -> (&str, &str) {
+    let mut at = 0;
+    loop {
+        let rest = &line[at..];
+        let spaces = rest.len() - rest.trim_start_matches(' ').len();
+        if spaces <= 3 && rest[spaces..].starts_with('>') {
+            at += spaces + 1;
+            if line[at..].starts_with(' ') {
+                at += 1;
+            }
+            continue;
+        }
+        at += spaces;
+        return (&line[..at], &line[at..]);
+    }
+}
+
+/// The line that stands for a fence written as an indented code block: its language, at
+/// most 64 characters of it.
+fn language_line(info: &str) -> Option<String> {
+    let info: String = info.trim().chars().take(64).collect();
+    (!info.is_empty()).then(|| format!("Code in {}:", crate::blocks::line_text(&info)))
 }
 
 /// A table separator row: only `|`, `-`, `:` and spaces, with a `-`.
@@ -428,6 +481,9 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
         {
             lead.push_str(opener);
         }
+        if state.math {
+            lead.push_str(&format!("{}$$\n", state.prefix));
+        }
         if row && let Some(header) = &state.table {
             lead.push_str(header);
         }
@@ -442,15 +498,30 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
         // What this line is written as: itself, or in an indented code block (see
         // `CutState::indented`) its text indented and the fence lines as blank lines.
         let mut written: Cow<'_, str> = Cow::Borrowed(line);
+        let (prefix, rest) = line_prefix(content);
         match &state.fence {
+            None if state.math => {
+                if rest.trim_end() == "$$" {
+                    after.math = false;
+                }
+            }
             None => {
-                if let Some((ch, run, _)) = fence_run(content) {
+                if let Some((ch, run, info)) = fence_run(rest) {
                     after.fence = Some((ch, run, Rc::from(*line)));
+                    after.prefix = Rc::from(prefix);
                     after.table = None;
                     if size(line) > limit / 2 {
                         after.indented = true;
-                        written = Cow::Borrowed("\n");
+                        let blank = prefix.trim_end();
+                        written = Cow::Owned(match language_line(info) {
+                            Some(l) => format!("\n{prefix}{l}\n{blank}\n"),
+                            None => "\n".to_string(),
+                        });
                     }
+                } else if rest.trim_end() == "$$" {
+                    after.math = true;
+                    after.prefix = Rc::from(prefix);
+                    after.table = None;
                 } else if content.starts_with('|') {
                     if state.table.is_some() {
                         row = !separator_row(content);
@@ -465,18 +536,18 @@ fn hard_cut(text: &str, limit: usize, size: &dyn Fn(&str) -> usize) -> Vec<Strin
                 }
             }
             Some((ch, run, _)) => {
-                if let Some((c, r, rest)) = fence_run(content)
+                if let Some((c, r, tail)) = fence_run(rest)
                     && c == *ch
                     && r >= *run
-                    && rest.trim().is_empty()
+                    && tail.trim().is_empty()
                 {
                     after.fence = None;
                     after.indented = false;
                     if state.indented {
                         written = Cow::Borrowed("\n");
                     }
-                } else if state.indented && !content.trim().is_empty() {
-                    written = Cow::Owned(format!("    {line}"));
+                } else if state.indented && !rest.trim().is_empty() {
+                    written = Cow::Owned(format!("{prefix}    {rest}\n"));
                 }
             }
         }
@@ -553,12 +624,28 @@ fn cut_line(
     size: &dyn Fn(&str) -> usize,
 ) -> Vec<String> {
     let content = line.trim_end_matches(['\n', '\r']);
-    let fence = state.fence.as_ref().map(|(ch, _, _)| *ch);
-    if state.indented {
-        // Each piece of an indented code line keeps the indent.
-        let text = content.strip_prefix("    ").unwrap_or(content);
-        let lines = text_lines(text, first.saturating_sub(4), room.saturating_sub(4), fence);
-        return lines.into_iter().map(|l| format!("    {l}")).collect();
+    let fence = state
+        .fence
+        .as_ref()
+        .map(|(ch, _, _)| *ch)
+        .or(state.math.then_some('$'));
+    if !row {
+        // Each piece keeps the line's quote markers and indent (an indented code line its
+        // indent).
+        let (prefix, text) = line_prefix(content);
+        if !prefix.is_empty() {
+            let n = prefix.chars().count();
+            let mut b = room.saturating_sub(n);
+            let mut lines = Vec::new();
+            for _ in 0..=8 {
+                lines = text_lines(text, first.saturating_sub(n), b, fence);
+                if lines.iter().all(|l| size(l) + n <= room) {
+                    break;
+                }
+                b /= 2;
+            }
+            return lines.into_iter().map(|l| format!("{prefix}{l}")).collect();
+        }
     }
     let (mut a, mut b) = (first, room);
     let mut best: Vec<String> = Vec::new();
@@ -724,4 +811,43 @@ fn row_lines(
     }
     out.push(row_line(&current));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cut;
+
+    #[test]
+    fn a_continued_lead_never_pushes_a_piece_over_the_budget() {
+        // The paragraph just under the budget starts a new piece, which begins with the
+        // continued heading of its Logic part.
+        let budget = 2_000;
+        let words = "lorem ipsum ".repeat(200);
+        let paragraph = words[..budget - 10].trim_end();
+        let md = format!("## Logic\n\n### Data\n\nSpreadsheet formulas.\n\n{paragraph}\n");
+        let size = |t: &str| t.chars().count();
+        let pieces = cut(&md, budget, &size);
+        assert!(pieces.len() > 1);
+        assert!(
+            pieces[1].starts_with("### Data (continued)"),
+            "{}",
+            pieces[1]
+        );
+        for p in &pieces {
+            assert!(size(p) <= budget, "{} over {budget}: {p}", size(p));
+        }
+    }
+
+    #[test]
+    fn quoted_lines_keep_their_markers_when_cut() {
+        let line = format!("> {}\n", "lorem ipsum ".repeat(400));
+        let size = |t: &str| t.chars().count();
+        let pieces = cut(&line, 1_000, &size);
+        assert!(pieces.len() > 2);
+        for p in &pieces {
+            for l in p.lines().filter(|l| l.contains("lorem")) {
+                assert!(l.starts_with("> "), "{l}");
+            }
+        }
+    }
 }
