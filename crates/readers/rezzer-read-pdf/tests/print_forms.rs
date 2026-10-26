@@ -1365,7 +1365,7 @@ fn form_section(xs: &[f32], top: f32, titles: &[&str], rows: &[&[&str]], print: 
 
 /// The upper section of the form: 8 columns of personal data, a label row over two value
 /// rows.
-fn personal_section() -> String {
+fn personal_section(print: Print) -> String {
     form_section(
         &form_columns(8),
         760.0,
@@ -1387,7 +1387,7 @@ fn personal_section() -> String {
                 "0002", "Beispiel", "15.03.21", "3", "1,0", "y", "Kasse B", "200",
             ],
         ],
-        BY_CELL,
+        print,
     )
 }
 
@@ -1453,7 +1453,7 @@ fn read_tables(out: &ReadOutcome) -> Vec<Vec<Vec<String>>> {
 /// outer edges, 17 column edges in all. Each section is read as its own table.
 #[test]
 fn form_sections_without_marks() {
-    let template = personal_section() + &earnings_section(712.0, "1.234,56", BY_CELL);
+    let template = personal_section(BY_CELL) + &earnings_section(712.0, "1.234,56", BY_CELL);
     let page = FormPage {
         template,
         ..FormPage::default()
@@ -1906,42 +1906,20 @@ fn assert_pay_slip(out: &ReadOutcome) {
     assert!(header(&found[4]).ends_with("Lj|Lk|Ll"), "{found:#?}");
     assert_eq!(found[4].len(), 2, "{found:#?}");
     // The title right above a section's top rule is that table's caption, never a row of
-    // the table above: T's in E's band, L's in the band under S. E's title stands above
-    // the grid, a paragraph before E.
+    // the table above: T's in E's band, L's in the band under S, and E's over the grid,
+    // as the grid is cut (ruling P6-Q).
     assert!(!e[2].contains("Abzuege"), "{e:?}");
     assert_eq!(body(&found[2]).len(), 1, "{found:#?}");
     assert_eq!(
         read_captions(out),
         [
-            None,
+            Some("Bezuege A".to_string()),
             Some("Abzuege B".to_string()),
             None,
             Some("La Lb".to_string()),
             None
         ]
     );
-    let blocks: Vec<String> = out
-        .document
-        .body
-        .iter()
-        .flat_map(|b| match b {
-            Block::Section { blocks, .. } => blocks
-                .iter()
-                .map(|inner| match inner {
-                    Block::Table { .. } => "table".to_string(),
-                    other => {
-                        let mut t = String::new();
-                        common::block_text(other, &mut t);
-                        t
-                    }
-                })
-                .collect(),
-            _ => Vec::new(),
-        })
-        .collect();
-    let title = blocks.iter().position(|t| t.trim() == "Bezuege A");
-    let table = blocks.iter().position(|t| t == "table");
-    assert!(title.is_some() && title < table, "{blocks:?}");
     assert_no_loss(out);
 }
 
@@ -2045,4 +2023,157 @@ fn a_note_near_the_top_of_its_band_stays_above() {
     assert_eq!(found[0][3].join("|"), "Muster GmbH Abzuege", "{found:?}");
     assert_eq!(read_captions(&out), [None, None]);
     assert_no_loss(&out);
+}
+
+/// Guard: the last row of a ruled section printed 2 points over its bottom rule, closer to
+/// the cut than to the row's top, stays a row: its column rules cross it.
+#[test]
+fn a_last_row_printed_low_stays_a_row() {
+    let low = Print {
+        one_line: false,
+        rise: 2.0,
+    };
+    let template = personal_section(low) + &earnings_section(712.0, "1.234,56", BY_CELL);
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].len(), 3, "{found:?}");
+    assert_eq!(found[0][2][1], "Beispiel", "{found:?}");
+    assert_eq!(read_captions(&out), [None, None]);
+    assert_no_loss(&out);
+}
+
+/// Guard: a bold total row in ruled cells right over a cut stays the last row of its table.
+#[test]
+fn a_bold_total_row_stays_a_row() {
+    let xs = form_columns(4);
+    let mut template = form_section(
+        &xs,
+        760.0,
+        &["Nr.", "Art", "Tage", "Betrag"],
+        &[
+            &["1001", "Gehalt", "20", "1.234,56"],
+            &["1002", "Zulage", "8", "12,34"],
+        ],
+        BY_CELL,
+    );
+    template += &grid(&xs, &[696.0, 712.0]);
+    template += &bold(xs[0] + 3.0, 698.0, 9.0, "Summe");
+    template += &bold(xs[3] + 3.0, 698.0, 9.0, "1.246,90");
+    template += &form_section(
+        &[40.0, 200.0, 420.0, 555.0],
+        696.0,
+        &["Kasse", "Art", "Betrag"],
+        &[&["A", "Steuer", "123,45"], &["B", "Beitrag", "67,89"]],
+        BY_CELL,
+    );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].len(), 4, "{found:?}");
+    assert_eq!(found[0][3][0], "Summe", "{found:?}");
+    assert_eq!(found[0][3][3], "1.246,90", "{found:?}");
+    assert_eq!(read_captions(&out), [None, None]);
+    assert_no_loss(&out);
+}
+
+/// Guard: a row of drawn cells with bold labels low in their cells, right over a section of
+/// other columns, keeps its labels: no table below takes them as its caption.
+#[test]
+fn header_band_labels_stay_in_their_band() {
+    let xs = form_columns(4);
+    let mut template = grid(&xs, &[700.0, 716.0]);
+    for (k, t) in ["Nr.", "Art", "Tage", "Betrag"].iter().enumerate() {
+        template += &bold(xs[k] + 3.0, 702.0, 7.0, t);
+    }
+    template += &form_section(
+        &[40.0, 200.0, 420.0, 555.0],
+        700.0,
+        &["Kasse", "Art", "Betrag"],
+        &[&["A", "Steuer", "123,45"], &["B", "Beitrag", "67,89"]],
+        BY_CELL,
+    );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert!(
+        read_captions(&out).iter().all(Option::is_none),
+        "{:?}",
+        read_captions(&out)
+    );
+    let text = all_text(&out);
+    assert!(text.contains("Tage"), "{text}");
+}
+
+/// A title of two lines in a band of one cell right over a cut is one caption of the
+/// table below.
+#[test]
+fn a_two_line_title_is_one_caption() {
+    let mut template = form_section(
+        &form_columns(4),
+        760.0,
+        &["Nr.", "Art", "Tage", "Betrag"],
+        &[
+            &["1001", "Gehalt", "20", "1.234,56"],
+            &["1002", "Zulage", "8", "12,34"],
+        ],
+        BY_CELL,
+    );
+    template += &grid(&[40.0, 555.0], &[682.0, 712.0]);
+    template += &bold(44.0, 696.0, 7.0, "Muster GmbH");
+    template += &bold(44.0, 685.0, 7.0, "Abzuege und Beitraege");
+    template += &form_section(
+        &[40.0, 200.0, 420.0, 555.0],
+        682.0,
+        &["Kasse", "Art", "Betrag"],
+        &[&["A", "Steuer", "123,45"], &["B", "Beitrag", "67,89"]],
+        BY_CELL,
+    );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let found = read_tables(&out);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].len(), 3, "{found:?}");
+    assert_eq!(
+        read_captions(&out),
+        [None, Some("Muster GmbH Abzuege und Beitraege".to_string())]
+    );
+    assert_no_loss(&out);
+}
+
+/// Guard: a bold line right over a grid that is not cut stays a paragraph (ruling P6-Q is
+/// for cut grids only).
+#[test]
+fn a_line_over_a_grid_that_is_not_cut_stays_a_paragraph() {
+    let mut template = bold(44.0, 763.0, 7.0, "Muster GmbH Bezuege");
+    template += &form_section(
+        &form_columns(4),
+        760.0,
+        &["Nr.", "Art", "Tage", "Betrag"],
+        &[
+            &["1001", "Gehalt", "20", "1.234,56"],
+            &["1002", "Zulage", "8", "12,34"],
+        ],
+        BY_CELL,
+    );
+    let page = FormPage {
+        template,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    assert_eq!(read_captions(&out), [None]);
+    assert!(all_text(&out).contains("Muster GmbH Bezuege"));
 }

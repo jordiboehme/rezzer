@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded};
-use super::sections::sections;
+use super::sections::{CUT_WORK, sections};
 use super::*;
 use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
@@ -15,13 +15,14 @@ use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 /// Why a grid with a figure caption next to it is not a table.
 const FIGURE_NEAR: &str = "a figure caption stands next to it";
 
-/// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom,
-/// and its grid's place among the page's grids.
+/// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom
+/// or its top, and its grid's place among the page's grids.
 struct Part {
     h: Vec<Seg>,
     v: Vec<Seg>,
     cut: bool,
     cut_below: bool,
+    cut_above: bool,
     id: usize,
 }
 
@@ -83,8 +84,15 @@ pub(super) fn ruled(
             v,
             cut,
             cut_below: k < last,
+            cut_above: k > 0,
             id,
         }));
+    }
+    if cut_work > CUT_WORK {
+        found.skipped.push(format!(
+            "ruled grids on page {page} are cut in sections only in part: the page has too many \
+             pieces of lines at the heights of their rules"
+        ));
     }
     grids.sort_by(|a, b| {
         let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
@@ -101,6 +109,7 @@ pub(super) fn ruled(
     // below, by its grid, has them as its caption once it is a table.
     let mut titles: Vec<bool> = vec![false; flow.runs.len()];
     let mut pending: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut title_work = 0usize;
     let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
     let mut quiet: Vec<(usize, &'static str, Refused)> = Vec::new();
     let mut tables: Vec<Planned> = Vec::new();
@@ -117,6 +126,7 @@ pub(super) fn ruled(
             v,
             cut,
             cut_below,
+            cut_above,
             id,
         },
     ) in grids.into_iter().enumerate()
@@ -138,57 +148,52 @@ pub(super) fn ruled(
         let mut ys = clustered(ys);
         // Rows from the top.
         ys.reverse();
-        let title_above = pending.remove(&id).unwrap_or_default();
-        // The line right above a cut is the title of the section below: it leaves this
-        // section, and a row of one cell that held only it goes too.
-        if cut_below && xs.len() >= 2 && ys.len() >= 2 {
-            let free = |i: usize| {
-                let r = &flow.runs[i];
-                let (cx, _) = middle(r);
-                !r.off_axis
-                    && claimed[i].is_none()
-                    && !titles[i]
-                    && cx > xs[0]
-                    && cx < xs[xs.len() - 1]
-                    && !r.text.trim().is_empty()
+        let mut title_above = pending.remove(&id).unwrap_or_default();
+        if xs.len() >= 2 && ys.len() >= 2 {
+            let mut place = TitlePlace {
+                flow,
+                by_y: &by_y,
+                claimed: &claimed,
+                titles: &mut titles,
+                xs: &xs,
+                work: &mut title_work,
             };
-            let runs: Vec<usize> = by_y
-                .runs_between(ys[ys.len() - 1], ys[0])
-                .into_iter()
-                .filter(|&i| free(i))
-                .collect();
-            let title = bottom_title(flow, &runs, &ys);
-            for &i in &title {
-                titles[i] = true;
+            // The first section of a cut grid has the line right over the grid as its title,
+            // as each section after it has the line right over its cut.
+            if cut && !cut_above {
+                title_above.extend(place.over_grid(&vs, ys[0]));
             }
-            pending.insert(id, title.clone());
-            let n = ys.len();
-            if !title.is_empty() && n >= 3 {
-                let (lo, hi) = (ys[n - 1], ys[n - 2]);
-                let empty = runs.iter().all(|&i| {
-                    titles[i] || {
-                        let (_, cy) = middle(&flow.runs[i]);
-                        cy > hi || cy < lo
-                    }
-                });
-                let parted = v.iter().any(|s| {
-                    s.at > xs[0] + SNAP
-                        && s.at < xs[xs.len() - 1] - SNAP
-                        && s.from < hi - SNAP
-                        && s.to > lo + SNAP
-                });
-                if empty && !parted {
-                    ys.pop();
-                    h.retain(|s| s.at >= hi - SNAP);
-                }
+            // The line right above a cut is the title of the section below: it leaves this
+            // section, and a row of one cell that held only it goes too.
+            if cut_below {
+                let title = place.above_cut(&v, &mut ys, &mut h);
+                pending.insert(id, title);
             }
         }
         // A row whose inner column rules all hang from its top and end at one height is a
         // header over lines without rules: a rule across at their feet parts the two, and
         // the row below it (its lines) is open: one cell across that is no spanning box.
+        // Only in a cut grid or a row alone, and only over lines of text it is for.
         let mut open: Vec<f32> = Vec::new();
-        if xs.len() >= 3 && ys.len() >= 2 {
-            for foot in hanging_feet(&v, &xs, &ys) {
+        if xs.len() >= 3 && (cut || ys.len() == 2) {
+            let feet: Vec<f32> = hanging_feet(&v, &xs, &ys)
+                .into_iter()
+                .filter(|&(foot, bottom)| {
+                    by_y.runs_between(bottom, foot).into_iter().any(|i| {
+                        let r = &flow.runs[i];
+                        let (cx, cy) = middle(r);
+                        !r.off_axis
+                            && claimed[i].is_none()
+                            && !titles[i]
+                            && cy < foot
+                            && cx > xs[0]
+                            && cx < xs[xs.len() - 1]
+                            && !r.text.trim().is_empty()
+                    })
+                })
+                .map(|(foot, _)| foot)
+                .collect();
+            for foot in feet {
                 let at = ys.partition_point(|e| *e > foot);
                 ys.insert(at, foot);
                 open.push(foot);
@@ -441,21 +446,7 @@ pub(super) fn ruled(
             flow, &within, head, rows, &owner, &extent, &row_at, &cell_at,
         );
         // The lines under a header of hanging rules are rows by the header's columns.
-        if !open.is_empty() {
-            let mut by_row: HashMap<usize, Vec<usize>> = HashMap::new();
-            for &i in &within {
-                let r = row_at(middle(&flow.runs[i]).1);
-                if open.iter().any(|f| (ys[r] - f).abs() <= SNAP) {
-                    by_row.entry(r).or_default().push(i);
-                }
-            }
-            for (r, runs) in by_row {
-                let lines = open_rows(flow, &runs, &xs);
-                if lines.len() >= 2 {
-                    anchors[r] = lines;
-                }
-            }
-        }
+        open_anchors(flow, &within, &xs, &ys, &open, &row_at, &mut anchors);
         let subs = |r: usize| anchors[r].len().max(1);
         // The row of a band a run goes to: that of the nearest anchor line at or above it.
         let sub_of = |r: usize, run: &Run| -> usize {
@@ -656,44 +647,228 @@ pub(super) fn ruled(
     }
 }
 
-/// The runs of the lowest line of `runs` when it titles what stands below the section whose
-/// row edges are `ys` (from the top): the line is closer to the section's bottom than to the
-/// line or row edge above it, or it is bold and at most its size above the bottom.
-fn bottom_title(flow: &Flow, runs: &[usize], ys: &[f32]) -> Vec<usize> {
-    let bottom = ys[ys.len() - 1];
-    let Some(low) = runs.iter().map(|&i| flow.runs[i].y).reduce(f32::min) else {
-        return Vec::new();
-    };
-    let near = |i: usize| {
+/// Lines a title may have.
+const TITLE_LINES: usize = 2;
+
+/// Steps the title search of one page may take over the page's column rules; past them no
+/// line over a cut grid is taken as a title.
+const TITLE_WORK: usize = 1_000_000;
+
+/// One line of text: its baseline, its largest size, whether all of it is bold, and its
+/// runs.
+struct TextLine {
+    y: f32,
+    size: f32,
+    bold: bool,
+    runs: Vec<usize>,
+}
+
+/// The lines of `runs` from the bottom: runs whose baselines lie within a third of their
+/// size of the line's first.
+fn lines_up(flow: &Flow, runs: &[usize]) -> Vec<TextLine> {
+    let mut sorted = runs.to_vec();
+    sorted.sort_by(|&a, &b| flow.runs[a].y.total_cmp(&flow.runs[b].y));
+    let mut out: Vec<TextLine> = Vec::new();
+    for i in sorted {
         let r = &flow.runs[i];
-        r.y - low <= 0.3 * r.size.max(1.0)
-    };
-    let line: Vec<usize> = runs.iter().copied().filter(|&i| near(i)).collect();
-    let size = line
-        .iter()
-        .map(|&i| flow.runs[i].size)
-        .fold(0.0f32, f32::max);
-    let head = line
-        .iter()
-        .map(|&i| flow.runs[i].y + flow.runs[i].size)
-        .fold(f32::MIN, f32::max);
-    let next = runs
-        .iter()
-        .filter(|&&i| !near(i))
-        .map(|&i| flow.runs[i].y)
-        .fold(f32::MAX, f32::min);
-    let edge = ys
+        match out.last_mut() {
+            Some(l) if r.y - l.y <= 0.3 * r.size.max(1.0) => {
+                l.size = l.size.max(r.size);
+                l.bold &= r.bold;
+                l.runs.push(i);
+            }
+            _ => out.push(TextLine {
+                y: r.y,
+                size: r.size,
+                bold: r.bold,
+                runs: vec![i],
+            }),
+        }
+    }
+    out
+}
+
+/// The title among `runs` that stands right over the rule at height `base`: the lowest line
+/// over it and, for a title of two lines, the line one line pitch above it in the same
+/// style, none crossed by a column rule (`crossed` of a height range). The title is at most
+/// twice its size over the rule and closer to it than to the next line or to `ceiling` above
+/// (the row edge over it), or bold and at most its size over the rule.
+fn title_over(
+    flow: &Flow,
+    runs: &[usize],
+    base: f32,
+    ceiling: f32,
+    crossed: &mut dyn FnMut(f32, f32) -> bool,
+) -> Vec<usize> {
+    let above: Vec<usize> = runs
         .iter()
         .copied()
-        .filter(|e| *e > low)
-        .fold(f32::MAX, f32::min);
-    let below = low - bottom;
-    let above = next.min(edge) - head;
-    let bold = line.iter().all(|&i| flow.runs[i].bold);
-    if below < above || (bold && below <= size) {
-        line
+        .filter(|&i| flow.runs[i].y > base)
+        .collect();
+    let lines = lines_up(flow, &above);
+    let Some(first) = lines.first() else {
+        return Vec::new();
+    };
+    if crossed(first.y, first.y + first.size) {
+        return Vec::new();
+    }
+    let mut taken = 1;
+    while taken < TITLE_LINES.min(lines.len()) {
+        let (prev, next) = (&lines[taken - 1], &lines[taken]);
+        if next.y - prev.y > 1.6 * prev.size.max(next.size)
+            || next.bold != first.bold
+            || next.y + next.size > ceiling
+            || crossed(next.y, next.y + next.size)
+        {
+            break;
+        }
+        taken += 1;
+    }
+    let block = &lines[..taken];
+    let size = block.iter().map(|l| l.size).fold(0.0f32, f32::max);
+    let head = block.iter().map(|l| l.y + l.size).fold(f32::MIN, f32::max);
+    let next = lines.get(taken).map_or(f32::MAX, |l| l.y);
+    let (below, gap) = (first.y - base, next.min(ceiling) - head);
+    let bold = block.iter().all(|l| l.bold);
+    if below <= 2.0 * size && (below < gap || (bold && below <= size)) {
+        block.iter().flat_map(|l| l.runs.iter().copied()).collect()
     } else {
         Vec::new()
+    }
+}
+
+/// What the title search of a section looks at and marks.
+struct TitlePlace<'a> {
+    flow: &'a Flow,
+    by_y: &'a ByY,
+    claimed: &'a [Option<(usize, usize, usize)>],
+    titles: &'a mut Vec<bool>,
+    /// The section's column edges.
+    xs: &'a [f32],
+    work: &'a mut usize,
+}
+
+impl TitlePlace<'_> {
+    /// The runs between the heights `lo` and `hi` over the section that no table and no
+    /// title has taken.
+    fn free(&self, lo: f32, hi: f32) -> Vec<usize> {
+        let (left, right) = (self.xs[0], self.xs[self.xs.len() - 1]);
+        self.by_y
+            .runs_between(lo, hi)
+            .into_iter()
+            .filter(|&i| {
+                let r = &self.flow.runs[i];
+                let (cx, _) = middle(r);
+                !r.off_axis
+                    && self.claimed[i].is_none()
+                    && !self.titles[i]
+                    && cx > left
+                    && cx < right
+                    && !r.text.trim().is_empty()
+            })
+            .collect()
+    }
+
+    fn take(&mut self, title: &[usize]) {
+        for &i in title {
+            self.titles[i] = true;
+        }
+    }
+
+    /// The title right over the grid's top rule at `top`: no column rule of the page
+    /// (`vs`, sorted by place) may cross it.
+    fn over_grid(&mut self, vs: &[Seg], top: f32) -> Vec<usize> {
+        let runs = self.free(top, top + 2.0 * MAX_CAPTION_SIZE);
+        let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
+        let lo = vs.partition_point(|s| s.at <= left);
+        let work = &mut *self.work;
+        let mut crossed = |a: f32, b: f32| {
+            for s in &vs[lo..] {
+                *work += 1;
+                if *work > TITLE_WORK {
+                    return true;
+                }
+                if s.at >= right {
+                    break;
+                }
+                if s.from < b && s.to > a {
+                    return true;
+                }
+            }
+            false
+        };
+        let title = title_over(self.flow, &runs, top, f32::MAX, &mut crossed);
+        self.take(&title);
+        title
+    }
+
+    /// The title right over the cut at the section's bottom (`ys` from the top): no inner
+    /// column rule of the section (`v`) may cross it. Its runs leave the section, and a
+    /// lowest row of one cell that held only them goes too, with its rules of `h`.
+    fn above_cut(&mut self, v: &[Seg], ys: &mut Vec<f32>, h: &mut Vec<Seg>) -> Vec<usize> {
+        let n = ys.len();
+        let runs = self.free(ys[n - 1], ys[0]);
+        let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
+        let inner = |s: &&Seg| s.at > left && s.at < right;
+        let low = runs
+            .iter()
+            .map(|&i| self.flow.runs[i].y)
+            .fold(f32::MAX, f32::min);
+        let ceiling = ys
+            .iter()
+            .copied()
+            .filter(|e| *e > low)
+            .fold(f32::MAX, f32::min);
+        let mut crossed = |a: f32, b: f32| v.iter().filter(inner).any(|s| s.from < b && s.to > a);
+        let title = title_over(self.flow, &runs, ys[n - 1], ceiling, &mut crossed);
+        self.take(&title);
+        if !title.is_empty() && n >= 3 {
+            let (lo, hi) = (ys[n - 1], ys[n - 2]);
+            let empty = runs.iter().all(|&i| {
+                self.titles[i] || {
+                    let (_, cy) = middle(&self.flow.runs[i]);
+                    cy > hi || cy < lo
+                }
+            });
+            let parted = v
+                .iter()
+                .filter(inner)
+                .any(|s| s.from < hi - SNAP && s.to > lo + SNAP);
+            if empty && !parted {
+                ys.pop();
+                h.retain(|s| s.at >= hi - SNAP);
+            }
+        }
+        title
+    }
+}
+
+/// For each open row (its top one of the feet `open`), the lines of `within` in it that
+/// start a row, as `anchors`; a row with fewer than two such lines is left as it is.
+fn open_anchors(
+    flow: &Flow,
+    within: &[usize],
+    xs: &[f32],
+    ys: &[f32],
+    open: &[f32],
+    row_at: &dyn Fn(f32) -> usize,
+    anchors: &mut [Vec<f32>],
+) {
+    if open.is_empty() {
+        return;
+    }
+    let mut by_row: HashMap<usize, Vec<usize>> = HashMap::new();
+    for &i in within {
+        let r = row_at(middle(&flow.runs[i]).1);
+        if open.iter().any(|f| (ys[r] - f).abs() <= SNAP) {
+            by_row.entry(r).or_default().push(i);
+        }
+    }
+    for (r, runs) in by_row {
+        let lines = open_rows(flow, &runs, xs);
+        if lines.len() >= 2 {
+            anchors[r] = lines;
+        }
     }
 }
 
@@ -746,9 +921,9 @@ fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
 
 /// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
 /// heights where the inner column rules of a row end when it has some, all of them hang
-/// from its top and they end at one height clear of its bottom. Each rule is looked at in
-/// the rows it reaches into, no more.
-fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<f32> {
+/// from its top and they end at one height clear of its bottom, each with that bottom. Each
+/// rule is looked at in the rows it reaches into, no more.
+fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<(f32, f32)> {
     let (left, right) = (xs[0], xs[xs.len() - 1]);
     let rows = ys.len() - 1;
     let mut feet: Vec<Vec<f32>> = vec![Vec::new(); rows];
@@ -775,9 +950,10 @@ fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<f32> {
     }
     feet.into_iter()
         .zip(standing)
-        .filter_map(|(f, standing)| {
+        .enumerate()
+        .filter_map(|(r, (f, standing))| {
             let f = clustered(f);
-            (!standing && f.len() == 1).then(|| f[0])
+            (!standing && f.len() == 1).then(|| (f[0], ys[r + 1]))
         })
         .collect()
 }

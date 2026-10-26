@@ -1676,7 +1676,7 @@ fn grid_section(
         for (k, x) in xs[..xs.len() - 1].iter().enumerate() {
             let text = cell(r, k);
             if !text.is_empty() {
-                c += &show(font(r), 8.0, x + 3.0, top - h * r as f32 - h + 6.0, &text);
+                c += &show(font(r), 8.0, x + 3.0, top - h * r as f32 - h + 7.0, &text);
             }
         }
     }

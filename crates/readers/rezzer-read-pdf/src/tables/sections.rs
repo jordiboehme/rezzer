@@ -7,6 +7,8 @@
 //! grid's column edges are those of all its sections. Each section is judged as a grid of
 //! its own.
 
+use std::collections::HashSet;
+
 use super::SNAP;
 use crate::regions::{Seg, clustered};
 
@@ -25,14 +27,22 @@ const CUT_GAPS: f32 = 0.05;
 
 /// Pieces of the page's horizontal rules the sections of one page may look at to complete a
 /// rule across a grid; past them a rule with gaps no longer cuts.
-const CUT_WORK: usize = 1_000_000;
+pub(super) const CUT_WORK: usize = 1_000_000;
 
 /// Whether the rules at height `y` cross `left..right`: the pieces of `page` (sorted by
 /// height) that lie within [`SNAP`] of `y`, together reaching both ends and leaving gaps of
-/// at most [`CUT_GAPS`] of the width.
-fn crosses(page: &[Seg], y: f32, left: f32, right: f32, work: &mut usize) -> bool {
+/// at most [`CUT_GAPS`] of the width, with a piece of another group (not in `own`, by place
+/// and start) among them: a grid's own rule with gaps does not cut by itself.
+fn crosses(
+    page: &[Seg],
+    own: &HashSet<(u32, u32)>,
+    y: f32,
+    (left, right): (f32, f32),
+    work: &mut usize,
+) -> bool {
     let lo = page.partition_point(|s| s.at < y - SNAP);
     let mut pieces: Vec<(f32, f32)> = Vec::new();
+    let mut foreign = false;
     for s in &page[lo..] {
         if s.at > y + SNAP {
             break;
@@ -43,6 +53,7 @@ fn crosses(page: &[Seg], y: f32, left: f32, right: f32, work: &mut usize) -> boo
         }
         if s.to > left && s.from < right {
             pieces.push((s.from.max(left), s.to.min(right)));
+            foreign |= !own.contains(&(s.at.to_bits(), s.from.to_bits()));
         }
     }
     pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -53,7 +64,7 @@ fn crosses(page: &[Seg], y: f32, left: f32, right: f32, work: &mut usize) -> boo
         }
         reach = reach.max(to);
     }
-    reach >= right - SNAP && gaps <= CUT_GAPS * (right - left)
+    foreign && reach >= right - SNAP && gaps <= CUT_GAPS * (right - left)
 }
 
 /// The sections of the grid of horizontal segments `h` and vertical segments `v`, top
@@ -90,6 +101,10 @@ pub(super) fn sections(
         bottom.fold(f32::MAX, f32::min),
         top.fold(f32::MIN, f32::max),
     );
+    let own: HashSet<(u32, u32)> = h
+        .iter()
+        .map(|s| (s.at.to_bits(), s.from.to_bits()))
+        .collect();
     // The band edges from the bottom: the grid's ends and the rules across its width.
     let inner: Vec<f32> = clustered(
         h.iter()
@@ -102,7 +117,7 @@ pub(super) fn sections(
         .filter(|&y| {
             h.iter()
                 .any(|s| (s.at - y).abs() <= SNAP && s.from <= left + SNAP && s.to >= right - SNAP)
-                || crosses(page, y, left, right, work)
+                || crosses(page, &own, y, (left, right), work)
         })
         .collect();
     ys.push(bottom);

@@ -1105,6 +1105,36 @@ impl Built {
                 self.added.push((t, add.row, add.cell, inlines));
             }
         }
+        // The title line or lines, left to right, are built first, as they come before the
+        // table: charged like any text, links kept.
+        let mut title = std::mem::take(&mut plan.caption);
+        title.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+        let title: Option<Vec<Inline>> = if title.is_empty() {
+            None
+        } else {
+            self.pending = Pending::Block;
+            let refs: Vec<&Run> = title.iter().collect();
+            let built = self.inlines(&refs, cx);
+            self.mark = None;
+            if built.is_none() {
+                return;
+            }
+            built
+        };
+        // A title that does not go with a table stands before its text as a paragraph.
+        let title_paragraph = |built: &mut Self, title: Option<Vec<Inline>>| {
+            if let Some(inlines) = title {
+                built.pending = Pending::Block;
+                built.push(
+                    Block::Paragraph {
+                        inlines,
+                        role: None,
+                        anchor: None,
+                    },
+                    cx,
+                );
+            }
+        };
         // What the table's cells and rows cost beyond their text is set aside at once. When it
         // does not fit, the table's text is laid out as paragraphs: the overhead of a table
         // never stops the text.
@@ -1117,6 +1147,7 @@ impl Built {
             if cx.links.take_bytes(overhead).is_err() {
                 cx.links.restore(mark);
                 let rows = std::mem::take(&mut plan.rows);
+                title_paragraph(self, title);
                 self.as_text(rows, plan.tagged, cx);
                 return;
             }
@@ -1174,6 +1205,7 @@ impl Built {
         if rows.is_empty() {
             self.probe_pending.clear();
             self.probe_round += 1;
+            title_paragraph(self, title);
             return;
         }
         match earlier {
@@ -1185,17 +1217,30 @@ impl Built {
             }
             None => {
                 self.tagged.push(plan.tagged);
-                // The title line, left to right.
-                plan.caption.sort_by(|a, b| a.x.total_cmp(&b.x));
-                let caption = plan
-                    .caption
-                    .iter()
-                    .map(|r| r.text.trim())
-                    .filter(|t| !t.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                // A title with a link stands as a caption paragraph before the table, as a
+                // caption is plain text; any other title is the caption.
+                let linked = title
+                    .as_ref()
+                    .is_some_and(|t| t.iter().any(|i| matches!(i, Inline::Link { .. })));
+                let caption = if linked {
+                    if let Some(inlines) = title {
+                        self.push(
+                            Block::Paragraph {
+                                inlines,
+                                role: Some("caption".into()),
+                                anchor: None,
+                            },
+                            cx,
+                        );
+                    }
+                    None
+                } else {
+                    title
+                        .map(|t| rezzer_model::plain_text(&t).trim().to_string())
+                        .filter(|t| !t.is_empty())
+                };
                 self.blocks.push(Block::Table {
-                    caption: (!caption.is_empty()).then_some(caption),
+                    caption,
                     header_rows: plan.header_rows.min(rows.len()),
                     role: None,
                     rows,
@@ -2376,6 +2421,123 @@ mod tests {
         assert!(built.blocks.is_empty());
         assert!(built.stop.is_some());
         assert_eq!(room.cut(), None);
+    }
+
+    /// A ruled table of one row holding "cell", with the title "Muster Titel" (with a link
+    /// when `uri`), laid out with `room` bytes of link and table room.
+    fn titled_table(rows: usize, uri: bool, room: u64) -> Vec<Block> {
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let links = LinkRoom::new(room);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let title = Run {
+            uri: uri.then(|| UriTarget::new("https://example.org/titel")),
+            ..run("Muster Titel", 0, 700.0, 10.0)
+        };
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: (0..rows)
+                .map(|_| {
+                    vec![PlannedCell {
+                        runs: vec![run("cell", 1, 680.0, 10.0)],
+                        row_span: 1,
+                        col_span: 1,
+                    }]
+                })
+                .collect(),
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![title],
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        built.blocks
+    }
+
+    /// The kind and text of each block.
+    fn kinds(blocks: &[Block]) -> Vec<(String, String)> {
+        blocks
+            .iter()
+            .map(|b| match b {
+                Block::Table { caption, rows, .. } => (
+                    format!("table {caption:?}"),
+                    rows.iter()
+                        .flatten()
+                        .map(|c| rezzer_model::plain_text(&c.inlines))
+                        .collect(),
+                ),
+                Block::Paragraph { inlines, role, .. } => (
+                    format!("paragraph {role:?}"),
+                    rezzer_model::plain_text(inlines),
+                ),
+                other => (format!("{other:?}"), String::new()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_title_is_the_caption_of_its_table() {
+        let blocks = titled_table(1, false, 10_000);
+        assert_eq!(
+            kinds(&blocks),
+            [(
+                "table Some(\"Muster Titel\")".to_string(),
+                "cell".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_title_with_a_link_stands_before_its_table() {
+        let blocks = titled_table(1, true, 10_000);
+        assert_eq!(kinds(&blocks)[0].0, "paragraph Some(\"caption\")");
+        assert!(matches!(
+            &blocks[0],
+            Block::Paragraph { inlines, .. } if matches!(inlines[0], Inline::Link { .. })
+        ));
+        assert_eq!(kinds(&blocks)[1].0, "table None");
+    }
+
+    #[test]
+    fn a_title_of_a_table_kept_as_paragraphs_comes_first() {
+        // No room for the table's overhead: its text is paragraphs, the title before it.
+        let blocks = titled_table(1, false, 0);
+        let k = kinds(&blocks);
+        assert_eq!(
+            k[0],
+            ("paragraph None".to_string(), "Muster Titel".to_string())
+        );
+        assert!(k[1..].iter().any(|(_, t)| t == "cell"), "{k:?}");
+        assert!(
+            !k.iter().any(|(kind, _)| kind.starts_with("table")),
+            "{k:?}"
+        );
+    }
+
+    #[test]
+    fn a_title_of_a_table_without_rows_stays() {
+        let blocks = titled_table(0, false, 10_000);
+        assert_eq!(
+            kinds(&blocks),
+            [("paragraph None".to_string(), "Muster Titel".to_string())]
+        );
     }
 
     /// A block built in two calls, as a table is, one cell per call: the first cell cuts its
