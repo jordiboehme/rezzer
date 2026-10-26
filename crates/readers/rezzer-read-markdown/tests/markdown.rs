@@ -1223,4 +1223,18 @@ fn byte_order_mark_inside_frontmatter_is_a_loss() {
     // Inside a quoted value it is text.
     let out = read("---\ntitle: \"a\u{feff}b\"\n---\n");
     assert_eq!(out.document.properties.title.as_deref(), Some("a\u{feff}b"));
+    // Inside a plain value the value is not cut short: the frontmatter is damaged.
+    let out = read("---\ntitle: a\u{feff}b\n---\n");
+    assert_ne!(out.document.properties.title.as_deref(), Some("a"));
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == "frontmatter"
+                && l.why == LossReason::Damaged
+                && l.what.contains("byte order mark")),
+        "{:?} {:?}",
+        out.document.properties.title,
+        out.document.losses
+    );
 }
