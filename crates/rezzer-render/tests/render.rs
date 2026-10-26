@@ -1951,6 +1951,20 @@ fn assert_wikilink_text(md: &str, shown: &str) {
     assert!(text.contains(shown), "{shown} not in {text:?} from {md}");
 }
 
+/// A `$` in a wikilink is escaped like the text around it when the block has a pair.
+#[test]
+fn a_dollar_in_a_wikilink_is_escaped_like_text() {
+    let mut d = Document::new(source());
+    d.body.push(Block::Paragraph {
+        inlines: vec![txt("costs $5 in "), wiki_link("cost$", "cost$")],
+        role: None,
+        anchor: None,
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains(r"\[\[cost\$\]\]"), "{md}");
+    assert!(md.contains(r"costs \$5 in"), "{md}");
+}
+
 #[test]
 fn every_wikilink_is_text_whatever_its_target() {
     for (target, text, shown) in [

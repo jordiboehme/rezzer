@@ -448,7 +448,7 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 return;
             }
             if *wiki {
-                out.push_str(&wikilink(target, content, mode));
+                out.push_str(&wikilink(target, content, mode, dollars));
                 return;
             }
             if !safe_target(target) {
@@ -2062,7 +2062,7 @@ fn model_table(
 /// one with `_`, `:`, a path or formatting. Crystalline reads a wikilink wherever `[[`
 /// stands, also after a backslash, so each bracket is escaped. The link itself stays in the
 /// link facts and the graph.
-fn wikilink(target: &str, content: &[Inline], mode: Mode) -> String {
+fn wikilink(target: &str, content: &[Inline], mode: Mode, dollars: bool) -> String {
     let text = plain_text(content);
     let spelled = if text.trim().is_empty() || text == target {
         format!("[[{target}]]")
@@ -2070,7 +2070,8 @@ fn wikilink(target: &str, content: &[Inline], mode: Mode) -> String {
         format!("[[{target}|{text}]]")
     };
     let mut out = String::new();
-    escape_text(&spelled, line_mode(mode), &mut out);
+    // With `dollars` every `$` is escaped, as in the text around it.
+    escape_with(&spelled, line_mode(mode), dollars, &mut out);
     out
 }
 

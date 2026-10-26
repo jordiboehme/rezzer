@@ -1388,8 +1388,7 @@ fn units_at_one_place_get_a_number() {
     assert_eq!(titles(&list), ["Notes", "Notes (2)"]);
 }
 
-/// A title like one of Rezzer's own parts gets a word, and no title is used twice, also not
-/// in another letter case or as a piece title.
+/// No title is used twice, also not in another letter case or as a piece title.
 #[test]
 fn titles_stay_unique_against_own_parts_and_pieces() {
     let mut d = doc(FormatId::Markdown);
@@ -1404,9 +1403,68 @@ fn titles_stay_unique_against_own_parts_and_pieces() {
     let list = units(&d, 2_500);
     assert_within(&list, 2_500);
     let all = titles(&list);
-    assert_eq!(all[0], "Logic (section)", "{all:?}");
+    // The document has no Logic part, so the source chapter keeps its title.
+    assert_eq!(all[0], "Logic", "{all:?}");
     let unique: std::collections::HashSet<_> = all.iter().map(|t| t.to_lowercase()).collect();
     assert_eq!(unique.len(), all.len(), "{all:?}");
+}
+
+/// Ruling P5-AF: a source chapter `Overview` gets a word only when the main document writes
+/// its own `Overview` part.
+#[test]
+fn a_source_overview_chapter_gets_a_word_only_beside_an_overview_part() {
+    let mut d = doc(FormatId::Markdown);
+    for title in ["Overview", "Chapter 2", "Chapter 3"] {
+        d.body.push(heading(1, title));
+        d.body.push(para(&words(6_000)));
+    }
+    d.overview = Some(rezzer_model::Overview {
+        parts: (1..=30)
+            .map(|i| OverviewPart {
+                id: format!("p{i}"),
+                name: format!("Part {i}"),
+                kind: "chapter".into(),
+                size: "1 paragraph".into(),
+                role: None,
+                reads: Vec::new(),
+            })
+            .collect(),
+        facts: Vec::new(),
+    });
+    let out = output(&d, 2_500, "report.md.md", "b");
+    let all: Vec<&str> = out.parts.iter().map(|p| p.title.as_str()).collect();
+    assert!(all.contains(&"report.md: Overview (section)"), "{all:?}");
+    assert!(all.contains(&"report.md: Overview"), "{all:?}");
+    let unique: std::collections::HashSet<_> = all.iter().map(|t| t.to_lowercase()).collect();
+    assert_eq!(unique.len(), all.len(), "{all:?}");
+    // With the whole overview in the main document there is no Overview part.
+    d.overview.as_mut().expect("overview").parts.truncate(5);
+    let out = output(&d, 2_500, "report.md.md", "b");
+    let all: Vec<&str> = out.parts.iter().map(|p| p.title.as_str()).collect();
+    assert!(all.contains(&"report.md: Overview"), "{all:?}");
+    assert!(!all.iter().any(|t| t.contains("(section)")), "{all:?}");
+}
+
+/// Ruling P5-AF: a lone source chapter titled like one of Rezzer's trailing parts keeps its
+/// title when the document has no such part, and gets a word when it has one.
+#[test]
+fn a_source_properties_chapter_gets_a_word_only_beside_a_properties_part() {
+    let mut d = doc(FormatId::Markdown);
+    for title in ["Properties", "Chapter 2"] {
+        d.body.push(heading(1, title));
+        d.body.push(para(&words(8_000)));
+    }
+    assert_eq!(titles(&units(&d, 2_500)), ["Properties", "Chapter 2"]);
+    d.properties.custom = BTreeMap::from([(
+        "Project".to_string(),
+        Value::Text {
+            value: "Apollo".into(),
+        },
+    )]);
+    assert_eq!(
+        titles(&units(&d, 2_500)),
+        ["Properties (section)", "Chapter 2", "Properties"]
+    );
 }
 
 /// Ruling P5-AD with the Markdown reader: a wikilink in the text becomes escaped text, one in
@@ -1733,11 +1791,7 @@ fn main_document_within_limit_with_many_parts() {
     let parts = section_lines(&out.main, "Parts");
     assert_eq!(
         parts,
-        [format!(
-            "The 2000 parts are listed in {} parts, starting with \
-             [List of parts](report-md/contents.md).",
-            contents.len()
-        )]
+        ["The list of all 2000 parts starts in [List of parts](report-md/contents.md)."]
     );
     // Each contents part but the last leads on to the next one.
     for (k, c) in contents.iter().enumerate() {

@@ -52,6 +52,8 @@ pub struct Unit {
     pub location: String,
     /// The body only: no frontmatter, no title, no relations.
     pub markdown: String,
+    /// How `title` is made.
+    pub(crate) naming: Naming,
 }
 
 /// Unit titles and locations, and the document title in a part's title, are cut to this many
@@ -332,8 +334,8 @@ struct Item<'a> {
     lead: usize,
     /// Only a heading: it goes with the item after it when it cannot be packed with it.
     heading_only: bool,
-    /// Rezzer made it and titled it itself (`Start`, `Footnotes`): its title is one of
-    /// [`OWN_TITLES`] and never changes for a clash.
+    /// Rezzer made it and titled it itself (`Start`, `Footnotes`): its title never changes
+    /// for a clash.
     rezzer: bool,
 }
 
@@ -361,6 +363,10 @@ pub(crate) fn family_title(title: &str, n: usize) -> String {
 /// The title of Rezzer's own parts that list the other parts (ruling P5-AF), so a source
 /// chapter named `Contents` keeps its name.
 pub(crate) const LIST_TITLE: &str = "List of parts";
+/// The whole overview when the main document cuts it.
+pub(crate) const OVERVIEW_TITLE: &str = "Overview";
+/// The whole `## Not read` list when the main document cuts it.
+pub(crate) const NOT_READ_TITLE: &str = "Not read";
 /// The blocks before the first border.
 pub(crate) const START_TITLE: &str = "Start";
 /// The footnote definitions no unit cites.
@@ -371,14 +377,13 @@ pub(crate) const ANNOTATIONS_TITLE: &str = "Annotations";
 pub(crate) const CHANGES_TITLE: &str = "Changes";
 pub(crate) const EMBEDDED_TITLE: &str = "Embedded";
 pub(crate) const OUTLINE_TITLE: &str = "Outline";
-/// The whole `## Not read` list when the main document cuts it.
-pub(crate) const NOT_READ_TITLE: &str = "Not read";
 
-/// The titles of Rezzer's own parts, the same constants the writers use: a unit of the
-/// source titled like one of them (or like a piece of one, `Logic, part 2`) gets its location
-/// or a word added.
-pub(crate) const OWN_TITLES: [&str; 10] = [
+/// Every title Rezzer gives its own parts, the constants the writers use.
+#[cfg(test)]
+pub(crate) const OWN_TITLES: [&str; 11] = [
     LIST_TITLE,
+    OVERVIEW_TITLE,
+    NOT_READ_TITLE,
     START_TITLE,
     FOOTNOTES_TITLE,
     PROPERTIES_TITLE,
@@ -387,24 +392,26 @@ pub(crate) const OWN_TITLES: [&str; 10] = [
     CHANGES_TITLE,
     EMBEDDED_TITLE,
     OUTLINE_TITLE,
-    NOT_READ_TITLE,
 ];
+
+/// How a unit's title is made, so the part writer can make it again once it knows which of
+/// its own parts the document gets ([`finish_titles`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct Naming {
+    /// Rezzer made and titled it (`Start`, `Footnotes`, the trailing sections): its title
+    /// never changes for a clash.
+    own: bool,
+    /// The unit's title before its piece number, unique among the units of the source.
+    base: String,
+    /// Where the unit (its first piece) lies.
+    location: String,
+    /// Its piece number from 2, else 0 (a unit in one piece, or its first piece).
+    piece: usize,
+}
 
 /// A title as Crystalline compares it (L003): trimmed, in lower case.
 fn title_key(title: &str) -> String {
     title.trim().to_lowercase()
-}
-
-/// Whether `key` (see [`title_key`]) is the title of one of Rezzer's own parts or of a piece
-/// of one.
-pub(crate) fn own_title(key: &str) -> bool {
-    OWN_TITLES.iter().any(|own| {
-        let own = title_key(own);
-        key == own
-            || key
-                .strip_prefix(own.as_str())
-                .is_some_and(|rest| rest.starts_with(", "))
-    })
 }
 
 /// `title` with ` <suffix>` added, within [`TITLE_CAP`]: the title is cut to make room.
@@ -413,62 +420,97 @@ fn with_suffix(title: &str, suffix: &str) -> String {
     format!("{} {suffix}", capped(title, room))
 }
 
-/// The titles of the units of one document (title, location), made unique before their
+/// The titles of the units of one document (title, location, own), made unique before their
 /// pieces are numbered (rulings P5-AE and P5-AF), as Crystalline compares titles (L003).
-/// Units that share a title get their location in words, `Abstract (pages 3 to 5)`; units
-/// that share title and location get ` (2)`, ` (3)` after the first. A unit titled like one
-/// of Rezzer's own parts gets its location, or the word `(section)`; Rezzer's own units
-/// (`rezzer` true: `Start`, `Footnotes`) keep theirs. Each title stays within [`TITLE_CAP`],
-/// so the pieces' `, part <n>` fits the part overhead. A unit is (title, location, rezzer).
+/// Units of the source that share a title get their location in words,
+/// `Abstract (pages 3 to 5)`; units that share title and location get ` (2)`, ` (3)` after
+/// the first. Rezzer's own units keep theirs; a clash with them is [`finish_titles`]' job.
+/// Each title stays within [`TITLE_CAP`], so the pieces' `, part <n>` fits the overhead.
 pub(crate) fn unit_titles(units: &[(&str, &str, bool)]) -> Vec<String> {
     let mut count: HashMap<String, usize> = HashMap::new();
-    for (title, _, _) in units {
-        *count.entry(title_key(title)).or_insert(0) += 1;
+    for (title, _, own) in units {
+        if !own {
+            *count.entry(title_key(title)).or_insert(0) += 1;
+        }
     }
-    let located: Vec<String> = units
+    let mut taken: HashSet<String> = HashSet::new();
+    units
         .iter()
-        .map(|&(title, location, rezzer)| {
-            if rezzer {
+        .map(|&(title, location, own)| {
+            if own {
                 return capped(title, TITLE_CAP);
             }
             let key = title_key(title);
-            let shared = count.get(&key).is_some_and(|&n| n > 1);
-            let own = own_title(&key);
             let location = location.trim();
-            if (shared || own) && !location.is_empty() && title_key(location) != key {
+            let located = if count.get(&key).is_some_and(|&n| n > 1)
+                && !location.is_empty()
+                && title_key(location) != key
+            {
                 with_suffix(title, &format!("({})", capped(location, 60)))
-            } else if own {
-                with_suffix(title, "(section)")
             } else {
                 capped(title, TITLE_CAP)
+            };
+            let mut unique = located.clone();
+            let mut n = 1;
+            while !taken.insert(title_key(&unique)) {
+                n += 1;
+                unique = with_suffix(&located, &format!("({n})"));
             }
+            unique
         })
-        .collect();
-    let mut taken: HashSet<String> = HashSet::new();
-    let mut out = Vec::with_capacity(located.len());
-    for title in located {
-        let mut unique = title.clone();
-        let mut n = 1;
-        while !taken.insert(title_key(&unique)) {
-            n += 1;
-            unique = with_suffix(&title, &format!("({n})"));
-        }
-        out.push(unique);
-    }
-    out
+        .collect()
 }
 
-/// The last guard: a title that is still used twice in the document (a source unit titled
-/// like a piece, `Notes, part 2`) gets ` (2)`, ` (3)`. Rezzer's own parts come last, so a
-/// source unit keeps its title before them only when nothing clashes.
-fn distinct_titles(units: &mut [Unit]) {
-    let mut taken: HashSet<String> = HashSet::new();
+/// Whether `key` is `own` or a piece of it (`logic, part 2`, `logic, sheet1`).
+fn is_title_or_piece(key: &str, own: &str) -> bool {
+    key == own
+        || key
+            .strip_prefix(own)
+            .is_some_and(|rest| rest.starts_with(", "))
+}
+
+/// Writes the final title of every unit from its [`Naming`] (ruling P5-AF): a unit of the
+/// source titled like a part Rezzer really writes for this document (one of its own units,
+/// or one of `extra`, the parts the main document writer adds: `Overview`, `Not read`,
+/// `List of parts`) gets its location in words, else the word `(section)`; then its piece
+/// number. A title still used twice gets ` (2)`, ` (3)`, own units first.
+pub(crate) fn finish_titles(units: &mut [Unit], extra: &[&str]) {
+    let present: Vec<String> = units
+        .iter()
+        .filter(|u| u.naming.own)
+        .map(|u| title_key(&u.naming.base))
+        .chain(extra.iter().map(|t| title_key(t)))
+        .collect();
     for unit in units.iter_mut() {
-        let base = unit.title.clone();
-        let mut n = 1;
-        while !taken.insert(title_key(&unit.title)) {
-            n += 1;
-            unit.title = with_suffix(&capped(&base, TITLE_CAP), &format!("({n})"));
+        let n = &unit.naming;
+        if n.base.is_empty() {
+            continue;
+        }
+        let mut base = n.base.clone();
+        let key = title_key(&base);
+        if !n.own
+            && present
+                .iter()
+                .any(|own| is_title_or_piece(&key, own) || is_title_or_piece(own, &key))
+        {
+            let location = n.location.trim();
+            base = if !location.is_empty() && title_key(location) != key {
+                with_suffix(&base, &format!("({})", capped(location, 60)))
+            } else {
+                with_suffix(&base, "(section)")
+            };
+        }
+        unit.title = family_title(&base, n.piece);
+    }
+    let mut taken: HashSet<String> = HashSet::new();
+    for own in [true, false] {
+        for unit in units.iter_mut().filter(|u| u.naming.own == own) {
+            let base = unit.title.clone();
+            let mut n = 1;
+            while !taken.insert(title_key(&unit.title)) {
+                n += 1;
+                unit.title = with_suffix(&capped(&base, TITLE_CAP), &format!("({n})"));
+            }
         }
     }
 }
@@ -1486,6 +1528,10 @@ impl<'a> Splitter<'a> {
             .map(|&(f, _)| f)
             .zip(unit_titles(&pairs))
             .collect();
+        let first_location: HashMap<usize, String> = firsts
+            .iter()
+            .map(|&(f, k)| (f, specs[k].item.location.clone()))
+            .collect();
         let mut units: Vec<Unit> = Vec::new();
         let mut families: HashMap<usize, usize> = HashMap::new();
         for (k, s) in specs.iter().enumerate() {
@@ -1516,16 +1562,18 @@ impl<'a> Splitter<'a> {
                 };
                 let n = families.entry(family).or_insert(0);
                 *n += 1;
-                let title = if lone {
-                    unit_title.clone()
-                } else {
-                    family_title(unit_title, *n)
-                };
+                let piece_number = if lone { 0 } else { *n };
                 units.push(Unit {
                     file,
-                    title,
+                    title: family_title(unit_title, piece_number),
                     location: s.item.location.clone(),
                     markdown: piece,
+                    naming: Naming {
+                        own: s.item.rezzer,
+                        base: unit_title.clone(),
+                        location: first_location[&family].clone(),
+                        piece: piece_number,
+                    },
                 });
             }
         }
@@ -1540,7 +1588,7 @@ impl<'a> Splitter<'a> {
         for (base, location, text) in self.trailing(&notes, &links) {
             self.push_trailing(&mut units, &mut names, base, location, &text);
         }
-        distinct_titles(&mut units);
+        finish_titles(&mut units, &[]);
         units
     }
 
@@ -1653,9 +1701,16 @@ impl<'a> Splitter<'a> {
             n = if goes_on { n + 1 } else { 1 };
             prev = Some((piece_base.clone(), piece_location.clone()));
             let order = units.len() + 1;
+            let title = family_title(&piece_location, n);
             units.push(Unit {
                 file: names.take(&piece_base, "", order),
-                title: family_title(&piece_location, n),
+                naming: Naming {
+                    own: true,
+                    base: title.clone(),
+                    location: piece_location.clone(),
+                    piece: 0,
+                },
+                title,
                 location: piece_location,
                 markdown: piece,
             });
@@ -2340,8 +2395,8 @@ fn heading_slug(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Names, OWN_TITLES, START_TITLE, capped, own_title, part_budget, part_measure, slug, split,
-        title_key, unit_titles,
+        Names, Naming, OWN_TITLES, Unit, capped, finish_titles, part_budget, part_measure, slug,
+        split, title_key,
     };
     use crate::RenderOptions;
     use crate::describe::body_tokens;
@@ -2509,32 +2564,82 @@ mod tests {
         assert!(logic_part("## Logic\n\n> [!WARNING] Old\n\n### Data").is_none());
     }
 
-    /// Every title Rezzer gives its own parts: a source unit titled like it, or like a piece
-    /// of it, in any letter case, gets its location, else `(section)`; Rezzer's own unit
-    /// keeps it.
+    fn unit(title: &str, location: &str, own: bool, piece: usize) -> Unit {
+        Unit {
+            file: String::new(),
+            title: String::new(),
+            location: location.into(),
+            markdown: String::new(),
+            naming: Naming {
+                own,
+                base: title.into(),
+                location: location.into(),
+                piece,
+            },
+        }
+    }
+
+    fn titled(units: &mut [Unit], extra: &[&str]) -> Vec<String> {
+        finish_titles(units, extra);
+        units.iter().map(|u| u.title.clone()).collect()
+    }
+
+    /// Every title Rezzer gives its own parts (ruling P5-AF): a source unit titled like it,
+    /// like a piece of it, or in another letter case gets its location, else `(section)`,
+    /// but only when the document really has that part (as one of its units or as a part
+    /// the main document adds). Rezzer's own unit keeps its title.
     #[test]
     fn every_own_title_is_checked() {
         for own in OWN_TITLES {
-            assert!(own_title(&title_key(own)), "{own}");
             let lower = own.to_lowercase();
             let piece = format!("{own}, part 2");
             for title in [own, lower.as_str(), piece.as_str()] {
+                // The part is one of the units.
                 assert_eq!(
-                    unit_titles(&[(title, title, false)]),
+                    titled(
+                        &mut [unit(own, own, true, 0), unit(title, title, false, 0)],
+                        &[]
+                    ),
+                    [own.to_string(), format!("{title} (section)")]
+                );
+                assert_eq!(
+                    titled(
+                        &mut [
+                            unit(own, own, true, 0),
+                            unit(title, "pages 1 to 2", false, 0)
+                        ],
+                        &[]
+                    ),
+                    [own.to_string(), format!("{title} (pages 1 to 2)")]
+                );
+                // The main document writer adds the part.
+                assert_eq!(
+                    titled(&mut [unit(title, title, false, 0)], &[own]),
                     [format!("{title} (section)")]
                 );
+                // No such part: the title stays.
                 assert_eq!(
-                    unit_titles(&[(title, "pages 1 to 2", false)]),
-                    [format!("{title} (pages 1 to 2)")]
+                    titled(&mut [unit(title, title, false, 0)], &[]),
+                    [title.to_string()]
                 );
             }
-            assert_eq!(unit_titles(&[(own, own, true)]), [own.to_string()]);
         }
-        // Rezzer's `Start` first, then a source chapter `Start`.
+        // The pieces of a renamed unit keep one name.
         assert_eq!(
-            unit_titles(&[(START_TITLE, START_TITLE, true), ("Start", "Start", false)]),
-            ["Start", "Start (section)"]
+            titled(
+                &mut [
+                    unit("Logic", "Logic", false, 1),
+                    unit("Logic", "Logic", false, 2),
+                    unit("Logic", "Logic", true, 0),
+                ],
+                &[]
+            ),
+            ["Logic (section)", "Logic (section), part 2", "Logic"]
         );
-        assert!(!own_title("startup") && !own_title("logical"));
+        assert_eq!(title_key(" Start "), "start");
+        assert_eq!(
+            titled(&mut [unit("Startup", "Startup", false, 0)], &["Start"]),
+            ["Startup"]
+        );
     }
 }

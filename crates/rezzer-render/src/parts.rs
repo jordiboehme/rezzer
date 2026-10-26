@@ -34,8 +34,8 @@ use crate::blocks;
 use crate::bullets;
 use crate::describe::{self, Counts, Measure, body_tokens, counted};
 use crate::split::{
-    self, LIST_TITLE, NOT_READ_TITLE, Names, TITLE_CAP, Unit, capped, family_title, part_budget,
-    part_measure, pieces,
+    self, LIST_TITLE, NOT_READ_TITLE, Names, OVERVIEW_TITLE, TITLE_CAP, Unit, capped, family_title,
+    part_budget, part_measure, pieces,
 };
 use crate::{
     OutputSection, PartMeta, RenderOptions, Selection, chosen_sheets, facets, frontmatter,
@@ -163,8 +163,12 @@ impl Writer<'_> {
         format!("{}: {title}", self.doc_title)
     }
 
-    fn write(&self, units: Vec<Unit>) -> Output {
-        let content: Vec<Entry> = units
+    /// The content's entries, their titles made final for the parts the main document adds
+    /// (`extra`: `Overview`, `Not read`, `List of parts`), so no title is used twice.
+    fn content(&self, units: &[Unit], extra: &[&str]) -> Vec<Entry> {
+        let mut units = units.to_vec();
+        split::finish_titles(&mut units, extra);
+        units
             .into_iter()
             .map(|u| Entry {
                 title: self.part_title(&u.title),
@@ -172,7 +176,10 @@ impl Writer<'_> {
                 location: u.location,
                 markdown: u.markdown,
             })
-            .collect();
+            .collect()
+    }
+
+    fn write(&self, units: Vec<Unit>) -> Output {
         let losses = &self.doc.losses;
         let not_read_pieces = if self.want(OutputSection::NotRead) && !losses.is_empty() {
             pieces(&facets::not_read_list(losses), self.budget, self.measure)
@@ -204,7 +211,7 @@ impl Writer<'_> {
                     contents,
                     last_resort: false,
                 };
-                let (main, extra) = self.layout(shape, &content, &trailing);
+                let (main, content, extra) = self.layout(shape, &units, &trailing);
                 if body_tokens(&main, note_path_len) <= self.part_size {
                     return self.finish(main, &content, &extra);
                 }
@@ -215,7 +222,7 @@ impl Writer<'_> {
             contents: true,
             last_resort: true,
         };
-        let (main, extra) = self.layout(last, &content, &trailing);
+        let (main, content, extra) = self.layout(last, &units, &trailing);
         self.finish(main, &content, &extra)
     }
 
@@ -225,22 +232,33 @@ impl Writer<'_> {
     fn layout(
         &self,
         shape: Shape,
-        content: &[Entry],
+        units: &[Unit],
         trailing: &Trailing<'_>,
-    ) -> (String, Vec<Entry>) {
-        let mut names = Names::taken(content.iter().map(|e| e.file.as_str()));
+    ) -> (String, Vec<Entry>, Vec<Entry>) {
+        let mut names = Names::taken(units.iter().map(|u| u.file.as_str()));
         let mut extra: Vec<Entry> = Vec::new();
         let overview = self.overview_section(shape, trailing.overview);
-        if overview.as_ref().is_some_and(|(_, cut)| *cut) {
+        let overview_cut = overview.as_ref().is_some_and(|(_, cut)| *cut);
+        let not_read = self.not_read_section(shape);
+        let not_read_cut = not_read.as_ref().is_some_and(|(_, cut)| *cut);
+        let own: Vec<&str> = [
+            (overview_cut, OVERVIEW_TITLE),
+            (not_read_cut, NOT_READ_TITLE),
+            (shape.contents, LIST_TITLE),
+        ]
+        .into_iter()
+        .filter_map(|(written, title)| written.then_some(title))
+        .collect();
+        let content = self.content(units, &own);
+        if overview_cut {
             extra.extend(self.family(
                 &trailing.overview_pieces,
                 "overview",
-                "Overview",
+                OVERVIEW_TITLE,
                 &mut names,
             ));
         }
-        let not_read = self.not_read_section(shape);
-        if not_read.as_ref().is_some_and(|(_, cut)| *cut) {
+        if not_read_cut {
             extra.extend(self.family(
                 &trailing.not_read_pieces,
                 "not-read",
@@ -264,7 +282,7 @@ impl Writer<'_> {
             parts,
         );
         extra.extend(contents);
-        (main, extra)
+        (main, content, extra)
     }
 
     /// The parts of a trailing list cut into `list`: `<base>`, then `<base>-2` and so on
@@ -607,12 +625,12 @@ impl Writer<'_> {
                 list_lines(listed, &format!("{}/", self.bundle))
             ),
             1 => format!(
-                "## Parts\n\nThe {} parts are listed in {}.",
+                "## Parts\n\nThe list of all {} parts is in {}.",
                 listed.len(),
                 link(LIST_TITLE)
             ),
-            k => format!(
-                "## Parts\n\nThe {} parts are listed in {k} parts, starting with {}.",
+            _ => format!(
+                "## Parts\n\nThe list of all {} parts starts in {}.",
                 listed.len(),
                 link(LIST_TITLE)
             ),
