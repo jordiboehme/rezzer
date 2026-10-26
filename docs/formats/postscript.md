@@ -2,7 +2,7 @@
 
 Rezzer reads the document facts of a PostScript or EPS file from its comment header (title, creator, date, pages, fonts) without running the file.
 
-Status: planned for the first release (document facts). Text is planned for a later release.
+Status: 🔭 planned for a later release (document facts first, text after that). Nothing is implemented yet.
 
 File types: `.ps`, `.eps`. Rezzer detects the format by content, not by extension. It reads the DSC comment header (the `%%` lines at the start and end of the file) and the binary header of DOS EPS files.
 
@@ -51,7 +51,7 @@ Text: not read. PostScript is a program and Rezzer does not run it.
 ## Known limitations
 
 - PostScript is a programming language. Rezzer never runs a PostScript file
-- The header holds no text. In the first release Rezzer reports the header facts and says that the text was not read
+- The header holds no text. In its first version Rezzer reports the header facts and says that the text was not read
 - Planned for later: a small text reader of Rezzer's own that only follows the text-drawing commands and never runs the program. Most PostScript files from Word, dvips and similar tools draw their text in a simple way. Files that compute their text will stay unreadable, and the output will say so
 - The tested PostScript interpreter crate (stet 0.8.7) has no safe mode: a file can delete and read files through it. Rezzer does not use it
 - No public test file was found with a `%%For` line or with a DOS EPS binary header holding a TIFF preview

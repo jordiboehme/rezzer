@@ -2,7 +2,7 @@
 
 Rezzer finds the tables, titles and notes inside each sheet and shows the calculation behind them: every formula with the cells it reads, inputs, results and the dependencies between them.
 
-Status: available in the development version (no release yet).
+Status: ✅ available for XLSX and XLSM. 🟡 Partial for XLSB: values, formulas and names, see the limitations below. In the development version, and part of 0.1.0, the first release.
 
 File types: `.xlsx`, `.xlsm`, `.xlsb`. Rezzer detects the format by content, not by extension.
 

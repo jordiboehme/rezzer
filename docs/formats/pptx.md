@@ -2,7 +2,7 @@
 
 Rezzer reads PowerPoint presentations slide by slide, with speaker notes, comments, charts with their data source and embedded files.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.pptx`. Rezzer detects the format by content, not by extension.
 

@@ -2,7 +2,7 @@
 
 Rezzer reads OpenDocument presentations slide by slide, with speaker notes, comments, charts and pictures with alt text.
 
-Status: planned for the first release. Nothing is implemented yet.
+Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.odp`. Rezzer detects the format by content, not by extension.
 
