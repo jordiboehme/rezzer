@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 use common::{Builder, lenient_bomb};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Block, Completeness, Loss, LossReason, ReadOptions, ReadOutcome, Reader, Severity, plain_text,
+    Block, Completeness, Loss, LossReason, ReadOptions, ReadOutcome, Severity, plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 /// The allocator of the Rezzer binary, counted: the memory these tests measure is the memory
 /// it ships with. Most bounds here hold the resident set size; the test at a low memory limit
@@ -35,21 +34,15 @@ fn hostile() -> Limits {
 }
 
 fn read_with(bytes: &[u8], extract: bool) -> ReadOutcome {
-    let src = common::source(bytes);
-    let opts = ReadOptions {
-        extract_assets: extract,
-        ..ReadOptions::default()
-    };
-    PdfReader.read(&src, &opts, &Budget::new(hostile()))
+    read_with_limits(bytes, extract, hostile())
 }
 
 fn read_with_limits(bytes: &[u8], extract: bool, limits: Limits) -> ReadOutcome {
-    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: extract,
         ..ReadOptions::default()
     };
-    PdfReader.read(&src, &opts, &Budget::new(limits))
+    common::read_in(bytes, &opts, &Budget::new(limits))
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {

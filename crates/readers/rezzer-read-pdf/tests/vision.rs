@@ -13,10 +13,9 @@ use std::path::PathBuf;
 use common::Builder;
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Asset, Block, Completeness, LossReason, ReadOptions, ReadOutcome, Reader, SectionKind,
+    Anchor, Asset, Block, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind,
     Severity, plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 use sha2::{Digest, Sha256};
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -31,7 +30,7 @@ fn read_opts(bytes: &[u8], extract: bool, limits: Limits) -> ReadOutcome {
         extract_assets: extract,
         ..ReadOptions::default()
     };
-    PdfReader.read(&common::source(bytes), &opts, &Budget::new(limits))
+    common::read_in(bytes, &opts, &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {

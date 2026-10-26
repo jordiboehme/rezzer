@@ -6,7 +6,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{Builder, Page, pdf, show, zeros_packed};
+use common::{Builder, Page, all_text, body_text, pdf, show, text, zeros_packed};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, CalloutKind, Completeness, FormatId, Inline, LossReason, ReadOptions,
@@ -25,11 +25,7 @@ fn corpus(name: &str) -> Vec<u8> {
 }
 
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    PdfReader.read(
-        &common::source(bytes),
-        &ReadOptions::default(),
-        &Budget::new(limits),
-    )
+    common::read_in(bytes, &ReadOptions::default(), &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {
@@ -52,53 +48,6 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no section p{n} in {:#?}", out.document.body))
-}
-
-/// The text of a block and the blocks inside it, one line per paragraph or heading.
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. }
-        | Block::Paragraph { inlines, .. }
-        | Block::Task { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. }
-        | Block::Quote { blocks, .. }
-        | Block::Callout { blocks, .. } => blocks.iter().for_each(|b| block_text(b, out)),
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        Block::Table { rows, .. } => {
-            for row in rows {
-                for cell in row {
-                    out.push_str(&plain_text(&cell.inlines));
-                    out.push('|');
-                }
-                out.push('\n');
-            }
-        }
-        _ => {}
-    }
-}
-
-fn text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    blocks.iter().for_each(|b| block_text(b, &mut out));
-    out
-}
-
-/// The text of the page sections without the folded callouts (what an agent reads as the
-/// page's body).
-fn body_text(blocks: &[Block]) -> String {
-    let kept: Vec<Block> = blocks
-        .iter()
-        .filter(|b| !matches!(b, Block::Callout { .. }))
-        .cloned()
-        .collect();
-    text(&kept)
-}
-
-fn all_text(out: &ReadOutcome) -> String {
-    text(&out.document.body)
 }
 
 fn headings(blocks: &[Block]) -> Vec<(u8, String)> {
@@ -777,8 +726,8 @@ fn wrong_password_is_said() {
         password: Some("not the password".into()),
         ..ReadOptions::default()
     };
-    let out = PdfReader.read(
-        &common::source(&corpus("qpdf-user-password.pdf")),
+    let out = common::read_in(
+        &corpus("qpdf-user-password.pdf"),
         &opts,
         &Budget::new(Limits::default()),
     );

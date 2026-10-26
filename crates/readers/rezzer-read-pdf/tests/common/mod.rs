@@ -13,7 +13,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Bytes, Confidence, Detection, FormatId, ReadOptions, ReadOutcome, Reader, Source,
+    Block, Bytes, Confidence, Detection, FormatId, ReadOptions, ReadOutcome, Reader, Source,
+    plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -208,6 +209,55 @@ pub fn read(bytes: &[u8]) -> ReadOutcome {
         &ReadOptions::default(),
         &Budget::new(Limits::default()),
     )
+}
+
+/// The text of a block and the blocks inside it: one line per heading, paragraph or task, and
+/// one line per table row with each cell followed by `|`.
+pub fn block_text(block: &Block, out: &mut String) {
+    match block {
+        Block::Heading { inlines, .. }
+        | Block::Paragraph { inlines, .. }
+        | Block::Task { inlines, .. } => {
+            out.push_str(&plain_text(inlines));
+            out.push('\n');
+        }
+        Block::Section { blocks, .. }
+        | Block::Quote { blocks, .. }
+        | Block::Callout { blocks, .. } => blocks.iter().for_each(|b| block_text(b, out)),
+        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
+        Block::Table { rows, .. } => {
+            for row in rows {
+                for cell in row {
+                    out.push_str(&plain_text(&cell.inlines));
+                    out.push('|');
+                }
+                out.push('\n');
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The text of `blocks`, as [`block_text`] writes it.
+pub fn text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    blocks.iter().for_each(|b| block_text(b, &mut out));
+    out
+}
+
+/// The text of `blocks` without the folded callouts (what an agent reads as a page's body).
+pub fn body_text(blocks: &[Block]) -> String {
+    let kept: Vec<Block> = blocks
+        .iter()
+        .filter(|b| !matches!(b, Block::Callout { .. }))
+        .cloned()
+        .collect();
+    text(&kept)
+}
+
+/// The text of the whole body of a read.
+pub fn all_text(out: &ReadOutcome) -> String {
+    text(&out.document.body)
 }
 
 /// One line of the data layer of a print-run form.

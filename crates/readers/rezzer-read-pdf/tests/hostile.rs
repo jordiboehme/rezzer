@@ -10,13 +10,12 @@ mod common;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-use common::{Builder, heap_peak_bytes, peak_of};
+use common::{Builder, body_text, heap_peak_bytes, peak_of, text};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, CalloutKind, Completeness, Inline, Loss, LossReason, ReadOptions, ReadOutcome,
-    Reader, SectionKind, Severity, plain_text,
+    SectionKind, Severity, plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 // The memory bounds here are bounds on the live heap: the counting allocator of the tests'
 // common module adds up the bytes the read holds and keeps their peak. The resident set size
@@ -47,8 +46,7 @@ fn read(bytes: &[u8]) -> ReadOutcome {
 }
 
 fn read_with(bytes: &[u8], budget: &Budget) -> ReadOutcome {
-    let src = common::source(bytes);
-    PdfReader.read(&src, &ReadOptions::default(), budget)
+    common::read_in(bytes, &ReadOptions::default(), budget)
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {
@@ -101,35 +99,6 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no section p{n}"))
-}
-
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. } | Block::Callout { blocks, .. } => {
-            blocks.iter().for_each(|b| block_text(b, out))
-        }
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        _ => {}
-    }
-}
-
-fn text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    blocks.iter().for_each(|b| block_text(b, &mut out));
-    out
-}
-
-fn body_text(blocks: &[Block]) -> String {
-    let kept: Vec<Block> = blocks
-        .iter()
-        .filter(|b| !matches!(b, Block::Callout { .. }))
-        .cloned()
-        .collect();
-    text(&kept)
 }
 
 fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
@@ -2194,13 +2163,13 @@ fn no_annots(_: usize, _: &[u32]) -> Vec<String> {
     Vec::new()
 }
 
+/// Reads a file at the hostile limits with its pictures extracted.
 fn read_extracting(bytes: &[u8]) -> ReadOutcome {
-    let src = common::source(bytes);
     let opts = ReadOptions {
         extract_assets: true,
         ..ReadOptions::default()
     };
-    PdfReader.read(&src, &opts, &Budget::new(hostile()))
+    common::read_in(bytes, &opts, &Budget::new(hostile()))
 }
 
 /// The read renders and serializes, stays within the time and memory bounds and is partial
@@ -3283,15 +3252,6 @@ fn a_probe_bound_with_every_note_placed_says_nothing() {
     );
 }
 
-fn read_assets(bytes: &[u8]) -> ReadOutcome {
-    let src = common::source(bytes);
-    let opts = ReadOptions {
-        extract_assets: true,
-        ..ReadOptions::default()
-    };
-    PdfReader.read(&src, &opts, &Budget::new(hostile()))
-}
-
 /// `pages` pages of `w` by `h` points, each drawing one shared gray picture of 8 by 8 pixels
 /// over the whole page and no text.
 fn picture_pages(pages: usize, w: u32, h: u32) -> Vec<u8> {
@@ -3323,7 +3283,7 @@ fn picture_pages(pages: usize, w: u32, h: u32) -> Vec<u8> {
 #[test]
 fn a_huge_media_box_renders_at_most_16_million_pixels() {
     // 200,000 points square: at 144 dpi that would be 160 billion pixels.
-    let out = read_assets(&picture_pages(1, 200_000, 200_000));
+    let out = read_extracting(&picture_pages(1, 200_000, 200_000));
     let blob = out
         .blobs
         .iter()
@@ -3339,7 +3299,7 @@ fn a_huge_media_box_renders_at_most_16_million_pixels() {
 #[test]
 fn many_pages_that_need_vision_render_at_most_1000() {
     let start = Instant::now();
-    let out = read_assets(&picture_pages(1010, 20, 20));
+    let out = read_extracting(&picture_pages(1010, 20, 20));
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",

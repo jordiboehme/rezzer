@@ -12,10 +12,9 @@ use std::path::PathBuf;
 use common::{Builder, Page, helvetica_width, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, Reader, SectionKind,
-    Severity, plain_text,
+    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind, Severity,
+    plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 fn corpus_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -24,8 +23,7 @@ fn corpus_path(name: &str) -> PathBuf {
 }
 
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    let src = common::source(bytes);
-    PdfReader.read(&src, &ReadOptions::default(), &Budget::new(limits))
+    common::read_in(bytes, &ReadOptions::default(), &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {

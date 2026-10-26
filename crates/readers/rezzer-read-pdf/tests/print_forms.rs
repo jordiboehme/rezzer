@@ -7,46 +7,13 @@
 
 mod common;
 
-use common::{DataLine, FormPage, data_line, label, print_form, read};
-use rezzer_model::{Block, Completeness, ReadOutcome, plain_text};
+use common::{DataLine, FormPage, all_text, data_line, label, print_form, read};
+use rezzer_model::{Completeness, ReadOutcome};
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
 /// ships with.
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
-
-/// The text of a block and the blocks inside it, one line per paragraph or heading and one
-/// line per table row.
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. }
-        | Block::Paragraph { inlines, .. }
-        | Block::Task { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. }
-        | Block::Quote { blocks, .. }
-        | Block::Callout { blocks, .. } => blocks.iter().for_each(|b| block_text(b, out)),
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        Block::Table { rows, .. } => {
-            for row in rows {
-                for cell in row {
-                    out.push_str(&plain_text(&cell.inlines));
-                    out.push('|');
-                }
-                out.push('\n');
-            }
-        }
-        _ => {}
-    }
-}
-
-fn all_text(out: &ReadOutcome) -> String {
-    let mut s = String::new();
-    out.document.body.iter().for_each(|b| block_text(b, &mut s));
-    s
-}
 
 /// The read is complete and names no loss.
 fn assert_no_loss(out: &ReadOutcome) {
