@@ -296,7 +296,9 @@ impl Default for FormPage {
 }
 
 /// A file of A4 print-run form pages. The page and the template have the fonts `/FL`
-/// (Helvetica, for labels), `/FD` (Courier, for data lines) and `/FB` (Helvetica-Bold).
+/// (Helvetica, for labels), `/FD` (Courier, for data lines) and `/FB` (Helvetica-Bold), all
+/// in WinAnsi: the template and the data lines are written in that encoding, so labels may
+/// hold umlauts, `\u{df}` and the euro sign.
 /// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
 /// the file has none. `catalog_extra` goes into the catalog dictionary, where `{annots}`
 /// stands for the references of every annotation of every page, in page order (for example
@@ -305,22 +307,25 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
-    let label = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-    let data = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>");
-    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let font = |name: &str| {
+        format!("<< /Type /Font /Subtype /Type1 /BaseFont /{name} /Encoding /WinAnsiEncoding >>")
+    };
+    let label = b.add(font("Helvetica"));
+    let data = b.add(font("Courier"));
+    let bold = b.add(font("Helvetica-Bold"));
     let fonts = format!("/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R >>");
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();
     for page in pages {
         let tpl = b.stream(
             &format!("/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Resources << {fonts} >>"),
-            page.template.as_bytes(),
+            &win_ansi(&page.template),
         );
         let mut content = String::from("q /Tpl Do Q\n");
         for line in &page.lines {
             content.push_str(&data_line(page.left, line.y, page.size, &line.text));
         }
-        let content = b.stream("", content.as_bytes());
+        let content = b.stream("", &win_ansi(&content));
         let annots: Vec<String> = page
             .annots
             .iter()
@@ -354,6 +359,51 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
         let info = b.add(format!("<< {info} >>"));
         b.finish_with(catalog, &format!("/Info {info} 0 R"))
     }
+}
+
+/// `content` in WinAnsi (Windows-1252), the encoding of the fonts of [`print_form`]. Panics
+/// on a character WinAnsi has not, so a test never writes text the file cannot show.
+pub fn win_ansi(content: &str) -> Vec<u8> {
+    const HIGH: [(char, u8); 27] = [
+        ('\u{20ac}', 0x80),
+        ('\u{201a}', 0x82),
+        ('\u{192}', 0x83),
+        ('\u{201e}', 0x84),
+        ('\u{2026}', 0x85),
+        ('\u{2020}', 0x86),
+        ('\u{2021}', 0x87),
+        ('\u{2c6}', 0x88),
+        ('\u{2030}', 0x89),
+        ('\u{160}', 0x8a),
+        ('\u{2039}', 0x8b),
+        ('\u{152}', 0x8c),
+        ('\u{17d}', 0x8e),
+        ('\u{2018}', 0x91),
+        ('\u{2019}', 0x92),
+        ('\u{201c}', 0x93),
+        ('\u{201d}', 0x94),
+        ('\u{2022}', 0x95),
+        ('\u{2013}', 0x96),
+        ('\u{2014}', 0x97),
+        ('\u{2dc}', 0x98),
+        ('\u{2122}', 0x99),
+        ('\u{161}', 0x9a),
+        ('\u{203a}', 0x9b),
+        ('\u{153}', 0x9c),
+        ('\u{17e}', 0x9e),
+        ('\u{178}', 0x9f),
+    ];
+    content
+        .chars()
+        .map(|c| match u32::from(c) {
+            0..=0x7f | 0xa0..=0xff => u32::from(c) as u8,
+            _ => HIGH
+                .iter()
+                .find(|(h, _)| *h == c)
+                .map(|(_, b)| *b)
+                .unwrap_or_else(|| panic!("{c:?} is not in WinAnsi")),
+        })
+        .collect()
 }
 
 /// `text` as a PDF literal string, with `\`, `(` and `)` escaped.

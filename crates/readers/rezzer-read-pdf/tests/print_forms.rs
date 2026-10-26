@@ -10,8 +10,7 @@ mod common;
 use common::{DataLine, FormPage, all_text, data_line, label, print_form, read};
 use rezzer_model::{Completeness, ReadOutcome};
 
-/// The allocator of the Rezzer binary: the memory these tests measure is the memory it
-/// ships with.
+/// The allocator of the Rezzer binary, so the reads run as they run in it.
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
@@ -78,5 +77,19 @@ fn fake_bold_line_reads_once() {
     let text = all_text(&out);
     assert_eq!(text.matches("1.234,56").count(), 1, "{text}");
     assert_eq!(text.matches("Auszahlung").count(), 1, "{text}");
+    assert_no_loss(&out);
+}
+
+/// The builder writes text in WinAnsi, so a German label reads back as written.
+#[test]
+fn label_with_umlauts_reads_back() {
+    let words = "Bez\u{fc}ge \u{c4}rger \u{d6}l \u{dc}bung Gr\u{f6}\u{df}e Stra\u{df}e";
+    let page = FormPage {
+        template: label(40.0, 760.0, 8.0, words),
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(text.contains(words), "{text}");
     assert_no_loss(&out);
 }
