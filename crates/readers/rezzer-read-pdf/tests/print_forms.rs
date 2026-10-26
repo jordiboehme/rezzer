@@ -1818,6 +1818,14 @@ fn pay_slip(stroked_marks: bool) -> FormPage {
             510.42,
             &[(2, "003 Beispiel Bezug"), (67, "Z X N"), (81, "56,78")],
         ),
+        columns_line(
+            499.02,
+            &[
+                (2, "045 Zulage fuer Muster Bezug"),
+                (67, "X Y Z"),
+                (81, "11,11"),
+            ],
+        ),
         columns_line(373.62, &[(78, "1.302,90")]),
         columns_line(
             350.82,
@@ -1908,7 +1916,8 @@ fn assert_pay_slip(out: &ReadOutcome) {
         [
             "001|Gehalt||||X|X|Y",
             "002|Zulage Muster||||X|X|Y",
-            "003|Beispiel Bezug||||Z|X|N"
+            "003|Beispiel Bezug||||Z|X|N",
+            "045|Zulage fuer Muster Bezug||||X|Y|Z"
         ]
     );
     // T and S: their headers and one row of values, the marks read as separators.
@@ -2350,7 +2359,7 @@ fn values_running_into_the_next_field_keep_the_section() {
 }
 
 /// A note of prose across the columns under a header of hanging rules is not cut at them: it
-/// stays one cell across the row, as before values went into their columns.
+/// is one cell across its row, and the value line above it keeps its columns.
 #[test]
 fn a_note_across_an_open_row_stays_whole() {
     let note = "Bitte die Hinweise auf der Rueckseite beachten";
@@ -2358,7 +2367,7 @@ fn a_note_across_an_open_row_stays_whole() {
         &[120.0, 200.0, 280.0, 340.0],
         &["Aa", "Ab", "Ac", "Ad", "Ae"],
         vec![
-            columns_line(675.0, &[(1, "Muster"), (12, "ABCD"), (40, "11")]),
+            columns_line(675.0, &[(1, "Muster"), (22, "ABCD"), (40, "11")]),
             columns_line(665.0, &[(1, note)]),
         ],
     );
@@ -2366,5 +2375,7 @@ fn a_note_across_an_open_row_stays_whole() {
     let found = read_tables(&out);
     assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
     assert_eq!(found[0].last(), Some(&vec![note.to_string()]), "{found:#?}");
+    // The value line of the same row keeps its columns.
+    assert_eq!(found[0][1], ["Muster", "ABCD", "11", "", ""], "{found:#?}");
     assert_no_loss(&out);
 }

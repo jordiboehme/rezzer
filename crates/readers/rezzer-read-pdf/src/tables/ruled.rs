@@ -409,28 +409,9 @@ pub(super) fn ruled(
         };
         // An open row (the lines under a header of hanging rules) has a cell for each of the
         // header's columns: each value goes into the column it stands under, and a field
-        // left empty is an empty cell. A note of prose across the columns keeps the row one
-        // cell, as before (`footed` is each row under a header of hanging rules).
-        let footed: Vec<bool> = (0..rows)
-            .map(|r| open.iter().any(|f| (ys[r] - f).abs() <= SNAP))
-            .collect();
-        let mut noted_rows: HashSet<usize> = HashSet::new();
-        for &i in &within {
-            let run = &flow.runs[i];
-            let (_, cy) = middle(run);
-            let r = ys
-                .partition_point(|e| *e > cy)
-                .saturating_sub(1)
-                .min(rows - 1);
-            let across = xs[1..cols]
-                .iter()
-                .any(|&e| e > run.x + SNAP && e < run.x + run.w - SNAP);
-            if footed[r] && across && prose_like(&run.text) {
-                noted_rows.insert(r);
-            }
-        }
+        // left empty is an empty cell.
         let is_open: Vec<bool> = (0..rows)
-            .map(|r| footed[r] && !noted_rows.contains(&r))
+            .map(|r| open.iter().any(|f| (ys[r] - f).abs() <= SNAP))
             .collect();
         for (r, row) in owner.iter_mut().enumerate() {
             if is_open[r] {
@@ -470,7 +451,7 @@ pub(super) fn ruled(
         // Rows of the body that only column rules part: the lines of a band that fill at
         // least half of its columns with text, the first of them included, each start a row.
         let mut anchors = anchor_rows(
-            flow, &within, head, &footed, &owner, &extent, &row_at, &cell_at,
+            flow, &within, head, &is_open, &owner, &extent, &row_at, &cell_at,
         );
         // The lines under a header of hanging rules are rows by the header's columns.
         open_anchors(flow, &within, &xs, &ys, &open, &row_at, &mut anchors);
@@ -483,6 +464,19 @@ pub(super) fn ruled(
             let above = a.len() - a.partition_point(|y| *y < run.y - tol);
             above.saturating_sub(1)
         };
+        // A line of prose across an open row (a note over the section) is one cell across
+        // its row of the table; the value lines around it keep their columns.
+        let mut spanned: HashSet<(usize, usize)> = HashSet::new();
+        for &i in &within {
+            let run = &flow.runs[i];
+            let r = row_at(middle(run).1);
+            if !is_open[r] {
+                continue;
+            }
+            if note_across(run, &xs) {
+                spanned.insert((r, sub_of(r, run)));
+            }
+        }
         let planned_count: usize = (0..rows).map(subs).sum();
         if planned_count.saturating_mul(cols) > MAX_SQUARES {
             found.skipped.push(format!(
@@ -514,7 +508,7 @@ pub(super) fn ruled(
         let all: usize = extent.keys().map(|o| subs(o.0)).sum();
         let spanning: usize = extent
             .iter()
-            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !footed[o.0])
+            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !is_open[o.0])
             .map(|(o, _)| subs(o.0))
             .sum();
         // The fields of an open row are often left empty: its cells do not count here.
@@ -543,6 +537,18 @@ pub(super) fn ruled(
         for (r, row) in owner.iter().enumerate() {
             for sub in 0..subs(r) {
                 let mut cells = Vec::new();
+                if spanned.contains(&(r, sub)) {
+                    for o in row {
+                        place.insert((*o, sub), (planned_rows.len(), 0));
+                    }
+                    cells.push(PlannedCell {
+                        runs: Vec::new(),
+                        row_span: 1,
+                        col_span: cols as u32,
+                    });
+                    planned_rows.push(cells);
+                    continue;
+                }
                 for (c, o) in row.iter().enumerate() {
                     if *o != (r, c) {
                         continue;
@@ -597,7 +603,7 @@ pub(super) fn ruled(
             header_rows: if styled {
                 head
             } else {
-                (0..footed.iter().position(|o| *o).unwrap_or(0))
+                (0..is_open.iter().position(|o| *o).unwrap_or(0))
                     .map(subs)
                     .sum()
             },
@@ -931,7 +937,7 @@ fn open_anchors(
 /// rule of a body under a header band ([`row_starts`]) in the columns of `xs`.
 fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
     let cols = xs.len() - 1;
-    let mut runs: Vec<(f32, f32, usize, &str)> = runs
+    let mut runs: Vec<(f32, f32, usize, &str, bool)> = runs
         .iter()
         .map(|&i| {
             let r = &flow.runs[i];
@@ -940,19 +946,22 @@ fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
                 .partition_point(|e| *e < cx)
                 .saturating_sub(1)
                 .min(cols - 1);
-            (r.y, r.size.max(1.0), c, r.text.as_str())
+            (r.y, r.size.max(1.0), c, r.text.as_str(), note_across(r, xs))
         })
         .collect();
     runs.sort_by(|a, b| b.0.total_cmp(&a.0));
-    // Lines from the top, each the text of its columns.
+    // Lines from the top, each the text of its columns, and whether it holds a note.
     let mut lines: Vec<(f32, Vec<(usize, String)>)> = Vec::new();
-    for (y, size, c, text) in runs {
+    let mut notes: Vec<bool> = Vec::new();
+    for (y, size, c, text, note) in runs {
         if lines.last().is_none_or(|(ly, _)| *ly - y > 0.3 * size) {
             lines.push((y, Vec::new()));
+            notes.push(false);
         }
-        let Some((_, line)) = lines.last_mut() else {
+        let (Some((_, line)), Some(noted)) = (lines.last_mut(), notes.last_mut()) else {
             continue;
         };
+        *noted |= note;
         match line.iter_mut().find(|p| p.0 == c) {
             Some(p) => p.1.push_str(text),
             None => line.push((c, text.to_string())),
@@ -965,15 +974,35 @@ fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
         .iter()
         .map(|l| l.1.iter().map(|(c, t)| (*c, numeric(t))).collect())
         .collect();
+    // A note across the columns is a row of its own, and so is the line after it.
+    let mut starting = row_starts(&pieces, used.len());
+    for k in 0..lines.len() {
+        if notes[k] {
+            starting[k] = true;
+            if let Some(next) = starting.get_mut(k + 1) {
+                *next = true;
+            }
+        }
+    }
     // Kept going up, for a search by baseline.
     let mut starts: Vec<f32> = lines
         .iter()
-        .zip(row_starts(&pieces, used.len()))
+        .zip(starting)
         .filter(|(_, starts)| *starts)
         .map(|(l, _)| l.0)
         .collect();
     starts.reverse();
     starts
+}
+
+/// Whether `run` is a note across the columns of `xs`: a sentence over at least one inner
+/// column edge (see [`prose_like`]).
+fn note_across(run: &Run, xs: &[f32]) -> bool {
+    let across = xs[1..xs.len() - 1]
+        .iter()
+        .filter(|&&e| e > run.x + SNAP && e < run.x + run.w - SNAP)
+        .count();
+    across > 0 && prose_like(&run.text, across + 1)
 }
 
 /// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
@@ -990,16 +1019,17 @@ fn edges(h: &[Seg], v: &[Seg]) -> (Vec<f32>, Vec<f32>) {
     (clustered(xs), ys)
 }
 
-/// Whether the text of a run reads as a line of prose: at least [`PROSE_WORDS`] words and
-/// [`PROSE_LINE`] characters, most of them words with a small letter and no digit. Values,
-/// codes and flags do not.
-fn prose_like(text: &str) -> bool {
+/// Whether the text of a run that stands over `columns` columns reads as a sentence: at
+/// least [`PROSE_WORDS`] words and [`PROSE_LINE`] characters, more words than columns, and
+/// most of them words with a small letter and no digit. Values, codes, amounts and flags do
+/// not.
+fn prose_like(text: &str, columns: usize) -> bool {
     let words: Vec<&str> = text.split_whitespace().collect();
     let worded = words
         .iter()
         .filter(|w| w.chars().any(char::is_lowercase) && !w.chars().any(|c| c.is_ascii_digit()))
         .count();
-    words.len() >= PROSE_WORDS
+    words.len() >= PROSE_WORDS.max(columns + 1)
         && text.trim().chars().count() >= PROSE_LINE
         && 2 * worded > words.len()
 }
@@ -1042,8 +1072,8 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// two of its words, so each part stands in its own column: a value line padded into its
 /// fields often has only one or two spaces between two fields. A rule cuts at the heights it
 /// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
-/// their section (see [`hanging_feet`]), but not a line of prose there (a note across the
-/// section, see [`prose_like`]). A rule within a tenth of the text size of a gap cuts there;
+/// their section (see [`hanging_feet`]), but not a sentence that runs over them as words
+/// (a note across the section, see [`prose_like`]). A rule within a tenth of the text size of a gap cuts there;
 /// a rule inside a word cuts nothing. A cut part keeps the run's place in the reading order.
 /// False when more than `budget` steps were needed: the runs past them stay whole.
 fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
@@ -1081,12 +1111,10 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
         let (_, cy) = middle(r);
         let tol = 0.1 * r.size.max(1.0);
         let mut at: Vec<usize> = Vec::new();
-        let lists: &[&[Place]] = if prose_like(&r.text) {
-            &[&drawn]
-        } else {
-            &[&drawn, &hanging]
-        };
-        for places in lists {
+        // At the hanging edges: the gaps found, the edges crossed and whether one of them
+        // falls inside a word.
+        let (mut below, mut crossed, mut in_word) = (Vec::new(), 0usize, false);
+        for (list, places) in [&drawn, &hanging].into_iter().enumerate() {
             let first = places.partition_point(|p| p.0 <= r.x + tol);
             for (x, heights) in &places[first..] {
                 if *x >= r.x + r.w - tol {
@@ -1102,10 +1130,24 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
                     continue;
                 }
                 let k = r.gaps.partition_point(|g| g.to + tol < *x);
-                if r.gaps.get(k).is_some_and(|g| g.from - tol <= *x) {
-                    at.push(k);
+                let gap = r.gaps.get(k).is_some_and(|g| g.from - tol <= *x);
+                if list == 0 {
+                    if gap {
+                        at.push(k);
+                    }
+                    continue;
+                }
+                crossed += 1;
+                if gap {
+                    below.push(k);
+                } else {
+                    in_word = true;
                 }
             }
+        }
+        // A sentence that runs over the hanging edges as words (a note) is not cut there.
+        if !(in_word && prose_like(&r.text, crossed + 1)) {
+            at.extend(below);
         }
         at.sort_unstable();
         at.dedup();
