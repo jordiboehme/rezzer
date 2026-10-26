@@ -14,6 +14,9 @@ use super::*;
 use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 
+/// Where a run a table took goes: the table, its row and its cell.
+type Claim = Option<(usize, usize, usize)>;
+
 /// Why a grid with a figure caption next to it is not a table.
 const FIGURE_NEAR: &str = "a figure caption stands next to it";
 
@@ -72,55 +75,11 @@ pub(super) fn ruled(
             return;
         }
     };
-    // Each connected grid in its sections, each judged as a grid of its own, top to bottom;
-    // a section of a grid that was cut is no grid's to drop without a word.
-    let mut cut_work = 0usize;
-    let mut grids: Vec<Part> = Vec::new();
-    for (id, (gh, gv)) in groups.iter().enumerate() {
-        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
-        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
-        let parts = sections(&h, &v, &hs, &mut cut_work);
-        let (cut, last) = (parts.len() > 1, parts.len().saturating_sub(1));
-        grids.extend(parts.into_iter().enumerate().map(|(k, (h, v))| Part {
-            h,
-            v,
-            cut,
-            cut_below: k < last,
-            cut_above: k > 0,
-            id,
-        }));
-    }
-    if cut_work > CUT_WORK {
-        found.skipped.push(format!(
-            "ruled grids on page {page} are cut in sections only in part: the page has too many \
-             pieces of lines at the heights of their rules"
-        ));
-    }
-    grids.sort_by(|a, b| {
-        let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
-        top(b).total_cmp(&top(a))
-    });
+    let grids = grid_parts(page, &hs, &vs, &groups, found);
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
     let taken = taken_by_grids(hs.len(), &groups);
-    // The dividers of strips of fields cut the runs across them too, at a word gap.
-    let frames = frames(&hs, &taken, &vs);
-    if frames.is_none() {
-        found.skipped.push(format!(
-            "label and value fields between rules on page {page} are not looked for: the page \
-             has too many lines"
-        ));
-    }
-    let frames = frames.unwrap_or_default();
-    if !frames.is_empty() {
-        apply_cuts(flow, field_cuts(flow, &frames));
-    }
-    if !cut_at_columns(flow, &grids, COLUMN_CUT_WORK) {
-        found.skipped.push(format!(
-            "text across column lines on page {page} is cut at them only in part: the page has \
-             too many runs across its column lines"
-        ));
-    }
+    let frames = cut_runs(page, flow, (&hs, &vs, &taken), &grids, found);
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
     let per_line = texted_per_line(flow);
@@ -129,38 +88,15 @@ pub(super) fn ruled(
     let mut tables: Vec<Planned> = Vec::new();
     // A column of totals beside the sections: its totals are pairs, taken first; its other
     // strips join the section beside them, below.
-    let sides = {
-        let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
-        let beside: Vec<Beside<'_>> = edged
-            .iter()
-            .filter(|(xs, ys)| xs.len() >= 2 && ys.len() >= 2)
-            .map(|(xs, ys)| Beside {
-                left: xs[0],
-                right: xs[xs.len() - 1],
-                ys,
-            })
-            .collect();
-        let mut work = 0;
-        let sides = side_columns(flow, &by_y, &hs, &vs, &taken, &beside, &mut work);
-        if work > SIDE_WORK {
-            found.skipped.push(format!(
-                "columns of totals beside ruled tables on page {page} are not looked for: the \
-                 page has too many lines"
-            ));
-        }
-        sides
-    };
-    for strip in sides.iter().flat_map(|s| &s.strips) {
-        let StripKind::Totals(totals) = &strip.kind else {
-            continue;
-        };
-        let list: Vec<&Field> = totals.iter().collect();
-        let Some(table) = pairs_table(flow, &list, totals_top(flow, totals), SIDE_FOUND_BY) else {
-            continue;
-        };
-        claim(&mut claimed, tables.len(), &list);
-        tables.push(table);
-    }
+    let sides = totals_tables(
+        page,
+        flow,
+        &by_y,
+        (&hs, &vs, &taken),
+        &grids,
+        (&mut claimed, &mut tables),
+        found,
+    );
     // The tables of totals come first; they have no header row.
     let pairs = tables.len();
     // Runs of grids refused with a note, and those grids: where each stands and why; and
@@ -728,25 +664,19 @@ pub(super) fn ruled(
     );
     // Rows of fields between rules no grid takes, in the text no table took.
     let strips_from = tables.len();
-    let busy = |i: usize| claimed[i].is_some() || held[i] || titles[i];
-    let mut strip_claims = vec![None; flow.runs.len()];
-    let text_sizes = crate::layout::page_text_sizes(&flow.runs);
-    field_strips(
+    let busy: Vec<bool> = (0..flow.runs.len())
+        .map(|i| claimed[i].is_some() || held[i] || titles[i])
+        .collect();
+    strip_tables(
         page,
         flow,
         &by_y,
         &frames,
         &busy,
-        &text_sizes,
-        &mut strip_claims,
+        &mut claimed,
         &mut tables,
-        &mut found.uncertain,
+        found,
     );
-    for (c, s) in claimed.iter_mut().zip(strip_claims) {
-        if s.is_some() {
-            *c = s;
-        }
-    }
     found.quiet = quiet;
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
@@ -798,6 +728,152 @@ pub(super) fn ruled(
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
+    }
+}
+
+/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) in its sections, each
+/// judged as a grid of its own, top to bottom; a section of a grid that was cut is no grid's to
+/// drop without a word.
+fn grid_parts(
+    page: u32,
+    hs: &[Seg],
+    vs: &[Seg],
+    groups: &[(Vec<usize>, Vec<usize>)],
+    found: &mut Found,
+) -> Vec<Part> {
+    let mut cut_work = 0usize;
+    let mut grids: Vec<Part> = Vec::new();
+    for (id, (gh, gv)) in groups.iter().enumerate() {
+        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
+        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
+        let parts = sections(&h, &v, hs, &mut cut_work);
+        let (cut, last) = (parts.len() > 1, parts.len().saturating_sub(1));
+        grids.extend(parts.into_iter().enumerate().map(|(k, (h, v))| Part {
+            h,
+            v,
+            cut,
+            cut_below: k < last,
+            cut_above: k > 0,
+            id,
+        }));
+    }
+    if cut_work > CUT_WORK {
+        found.skipped.push(format!(
+            "ruled grids on page {page} are cut in sections only in part: the page has too many \
+             pieces of lines at the heights of their rules"
+        ));
+    }
+    grids.sort_by(|a, b| {
+        let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
+        top(b).total_cmp(&top(a))
+    });
+    grids
+}
+
+/// Cuts the runs of the page at the edges of the fields between rules (the frames of the
+/// horizontal lines `hs` no grid takes, see `taken`, with their dividers among `vs`), at a word
+/// gap, and at the column lines of the sections `grids`. The frames found.
+fn cut_runs(
+    page: u32,
+    flow: &mut Flow,
+    (hs, vs, taken): (&[Seg], &[Seg], &[bool]),
+    grids: &[Part],
+    found: &mut Found,
+) -> Vec<Frame> {
+    let frames = frames(hs, taken, vs);
+    if frames.is_none() {
+        found.skipped.push(format!(
+            "label and value fields between rules on page {page} are not looked for: the page \
+             has too many lines"
+        ));
+    }
+    let frames = frames.unwrap_or_default();
+    if !frames.is_empty() {
+        apply_cuts(flow, field_cuts(flow, &frames));
+    }
+    if !cut_at_columns(flow, grids, COLUMN_CUT_WORK) {
+        found.skipped.push(format!(
+            "text across column lines on page {page} is cut at them only in part: the page has \
+             too many runs across its column lines"
+        ));
+    }
+    frames
+}
+
+/// The columns of totals beside the sections `grids` (among the page's lines `hs` and `vs`,
+/// those no grid takes in `taken`), with the tables of their totals planned in `tables` and
+/// their runs in `claimed`.
+fn totals_tables(
+    page: u32,
+    flow: &Flow,
+    by_y: &ByY,
+    (hs, vs, taken): (&[Seg], &[Seg], &[bool]),
+    grids: &[Part],
+    (claimed, tables): (&mut [Claim], &mut Vec<Planned>),
+    found: &mut Found,
+) -> Vec<Side> {
+    let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
+    let beside: Vec<Beside<'_>> = edged
+        .iter()
+        .filter(|(xs, ys)| xs.len() >= 2 && ys.len() >= 2)
+        .map(|(xs, ys)| Beside {
+            left: xs[0],
+            right: xs[xs.len() - 1],
+            ys,
+        })
+        .collect();
+    let mut work = 0;
+    let sides = side_columns(flow, by_y, hs, vs, taken, &beside, &mut work);
+    if work > SIDE_WORK {
+        found.skipped.push(format!(
+            "columns of totals beside ruled tables on page {page} are not looked for: the page \
+             has too many lines"
+        ));
+    }
+    for strip in sides.iter().flat_map(|s| &s.strips) {
+        let StripKind::Totals(totals) = &strip.kind else {
+            continue;
+        };
+        let list: Vec<&Field> = totals.iter().collect();
+        let Some(table) = pairs_table(flow, &list, totals_top(flow, totals), SIDE_FOUND_BY) else {
+            continue;
+        };
+        claim(claimed, tables.len(), &list);
+        tables.push(table);
+    }
+    sides
+}
+
+/// The rows of fields between rules in `frames`, among the runs `busy` does not name, planned
+/// in `tables` with their runs in `claimed`.
+#[allow(clippy::too_many_arguments)]
+fn strip_tables(
+    page: u32,
+    flow: &Flow,
+    by_y: &ByY,
+    frames: &[Frame],
+    busy: &[bool],
+    claimed: &mut [Claim],
+    tables: &mut Vec<Planned>,
+    found: &mut Found,
+) {
+    let mut strip_claims = vec![None; flow.runs.len()];
+    let text_sizes = crate::layout::page_text_sizes(&flow.runs);
+    field_strips(
+        page,
+        flow,
+        by_y,
+        frames,
+        &|i| busy[i],
+        &text_sizes,
+        &mut strip_claims,
+        tables,
+        &mut found.uncertain,
+    );
+    for (c, s) in claimed.iter_mut().zip(strip_claims) {
+        if s.is_some() {
+            *c = s;
+        }
     }
 }
 
