@@ -1650,3 +1650,124 @@ fn a_ruled_row_with_wrapped_cells_stays_one_row() {
         "{rows:?}"
     );
 }
+
+/// One section of a ruled grid: rows `h` points high from `top` down between the column
+/// rules `xs`, every rule drawn, and in each cell the text `cell(row, column)` in `font` at
+/// 8 points (none when it is empty).
+fn grid_section(
+    xs: &[f32],
+    top: f32,
+    h: f32,
+    rows: usize,
+    font: &dyn Fn(usize) -> &'static str,
+    cell: &dyn Fn(usize, usize) -> String,
+) -> String {
+    let (x0, x1) = (xs[0], xs[xs.len() - 1]);
+    let bottom = top - h * rows as f32;
+    let mut c = String::from("0.5 w ");
+    for k in 0..=rows {
+        let y = top - h * k as f32;
+        c += &format!("{x0} {y} m {x1} {y} l S ");
+    }
+    for x in xs {
+        c += &format!("{x} {bottom} m {x} {top} l S ");
+    }
+    for r in 0..rows {
+        for (k, x) in xs[..xs.len() - 1].iter().enumerate() {
+            let text = cell(r, k);
+            if !text.is_empty() {
+                c += &show(font(r), 8.0, x + 3.0, top - h * r as f32 - h + 6.0, &text);
+            }
+        }
+    }
+    c
+}
+
+/// `n` columns of equal width from 72 to 552.
+fn columns(n: usize) -> Vec<f32> {
+    (0..=n)
+        .map(|k| 72.0 + 480.0 * k as f32 / n as f32)
+        .collect()
+}
+
+/// The one table of page 1 with the given number of columns in every row.
+fn table_of_width(out: &ReadOutcome, cols: usize) -> Vec<Vec<String>> {
+    let found = tables(page(out, 1));
+    let hits: Vec<_> = found
+        .iter()
+        .filter(|(_, rows)| rows.iter().all(|r| r.len() == cols))
+        .collect();
+    assert_eq!(hits.len(), 1, "{found:?}");
+    hits[0].1.clone()
+}
+
+#[test]
+fn two_sections_two_tables() {
+    // One connected grid: a section of 4 columns and 3 rows over one of 9 columns and 4
+    // rows, the rule between them shared: 13 column edges in all. Each section is a table
+    // of its own.
+    let bold = |r: usize| if r == 0 { "F2" } else { "F1" };
+    let mut c = grid_section(&columns(4), 700.0, 20.0, 3, &bold, &|r, k| {
+        format!("{}{r}{k}", ['K', 'L', 'M'][r])
+    });
+    c += &grid_section(&columns(9), 640.0, 20.0, 4, &bold, &|r, k| {
+        format!("w{r}{k}")
+    });
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert_eq!(
+        tables(page(&out, 1)).len(),
+        2,
+        "{:?}",
+        tables(page(&out, 1))
+    );
+    let upper = table_of_width(&out, 4);
+    assert_eq!(upper[0], ["K00", "K01", "K02", "K03"]);
+    assert_eq!(upper.len(), 3, "{upper:?}");
+    let lower = table_of_width(&out, 9);
+    assert_eq!(lower.len(), 4, "{lower:?}");
+    assert_eq!(lower[3][8], "w38");
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+}
+
+/// Guard: a header row of two cells, each over two columns of the body, stays with its
+/// body: one table, its first row the header.
+#[test]
+fn spanned_header_is_not_a_section() {
+    let xs = columns(4);
+    let bold = |r: usize| if r == 0 { "F2" } else { "F1" };
+    let mut c = grid_section(&[xs[0], xs[2], xs[4]], 700.0, 20.0, 1, &bold, &|_, k| {
+        ["Erika Mustermann", "Muster GmbH"][k].to_string()
+    });
+    c += &grid_section(&xs, 680.0, 20.0, 3, &|_| "F1", &|r, k| format!("v{r}{k}"));
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (header, rows) = &found[0];
+    assert_eq!(*header, 1, "{found:?}");
+    assert_eq!(rows[0], ["Erika Mustermann", "Muster GmbH"], "{found:?}");
+    assert_eq!(rows.len(), 4, "{found:?}");
+    assert_eq!(rows[3], ["v20", "v21", "v22", "v23"], "{found:?}");
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+}
+
+#[test]
+fn calendar_grid_is_refused_with_a_loss() {
+    // A month of 31 day columns: the days in the first row, two rows of names with a mark
+    // on some days. One section of 31 columns is no table, and its refusal is a loss.
+    let xs: Vec<f32> = (0..=31).map(|k| 40.0 + 16.0 * k as f32).collect();
+    let c = grid_section(&xs, 700.0, 16.0, 3, &|_| "F1", &|r, k| match r {
+        0 => format!("{}", k + 1),
+        _ if k % 7 == r => "x".into(),
+        _ => String::new(),
+    });
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert!(tables(page(&out, 1)).is_empty());
+    let losses = &out.document.losses;
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain, "{losses:?}");
+    assert_eq!(losses[0].severity, Severity::Info, "{losses:?}");
+    assert!(
+        losses[0].what.contains("more than 15 columns"),
+        "{losses:?}"
+    );
+}

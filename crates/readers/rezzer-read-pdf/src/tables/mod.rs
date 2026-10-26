@@ -10,6 +10,7 @@
 mod banded;
 mod borderless;
 mod ruled;
+mod sections;
 mod tagged;
 
 use std::collections::HashMap;

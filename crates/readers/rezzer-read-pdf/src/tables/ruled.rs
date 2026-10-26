@@ -7,7 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded};
+use super::sections::sections;
 use super::*;
+use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 
 /// Why a grid with a figure caption next to it is not a table.
@@ -57,11 +59,17 @@ pub(super) fn ruled(
             return;
         }
     };
-    let mut grids = groups;
-    // Top to bottom.
+    // Each connected grid in its sections, each judged as a grid of its own, top to bottom.
+    let mut grids: Vec<(Vec<Seg>, Vec<Seg>)> = groups
+        .iter()
+        .flat_map(|(gh, gv)| {
+            let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
+            let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
+            sections(&h, &v)
+        })
+        .collect();
     grids.sort_by(|a, b| {
-        let top =
-            |g: &(Vec<usize>, Vec<usize>)| g.0.iter().map(|&j| hs[j].at).fold(f32::MIN, f32::max);
+        let top = |g: &(Vec<Seg>, Vec<Seg>)| g.0.iter().map(|s| s.at).fold(f32::MIN, f32::max);
         top(b).total_cmp(&top(a))
     });
     let lines = flow_lines(flow);
@@ -80,7 +88,7 @@ pub(super) fn ruled(
     let mut icons: Vec<(usize, usize, usize, [f32; 4])> = Vec::new();
     let mut strokes: Option<Vec<[f32; 4]>> = None;
     let mut icon_work = 0usize;
-    'grids: for (g, (gh, gv)) in grids.into_iter().enumerate() {
+    'grids: for (g, (h, v)) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "ruled tables on page {page} are looked for only in part: the time limit was \
@@ -88,8 +96,6 @@ pub(super) fn ruled(
             ));
             break;
         }
-        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
-        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
         let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
         xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
         xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
@@ -135,7 +141,7 @@ pub(super) fn ruled(
             .copied()
             .filter(|&i| !flow.runs[i].text.trim().is_empty())
             .collect();
-        if within.is_empty() {
+        if within.is_empty() || boxed_field(flow, &within, &xs, &ys) {
             continue;
         }
         if tables.len() >= MAX_TABLES {
@@ -199,7 +205,16 @@ pub(super) fn ruled(
                 held[i] = true;
             }
         };
-        // A grid of many columns is refused before its cells are worked out.
+        // A figure caption next to the grid or inside it is looked at first, so a wide chart
+        // gets no note; a grid of many columns is refused before its cells are worked out.
+        if figure_caption
+            || within
+                .iter()
+                .any(|&i| caption(&flow.runs[i].text) == Some(false))
+        {
+            refuse(FIGURE_NEAR);
+            continue;
+        }
         if cols > MAX_COLUMNS {
             refuse("it has more than 15 columns");
             continue;
@@ -354,7 +369,6 @@ pub(super) fn ruled(
         }
         let mut with_text: HashSet<((usize, usize), usize)> = HashSet::new();
         let mut crossing = 0usize;
-        let mut caption_inside = false;
         for &i in &within {
             let r = &flow.runs[i];
             let (cx, cy) = middle(r);
@@ -364,9 +378,6 @@ pub(super) fn ruled(
             let (x0, x1) = (xs[o.1], xs[(o.1 + extent[&o].1 as usize).min(cols)]);
             if r.x < x0 - SNAP || r.x + r.w > x1 + SNAP {
                 crossing += 1;
-            }
-            if caption(&r.text) == Some(false) {
-                caption_inside = true;
             }
         }
         // Cells counted with the rows each band was cut in; only cells of the body count as
@@ -378,9 +389,7 @@ pub(super) fn ruled(
             .map(|(o, _)| subs(o.0))
             .sum();
         let empty = all - with_text.len();
-        let refused = if figure_caption || caption_inside {
-            Some(FIGURE_NEAR)
-        } else if empty as f32 > EMPTY_SHARE * all as f32 {
+        let refused = if empty as f32 > EMPTY_SHARE * all as f32 {
             Some("most of its cells are empty")
         } else if 10 * spanning > 3 * all {
             Some("its boxes do not form rows and columns")
@@ -528,6 +537,37 @@ pub(super) fn ruled(
         }
         found.tables.push(t);
     }
+}
+
+/// A box of a boxed field is at most this many times as wide as the size of its digits.
+const DIGIT_BOX: f32 = 1.5;
+
+/// Whether the grid of column edges `xs` and row edges `ys` (from the top) with the runs
+/// `within` is boxed fields: columns of one width, narrow as a box for each digit, and in
+/// each row at most one run of text, which is digits (with the separators read from marks).
+/// Its text is read as it is, and its refusal is no loss.
+fn boxed_field(flow: &Flow, within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
+    let (Some(first), Some(size)) = (
+        xs.windows(2).map(|w| w[1] - w[0]).next(),
+        within.iter().map(|&i| flow.runs[i].size).reduce(f32::max),
+    ) else {
+        return false;
+    };
+    let digits = |t: &str| {
+        let t = t.trim();
+        t.starts_with(|c: char| c.is_ascii_digit())
+            && t.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',') || is_placeholder(c))
+    };
+    let mut rows: HashSet<usize> = HashSet::new();
+    xs.len() >= 3
+        && first <= DIGIT_BOX * size
+        && xs.windows(2).all(|w| (w[1] - w[0] - first).abs() <= SNAP)
+        && within.iter().all(|&i| {
+            let r = &flow.runs[i];
+            let (_, cy) = middle(r);
+            digits(&r.text) && rows.insert(ys.partition_point(|e| *e > cy))
+        })
 }
 
 /// What a title drawn as an icon is written as.
