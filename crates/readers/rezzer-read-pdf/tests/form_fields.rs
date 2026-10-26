@@ -454,10 +454,29 @@ fn blocks(out: &ReadOutcome) -> &[Block] {
         .expect("a page")
 }
 
+/// An invariant a read of a generated form must hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Inv {
+    /// Every pair is a right pair (ruling P6-X): never broken, not even by a known variant.
+    RightPair,
+    /// Every value stands once in the text: never broken either.
+    ValueOnce,
+    /// A field the geometry makes clear pairs.
+    ClearPairs,
+    /// A field the geometry leaves unclear does not pair, and a loss names it.
+    UnclearSaid,
+    /// The underlined title is a heading followed by its lines, before the grid's table.
+    Title,
+}
+
+/// One broken invariant, and what broke it.
+#[derive(Debug)]
+struct Broken(Inv, String);
+
 /// The fields' invariants on a read: every pair is a right pair, each clear field pairs
 /// (an empty one with `empty`), each unclear field does not pair and a loss names it, every
 /// value stands once in the text. Each broken one is listed.
-fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<String> {
+fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<Broken> {
     let mut broken = Vec::new();
     let pairs = pairs_of(out);
     for (l, v) in &pairs {
@@ -465,11 +484,17 @@ fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<String> {
         match b.fields.iter().find(|f| f.0 == label) {
             Some((_, Ok(Some(want)))) if v == want => {}
             Some((_, Ok(None))) if v == "empty" => {}
-            Some((_, want)) => broken.push(format!("wrong pair {l:?}: {v:?}, want {want:?}")),
+            Some((_, want)) => broken.push(Broken(
+                Inv::RightPair,
+                format!("wrong pair {l:?}: {v:?}, want {want:?}"),
+            )),
             // Pairs of other text (the title is checked on its own).
             None => {
                 if l.contains("Hinweise") {
-                    broken.push(format!("the title is a pair: {l:?}: {v:?}"));
+                    broken.push(Broken(
+                        Inv::RightPair,
+                        format!("the title is a pair: {l:?}: {v:?}"),
+                    ));
                 }
             }
         }
@@ -486,10 +511,18 @@ fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<String> {
             .iter()
             .any(|(l, _)| l.trim_end_matches(" 8").trim_end_matches('8').trim() == *name);
         match want {
-            Ok(_) if !paired => broken.push(format!("{name} does not pair")),
-            Err(()) if paired => broken.push(format!("{name} pairs though it is unclear")),
+            Ok(_) if !paired => {
+                broken.push(Broken(Inv::ClearPairs, format!("{name} does not pair")));
+            }
+            Err(()) if paired => broken.push(Broken(
+                Inv::UnclearSaid,
+                format!("{name} pairs though it is unclear"),
+            )),
             Err(()) if !uncertain.iter().any(|w| w.contains(name)) => {
-                broken.push(format!("no loss names {name}: {uncertain:?}"))
+                broken.push(Broken(
+                    Inv::UnclearSaid,
+                    format!("no loss names {name}: {uncertain:?}"),
+                ));
             }
             _ => {}
         }
@@ -506,7 +539,7 @@ fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<String> {
             .filter(|w| *w == parts.as_slice())
             .count();
         if n != 1 {
-            broken.push(format!("{v:?} stands {n} times"));
+            broken.push(Broken(Inv::ValueOnce, format!("{v:?} stands {n} times")));
         }
     }
     broken
@@ -514,14 +547,14 @@ fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<String> {
 
 /// The title's invariants: no table row holds it, it is a heading followed directly by its
 /// two lines, and it stands before the grid's table.
-fn check_title(out: &ReadOutcome) -> Vec<String> {
+fn check_title(out: &ReadOutcome) -> Vec<Broken> {
     let mut broken = Vec::new();
     let bl = blocks(out);
     let heading = bl.iter().position(
         |b| matches!(b, Block::Heading { inlines, .. } if plain_text(inlines) == "Hinweise Muster"),
     );
     let Some(h) = heading else {
-        broken.push("the title is no heading".into());
+        broken.push(Broken(Inv::Title, "the title is no heading".into()));
         return broken;
     };
     let next: String = bl[h + 1..]
@@ -535,14 +568,20 @@ fn check_title(out: &ReadOutcome) -> Vec<String> {
         .collect::<Vec<_>>()
         .join(" | ");
     if !(next.contains("Muster vom 01.02.21 Kst.") && next.contains("- Musterhinweis 2 Muster")) {
-        broken.push(format!("the title's lines do not follow it: {next:?}"));
+        broken.push(Broken(
+            Inv::Title,
+            format!("the title's lines do not follow it: {next:?}"),
+        ));
     }
     let grid = bl.iter().position(|b| {
         matches!(b, Block::Table { rows, .. }
             if rows.iter().flatten().any(|c| plain_text(&c.inlines) == "Gehalt"))
     });
     if grid.is_some_and(|t| t < h) {
-        broken.push("the title stands after the grid's table".into());
+        broken.push(Broken(
+            Inv::Title,
+            "the title stands after the grid's table".into(),
+        ));
     }
     broken
 }
@@ -1033,35 +1072,73 @@ fn variants() -> Vec<(String, Geo, bool, bool)> {
     out
 }
 
-/// Variants that break an invariant today, with why (reported, not tuned away): the test
-/// fails when one of them starts to hold or another one breaks.
-const KNOWN: &[(&str, &str)] = &[(
+/// Variants that break an invariant today: the variant's name, the one invariant it breaks,
+/// and why (reported, not tuned away). Every other invariant is still held for it, and the
+/// test fails when a known variant starts to hold or breaks another one. No variant may be
+/// known to break [`Inv::RightPair`] or [`Inv::ValueOnce`].
+const KNOWN: &[(&str, Inv, &str)] = &[(
     "separate labels",
+    Inv::ClearPairs,
     "the two short labels are two text objects less than half a label size apart, so the \
      text pass reads them as one word without a space; that word stands across the divider \
-     between them, so both fields stay text with a loss that names them (no wrong pair)",
+     between them, so both fields stay text with a loss that names them",
 )];
+
+/// Holds each read to the invariants, with `known` the variants that break one: the names
+/// of the variants that break another one or break none though they are known.
+fn unexpected(reads: Vec<(String, Vec<Broken>)>, known: &[(&str, Inv, &str)]) -> Vec<String> {
+    assert!(
+        known
+            .iter()
+            .all(|k| k.1 != Inv::RightPair && k.1 != Inv::ValueOnce),
+        "a wrong pair or a value lost is never a known break"
+    );
+    let mut out = Vec::new();
+    for (name, broken) in reads {
+        let held = match known.iter().find(|k| k.0 == name) {
+            Some(k) => !broken.is_empty() && broken.iter().all(|b| b.0 == k.1),
+            None => broken.is_empty(),
+        };
+        if !held {
+            let list: Vec<String> = broken
+                .iter()
+                .map(|b| format!("{:?}: {}", b.0, b.1))
+                .collect();
+            out.push(format!("{name}: {list:#?}"));
+        }
+    }
+    out
+}
+
+/// The check of known variants bites: a known variant that breaks another invariant than
+/// its own, or that holds them all, is reported; so is any other variant that breaks one.
+#[test]
+fn known_variants_are_held_to_every_other_invariant() {
+    let known: &[(&str, Inv, &str)] = &[("k", Inv::ClearPairs, "a reason")];
+    let read = |name: &str, broken: Vec<Broken>| vec![(name.to_string(), broken)];
+    let b = |inv: Inv| Broken(inv, String::new());
+    assert!(unexpected(read("k", vec![b(Inv::ClearPairs)]), known).is_empty());
+    for other in [Inv::RightPair, Inv::ValueOnce, Inv::UnclearSaid, Inv::Title] {
+        let both = vec![b(Inv::ClearPairs), b(other)];
+        assert_eq!(unexpected(read("k", both), known).len(), 1, "{other:?}");
+    }
+    assert_eq!(unexpected(read("k", Vec::new()), known).len(), 1);
+    assert_eq!(
+        unexpected(read("other", vec![b(Inv::Title)]), known).len(),
+        1
+    );
+}
 
 #[test]
 fn generated_variants_hold_the_invariants() {
-    let mut report = Vec::new();
-    let mut unexpected = Vec::new();
+    let mut reads = Vec::new();
     for (name, g, overflow, one_run) in variants() {
         let b = page(&g, overflow, one_run);
         let out = read(&print_form(std::slice::from_ref(&b.page), "", ""));
         let mut broken = check_fields(&out, &b);
         broken.extend(check_title(&out));
-        let known = KNOWN.iter().any(|k| k.0 == name);
-        if !broken.is_empty() {
-            report.push(format!("{name}: {broken:?}"));
-        }
-        if broken.is_empty() == known {
-            unexpected.push(name);
-        }
+        reads.push((name, broken));
     }
-    assert!(
-        unexpected.is_empty(),
-        "unexpected: {unexpected:?}\n{}",
-        report.join("\n")
-    );
+    let wrong = unexpected(reads, KNOWN);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
