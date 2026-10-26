@@ -3046,7 +3046,7 @@ fn heading_rows_and_footnote_of_a_table_pack_together() {
     assert_eq!(next, 122);
     // The last part also holds the later pages; its location and title say so.
     assert!(
-        last.location.ends_with("to pages 2 to 5"),
+        last.location.ends_with(" and pages 2 to 5"),
         "{}",
         last.location
     );
@@ -3223,6 +3223,9 @@ fn a_link_to_a_heading_with_inline_html_keeps_its_fragment_across_parts() {
         .iter()
         .find(|u| u.file.starts_with("beta"))
         .expect("a part for Beta");
+    // Its title and file name use the heading's words without the tags.
+    assert_eq!(beta.file, "beta-bold");
+    assert_eq!(beta.title, "Beta bold");
     let link = format!("({}.md#beta-bold)", beta.file);
     assert!(
         list[0].markdown.contains(&link),

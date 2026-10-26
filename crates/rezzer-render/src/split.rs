@@ -1210,7 +1210,10 @@ impl<'a> Splitter<'a> {
             let b = borders.get(k + 1).copied().unwrap_or(to);
             let title = match &list[a] {
                 Block::Heading { inlines, .. } if heading_level(&list[a]) == Some(min) => {
-                    Some(rezzer_model::plain_text(inlines))
+                    // The heading's words: inline HTML tags left out, their text kept.
+                    Some(rezzer_model::text::strip_html_tags(
+                        &rezzer_model::plain_text(inlines),
+                    ))
                 }
                 _ => None,
             };
@@ -1788,24 +1791,27 @@ impl<'a> Splitter<'a> {
             (Some(_), None) => false,
         };
         let both = joined_location(&x.shown_location(), &y.shown_location());
-        // A piece on pages past the rows' pages is named too: the title follows the location.
+        // A piece on pages past the rows' pages is named too, in title and location:
+        // `GLOSSARY, rows 266 to 278 and pages 422 to 450`.
+        let rows_and_pages = capped(
+            &format!("{} and {}", x.shown_location(), y.shown_location()),
+            TITLE_CAP,
+        );
         let suffix = if y.table.is_none() && holds_only(x, &held_y) {
             if !within(y, x) {
-                item.title = capped(&both, TITLE_CAP);
-                item.location = both;
+                item.title = rows_and_pages.clone();
+                item.location = rows_and_pages;
             }
             a.suffix.clone()
         } else if x.table.is_none() && holds_only(y, &held_x) {
             item.base = y.base.clone();
             item.title = y.title.clone();
-            if !within(x, y) {
-                item.title = capped(&both, TITLE_CAP);
-            }
-            item.location = if within(x, y) {
-                y.location.clone()
+            if within(x, y) {
+                item.location = y.location.clone();
             } else {
-                both
-            };
+                item.title = rows_and_pages.clone();
+                item.location = rows_and_pages;
+            }
             item.paragraphs = None;
             item.family = y.family;
             item.table = y.table.clone();
