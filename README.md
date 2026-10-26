@@ -219,11 +219,21 @@ Planned after that:
 
 | Group | Status | Formats |
 |---|---|---|
-| [Mail](docs/formats/mail.md) | 🔭 | EML, MBOX, MSG |
+| [Mail](docs/formats/mail.md) | 🔭 | EML, MBOX, MSG, Outlook PST and OST |
+| Lotus Notes | 🔭 | NSF mail databases |
+| Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
+| Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
+| Diagrams | 🔭 | draw.io, Visio, Lucidchart |
 | [Calculation sheets](docs/formats/mathcad.md) | 🔭 | Mathcad Prime, Mathcad 12-15, SMath |
-| Diagrams | 🔭 | draw.io, Visio |
+| Automation | 🔭 | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports |
+| Plant and product data | 🔭 | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF |
+| Lab data | 🔭 | ELN exports, ChemDraw, Allotrope, instrument files |
 | Data science | 🔭 | Parquet, Arrow and Feather, Avro, JSON Lines, compressed CSV, HDF5, NetCDF, NumPy, Zarr |
-| Retro | 🔭 | WordStar, WordPerfect, disk and tape images from the C64, Atari and classic Mac |
+| Research writing | 🔭 | Jupyter notebooks, LaTeX, BibTeX, RIS |
+| Signals and parameters | 🔭 | DBC, A2L, COMTRADE, NI TDMS, FMI |
+| Retro | 🔭 | WordStar, WordPerfect, Lotus 1-2-3, dBase, disk and tape images from the C64, Atari and classic Mac |
+
+Until a reader is ready, Rezzer will detect Lotus Notes files and say what to export.
 
 For large data sets Rezzer gives the agent the schema and a profile of all rows. A `rows` tool then fetches exactly the rows the agent needs, page by page, as a table, CSV, JSON Lines or [TOON](https://github.com/toon-format/toon).
 
