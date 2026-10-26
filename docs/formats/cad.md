@@ -2,7 +2,7 @@
 
 For engineering files Rezzer gives the agent what matters to an engineer: units, layers, parts lists, assembly and feature trees, sketch constraints, parameters and what drives them, materials, nets and print settings. Trees and dependencies come out as Mermaid.
 
-Status: planned for the first release, except DWG and the closed native formats (see below). Nothing is implemented yet.
+Status: 🔭 planned for a later release, after 0.2.0. DWG and the closed native formats come after that (see below). Nothing is implemented yet.
 
 File types: see the table. Rezzer detects the format by content, not by extension. This matters for CAD: `.prt` is used by both PTC Creo and Siemens NX. A Creo file starts with a `#UGC:` line. An NX file is an OLE compound file. A DWG file names its version in the first 6 bytes (for example `AC1032`).
 
@@ -32,7 +32,7 @@ Tested on 2026-10-19 with about 390 public test files. Most formats get Rezzer's
 
 ## Until the later formats arrive
 
-For DWG and the closed native formats the first release detects the format and its version, says what it can't read yet and asks for an export the agent can use: DXF for drawings, STEP AP242 for models.
+For DWG and the closed native formats the first CAD release detects the format and its version, says what it can't read yet and asks for an export the agent can use: DXF for drawings, STEP AP242 for models.
 
 ## Known limitations
 
@@ -40,7 +40,7 @@ For DWG and the closed native formats the first release detects the format and i
 - cadmpeg reads real feature trees and parameters from SolidWorks, Creo, NX and Fusion files, far above its own "opened" label. But design data needs a full geometry decode (44 s and 3.1 GB on a 20.6 MB FreeCAD file), it adds about 72 MB to the binary and it refuses a whole file over one unusual record. That's why Rezzer doesn't link it. Rezzer writes its own readers for these formats from cadmpeg's format documentation, and reads only what an agent needs, without decoding all the geometry
 - Exact volume and mass of STEP and IGES solids need a geometry kernel. Rezzer doesn't link one. Bounding boxes come from points and can be too large
 - Native assemblies (SolidWorks, Inventor, Creo) are weak in every tested reader
-- The G-code body inside `.bgcode` files is compressed and comes later; its metadata is read in the first release
+- The G-code body inside `.bgcode` files is compressed and comes later; its metadata is read in the first CAD release
 - Some CAD libraries are GPL or AGPL (OpenCascade, LibreDWG, some KiCad and OpenSCAD parsers). Rezzer doesn't use them
 - Against hostile files Rezzer uses limits on size, unpacking, depth, entity count and time. Referenced files (textures, buffers, xrefs) are listed and never opened outside the input folder
 - Not covered by public test files: IGES notes, Fusion user parameters, DWG and DXF xrefs, a real Cura 3MF, Gerber X3 component layers, ifcXML, native assemblies

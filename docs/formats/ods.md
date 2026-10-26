@@ -2,7 +2,7 @@
 
 Rezzer reads OpenDocument spreadsheets the same way as Excel files: the tables inside each sheet, formulas with the cells they read, annotations and hidden parts.
 
-Status: available in the development version (no release yet).
+Status: ✅ available in the development version. It is part of 0.1.0, the first release.
 
 File types: `.ods`. Rezzer detects the format by content, not by extension.
 

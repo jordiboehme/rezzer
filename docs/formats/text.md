@@ -2,7 +2,7 @@
 
 Rezzer reads plain text in any encoding and says how it found the encoding, which line endings the file uses and which language it is most likely in.
 
-Status: available in the development version (no release yet).
+Status: ✅ available in the development version. It is part of 0.1.0, the first release.
 
 File types: `.txt` and other plain text files. Rezzer detects the format by content, not by extension. A `.txt` file is also checked for delimited data (see [CSV and TSV](csv.md)), mbox `From ` lines and mail headers (see [mail](mail.md)). The output says how the format was decided.
 

@@ -2,7 +2,7 @@
 
 Rezzer reads Markdown files, keeps their own frontmatter and adds an outline and a graph of the links, including wikilinks.
 
-Status: available in the development version (no release yet).
+Status: ✅ available in the development version. It is part of 0.1.0, the first release.
 
 File types: `.md`, `.markdown`. Rezzer detects the format by content, not by extension.
 
