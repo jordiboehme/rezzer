@@ -7,7 +7,7 @@
 
 mod common;
 
-use common::{DataLine, FormPage, all_text, data_line, label, print_form, read};
+use common::{DataLine, FormPage, all_text, boxed, data_line, label, print_form, read};
 use rezzer_model::{Completeness, LossReason, ReadOutcome, Severity};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
@@ -436,5 +436,85 @@ fn quiet_grid_and_band_of_a_page_give_two_losses() {
             .losses
             .iter()
             .all(|l| l.why == LossReason::Uncertain && l.severity == Severity::Info)
+    );
+}
+
+/// `n` spaces of the data font, then `text`: a value the print run pads into its place.
+fn padded(n: usize, text: &str) -> String {
+    format!("{}{text}", " ".repeat(n))
+}
+
+/// Two boxes side by side with a label each; the data lines start at the left edge of the
+/// page and are padded into the boxes. Each value is read in its own box, after its label,
+/// left box first.
+#[test]
+fn padded_values_stand_in_their_box() {
+    let mut template = boxed(40.0, 620.0, 250.0, 90.0) + &boxed(300.0, 620.0, 255.0, 90.0);
+    template += &label(45.0, 698.0, 6.0, "Arbeitgeber");
+    template += &label(305.0, 698.0, 6.0, "Arbeitnehmer");
+    // Data lines from x 40 in Courier 9.5 (5.7 points a character): 47 spaces reach x 307.9,
+    // inside the right box.
+    let lines = vec![
+        DataLine {
+            y: 680.0,
+            text: format!("  Muster GmbH{}", padded(34, "Erika Mustermann")),
+        },
+        DataLine {
+            y: 665.0,
+            text: padded(2, "Musterweg 1"),
+        },
+        DataLine {
+            y: 650.0,
+            text: padded(47, "Beispielstr. 2"),
+        },
+        DataLine {
+            y: 635.0,
+            text: padded(47, "12345 Musterstadt"),
+        },
+    ];
+    let page = FormPage {
+        template,
+        lines,
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    let at = |t: &str| text.find(t).unwrap_or_else(|| panic!("no {t:?} in {text}"));
+    let order = [
+        "Arbeitgeber",
+        "Muster GmbH",
+        "Musterweg 1",
+        "Arbeitnehmer",
+        "Erika Mustermann",
+        "Beispielstr. 2",
+        "12345 Musterstadt",
+    ];
+    for w in order.windows(2) {
+        assert!(
+            at(w[0]) < at(w[1]),
+            "{:?} before {:?} in {text}",
+            w[0],
+            w[1]
+        );
+    }
+    assert!(!text.contains("  "), "{text:?}");
+}
+
+/// A template label and a data line padded onto its baseline read as one line, label first.
+#[test]
+fn label_then_value_on_one_row() {
+    let page = FormPage {
+        template: label(60.0, 600.0, 8.0, "Auszahlungsbetrag"),
+        lines: vec![DataLine {
+            y: 600.0,
+            text: padded(30, "1.234,56"),
+        }],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let text = all_text(&out);
+    assert!(
+        text.lines().any(|l| l == "Auszahlungsbetrag 1.234,56"),
+        "{text:?}"
     );
 }

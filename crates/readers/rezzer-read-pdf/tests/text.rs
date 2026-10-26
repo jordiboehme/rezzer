@@ -1398,3 +1398,38 @@ fn very_narrow_german_prose_keeps_joining() {
         assert!(md.contains(&joined), "{joined} in {md}");
     }
 }
+
+/// Guard: prose whose first lines start with two space glyphs (an indent typed as spaces),
+/// and a line inside a paragraph that starts with one, keeps its paragraphs and its words.
+#[test]
+fn indented_prose_keeps_its_paragraphs() {
+    let paragraphs = [
+        vec![
+            "  The payroll office of Muster GmbH sends the statement at the end",
+            "of every month to each employee by post, together with the notes",
+            " on taxes and social insurance that apply to the month in question,",
+            "and keeps a copy of every statement for the records of the firm.",
+        ],
+        vec![
+            "  Erika Mustermann reads the statement and checks the amounts, the",
+            "days of leave and the hours worked against her own notes for the",
+            "month before she signs the form and sends it back to the office.",
+        ],
+    ];
+    let mut c = String::new();
+    let mut y = 760.0;
+    for lines in &paragraphs {
+        for l in lines {
+            c += &show("F1", 10.0, 72.0, y, l);
+            y -= 12.0;
+        }
+        y -= 12.0;
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found: Vec<String> = roles_of(&out, 1).into_iter().map(|(_, t)| t).collect();
+    let want: Vec<String> = paragraphs
+        .iter()
+        .map(|lines| lines.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(found, want);
+}

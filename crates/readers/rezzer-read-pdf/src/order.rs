@@ -56,12 +56,17 @@ fn is_pad(c: char) -> bool {
 #[derive(Debug, Clone)]
 struct Frag {
     text: String,
-    /// Start on the baseline in the frame the run reads along +x.
+    /// Start on the baseline in the frame the run reads along +x: where its first glyph
+    /// with ink starts, so white space the run starts with (padding) is not where it
+    /// stands. A run of white space only starts at its first glyph.
     x: f32,
     y: f32,
     /// The same start in the page's frame.
     ox: f32,
     oy: f32,
+    /// Where the first glyph starts, white space too: the end of the run before it when the
+    /// run goes on it (see [`chain_heads`]).
+    pen0: f32,
     /// The end of the last glyph with ink along the baseline: white space does not move
     /// it, so padding made of spaces leaves a gap.
     end: f32,
@@ -76,9 +81,7 @@ struct Frag {
     free: f32,
     /// White space follows the last ink.
     padded: bool,
-    /// Where the first ink starts, and the advance of the white space glyph the run starts
-    /// with (0 when it starts with ink).
-    ink_x: f32,
+    /// The advance of the white space glyph the run starts with (0 when it starts with ink).
     lead: f32,
     size: f32,
     bold: bool,
@@ -212,7 +215,9 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
                     }
                 } else {
                     if !f.inked {
-                        f.ink_x = x;
+                        // The first ink: the run starts here, not at the white space.
+                        f.x = x;
+                        (f.ox, f.oy) = page.apply(g.x, g.y);
                     }
                     f.end = if f.inked { f.end.max(x + adv) } else { x + adv };
                     f.inked = true;
@@ -230,12 +235,12 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
             y,
             ox,
             oy,
+            pen0: x,
             end: if pad { x } else { x + adv },
             pen: x + adv,
             inked: !pad,
             free: x + adv,
             padded: pad,
-            ink_x: x,
             lead: if pad { adv } else { 0.0 },
             size,
             bold: g.bold,
@@ -282,7 +287,7 @@ struct Piece {
 /// space ends it) and the first ink of `f`, less one space: a gap of padding, not of a word
 /// space.
 fn gap(free: f32, padded: bool, f: &Frag) -> f32 {
-    f.ink_x - free - if padded { 0.0 } else { f.lead }
+    f.x - free - if padded { 0.0 } else { f.lead }
 }
 
 /// The vertical extent of a fragment: a quarter of its size below the baseline, three
@@ -294,7 +299,8 @@ fn extent(f: &Frag) -> (f32, f32) {
 /// For each fragment, the first of the chain it goes on in content order: a fragment that
 /// goes on right where the one before it ends, on its baseline in its size and in its box (a
 /// run cut at a link's edge or a change of style), moves with it, so other text that shares
-/// the row is never put in between.
+/// the row is never put in between. Where it goes on counts from its first glyph, white space
+/// too: a run cut at a change of style may start with a word space.
 fn chain_heads(frags: &[Frag]) -> Vec<usize> {
     let mut head: Vec<usize> = Vec::with_capacity(frags.len());
     for (i, f) in frags.iter().enumerate() {
@@ -304,7 +310,7 @@ fn chain_heads(frags: &[Frag]) -> Vec<usize> {
             p.region == f.region
                 && (f.y - p.y).abs() <= 0.1 * size
                 && (f.size - p.size).abs() <= 0.05 * size
-                && (f.x - p.pen).abs() <= 0.1 * size
+                && (f.pen0 - p.pen).abs() <= 0.1 * size
         };
         head.push(if joins { head[i - 1] } else { i });
     }
@@ -848,9 +854,16 @@ fn boxed_order(frags: &[Frag], head: &[usize], boxes: &[[f32; 4]]) -> (Vec<Piece
     (ps, order)
 }
 
+/// The fragments of a line from the first one with ink on: runs of white space only before
+/// it are padding, not text. A line without ink stays whole.
+fn from_first_ink<'a>(frags: &[Frag], ids: &'a [usize]) -> &'a [usize] {
+    let first = ids.iter().position(|&i| frags[i].inked).unwrap_or(0);
+    &ids[first..]
+}
+
 /// The runs of one line, numbered `line`. A run that starts a new word gets a leading space;
-/// a line with right-to-left text becomes one run in logical order. A run's link is the one
-/// of `links` its glyphs lie in.
+/// white space at the start of the line is dropped; a line with right-to-left text becomes
+/// one run in logical order. A run's link is the one of `links` its glyphs lie in.
 fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]) -> Vec<Run> {
     let n = ids.len();
     // For each fragment: the part of its text that is kept, whether its padding is written as
@@ -858,6 +871,14 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
     let mut keep: Vec<(usize, usize)> = ids.iter().map(|&i| (0, frags[i].text.len())).collect();
     let mut pad_after = vec![false; n];
     let mut spaced = vec![false; n];
+    // White space at the start of a line (a value padded into its place) is not text: the
+    // line starts at its first ink (see [`from_first_ink`]).
+    if let Some(&first) = ids.first()
+        && frags[first].inked
+    {
+        let t = &frags[first].text;
+        keep[0].0 = t.len() - t.trim_start_matches(is_pad).len();
+    }
     for pos in 1..n {
         let (p, f) = (&frags[ids[pos - 1]], &frags[ids[pos]]);
         // White space that opens a piece gap is padding: it is written as one space.
@@ -1139,7 +1160,13 @@ pub(crate) fn runs_in(
         tag_regions(&mut frags, &turned).err()
     };
     for ids in lines_in(&frags, true, &turned) {
-        runs.extend(line_runs(page, &frags, &ids, line, links));
+        runs.extend(line_runs(
+            page,
+            &frags,
+            from_first_ink(&frags, &ids),
+            line,
+            links,
+        ));
         line += 1;
     }
     for (dir, list) in others {
@@ -1148,8 +1175,9 @@ pub(crate) fn runs_in(
         let frame = compose(turn, dir);
         let frags = fragments(&list, text, frame, turn);
         for ids in lines_in(&frags, false, &[]) {
-            let mut r = line_runs(page, &frags, &ids, line, links);
-            for (run, &i) in r.iter_mut().zip(&ids) {
+            let ids = from_first_ink(&frags, &ids);
+            let mut r = line_runs(page, &frags, ids, line, links);
+            for (run, &i) in r.iter_mut().zip(ids) {
                 (run.x, run.y) = (frags[i].ox, frags[i].oy);
                 run.off_axis = true;
             }
@@ -1174,7 +1202,9 @@ fn tag_regions(frags: &mut [Frag], boxes: &[[f32; 4]]) -> Result<(), String> {
     };
     let mut held = vec![false; boxes.len()];
     for f in frags.iter_mut() {
-        let (x, y) = ((f.x + f.pen.max(f.x)) / 2.0, f.y + 0.25 * f.size);
+        // The middle of the ink: padding on either side does not move the run into the box
+        // beside it.
+        let (x, y) = ((f.x + f.end.max(f.x)) / 2.0, f.y + 0.25 * f.size);
         f.region = index.innermost(x, y);
         if let Some(b) = f.region {
             held[b as usize] = true;
@@ -1246,12 +1276,12 @@ mod tests {
             y,
             ox: x,
             oy: y,
+            pen0: x,
             end: x + 6.0 * text.chars().count() as f32,
             pen: x + 6.0 * text.chars().count() as f32,
             inked: true,
             free: x + 6.0 * text.chars().count() as f32,
             padded: false,
-            ink_x: x,
             lead: 0.0,
             size: 10.0,
             bold: false,
@@ -1366,6 +1396,88 @@ mod tests {
             &[],
         );
         assert_eq!(runs[0].text, "Codes:");
+    }
+
+    /// Glyphs of `parts` (text, bold) in a fixed-pitch font of `size` with an advance of
+    /// `adv`, one glyph per character from `x` on the baseline `y`, and the page text they
+    /// point into.
+    fn pitched(parts: &[(&str, bool)], x: f32, y: f32, size: f32, adv: f32) -> (String, Vec<Gl>) {
+        let mut text = String::new();
+        let mut glyphs = Vec::new();
+        let mut at = x;
+        for &(part, bold) in parts {
+            for c in part.chars() {
+                glyphs.push(Gl {
+                    start: text.len() as u32,
+                    len: c.len_utf8() as u32,
+                    x: at,
+                    y,
+                    dx: 1.0,
+                    dy: 0.0,
+                    size,
+                    adv: Some(adv),
+                    bold,
+                    italic: false,
+                    mcid: None,
+                    invisible: false,
+                    layer: None,
+                    vertical: false,
+                    joined: false,
+                    actual: None,
+                    link: None,
+                });
+                text.push(c);
+                at += adv;
+            }
+        }
+        (text, glyphs)
+    }
+
+    #[test]
+    fn leading_padding_is_not_the_start() {
+        // A data line of a print run: six spaces of 5.7 points, then the value. The value
+        // starts at its first ink, 40 + 6 * 5.7 points.
+        let (text, glyphs) = pitched(&[("      Muster GmbH", false)], 40.0, 700.0, 9.5, 5.7);
+        let texts = Texts {
+            text: &text,
+            actuals: &[],
+        };
+        let frags = fragments(&glyphs, &texts, Turn::None, Turn::None);
+        assert_eq!(frags.len(), 1, "{frags:?}");
+        let ps = pieces(&frags);
+        assert!((ps[0].x0 - 74.2).abs() < 0.01, "{ps:?}");
+        let runs = runs_of(1, &glyphs, &texts, Turn::None, &[]);
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert_eq!(runs[0].text, "Muster GmbH");
+        assert!((runs[0].x - 74.2).abs() < 0.01, "{runs:?}");
+        assert!((runs[0].w - 11.0 * 5.7).abs() < 0.01, "{runs:?}");
+        // Padding drawn in another style is a run of its own: the line starts after it too.
+        let (text, glyphs) = pitched(&[("    ", true), ("Erika", false)], 40.0, 700.0, 9.5, 5.7);
+        let texts = Texts {
+            text: &text,
+            actuals: &[],
+        };
+        let runs = runs_of(1, &glyphs, &texts, Turn::None, &[]);
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert_eq!(runs[0].text, "Erika");
+        assert!((runs[0].x - 62.8).abs() < 0.01, "{runs:?}");
+    }
+
+    /// Guard: a run cut at a change of style that begins with a word space goes on the run
+    /// before it, from where that one's pen ends.
+    #[test]
+    fn style_change_after_a_space_stays_chained() {
+        let (text, glyphs) = pitched(&[("plain", false), (" bold", true)], 40.0, 700.0, 10.0, 6.0);
+        let texts = Texts {
+            text: &text,
+            actuals: &[],
+        };
+        let frags = fragments(&glyphs, &texts, Turn::None, Turn::None);
+        assert_eq!(frags.len(), 2, "{frags:?}");
+        assert_eq!(chain_heads(&frags), [0, 0]);
+        let runs = runs_of(1, &glyphs, &texts, Turn::None, &[]);
+        let line: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(line, "plain bold");
     }
 
     #[test]
