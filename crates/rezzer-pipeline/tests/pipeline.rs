@@ -1879,6 +1879,33 @@ fn part_size_not_in_cache_key() {
 }
 
 #[test]
+fn config_inline_size_and_bounds() {
+    let limits = Config::default().limits;
+    assert_eq!(limits.max_inline_bytes, 32 << 20);
+    assert_eq!(limits.inline_bytes(), 32 << 20);
+    let small = rezzer_limits::Limits {
+        max_file_bytes: 1000,
+        ..rezzer_limits::Limits::default()
+    };
+    assert_eq!(small.inline_bytes(), 1000);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[limits]\nmax_inline_bytes = 4096\n").unwrap();
+    assert_eq!(
+        Config::load_from(&path).unwrap().limits.max_inline_bytes,
+        4096
+    );
+    for bad in ["0", "1073741825"] {
+        std::fs::write(&path, format!("[limits]\nmax_inline_bytes = {bad}\n")).unwrap();
+        let err = Config::load_from(&path).unwrap_err().to_string();
+        assert!(
+            err.ends_with("limits.max_inline_bytes must be between 1 and 1073741824"),
+            "{err}"
+        );
+    }
+}
+
+#[test]
 fn config_part_size_and_bounds() {
     assert_eq!(Config::default().limits.part_size, 10_000);
     assert_eq!(rezzer_pipeline::check_part_size(0), Ok(()));

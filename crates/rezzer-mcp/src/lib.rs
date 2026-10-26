@@ -53,9 +53,9 @@ pub struct RezzerServer {
 impl RezzerServer {
     pub fn new(pipeline: Arc<Pipeline>) -> Self {
         let mut tool_router = Self::tool_router();
-        let max_file_bytes = pipeline.config().limits.max_file_bytes;
+        let max_inline_bytes = pipeline.config().limits.inline_bytes();
         if let Some(route) = tool_router.map.get_mut("rez") {
-            route.attr.input_schema = Arc::new(rez_input_schema(max_file_bytes));
+            route.attr.input_schema = Arc::new(rez_input_schema(max_inline_bytes));
         }
         if let Some(route) = tool_router.map.get_mut("inspect") {
             route.attr.input_schema = schema_for_type::<InspectParams>();
@@ -100,11 +100,11 @@ impl RezzerServer {
 
 /// The input schema of `rez`: [`RezParams`] with the `file` property marked for the MCP
 /// file extension draft (`x-mcp-file`), so a client that supports it can attach a file.
-fn rez_input_schema(max_file_bytes: u64) -> JsonObject {
+fn rez_input_schema(max_inline_bytes: u64) -> JsonObject {
     let mut schema = schema_for_type::<RezParams>().as_ref().clone();
     if let Some(Value::Object(file)) = schema.get_mut("properties").and_then(|p| p.get_mut("file"))
     {
-        file.insert("x-mcp-file".into(), json!({ "maxSize": max_file_bytes }));
+        file.insert("x-mcp-file".into(), json!({ "maxSize": max_inline_bytes }));
     }
     schema
 }
@@ -188,7 +188,7 @@ where
     R: tokio::io::AsyncRead + Send + Unpin + 'static,
     W: tokio::io::AsyncWrite + Send + Unpin + 'static,
 {
-    let max = transport::max_message_bytes(pipeline.config().limits.max_file_bytes);
+    let max = transport::max_message_bytes(pipeline.config().limits.inline_bytes());
     serve(pipeline, transport::LineTransport::new(read, write, max)).await
 }
 

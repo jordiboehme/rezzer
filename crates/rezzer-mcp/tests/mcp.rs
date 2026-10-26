@@ -486,7 +486,7 @@ async fn wrong_types_are_failed_results_with_structured_content() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rez_input_schema_types_format_and_marks_the_file() {
     let mut cfg = config();
-    cfg.limits.max_file_bytes = 1234;
+    cfg.limits.max_inline_bytes = 1234;
     let client = connect(cfg).await;
     let tools = client.list_all_tools().await.unwrap();
     let rez = tools.iter().find(|t| t.name == "rez").unwrap();
@@ -1198,7 +1198,7 @@ async fn a_data_uri_over_16_mib_is_read() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_advertised_max_size_fits_percent_encoded() {
     let mut small = config();
-    small.limits.max_file_bytes = 1 << 20;
+    small.limits.max_inline_bytes = 1 << 20;
     let client = connect(small).await;
     // A file of the largest size, every byte percent-encoded: three bytes per byte.
     let uri = format!("data:text/plain;name=max.txt,{}", "%41".repeat(1 << 20));
@@ -1213,13 +1213,50 @@ async fn the_advertised_max_size_fits_percent_encoded() {
         .expect("an answer");
     let s = structured(&result);
     assert_eq!(s["status"], "failed", "{s}");
+    let message = s["message"].as_str().unwrap();
+    assert!(message.contains("too large to send inline"), "{s}");
+    assert!(message.ends_with("give it by path"), "{s}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_advertised_max_size_fits_as_json_escapes() {
+    let mut small = config();
+    small.limits.max_inline_bytes = 1 << 20;
+    let client = connect(small).await;
+    // Control characters go over the wire as \u00XX: six bytes per byte of the file.
+    let uri = format!("data:text/plain;name=esc.txt,{}", "\u{1}".repeat(1 << 20));
+    let line = serde_json::to_string(&uri).unwrap().len();
+    assert!(line > 6 << 20, "{line}");
+    let params = CallToolRequestParams::new("rez".to_string())
+        .with_arguments(json!({ "file": uri }).as_object().unwrap().clone());
+    let result = tokio::time::timeout(ANSWER_WITHIN, client.call_tool(params))
+        .await
+        .expect("an answer")
+        .expect("a tool result, not the error for a message over the bound");
+    let s = structured(&result);
+    let message = s["message"].as_str().unwrap_or("");
+    assert!(!message.contains("too large"), "{s}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_inline_file_has_its_own_limit_and_a_path_does_not() {
+    let mut small = config();
+    small.limits.max_inline_bytes = 8;
+    let client = connect(small).await;
+    let result = call(&client, "rez", json!({ "file": "data:,123456789" })).await;
+    let s = structured(&result);
+    assert_eq!(s["status"], "failed", "{s}");
     assert!(s["message"].as_str().unwrap().contains("too large"), "{s}");
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "a.txt", "123456789 and more than eight bytes\n");
+    let result = call(&client, "rez", json!({ "path": path })).await;
+    assert_eq!(structured(&result)["status"], "complete");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_over_the_bound_gets_an_error_answer() {
     let mut small = config();
-    small.limits.max_file_bytes = 1 << 20;
+    small.limits.max_inline_bytes = 1 << 20;
     let max = rezzer_mcp::transport::max_message_bytes(1 << 20);
     let client = connect(small).await;
     let uri = base64_uri("huge.txt", &vec![b'a'; max]);

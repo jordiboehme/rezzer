@@ -40,7 +40,8 @@ pub struct RezParams {
     pub path: Option<String>,
     /// The file itself as a data: URI, for example
     /// `data:text/csv;name=budget.csv;base64,<data>`. The type and the name are optional;
-    /// the name is percent-encoded.
+    /// the name is percent-encoded. The file may be up to maxSize bytes (32 MiB by default);
+    /// give a larger file by path.
     #[serde(default)]
     #[schemars(extend("format" = "uri"))]
     pub file: Option<String>,
@@ -391,7 +392,7 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
     let result = if let Some(path) = &params.path {
         pipeline.run_path(Path::new(path), &request)
     } else if let Some(file) = params.file.take() {
-        let max = pipeline.config().limits.max_file_bytes;
+        let max = pipeline.config().limits.inline_bytes();
         // The encoded text is consumed here, so it is gone before the pipeline runs.
         match parse_file_uri(file, max) {
             Ok(data) => pipeline.run_bytes(&data.name, data.bytes, data.mime.as_deref(), &request),
@@ -738,7 +739,7 @@ pub fn parse_file_uri(uri: String, max: u64) -> Result<FileData, String> {
     };
     if size as u64 > max {
         return Err(format!(
-            "file is too large: {size} bytes, the limit is {max} bytes"
+            "file is too large to send inline: {size} bytes, the limit is {max} bytes; give it by path"
         ));
     }
     let bytes = if base64 {

@@ -24,12 +24,13 @@ use tokio::sync::mpsc;
 /// and the other arguments.
 const ENVELOPE_BYTES: u64 = 1 << 20;
 
-/// The longest line read, in bytes with its line end, for files of up to `max_file_bytes`.
-/// A file of that size fits base64-encoded (4 bytes per 3) and percent-encoded (at most 3
-/// bytes per byte); an encoding that needs more than 3 bytes per byte does not.
-pub fn max_message_bytes(max_file_bytes: u64) -> usize {
-    let bytes = max_file_bytes
-        .saturating_mul(3)
+/// The longest line read, in bytes with its line end, for inline files of up to
+/// `max_inline_bytes`. A file of that size fits in every JSON form of a `data:` URI: base64
+/// (4 bytes per 3), percent-encoded (3 bytes per byte) and as JSON `\u00XX` escapes (6 bytes
+/// per byte).
+pub fn max_message_bytes(max_inline_bytes: u64) -> usize {
+    let bytes = max_inline_bytes
+        .saturating_mul(6)
         .saturating_add(ENVELOPE_BYTES);
     usize::try_from(bytes).unwrap_or(usize::MAX)
 }
@@ -331,7 +332,7 @@ mod tests {
     #[test]
     fn the_bound_holds_for_large_files() {
         assert_eq!(max_message_bytes(0), 1 << 20);
-        assert_eq!(max_message_bytes(10), 30 + (1 << 20));
+        assert_eq!(max_message_bytes(10), 60 + (1 << 20));
         assert!(max_message_bytes(u64::MAX) >= usize::MAX / 2);
     }
 }

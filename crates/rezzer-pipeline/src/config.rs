@@ -13,6 +13,7 @@
 //!
 //! [limits]
 //! max_file_bytes = 2147483648
+//! max_inline_bytes = 33554432
 //! max_time = 120
 //! max_elements = 2000000
 //! max_text_bytes = 268435456
@@ -150,6 +151,8 @@ impl Config {
             )));
         }
         rezzer_limits::check_part_size(file.limits.part_size)
+            .map_err(|e| invalid(format!("limits.{e}")))?;
+        rezzer_limits::check_inline_bytes(file.limits.max_inline_bytes)
             .map_err(|e| invalid(format!("limits.{e}")))?;
         let known: Vec<&str> = rezzer_enrich::passes().iter().map(|p| p.name()).collect();
         if let Some(bad) = file
