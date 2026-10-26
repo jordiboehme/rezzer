@@ -34,7 +34,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
 repository = "https://github.com/jordiboehme/rezzer"
-rust-version = "1.99.0"
+rust-version = "1.99.1"
 
 [workspace.dependencies]
 rmcp = { version = "=3.7.0", default-features = false }
