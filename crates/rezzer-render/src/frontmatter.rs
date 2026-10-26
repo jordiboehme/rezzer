@@ -143,8 +143,7 @@ pub(crate) fn format_name(format: FormatId) -> String {
     out
 }
 
-/// The title used in the frontmatter and the `#` heading: the document title, else the file
-/// name.
+/// The document's title: its own, else the file name.
 pub(crate) fn title(doc: &Document) -> &str {
     doc.properties
         .title
@@ -153,42 +152,82 @@ pub(crate) fn title(doc: &Document) -> &str {
         .unwrap_or(&doc.source.name)
 }
 
-/// The frontmatter block with both `---` lines and a final newline.
+/// The title of this output, in the frontmatter and the `#` heading: a part's own title,
+/// else the document's.
+pub(crate) fn shown_title<'a>(doc: &'a Document, opts: &'a RenderOptions) -> &'a str {
+    match &opts.part {
+        Some(part) if !part.title.trim().is_empty() => &part.title,
+        _ => title(doc),
+    }
+}
+
+/// The description of this output: for a part `Part <k> of <n> of "<title>": <location>.`,
+/// else the document's own or the template ([`crate::describe::description`]).
+pub(crate) fn shown_description(doc: &Document, opts: &RenderOptions) -> String {
+    match &opts.part {
+        Some(part) => format!(
+            "Part {} of {} of \"{}\": {}.",
+            part.index,
+            part.count,
+            title(doc).trim(),
+            part.location
+        ),
+        None => crate::describe::description(doc),
+    }
+}
+
+/// The document's own date (`YYYY-MM-DD`): its modified date, else its created date, when
+/// that is a real calendar date.
+pub(crate) fn document_date(doc: &Document) -> Option<&str> {
+    let p = &doc.properties;
+    p.modified
+        .as_ref()
+        .and_then(value_date)
+        .or_else(|| p.created.as_ref().and_then(value_date))
+}
+
+/// The date of the source with how sure it is: the document's own date is `explicit`, a
+/// file system date (modified, else created) `inferred`. Only a real calendar date counts
+/// (Crystalline's T003); without one there is no date.
+fn source_date(doc: &Document) -> Option<(&str, &'static str)> {
+    if let Some(date) = document_date(doc) {
+        return Some((date, "explicit"));
+    }
+    let s = &doc.source;
+    [&s.modified, &s.created]
+        .into_iter()
+        .flatten()
+        .find_map(|v| date_prefix(v).filter(|d| is_real_date(d)))
+        .map(|date| (date, "inferred"))
+}
+
+/// The frontmatter block with both `---` lines and a final newline. Key order: the OKF keys
+/// (`type`, `title`, `description`, `resource`, `tags`, `generated`, `source_date`,
+/// `temporal_confidence`, `sources`, `status`), then Rezzer's: the source and its file
+/// system facts, the read, the part keys, the file facts, the render options, the document
+/// properties.
 pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let p = &doc.properties;
     let s = &doc.source;
-    let mut out = String::from("---\ntype: document\n");
-    out.push_str(&format!("title: {}\n", quote(title(doc))));
-    if let Some(d) = p.description.as_deref().filter(|d| !d.trim().is_empty()) {
-        out.push_str(&format!("description: {}\n", quote(d)));
-    }
+    let mut out = String::from("---\ntype: source\n");
+    out.push_str(&format!("title: {}\n", quote(shown_title(doc, opts))));
+    out.push_str(&format!(
+        "description: {}\n",
+        quote(&shown_description(doc, opts))
+    ));
     let resource = s.path.as_deref().unwrap_or(&s.name);
     out.push_str(&format!("resource: {}\n", quote(resource)));
-    if !p.keywords.is_empty() {
-        out.push_str(&format!("tags: {}\n", quoted_list(&p.keywords)));
-    }
+    out.push_str(&format!(
+        "tags: {}\n",
+        quoted_list(&crate::describe::tags(doc))
+    ));
     out.push_str(&format!(
         "generated: {{ by: {}, at: {} }}\n",
         token(&format!("rezzer/{}", opts.rezzer_version)),
         token(&opts.generated_at)
     ));
-    let from_document = p
-        .modified
-        .as_ref()
-        .and_then(value_date)
-        .or_else(|| p.created.as_ref().and_then(value_date));
-    let (date, confidence) = match from_document {
-        Some(d) => (Some(d), "high"),
-        None => (s.modified.as_deref().and_then(date_prefix), "medium"),
-    };
-    if let Some(date) = date {
-        // A real date is plain; anything else stays a quoted string.
-        let shown = if is_real_date(date) {
-            date.to_string()
-        } else {
-            quote(date)
-        };
-        out.push_str(&format!("source_date: {shown}\n"));
+    if let Some((date, confidence)) = source_date(doc) {
+        out.push_str(&format!("source_date: {date}\n"));
         out.push_str(&format!("temporal_confidence: {confidence}\n"));
     }
     if let Some(archive) = &opts.archive_ref {
@@ -197,8 +236,21 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
             quoted_list(std::slice::from_ref(archive))
         ));
     }
+    out.push_str("status: stable\n");
     out.push_str(&format!("source_sha256: {}\n", quote(&s.sha256)));
     out.push_str(&format!("source_size: {}\n", s.size));
+    if let Some(t) = &s.created {
+        out.push_str(&format!("file_created: {}\n", token(t)));
+    }
+    if let Some(t) = &s.modified {
+        out.push_str(&format!("file_modified: {}\n", token(t)));
+    }
+    if let Some(url) = &s.downloaded_from {
+        out.push_str(&format!("downloaded_from: {}\n", quote(url)));
+    }
+    if !s.file_tags.is_empty() {
+        out.push_str(&format!("file_tags: {}\n", quoted_list(&s.file_tags)));
+    }
     out.push_str(&format!("format: {}\n", format_name(s.format)));
     out.push_str(&format!("detected_by: {}\n", quote(&s.detection.evidence)));
     if let Some(e) = &s.encoding {
@@ -215,6 +267,18 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
         completeness_name(completeness)
     ));
     out.push_str(&format!("losses: {}\n", doc.losses.len()));
+    match &opts.part {
+        Some(part) => {
+            out.push_str(&format!("parts: {}\n", part.count));
+            out.push_str(&format!("part: {}\n", part.index));
+            out.push_str(&format!("location: {}\n", quote(&part.location)));
+        }
+        None => {
+            if let Some(n) = opts.parts {
+                out.push_str(&format!("parts: {n}\n"));
+            }
+        }
+    }
     facts(&p.facts, &mut out);
     // The render options that change what the output holds; left out at their defaults.
     if opts.table_style != crate::TableStyle::Table {

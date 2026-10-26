@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-latin1-noheader-derived-geonames.csv"
+description: "CSV, 83 rows x 4 columns. 1 table."
 resource: "<corpus>/web-text/csv-latin1-noheader-derived-geonames.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "c3b48ea33e7ddc1c46b94bd1c4030f76e285a6cc9530a5b0603294912175b37e"
 source_size: 3140
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (windows-1252), delimiter ',', 100% of rows with the same field count"
 encoding: "windows-1252"

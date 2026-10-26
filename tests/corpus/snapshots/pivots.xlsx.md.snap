@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "pivots.xlsx"
+description: "XLSX, 6 sheets, 2025-11-24. 7 tables, 22 formulas."
 resource: "<corpus>/office/pivots.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "632407ef8f5a5b45d93781b78b303c662aeea83c11d43e04ce5b07da96595235"
 source_size: 34944
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

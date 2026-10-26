@@ -3,15 +3,18 @@ source: crates/rezzer-render/tests/render.rs
 expression: md
 ---
 ---
-type: document
+type: source
 title: "Quarterly report"
+description: "Markdown, 42 bytes, \"Quarterly report\", 2025-11-30. 1 table, 1 formula, 1 annotation, 1 picture that needs vision, 1 part not read."
 resource: "/data/report.md"
-tags: ["finance"]
+tags: ["rezzer", "markdown", "finance"]
 generated: { by: rezzer/0.1.0, at: 2026-10-20T12:00:00Z }
 source_date: 2025-11-30
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "abc123"
 source_size: 42
+file_modified: 2026-01-05T10:00:00Z
 format: markdown
 detected_by: "extension .md and text"
 encoding: "utf-8"

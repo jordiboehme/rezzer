@@ -59,7 +59,15 @@ fn rendered_body(doc: &Document) -> String {
     let after = after.trim_start_matches('\n');
     // The title line Rezzer always writes.
     let after = after.split_once('\n').map_or("", |(_, b)| b);
-    after.trim_start_matches('\n').to_string()
+    let after = after.trim_start_matches('\n');
+    // A short body gets the description under the title (Crystalline's Q001), here always
+    // the template `Markdown, <n> bytes.`.
+    match after.split_once("\n\n") {
+        Some((first, rest)) if first.starts_with("Markdown, ") && first.ends_with(" bytes.") => {
+            rest.to_string()
+        }
+        _ => after.to_string(),
+    }
 }
 
 /// Reads `text`, renders it, reads the result and returns both bodies and the Markdown.

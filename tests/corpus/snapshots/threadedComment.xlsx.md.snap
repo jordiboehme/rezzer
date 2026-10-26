@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "threadedComment.xlsx"
+description: "XLSX, 1 sheet, 2026-04-07. 2 annotations."
 resource: "<corpus>/office/threadedComment.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "47f1813c00f19e88e202f5915b419a0c2e5e2768f95524af0cb11634612d5158"
 source_size: 9175
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

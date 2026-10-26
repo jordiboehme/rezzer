@@ -317,6 +317,8 @@ impl Pipeline {
             math: req.math,
             table_style: req.table_style.unwrap_or(self.config.read.table_style),
             sheets,
+            part: None,
+            parts: None,
         };
         let page_tokens = self.config.limits.page_tokens;
         let rendered = panics::contained(|| {

@@ -2,15 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "Abstraction without overhead: traits in Rust"
 description: "The vision of Rust's traits for zero-cost abstraction"
 resource: "<corpus>/web-text/md-toml-frontmatter-rust-blog-traits.md"
+tags: ["rezzer", "markdown"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "3c8c21ca977b691b0f0292ed63778361377d3161703164b3aadfc5e03b07e53d"
 source_size: 17852
+file_modified: <modified>
 format: markdown
 detected_by: "toml frontmatter"
 encoding: "UTF-8"

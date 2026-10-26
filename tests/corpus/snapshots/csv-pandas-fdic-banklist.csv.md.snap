@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-pandas-fdic-banklist.csv"
+description: "CSV, 506 rows x 7 columns. 1 table."
 resource: "<corpus>/web-text/csv-pandas-fdic-banklist.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "b33f2443e72c52ed02c8f9bbd4969d69590373f75c1b0f3b07e3693127c48423"
 source_size: 41417
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
 encoding: "UTF-8"

@@ -79,7 +79,7 @@ fn read_markdown_prints_frontmatter() {
         .arg(&md)
         .assert()
         .code(0)
-        .stdout(predicate::str::starts_with("---\ntype: document\n"))
+        .stdout(predicate::str::starts_with("---\ntype: source\n"))
         .stdout(predicate::str::contains(AT))
         .stdout(predicate::str::contains("Some text with"));
     assert_eq!(env.cache_entries(), 1, "the cache lives in the temp dir");
@@ -272,7 +272,7 @@ fn output_dir_writes_markdown_and_json() {
         .stdout("");
     // Named after the whole file name, so notes.md and notes.csv never overwrite each other.
     let written = std::fs::read_to_string(dir.join("notes.md.md")).unwrap();
-    assert!(written.starts_with("---\ntype: document\n"));
+    assert!(written.starts_with("---\ntype: source\n"));
     let json = std::fs::read(dir.join("notes.md.json")).unwrap();
     serde_json::from_slice::<Document>(&json).unwrap();
 

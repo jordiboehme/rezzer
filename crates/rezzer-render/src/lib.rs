@@ -28,10 +28,13 @@
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list
+//! - A body with fewer than 3 non-blank lines outside fences (Crystalline's Q001) gets the
+//!   frontmatter description as a paragraph under the title; nothing else changes
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 
 mod blocks;
+mod describe;
 mod facets;
 mod form;
 mod frontmatter;
@@ -43,7 +46,7 @@ mod workbook;
 
 use std::collections::HashSet;
 
-use rezzer_model::{Block, Completeness, Document, SectionKind, plain_text};
+use rezzer_model::{Block, Completeness, Document, Inline, SectionKind, plain_text};
 
 use crate::blocks::{Ctx, MAX_DEPTH, Notes};
 
@@ -268,6 +271,23 @@ pub struct RenderOptions {
     /// The titles of the sheets to write (see [`resolve_sheets`]); `None` or an empty list
     /// writes all.
     pub sheets: Option<Vec<String>>,
+    /// Set when this output is one part of a split document: its place, location and title.
+    pub part: Option<PartMeta>,
+    /// Set on the main document of a split document: how many parts it has.
+    pub parts: Option<usize>,
+}
+
+/// Where a part file stands in a split document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartMeta {
+    /// The part's number, counted from 1.
+    pub index: usize,
+    /// How many parts the document has.
+    pub count: usize,
+    /// Where the part lies in the document, for example `pages 12 to 20` or `Data!A1:F400`.
+    pub location: String,
+    /// The part's own title, for example `Report: Results`.
+    pub title: String,
 }
 
 impl Default for RenderOptions {
@@ -280,6 +300,8 @@ impl Default for RenderOptions {
             math: true,
             table_style: TableStyle::Table,
             sheets: None,
+            part: None,
+            parts: None,
         }
     }
 }
@@ -298,18 +320,17 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let want = |s: OutputSection| opts.sections.as_ref().is_none_or(|l| l.contains(&s));
     let mut out = frontmatter::render(doc, completeness, opts);
     let title = frontmatter::title(doc).trim();
-    out.push('\n');
+    let shown = frontmatter::shown_title(doc, opts).trim();
     // The heading that became the title keeps its links.
     let title_line = match doc.body.first() {
         Some(Block::Heading {
             level: 1, inlines, ..
-        }) if plain_text(inlines).trim() == title => blocks::inlines(inlines, blocks::Mode::Line)
+        }) if plain_text(inlines).trim() == shown => blocks::inlines(inlines, blocks::Mode::Line)
             .trim()
             .to_string(),
-        _ => blocks::line_text(title),
+        _ => blocks::line_text(shown),
     };
-    out.push_str(&blocks::heading_line(1, &title_line));
-    out.push('\n');
+    let heading = format!("\n{}\n", blocks::heading_line(1, &title_line));
 
     let selection = chosen_sheets(opts).map(|titles| Selection::of(doc, titles));
     let selection = selection.as_ref();
@@ -350,13 +371,32 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     if want(OutputSection::NotRead) {
         parts.extend(facets::not_read(doc));
     }
+    // Crystalline wants 3 lines of content (Q001): a shorter body gets the description as
+    // a paragraph under the title.
+    let lines = describe::content_lines(&heading)
+        + parts
+            .iter()
+            .map(|p| describe::content_lines(p))
+            .sum::<usize>();
+    if lines < MIN_CONTENT_LINES {
+        let description = frontmatter::shown_description(doc, opts);
+        let text = blocks::paragraph(&[Inline::Text {
+            text: description,
+            emphasis: false,
+            strong: false,
+            strike: false,
+        }]);
+        parts.insert(0, text);
+    }
     // One growth for all parts, so a huge part is not doubled by the push.
     out.reserve_exact(
-        parts
-            .iter()
-            .map(|p| p.len() + if p.is_empty() { 0 } else { 2 })
-            .sum(),
+        heading.len()
+            + parts
+                .iter()
+                .map(|p| p.len() + if p.is_empty() { 0 } else { 2 })
+                .sum::<usize>(),
     );
+    out.push_str(&heading);
     for part in parts.iter().filter(|p| !p.is_empty()) {
         out.push('\n');
         out.push_str(part);
@@ -364,6 +404,9 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     }
     out
 }
+
+/// Crystalline's least number of content lines in a body (its rule Q001).
+const MIN_CONTENT_LINES: usize = 3;
 
 /// `## Overview`: the parts with kind, size, role and what they read from, the facts, and a
 /// Mermaid graph of the parts when one reads from another. `None` when the document has no

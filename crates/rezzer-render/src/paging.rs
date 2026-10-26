@@ -32,7 +32,7 @@ enum Border {
 }
 
 /// A fence opener or closer: up to three spaces, then three or more backticks or tildes.
-fn fence_run(line: &str) -> Option<(char, usize, &str)> {
+pub(crate) fn fence_run(line: &str) -> Option<(char, usize, &str)> {
     let indent = line.len() - line.trim_start_matches(' ').len();
     if indent > 3 {
         return None;

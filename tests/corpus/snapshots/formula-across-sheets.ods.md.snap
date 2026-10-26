@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "formula-across-sheets.ods"
+description: "ODS, 3 sheets, 2014-01-25. 6 tables, 23 formulas, 1 part not read."
 resource: "<corpus>/office/formula-across-sheets.ods"
+tags: ["rezzer", "ods"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "e63f058d75938fc5e4b1f39002100e0fdc1b21d3ef208a6ce41339cefc7f5434"
 source_size: 15572
+file_modified: <modified>
 format: ods
 detected_by: "zip with mimetype application/vnd.oasis.opendocument.spreadsheet"
 reader: "sheet/0.1.0"

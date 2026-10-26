@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "LAMBDA.xlsx"
+description: "XLSX, 1 sheet, 2026-04-29. 4 tables, 8 formulas."
 resource: "<corpus>/office/LAMBDA.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "6fda1c171601204eb5ce8d9b2a48706c5a60adbd6d60d59d13db5a24675f01bb"
 source_size: 10383
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"
