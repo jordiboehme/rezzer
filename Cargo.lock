@@ -1644,6 +1644,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "read-fonts"
+version = "0.45.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4edc8db0d972de88e53a085b1f01fb3fbdae7bb0cb7a0ce2b2f8285a412fe3ef"
+dependencies = [
+ "bytemuck",
+ "foldhash 0.2.0",
+ "font-types",
+ "once_cell",
+ "yoke",
+]
+
+[[package]]
 name = "redox_users"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1888,7 +1901,7 @@ dependencies = [
  "kurbo",
  "libc",
  "pdfparts",
- "read-fonts 0.43.3",
+ "read-fonts 0.45.1",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-render",
