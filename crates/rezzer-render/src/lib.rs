@@ -34,6 +34,8 @@
 //!   the chosen sections when the caller chose some)
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
+//! - A document whose body is over the part size is cut into units at its own borders by
+//!   [`split`] (spec 5); the units' links are written for their place one folder down
 
 mod blocks;
 mod describe;
@@ -44,6 +46,7 @@ mod layout;
 mod mermaid;
 mod overview;
 mod paging;
+mod split;
 mod workbook;
 
 use std::collections::HashSet;
@@ -51,6 +54,8 @@ use std::collections::HashSet;
 use rezzer_model::{Block, Completeness, Document, Inline, SectionKind, plain_text};
 
 use crate::blocks::{Ctx, MAX_DEPTH, Notes};
+
+pub use crate::split::{Unit, split};
 
 /// A part of the output that a caller can ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,7 +315,7 @@ impl Default for RenderOptions {
 
 /// Whether the tables of a document name a column without a header by its number: CSV and
 /// TSV have no column letters of their own.
-fn column_numbers(doc: &Document) -> bool {
+pub(crate) fn column_numbers(doc: &Document) -> bool {
     matches!(
         doc.source.format,
         rezzer_model::FormatId::Csv | rezzer_model::FormatId::Tsv
@@ -355,6 +360,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     let ctx = Ctx {
         codes_shown: Default::default(),
         assets: &doc.assets,
+        link_base: "",
         heading_offset: 0,
         notes: None,
         in_sheet: Default::default(),
@@ -368,7 +374,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         parts.extend(facets::changes(doc));
     }
     if want(OutputSection::Embedded) {
-        parts.extend(facets::embedded(doc));
+        parts.extend(facets::embedded(doc, ""));
     }
     if want(OutputSection::NotRead) {
         parts.extend(facets::not_read(doc));
@@ -442,7 +448,7 @@ pub(crate) struct Selection<'a> {
 }
 
 impl<'a> Selection<'a> {
-    fn of(doc: &'a Document, titles: &'a [String]) -> Selection<'a> {
+    pub(crate) fn of(doc: &'a Document, titles: &'a [String]) -> Selection<'a> {
         let titles: HashSet<&str> = titles.iter().map(String::as_str).collect();
         let mut chosen = HashSet::new();
         let mut sheets = HashSet::new();
@@ -540,6 +546,7 @@ fn content(
     let ctx = Ctx {
         codes_shown: Default::default(),
         assets: &doc.assets,
+        link_base: "",
         heading_offset: 2u8.saturating_sub(min),
         notes: Some(notes),
         in_sheet: Default::default(),
@@ -564,7 +571,7 @@ fn content(
 }
 
 /// The smallest heading level anywhere in `list`.
-fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
+pub(crate) fn min_heading(list: &[Block], depth: usize) -> Option<u8> {
     if depth > MAX_DEPTH {
         return None;
     }

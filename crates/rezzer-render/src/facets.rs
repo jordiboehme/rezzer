@@ -425,8 +425,8 @@ pub(crate) fn changes(doc: &Document) -> Option<String> {
 
 /// `## Embedded`: scripts, macros, objects and references (never run or followed) with the
 /// texts of the scripts ([`form::scripts`]), then the pictures the calling agent should look
-/// at.
-pub(crate) fn embedded(doc: &Document) -> Option<String> {
+/// at. `link_base` goes before every asset path in a link (see `Ctx::link_base`).
+pub(crate) fn embedded(doc: &Document, link_base: &str) -> Option<String> {
     let vision: Vec<_> = doc.assets.iter().filter(|a| a.needs_vision).collect();
     if doc.facets.embedded.is_empty() && vision.is_empty() {
         return None;
@@ -457,7 +457,7 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
                         if !target.is_empty() {
                             target.push(' ');
                         }
-                        target.push_str(&blocks::asset_link(path, Mode::Cell));
+                        target.push_str(&blocks::asset_link(path, link_base, Mode::Cell));
                     }
                 }
                 vec![
@@ -481,7 +481,7 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
             .iter()
             .map(|a| {
                 let file = match &a.path {
-                    Some(p) => blocks::asset_link(p, Mode::Cell),
+                    Some(p) => blocks::asset_link(p, link_base, Mode::Cell),
                     None => "not extracted".to_string(),
                 };
                 vec![

@@ -307,15 +307,86 @@ pub(crate) fn format_label(format: FormatId) -> String {
     label.to_string()
 }
 
-/// The token count Crystalline's size check (Q002) uses: the characters of the body after
-/// the closing `---` line of the frontmatter, divided by four. Without frontmatter the whole
-/// text is the body.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the splitter measures its parts with it")
-)]
-pub(crate) fn body_tokens(markdown: &str) -> usize {
-    crate::paging::tokens(body(markdown))
+/// The token count Crystalline's size check (Q002) uses, as an import sees the file
+/// (decision 12): the characters of the body after the closing `---` line of the frontmatter,
+/// divided by four, each link to a file counted at its import length ([`Measure`]).
+/// `note_path_len` is the length of the file's path without `.md`. Without frontmatter the
+/// whole text is the body.
+pub(crate) fn body_tokens(markdown: &str, note_path_len: usize) -> usize {
+    Measure {
+        note_path_len,
+        moved: false,
+    }
+    .chars(body(markdown))
+        / 4
+}
+
+/// The one size measure of Rezzer's output (decisions 12 and F11): characters, plus what the
+/// links in the text can grow by.
+///
+/// - A link to a file (a relative destination that is no anchor and no `.md` file) counts at
+///   the longer of its written length and the link Crystalline's import writes for it,
+///   `assets/` + the note's path without `.md` + `/` + the file name.
+/// - With `moved` the text is still to be written as a part one folder down: every relative
+///   destination gets 3 characters for `../`, and every anchor link (`](#`) 64 characters
+///   for the part file it may point to (at most 60 bytes plus `.md`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Measure {
+    /// Characters of the note's path without `.md`, as the import root sees it.
+    pub note_path_len: usize,
+    pub moved: bool,
+}
+
+/// What an anchor link may grow by when its anchor is in another part: the part's file name
+/// (at most 60 bytes) and `.md`, with room to spare.
+pub(crate) const ANCHOR_LINK_GROWTH: usize = 64;
+
+impl Measure {
+    /// The size of `text` in characters, its links counted as above.
+    pub(crate) fn chars(&self, text: &str) -> usize {
+        text.chars().count() + self.growth(text)
+    }
+
+    /// What the links in `text` can grow by.
+    fn growth(&self, text: &str) -> usize {
+        let mut growth = 0usize;
+        let mut rest = text;
+        while let Some(at) = rest.find("](") {
+            rest = &rest[at + 2..];
+            let end = rest.find([')', ' ', '\n']).unwrap_or(rest.len());
+            let dest = &rest[..end];
+            if dest.starts_with('#') {
+                if self.moved {
+                    growth += ANCHOR_LINK_GROWTH;
+                }
+                continue;
+            }
+            if !relative(dest) {
+                continue;
+            }
+            if self.moved {
+                growth += 3;
+            }
+            let path = dest.split('#').next().unwrap_or(dest);
+            if path.ends_with(".md") {
+                continue;
+            }
+            let name = path.rsplit('/').next().unwrap_or(path);
+            let import = "assets/".len() + self.note_path_len + 1 + name.chars().count();
+            growth += import.saturating_sub(dest.chars().count());
+        }
+        growth
+    }
+}
+
+/// A link destination that is a relative path: not empty, no anchor alone, no `/` first and
+/// no scheme (`https:`, `mailto:`).
+fn relative(dest: &str) -> bool {
+    if dest.is_empty() || dest.starts_with(['#', '/', '<']) {
+        return false;
+    }
+    let before = dest.split(['/', '?', '#']).next().unwrap_or("");
+    !before.contains(':')
 }
 
 /// The body of a Markdown file: what follows the closing `---` line of its frontmatter, the
@@ -410,17 +481,17 @@ mod tests {
     #[test]
     fn body_tokens_count_after_the_closing_line() {
         // 8 characters of body: "\n# T\nabc" is 8 chars, 2 tokens.
-        assert_eq!(body_tokens("---\ntype: source\n---\n\n# T\nabc"), 2);
+        assert_eq!(body_tokens("---\ntype: source\n---\n\n# T\nabc", 0), 2);
         assert_eq!(
             body(&format!("---\na: b\n---\n{}", "x".repeat(40_003))).len(),
             40_003
         );
         assert_eq!(
-            body_tokens(&format!("---\na: b\n---\n{}", "x".repeat(40_003))),
+            body_tokens(&format!("---\na: b\n---\n{}", "x".repeat(40_003)), 0),
             10_000
         );
         assert_eq!(
-            body_tokens(&format!("---\na: b\n---\n{}", "é".repeat(40_004))),
+            body_tokens(&format!("---\na: b\n---\n{}", "é".repeat(40_004)), 0),
             10_001
         );
         assert_eq!(body("---\r\na: b\r\n---\r\nbody"), "body");
@@ -429,6 +500,31 @@ mod tests {
         assert_eq!(body("# T\n---\nx"), "# T\n---\nx");
         assert_eq!(body("---\na: b\nno end"), "---\na: b\nno end");
         assert_eq!(body("---"), "---");
+    }
+
+    #[test]
+    fn measure_counts_links_at_their_import_length() {
+        use super::Measure;
+        let plain = Measure {
+            note_path_len: 10,
+            moved: false,
+        };
+        // `assets/` + 10 + `/` + `a.png` is 23 characters, the written link 14.
+        assert_eq!(plain.chars("![p](b.assets/a.png)"), 20 + 23 - 14);
+        // Web addresses, anchors and notes do not grow.
+        assert_eq!(plain.chars("[x](https://e.org/a.png)"), 24);
+        assert_eq!(plain.chars("[x](#here)"), 10);
+        assert_eq!(plain.chars("[x](other.md#a)"), 15);
+        let moved = Measure {
+            note_path_len: 10,
+            moved: true,
+        };
+        assert_eq!(moved.chars("[x](#here)"), 10 + super::ANCHOR_LINK_GROWTH);
+        assert_eq!(moved.chars("[x](other.md)"), 13 + 3);
+        assert_eq!(
+            body_tokens("---\na: b\n---\n![p](b.assets/a.png)", 10),
+            (20 + 9) / 4
+        );
     }
 
     #[test]
