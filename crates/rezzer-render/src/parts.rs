@@ -28,8 +28,6 @@
 //! `- follows [<title of the part before>](<its file>.md)`. Crystalline 0.29.0 reads these
 //! lines as relations and no other line of ours.
 
-use std::borrow::Cow;
-
 use rezzer_model::{Block, Completeness, Document, Inline, Loss};
 
 use crate::blocks;
@@ -170,10 +168,7 @@ impl Writer<'_> {
                 title: self.part_title(&u.title),
                 file: u.file,
                 location: u.location,
-                markdown: match bullets::guard(&u.markdown) {
-                    Cow::Borrowed(_) => u.markdown,
-                    Cow::Owned(guarded) => guarded,
-                },
+                markdown: u.markdown,
             })
             .collect();
         let losses = &self.doc.losses;
@@ -184,7 +179,7 @@ impl Writer<'_> {
         };
         let overview = self
             .want(OutputSection::Overview)
-            .then(|| overview::render(self.doc, self.selection.as_ref()))
+            .then(|| overview::render_whole(self.doc, self.selection.as_ref()))
             .flatten();
         let trailing = Trailing {
             overview: overview.as_deref(),
@@ -335,7 +330,8 @@ impl Writer<'_> {
                 md.push('\n');
                 md.push_str(&blocks::heading_line(1, &label(&e.title, false)));
                 md.push_str("\n\n");
-                md.push_str(&e.markdown);
+                // Every body follows P5-S and P5-X; the relations below stay `- ` bullets.
+                md.push_str(&bullets::guard(&e.markdown));
                 md.push_str("\n\n## Relations\n\n");
                 md.push_str(&part_of);
                 if let Some(before) = k.checked_sub(1).map(|b| listed[b]) {
@@ -415,7 +411,7 @@ impl Writer<'_> {
         }
         for section in sections.iter().filter(|s| !s.is_empty()) {
             out.push('\n');
-            out.push_str(section);
+            out.push_str(&bullets::guard(section));
             out.push('\n');
         }
         out

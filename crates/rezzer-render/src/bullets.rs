@@ -206,11 +206,59 @@ fn continues(line: &str) -> bool {
         || is_thematic_break(t))
 }
 
-/// Whether the last `[[` of a line has no `]]` after it (inline code included: the guard
-/// only errs towards joining less, which reads at most what Crystalline reads per line).
+/// Whether the last `[[` of a line outside inline code has no `]]` after it. Crystalline
+/// masks inline code first; the guard must join exactly the lines Crystalline joins, as a
+/// line joined less could hide a relation that Crystalline reads.
 fn ends_inside_wikilink(line: &str) -> bool {
-    line.rfind("[[")
-        .is_some_and(|open| !line[open + 2..].contains("]]"))
+    if !line.contains("[[") {
+        return false;
+    }
+    let mut masked = line.as_bytes().to_vec();
+    for (start, end) in code_spans(line) {
+        masked[start..end].fill(b' ');
+    }
+    let masked = String::from_utf8_lossy(&masked);
+    masked
+        .rfind("[[")
+        .is_some_and(|open| !masked[open + 2..].contains("]]"))
+}
+
+/// The byte ranges of the inline code spans of a line, backticks included: a run of
+/// backticks up to the next run of the same length.
+fn code_spans(line: &str) -> Vec<(usize, usize)> {
+    let b = line.as_bytes();
+    let run_at = |i: usize| b[i..].iter().take_while(|c| **c == b'`').count();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let run = run_at(i);
+        let mut k = i + run;
+        let mut closed = None;
+        while k < b.len() {
+            if b[k] == b'`' {
+                let n = run_at(k);
+                if n == run {
+                    closed = Some(k + n);
+                    break;
+                }
+                k += n;
+            } else {
+                k += 1;
+            }
+        }
+        match closed {
+            Some(end) => {
+                spans.push((i, end));
+                i = end;
+            }
+            None => i += run,
+        }
+    }
+    spans
 }
 
 /// The type before a relation's target: a quoted phrase, or one token that does not open
@@ -300,10 +348,9 @@ fn destination(line: &str, open: usize) -> Option<String> {
     let target = match rest.strip_prefix('<') {
         Some(inner) => &inner[..inner.find('>')?],
         None => {
-            let end = rest
-                .find(|c: char| c.is_whitespace() || c == ')')
-                .unwrap_or(rest.len());
-            &rest[..end]
+            let inside = &rest[..closing_paren(rest)?];
+            let end = inside.find(char::is_whitespace).unwrap_or(inside.len());
+            &inside[..end]
         }
     };
     let path = target.split('#').next().unwrap_or("");
@@ -325,6 +372,29 @@ fn destination(line: &str, open: usize) -> Option<String> {
         i += 1;
     }
     Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// The offset of the `)` that closes a destination starting at `text`: balanced parentheses
+/// inside are read past, and `\(`, `\)` and `\\` neither open nor close.
+fn closing_paren(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let mut depth = 1usize;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if matches!(b.get(i + 1), Some(b'(' | b')' | b'\\')) => i += 1,
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 /// A relative path to a `.md` file (any case), not a folder's `index.md` or `log.md`.
@@ -365,6 +435,12 @@ mod tests {
             "* a\n  - n\n\n* [c] x\n* b\n\ntext\n\n- d"
         );
         assert_eq!(guard("- [c] x\n- b\n\n* other"), "+ [c] x\n+ b\n\n* other");
+        // A `[[` in inline code does not stop the join, as in Crystalline; then the joined
+        // text holds a wikilink after one token.
+        assert_eq!(guard("- tok`[[` then\n  x]]"), "* tok`[[` then\n  x]]");
+        // Parentheses inside a destination are balanced, escaped ones skipped.
+        assert_eq!(guard("- See [x](a_(b).md)"), "* See [x](a_(b).md)");
+        assert_eq!(guard("- See [x](a\\).md)"), "* See [x](a\\).md)");
         // Not read: more words before the link, a web page, a task box, an indent, a fence,
         // a link that opens later, an escaped bracket.
         for md in [

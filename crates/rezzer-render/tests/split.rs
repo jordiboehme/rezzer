@@ -2616,3 +2616,49 @@ fn a_list_with_one_item_crystalline_would_read_stays_one_list() {
     assert_eq!((lists, items), (1, 3));
     assert_eq!(crystalline_reads(body(&md)), []);
 }
+
+#[test]
+fn the_overview_part_holds_every_row() {
+    // More rows than one file's overview shows (200): the overview parts drop none.
+    let mut d = chapters_doc(4, 6_000);
+    d.overview = Some(rezzer_model::Overview {
+        parts: (1..=250)
+            .map(|i| OverviewPart {
+                id: format!("p{i}"),
+                name: format!("Part {i}"),
+                kind: "chapter".into(),
+                size: "1 paragraph".into(),
+                role: None,
+                reads: Vec::new(),
+            })
+            .collect(),
+        facts: vec![("See".into(), "[x](y.md)".into())],
+    });
+    let out = output(&d, 2_500, "report.md.md", "b");
+    assert_files_within(&out, 2_500);
+    let overview: Vec<&PartFile> = out
+        .parts
+        .iter()
+        .filter(|p| p.location == "Overview")
+        .collect();
+    assert!(!overview.is_empty());
+    assert_eq!(overview[0].path, "b/overview.md");
+    let text: String = overview.iter().map(|p| p.markdown.as_str()).collect();
+    for i in 1..=250 {
+        assert!(text.contains(&format!("| Part {i} |")), "Part {i}");
+    }
+    assert!(!text.contains("Only the first"));
+    // Every written file reads as Crystalline reads it: relations only where Rezzer means them.
+    assert_eq!(crystalline_reads(body(&out.main)), []);
+    for p in &out.parts {
+        let reads = crystalline_reads(body(&p.markdown));
+        assert!(
+            reads.iter().all(|r| matches!(
+                r,
+                Read::Relation(k, _) if k == "part_of" || k == "follows"
+            )),
+            "{}: {reads:?}",
+            p.path
+        );
+    }
+}
