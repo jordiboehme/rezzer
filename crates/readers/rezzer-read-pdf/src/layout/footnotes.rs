@@ -27,6 +27,10 @@ const REF_RISE: f32 = 0.2;
 const REF_RISE_SMALL: f32 = 0.1;
 const REF_SMALLER: f32 = 0.9;
 
+/// A reference number starts at most this many sizes of the word before it before the end of
+/// that word's glyphs: it stands after the word, not over it.
+const REF_LEAD: f32 = 0.3;
+
 /// A reference number starts at most this many sizes of the word before it after that word.
 const REF_GAP: f32 = 1.0;
 
@@ -80,11 +84,113 @@ struct Entry {
     ids: Vec<usize>,
 }
 
-/// What [`find`] reads: the entries, and the raised reference runs above them with their
-/// markers.
+/// Where a raised reference number goes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Place {
+    /// After the run before it on its line.
+    End,
+    /// Into a white space of the run `word` of its line, after the word before it.
+    Inside { word: usize, split: Split },
+    /// After the run `word`, the last of the line above: the number opens its own line
+    /// though it stands raised at the end of that word.
+    Above { word: usize },
+}
+
+/// A white space between two words of a run: where the next word starts in the text, and
+/// the end of the ink before it and the start of the ink after it. From the glyphs (`gap`
+/// names the run's gap) or, for a run without them, by the share of characters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Split {
+    byte: usize,
+    from: f32,
+    to: f32,
+    gap: Option<usize>,
+}
+
+/// The white spaces between the words of `run`, in order.
+fn splits(run: &Run) -> Vec<Split> {
+    // Where each word after the first starts, and how many words stand before it.
+    let mut starts = Vec::new();
+    let mut words = 0;
+    let mut in_word = false;
+    for (i, c) in run.text.char_indices() {
+        if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            if words > 0 {
+                starts.push((i, words));
+            }
+            words += 1;
+            in_word = true;
+        }
+    }
+    if !run.gaps.is_empty() {
+        return run
+            .gaps
+            .iter()
+            .enumerate()
+            .filter_map(|(k, g)| {
+                let &(byte, _) = starts.iter().find(|s| s.1 == g.words as usize)?;
+                Some(Split {
+                    byte,
+                    from: g.from,
+                    to: g.to,
+                    gap: Some(k),
+                })
+            })
+            .collect();
+    }
+    // By the share of characters of the text from its first ink on.
+    let lead = run.text.len() - run.text.trim_start().len();
+    let text = run.text.trim();
+    let total = text.chars().count().max(1) as f32;
+    let at = |byte: usize| {
+        let chars = run.text[lead..byte.max(lead)].chars().count() as f32;
+        run.x + run.w * chars / total
+    };
+    starts
+        .iter()
+        .map(|&(byte, _)| {
+            let end = run.text[..byte].trim_end().len();
+            Split {
+                byte,
+                from: at(end),
+                to: at(byte),
+                gap: None,
+            }
+        })
+        .collect()
+}
+
+/// `run` cut at `split`: the words before it and the words after it as a run that starts a
+/// new word.
+fn cut(run: &Run, split: &Split) -> Option<(Run, Run)> {
+    if let Some(k) = split.gap {
+        return run.cut_at(k);
+    }
+    let end = run.x + run.w;
+    let mut before = run.clone();
+    before.text = run.text.get(..split.byte)?.trim_end().to_string();
+    before.w = (split.from - run.x).max(0.0);
+    let mut after = run.clone();
+    after.text = format!(" {}", run.text.get(split.byte..)?);
+    after.x = split.to;
+    after.w = (end - split.to).max(0.0);
+    Some((before, after))
+}
+
+/// A raised reference number: its run, its marker and where it goes.
+#[derive(Debug, Clone, Copy)]
+struct Raised {
+    run: usize,
+    mark: NoteMark,
+    place: Place,
+}
+
+/// What [`find`] reads: the entries, and the raised reference numbers above them.
 struct Found {
     entries: Vec<Entry>,
-    raised: Vec<(usize, NoteMark)>,
+    raised: Vec<Raised>,
 }
 
 /// Finds the legend of the untagged page `page`, marks the raised references to it in `flow`
@@ -120,23 +226,37 @@ pub(super) fn take(page: u32, flow: &mut Flow) -> Legend {
         labels.entry(e.mark).or_insert_with(|| label.clone());
         named.push(label);
     }
-    // A raised reference to a footnote of the legend becomes a reference run; one to no
-    // footnote stays text, set apart from its word.
-    for &(i, mark) in &found.raised {
-        let r = &mut flow.runs[i];
-        match labels.get(&mark) {
-            Some(label) => {
-                r.text.clone_from(label);
-                r.note = true;
+    // A raised reference to a footnote of the legend becomes a reference run after its word;
+    // one to no footnote stays text where it is, set apart from its word.
+    let mut inside = Vec::new();
+    for r in &found.raised {
+        let Some(label) = labels.get(&r.mark) else {
+            let run = &mut flow.runs[r.run];
+            if !run.text.starts_with(char::is_whitespace) {
+                run.text.insert(0, ' ');
             }
-            None if !r.text.starts_with(char::is_whitespace) => r.text.insert(0, ' '),
-            None => {}
+            continue;
+        };
+        match r.place {
+            Place::End => {}
+            Place::Above { word } => {
+                // The number goes to the end of the line above, which its runs follow.
+                let (line, y) = (flow.runs[word].line, flow.runs[word].y);
+                let run = &mut flow.runs[r.run];
+                run.line = line;
+                run.y = y;
+            }
+            Place::Inside { word, split } => inside.push((word, split, r.run)),
         }
+        let run = &mut flow.runs[r.run];
+        run.text.clone_from(label);
+        run.note = true;
     }
+    let moved = place_inside(flow, inside);
     let mut owner: Vec<Option<usize>> = vec![None; flow.runs.len()];
     for (n, e) in entries.iter().enumerate() {
         for &i in &e.ids {
-            owner[i] = Some(n);
+            owner[moved[i]] = Some(n);
         }
     }
     let mut runs: Vec<Vec<Run>> = vec![Vec::new(); entries.len()];
@@ -147,6 +267,124 @@ pub(super) fn take(page: u32, flow: &mut Flow) -> Legend {
     Legend {
         notes: named.into_iter().zip(runs).collect(),
         labels,
+    }
+}
+
+/// Puts each reference run of `inside` (word run, gap, reference run) into the white space
+/// of its word run: the word run is cut at the gap and the reference stands between the two
+/// parts. Returns where each run of the flow went. A word run that no longer has the gap
+/// keeps the reference after it.
+fn place_inside(flow: &mut Flow, mut inside: Vec<(usize, Split, usize)>) -> Vec<usize> {
+    let n = flow.runs.len();
+    if inside.is_empty() {
+        return (0..n).collect();
+    }
+    inside.sort_by_key(|c| (c.0, c.1.byte));
+    let refs: HashSet<usize> = inside.iter().map(|c| c.2).collect();
+    let all = std::mem::take(flow);
+    let mut runs: Vec<Option<Run>> = all.runs.into_iter().map(Some).collect();
+    let mut moved = vec![0; n];
+    let mut out = Flow::default();
+    let push = |out: &mut Flow, run: Run, slot, at| {
+        out.runs.push(run);
+        out.slots.push(slot);
+        out.at.push(at);
+        out.runs.len() - 1
+    };
+    let mut next = 0;
+    for i in 0..n {
+        if refs.contains(&i) {
+            continue;
+        }
+        let (slot, at) = (all.slots[i], all.at[i]);
+        let Some(run) = runs[i].take() else {
+            continue;
+        };
+        moved[i] = out.runs.len();
+        // The cuts of this run, in order, each in the part after the cut before: its gaps
+        // and bytes count from that cut.
+        let mut rest = Some(run);
+        let mut last: Option<Split> = None;
+        while next < inside.len() && inside[next].0 == i {
+            let (_, split, r) = inside[next];
+            next += 1;
+            let reference = runs[r].take().expect("a reference is placed once");
+            // The part after a cut starts with one space before its first word, and its gaps
+            // count from the cut.
+            let here = match last {
+                None => Some(split),
+                Some(l) => (split.byte + 1).checked_sub(l.byte).map(|byte| Split {
+                    byte,
+                    gap: split.gap.zip(l.gap).and_then(|(g, k)| g.checked_sub(k + 1)),
+                    ..split
+                }),
+            };
+            let parts = rest.as_ref().zip(here).and_then(|(x, here)| cut(x, &here));
+            match parts {
+                Some((before, after)) => {
+                    push(&mut out, before, slot, at);
+                    rest = Some(after);
+                    last = Some(split);
+                }
+                // Without the gap the reference goes after what is left of the run.
+                None => {
+                    if let Some(x) = rest.take() {
+                        push(&mut out, x, slot, at);
+                    }
+                }
+            }
+            moved[r] = push(&mut out, reference, slot, at);
+        }
+        if let Some(x) = rest {
+            push(&mut out, x, slot, at);
+        }
+    }
+    *flow = out;
+    moved
+}
+
+/// Writes the references of `blocks` to the footnotes `unwritten` (by label) as the text of
+/// their markers: a stop that cut the legend leaves no reference without its footnote.
+pub(super) fn unlink(blocks: &mut [Block], legend: &Legend, unwritten: &[&str]) {
+    if unwritten.is_empty() {
+        return;
+    }
+    let marks: HashMap<&str, NoteMark> = legend
+        .labels
+        .iter()
+        .map(|(m, l)| (l.as_str(), *m))
+        .collect();
+    let text = |id: &str| match marks.get(id) {
+        Some(NoteMark::Stars(c)) => "*".repeat(usize::from(*c)),
+        Some(NoteMark::Paren(n)) => format!("{n})"),
+        Some(NoteMark::Raised(n)) => format!(" {n}"),
+        None => String::new(),
+    };
+    let fix = |inlines: &mut Vec<Inline>| {
+        for i in inlines.iter_mut() {
+            if let Inline::FootnoteRef { id } = i
+                && unwritten.contains(&id.as_str())
+            {
+                *i = Inline::plain(text(id));
+            }
+        }
+    };
+    walk_inlines(blocks, &mut |i| fix(i));
+}
+
+/// Calls `f` with every list of inlines of `blocks` outside links: paragraphs, headings, list
+/// items, table cells and the blocks inside sections, quotes and callouts.
+fn walk_inlines(blocks: &mut [Block], f: &mut dyn FnMut(&mut Vec<Inline>)) {
+    for b in blocks {
+        match b {
+            Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => f(inlines),
+            Block::List { items, .. } => items.iter_mut().for_each(|i| walk_inlines(i, f)),
+            Block::Table { rows, .. } => rows.iter_mut().flatten().for_each(|c| f(&mut c.inlines)),
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => walk_inlines(blocks, f),
+            _ => {}
+        }
     }
 }
 
@@ -182,15 +420,32 @@ fn digits(run: &Run) -> Option<u8> {
         .flatten()
 }
 
-/// Whether `run` is a reference number raised right after `word`: close after it, and its
-/// baseline higher than the word's.
-fn raised_ref(run: &Run, word: &Run) -> Option<u8> {
+/// Whether `run` is a reference number raised right after a word of `word`: its baseline
+/// higher than the word's, and it starts close after the end of the run's glyphs (`None`)
+/// or in one of the run's white spaces right after a word (`Some` of that space). The word
+/// before it does not end in a digit: `mtl.` or `%` take references, a number does not.
+fn raised_ref(run: &Run, word: &Run) -> Option<(u8, Option<Split>)> {
+    let n = digits(run)?;
+    let size = word.size;
     let rise = run.y - word.y;
-    let close = run.x - (word.x + word.w) <= REF_GAP * word.size;
-    let raised = rise >= REF_RISE * word.size
-        || (run.size <= REF_SMALLER * word.size && rise >= REF_RISE_SMALL * word.size);
-    let after_word = word.text.trim_end().ends_with(char::is_alphanumeric);
-    digits(run).filter(|_| close && raised && after_word)
+    let raised = rise >= REF_RISE * size
+        || (run.size <= REF_SMALLER * size && rise >= REF_RISE_SMALL * size);
+    if !raised {
+        return None;
+    }
+    let no_digit = |w: &str| w.chars().next_back().is_some_and(|c| !c.is_ascii_digit());
+    let end = word.x + word.w;
+    if run.x >= end - REF_LEAD * size
+        && run.x - end <= REF_GAP * size
+        && no_digit(word.text.trim_end())
+    {
+        return Some((n, None));
+    }
+    splits(word).into_iter().find_map(|g| {
+        let before = word.text[..g.byte].trim_end();
+        (run.x >= g.from - REF_LEAD * size && run.x <= g.to && no_digit(before))
+            .then_some((n, Some(g)))
+    })
 }
 
 /// The value of one or two superscript digits.
@@ -287,25 +542,69 @@ fn opening_mark(runs: &[Run]) -> Option<NoteMark> {
         .then_some(NoteMark::Raised(value))
 }
 
-/// The references of a line: markers that end a word, and numbers raised right after a
-/// word (`PV-Beitrag` and a raised `6`) with the index of their run, from `start`.
-fn references(l: &Line<'_>, start: usize, marks: &mut HashSet<NoteMark>) -> Vec<(usize, u8)> {
+/// The references of line `k` of `all`, whose first run is run `start` of the page:
+/// markers that end a word go to `marks`, numbers raised right after a word are returned. A
+/// number that opens the line belongs to the last word of the line before when it stands
+/// raised, smaller and close at that word's end.
+fn references(
+    all: &[Line<'_>],
+    k: usize,
+    start: usize,
+    marks: &mut HashSet<NoteMark>,
+) -> Vec<Raised> {
+    let l = &all[k];
     marks.extend(l.text.split_whitespace().filter_map(word_mark).map(|m| m.0));
     let mut raised = Vec::new();
-    let mut word: Option<&Run> = None;
+    let mut word: Option<(usize, &Run)> = None;
     for (i, r) in l.runs.iter().enumerate() {
         if ink(&r.text) == 0 {
             continue;
         }
-        if let Some(w) = word
-            && let Some(n) = raised_ref(r, w)
-        {
-            marks.insert(NoteMark::Raised(n));
-            raised.push((start + i, n));
+        let found = match word {
+            Some((w, run)) => raised_ref(r, run).map(|(n, gap)| {
+                let place = match gap {
+                    None => Place::End,
+                    Some(split) => Place::Inside {
+                        word: start + w,
+                        split,
+                    },
+                };
+                (n, place)
+            }),
+            None => above(all, k, start, r),
+        };
+        match found {
+            Some((n, place)) => {
+                marks.insert(NoteMark::Raised(n));
+                raised.push(Raised {
+                    run: start + i,
+                    mark: NoteMark::Raised(n),
+                    place,
+                });
+            }
+            // A reference does not end the word it follows: the next one may follow it too.
+            None => word = Some((i, r)),
         }
-        word = Some(r);
     }
     raised
+}
+
+/// The reference `r`, the first run of line `k`, makes at the end of the line before, with
+/// the index of that line's last run with ink.
+fn above(all: &[Line<'_>], k: usize, start: usize, r: &Run) -> Option<(u8, Place)> {
+    let prev = all.get(k.checked_sub(1)?)?;
+    let (i, word) = prev
+        .runs
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, w)| ink(&w.text) > 0)?;
+    if r.size >= word.size {
+        return None;
+    }
+    let (n, gap) = raised_ref(r, word)?;
+    let word = start - prev.runs.len() + i;
+    gap.is_none().then_some((n, Place::Above { word }))
 }
 
 /// The pieces of a line: its runs cut where a piece gap parts two runs with ink.
@@ -330,66 +629,67 @@ fn pieces<'a>(l: &Line<'a>) -> Vec<(usize, &'a [Run])> {
         .collect()
 }
 
-/// The legend of a page. It opens at the first line that is the lowest line so far, with
-/// nothing below it, in a size no larger than every line above, and that opens with a note
-/// marker which also stands as a reference above. Its lines are the lines in that size from
-/// there on; lines in other sizes stay text. Each piece of a legend line (cut at piece gaps,
-/// so columns side by side stay apart) opens a footnote with a marker or goes on the
-/// footnote of its column on the line above. Pieces that go on nothing stay text; when they
-/// outnumber the footnotes there is no legend.
+/// The legend of a page, read by position: its lines are taken top down by baseline. It
+/// opens at the first line that opens with a note marker which also stands as a reference
+/// above, in a size no larger than every line above and with no larger line below. Its lines
+/// are the lines in that size from there down; lines in other sizes stay text. Each piece
+/// of a legend line (cut at piece gaps, so columns side by side stay apart) opens a footnote
+/// with a marker or goes on the footnote of its column on the line above. Pieces that go on
+/// nothing stay text; when they outnumber the footnotes there is no legend.
 fn find(runs: &[Run]) -> Option<Found> {
     let all = lines(runs);
-    let n = all.len();
-    let inked = |l: &Line<'_>| !l.text.is_empty();
-    let mut starts = Vec::with_capacity(n);
+    let mut starts = Vec::with_capacity(all.len());
     let mut at = 0;
     for l in &all {
         starts.push(at);
         at += l.runs.len();
     }
-    // The highest line after each line.
-    let mut highest_after = vec![f32::MIN; n + 1];
-    for k in (0..n).rev() {
-        let y = if inked(&all[k]) { all[k].y } else { f32::MIN };
-        highest_after[k] = highest_after[k + 1].max(y);
+    // Top down by baseline; lines on one baseline keep their order.
+    let mut order: Vec<usize> = (0..all.len())
+        .filter(|&k| !all[k].text.is_empty())
+        .collect();
+    order.sort_by(|&a, &b| all[b].y.total_cmp(&all[a].y));
+    let mut largest_below = vec![f32::MIN; order.len() + 1];
+    for p in (0..order.len()).rev() {
+        largest_below[p] = largest_below[p + 1].max(all[order[p]].size);
     }
     let mut marks: HashSet<NoteMark> = HashSet::new();
-    let mut raised: Vec<(usize, NoteMark)> = Vec::new();
-    let (mut lowest, mut smallest) = (f32::MAX, f32::MAX);
-    let mut first = None;
-    for k in 0..n {
+    let mut raised: Vec<(f32, Raised)> = Vec::new();
+    let mut smallest = f32::MAX;
+    let mut top = None;
+    for (p, &k) in order.iter().enumerate() {
         let l = &all[k];
-        if !inked(l) {
-            continue;
-        }
         let opens = pieces(l)
             .first()
-            .and_then(|p| opening_mark(p.1))
+            .and_then(|piece| opening_mark(piece.1))
             .is_some_and(|m| marks.contains(&m));
-        if k > 0
+        if p > 0
             && opens
             && l.size <= smallest + SIZE_SLACK
-            && l.y <= lowest + EDGE
-            && highest_after[k + 1] <= l.y + EDGE
+            && largest_below[p + 1] <= l.size + SIZE_SLACK
         {
-            first = Some(k);
+            top = Some((l.y, l.size));
             break;
         }
         raised.extend(
-            references(l, starts[k], &mut marks)
+            references(&all, k, starts[k], &mut marks)
                 .into_iter()
-                .map(|(i, v)| (i, NoteMark::Raised(v))),
+                .map(|r| (l.y, r)),
         );
-        lowest = lowest.min(l.y);
         smallest = smallest.min(l.size);
     }
-    let first = first?;
-    let size = all[first].size;
+    let (top, size) = top?;
+    // Only references that stand above the legend count.
+    let raised: Vec<Raised> = raised
+        .into_iter()
+        .filter(|(y, _)| *y > top + EDGE)
+        .map(|(_, r)| r)
+        .collect();
     let mut entries: Vec<Entry> = Vec::new();
     let mut loose = 0usize;
-    for k in first..n {
+    for &k in &order {
         let l = &all[k];
-        if !inked(l) || (l.size - size).abs() > SIZE_SLACK {
+        if l.y > top + EDGE || (l.size - size).abs() > SIZE_SLACK {
             continue;
         }
         for (from, piece) in pieces(l) {
@@ -434,29 +734,7 @@ pub(super) fn link_words(blocks: &mut [Block], legend: &Legend) {
     if legend.labels.is_empty() {
         return;
     }
-    for b in blocks {
-        link_block(b, legend);
-    }
-}
-
-fn link_block(block: &mut Block, legend: &Legend) {
-    match block {
-        Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => {
-            link_inlines(inlines, legend);
-        }
-        Block::List { items, .. } => items
-            .iter_mut()
-            .flatten()
-            .for_each(|b| link_block(b, legend)),
-        Block::Table { rows, .. } => rows
-            .iter_mut()
-            .flatten()
-            .for_each(|c| link_inlines(&mut c.inlines, legend)),
-        Block::Section { blocks, .. }
-        | Block::Quote { blocks, .. }
-        | Block::Callout { blocks, .. } => blocks.iter_mut().for_each(|b| link_block(b, legend)),
-        _ => {}
-    }
+    walk_inlines(blocks, &mut |i| link_inlines(i, legend));
 }
 
 /// [`link_words`] for one list of inlines. Text inside links stays as it is.
@@ -582,10 +860,19 @@ mod tests {
         let word = run("Einheit", 0, 40.0, 720.0, 9.0);
         // Nearly the size of the word and raised, as header cells set them.
         let close = run("2", 0, 72.0, 722.5, 8.0);
-        assert_eq!(raised_ref(&close, &word), Some(2));
-        // On the baseline, or far away: no reference.
+        assert_eq!(raised_ref(&close, &word), Some((2, None)));
+        // On the baseline, far away, or over the word's glyphs: no reference.
         assert_eq!(raised_ref(&run("2", 0, 72.0, 720.0, 8.0), &word), None);
         assert_eq!(raised_ref(&run("2", 0, 140.0, 724.0, 6.0), &word), None);
+        assert_eq!(raised_ref(&run("2", 0, 50.0, 722.5, 8.0), &word), None);
+        // After a label that ends in a stop or a sign, not after a number.
+        let short = run("mtl.", 0, 40.0, 720.0, 9.0);
+        assert_eq!(
+            raised_ref(&run("1", 0, 59.0, 722.5, 8.0), &short),
+            Some((1, None))
+        );
+        let number = run("1234", 0, 40.0, 720.0, 9.0);
+        assert_eq!(raised_ref(&run("1", 0, 59.0, 722.5, 8.0), &number), None);
     }
 
     /// Runs of a page with references raised after `Einheit` and `Beitrag`, a line of body
@@ -653,6 +940,79 @@ mod tests {
             [
                 "2 Std = Stunden,Min = Minuten",
                 " 3 Gegebenenfalls anteilig"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_marker_put_on_the_next_line_goes_to_its_word() {
+        // The raised 1 after `Musterwert` opens the next line in the line order; the 2 after
+        // the run of two labels `Xa Xb` stands after `Xa`, the 3 after `Xb`.
+        let mut xa = run(" Xa Xb", 2, 40.0, 700.0, 6.6);
+        xa.w = 15.0;
+        let runs = vec![
+            run("Musterwert", 0, 40.0, 720.0, 6.6),
+            run("1", 1, 73.5, 721.9, 4.7),
+            run(" Kl Muster", 1, 40.0, 712.0, 6.6),
+            xa,
+            run("2", 2, 47.0, 701.9, 4.7),
+            run("3", 2, 55.5, 701.9, 4.7),
+            run("die Werte werden monatlich gemeldet", 3, 40.0, 690.0, 9.0),
+            run("1 A = Muster", 4, 40.0, 70.0, 6.0),
+            run("2 B = Beispiel", 5, 40.0, 62.0, 6.0),
+            run("3 C = Chor", 6, 40.0, 54.0, 6.0),
+        ];
+        let n = runs.len();
+        let mut flow = Flow::new(runs, vec![super::super::Slot::Free; n]);
+        let legend = take(1, &mut flow);
+        assert_eq!(legend.notes.len(), 3);
+        let texts: Vec<(&str, u32, bool)> = flow
+            .runs
+            .iter()
+            .map(|r| (r.text.as_str(), r.line, r.note))
+            .collect();
+        assert_eq!(
+            texts[..6],
+            [
+                ("Musterwert", 0, false),
+                ("p1-1", 0, true),
+                (" Kl Muster", 1, false),
+                (" Xa", 2, false),
+                ("p1-2", 2, true),
+                (" Xb", 2, false),
+            ]
+        );
+        assert_eq!(texts[6], ("p1-3", 2, true));
+    }
+
+    #[test]
+    fn references_to_unwritten_footnotes_become_text() {
+        let mut legend = Legend::default();
+        legend.labels.insert(NoteMark::Stars(1), "p1-star".into());
+        legend.labels.insert(NoteMark::Raised(2), "p1-2".into());
+        let reference = |id: &str| Inline::FootnoteRef { id: id.into() };
+        let mut blocks = vec![Block::Paragraph {
+            inlines: vec![
+                Inline::plain("Betrag"),
+                reference("p1-star"),
+                Inline::plain(" Einheit"),
+                reference("p1-2"),
+            ],
+            role: None,
+            anchor: None,
+        }];
+        // A stop wrote the first footnote only.
+        unlink(&mut blocks, &legend, &["p1-2"]);
+        let Block::Paragraph { inlines, .. } = &blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            inlines,
+            &[
+                Inline::plain("Betrag"),
+                reference("p1-star"),
+                Inline::plain(" Einheit"),
+                Inline::plain(" 2"),
             ]
         );
     }

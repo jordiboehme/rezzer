@@ -10,7 +10,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::{DataLine, FormPage, all_text, boxed, data_line, label, mark, print_form};
-use rezzer_model::{Block, Completeness, LossReason, ReadOutcome, Severity, plain_text};
+use rezzer_model::{Block, Completeness, Inline, LossReason, ReadOutcome, Severity, plain_text};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
 #[global_allocator]
@@ -2940,4 +2940,201 @@ fn legend_of_three_columns_links_its_references() {
         all_text(&out)
     );
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
+}
+
+/// A label in 6.6 pt with a 4.7 pt marker raised 1.92 after it, `gap` points after its end.
+fn label_marked(x: f32, y: f32, text: &str, number: &str, gap: f32) -> String {
+    let w = common::helvetica_width(text, 6.6);
+    common::show("FL", 6.6, x, y, text) + &common::show("FL", 4.7, x + w + gap, y + 1.92, number)
+}
+
+/// The legend as the real print template draws it: markers in runs of their own, the same
+/// size as the text, raised; columns drawn one after the other; the form number drawn first;
+/// a larger data value drawn after the template above the legend.
+#[test]
+fn legend_of_raised_markers_in_columns_links_its_references() {
+    let xs = [30.0, 130.0, 230.0, 330.0, 430.0, 565.0];
+    let mut template = String::new();
+    // Form number first, as the template draws it.
+    template += &common::show("FL", 4.7, 42.40, 58.31, "Muster-Nr. 0000 00");
+    template += &grid(&xs, &[600.0, 620.0, 640.0, 660.0, 680.0]);
+    // Header row: markers after labels, one inside a two-label run.
+    template += &label_marked(xs[0] + 6.0, 666.0, "Einheit", "2", 4.4);
+    template += &label_marked(xs[1] + 6.0, 666.0, "Menge", "3", 0.7);
+    template += &label_marked(xs[2] + 6.0, 666.0, "St", "4", 1.3);
+    let sv = xs[3] + 6.0;
+    template += &common::show("FL", 6.6, sv, 666.0, "SV GB");
+    let w_sv = common::helvetica_width("SV", 6.6);
+    let w_all = common::helvetica_width("SV GB", 6.6);
+    template += &common::show("FL", 4.7, sv + w_sv + 0.5, 667.92, "4");
+    template += &common::show("FL", 4.7, sv + w_all + 1.1, 667.92, "5");
+    template += &label_marked(xs[4] + 6.0, 666.0, "Betrag", "6", 0.6);
+    for (r, y) in [646.0, 626.0, 606.0].iter().enumerate() {
+        for (c, x) in xs[..5].iter().enumerate() {
+            template += &common::show("FL", 8.0, x + 6.0, *y, &format!("{}0,{r}0", c + 1));
+        }
+    }
+    // Header field line: a label ending in '.', one ending in '%', one plain.
+    template += &label_marked(40.0, 720.0, "Musterwert mtl.", "1", 6.3);
+    template += &label_marked(160.0, 720.0, "Satz %", "8", 3.4);
+    template += &label_marked(260.0, 720.0, "Kennz", "7", 1.8);
+    template += &common::show(
+        "FL",
+        9.0,
+        40.0,
+        560.0,
+        "die Werte werden von der Muster GmbH monatlich abgerechnet und gemeldet",
+    );
+    let show = |x: f32, y: f32, t: &str| common::show("FL", 4.7, x, y, t);
+    // Column 1: markers, then texts, then two empty lines.
+    for (y, m) in [(93.58, "1"), (88.06, "2"), (76.54, "3")] {
+        template += &show(42.40, y, m);
+    }
+    template += &show(42.40, 70.78, " ");
+    for (y, t) in [
+        (91.90, "A = Musterbetrag nach Vertrag"),
+        (86.38, "Abc = Abcdef, Gh = Ghijkl, Mn = Mnopqr, Uv = Uvwxyz"),
+        (80.62, "Ab = Abend, Bc = Becher, Cd = Cedern, De = Delle"),
+        (74.86, "Muster anteilig nach Tagen im Monat"),
+        (69.10, " "),
+    ] {
+        template += &show(46.72, y, t);
+    }
+    // Column 2 texts; its marker comes last.
+    for (y, t) in [
+        (91.90, "Q = Quelle, R = Rest, U = Umlage, X = Extra,"),
+        (86.38, "Y = Ypsilon, K = Kappe, D = Delta, O = Oktav,"),
+        (80.62, "H = Halde, I = Insel, C = Chor, G = Garten"),
+        (74.86, "V = Vorlage, W = Wiese"),
+        (69.10, " "),
+    ] {
+        template += &show(190.72, y, t);
+    }
+    // Column 3: markers, then texts.
+    for (y, m) in [
+        (93.34, "5"),
+        (87.82, "6"),
+        (76.30, "7"),
+        (70.54, "8 "),
+        (65.02, " "),
+    ] {
+        template += &show(327.52, y, m);
+    }
+    for (y, t) in [
+        (91.90, "J = Teil der Mustersumme im Monat"),
+        (86.38, "Z = Zuschlag zur Musterkasse fuer alle Gruppen,"),
+        (80.62, "E = Eintrag geprueft, 1-5 = Anzahl der Muster"),
+        (74.86, "KZ = Kennzeichen fuer den Monat"),
+        (69.10, "Muster Satz zur Musterkasse mit allen Teilen"),
+        (63.58, " "),
+    ] {
+        template += &show(331.60, y, t);
+    }
+    template += &show(186.40, 93.58, "4");
+    template += &show(186.40, 70.78, " ");
+    template += &show(177.52, 58.31, "- Dies ist ein Musterblatt fuer Tests -");
+    // The total box at the right, its value printed after the template above the legend.
+    template += &common::boxed(464.32, 98.62, 73.68, 22.81);
+    template += &common::show("FB", 6.66, 480.0, 113.26, "Musterbetrag");
+    let page = FormPage {
+        template,
+        lines: vec![DataLine {
+            y: 100.02,
+            text: format!("{}9.999,99", " ".repeat(79)),
+        }],
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let blocks = page_blocks(&out);
+    let label = |n: u32| format!("p1-{n}");
+    let texts: Vec<String> = footnote_texts(&out).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(texts, (1..=8).map(label).collect::<Vec<_>>(), "{blocks:#?}");
+    let refs = references(&out);
+    for n in 1..=8 {
+        assert!(refs.contains(&label(n)), "{n}: {refs:?}");
+    }
+    // Both markers of the run of two labels stand after their own label.
+    let header = header_cells(&out);
+    assert_eq!(
+        header[3],
+        [
+            Inline::plain("SV"),
+            Inline::FootnoteRef { id: label(4) },
+            Inline::plain(" GB"),
+            Inline::FootnoteRef { id: label(5) },
+        ],
+        "{header:?}"
+    );
+}
+
+/// The inlines of the cells of the first row of the first table.
+fn header_cells(out: &ReadOutcome) -> Vec<Vec<Inline>> {
+    page_blocks(out)
+        .iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows[0].iter().map(|c| c.inlines.clone()).collect()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Guard: every footnote reference has its footnote, whatever limit stops the page. (The
+/// limits of this small page stop it before its text or not at all; the cut legend itself is
+/// tested in `layout::footnotes`.)
+#[test]
+fn no_limit_leaves_a_reference_without_its_footnote() {
+    let template = common::show("FL", 9.0, 40.0, 700.0, "Betrag* 1.234,56")
+        + &common::show("FL", 9.0, 40.0, 688.0, "Summe** 2.345,67")
+        + &common::show(
+            "FL",
+            9.0,
+            40.0,
+            676.0,
+            "Die Ware wird wie vereinbart geliefert.",
+        )
+        + &common::show("FL", 6.0, 40.0, 60.0, "* steuerfrei")
+        + &common::show("FL", 6.0, 40.0, 52.0, "** ohne Abzug");
+    let bytes = print_form(
+        &[FormPage {
+            template,
+            ..FormPage::default()
+        }],
+        "",
+        "",
+    );
+    let limits = (100..140)
+        .map(|max_elements| rezzer_limits::Limits {
+            max_elements,
+            ..rezzer_limits::Limits::default()
+        })
+        .chain((50..100).map(|max_text_bytes| rezzer_limits::Limits {
+            max_text_bytes,
+            ..rezzer_limits::Limits::default()
+        }));
+    for limits in limits {
+        let out = common::read_in(
+            &bytes,
+            &rezzer_model::ReadOptions::default(),
+            &rezzer_limits::Budget::new(limits),
+        );
+        let notes: Vec<String> = out
+            .document
+            .body
+            .iter()
+            .filter_map(|b| match b {
+                Block::Section { blocks, .. } => Some(blocks),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|b| match b {
+                Block::Section {
+                    anchor: Some(a), ..
+                } => a.0.strip_prefix("fn:").map(str::to_string),
+                _ => None,
+            })
+            .collect();
+        for r in references(&out) {
+            assert!(notes.contains(&r), "{r} without its footnote: {notes:?}");
+        }
+    }
 }

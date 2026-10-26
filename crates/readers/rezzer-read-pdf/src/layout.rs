@@ -950,6 +950,12 @@ pub(crate) fn page_blocks_at(
         built.footnote(label, runs.iter().collect(), cx);
     }
     let footnotes_written = built.blocks.len() - before;
+    // References to footnotes a stop did not write go back to text.
+    let unwritten: Vec<&str> = legend.notes[footnotes_written.min(legend.notes.len())..]
+        .iter()
+        .map(|n| n.0.as_str())
+        .collect();
+    footnotes::unlink(&mut built.blocks, &legend, &unwritten);
     for l in lines(&footers) {
         built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
     }
