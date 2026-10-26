@@ -59,7 +59,7 @@ rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
 
-`--part-size` sets the largest part in tokens. The default is 10000. Larger parts go over Crystalline's size check. In the parts folder Rezzer only removes or replaces parts it wrote. A file of yours in the way stops the run with a message. Two files whose names differ only in letter case (`Notes.pdf` and `notes.pdf`) get the same output names on a file system that ignores case, like the macOS default. Write them to different folders.
+With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. Larger parts go over Crystalline's size check. In the parts folder Rezzer only removes or replaces parts it wrote. A file of yours in the way stops the run with a message. Two files whose names differ only in letter case (`Notes.pdf` and `notes.pdf`) get the same output names on a file system that ignores case, like the macOS default. Write them to different folders.
 
 Use it from an agent (Claude Code shown, any MCP client works):
 
@@ -102,7 +102,7 @@ A new format means one new reader. The rest of the pipeline stays the same.
 
 - **Structure:** headings, sections, lists, footnotes and cross references stay what they are. Tables become real Markdown tables, merged cells included.
 - **Metadata:** title, authors, dates, revisions, keywords and custom properties go into the frontmatter. Values keep their type: a date stays a date, 9 % stays a percentage.
-- **Frontmatter ready to import:** tags come from the file: its format, the kind of document, its own keywords and its Finder tags. Each date says how sure it is: from the document itself or only from the file system. A downloaded file says where it came from. The description is the document's own, or plain facts about it.
+- **Frontmatter ready to import:** besides a `rezzer` tag, the tags come from the file: its format, the kind of document, its own keywords and its file system tags (Finder tags on a Mac). Each date says how sure it is: from the document itself or only from the file system. A downloaded file says where it came from. The description is the document's own, or plain facts about it.
 - **The logic behind the content:** every format has a layer that tells how it works. Rezzer reads it and shows it as tables and graphs:
   - Spreadsheets: the tables, header rows, titles and totals inside each sheet, formulas with the cells they read, inputs with label and unit, results, named ranges, number formats, validation rules, data tables
   - PDF forms: which field is calculated from which, in what order, with what format

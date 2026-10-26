@@ -67,8 +67,8 @@ pub struct RezParams {
     /// written as <file name>.md plus parts in a folder next to it, <file name>.parts.
     /// Pictures (for example rendered PDF pages) go to a folder next to it, and the Markdown
     /// links to them. Older files that Rezzer wrote there and this read does not write are
-    /// removed. A file of the user in the way of a part stops the read. Without it nothing is
-    /// written.
+    /// removed. A file Rezzer did not write in the way of a part stops the read. Without it
+    /// nothing is written.
     #[serde(default)]
     pub output_dir: Option<String>,
     /// Largest part in tokens when output_dir is set. A larger document is written as a main
