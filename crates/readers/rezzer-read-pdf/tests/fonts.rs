@@ -43,6 +43,9 @@ fn source(bytes: &[u8]) -> Source {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     }
 }
 

@@ -60,6 +60,9 @@ fn read_with(bytes: &[u8], budget: &Budget) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     PdfReader.read(&src, &ReadOptions::default(), budget)
 }
@@ -2220,6 +2223,9 @@ fn read_extracting(bytes: &[u8]) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let opts = ReadOptions {
         extract_assets: true,
@@ -3321,6 +3327,9 @@ fn read_assets(bytes: &[u8]) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let opts = ReadOptions {
         extract_assets: true,

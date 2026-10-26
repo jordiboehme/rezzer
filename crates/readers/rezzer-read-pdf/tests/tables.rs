@@ -37,6 +37,9 @@ fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
             evidence: "%PDF-".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     PdfReader.read(&src, &ReadOptions::default(), &Budget::new(limits))
 }

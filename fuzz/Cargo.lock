@@ -1328,6 +1328,7 @@ dependencies = [
  "cfb",
  "csv",
  "csvsniff",
+ "fileattrs",
  "flate2",
  "hex",
  "libc",

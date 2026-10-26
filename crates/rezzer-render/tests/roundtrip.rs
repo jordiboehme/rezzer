@@ -27,6 +27,9 @@ fn read(text: &str) -> Document {
             evidence: "md".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     MarkdownReader
         .read(

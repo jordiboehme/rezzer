@@ -371,6 +371,9 @@ impl Pipeline {
             let fresh = source_info(src);
             document.source.path = fresh.path;
             document.source.modified = fresh.modified;
+            document.source.created = fresh.created;
+            document.source.downloaded_from = fresh.downloaded_from;
+            document.source.file_tags = fresh.file_tags;
             document.source.detection = fresh.detection;
             return (document, completeness, None);
         }

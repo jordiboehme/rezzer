@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Opening a file or taking bytes, hashing and building the [`Source`].
+//! Opening a file or taking bytes, hashing and building the [`Source`], with the facts the
+//! file system keeps about the file: modification and birth time, the download address and
+//! tags.
 
 use std::fs::File;
 use std::io::{ErrorKind, Read};
@@ -69,8 +71,135 @@ pub(crate) fn open(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| shown.clone());
-    let modified = handle_meta.modified().ok().and_then(rfc3339);
-    Ok(build(Some(path), name, None, bytes, modified, detector))
+    let facts = FsFacts {
+        modified: handle_meta.modified().ok().and_then(rfc3339),
+        created: handle_meta.created().ok().and_then(rfc3339),
+        downloaded_from: downloaded_from(&file, path),
+        file_tags: file_tags(&file),
+    };
+    Ok(build(Some(path), name, None, bytes, facts, detector))
+}
+
+/// What the file system knows about a file beside its bytes. Every field is empty when the
+/// system has no value or reading it failed: these facts never fail an open.
+#[derive(Default)]
+struct FsFacts {
+    modified: Option<String>,
+    created: Option<String>,
+    downloaded_from: Option<String>,
+    file_tags: Vec<String>,
+}
+
+/// At most this many file system tags are kept.
+#[cfg(unix)]
+const MAX_FILE_TAGS: usize = 64;
+
+/// macOS: the download addresses, a binary plist array (the file, then the page).
+#[cfg(unix)]
+const WHERE_FROMS: &str = "com.apple.metadata:kMDItemWhereFroms";
+/// macOS: the Finder tags, a binary plist array of `name\n<colour>` entries.
+#[cfg(unix)]
+const FINDER_TAGS: &str = "com.apple.metadata:_kMDItemUserTags";
+/// freedesktop: the download address, plain text.
+#[cfg(unix)]
+const XDG_ORIGIN_URL: &str = "user.xdg.origin.url";
+/// freedesktop: the tags, comma-separated text.
+#[cfg(unix)]
+const XDG_TAGS: &str = "user.xdg.tags";
+
+/// One extended attribute of the open file. Missing, too large, unsupported or any error
+/// gives None.
+#[cfg(unix)]
+fn xattr(file: &File, name: &str) -> Option<Vec<u8>> {
+    fileattrs::read_xattr(file, name, fileattrs::MAX_ATTR_BYTES)
+        .ok()
+        .flatten()
+}
+
+/// The address the file was downloaded from: the first `kMDItemWhereFroms` entry, else
+/// `user.xdg.origin.url`, else (Windows) the `HostUrl` of the `Zone.Identifier` stream.
+/// Only a safe address is kept, see [`safe_url`].
+#[cfg(unix)]
+fn downloaded_from(file: &File, _path: &Path) -> Option<String> {
+    if let Some(bytes) = xattr(file, WHERE_FROMS) {
+        // The first entry is the file itself; a later one (the page) is never taken instead.
+        let first = fileattrs::string_array(&bytes).ok()?.into_iter().next()?;
+        return safe_url(&first);
+    }
+    let bytes = xattr(file, XDG_ORIGIN_URL)?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    safe_url(text.trim_matches(|c: char| c == '\0' || c.is_whitespace()))
+}
+
+#[cfg(windows)]
+fn downloaded_from(_file: &File, path: &Path) -> Option<String> {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    let mut bytes = Vec::new();
+    File::open(stream)
+        .ok()?
+        .take(fileattrs::MAX_ATTR_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    zone_download(&bytes)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn downloaded_from(_file: &File, _path: &Path) -> Option<String> {
+    None
+}
+
+/// The download address in the bytes of a `Zone.Identifier` stream. A stream over
+/// [`fileattrs::MAX_ATTR_BYTES`] gives None.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn zone_download(bytes: &[u8]) -> Option<String> {
+    if bytes.len() > fileattrs::MAX_ATTR_BYTES {
+        return None;
+    }
+    let text = fileattrs::zone_text(bytes)?;
+    safe_url(&fileattrs::zone_host_url(&text)?)
+}
+
+/// The Finder tags, else the `user.xdg.tags`, as written: no empty names, no repeats, at
+/// most [`MAX_FILE_TAGS`].
+#[cfg(unix)]
+fn file_tags(file: &File) -> Vec<String> {
+    let mut tags = match xattr(file, FINDER_TAGS) {
+        Some(bytes) => fileattrs::finder_tags(&bytes),
+        None => xattr(file, XDG_TAGS)
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|text| fileattrs::xdg_tags(&text))
+            .unwrap_or_default(),
+    };
+    tags.truncate(MAX_FILE_TAGS);
+    tags
+}
+
+#[cfg(not(unix))]
+fn file_tags(_file: &File) -> Vec<String> {
+    Vec::new()
+}
+
+/// `raw` when it is an `http`, `https` or `ftp` address with a host, with any user and
+/// password removed; else None. Control characters and spaces make it unsafe too.
+pub(crate) fn safe_url(raw: &str) -> Option<String> {
+    if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return None;
+    }
+    let (scheme, rest) = raw.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    if !matches!(scheme.as_str(), "http" | "https" | "ftp") {
+        return None;
+    }
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if host.is_empty() || host.starts_with(':') {
+        return None;
+    }
+    Some(format!("{scheme}://{host}{tail}"))
 }
 
 /// Opens for reading. On Unix with `O_NONBLOCK`, so opening a FIFO returns at once instead of
@@ -99,7 +228,7 @@ pub(crate) fn from_bytes(
         name.to_string(),
         mime,
         Bytes::Owned(Arc::new(bytes)),
-        None,
+        FsFacts::default(),
         detector,
     ))
 }
@@ -109,7 +238,7 @@ fn build(
     name: String,
     mime: Option<&str>,
     bytes: Bytes,
-    modified: Option<String>,
+    facts: FsFacts,
     detector: &Detector<'_>,
 ) -> Source {
     let slice = bytes.as_slice();
@@ -124,7 +253,10 @@ fn build(
         size,
         format,
         detection,
-        modified,
+        modified: facts.modified,
+        created: facts.created,
+        downloaded_from: facts.downloaded_from,
+        file_tags: facts.file_tags,
     }
 }
 
@@ -203,6 +335,55 @@ mod tests {
         let src = open(&path, &Limits::default(), &crate::detect_with_hints).unwrap();
         assert!(matches!(src.bytes, Bytes::Mapped(_)), "{:?}", src.bytes);
         assert_eq!(src.size, IN_MEMORY_MAX + 1);
+    }
+
+    #[test]
+    fn unsafe_where_froms_are_dropped() {
+        assert_eq!(safe_url("javascript:alert(1)"), None);
+        assert_eq!(
+            safe_url("https://user:pw@example.org/a.pdf").as_deref(),
+            Some("https://example.org/a.pdf")
+        );
+        assert_eq!(
+            safe_url("HTTPS://example.org/a@b.pdf").as_deref(),
+            Some("https://example.org/a@b.pdf")
+        );
+        assert_eq!(
+            safe_url("ftp://me@example.org:21").as_deref(),
+            Some("ftp://example.org:21")
+        );
+        assert_eq!(
+            safe_url("http://example.org?q=a@b").as_deref(),
+            Some("http://example.org?q=a@b")
+        );
+        for bad in [
+            "file:///etc/passwd",
+            "data:text/html,x",
+            "https://",
+            "https://user@/a",
+            "https://example.org/a b",
+            "https://example.org/\nx",
+            "example.org/a.pdf",
+            "",
+        ] {
+            assert_eq!(safe_url(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn zone_identifier_gives_the_host_url() {
+        let utf8 = b"[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.org/\r\nHostUrl=https://u:p@example.org/a.pdf\r\n";
+        assert_eq!(
+            zone_download(utf8).as_deref(),
+            Some("https://example.org/a.pdf")
+        );
+        assert_eq!(
+            zone_download(b"[ZoneTransfer]\r\nHostUrl=about:internet\r\n"),
+            None
+        );
+        let mut big = utf8.to_vec();
+        big.resize(fileattrs::MAX_ATTR_BYTES + 1, b' ');
+        assert_eq!(zone_download(&big), None);
     }
 
     #[test]

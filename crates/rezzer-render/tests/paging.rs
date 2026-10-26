@@ -44,6 +44,9 @@ fn workbook() -> Document {
             evidence: "zip with xl/workbook.xml".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: None,
         reader: None,
     });

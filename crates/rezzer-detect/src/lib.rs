@@ -40,7 +40,8 @@ pub enum OpenError {
 
 /// Opens `path`: refuses directories and other non-files, refuses files larger than
 /// `limits.max_file_bytes`, maps the file, hashes it (SHA-256, lowercase hex), records the
-/// modification time (RFC 3339, UTC) and detects its format.
+/// modification and birth time (RFC 3339, UTC), the download address and the file system
+/// tags, and detects its format. A file system fact that cannot be read is left empty.
 pub fn open(path: &Path, limits: &Limits) -> Result<Source, OpenError> {
     source::open(path, limits, &detect_with_hints)
 }

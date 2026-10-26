@@ -23,6 +23,9 @@ fn source() -> SourceInfo {
             evidence: "extension .md and text".into(),
         },
         modified: Some("2026-01-05T10:00:00Z".into()),
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: Some("utf-8".into()),
         reader: Some(ReaderInfo {
             id: "markdown".into(),

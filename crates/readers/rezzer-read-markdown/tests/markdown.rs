@@ -24,6 +24,9 @@ fn source(bytes: &[u8]) -> Source {
             evidence: "md".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     }
 }
 

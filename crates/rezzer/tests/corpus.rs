@@ -234,14 +234,22 @@ fn corpus_facts() {
     );
 }
 
-/// Makes a snapshot independent of the checkout location and of the file's modification time.
+/// File system facts that exist on some machines and not on others: their lines are left
+/// out of a snapshot, so it is the same on every machine.
+const MACHINE_KEYS: [&str; 3] = ["file_created: ", "downloaded_from: ", "file_tags: "];
+
+/// Makes a snapshot independent of the checkout location and of the file's file system
+/// facts: modification times are replaced, birth time, download address and tags left out.
 fn redact(text: &str, corpus: &str) -> String {
     let text = text.replace(corpus, "<corpus>");
     let lines: Vec<String> = text
         .lines()
+        .filter(|line| !MACHINE_KEYS.iter().any(|key| line.starts_with(key)))
         .map(|line| {
             if line.starts_with("source_date: ") {
                 "source_date: <modified>".to_string()
+            } else if line.starts_with("file_modified: ") {
+                "file_modified: <modified>".to_string()
             } else {
                 line.to_string()
             }
@@ -278,6 +286,11 @@ fn snapshot_json(out: &Output, corpus: &str) -> String {
     let mut value = out.json.clone();
     if let Some(modified) = value.pointer_mut("/source/modified") {
         *modified = Value::String("<modified>".into());
+    }
+    if let Some(Value::Object(source)) = value.get_mut("source") {
+        for key in ["created", "downloaded_from", "file_tags"] {
+            source.remove(key);
+        }
     }
     shorten(&mut value);
     redact(&serde_json::to_string_pretty(&value).unwrap(), corpus)

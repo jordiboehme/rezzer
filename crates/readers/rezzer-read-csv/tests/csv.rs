@@ -26,6 +26,9 @@ fn source(name: &str, format: FormatId, bytes: &[u8]) -> Source {
             evidence: "csv".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     }
 }
 

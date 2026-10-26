@@ -1571,6 +1571,9 @@ mod tests {
                 evidence: "x".into(),
             },
             modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
         })));
         let budget = Budget::new(Limits::default());
         budget.cancel();
@@ -1627,6 +1630,9 @@ mod tests {
                 evidence: "x".into(),
             },
             modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
         })));
         let bad = |page: u32, why: &str| Failure {
             page,
@@ -1732,6 +1738,9 @@ mod tests {
                 evidence: "%PDF-".into(),
             },
             modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
         };
         let budget = Budget::new(Limits::default());
         let before = render::SCAN_RUNS.with(std::cell::Cell::get);
@@ -1764,6 +1773,9 @@ mod tests {
                 evidence: "%PDF-".into(),
             },
             modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
         };
         let opts = ReadOptions {
             extract_assets: true,
@@ -1816,6 +1828,9 @@ mod tests {
                 evidence: "%PDF-".into(),
             },
             modified: None,
+            created: None,
+            downloaded_from: None,
+            file_tags: Vec::new(),
         };
         let asked = std::cell::Cell::new(0);
         let budget = Budget::new(Limits::default());

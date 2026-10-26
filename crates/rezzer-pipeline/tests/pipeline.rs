@@ -209,6 +209,88 @@ fn cache_hit_takes_the_path_from_the_current_source() {
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
 }
 
+/// Sets an extended attribute on a path, or returns the OS error.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn set_xattr(path: &Path, name: &str, value: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    let name = std::ffi::CString::new(name).unwrap();
+    // SAFETY: path and name are NUL-terminated strings, the value pointer and length come
+    // from one live slice.
+    #[cfg(target_os = "macos")]
+    let rc = unsafe {
+        libc::setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    // SAFETY: as above.
+    #[cfg(target_os = "linux")]
+    let rc = unsafe {
+        libc::setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn cache_hit_takes_fresh_file_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(files.path().join("one")).unwrap();
+    std::fs::create_dir_all(files.path().join("two")).unwrap();
+    let a = files.path().join("one/x.txt");
+    let b = files.path().join("two/x.txt");
+    for (path, tags, secs) in [
+        (&a, "Rot", 1_700_000_000),
+        (&b, "Blau, Projekt", 1_800_000_000),
+    ] {
+        std::fs::write(path, "hello\n").unwrap();
+        if let Err(error) = set_xattr(path, "user.xdg.tags", tags.as_bytes()) {
+            eprintln!("skipped: this file system refuses user.xdg.tags ({error})");
+            return;
+        }
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)))
+            .unwrap();
+    }
+    let (registry, calls) = counting(false);
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let first = pipeline.run_path(&a, &request()).document.unwrap();
+    let second = pipeline.run_path(&b, &request()).document.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(first.source.file_tags, ["Rot"]);
+    assert_eq!(
+        first.source.modified.as_deref(),
+        Some("2023-11-14T22:13:20Z")
+    );
+    assert_eq!(second.source.file_tags, ["Blau", "Projekt"]);
+    assert_eq!(
+        second.source.modified.as_deref(),
+        Some("2027-01-15T08:00:00Z")
+    );
+    let fresh =
+        rezzer_detect::open(&std::fs::canonicalize(&b).unwrap(), &Default::default()).unwrap();
+    assert_eq!(second.source.created, fresh.created);
+    assert_eq!(second.source.downloaded_from, fresh.downloaded_from);
+}
+
 #[test]
 fn the_file_name_is_part_of_the_cache_key() {
     // The CSV reader names its sheet after the file: a renamed copy must not get the old name.
