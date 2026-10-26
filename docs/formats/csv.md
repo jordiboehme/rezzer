@@ -97,6 +97,7 @@ Found in the data, not written as formulas in the file.
 - A very small file (3 to 9 lines) with a ragged row is read as CSV only when it has a `.csv` or `.tsv` extension and its header row and first record have the same field count. Otherwise it is read as text
 - The table shows at most 10,000 rows, 1,000 columns and 200,000 cells (counted after short rows are padded). A Columns table lists at most 500 columns. The output says what is not shown
 - A Columns table describes the columns of its table. A column that is empty in every row and lies outside every table, like the one after a trailing delimiter, is counted in the size but has no row in a Columns table
+- The Logic section names a column by its whole letter, like `B:B`. When a file holds two tables, one letter can name a column in each of them
 - `--table-style` changes only the Markdown. `--json` gives the full model
 - qsv-sniffer 0.12.2 was tested for delimiter and header detection. It failed or was wrong on 8 of 13 files and its repository is archived, so Rezzer does its own detection
 
