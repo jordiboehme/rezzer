@@ -29,7 +29,8 @@
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list
 //! - A body with fewer than 3 non-blank lines outside fences (Crystalline's Q001) gets the
-//!   frontmatter description as a paragraph under the title; nothing else changes
+//!   frontmatter description as a paragraph under the title. When it is still short, a last
+//!   line says there is no content (in the chosen sections, when the caller chose some)
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 
@@ -372,21 +373,27 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         parts.extend(facets::not_read(doc));
     }
     // Crystalline wants 3 lines of content (Q001): a shorter body gets the description as
-    // a paragraph under the title.
+    // a paragraph under the title, and a body that is still short says it has nothing more.
     let lines = describe::content_lines(&heading)
         + parts
             .iter()
             .map(|p| describe::content_lines(p))
             .sum::<usize>();
     if lines < MIN_CONTENT_LINES {
-        let description = frontmatter::shown_description(doc, opts);
-        let text = blocks::paragraph(&[Inline::Text {
-            text: description,
+        let description = blocks::paragraph(&[Inline::Text {
+            text: frontmatter::shown_description(doc, opts),
             emphasis: false,
             strong: false,
             strike: false,
         }]);
-        parts.insert(0, text);
+        if lines + describe::content_lines(&description) < MIN_CONTENT_LINES {
+            parts.push(if opts.sections.is_some() {
+                NO_CONTENT_IN_SECTIONS.to_string()
+            } else {
+                NO_CONTENT.to_string()
+            });
+        }
+        parts.insert(0, description);
     }
     // One growth for all parts, so a huge part is not doubled by the push.
     out.reserve_exact(
@@ -407,6 +414,13 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
 
 /// Crystalline's least number of content lines in a body (its rule Q001).
 const MIN_CONTENT_LINES: usize = 3;
+
+/// The last line of a body that has nothing but its title and description.
+const NO_CONTENT: &str = "The document has no content.";
+
+/// [`NO_CONTENT`] when the caller chose the sections: the document may have content in
+/// others.
+const NO_CONTENT_IN_SECTIONS: &str = "The chosen sections have no content.";
 
 /// `## Overview`: the parts with kind, size, role and what they read from, the facts, and a
 /// Mermaid graph of the parts when one reads from another. `None` when the document has no

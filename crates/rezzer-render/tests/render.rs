@@ -6739,7 +6739,7 @@ fn empty_file_gets_three_lines() {
     let md = render(&d, Completeness::Complete, &opts());
     assert_eq!(
         after_frontmatter(&md),
-        "\n# empty.txt\n\nEMPTY, 0 bytes.\n\nThe file is empty.\n"
+        "\n# empty.txt\n\nEmpty file, 0 bytes.\n\nThe file is empty.\n"
     );
     assert_eq!(content_lines(&md), 3);
 }
@@ -6820,4 +6820,36 @@ fn part_heading_equal_to_its_title_is_written_once() {
         after_frontmatter(&md).starts_with("\n# Big Report: Results\n\n## Big Report\n"),
         "{md}"
     );
+}
+
+#[test]
+fn chosen_sections_without_content_say_so() {
+    let mut d = doc();
+    d.body = vec![para("One."), para("Two.")];
+    let mut o = opts();
+    o.sections = Some(vec![OutputSection::Logic]);
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(
+        after_frontmatter(&md),
+        "\n# report.md\n\nMarkdown, 42 bytes.\n\nThe chosen sections have no content.\n"
+    );
+    assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn long_own_description_stays_one_scalar() {
+    let long = format!("{}\n{}", "word ".repeat(600), "x\"y".repeat(200));
+    let mut d = doc();
+    d.properties.description = Some(long.clone());
+    let md = render(&d, Completeness::Complete, &opts());
+    let line = fm_line(&md, "description").expect("description");
+    assert!(line.starts_with('"') && line.ends_with('"'), "{line}");
+    let mut scalars = Vec::new();
+    for item in saphyr_parser::Parser::new_from_str(frontmatter_of(&md)) {
+        if let (saphyr_parser::Event::Scalar(v, ..), _) = item.expect("valid yaml") {
+            scalars.push(v.into_owned());
+        }
+    }
+    let at = scalars.iter().position(|s| s == "description").unwrap();
+    assert_eq!(scalars[at + 1], long.trim());
 }

@@ -21,6 +21,14 @@ pub struct Loss {
     pub severity: Severity,
 }
 
+impl Loss {
+    /// True when the loss says something was not read: every loss but an uncertain one. An
+    /// uncertain loss (an unsure region, a guessed dialect) was read, only not surely.
+    pub fn is_not_read(&self) -> bool {
+        self.why != LossReason::Uncertain
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LossReason {

@@ -12,7 +12,7 @@
 
 use std::collections::HashSet;
 
-use rezzer_model::{Block, Document, FormatId, FormulaKind, LossReason, SectionKind};
+use rezzer_model::{Block, Document, FormatId, LayoutKind, SectionKind, Signature};
 
 use crate::blocks::MAX_DEPTH;
 use crate::frontmatter::{document_date, format_name};
@@ -79,7 +79,7 @@ pub(crate) fn kind_words(doc: &Document) -> Vec<&'static str> {
             .facets
             .signatures
             .iter()
-            .any(|s| s.kind != "usage-rights"),
+            .any(|s| s.kind != Signature::USAGE_RIGHTS),
     };
     if signed {
         out.push("signed");
@@ -108,45 +108,30 @@ pub(crate) struct Counts {
 }
 
 pub(crate) fn counts(doc: &Document) -> Counts {
-    let mut tables = 0;
-    let mut outlines = 0;
-    count_blocks(&doc.body, 0, &mut tables, &mut outlines);
-    Counts {
-        tables,
-        outlines,
-        formulas: doc
-            .facets
-            .formulas
-            .iter()
-            .filter(|f| {
-                !(matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
-                    || f.anchor.0.starts_with("name:"))
-            })
-            .count(),
+    let mut counts = Counts {
+        formulas: doc.facets.formulas.iter().filter(|f| !f.is_name()).count(),
         form_fields: doc.facets.fields.len(),
         signatures: doc.facets.signatures.len(),
         annotations: doc.facets.annotations.len(),
         vision: doc.assets.iter().filter(|a| a.needs_vision).count(),
-        not_read: doc
-            .losses
-            .iter()
-            .filter(|l| l.why != LossReason::Uncertain)
-            .count(),
-    }
+        not_read: doc.losses.iter().filter(|l| l.is_not_read()).count(),
+        ..Counts::default()
+    };
+    count_blocks(&doc.body, 0, &mut counts);
+    counts
 }
 
-fn count_blocks(list: &[Block], depth: usize, tables: &mut usize, outlines: &mut usize) {
+/// Adds the tables and outlines in `list` to `counts`.
+fn count_blocks(list: &[Block], depth: usize, counts: &mut Counts) {
     if depth > MAX_DEPTH {
         return;
     }
     for b in list {
         match b {
             Block::Table { role, layout, .. } => {
-                let table_region = layout
-                    .as_ref()
-                    .is_none_or(|l| l.kind == rezzer_model::LayoutKind::Table);
+                let table_region = layout.as_ref().is_none_or(|l| l.kind == LayoutKind::Table);
                 if role.is_none() && table_region {
-                    *tables += 1;
+                    counts.tables += 1;
                 }
             }
             Block::Section {
@@ -156,17 +141,17 @@ fn count_blocks(list: &[Block], depth: usize, tables: &mut usize, outlines: &mut
                 ..
             } => {
                 if *kind == SectionKind::Other && title.as_deref() == Some("Outline") {
-                    *outlines += 1;
+                    counts.outlines += 1;
                 } else {
-                    count_blocks(blocks, depth + 1, tables, outlines);
+                    count_blocks(blocks, depth + 1, counts);
                 }
             }
             Block::Quote { blocks, .. } | Block::Callout { blocks, .. } => {
-                count_blocks(blocks, depth + 1, tables, outlines);
+                count_blocks(blocks, depth + 1, counts);
             }
             Block::List { items, .. } => {
                 for item in items {
-                    count_blocks(item, depth + 1, tables, outlines);
+                    count_blocks(item, depth + 1, counts);
                 }
             }
             _ => {}
@@ -188,10 +173,7 @@ pub(crate) fn description(doc: &Document) -> String {
     {
         return own.to_string();
     }
-    let mut head = vec![format_label(doc.source.format)];
-    if let Some(size) = size(doc) {
-        head.push(size);
-    }
+    let mut head = vec![format_label(doc.source.format), size(doc)];
     if let Some(own) = doc
         .properties
         .title
@@ -237,9 +219,9 @@ fn counted(n: usize, one: &str, many: &str) -> String {
 
 /// The size in the template: the pages of a PDF, the sheets of a workbook, the size of the
 /// one part the overview has, else the bytes.
-fn size(doc: &Document) -> Option<String> {
+fn size(doc: &Document) -> String {
     if let Some(pages) = doc.properties.facts.pages {
-        return Some(counted(pages as usize, "page", "pages"));
+        return counted(pages as usize, "page", "pages");
     }
     let workbook = matches!(
         doc.source.format,
@@ -259,32 +241,79 @@ fn size(doc: &Document) -> Option<String> {
         })
         .count();
     if workbook && sheets > 0 {
-        return Some(counted(sheets, "sheet", "sheets"));
+        return counted(sheets, "sheet", "sheets");
     }
     if let Some(overview) = &doc.overview
         && let [one] = overview.parts.as_slice()
         && !one.size.trim().is_empty()
     {
-        return Some(one.size.trim().to_string());
+        return one.size.trim().to_string();
     }
     let bytes = usize::try_from(doc.source.size).unwrap_or(usize::MAX);
-    Some(counted(bytes, "byte", "bytes"))
+    counted(bytes, "byte", "bytes")
 }
 
-/// The name of a format in a description: `PDF`, `XLSX`, `Markdown`, `Text` and so on, else
-/// the format name in upper case.
+/// The name of a format in a description, as people write it: `PDF`, `Markdown`, `3MF`,
+/// `KiCad schematic`, `Empty file`. A format without a label of its own (one added later)
+/// is its name with spaces in upper case.
 pub(crate) fn format_label(format: FormatId) -> String {
-    match format {
-        FormatId::Pdf => "PDF".to_string(),
-        FormatId::Xlsx => "XLSX".to_string(),
-        FormatId::Xlsm => "XLSM".to_string(),
-        FormatId::Xlsb => "XLSB".to_string(),
-        FormatId::Ods => "ODS".to_string(),
-        FormatId::Csv => "CSV".to_string(),
-        FormatId::Markdown => "Markdown".to_string(),
-        FormatId::Text => "Text".to_string(),
-        other => format_name(other).to_ascii_uppercase(),
-    }
+    let label = match format {
+        FormatId::Empty => "Empty file",
+        FormatId::Text => "Text",
+        FormatId::Markdown => "Markdown",
+        FormatId::Csv => "CSV",
+        FormatId::Tsv => "TSV",
+        FormatId::Html => "HTML",
+        FormatId::Epub => "EPUB",
+        FormatId::Pdf => "PDF",
+        FormatId::PostScript => "PostScript",
+        FormatId::Eps => "EPS",
+        FormatId::Docx => "DOCX",
+        FormatId::Xlsx => "XLSX",
+        FormatId::Xlsm => "XLSM",
+        FormatId::Xlsb => "XLSB",
+        FormatId::Pptx => "PPTX",
+        FormatId::Odt => "ODT",
+        FormatId::Ods => "ODS",
+        FormatId::Odp => "ODP",
+        FormatId::Doc => "DOC",
+        FormatId::Xls => "XLS",
+        FormatId::Ppt => "PPT",
+        FormatId::Rtf => "RTF",
+        FormatId::Eml => "Email",
+        FormatId::Mbox => "Mailbox",
+        FormatId::Zip => "ZIP",
+        FormatId::Fcstd => "FreeCAD",
+        FormatId::Step => "STEP",
+        FormatId::Iges => "IGES",
+        FormatId::Ifc => "IFC",
+        FormatId::Dxf => "DXF",
+        FormatId::Dwg => "DWG",
+        FormatId::ThreeMf => "3MF",
+        FormatId::Stl => "STL",
+        FormatId::Obj => "OBJ",
+        FormatId::Gltf => "glTF",
+        FormatId::Glb => "GLB",
+        FormatId::Gcode => "G-code",
+        FormatId::Bgcode => "Binary G-code",
+        FormatId::KicadSch => "KiCad schematic",
+        FormatId::KicadPcb => "KiCad board",
+        FormatId::Gerber => "Gerber",
+        FormatId::Excellon => "Excellon drill",
+        FormatId::Openscad => "OpenSCAD",
+        FormatId::Sldprt => "SolidWorks part",
+        FormatId::CreoPrt => "Creo part",
+        FormatId::NxPrt => "NX part",
+        FormatId::Catpart => "CATIA part",
+        FormatId::Ipt => "Inventor part",
+        FormatId::Iam => "Inventor assembly",
+        FormatId::F3d => "Fusion design",
+        FormatId::Rhino3dm => "Rhino 3DM",
+        FormatId::Ole => "OLE compound file",
+        FormatId::Unknown => "Unknown format",
+        other => return format_name(other).replace('_', " ").to_ascii_uppercase(),
+    };
+    label.to_string()
 }
 
 /// The token count Crystalline's size check (Q002) uses: the characters of the body after
@@ -373,8 +402,18 @@ mod tests {
         assert_eq!(format_label(FormatId::Xlsb), "XLSB");
         assert_eq!(format_label(FormatId::Markdown), "Markdown");
         assert_eq!(format_label(FormatId::Text), "Text");
-        assert_eq!(format_label(FormatId::ThreeMf), "THREE_MF");
+        assert_eq!(format_label(FormatId::ThreeMf), "3MF");
         assert_eq!(format_label(FormatId::Docx), "DOCX");
+        assert_eq!(format_label(FormatId::Empty), "Empty file");
+        assert_eq!(format_label(FormatId::Unknown), "Unknown format");
+        assert_eq!(format_label(FormatId::PostScript), "PostScript");
+        assert_eq!(format_label(FormatId::KicadSch), "KiCad schematic");
+        assert_eq!(format_label(FormatId::CreoPrt), "Creo part");
+        // The tag word stays the format name.
+        assert_eq!(
+            fold_tag(&format_name(FormatId::ThreeMf)).as_deref(),
+            Some("three-mf")
+        );
     }
 
     #[test]

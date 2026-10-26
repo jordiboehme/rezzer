@@ -97,3 +97,48 @@ fn inline_math_round_trips() {
     assert!(md.contains("$`x + y`$"), "{md}");
     assert_eq!(first, second, "{md}");
 }
+
+/// Non-blank lines of the body after the frontmatter (Crystalline's Q001 count; these bodies
+/// have no fences).
+fn body_lines(md: &str) -> Vec<&str> {
+    let rest = md.strip_prefix("---\n").expect("frontmatter");
+    let end = rest.find("\n---\n").expect("frontmatter end");
+    rest[end + 5..]
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect()
+}
+
+#[test]
+fn body_without_content_gets_three_lines() {
+    let doc = read("---\ntitle: Only\n---\n");
+    let md = render(&doc, Completeness::Complete, &RenderOptions::default());
+    assert_eq!(
+        body_lines(&md),
+        [
+            "# Only",
+            "Markdown, 20 bytes, \"Only\".",
+            "The document has no content."
+        ]
+    );
+    let opts = RenderOptions {
+        sections: Some(vec![OutputSection::Content]),
+        ..RenderOptions::default()
+    };
+    let md = render(&doc, Completeness::Complete, &opts);
+    assert_eq!(
+        body_lines(&md),
+        [
+            "# Only",
+            "Markdown, 20 bytes, \"Only\".",
+            "The chosen sections have no content."
+        ]
+    );
+    // Its own one-line description does not reach 3 lines either.
+    let doc = read("---\ntitle: Only\ndescription: One line.\n---\n");
+    let md = render(&doc, Completeness::Complete, &RenderOptions::default());
+    assert_eq!(
+        body_lines(&md),
+        ["# Only", "One line.", "The document has no content."]
+    );
+}
