@@ -69,7 +69,8 @@ pub struct RezParams {
     /// links to them. Older files that Rezzer wrote there and this read does not write are
     /// removed. Rezzer only replaces or removes files it wrote for the same source: anything
     /// else in the way stops the read, also the output of another file with the same name
-    /// or a name that differs only in case. Without it nothing is written.
+    /// and other content, or with a name that differs only in case on a file system that
+    /// ignores case. Without it nothing is written.
     #[serde(default)]
     pub output_dir: Option<String>,
     /// Largest part in tokens when output_dir is set. A larger document is written as a main

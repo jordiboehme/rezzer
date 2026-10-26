@@ -68,8 +68,8 @@ struct ReadArgs {
     /// <file name>.parts. Pictures go to a folder next to it. Older files that Rezzer wrote
     /// there and this read does not write are removed. Rezzer only replaces or removes files
     /// it wrote for the same source. Anything else in the way stops the read, also the output
-    /// of another file with the same name, or with a name that differs only in case on a file
-    /// system that ignores case (the macOS default).
+    /// of another file with the same name and other content, or with a name that differs
+    /// only in case on a file system that ignores case (the macOS default).
     #[arg(short = 'o', long = "output-dir", value_name = "DIR")]
     output_dir: Option<PathBuf>,
     /// Largest part in tokens when writing with -o. A larger document is written as a main

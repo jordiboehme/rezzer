@@ -36,9 +36,21 @@
 //! Rezzer names pictures ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
 //! wrote for this source ([`holder`]). A file a user put there stays. An empty parts folder
 //! is removed, also one Rezzer did not make. Symlinks and folders inside are never followed
-//! or removed. The check of a folder and the removal of its files are separate steps, so a
-//! folder that is swapped for a symlink in between is a known gap (planned for the
-//! known-issues plan).
+//! or removed.
+//!
+//! Each Markdown and JSON path is looked at again right before its write, and a path that
+//! was free is created exclusively without removing anything: a file that appears after the
+//! check (a parallel run, a file of the user's) fails the write and stays.
+//!
+//! Known gap (planned for the known-issues plan): every path is opened by name below the
+//! output folder, so its folders are followed at the moment of each call. Someone who can
+//! write to the output folder and swaps the parts or assets folder for a symlink between
+//! the folder check and the writes redirects them into the folder the link points at. There
+//! new parts are only created (never over a file), and only Rezzer's own parts of
+//! the same source are replaced or removed. Pictures are replaced by name, and stale
+//! picture names are removed, so a file named like a Rezzer picture (`page-3.png`) in that
+//! folder can be overwritten or removed. Closing it needs writes relative to an open folder
+//! handle (`openat` with `O_NOFOLLOW`), which the standard library does not offer.
 //!
 //! Order: the pictures are planned while the document is read, because the Markdown links
 //! name them. After the render the part paths are checked, so a run that fails there has
@@ -294,7 +306,8 @@ pub(crate) fn write_assets(
     };
     for p in planned {
         let result = match &ready {
-            Ok(()) => write_new(&dir.join(&folder).join(&p.file), &p.bytes),
+            // Pictures are replaced by name (ruling P5-AC).
+            Ok(()) => write_new(&dir.join(&folder).join(&p.file), &p.bytes, true),
             Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
         };
         match result {
@@ -373,20 +386,27 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     if !files.parts.is_empty() {
         prepare_folder(dir, files.folder).map_err(|e| shown(&folder, e))?;
     }
+    // Each path is looked at again right before its write: only Rezzer's own output for
+    // this source is replaced. A file that appeared since the check (another run at the same
+    // time, a file of the user's) makes the exclusive create fail instead of being replaced.
+    let put = |target: &Path, bytes: &[u8], what: Target| -> Result<(), String> {
+        let replace = decide(target, &source, what)?;
+        write_new(target, bytes, replace).map_err(|e| shown(target, e))
+    };
     for (path, markdown) in &files.parts {
         let target = dir.join(path);
-        write_new(&target, markdown.as_bytes()).map_err(|e| shown(&target, e))?;
+        put(&target, markdown.as_bytes(), Target::Part)?;
         keep.extend(target.file_name().map(std::ffi::OsStr::to_os_string));
     }
     let main = dir.join(format!("{}.md", files.main));
-    write_new(&main, files.main_markdown.as_bytes()).map_err(|e| shown(&main, e))?;
+    put(&main, files.main_markdown.as_bytes(), Target::Main)?;
     if let Some(json) = files.json {
         let target = dir.join(format!("{}.json", files.main));
         let mut text = json.to_string();
         if !text.ends_with('\n') {
             text.push('\n');
         }
-        write_new(&target, text.as_bytes()).map_err(|e| shown(&target, e))?;
+        put(&target, text.as_bytes(), Target::Json)?;
     }
     remove_stale(&folder, &keep, Stale::Parts(&source)).map_err(|e| {
         format!(
@@ -407,25 +427,11 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
 /// source.
 pub(crate) fn check_paths(dir: &Path, files: &Files<'_>) -> Result<(), String> {
     let source = SourceId::of(files);
-    let resource = &source.resource;
-    let refuse = |target: &Path, holder: Holder, what: &str| match holder {
-        Holder::Free | Holder::Same => Ok(()),
-        Holder::Foreign => Err(format!(
-            "cannot write {}: it is in the way and is not {what} Rezzer wrote",
-            target.display()
-        )),
-        Holder::Other(other) => Err(format!(
-            "cannot write {}: it holds Rezzer's output for {other}, and this read is of \
-             {resource}. Sources with the same name, or names that differ only in letter \
-             case on a file system that ignores case, need different output folders",
-            target.display()
-        )),
-    };
     let main = dir.join(format!("{}.md", files.main));
-    refuse(&main, holder(&main, &source, Kind::Main), "a file")?;
+    decide(&main, &source, Target::Main)?;
     if files.json.is_some() {
         let json = dir.join(format!("{}.json", files.main));
-        refuse(&json, json_holder(&json, &source), "a file")?;
+        decide(&json, &source, Target::Json)?;
     }
     if files.parts.is_empty() {
         return Ok(());
@@ -449,18 +455,47 @@ pub(crate) fn check_paths(dir: &Path, files: &Files<'_>) -> Result<(), String> {
         }
     }
     for (path, _) in &files.parts {
-        let target = dir.join(path);
-        match holder(&target, &source, Kind::Part) {
-            Holder::Foreign => {
-                return Err(format!(
-                    "cannot write the parts: {} is in the way and is not a part Rezzer wrote",
-                    target.display()
-                ));
-            }
-            other => refuse(&target, other, "a part")?,
-        }
+        decide(&dir.join(path), &source, Target::Part)?;
     }
     Ok(())
+}
+
+/// What a path of a run is: the main document, the JSON or a part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Main,
+    Json,
+    Part,
+}
+
+/// Whether Rezzer may write `target` for `source` now: `Ok(false)` when nothing is there,
+/// `Ok(true)` when it holds Rezzer's own output for this source (so it is replaced), else
+/// the message that stops the run.
+fn decide(target: &Path, source: &SourceId, what: Target) -> Result<bool, String> {
+    let found = match what {
+        Target::Main => holder(target, source, Kind::Main),
+        Target::Part => holder(target, source, Kind::Part),
+        Target::Json => json_holder(target, source),
+    };
+    match found {
+        Holder::Free => Ok(false),
+        Holder::Same => Ok(true),
+        Holder::Foreign if what == Target::Part => Err(format!(
+            "cannot write the parts: {} is in the way and is not a part Rezzer wrote",
+            target.display()
+        )),
+        Holder::Foreign => Err(format!(
+            "cannot write {}: it is in the way and is not a file Rezzer wrote",
+            target.display()
+        )),
+        Holder::Other(other) => Err(format!(
+            "cannot write {}: it holds Rezzer's output for {other}, and this read is of \
+             {}. Sources with the same name, or names that differ only in letter case on a \
+             file system that ignores case, need different output folders",
+            target.display(),
+            source.resource
+        )),
+    }
 }
 
 /// Removes `folder` when it is a plain directory and empty. Anything else stays.
@@ -715,21 +750,87 @@ fn prepare_folder(dir: &Path, folder: &str) -> std::io::Result<()> {
     }
 }
 
-/// Writes a new file at `path`. An existing entry (also a symlink) is removed without being
-/// followed, and the file is created exclusively, so a symlink is never written through.
-fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Writes a new file at `path`, created exclusively, so a symlink is never written through.
+/// With `replace` an existing entry (also a symlink) is removed first without being
+/// followed; without it nothing is removed, and an entry that is there makes the write
+/// fail ("it appeared while Rezzer was writing").
+fn write_new(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
     use std::io::Write;
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() => {
             return Err(std::io::Error::other("a directory is in the way"));
         }
-        Ok(_) => std::fs::remove_file(path)?,
+        Ok(_) if replace => std::fs::remove_file(path)?,
+        Ok(_) => {
+            return Err(std::io::Error::other(
+                "it appeared while Rezzer was writing and is not replaced",
+            ));
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(path)?;
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                std::io::Error::other("it appeared while Rezzer was writing and is not replaced")
+            } else {
+                e
+            }
+        })?;
     file.write_all(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Files, check_paths, write_files, write_new};
+
+    fn files<'a>(main_markdown: &'a str) -> Files<'a> {
+        Files {
+            source: "/src/notes.txt",
+            sha256: "00",
+            main: "notes.txt",
+            folder: "notes.txt.parts",
+            main_markdown,
+            parts: Vec::new(),
+            json: None,
+        }
+    }
+
+    /// Without `replace` nothing is removed: an entry that is there fails the write.
+    #[test]
+    fn a_free_path_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.md");
+        write_new(&path, b"first", false).unwrap();
+        let err = write_new(&path, b"second", false).unwrap_err();
+        assert!(err.to_string().contains("appeared"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        write_new(&path, b"third", true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"third");
+    }
+
+    /// A file that appears after the check (another run at the same time, a file of the
+    /// user's) is not replaced by the write that follows.
+    #[test]
+    fn a_file_that_appears_after_the_check_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let ours = "---\ntype: source\nresource: \"/src/notes.txt\"\ngenerated: { by: rezzer/0.1.0, at: 2026-10-26T00:00:00Z }\n---\n\nnew\n";
+        let f = files(ours);
+        check_paths(dir.path(), &f).unwrap();
+        let main = dir.path().join("notes.txt.md");
+        let other = "---\ntype: source\nresource: \"/other/notes.txt\"\ngenerated: { by: rezzer/0.1.0, at: 2026-10-26T00:00:00Z }\nsource_sha256: \"11\"\n---\n\nother\n";
+        for appeared in ["# mine\n", other] {
+            std::fs::write(&main, appeared).unwrap();
+            let err = write_files(dir.path(), &f).unwrap_err();
+            assert!(err.contains("notes.txt.md"), "{err}");
+            assert_eq!(std::fs::read_to_string(&main).unwrap(), appeared);
+        }
+        // Rezzer's own output for this source is replaced.
+        std::fs::write(&main, ours.replace("new", "old")).unwrap();
+        write_files(dir.path(), &f).unwrap();
+        assert_eq!(std::fs::read_to_string(&main).unwrap(), ours);
+    }
 }
