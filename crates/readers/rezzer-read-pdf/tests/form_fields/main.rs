@@ -1095,6 +1095,75 @@ fn rows_of_fields_between_horizontal_rules_alone_pair() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// As [`labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss`] with both ends
+/// in ruled tables of two rows, but the strip of another shape is a mix: its first row holds,
+/// beside the labels under the values over them, a third field whose label stands beside its
+/// value (`Kst 4711`). No field pairs with the value of another row, and each field with a
+/// value pairs right or a loss names it.
+#[test]
+fn labels_under_values_beside_a_label_and_value_between_tables_never_pair_shifted() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        let mut b = rows_page(&g, &s, &THREE_ROWS, &[]);
+        let (d, h, top) = (g.data, 2.4 * g.data, 760.0 + g.dy);
+        let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+        // The rules run on to column 70; a divider at column 50 parts the third field.
+        for k in 0..3 {
+            b.page.template += &g.hrule(x1, g.col(70), top - h * k as f32);
+        }
+        let span = 1.21 * d;
+        b.page.template += &if g.rising {
+            g.vrule(x1 - 0.06, top - h, top - h + span)
+        } else {
+            g.vrule(x1 - 0.06, top - span, top)
+        };
+        let y = top - 0.86 * d;
+        b.page.template += &draw::courier(g.col(51), y, g.label, "Kst");
+        b.page.template += &draw::courier(g.col(56), y, d, "4711");
+        b.values.push("4711".into());
+        b.fields.push(("Kst", Ok(Some("4711"))));
+        // Ruled tables of two rows over the grid and under it, their divider in line with the
+        // grid's, each with the text of its row away from the grid.
+        let table = |b: &mut Built, hi: f32, row: f32, text: [&'static str; 2]| {
+            for k in 0..3 {
+                b.page.template += &g.hrule(x0, x1, hi - h * k as f32);
+            }
+            for x in [x0, g.col(30) - 0.06, x1] {
+                b.page.template += &g.vrule(x, hi - 2.0 * h, hi);
+            }
+            for (k, t) in [0, 30].into_iter().zip(text) {
+                let x = g.col(k) + 0.3 * g.pitch();
+                b.page.template += &draw::courier(x, row + 0.6 * d, d, t);
+                b.values.push(t.to_string());
+            }
+        };
+        table(&mut b, top + 2.0 * h, top + h, ["Anschrift", "Kontakt"]);
+        let last = top - 2.0 * h;
+        table(&mut b, last, last - 2.0 * h, ["1000", "1.111,11"]);
+        let out = read_pages(&[&b]);
+        let named = |n: &str| {
+            out.document
+                .losses
+                .iter()
+                .any(|l| l.what.contains(&format!(" {n}")))
+        };
+        let broken: Vec<Broken> = check_fields(&out, &b)
+            .into_iter()
+            .filter(|x| {
+                let field = x.1.strip_suffix(" does not pair");
+                !(x.0 == Inv::ClearPairs && field.is_some_and(named))
+            })
+            .collect();
+        reads.push((look.to_string(), broken));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.

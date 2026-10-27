@@ -635,16 +635,17 @@ pub(in crate::tables) fn field_strips(
         // add evidence, which under the table of ends gives a loss or the reading both ways
         // agree on.
         let own: HashSet<usize> = runs.iter().copied().collect();
-        // A group with a strip of another shape takes any evidence as a loss. When its labels
-        // stand beside their values (a block of labels and values) no reading puts them under
-        // the rule their values stand on, so the runs of ruled tables are no evidence for it:
+        // A group with a strip of another shape takes any evidence as a loss. When every label
+        // with a value stands beside it (a block of labels and values) no reading puts them
+        // under the rule their values stand on, so the runs of ruled tables are no evidence for
+        // it (a group that mixes such a block with labels over values has that reading):
         // the row of a section over such a block is that table's text. Labels over a value of
         // two lines may stand under the rule of the values over them: for them, as for every
         // other group, the runs of ruled tables count. Held and free runs always count.
         let shaped = g.iter().all(|&k| strips[k].rows.is_some());
-        let beside = g
-            .iter()
-            .any(|&k| strips[k].fields.iter().any(|f| beside_value(flow, f)));
+        let fields = || g.iter().flat_map(|&k| &strips[k].fields);
+        let beside = fields().any(|f| beside_value(flow, f))
+            && fields().all(|f| f.value.is_empty() || beside_value(flow, f));
         let with_held = |i: usize| {
             !own.contains(&i) && !outside.contains(&i) && (shaped || !beside || !tabled(i))
         };
