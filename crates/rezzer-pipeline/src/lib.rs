@@ -211,6 +211,11 @@ pub type DetectFn = fn(&str, Option<&str>, &[u8]) -> (FormatId, Detection);
 impl Pipeline {
     pub fn new(config: Config, registry: Registry) -> Pipeline {
         let cache = Cache::of(&config);
+        Pipeline::with_cache(config, registry, cache)
+    }
+
+    /// A pipeline with `cache` in place of the one `config` names.
+    pub(crate) fn with_cache(config: Config, registry: Registry, cache: Option<Cache>) -> Pipeline {
         Pipeline {
             config,
             registry,

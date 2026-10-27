@@ -247,12 +247,8 @@ mod tests {
         // The pipeline is built here with no default, so the user's real cache is never used.
         let mut registry = crate::Registry::new();
         registry.register(Box::new(rezzer_read_text::TextReader));
-        let pipeline = crate::Pipeline {
-            cache: Cache::with_default(&config, None),
-            config,
-            registry,
-            detector: rezzer_detect::detect_with_hints,
-        };
+        let cache = Cache::with_default(&config, None);
+        let pipeline = crate::Pipeline::with_cache(config, registry, cache);
         let input = dir.path().join("note.txt");
         std::fs::write(&input, "Muster GmbH\n").unwrap();
         let cwd = std::env::current_dir().unwrap();

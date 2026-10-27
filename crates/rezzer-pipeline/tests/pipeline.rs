@@ -808,16 +808,51 @@ fn config_load_uses_xdg_config_home() {
         rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), None),
         Some(dir.path().join("rezzer/config.toml"))
     );
-    let home = Path::new("/home/someone");
-    assert_eq!(
-        rezzer_pipeline::config_path_from(Some("".as_ref()), Some(home.as_os_str())),
-        Some(home.join(".config/rezzer/config.toml"))
-    );
-    assert_eq!(
-        rezzer_pipeline::config_path_from(Some("relative".as_ref()), Some(home.as_os_str())),
-        Some(home.join(".config/rezzer/config.toml"))
-    );
+    // A temp dir is absolute on every system, so the test holds on Windows too.
+    let home = dir.path();
+    for xdg in [None, Some(""), Some("relative")] {
+        assert_eq!(
+            rezzer_pipeline::config_path_from(xdg.map(OsStr::new), Some(home.as_os_str())),
+            Some(home.join(".config/rezzer/config.toml")),
+            "{xdg:?}"
+        );
+    }
     assert_eq!(rezzer_pipeline::config_path_from(None, None), None);
+}
+
+#[test]
+fn config_path_needs_an_absolute_base() {
+    // A relative or empty HOME never gives a config file in the working directory, with or
+    // without a relative XDG_CONFIG_HOME.
+    for home in [None, Some(""), Some("rel")] {
+        for xdg in [None, Some(""), Some("rel")] {
+            assert_eq!(
+                rezzer_pipeline::config_path_from(xdg.map(OsStr::new), home.map(OsStr::new)),
+                None,
+                "{xdg:?} {home:?}"
+            );
+        }
+    }
+    // An absolute XDG_CONFIG_HOME is enough on its own.
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), Some("rel".as_ref())),
+        Some(dir.path().join("rezzer/config.toml"))
+    );
+}
+
+// On Unix a Windows drive path is relative, and a Unix path is relative on Windows.
+#[test]
+fn config_path_judges_absolute_by_this_system() {
+    let foreign = if cfg!(windows) {
+        "/home/a"
+    } else {
+        r"C:\Users\a"
+    };
+    assert_eq!(
+        rezzer_pipeline::config_path_from(Some(foreign.as_ref()), Some(foreign.as_ref())),
+        None
+    );
 }
 
 // The cache folder lookup is tested with given values only: no test sets an environment

@@ -42,7 +42,8 @@ pub struct Config {
     /// Results are cached unless this is false.
     pub cache: bool,
     /// Where cache entries live; `None` is the user cache dir of [`cache_dir_from`]
-    /// (`~/.cache/rezzer` on Linux, `~/Library/Caches/rezzer` on macOS,
+    /// (`$XDG_CACHE_HOME/rezzer` when that is absolute, else `~/.cache/rezzer`, on Linux;
+    /// `~/Library/Caches/rezzer` on macOS;
     /// `%LOCALAPPDATA%\rezzer\cache` on Windows), and no cache when there is none.
     pub cache_dir: Option<PathBuf>,
     /// Size cap of the cache dir. After a write over the cap the oldest entries are removed
@@ -192,14 +193,13 @@ impl Config {
 }
 
 /// The config file path from the values of `XDG_CONFIG_HOME` and `HOME`. An empty or
-/// relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says.
+/// relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says. Without an
+/// absolute `HOME` either there is no path, so a config file is never read from the working
+/// directory. Absoluteness follows the rules of the system this runs on.
 pub fn config_path_from(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
-    let xdg = xdg_config_home
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute());
-    let base = match xdg {
-        Some(dir) => dir,
-        None => PathBuf::from(home.filter(|h| !h.is_empty())?).join(".config"),
+    let base = match xdg_config_home.filter(|v| host_absolute(v)) {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(home.filter(|v| host_absolute(v))?).join(".config"),
     };
     Some(base.join("rezzer").join("config.toml"))
 }
@@ -274,6 +274,16 @@ pub(crate) fn default_cache_dir() -> Option<PathBuf> {
         home.as_deref(),
         local_app_data.as_deref(),
     )
+}
+
+/// Whether `path` is absolute on the system this runs on: the Windows rules on Windows, the
+/// Unix rules everywhere else.
+fn host_absolute(path: &OsStr) -> bool {
+    if cfg!(windows) {
+        windows_absolute(path)
+    } else {
+        unix_absolute(path)
+    }
 }
 
 /// A Unix path is absolute when it starts with `/`.
