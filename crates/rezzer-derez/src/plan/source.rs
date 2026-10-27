@@ -8,6 +8,8 @@
 //! A sheet with tables refines its region: the cells of its tables become a cell grid and its
 //! formula cells towers.
 
+use std::collections::HashMap;
+
 use rezzer_model::{
     Block, Cell, Document, Formula, SectionKind, a1_position, plain_text, sheet_cell,
 };
@@ -57,9 +59,11 @@ pub struct Rounds {
 pub fn plans(doc: &Document) -> Vec<Plan> {
     let mut out = Vec::new();
     let body = &doc.body;
-    let (mut i, mut k) = (0, 0);
+    let mut i = 0;
+    // The sections of each kind so far, for labels such as `slide 2`.
+    let mut seen = [0usize; 8];
+    let mut formulas = None;
     while i < body.len() && out.len() < MAX_PLANS {
-        k += 1;
         let Block::Section {
             kind,
             title,
@@ -76,6 +80,8 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
             continue;
         };
         i += 1;
+        seen[*kind as usize] += 1;
+        let k = seen[*kind as usize];
         let title = title.as_deref().map(str::trim).filter(|t| !t.is_empty());
         let base = format!(
             "{} {}",
@@ -83,8 +89,17 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
             title.map_or_else(|| k.to_string(), shorten)
         );
         if *kind == SectionKind::Sheet {
-            let key = anchor.as_ref().map(|a| a.0.as_str()).or(title);
-            if let Some(plan) = sheet_plan(&base, blocks, key, title, &doc.facets.formulas) {
+            let by_sheet = formulas.get_or_insert_with(|| formula_cells(&doc.facets.formulas));
+            // Formula anchors name the sheet as its anchor does; the title is the fallback.
+            let named = anchor.as_ref().map(|a| sheet_name(&a.0));
+            let mut cells: Vec<(u32, u32)> = Vec::new();
+            for name in [named, title.filter(|&t| named != Some(t))]
+                .into_iter()
+                .flatten()
+            {
+                cells.extend(by_sheet.get(name).into_iter().flatten());
+            }
+            if let Some(plan) = sheet_plan(&base, blocks, &cells) {
                 out.push(plan);
                 continue;
             }
@@ -93,6 +108,33 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
     }
     out.truncate(MAX_PLANS);
     out
+}
+
+/// The cells `(row, col)` of the formulas in cells, grouped by sheet name without quotes, in
+/// one pass over all formulas.
+fn formula_cells(formulas: &[Formula]) -> HashMap<&str, Vec<(u32, u32)>> {
+    let mut by_sheet: HashMap<&str, Vec<(u32, u32)>> = HashMap::new();
+    for cell in formulas
+        .iter()
+        .filter(|f| !f.is_name())
+        .filter_map(|f| sheet_cell(&f.anchor.0))
+    {
+        by_sheet
+            .entry(sheet_name(cell.sheet))
+            .or_default()
+            .push((cell.row, cell.col));
+    }
+    by_sheet
+}
+
+/// A sheet name as an anchor writes it, without its quotes: `'My Costs'` is `My Costs`.
+/// Names with a doubled quote inside (`'it''s'`) stay quoted, as they cannot be borrowed
+/// unquoted; a section matches them by its anchor.
+fn sheet_name(sheet: &str) -> &str {
+    match sheet.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        Some(inner) if !inner.contains('\'') => inner,
+        _ => sheet,
+    }
 }
 
 /// The plans for a run on `name`: the Grid without a file (`name` empty), the Grid and a
@@ -344,14 +386,8 @@ fn borders(n: u32, bands: u32) -> impl Iterator<Item = u32> {
 }
 
 /// The cell grid plan of a sheet section, or `None` when it has no table or the plan does not
-/// fit a [`REFERENCE`] grid. `key` is the sheet as formula anchors write it, `title` its name.
-fn sheet_plan(
-    label: &str,
-    blocks: &[Block],
-    key: Option<&str>,
-    title: Option<&str>,
-    formulas: &[Formula],
-) -> Option<Plan> {
+/// fit a [`REFERENCE`] grid. `formulas` are the sheet's formula cells `(row, col)`.
+fn sheet_plan(label: &str, blocks: &[Block], formulas: &[(u32, u32)]) -> Option<Plan> {
     let regions: Vec<[u32; 4]> = blocks.iter().filter_map(table_region).collect();
     let r0 = regions.iter().map(|r| r[0]).min()?;
     let c0 = regions.iter().map(|r| r[1]).min()?;
@@ -375,17 +411,8 @@ fn sheet_plan(
             &mut shapes,
         );
     }
-    let on_sheet = |sheet: &str| {
-        key == Some(sheet) || title.is_some_and(|t| unquote(sheet).is_some_and(|s| s == t))
-    };
-    let cells: Vec<(u32, u32)> = formulas
-        .iter()
-        .filter(|f| !f.is_name())
-        .filter_map(|f| sheet_cell(&f.anchor.0))
-        .filter(|c| on_sheet(c.sheet))
-        .filter(|c| (r0..=r1).contains(&c.row) && (c0..=c1).contains(&c.col))
-        .map(|c| (c.row, c.col))
-        .collect();
+    let inside = |&&(r, c): &&(u32, u32)| (r0..=r1).contains(&r) && (c0..=c1).contains(&c);
+    let cells: Vec<(u32, u32)> = formulas.iter().filter(inside).copied().collect();
     // Towers come after the grid, so the shape cap of `fit` never drops the grid.
     let step = cells.len().div_ceil(MAX_TOWERS).max(1);
     for &(r, c) in cells.iter().step_by(step) {
@@ -399,12 +426,6 @@ fn sheet_plan(
         shapes,
     };
     fit(&plan, REFERENCE.0, REFERENCE.1).is_ok().then_some(plan)
-}
-
-/// A quoted sheet name without its quotes: `'My Costs'` is `My Costs`, `'it''s'` is `it's`.
-fn unquote(sheet: &str) -> Option<String> {
-    let inner = sheet.strip_prefix('\'')?.strip_suffix('\'')?;
-    Some(inner.replace("''", "'"))
 }
 
 /// The cells `[row0, col0, row1, col1]` (0-based, inclusive) of a table block: its layout

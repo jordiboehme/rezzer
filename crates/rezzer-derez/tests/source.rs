@@ -184,6 +184,12 @@ fn share(plan: &Plan, w: u16, h: u16) -> Option<f32> {
     Some(taken as f32 / (f32::from(gw - 2 * m) * f32::from(gh - 2 * m)))
 }
 
+/// A time bound in milliseconds: 50 in an optimized build, 500 with debug assertions, so a
+/// loaded machine does not make a debug test run fail.
+fn limit_ms() -> u128 {
+    if cfg!(debug_assertions) { 500 } else { 50 }
+}
+
 fn costs() -> Document {
     let mut d = doc(vec![sheet("Costs", vec![table(5, 4, Some("A1:D5"))])]);
     d.facets.formulas = vec![formula("Costs!D5"), formula("Other!A1")];
@@ -236,7 +242,7 @@ fn huge_sheet_range_is_clipped() {
     let d = doc(vec![sheet("Big", vec![table(3, 3, Some("A1:XFD1048576"))])]);
     let p = plans(&d);
     assert!(
-        started.elapsed().as_millis() < 50,
+        started.elapsed().as_millis() < limit_ms(),
         "{:?}",
         started.elapsed()
     );
@@ -417,7 +423,7 @@ fn generic_plan_for_any_sections() {
     ]);
     let p = plans(&d);
     let labels: Vec<_> = p.iter().map(|p| p.label.as_str()).collect();
-    assert_eq!(labels, ["slide Intro", "chapter 2"]);
+    assert_eq!(labels, ["slide Intro", "chapter 1"]);
     assert_eq!(count(&p[0], ShapeKind::Tower), 1);
     assert_eq!(count(&p[0], ShapeKind::Outline), 1);
     assert_eq!(column_borders(&p[0]), 2);
@@ -445,7 +451,7 @@ fn loose_blocks_beside_sections_are_a_region() {
         section(SectionKind::Other, None, vec![para("other")]),
     ]);
     let labels: Vec<_> = plans(&d).into_iter().map(|p| p.label).collect();
-    assert_eq!(labels, ["part 1 of 1", "page One", "section 3"]);
+    assert_eq!(labels, ["part 1 of 1", "page One", "section 1"]);
 }
 
 #[test]
@@ -652,4 +658,96 @@ fn a_sheet_document_gives_rounds() {
     assert_eq!(r.plans.len(), 1);
     assert_eq!(r.plans[0].label, "sheet Costs");
     assert_eq!(r.note, None);
+}
+
+#[test]
+fn sections_count_by_kind() {
+    let d = doc(vec![
+        para("a title block"),
+        section(SectionKind::Slide, None, vec![para("one")]),
+        section(SectionKind::Chapter, None, vec![para("two")]),
+        section(SectionKind::Slide, None, vec![para("three")]),
+    ]);
+    let labels: Vec<_> = plans(&d).into_iter().map(|p| p.label).collect();
+    assert_eq!(labels, ["part 1 of 1", "slide 1", "chapter 1", "slide 2"]);
+}
+
+#[test]
+fn formulas_find_their_sheet_among_many() {
+    let sheets: Vec<_> = (0..50)
+        .map(|i| sheet(&format!("S{i}"), vec![table(4, 4, Some("A1:D4"))]))
+        .collect();
+    let mut d = doc(sheets);
+    d.facets.formulas = (0..50)
+        .flat_map(|i| (1..=i % 4 + 1).map(move |r| formula(&format!("S{i}!A{r}"))))
+        .collect();
+    let p = plans(&d);
+    assert_eq!(p.len(), 50);
+    for (i, plan) in p.iter().enumerate() {
+        assert_eq!(count(plan, ShapeKind::Tower), i % 4 + 1, "{}", plan.label);
+    }
+}
+
+/// Takes a nested section apart one section at a time, so dropping it needs no deep recursion.
+fn drop_flat(mut block: Block) {
+    while let Block::Section { blocks, .. } = &mut block {
+        let Some(inner) = blocks.pop() else {
+            break;
+        };
+        block = inner;
+    }
+}
+
+#[test]
+fn deeply_nested_sections_do_not_overflow() {
+    let mut block = para("deep inside");
+    for _ in 0..10_000 {
+        block = section(SectionKind::Other, None, vec![block]);
+    }
+    let mut d = doc(vec![block]);
+    let started = Instant::now();
+    let p = plans(&d);
+    assert!(
+        started.elapsed().as_millis() < limit_ms(),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].label, "section 1");
+    assert_eq!(count(&p[0], ShapeKind::Line), 1);
+    drop_flat(d.body.pop().unwrap());
+}
+
+#[test]
+fn a_long_body_is_fast() {
+    let body: Vec<_> = (0..100_000)
+        .map(|i| match i % 3 {
+            0 => heading(1, &format!("Heading {i}")),
+            1 => para(&"word ".repeat(20)),
+            _ => list(3),
+        })
+        .collect();
+    let d = doc(body);
+    let started = Instant::now();
+    let p = plans(&d);
+    assert!(
+        started.elapsed().as_millis() < limit_ms(),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(p.len(), MAX_PLANS);
+}
+
+#[test]
+fn a_large_table_among_other_items_is_capped() {
+    let p = plans(&doc(vec![heading(1, "Before"), table(500, 100, None)]));
+    let p = &p[0];
+    assert_eq!(column_borders(p), 3);
+    let inside: Vec<f32> = p
+        .shapes
+        .iter()
+        .filter(|s| horizontal(s) && !in_slot(s, 2, &[0, 1]))
+        .map(|s| s.rect[1])
+        .collect();
+    assert_eq!(distinct(inside), 4);
 }
