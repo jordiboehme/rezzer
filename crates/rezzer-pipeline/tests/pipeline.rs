@@ -1142,9 +1142,16 @@ fn a_name_that_copies_a_hash_keeps_its_own_pictures() {
         output_dir: Some(out.path().to_path_buf()),
         ..request()
     };
+    // The copy in upper case shares the copy's main document on a file system that ignores
+    // case; the same content makes it the same source there, so its run still goes through
+    // and its folders are checked for real. On a file system that keeps case it has its own.
     let copy = folder_stem("a b.txt");
-    let sources: [(&str, &[&'static str]); 2] =
-        [("a b.txt", &["page-1", "page-2"]), (&copy, &["page-3"])];
+    let upper = copy.to_uppercase();
+    let sources: [(&str, &[&'static str]); 3] = [
+        ("a b.txt", &["page-1", "page-2"]),
+        (&copy, &["page-3"]),
+        (&upper, &["page-4"]),
+    ];
     for _ in 0..2 {
         for (name, ids) in sources {
             let (registry, _) = pictures(ids);
@@ -1152,11 +1159,10 @@ fn a_name_that_copies_a_hash_keeps_its_own_pictures() {
                 Pipeline::new(config(None), registry).run_bytes(name, b"x".to_vec(), None, &req);
             assert_eq!(res.completeness, Completeness::Complete, "{name}");
         }
-        let first = out.path().join(format!("{copy}.assets"));
-        let second = out.path().join(format!("{}.assets", folder_stem(&copy)));
-        assert_eq!(names_in(&first), ["page-1.png", "page-2.png"]);
-        assert_eq!(names_in(&second), ["page-3.png"]);
-        assert_ne!(first, second);
+        let assets = |name: &str| out.path().join(format!("{name}.assets"));
+        assert_eq!(names_in(&assets(&copy)), ["page-1.png", "page-2.png"]);
+        assert_eq!(names_in(&assets(&folder_stem(&copy))), ["page-3.png"]);
+        assert_eq!(names_in(&assets(&folder_stem(&upper))), ["page-4.png"]);
         assert!(assert_links_resolve(out.path()) >= 3);
     }
 }
