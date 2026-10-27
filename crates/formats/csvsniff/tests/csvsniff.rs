@@ -700,6 +700,8 @@ fn sniff_looks_only_at_the_first_mebibyte() {
     let steps = before.zip(csvsniff::work_steps()).map(|(b, a)| a - b);
     if cfg!(debug_assertions) {
         assert_eq!(steps, Some(5 * 174_762 * 6));
+    } else {
+        assert_eq!(steps, None);
     }
 }
 
