@@ -387,9 +387,6 @@ pub(in crate::tables) fn field_strips(
         ));
     };
     let mut strips: Vec<Strip> = Vec::new();
-    // The runs of rows refused with a loss: they look like a row of fields, so they are no
-    // text beyond another group either.
-    let mut refused: HashSet<usize> = HashSet::new();
     for fr in frames {
         let ids = frame_runs(flow, by_y, fr, busy);
         if ids.is_empty() || lines_of(flow, &ids).len() > STRIP_LINES {
@@ -483,7 +480,6 @@ pub(in crate::tables) fn field_strips(
             }
             for &i in &ids {
                 kept[i] = true;
-                refused.insert(i);
             }
             continue;
         }
@@ -541,9 +537,11 @@ pub(in crate::tables) fn field_strips(
             }
             continue;
         }
-        let free = |i: usize| {
-            !busy(i) && !held.contains(&i) && !refused.contains(&i) && !outside.contains(&i)
-        };
+        // Only runs a group holds are left out; the runs of rows refused with a loss count.
+        // Under the table of ends (see [`way_of`]) more text beyond a group can only make an
+        // end complete: a loss, or labels under values with both ends complete. Text left out
+        // can drop a complete end to none and read the group labels over values shifted.
+        let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
         let under: Vec<Field>;
         let list: Vec<&Field> = match ends(flow, by_y, &free, frames, &strips, &g) {
             Ends::Over => list,

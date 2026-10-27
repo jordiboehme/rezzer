@@ -657,6 +657,46 @@ fn labels_under_values_with_a_value_of_two_lines_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Labels under the rule their values stand on, every row full, under a section rule one row
+/// pitch over the top rule with a bold title in the frame it makes over the first row's values
+/// (the reviewer's probe P2), with and without a rule one pitch under the last labels. The
+/// title makes that frame a row refused with a loss; its values are still the top end. With
+/// the rule under the last labels (an own bottom) one end is complete: no field pairs and a
+/// loss names them all. Without it both ends are complete: the fields pair labels under values.
+#[test]
+fn labels_under_values_under_a_titled_section_rule_never_pair_shifted() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (size, own) in [
+            (1.25f32, true),
+            (1.25, false),
+            (1.003, true),
+            (1.003, false),
+        ] {
+            let mut b = rows_page(&g, &s, &THREE_ROWS, if own { &all } else { &[] });
+            let (d, h) = (g.data, 2.4 * g.data);
+            let top = 760.0 + g.dy;
+            b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), top + h);
+            if own {
+                b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), top - 3.0 * h);
+            }
+            let t = "Anschrift";
+            b.page.template += &draw::bold(g.col(0), top + h - 1.2 * d * size, d * size, t);
+            b.values.push(t.into());
+            let out = read_pages(&[&b]);
+            let name = format!("title {size}, {}, {look}", if own { "own" } else { "free" });
+            reads.push((name, check_fields(&out, &b)));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
