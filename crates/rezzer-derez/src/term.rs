@@ -12,6 +12,11 @@
 //! Ctrl-C needs no signal handler: in raw mode the terminal delivers it as a key, and the key
 //! handling quits on it. A process that is killed (for example `kill -9`) runs none of this and
 //! can leave the terminal in raw mode; that is accepted, and `reset` fixes it.
+//!
+//! The flag the hook checks is process-wide, so a panic on any thread restores the terminal,
+//! also one that is caught (`catch_unwind`, a thread whose join result is ignored). derez must
+//! therefore not catch panics while the guard is active, and this hook must stay the last
+//! panic hook installed.
 
 use std::io;
 use std::panic;
@@ -166,11 +171,20 @@ mod tests {
 
     static RECORD: StdMutex<Vec<&'static str>> = StdMutex::new(Vec::new());
 
+    /// The thread of the hook test; only its panics are recorded.
+    static TEST_THREAD: StdMutex<Option<ThreadId>> = StdMutex::new(None);
+
+    fn on_test_thread() -> bool {
+        *TEST_THREAD.lock().unwrap_or_else(|e| e.into_inner()) == Some(thread::current().id())
+    }
+
     fn record_restore() {
-        RECORD
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push("restore");
+        if on_test_thread() {
+            RECORD
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push("restore");
+        }
     }
 
     fn take_record() -> Vec<&'static str> {
@@ -182,11 +196,11 @@ mod tests {
     /// other threads are passed on to the original hook and not recorded.
     #[test]
     fn restore_hook_runs_before_the_previous_hook() {
-        let me: ThreadId = thread::current().id();
+        *TEST_THREAD.lock().unwrap_or_else(|e| e.into_inner()) = Some(thread::current().id());
         let original: Arc<Hook> = Arc::new(panic::take_hook());
         let forward = Arc::clone(&original);
         panic::set_hook(Box::new(move |info| {
-            if thread::current().id() == me {
+            if on_test_thread() {
                 RECORD
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
