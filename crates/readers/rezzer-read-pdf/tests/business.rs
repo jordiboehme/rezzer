@@ -2577,11 +2577,66 @@ fn titles_over_two_columns_of_one_kind_of_values_stay_spanned() {
     );
 }
 
-/// The carry C-r3-a: a line of two pieces, `Rechnung 4711` at x 40 and `Datum 01.01.2026`
-/// flush right at x 540, `8 k` over the top rule of a frame of line items (see
-/// [`framed_items`]), in every size, look, font and weight, with 2 to 5 rows, alone and with
-/// an upright rule elsewhere: the line is no part of the table header, every title heads the
-/// column of its values, and the line is read.
+/// How the line over the frame of [`line_over_frame`] is set.
+#[derive(Debug, Clone, Copy)]
+enum Over {
+    /// Plain, in the size of the items.
+    Plain,
+    /// Bold, in the size of the items.
+    Bold,
+    /// Plain, one and a half times the size of the items.
+    Larger,
+}
+
+/// What breaks the reading of a line of two pieces over the top rule of a frame of `n` line
+/// items (see [`framed_items`] for `k`, `look`, `fonts` and `bold`): `Rechnung 4711` at x 40
+/// and `Datum 01.01.2026` flush right at x 540, `8 k` over the rule, set as `over`, with a
+/// lone upright rule far from them when `upright`. The line must be no part of the table
+/// header, every title must head the column of its values, and the line must be read.
+fn line_over_frame(
+    (k, look, fonts, bold): (f32, Look, (&str, &str), bool),
+    n: usize,
+    over: Over,
+    upright: bool,
+) -> Vec<String> {
+    let (mut t, columns) = framed_items(k, look, fonts, bold, n, None);
+    let (font, size) = match over {
+        Over::Plain => (fonts.0, 8.0 * k),
+        Over::Bold => (fonts.1, 8.0 * k),
+        Over::Larger => (fonts.0, 12.0 * k),
+    };
+    // The top rule of the frame is at 600 + 8 k.
+    let y = 600.0 + 16.0 * k;
+    let date = "Datum 01.01.2026";
+    t += &show(font, size, 40.0, y, "Rechnung 4711");
+    t += &show(
+        font,
+        size,
+        540.0 - common::font_width(font, date, size),
+        y,
+        date,
+    );
+    if upright {
+        t += "0.5 w 30 200 m 30 300 l S\n";
+    }
+    let out = common::read(&page_in(&t, look));
+    let mut broken = columns_broken(&out, &columns);
+    let in_cell = tables(&out).iter().any(|t| {
+        t.1.iter()
+            .flatten()
+            .any(|c| c.contains("4711") || c.contains("01.01.2026"))
+    });
+    let all = common::all_text(&out);
+    if in_cell || !all.contains("Rechnung 4711") || !all.contains(date) {
+        broken.push(format!("the line is in a cell or lost: {:?}", tables(&out)));
+    }
+    broken
+}
+
+/// The carry C-r3-a: a line of two pieces over the top rule of a frame of line items handed
+/// to the table pass (see [`line_over_frame`]) is no part of its header, in every size, look,
+/// font and weight of the items, every look of the line, with 2 to 5 rows, alone and with an
+/// upright rule elsewhere.
 #[test]
 fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
     let mut wrong = Vec::new();
@@ -2591,44 +2646,28 @@ fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
             for fonts in FONTS {
                 for bold in [false, true] {
                     for n in 2..=5 {
-                        for upright in [false, true] {
-                            let (mut t, columns) = framed_items(k, look, fonts, bold, n, None);
-                            // The top rule of the frame is at 600 + 8 k.
-                            let (size, over) = (8.0 * k, 600.0 + 16.0 * k);
-                            let date = "Datum 01.01.2026";
-                            t += &show(fonts.0, size, 40.0, over, "Rechnung 4711");
-                            let w = common::font_width(fonts.0, date, size);
-                            t += &show(fonts.0, size, 540.0 - w, over, date);
-                            if upright {
-                                t += "0.5 w 30 200 m 30 300 l S\n";
+                        for over in [Over::Plain, Over::Bold, Over::Larger] {
+                            for upright in [false, true] {
+                                let items = (k, look, fonts, bold);
+                                reads += 1;
+                                wrong.extend(
+                                    line_over_frame(items, n, over, upright)
+                                        .into_iter()
+                                        .map(|b| {
+                                            format!(
+                                                "{k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows, \
+                                             {over:?}, upright {upright}: {b}"
+                                            )
+                                        }),
+                                );
                             }
-                            let out = common::read(&page_in(&t, look));
-                            reads += 1;
-                            let name = format!(
-                                "{k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows, upright \
-                                 {upright}"
-                            );
-                            let mut b = columns_broken(&out, &columns);
-                            let in_cell = tables(&out).iter().any(|t| {
-                                t.1.iter()
-                                    .flatten()
-                                    .any(|c| c.contains("4711") || c.contains("01.01.2026"))
-                            });
-                            let all = common::all_text(&out);
-                            if in_cell || !all.contains("Rechnung 4711") || !all.contains(date) {
-                                b.push(format!(
-                                    "the line is in a cell or lost: {:?}",
-                                    tables(&out)
-                                ));
-                            }
-                            wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
                         }
                     }
                 }
             }
         }
     }
-    assert_eq!(reads, 576);
+    assert_eq!(reads, 1728);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
@@ -2771,47 +2810,59 @@ const GROUP_ROWS: [[&str; 3]; 3] = [
     ["Versand", "1", "34,56"],
 ];
 
-/// A table without rules at `k` times 8 pt in the fonts `fonts` (plain, bold), rows `10 k`
-/// apart: the bold titles `Gruppe`, `Artikel`, `Menge` and `Betrag`, then the three rows of
-/// [`GROUP_ROWS`], the article at x 40 + 100 k, the quantity at x 300 and the amount flush
-/// right at x 540; the first column at x 40 holds only `Gruppe A`, standing out as `stand`,
-/// on the baseline of the first row under the titles.
-fn grouped_rows(k: f32, fonts: (&str, &str), stand: Stand) -> String {
+/// Three rows of [`GROUP_ROWS`] without rules at `k` times 8 pt in the fonts `fonts` (plain,
+/// bold), `10 k` apart, the amount flush right; the first column at x 40 holds only
+/// `Gruppe A`, standing out as `stand`, on the baseline of the first row. When `titled`, the
+/// bold titles `Gruppe`, `Artikel`, `Menge` and `Betrag` stand over the rows, the article at
+/// x 40 + 100 k, the quantity at x 300 and the amount at x 540. Else there are no titles, and
+/// the article stands at x 200, the quantity at x 300 and the amount at x 380, so that the
+/// white space after `Gruppe A` is the widest of the block.
+fn grouped_rows(k: f32, fonts: (&str, &str), stand: Stand, titled: bool) -> String {
     let size = 8.0 * k;
     let (font, group) = match stand {
         Stand::BoldLarger => (fonts.1, 1.5 * size),
         Stand::Bold => (fonts.1, size),
         Stand::Larger => (fonts.0, 1.5 * size),
     };
-    let ax = 40.0 + 100.0 * k;
+    let (ax, rx) = if titled {
+        (40.0 + 100.0 * k, 540.0)
+    } else {
+        (200.0, 380.0)
+    };
+    let qx = 300.0;
     let flush_right = |font: &str, y: f32, t: &str| {
-        show(font, size, 540.0 - common::font_width(font, t, size), y, t)
+        show(font, size, rx - common::font_width(font, t, size), y, t)
     };
     let top = 600.0 + 10.0 * k;
-    let mut t = show(fonts.1, size, 40.0, top, "Gruppe")
-        + &show(fonts.1, size, ax, top, "Artikel")
-        + &show(fonts.1, size, 300.0, top, "Menge")
-        + &flush_right(fonts.1, top, "Betrag");
+    let mut t = String::new();
+    if titled {
+        t += &show(fonts.1, size, 40.0, top, "Gruppe");
+        t += &show(fonts.1, size, ax, top, "Artikel");
+        t += &show(fonts.1, size, qx, top, "Menge");
+        t += &flush_right(fonts.1, top, "Betrag");
+    }
     t += &show(font, group, 40.0, 600.0, "Gruppe A");
     for (r, row) in GROUP_ROWS.iter().enumerate() {
         let y = 600.0 - 10.0 * k * r as f32;
         t += &show(fonts.0, size, ax, y, row[0]);
-        t += &show(fonts.0, size, 300.0, y, row[1]);
+        t += &show(fonts.0, size, qx, y, row[1]);
         t += &flush_right(fonts.0, y, row[2]);
     }
     t
 }
 
-/// A lone cell on the baseline of a row of a table without rules is no title beside a block:
-/// one table of the titles and three rows, `Gruppe A` in the first row, in every size, font
-/// and look of the cell.
+/// A lone cell on the baseline of a row of a table without rules is no title beside a block,
+/// in every size, font and look of the cell. With a title over its column: one table of the
+/// titles and three rows, `Gruppe A` in the first row. Without titles (the reader keeps the
+/// rows as text): `Gruppe A` is read right before the rest of its row.
 #[test]
 fn lone_cell_on_a_row_baseline_stays_in_its_row() {
     let mut wrong = Vec::new();
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
             for stand in [Stand::BoldLarger, Stand::Bold, Stand::Larger] {
-                let out = common::read(&page_in(&grouped_rows(k, fonts, stand), Look::Plain));
+                let name = format!("{k}x, {fonts:?}, {stand:?}");
+                let out = common::read(&page_in(&grouped_rows(k, fonts, stand, true), Look::Plain));
                 let mut want: Vec<Vec<String>> =
                     vec![owned(&[&["Gruppe", "Artikel", "Menge", "Betrag"]]).remove(0)];
                 want.extend(GROUP_ROWS.iter().enumerate().map(|(r, row)| {
@@ -2823,7 +2874,16 @@ fn lone_cell_on_a_row_baseline_stays_in_its_row() {
                 }));
                 let got = tables(&out);
                 if got.len() != 1 || got[0].1 != want {
-                    wrong.push(format!("{k}x, {fonts:?}, {stand:?}: {got:?}"));
+                    wrong.push(format!("{name}, titled: {got:?}"));
+                }
+                let out =
+                    common::read(&page_in(&grouped_rows(k, fonts, stand, false), Look::Plain));
+                let texts = texts_of(&out);
+                if !texts
+                    .iter()
+                    .any(|t| t.contains("Gruppe A Beratung 2 1.000,00"))
+                {
+                    wrong.push(format!("{name}, untitled: {texts:?}"));
                 }
             }
         }

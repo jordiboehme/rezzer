@@ -1852,6 +1852,11 @@ mod tests {
     /// baseline of field line `at`. The fragments: the title first, then label and value of
     /// each line.
     fn title_beside(size: f32, bold: bool, ys: &[f32], at: usize) -> Vec<Frag> {
+        title_dropped(size, bold, ys, at, 1.5)
+    }
+
+    /// [`title_beside`] with the title `drop` points under the baseline of field line `at`.
+    fn title_dropped(size: f32, bold: bool, ys: &[f32], at: usize, drop: f32) -> Vec<Frag> {
         let small = |t: &str, x: f32, y: f32| Frag {
             size: 6.0,
             end: x + 3.0 * t.chars().count() as f32,
@@ -1862,7 +1867,7 @@ mod tests {
         let mut frags = vec![Frag {
             size,
             bold,
-            ..frag("Rechnung", 40.0, ys[at] - 1.5)
+            ..frag("Rechnung", 40.0, ys[at] - drop)
         }];
         for (k, &y) in ys.iter().enumerate() {
             frags.push(small(&format!("Feld {k}"), 360.0, y));
@@ -1917,6 +1922,21 @@ mod tests {
         let mut want = vec!["Muster GmbH".to_string(), "Rechnung".to_string()];
         want.extend((0..4).map(|k| format!("Feld {k} Wert {k}")));
         assert_eq!(text, want);
+    }
+
+    #[test]
+    fn a_lone_cell_on_a_baseline_of_the_block_stays_in_its_row() {
+        // On the baseline of a field line, or within 0.15 of the smaller size of it, the
+        // larger bold cell is a cell of that line's row.
+        let ys = [703.0, 695.0, 687.0, 679.0];
+        for drop in [0.0, 0.8, -0.8] {
+            for at in 0..ys.len() {
+                let lines = line_texts(&title_dropped(9.0, true, &ys, at, drop));
+                let want = format!("Rechnung Feld {at} Wert {at}");
+                assert_eq!(lines.len(), ys.len(), "{drop}, on {at}: {lines:?}");
+                assert_eq!(lines[at], want, "{drop}, on {at}: {lines:?}");
+            }
+        }
     }
 
     #[test]
