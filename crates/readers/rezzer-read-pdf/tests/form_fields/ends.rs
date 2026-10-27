@@ -8,7 +8,7 @@
 //! Each read holds the invariants and the reading the table of ends gives: the fields pair,
 //! or they stay text with a loss that names them.
 
-use crate::check::{Broken, check_fields, read_pages, unexpected};
+use crate::check::{Broken, Inv, check_fields, read_pages, unexpected};
 use crate::shapes::{Built, FieldSpec, Geo, REAL, ROWS, Rows, rows_page};
 use crate::{draw, looks};
 
@@ -407,6 +407,46 @@ fn every_cell_of_the_ends_reads_as_the_table_says() {
             let out = read_pages(&[&b]);
             let broken: Vec<Broken> = check_fields(&out, &b);
             reads.push((format!("{}, {look}", l.name()), broken));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every labels-under layout of the matrix split by a double rule: a second rule a third of
+/// the data size under its second rule, farther than the rules of one line are apart, so the
+/// grid falls into two groups whose ends lie in each other. The runs one group holds are
+/// evidence for the other one only toward a loss: in every look no field pairs wrongly, every
+/// value stands once, and each field with a value pairs right or a loss names it.
+#[test]
+fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
+    let mut reads = Vec::new();
+    let split: Vec<Layout> = candidates().into_iter().filter(|l| l.under).collect();
+    assert_eq!(split.len(), 42);
+    for l in split {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let mut b = l.page(&g, Outcome::Under);
+            let top = 760.0 + g.dy;
+            let rule = top - 2.4 * g.data - g.data / 3.0;
+            b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), rule);
+            let out = read_pages(&[&b]);
+            // As `check_fields` looks for a name in a loss.
+            let named = |n: &str| {
+                out.document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains(&format!(" {n}")))
+            };
+            // An empty field left as text loses no value: it need not be named.
+            let empty = |n: &str| b.fields.iter().any(|f| f.0 == n && f.1 == Ok(None));
+            let broken: Vec<Broken> = check_fields(&out, &b)
+                .into_iter()
+                .filter(|x| {
+                    let field = x.1.strip_suffix(" does not pair");
+                    !(x.0 == Inv::ClearPairs && field.is_some_and(|n| named(n) || empty(n)))
+                })
+                .collect();
+            reads.push((format!("{}, split, {look}", l.name()), broken));
         }
     }
     let wrong = unexpected(reads, &[]);

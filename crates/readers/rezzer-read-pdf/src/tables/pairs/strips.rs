@@ -521,29 +521,68 @@ pub(in crate::tables) fn field_strips(
         if list.iter().all(|f| f.value.is_empty()) {
             continue;
         }
-        // One field alone between its rules reads like a caption over a line: it is not
-        // paired, and that is said.
         // The runs of the group, kept as text when it is not paired.
         let runs: Vec<usize> = list
             .iter()
             .flat_map(|f| f.label.iter().chain(&f.value))
             .copied()
             .collect();
+        // Only runs a group holds are left out; the runs of rows refused with a loss count.
+        // Under the table of ends (see [`way_of`]) more text beyond a group can only make an
+        // end complete: a loss, or labels under values with both ends complete. Text left out
+        // can drop a complete end to none and read the group labels over values shifted.
+        let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
+        // The runs other groups hold count toward a loss only: a double rule parts one grid
+        // into two groups whose ends lie in each other. The ends are found without them and
+        // with them; when the two ways differ the group is not clear, and when they agree it
+        // is read the way found without them, so a run is never taken by two groups.
+        let own: HashSet<usize> = runs.iter().copied().collect();
+        let with_held = |i: usize| !busy(i) && !own.contains(&i) && !outside.contains(&i);
+        // One field alone between its rules reads like a caption over a line: it is not
+        // paired, and that is said, with the labels under its rule that may be of its value.
         if list.len() < 2 {
-            let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+            let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+            if let Ends::Under(_, below) | Ends::Unclear(below) =
+                ends(flow, by_y, &with_held, frames, &strips, &g)
+            {
+                for line in lines_of(flow, &below) {
+                    for l in labels_in_line(flow, &line) {
+                        let name = words(flow, &l);
+                        if !names.contains(&name) {
+                            names.push(name);
+                        }
+                    }
+                }
+            }
             say(unsure, &names, LONE);
             for &i in &runs {
                 kept[i] = true;
             }
             continue;
         }
-        // Only runs a group holds are left out; the runs of rows refused with a loss count.
-        // Under the table of ends (see [`way_of`]) more text beyond a group can only make an
-        // end complete: a loss, or labels under values with both ends complete. Text left out
-        // can drop a complete end to none and read the group labels over values shifted.
-        let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
+        let without = ends(flow, by_y, &free, frames, &strips, &g);
+        let with = ends(flow, by_y, &with_held, frames, &strips, &g);
+        let found = match (without, with) {
+            (Ends::Over, Ends::Over) => Ends::Over,
+            (Ends::Under(above, below), Ends::Under(..)) => Ends::Under(above, below),
+            // Not clear either way, or the two ways differ: the labels under the bottom rule
+            // either way are named.
+            (a, b) => {
+                let below = |e: Ends| match e {
+                    Ends::Under(_, b) | Ends::Unclear(b) => b,
+                    Ends::Over => Vec::new(),
+                };
+                let mut named = below(a);
+                for i in below(b) {
+                    if !named.contains(&i) {
+                        named.push(i);
+                    }
+                }
+                Ends::Unclear(named)
+            }
+        };
         let under: Vec<Field>;
-        let list: Vec<&Field> = match ends(flow, by_y, &free, frames, &strips, &g) {
+        let list: Vec<&Field> = match found {
             Ends::Over => list,
             Ends::Under(above, below) => match pair_under(flow, &strips, &g, &above, &below) {
                 Some(f) if f.len() >= 2 && f.iter().all(|f| short(flow, f)) => {
@@ -571,7 +610,10 @@ pub(in crate::tables) fn field_strips(
                     }
                 }
                 say(unsure, &names, UNDER_UNCLEAR);
-                for &i in runs.iter().chain(&below) {
+                for &i in runs
+                    .iter()
+                    .chain(below.iter().filter(|i| !held.contains(i)))
+                {
                     kept[i] = true;
                 }
                 continue;
@@ -865,7 +907,8 @@ fn ends(
     };
     let side_by_side = |p: &Run, q: &Run| p.x < q.x + q.w && q.x < p.x + p.w;
     // How far beyond the rule `at` of a strip of row pitch `pitch` text over (or under) the
-    // run `r` is looked at: one row pitch, up to the next rule of a frame over it.
+    // run `r` is looked at: one row pitch, up to the next rule of a frame over it. A rule
+    // between the rule and the run (a double rule) leaves nothing to look at.
     let reach = |r: &Run, at: f32, pitch: f32, up: bool| {
         let rules = frames
             .iter()
@@ -910,7 +953,7 @@ fn ends(
                     usable(i)
                         && at_depth(i)
                         && !by_y
-                            .runs_between(reach(r, s.bottom, pitch, false), r.y)
+                            .runs_between(reach(r, s.bottom, pitch, false).min(r.y), r.y)
                             .into_iter()
                             .any(|j| {
                                 let o = &flow.runs[j];
@@ -985,7 +1028,7 @@ fn ends(
                     && in_role(&vs, r)
                     && ((r.y - s.top) - b).abs() <= 0.5 * r.size
                     && !by_y
-                        .runs_between(r.y, reach(r, s.top, pitch, true))
+                        .runs_between(r.y, reach(r, s.top, pitch, true).max(r.y))
                         .into_iter()
                         .any(|j| {
                             let o = &flow.runs[j];

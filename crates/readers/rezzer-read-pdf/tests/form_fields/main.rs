@@ -697,6 +697,37 @@ fn labels_under_values_under_a_titled_section_rule_never_pair_shifted() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Labels under the rule their values stand on, every row full, with a second rule 3 or 4
+/// points under the second rule (a double rule, farther apart than one rule drawn in pieces)
+/// and with or without a rule one pitch under the last labels (the reviewer's probe P3). The
+/// double rule parts the grid into two groups; the values over the lower group's top rule are
+/// held by the upper group. Neither group may pair shifted: each gives a loss that names its
+/// fields.
+#[test]
+fn labels_under_values_split_by_a_double_rule_give_a_loss() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (gap, own) in [(3.0f32, true), (3.0, false), (4.0, true)] {
+            let mut b = rows_page(&g, &s, &THREE_ROWS, &all);
+            let (h, top) = (2.4 * g.data, 760.0 + g.dy);
+            b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), top - h - gap);
+            if own {
+                b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), top - 3.0 * h);
+            }
+            let out = read_pages(&[&b]);
+            let name = format!("gap {gap}, {}, {look}", if own { "own" } else { "free" });
+            reads.push((name, check_fields(&out, &b)));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
