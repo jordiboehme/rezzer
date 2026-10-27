@@ -22,8 +22,8 @@
 //!
 //! On Windows the main name and the folder stem are made legal there ([`legal_name`], Jordi,
 //! 2026-10-27): each of `: < > " | ? *` and the control characters, each trailing dot or
-//! space, and a device name before the first `.` (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to
-//! `COM9`, `LPT1` to `LPT9`, any case) become `_`, and a changed name gets the name hash of
+//! space, and a device name before the first `.` (`CON`, `PRN`, `AUX`, `NUL`, `COM0` to
+//! `COM9`, `LPT0` to `LPT9`, any case) become `_`, and a changed name gets the name hash of
 //! the original name, so `a:b.txt` and `a?b.txt` never share a file. On Unix and macOS the
 //! names stay as they are. The frontmatter's `resource` keeps the original name either way.
 //!

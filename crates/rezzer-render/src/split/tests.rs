@@ -163,6 +163,8 @@ fn no_part_takes_a_windows_device_name() {
         ("Prn", "prn"),
         ("COM9", "com9"),
         ("lpt1", "lpt1"),
+        ("LPT0", "lpt0"),
+        ("Com0", "com0"),
     ] {
         assert_eq!(slug(title), slugged);
         assert_eq!(
@@ -173,7 +175,7 @@ fn no_part_takes_a_windows_device_name() {
     }
     // `LPT9.x` slugs to `lpt9-x`, which no device has.
     assert_eq!(Names::new().take("LPT9.x", "", 1), "lpt9-x");
-    for title in ["Console", "COM10", "LPT0", "com", "Auxiliary", "Null"] {
+    for title in ["Console", "COM10", "LPT00", "com", "Auxiliary", "Null"] {
         assert_eq!(Names::new().take(title, "", 1), slug(title), "{title}");
     }
     for title in ["con. ", " aux ", "Nul.", "x."] {

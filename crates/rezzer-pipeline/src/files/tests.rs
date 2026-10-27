@@ -6,8 +6,11 @@ use super::{
     ASSET_TYPES, Files, OTHER_EXTENSION, asset_extension, check_paths, folder_stem_on,
     is_asset_name, main_name_on, write_files, write_new,
 };
+use std::borrow::Cow;
+
 use crate::config::CacheOs;
 use crate::folder::Folder;
+use crate::names::legal_name;
 
 #[test]
 fn every_confirmed_type_has_its_extension() {
@@ -311,11 +314,25 @@ fn windows_takes_no_trailing_dot_or_space() {
     let stem = folder_stem_on("a.", CacheOs::Windows);
     assert!(hashed_from(&stem, "a_", "a."), "{stem}");
     assert_eq!(folder_stem_on("a.", CacheOs::Unix), "a.");
-    for os in EVERY_OS {
-        let main = main_name_on("a. .", os);
-        assert!(
-            !main.ends_with(['.', ' ']) || os != CacheOs::Windows,
-            "{main}"
+    // The rule gives a name it leaves alone: each of its cases applied twice gives the same.
+    for name in [
+        "a:b<c>d\"e|f?g*h\u{1}.txt",
+        "a. .",
+        "a ",
+        "...",
+        "CON",
+        "con .txt",
+        "Lpt9.md",
+        "com0.pdf",
+        "COM\u{b9}.txt",
+        "nul. ",
+        "report.pdf",
+    ] {
+        let once = legal_name(name, CacheOs::Windows).into_owned();
+        assert_eq!(
+            legal_name(&once, CacheOs::Windows),
+            Cow::Borrowed(once.as_str()),
+            "{name:?}"
         );
     }
 }
@@ -333,6 +350,8 @@ fn windows_device_names_are_replaced() {
         ("con .txt", "_ .txt"),
         ("com\u{b9}.txt", "_.txt"),
         ("LPT\u{b3}", "_"),
+        ("LPT0.txt", "_.txt"),
+        ("com0.pdf", "_.pdf"),
     ] {
         let main = main_name_on(source, CacheOs::Windows);
         assert!(hashed_from(&main, base, source), "{source:?}: {main}");
@@ -366,7 +385,7 @@ fn names_that_only_look_like_a_device_stay() {
     for source in [
         "CONSOLE.txt",
         "COM10.pdf",
-        "LPT0.txt",
+        "LPT00.txt",
         "a.con",
         "COM.txt",
         "xcon.txt",

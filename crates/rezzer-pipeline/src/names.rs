@@ -7,7 +7,7 @@
 //! Windows cannot write every name that Unix and macOS can: a `:` writes an NTFS alternate
 //! data stream into a file of that name, `< > " | ? *` and the ASCII control characters are
 //! refused, a trailing dot or space is dropped, and a name whose part before the first `.`
-//! is a device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, in any
+//! is a device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, in any
 //! case, also with spaces before the `.`) opens the device instead of a file. So when Rezzer
 //! writes on Windows, a name it derives from a source name gets each such character, each
 //! trailing dot or space and such a device name replaced by `_` ([`legal_name`]).
@@ -32,7 +32,8 @@ fn forbidden(c: char) -> bool {
 }
 
 /// Whether `base` is a device name: `CON`, `PRN`, `AUX`, `NUL`, or `COM` or `LPT` with one
-/// digit 1 to 9 or one superscript 1 to 3 (Windows reserves `COM¹` too), in any case.
+/// digit 0 to 9 or one superscript 1 to 3 (Windows reserves `COM0` and `COM¹` too), in any
+/// case.
 fn device(base: &str) -> bool {
     if DEVICES.iter().any(|d| base.eq_ignore_ascii_case(d)) {
         return true;
@@ -44,7 +45,7 @@ fn device(base: &str) -> bool {
     let mut chars = tail.chars();
     let number = matches!(
         (chars.next(), chars.next()),
-        (Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+        (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
     );
     port && number
 }
