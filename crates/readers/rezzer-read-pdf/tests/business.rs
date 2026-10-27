@@ -1697,11 +1697,12 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
 }
 
 /// Guard: lines right under line items without rules that are no wrap of their last row do
-/// not join it, in every size, font and weight and with 2 to 5 rows: a note across the gutter
-/// between `Pos` and `Artikel`, a line under `Artikel` wider than its column, and a word under
-/// `Pos` wider than its numbers. They stay text out of the table, with no loss. A short word under `Artikel` that
-/// starts half a size into the column stays out of the table too, and a loss says that it may
-/// go on in the last row.
+/// not join it and give no loss, in every size, font and weight and with 2 to 5 rows: a note
+/// across the gutter between `Pos` and `Artikel`, a line under `Artikel` wider than its
+/// column, a word under `Pos` wider than its numbers, a word that starts half a size into
+/// `Artikel`, a total and a page number flush right under `Betrag` (the review's finding K2),
+/// and `Seite 1`, `Danke`, `Summe` and a signature under the text columns. Each stays text out
+/// of the table.
 #[test]
 fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
     let mut wrong = Vec::new();
@@ -1709,12 +1710,21 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
             for bold in [false, true] {
-                for (text, x, loss) in [
-                    ("Alle Preise in EUR", 40.0, false),
-                    ("Zahlbar bis zum 01.03.2026 ohne Abzug", 80.0, false),
-                    ("Hinweis", 40.0, false),
-                    ("inkl.", 80.0 + 4.0 * k, true),
+                for (text, x) in [
+                    ("Alle Preise in EUR", Some(40.0)),
+                    ("Zahlbar bis zum 01.03.2026 ohne Abzug", Some(80.0)),
+                    ("Hinweis", Some(40.0)),
+                    ("inkl.", Some(80.0 + 4.0 * k)),
+                    ("1.469,13", None),
+                    ("Gesamt 1.469,13", None),
+                    ("Seite 1/2", None),
+                    ("Seite 1", Some(80.0)),
+                    ("Danke", Some(80.0)),
+                    ("Summe", Some(300.0)),
+                    ("i.A. Erika Mustermann", Some(80.0)),
                 ] {
+                    // Flush right at x 540 when no x is given.
+                    let x = x.unwrap_or_else(|| 540.0 - common::font_width(fonts.0, text, 8.0 * k));
                     for n in 2..=5 {
                         let (t, columns) = unruled_items(k, fonts, bold, n, None, Some((text, x)));
                         let out = common::read(&page_in(&t, Look::Plain));
@@ -1736,8 +1746,7 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
                             .iter()
                             .map(|l| l.what.as_str())
                             .collect();
-                        let said = losses == [WRAP_LOSS];
-                        if said != loss {
+                        if !losses.is_empty() {
                             b.push(format!("losses {losses:?}"));
                         }
                         wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
@@ -1746,8 +1755,13 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
             }
         }
     }
-    assert_eq!(reads, 192);
-    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert_eq!(reads, 528);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 /// The loss for a line under a table that may go on in its last row.

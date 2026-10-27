@@ -494,8 +494,8 @@ struct Tail {
     marked: bool,
 }
 
-/// A line of one piece under a table may go on in its last row when it ends within this many
-/// sizes of the end of its column.
+/// A line of one piece under a table may go on in its last row when it starts within this
+/// many sizes of the start of its column and ends within as many of its end.
 const WRAP_ALIGN: f32 = 0.1;
 
 /// How many of the lines under a region (`lines`, the region's first, its `pieces` the
@@ -504,9 +504,11 @@ const WRAP_ALIGN: f32 = 0.1;
 /// - A marked line (see [`Tail`]) does when each of its pieces stands over one column of the
 ///   region (it crosses no gutter): the frame holds it.
 /// - A line of one piece never does: a wrap of the last row and a note under the table look
-///   the same. It may, when it stands over one column (it crosses no gutter), ends within the
-///   column (see [`WRAP_ALIGN`]) and stands no farther under the line over it than the lines
-///   of the region stand apart.
+///   the same. It may, when it goes on the text of a cell as a wrap does: it stands over one
+///   column (it crosses no gutter), starts at the column's start and ends within it (see
+///   [`WRAP_ALIGN`]), starts with a small letter (a new line of text, a total or a page number
+///   starts otherwise), the column holds no numbers mostly, and it stands no farther under the
+///   line over it than the lines of the region stand apart.
 fn joined_tail(
     flow: &Flow,
     lines: &[FlowLine],
@@ -537,8 +539,21 @@ fn joined_tail(
             .fold(0.0f32, f32::max);
         let size = line.size.max(1.0);
         let close = lines[core - 1].y - line.y <= pitch + WRAP_ALIGN * size;
-        let within = p.x1 <= columns[c].1 + WRAP_ALIGN * size;
-        return (0, close && within);
+        let within = (p.x0 - columns[c].0).abs() <= WRAP_ALIGN * size
+            && p.x1 <= columns[c].1 + WRAP_ALIGN * size;
+        let small = text_of(flow, p.start, p.end)
+            .chars()
+            .next()
+            .is_some_and(char::is_lowercase);
+        // The text of the column under its title.
+        let texts: Vec<String> = pieces[1..core]
+            .iter()
+            .flatten()
+            .filter(|q| over(q) == [c])
+            .map(|q| text_of(flow, q.start, q.end))
+            .collect();
+        let numbers = 2 * texts.iter().filter(|t| numeric(t)).count() > texts.len();
+        return (0, close && within && small && !numbers);
     }
     let mut joined = 0;
     for line in &lines[core..] {
