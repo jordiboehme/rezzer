@@ -626,6 +626,28 @@ fn joined_tail(
         });
         let wrap =
             close && within && same_face && !numbers && !numeric(&text) && !page_number(&text);
+        // A number at the pitch of the rows, in the column of numbers it stands in (flush with
+        // its start or its end), under a number of the last line, is one more row of its own
+        // (see [`grid_of`]) when the region has such rows already: a line of numbers only,
+        // each under a number of the line above. Else it may be a total under the items, and
+        // it stays out.
+        let numbers_only = |line: &[Piece]| {
+            !line.is_empty() && line.iter().all(|q| numeric(&text_of(flow, q.start, q.end)))
+        };
+        let under_numbers = |k: usize, line: &[Piece]| {
+            line.iter().all(|q| {
+                let cols = over(q);
+                pieces[k - 1]
+                    .iter()
+                    .any(|a| over(a) == cols && numeric(&text_of(flow, a.start, a.end)))
+            })
+        };
+        let stacked = (2..core).any(|k| numbers_only(&pieces[k]) && under_numbers(k, &pieces[k]));
+        let flush =
+            within || ((p.x1 - columns[c].1).abs() <= WRAP_ALIGN * size && p.x0 >= columns[c].0);
+        if stacked && close && flush && same_face && numeric(&text) && under_numbers(core, &own) {
+            return (1, false);
+        }
         return (0, wrap);
     }
     let mut joined = 0;
@@ -1082,9 +1104,23 @@ fn grid_of(
         c.dedup();
         c.len()
     };
-    let anchors: Vec<usize> = (0..lines.len())
-        .filter(|&k| 2 * filled(&placed[k]) >= cols)
-        .collect();
+    // A line of numbers only, each under a number of the row above in its column, is a row of
+    // its own too: two values in one cell are never one cell's (the rule of a header band's
+    // body, see `banded::row_starts`).
+    let mut anchors: Vec<usize> = Vec::new();
+    // The columns of the row being built that hold a number.
+    let mut above: Vec<usize> = Vec::new();
+    for (k, row) in placed.iter().enumerate() {
+        let number = |&(_, span, (s, e)): &Placement| span == 1 && numeric(&text_of(flow, s, e));
+        let stacked = !anchors.is_empty()
+            && !row.is_empty()
+            && row.iter().all(|x| number(x) && above.contains(&x.0));
+        if 2 * filled(row) >= cols || stacked {
+            anchors.push(k);
+            above.clear();
+        }
+        above.extend(row.iter().filter(|x| number(x)).map(|x| x.0));
+    }
     if anchors.len() < rows_needed.max(1) {
         return Err("too few rows");
     }
