@@ -641,9 +641,6 @@ enum Split {
     Boxed,
 }
 
-/// At most this many bands of white space are tried for a gutter, from the best one on.
-const GUTTER_TRIES: usize = 4;
-
 /// A block beside a lone row has at least this many rows: a lone cell beside fewer is a row
 /// of a table, not a title.
 const LONE_BLOCK: usize = 3;
@@ -659,9 +656,10 @@ const SIZE_STEP: f32 = 1.08;
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
 /// baselines do not line up, a lone row beside a block (see [`lone_row`]), columns in the
-/// shape of addresses (see [`listed_side`]) or a drawn box; and which of them makes it. The
-/// bands are tried from the best on (see [`bands`]), at most [`GUTTER_TRIES`]. Pieces of white
-/// space only are no text: they neither fill nor cross a band.
+/// shape of addresses (see [`listed_side`]) or a drawn box; and which of them makes it. Only
+/// the best band is tried (see [`best_band`]): a band after it, where the best one fails, cuts
+/// label and value blocks and table columns apart (ruling P6-X3). Pieces of white space only
+/// are no text: they neither fill nor cross a band.
 fn gutter(laid: Laid<'_>, ids: &[usize]) -> Option<(f32, f32, Split)> {
     let p = laid.0;
     let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
@@ -672,20 +670,18 @@ fn gutter(laid: Laid<'_>, ids: &[usize]) -> Option<(f32, f32, Split)> {
     let mut sizes: Vec<f32> = inked.iter().map(|&i| p[i].size).collect();
     sizes.sort_by(f32::total_cmp);
     let size = sizes[sizes.len() / 2];
-    bands(p, &inked, allowed, GUTTER * size)
-        .into_iter()
-        .take(GUTTER_TRIES)
-        .find_map(|(g0, g1)| split_at(laid, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s)))
+    let (g0, g1) = best_band(p, &inked, allowed, GUTTER * size)?;
+    split_at(laid, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s))
 }
 
-/// The bands of white space between the pieces `inked` at least `min_gap` wide with text on
-/// both sides, best first: those covered by the fewest pieces first (a ragged line end next to
-/// the gutter must not widen it), up to `allowed` pieces, and the widest first within a cover.
-fn bands(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Vec<(f32, f32)> {
+/// The best band of white space between the pieces `inked` at least `min_gap` wide with text
+/// on both sides: of those covered by the fewest pieces (a ragged line end next to the gutter
+/// must not widen it), up to `allowed` pieces, the widest.
+fn best_band(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Option<(f32, f32)> {
     let lo = inked.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
     let hi = inked.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
     if !(hi - lo).is_finite() || hi - lo < 2.0 {
-        return Vec::new();
+        return None;
     }
     let width = ((hi - lo).ceil() as usize).min(20_000) + 2;
     let scale = (hi - lo) / (width - 2) as f32;
@@ -706,34 +702,27 @@ fn bands(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Vec<(f32, 
     let mut levels: Vec<i32> = cover.iter().copied().filter(|&c| c <= allowed).collect();
     levels.sort_unstable();
     levels.dedup();
-    let mut out: Vec<(f32, f32)> = Vec::new();
     for level in levels {
-        let mut found: Vec<(f32, f32)> = Vec::new();
+        let mut best: Option<(f32, f32)> = None;
         let mut start = None;
         for (b, &c) in cover.iter().enumerate() {
             match (c <= level, start) {
                 (true, None) => start = Some(b),
                 (false, Some(s)) => {
                     let (g0, g1) = (lo + s as f32 * scale, lo + b as f32 * scale);
-                    if s > 0 && g1 - g0 >= min_gap {
-                        found.push((g0, g1));
+                    if s > 0 && g1 - g0 >= min_gap && best.is_none_or(|(a, z)| g1 - g0 > z - a) {
+                        best = Some((g0, g1));
                     }
                     start = None;
                 }
                 _ => {}
             }
         }
-        found.sort_by(|a, b| (b.1 - b.0).total_cmp(&(a.1 - a.0)));
-        for g in found {
-            if !out.contains(&g) {
-                out.push(g);
-            }
-        }
-        if out.len() >= GUTTER_TRIES {
-            break;
+        if best.is_some() {
+            return best;
         }
     }
-    out
+    None
 }
 
 /// What makes the band from `g0` to `g1` a gutter of the pieces `ids`, if anything: at most

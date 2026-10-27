@@ -3741,3 +3741,62 @@ fn footer_columns_on_too_few_pages_or_at_the_top_stay_content() {
         wrong.join("\n")
     );
 }
+
+/// The labels and values of a block of a notice: (label, value), an empty value for none.
+const NOTICE_FIELDS: [(&str, &str); 12] = [
+    ("Steuernummer", "000/000/00000"),
+    ("Aktenzeichen", "00 000 00000"),
+    ("Veranlagungsjahr", "2025"),
+    ("Bescheid vom", "01.02.2026"),
+    ("Zu versteuerndes Einkommen", "12.345"),
+    ("Festgesetzte Steuer", "1.234,56"),
+    ("Solidarit\u{e4}tszuschlag", ""),
+    ("Kirchensteuer", "123,45"),
+    ("Anzurechnende Steuer", "1.000,00"),
+    ("Verbleibender Betrag", ""),
+    ("Bereits gezahlt", "234,56"),
+    ("Noch zu zahlen", "123,45"),
+];
+
+/// Ruling P6-X3: a block of `n` label and value lines of a notice, the labels plain at x 40
+/// and the values bold flush right at x 400 on the same baselines, some values empty, in every
+/// size and font: each value is read after its own label and before the next label, never as
+/// a column of its own after a column of labels.
+#[test]
+fn labels_beside_bold_values_with_empty_values_stay_pairs() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for n in [6, 9, 12] {
+                let mut t = String::new();
+                for (r, (label, value)) in NOTICE_FIELDS.iter().take(n).enumerate() {
+                    let y = 700.0 - 11.0 * r as f32;
+                    t += &show(fonts.0, 8.0, 40.0, y, label);
+                    if !value.is_empty() {
+                        let x = 400.0 - common::font_width(fonts.1, value, 8.0);
+                        t += &show(fonts.1, 8.0, x, y, value);
+                    }
+                }
+                let out = common::read(&footed_pages(&t, 1, k, false));
+                let all = texts_of(&out).join("\n");
+                let fields = &NOTICE_FIELDS[..n];
+                for (r, (label, value)) in fields.iter().enumerate() {
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let next = fields.get(r + 1).map(|f| f.0);
+                    let order: Vec<&str> = [*label, *value].into_iter().chain(next).collect();
+                    if let Err(e) = common::in_order(&all, &order) {
+                        wrong.push(format!("{k}x, {fonts:?}, {n} rows: {e}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

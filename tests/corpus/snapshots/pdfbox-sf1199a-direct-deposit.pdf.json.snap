@@ -595,7 +595,7 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "paragraph"
         },
-        "<18 more items>"
+        "<14 more items>"
       ],
       "kind": "page",
       "type": "section"
