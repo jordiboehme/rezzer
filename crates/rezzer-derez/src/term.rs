@@ -193,7 +193,9 @@ mod tests {
 
     /// All hook checks live in this one test: the panic hook, `ACTIVE` and `RESTORE` are
     /// process-wide, so a second test would race with this one under `cargo test`. Panics from
-    /// other threads are passed on to the original hook and not recorded.
+    /// other threads are passed on to the original hook and not recorded. A panic on another
+    /// thread while `ACTIVE` is set still clears it and can make this test fail; that is
+    /// accepted because nextest runs each test in its own process, so no other test runs then.
     #[test]
     fn restore_hook_runs_before_the_previous_hook() {
         *TEST_THREAD.lock().unwrap_or_else(|e| e.into_inner()) = Some(thread::current().id());

@@ -9,12 +9,24 @@
 
 #![forbid(unsafe_code)]
 
+pub mod app;
 pub mod grid;
 pub mod plan;
 pub mod rng;
 pub mod round;
+mod run;
 pub mod steer;
 mod term;
+pub mod ui;
+
+pub use plan::{Rounds, rounds};
 
 #[doc(hidden)]
 pub use term::{Crossterm, Guard, Screen, install_restore_hook};
+
+/// Runs `rounds` on the terminal until the user quits; round `n` uses the seed `seed + n`.
+/// The terminal is restored on quit, on an error (returned as `terminal error: ...`) and on a
+/// panic. The caller checks that stdin and stdout are terminals.
+pub fn derez(rounds: Rounds, seed: u64) -> Result<(), String> {
+    run::run(rounds, seed)
+}
