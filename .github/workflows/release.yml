@@ -154,6 +154,10 @@ jobs:
           tool: cargo-auditable@0.7.7
           fallback: none
 
+      - name: Wait before the second try
+        if: ${{ steps.auditable.outcome == 'failure' }}
+        run: sleep 30
+
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         if: ${{ steps.auditable.outcome == 'failure' }}
         with:
@@ -162,6 +166,9 @@ jobs:
 
       # The registry fetch is its own step so it can retry. --locked: a
       # lockfile that would need an update fails here.
+      # `cargo fetch --target` fetches for the target only. If a leg ever
+      # cross-compiles (host arch differs from target), recheck that the host
+      # build dependencies are fetched.
       - name: Fetch crates
         run: |
           "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 cargo fetch --locked --target "$TARGET"

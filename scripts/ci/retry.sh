@@ -26,6 +26,12 @@ case "$tries" in
 esac
 
 wait_s="${RETRY_SLEEP:-5}"
+case "$wait_s" in
+  '' | *[!0-9]*)
+    echo "retry.sh: RETRY_SLEEP must be a whole number, got '$wait_s'" >&2
+    exit 2
+    ;;
+esac
 attempt=1
 while true; do
   "$@" && exit 0

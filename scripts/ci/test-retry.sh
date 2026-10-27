@@ -42,7 +42,22 @@ retry_sh_retries_then_passes() {
     >"$work/out" 2>&1
   status=$?
   [ "$status" -eq 0 ] && [ "$(count '::warning::' "$work/out")" -eq 2 ] \
-    && [ "$(count '::error::' "$work/out")" -eq 0 ]
+    && [ "$(count '::error::' "$work/out")" -eq 0 ] \
+    && [ "$(wc -l < "$work/counter" | tr -d ' ')" -eq 3 ]
+}
+
+retry_sh_doubles_the_wait() {
+  RETRY_SLEEP=1 bash "$retry" 3 false >"$work/out" 2>&1
+  [ "$(count 'Retrying in 1s' "$work/out")" -eq 1 ] \
+    && [ "$(count 'Retrying in 2s' "$work/out")" -eq 1 ]
+}
+
+retry_sh_rejects_bad_retry_sleep() {
+  RETRY_SLEEP=x bash "$retry" 3 true >"$work/out" 2>&1
+  letter=$?
+  RETRY_SLEEP=-1 bash "$retry" 3 true >"$work/out" 2>&1
+  minus=$?
+  [ "$letter" -eq 2 ] && [ "$minus" -eq 2 ]
 }
 
 retry_sh_gives_up_with_the_status() {
@@ -67,6 +82,7 @@ retry_sh_rejects_missing_command() {
 
 for t in retry_sh_passes_first_try retry_sh_retries_then_passes \
   retry_sh_gives_up_with_the_status retry_sh_rejects_bad_tries \
+  retry_sh_doubles_the_wait retry_sh_rejects_bad_retry_sleep \
   retry_sh_rejects_missing_command; do
   "$t"
   check "$t" $?
