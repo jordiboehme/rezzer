@@ -86,22 +86,33 @@ impl Reader for TextReader {
                 left.get(line.len() + 1..)
             };
             if timed_out {
-                // Keep what is read of the line and its paragraph.
+                // Keep what is read of the line and its paragraph, charged as any line. A
+                // limit that cuts the line before the time did is the one named.
                 let separator = usize::from(!current.is_empty());
-                if !line.trim().is_empty()
-                    && budget.add_elements(LINE_ELEMENTS).is_ok()
-                    && budget
-                        .charge_text(current_bytes + separator + line.len())
-                        .is_ok()
+                let what = if line.trim().is_empty() {
+                    TIME_STOP
+                } else if budget.add_elements(LINE_ELEMENTS).is_err() {
+                    ELEMENT_STOP
+                } else if budget
+                    .charge_text(current_bytes + separator + line.len())
+                    .is_err()
                 {
+                    let room = max_text.saturating_sub(current_bytes + separator);
+                    let cut = char_floor(line, room);
+                    if cut > 0 {
+                        current.push(&line[..cut]);
+                    }
+                    TEXT_STOP
+                } else {
                     current.push(line);
-                }
+                    TIME_STOP
+                };
                 let kept = !current.is_empty();
                 if kept {
                     blocks.push(paragraph(&current));
                     current.clear();
                 }
-                stopped_at = Some((blocks.len() + usize::from(!kept), TIME_STOP));
+                stopped_at = Some((blocks.len() + usize::from(!kept), what));
                 break;
             }
             if line.trim().is_empty() {
@@ -139,10 +150,7 @@ impl Reader for TextReader {
             {
                 // Keep what fits of the paragraph, cut on a character boundary.
                 let room = max_text.saturating_sub(current_bytes + separator);
-                let mut cut = room.min(line.len());
-                while !line.is_char_boundary(cut) {
-                    cut -= 1;
-                }
+                let cut = char_floor(line, room);
                 if cut > 0 {
                     current.push(&line[..cut]);
                 }
@@ -212,13 +220,18 @@ fn next_line<'a>(rest: &'a str, budget: &Budget) -> (&'a str, bool) {
         }
         from = to;
         if budget.check_time().is_err() {
-            let mut cut = from;
-            while !rest.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            return (&rest[..cut], true);
+            return (&rest[..char_floor(rest, from)], true);
         }
     }
+}
+
+/// The largest character boundary of `text` at or under `at`.
+fn char_floor(text: &str, at: usize) -> usize {
+    let mut cut = at.min(text.len());
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    cut
 }
 
 /// One paragraph: the lines as text inlines with a line break between them.

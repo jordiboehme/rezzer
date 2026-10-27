@@ -1006,7 +1006,11 @@ pub fn analyze_until(
                 })
                 .collect();
             truncated = stopped.get();
-            derived::find(&nums, checked_rows)
+            if truncated {
+                Vec::new()
+            } else {
+                derived::find(&nums, checked_rows)
+            }
         } else {
             Vec::new()
         }
