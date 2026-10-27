@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::banded::{BAND_EDGE, Band, Shared, Taken, banded, row_starts};
 use super::pairs::{
-    Field, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
+    Field, Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
     taken_by_grids,
 };
 use super::sections::{CUT_WORK, sections};
@@ -90,7 +90,7 @@ pub(super) fn ruled(
     let frames = cut_runs(
         page,
         flow,
-        (&hs, &vs, &frame_tops(&hs, &groups)),
+        (&hs, &vs, &frame_tops(&hs, &groups, true)),
         &grids,
         found,
     );
@@ -1167,7 +1167,7 @@ fn grid_parts(
 fn cut_runs(
     page: u32,
     flow: &mut Flow,
-    (hs, vs, tops): (&[Seg], &[Seg], &[bool]),
+    (hs, vs, tops): (&[Seg], &[Seg], &[Top]),
     grids: &[Part],
     found: &mut Found,
 ) -> Vec<Frame> {
@@ -1178,7 +1178,14 @@ fn cut_runs(
              has too many lines"
         ));
     }
-    let frames = frames.unwrap_or_default();
+    let mut frames = frames.unwrap_or_default();
+    // A frame under a grid's lowest rule is a row of fields only when its text holds fields
+    // with a value: text under a table's last rule is not.
+    if frames.iter().any(|f| f.under_grid) {
+        let lines = flow_lines(flow);
+        let by_y = ByY::new(flow, &lines);
+        frames.retain(|f| !f.under_grid || holds_values(flow, &by_y, f));
+    }
     if !frames.is_empty() {
         apply_cuts(flow, field_cuts(flow, &frames));
     }

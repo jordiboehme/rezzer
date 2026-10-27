@@ -56,15 +56,18 @@ pub(crate) struct Frame {
     pub dividers: Vec<f32>,
     /// The low and high end of each of its dividers.
     pub spans: Vec<(f32, f32)>,
+    /// Its top rule is the lowest rule of a grid (see [`frame_tops`]).
+    pub under_grid: bool,
 }
 
-/// The frames of fields between rules among the page's `rules` (see [`frames`]); none on a
-/// page without rules of both directions or with too many of them.
+/// The frames of fields between rules among the page's `rules` (see [`frames`]), under rules
+/// no grid takes; none on a page without horizontal rules or with too many of them. (A frame
+/// under a grid's lowest rule is a row of fields only by its text, see [`holds_values`].)
 pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
     let Ok(g) = grids(rules) else {
         return Vec::new();
     };
-    frames(&g.hs, &frame_tops(&g.hs, &g.groups), &g.vs).unwrap_or_default()
+    frames(&g.hs, &frame_tops(&g.hs, &g.groups, false), &g.vs).unwrap_or_default()
 }
 
 /// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
@@ -82,7 +85,7 @@ pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
     g.groups
         .iter()
         .any(|group| crate::regions::inner_ruled(&g, group))
-        || frames(&g.hs, &frame_tops(&g.hs, &g.groups), &g.vs)
+        || frames(&g.hs, &frame_tops(&g.hs, &g.groups, false), &g.vs)
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
 
@@ -100,18 +103,35 @@ pub(in crate::tables) fn taken_by_grids(
     taken
 }
 
-/// Which of the horizontal lines `hs` may be the top rule of a frame of fields: those no grid
-/// of `groups` takes, and the lowest line of each grid. A box drawn over a row of fields (a
-/// section's title cells) takes the row's top rule into its grid; the row under it is still a
-/// row of fields.
-pub(in crate::tables) fn frame_tops(hs: &[Seg], groups: &[(Vec<usize>, Vec<usize>)]) -> Vec<bool> {
-    let mut tops: Vec<bool> = taken_by_grids(hs.len(), groups)
+/// What a horizontal line may be to a frame of fields under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::tables) enum Top {
+    /// No top: a grid takes it.
+    No,
+    /// A rule no grid takes.
+    Free,
+    /// The lowest rule of a grid: a box drawn over a row of fields (a section's title cells)
+    /// takes the row's top rule into its grid, and the row under it is still a row of fields
+    /// when its text holds fields with a value (see [`holds_values`]).
+    Grid,
+}
+
+/// What each of the horizontal lines `hs` may be to a frame of fields under it (see [`Top`]):
+/// with `lowest`, the lowest line of each grid of `groups` may top one too.
+pub(in crate::tables) fn frame_tops(
+    hs: &[Seg],
+    groups: &[(Vec<usize>, Vec<usize>)],
+    lowest: bool,
+) -> Vec<Top> {
+    let mut tops: Vec<Top> = taken_by_grids(hs.len(), groups)
         .into_iter()
-        .map(|t| !t)
+        .map(|t| if t { Top::No } else { Top::Free })
         .collect();
-    for (gh, _) in groups {
-        if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
-            tops[low] = true;
+    if lowest {
+        for (gh, _) in groups {
+            if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
+                tops[low] = Top::Grid;
+            }
         }
     }
     tops
@@ -120,11 +140,11 @@ pub(in crate::tables) fn frame_tops(hs: &[Seg], groups: &[(Vec<usize>, Vec<usize
 /// The frames under the page's horizontal lines `hs` (sorted by height) that `tops` names
 /// (see [`frame_tops`]), with the dividers among the vertical lines `vs` (sorted by place);
 /// `None` past [`STRIP_WORK`] steps.
-pub(in crate::tables) fn frames(hs: &[Seg], tops: &[bool], vs: &[Seg]) -> Option<Vec<Frame>> {
+pub(in crate::tables) fn frames(hs: &[Seg], tops: &[Top], vs: &[Seg]) -> Option<Vec<Frame>> {
     let mut work = 0usize;
     let mut out = Vec::new();
     for (j, up) in hs.iter().enumerate() {
-        if !tops[j] {
+        if tops[j] == Top::No {
             continue;
         }
         // The nearest rule below that reaches under it, and it must cover it.
@@ -185,6 +205,7 @@ pub(in crate::tables) fn frames(hs: &[Seg], tops: &[bool], vs: &[Seg]) -> Option
             top,
             dividers,
             spans,
+            under_grid: tops[j] == Top::Grid,
         });
     }
     Some(out)
@@ -1716,6 +1737,7 @@ mod tests {
             top: 130.0,
             dividers: Vec::new(),
             spans: Vec::new(),
+            under_grid: false,
         }
     }
 

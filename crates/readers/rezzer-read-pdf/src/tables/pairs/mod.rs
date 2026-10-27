@@ -20,7 +20,7 @@ use super::*;
 pub(crate) use boxes::box_pairs;
 pub(crate) use strips::{Frame, field_frames, form_drawn};
 pub(super) use strips::{
-    field_cuts, field_strips, frame_tops, frames, holds_values, taken_by_grids,
+    Top, field_cuts, field_strips, frame_tops, frames, holds_values, taken_by_grids,
 };
 pub(crate) use titles::underlined_titles;
 
