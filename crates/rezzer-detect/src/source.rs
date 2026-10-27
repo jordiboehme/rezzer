@@ -215,7 +215,7 @@ fn safe_url(raw: &str) -> Option<String> {
 /// Unicode general category Cf (format characters), as of Unicode 16.0.
 ///
 /// To refresh for a newer Unicode version, list the code points whose second field is `Cf`
-/// in that version's `UnicodeData.txt` (https://www.unicode.org/Public/<version>/ucd/),
+/// in that version's `UnicodeData.txt` (`https://www.unicode.org/Public/<version>/ucd/`),
 /// join neighbours into ranges and replace the table. Unicode 14 added U+0890 and U+0891,
 /// Unicode 15 extended U+13430..U+13438 to U+1343F; nothing changed in 16.0.
 fn is_format_char(c: char) -> bool {
@@ -284,7 +284,7 @@ fn build(
     detector: &Detector<'_>,
 ) -> Source {
     let slice = bytes.as_slice();
-    let sha256 = hex::encode(Sha256::digest(slice));
+    let sha256 = rezzer_model::text::hex(&Sha256::digest(slice));
     let size = slice.len() as u64;
     let (format, detection) = detector(&name, mime, slice);
     Source {

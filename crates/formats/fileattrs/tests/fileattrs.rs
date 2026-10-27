@@ -491,16 +491,27 @@ fn tags_stop_at_the_cap_quickly() {
     let names: Vec<String> = (0..20_000).map(|i| format!("{i:x}")).collect();
     let mut text = names.join(",");
     text.truncate(MAX_ATTR_BYTES);
+    // The names each call looks at ([`fileattrs::work_steps`], counted in debug builds):
+    // exactly the 64 it keeps, so reading stops at the cap; and one for each of the 32,768
+    // repeats plus the empty name after the last comma. The count is the same on every
+    // machine; the wall time is only a safety stop.
+    let looked_at = |text: &str, want: &[&str]| {
+        let before = fileattrs::work_steps();
+        assert_eq!(xdg_tags(text), want);
+        before.zip(fileattrs::work_steps()).map(|(b, a)| a - b)
+    };
     let started = std::time::Instant::now();
-    for _ in 0..100 {
-        assert_eq!(xdg_tags(&text), names[..MAX_TAGS]);
-    }
+    let first: Vec<&str> = names[..MAX_TAGS].iter().map(String::as_str).collect();
     let repeats = "a,".repeat(MAX_ATTR_BYTES / 2);
-    for _ in 0..100 {
-        assert_eq!(xdg_tags(&repeats), ["a"]);
+    let (kept, repeated) = (looked_at(&text, &first), looked_at(&repeats, &["a"]));
+    if cfg!(debug_assertions) {
+        assert_eq!(kept, Some(MAX_TAGS as u64));
+        assert_eq!(repeated, Some(MAX_ATTR_BYTES as u64 / 2 + 1));
+    } else {
+        assert_eq!((kept, repeated), (None, None));
     }
     let spent = started.elapsed();
-    assert!(spent < std::time::Duration::from_secs(2), "{spent:?}");
+    assert!(spent < std::time::Duration::from_secs(60), "{spent:?}");
 }
 
 #[test]

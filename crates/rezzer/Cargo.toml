@@ -36,7 +36,6 @@ rezzer-model = { path = "../rezzer-model" }
 rezzer-pipeline = { path = "../rezzer-pipeline" }
 insta.workspace = true
 sha2.workspace = true
-hex.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 serde_json.workspace = true
@@ -46,7 +45,8 @@ tempfile.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 barcodes = { path = "../formats/barcodes", features = ["encode"] }
+sheetlayout = { path = "../formats/sheetlayout" }
 
 [target.'cfg(unix)'.dev-dependencies]
-# Only for getrusage, wait4 and the thread CPU clock in the tests.
+# Only for getrusage and wait4 in the tests.
 libc.workspace = true

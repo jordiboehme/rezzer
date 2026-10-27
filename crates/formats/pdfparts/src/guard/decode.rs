@@ -125,6 +125,7 @@ impl Shared<'_> {
     }
 
     fn poll(&self, moved: usize) -> io::Result<()> {
+        crate::work::add(moved as u64);
         let m = self.moved.get().saturating_add(moved as u64);
         self.moved.set(m);
         if m >= self.next_check.get() {
@@ -609,7 +610,7 @@ pub(crate) fn measure_bytes(
     measure_checked(raw, filters, limits, budget, stop).0
 }
 
-/// [`measure_bytes`], and whether a Flate or LZW layer stopped with a decoding error, so the
+/// `measure_bytes`, and whether a Flate or LZW layer stopped with a decoding error, so the
 /// stream unpacks only to the part before the damage. A deflate stream that only ends early
 /// is not counted as broken: many writers cut its last bytes.
 pub(crate) fn measure_checked(

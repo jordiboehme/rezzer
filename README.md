@@ -111,7 +111,7 @@ rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
 
-With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. With a larger value, parts can fail Crystalline's size check. Rezzer only replaces or removes files it wrote for the same source. A file of yours in the way stops the run with a message. The output of another file with the same name and other content stops it too. So does a name that differs only in letter case (`Notes.pdf` and `notes.pdf`) on a file system that ignores case, like the macOS default. Write such files to different folders.
+With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. With a larger value, parts can fail Crystalline's size check. Rezzer only replaces or removes files it wrote for the same source. A file of yours in the way stops the run with a message. The output of another file with the same name and other content stops it too. So does a name that differs only in letter case (`Notes.pdf` and `notes.pdf`) on a file system that ignores case, like the macOS default. Windows file systems ignore case too. Write such files to different folders. On Windows Rezzer changes the names it makes from the file name when Windows cannot write them. A character like `:` or `?` becomes `_`, and so does a device name like `CON`. A name may not end in a dot or a space on Windows, so the dots and spaces at its end become `_` too. Such a name also gets a short hash. The `resource` in the frontmatter keeps the original name. A part is never named like a Windows device such as `con`, on any system. On macOS and Linux Rezzer never follows a link inside the output folder. It opens each folder there once, so a folder that someone swaps for a link during a run cannot send files elsewhere. On Windows this is a known limit of 0.1.0: such a swap during a run can still send files to the folder the link points to.
 
 Use it from an agent (Claude Code shown, any MCP client works):
 
@@ -368,7 +368,7 @@ flowchart LR
     A --> K[Knowledge base]
 ```
 
-It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue. The output folder imports into Crystalline as it is: import the folder itself, with the main documents, their parts and pictures. An attachment keeps its type in the file name, such as `.png`, `.pdf`, `.txt` or `.json`, when Rezzer can tell the type from its content. Only attachments of an unknown binary type are written as `.bin`. Crystalline does not copy those on import, and it also leaves out files over 10 MiB.
+It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue. Rezzer's output needs Crystalline 0.29.1 or later. The output folder imports into Crystalline as it is: import the folder itself, with the main documents, their parts and pictures. An attachment keeps its type in the file name, such as `.png`, `.pdf`, `.txt` or `.json`, when Rezzer can tell the type from its content. Only attachments of an unknown binary type are written as `.bin`. Crystalline does not copy those on import, and it also leaves out files over 10 MiB.
 
 ## What Rezzer is not
 

@@ -20,6 +20,7 @@ mod registry;
 mod sheet;
 pub mod text;
 mod value;
+mod work;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
 pub use document::{
@@ -42,3 +43,4 @@ pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_i
 pub use registry::Registry;
 pub use sheet::{CellArea, locate_cells, table_headings};
 pub use value::Value;
+pub use work::work_steps;

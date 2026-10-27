@@ -94,6 +94,7 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
     let mut seen: Vec<(SectionKind, usize)> = Vec::new();
     let mut formulas = None;
     while i < body.len() && out.len() < MAX_PLANS {
+        crate::work::add(1);
         let Block::Section {
             kind,
             title,
@@ -103,6 +104,7 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
         else {
             let end = body[i..]
                 .iter()
+                .inspect(|_| crate::work::add(1))
                 .position(|b| matches!(b, Block::Section { .. }))
                 .map_or(body.len(), |p| i + p);
             region(None, &body[i..end], &mut out);
@@ -169,6 +171,7 @@ fn page_plans(doc: &Document) -> Vec<Plan> {
         if out.len() >= MAX_PLANS || tried >= PAGES_TRIED {
             break;
         }
+        crate::work::add(1);
         let shapes = page_shapes(page);
         if shapes.is_empty() {
             continue;
@@ -196,6 +199,7 @@ fn page_shapes(page: &PageGeometry) -> Vec<Shape> {
     let mapped: Vec<(BoxKind, Shape)> = page
         .boxes
         .iter()
+        .inspect(|_| crate::work::add(1))
         .filter_map(|b| page_shape(b, w, h).map(|s| (b.kind, s)))
         .collect();
     let tables: Vec<usize> = (0..mapped.len())
@@ -225,6 +229,7 @@ fn page_shapes(page: &PageGeometry) -> Vec<Shape> {
         let before = tables.partition_point(|&t| t < i);
         let order = (0..before).rev().chain(before..tables.len());
         let Some(t) = order
+            .inspect(|_| crate::work::add(1))
             .take(TABLES_TRIED)
             .find(|&t| contains(mapped[tables[t]].1.rect, cell.rect))
         else {
@@ -464,6 +469,7 @@ fn items(blocks: &[Block], cap: usize) -> Vec<(Item, Option<String>)> {
     let mut stack = vec![blocks.iter()];
     let mut after_task = false;
     while items.len() < cap {
+        crate::work::add(1);
         let Some(top) = stack.last_mut() else {
             break;
         };
@@ -601,6 +607,7 @@ fn cell_grid(rect: [f32; 4], rows: u32, cols: u32, bands: (u32, u32), out: &mut 
 fn grid_borders(rect: [f32; 4], cols: &[f32], rows: &[f32], out: &mut Vec<Shape>) {
     let [x0, y0, x1, y1] = rect;
     let mut xs = vec![x0];
+    crate::work::add((cols.len() + rows.len() * (cols.len() + 1)) as u64);
     for &x in cols {
         xs.push(x);
         out.push(Shape {

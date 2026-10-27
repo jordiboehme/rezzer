@@ -71,9 +71,14 @@ impl Geometry {
     pub fn add_page(&mut self, page: u32, size: [f32; 2]) -> bool {
         let valid = size.iter().all(|v| v.is_finite() && *v > 0.0);
         // Pages come in order: the last one answers the usual case, a scan the rest.
+        crate::work::add(1);
         let known = match self.pages.last() {
             Some(last) if last.page < page => false,
-            _ => self.pages.iter().any(|p| p.page == page),
+            _ => self
+                .pages
+                .iter()
+                .inspect(|_| crate::work::add(1))
+                .any(|p| p.page == page),
         };
         if !valid || known {
             return false;
@@ -96,7 +101,13 @@ impl Geometry {
         if self.pushed >= MAX_BOXES {
             return false;
         }
-        let Some(p) = self.pages.iter_mut().rev().find(|p| p.page == page) else {
+        let Some(p) = self
+            .pages
+            .iter_mut()
+            .rev()
+            .inspect(|_| crate::work::add(1))
+            .find(|p| p.page == page)
+        else {
             return false;
         };
         if p.boxes.len() >= MAX_BOXES_PER_PAGE {

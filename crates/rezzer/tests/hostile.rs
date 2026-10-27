@@ -20,7 +20,7 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use rezzer_model::{Completeness, LossReason, Registry};
-use rezzer_pipeline::{Config, OutputKind, Pipeline, Request, RunResult};
+use rezzer_pipeline::{Clock, Config, OutputKind, Pipeline, Request, RunResult};
 
 /// Counts the heap of the thread that allocates, so tests that run side by side do not
 /// disturb a measurement. The pipeline runs on the calling thread. The memory itself comes
@@ -69,7 +69,8 @@ static ALLOCATOR: Counting = Counting;
 
 /// Runs `f` and returns its result with the peak heap it added on this thread, in bytes.
 /// The measure covers the calling thread only: memory that a reader allocates on another
-/// thread is not seen. Every reader runs on the calling thread today.
+/// thread is not seen. Every reader runs on the calling thread today; only the barcode
+/// decoder of the PDF reader has threads of its own (see the hostile PDFs below).
 fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     let base = CURRENT.with(Cell::get);
     PEAK.with(|p| p.set(base));
@@ -78,8 +79,34 @@ fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     (out, usize::try_from(peak - base).unwrap_or(0))
 }
 
-/// Allowed overshoot of a time limit (CI machines are slower than a laptop).
-const SLACK: Duration = Duration::from_secs(2);
+/// A stop for a test whose time limit runs on a step clock: the test asserts its clock
+/// readings, and the wall time only catches a hang.
+const SAFETY: Duration = Duration::from_secs(60);
+
+/// Whether a run read its step clock no more than half again as often as measured and at least
+/// half as often: the count is exact when one thread reads the clock, readings on other threads
+/// may move it a little.
+fn assert_reads(clock: &Clock, measured: u64) {
+    assert_readings(clock.reads(), measured);
+}
+
+/// [`assert_reads`] for readings already taken.
+fn assert_readings(reads: u64, measured: u64) {
+    // At least half the measured readings too: none would mean the read took no time
+    // checks on this clock at all, not that it got cheaper.
+    assert!(
+        (measured / 2..=measured + measured / 2).contains(&reads),
+        "{reads} clock readings, measured {measured}"
+    );
+}
+
+/// A clock that never moves: a read on it cannot reach its time limit, also on a busy
+/// machine, and its readings count the time checks of the read, which is a count of the
+/// work, the same on every machine. The readings the tests assert were measured once in a
+/// debug build with `--no-capture`, each run printing them.
+fn still_clock() -> Clock {
+    Clock::steps(Duration::ZERO)
+}
 
 fn pipeline_with(max_time: Option<Duration>) -> Pipeline {
     let mut registry = Registry::new();
@@ -96,6 +123,11 @@ fn pipeline_with(max_time: Option<Duration>) -> Pipeline {
         config.limits.max_time = t;
     }
     Pipeline::new(config, registry)
+}
+
+/// The readers of [`pipeline_with`] under `max_time`, measured by `clock`.
+fn pipeline_with_clock(max_time: Duration, clock: Clock) -> Pipeline {
+    pipeline_with(Some(max_time)).with_clock(clock)
 }
 
 fn request() -> Request {
@@ -146,23 +178,69 @@ fn deep_markdown_nesting_is_partial() {
 
 #[test]
 fn huge_csv_row_respects_time_limit() {
+    // A few short rows, then one row with a field of 50 MiB. The analysis asks the time limit
+    // every 64 KiB, inside the long row too, so the limit cuts it. READS: measured once with
+    // this step, printed below (2026-10-27, macOS, debug); the whole read takes 3,204.
+    const STEP: Duration = Duration::from_micros(800);
+    const READS: u64 = 1_251;
     let limit = Duration::from_secs(1);
-    let p = pipeline_with(Some(limit));
-    let mut bytes = Vec::new();
+    let clock = Clock::steps(STEP);
+    let p = pipeline_with_clock(limit, clock.clone());
+    let mut bytes = b"a,b,c\n1,2,3\n4,5,6\n7,8,9\n10,11,".to_vec();
     bytes.extend(std::iter::repeat_n(b'x', 50 * 1024 * 1024));
     bytes.push(b'\n');
     let start = Instant::now();
     let result = p.run_bytes("huge.csv", bytes, None, &request());
     let took = start.elapsed();
-    assert!(took < limit + SLACK, "took {took:?}");
-    // Either the limit was hit (Partial with a Limit loss) or the run finished in time
-    // (Complete); the test machine decides which, both are clean.
-    match result.completeness {
-        Completeness::Partial => assert!(has_loss(&result, LossReason::Limit), "{result:?}"),
-        Completeness::Complete => {}
-        Completeness::Failed => panic!("{result:?}"),
-    }
-    eprintln!("huge_csv_row: {:?} in {took:?}", result.completeness);
+    eprintln!(
+        "huge_csv_row: {:?}, {} clock readings in {took:?}: {:?} {:?}",
+        result.completeness,
+        clock.reads(),
+        result.document.as_ref().map(|d| d.source.format),
+        losses(&result)
+    );
+    assert!(took < SAFETY, "took {took:?}");
+    assert_reads(&clock, READS);
+    assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit") && l.contains("time limit reached during the analysis")),
+        "{:?}",
+        losses(&result)
+    );
+}
+
+#[test]
+fn huge_text_line_respects_time_limit() {
+    // One line of 100 MiB without a break, read by the text reader. It looks for the end of
+    // the line with a time check every 64 KiB, so the limit cuts the line. READS: measured
+    // once with this step, printed below (2026-10-27, macOS, debug); the whole read takes
+    // 1,601.
+    const STEP: Duration = Duration::from_micros(800);
+    const READS: u64 = 1_251;
+    let limit = Duration::from_secs(1);
+    let clock = Clock::steps(STEP);
+    let p = pipeline_with_clock(limit, clock.clone());
+    let mut bytes = vec![b'x'; 100 * 1024 * 1024];
+    bytes.push(b'\n');
+    let start = Instant::now();
+    let result = p.run_bytes("huge.txt", bytes, None, &request());
+    let took = start.elapsed();
+    eprintln!(
+        "huge_text_line: {:?}, {} clock readings in {took:?}: {:?} {:?}",
+        result.completeness,
+        clock.reads(),
+        result.document.as_ref().map(|d| d.source.format),
+        losses(&result)
+    );
+    assert!(took < SAFETY, "took {took:?}");
+    assert_reads(&clock, READS);
+    assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
+    assert_eq!(
+        losses(&result),
+        ["Limit paragraph 1 rest of the text not read"]
+    );
 }
 
 #[test]
@@ -171,8 +249,13 @@ fn many_csv_rows_stop_at_the_time_limit() {
     // Short limit and a file that needs far more than that to analyze, so the test also
     // fails on a fast machine when the analysis ignores the limit. The file is written in
     // a stream to a temp dir and read with run_path (memory-mapped).
+    // READS: measured once with this step, printed below (2026-10-27, macOS, debug). The
+    // whole analysis takes 12,587 readings, so the limit (2,002 readings) cuts it short.
+    const STEP: Duration = Duration::from_micros(25);
+    const READS: u64 = 2_002;
     let limit = Duration::from_millis(50);
-    let p = pipeline_with(Some(limit));
+    let clock = Clock::steps(STEP);
+    let p = pipeline_with_clock(limit, clock.clone());
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("rows.csv");
     {
@@ -190,7 +273,9 @@ fn many_csv_rows_stop_at_the_time_limit() {
     let start = Instant::now();
     let result = p.run_path(&path, &request());
     let took = start.elapsed();
-    assert!(took < limit + SLACK, "took {took:?}");
+    eprintln!("many_csv_rows: {} clock readings", clock.reads());
+    assert!(took < SAFETY, "took {took:?}");
+    assert_reads(&clock, READS);
     assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
     assert!(has_loss(&result, LossReason::Limit));
 }
@@ -450,11 +535,14 @@ fn sheet_pipeline() -> Pipeline {
     pipeline_with(None)
 }
 
-/// Runs `bytes` as `name` and returns the result, its peak heap and its time.
-fn measured(p: &Pipeline, name: &str, bytes: Vec<u8>) -> (RunResult, usize, Duration) {
+/// Runs `bytes` as `name` on `p` with a [`still_clock`] and returns the result, its peak
+/// heap, the readings of the clock and the wall time.
+fn measured(p: Pipeline, name: &str, bytes: Vec<u8>) -> (RunResult, usize, u64, Duration) {
+    let clock = still_clock();
+    let p = p.with_clock(clock.clone());
     let start = Instant::now();
     let (result, peak) = peak_heap(|| p.run_bytes(name, bytes, None, &markdown_request()));
-    (result, peak, start.elapsed())
+    (result, peak, clock.reads(), start.elapsed())
 }
 
 const MB: usize = 1024 * 1024;
@@ -527,7 +615,7 @@ fn xlsx_unpacked_limit_counts_each_part_once() {
     // parts. The readers read some parts more than once; that must not count again.
     let (book, unpacked) = big_book();
     let p = sheet_pipeline_with_unpacked(unpacked + 64 * 1024);
-    let (result, peak, took) = measured(&p, "big.xlsx", book);
+    let (result, peak, _, took) = measured(p, "big.xlsx", book);
     eprintln!(
         "xlsx_unpacked_limit_counts_each_part_once: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
@@ -551,7 +639,7 @@ fn xlsx_over_unpacked_limit_is_refused() {
     // why.
     let (book, unpacked) = big_book();
     let p = sheet_pipeline_with_unpacked(unpacked - 1);
-    let (result, peak, took) = measured(&p, "bomb.xlsx", book);
+    let (result, peak, _, took) = measured(p, "bomb.xlsx", book);
     eprintln!(
         "xlsx_over_unpacked_limit_is_refused: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
@@ -583,10 +671,9 @@ fn xlsx_zip_bomb_is_refused() {
     sheet.extend(std::iter::repeat_n(' ', 64 * MB));
     sheet.push_str("</t></is></c></row></sheetData></worksheet>");
     let book = xlsx(&[("Small", small_worksheet()), ("Bomb", sheet)]);
-    let p = sheet_pipeline();
-    let (result, peak, took) = measured(&p, "bomb.xlsx", book);
+    let (result, peak, reads, took) = measured(sheet_pipeline(), "bomb.xlsx", book);
     eprintln!(
-        "xlsx_zip_bomb_is_refused: peak heap {} MB in {took:?}",
+        "xlsx_zip_bomb_is_refused: peak heap {} MB, {reads} clock readings in {took:?}",
         peak / MB
     );
     assert_eq!(
@@ -602,7 +689,9 @@ fn xlsx_zip_bomb_is_refused() {
     );
     assert!(!result.markdown_pages.join("").contains("BOMB"));
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(120) + SLACK, "took {took:?}");
+    // The readings were measured once (2026-10-27): the sheet is never read.
+    assert_readings(reads, 0);
+    assert!(took < SAFETY, "took {took:?}");
 }
 
 #[test]
@@ -610,14 +699,15 @@ fn ods_repeat_bomb_is_bounded() {
     // calamine's issue 594: repeat counts that ask for about 3.9 TB of cells.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/corpus/office/malformed/issue_594_dos.ods");
-    let limit = Duration::from_secs(10);
-    let p = pipeline_with(Some(limit));
+    // The repeat counts are refused before any time check, so no time limit plays a part:
+    // the wall time only catches a hang.
+    let p = sheet_pipeline();
     let start = Instant::now();
     let (result, peak) = peak_heap(|| p.run_path(&path, &markdown_request()));
     let took = start.elapsed();
     eprintln!("ods_repeat_bomb: peak heap {} MB in {took:?}", peak / MB);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < limit + SLACK, "took {took:?}");
+    assert!(took < SAFETY, "took {took:?}");
     assert_eq!(
         result.completeness,
         Completeness::Failed,
@@ -639,11 +729,16 @@ fn sparse_far_cells_do_not_allocate_grid() {
         "<row r=\"1\"><c r=\"A1\"><v>1</v></c></row><row r=\"1048576\"><c r=\"XFD1048576\"><f>A1*2</f><v>2</v></c></row>",
         "",
     );
-    let p = sheet_pipeline();
-    let (result, peak, took) = measured(&p, "sparse.xlsx", xlsx(&[("S", sheet)]));
-    eprintln!("sparse_far_cells: peak heap {} MB in {took:?}", peak / MB);
+    let (result, peak, reads, took) =
+        measured(sheet_pipeline(), "sparse.xlsx", xlsx(&[("S", sheet)]));
+    eprintln!(
+        "sparse_far_cells: peak heap {} MB, {reads} clock readings in {took:?}",
+        peak / MB
+    );
     assert!(peak < 64 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // The readings were measured once (2026-10-27).
+    assert_readings(reads, 16);
+    assert!(took < SAFETY, "took {took:?}");
     assert_ne!(
         result.completeness,
         Completeness::Failed,
@@ -713,16 +808,18 @@ fn deep_xml_stops_at_depth() {
         "<row r=\"1\"><c r=\"A1\"><v>5</v></c></row>",
         &format!("<extLst><ext uri=\"urn:deep\">{deep}</ext></extLst>"),
     );
-    let p = sheet_pipeline();
-    let (result, peak, took) = measured(&p, "deep.xlsx", xlsx(&[("S", sheet)]));
+    let (result, peak, reads, took) =
+        measured(sheet_pipeline(), "deep.xlsx", xlsx(&[("S", sheet)]));
     eprintln!(
-        "deep_xml (xlsx): {:?}, peak heap {} MB in {took:?}: {:?}",
+        "deep_xml (xlsx): {:?}, peak heap {} MB, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         peak / MB,
         losses(&result)
     );
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // The readings of both reads were measured once (2026-10-27).
+    assert_readings(reads, 13);
+    assert!(took < SAFETY, "took {took:?}");
     assert_eq!(
         result.completeness,
         Completeness::Partial,
@@ -745,15 +842,17 @@ fn deep_xml_stops_at_depth() {
     let body = format!(
         "<table:table table:name=\"S\"><table:table-row><table:table-cell office:value-type=\"float\" office:value=\"5\"><text:p>5</text:p></table:table-cell><table:table-cell office:value-type=\"string\"><text:p>{spans}</text:p></table:table-cell></table:table-row></table:table>"
     );
-    let (result, peak, took) = measured(&p, "deep.ods", ods(&ods_content("", &body)));
+    let (result, peak, reads, took) =
+        measured(sheet_pipeline(), "deep.ods", ods(&ods_content("", &body)));
     eprintln!(
-        "deep_xml (ods): {:?}, peak heap {} MB in {took:?}: {:?}",
+        "deep_xml (ods): {:?}, peak heap {} MB, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         peak / MB,
         losses(&result)
     );
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    assert_readings(reads, 0);
+    assert!(took < SAFETY, "took {took:?}");
     // ODS content is checked as a whole before any parser reads it: too deep, it is
     // refused, and the loss names the depth limit as the reason.
     assert_eq!(
@@ -798,7 +897,6 @@ fn laughs() -> String {
 
 #[test]
 fn billion_laughs_is_refused() {
-    let p = sheet_pipeline();
     let sheet = format!(
         "<?xml version=\"1.0\"?>{}{}",
         laughs(),
@@ -808,15 +906,18 @@ fn billion_laughs_is_refused() {
             ""
         )
     );
-    let (result, peak, took) = measured(&p, "laughs.xlsx", xlsx(&[("S", sheet)]));
+    let (result, peak, reads, took) =
+        measured(sheet_pipeline(), "laughs.xlsx", xlsx(&[("S", sheet)]));
     eprintln!(
-        "billion_laughs (xlsx): {:?}, peak heap {} MB in {took:?}: {:?}",
+        "billion_laughs (xlsx): {:?}, peak heap {} MB, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         peak / MB,
         losses(&result)
     );
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // The readings of both reads were measured once (2026-10-27).
+    assert_readings(reads, 10);
+    assert!(took < SAFETY, "took {took:?}");
     assert_ne!(
         result.completeness,
         Completeness::Complete,
@@ -834,15 +935,16 @@ fn billion_laughs_is_refused() {
         &laughs(),
         "<table:table table:name=\"S\"><table:table-row><table:table-cell office:value-type=\"string\"><text:p>&lol9;</text:p></table:table-cell></table:table-row></table:table>",
     );
-    let (result, peak, took) = measured(&p, "laughs.ods", ods(&content));
+    let (result, peak, reads, took) = measured(sheet_pipeline(), "laughs.ods", ods(&content));
     eprintln!(
-        "billion_laughs (ods): {:?}, peak heap {} MB in {took:?}: {:?}",
+        "billion_laughs (ods): {:?}, peak heap {} MB, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         peak / MB,
         losses(&result)
     );
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    assert_readings(reads, 0);
+    assert!(took < SAFETY, "took {took:?}");
     assert_ne!(
         result.completeness,
         Completeness::Complete,
@@ -905,46 +1007,48 @@ fn ods_content_cut_at_a_limit_names_that_limit() {
 
 // Hostile sheet layouts: many merges, many tiny regions, one merge over the whole sheet. The
 // layout works on the sparse cells and on merge intervals, never on a grid of the used area.
-// Work is bounded by the CPU time of the calling thread (every sheet reader runs on it), so a
-// busy machine does not fail the test; memory by the heap peak of that thread, with the RSS
-// of the process as a loose guard.
+// Work is bounded by the counted steps of layout work on the calling thread (every sheet
+// reader runs on it), so neither a slow nor a busy machine fails the test; memory by the heap
+// peak of that thread, with the RSS of the process as a loose guard.
 
-/// The CPU time the calling thread has used.
-#[cfg(unix)]
-fn thread_cpu() -> Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+/// Checks the layout work of a read: at most the `measured` steps of layout work
+/// ([`sheetlayout::work_steps`], counted in debug builds) with half of them again as margin,
+/// and the wall time under [`SAFETY`]. Each `measured` was taken once (2026-10-27, debug
+/// build, `--no-capture`); the count is the same on every machine, so neither a slow nor a
+/// busy machine fails the test, and a growth past the margin is a change in the work.
+fn assert_layout_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
+    eprintln!(
+        "{what}: {steps:?} layout steps (bound {})",
+        measured + measured / 2
+    );
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| (measured / 2..=measured + measured / 2).contains(&n)),
+            "{what}: {steps:?} layout steps, measured {measured}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
 }
-
-/// No thread CPU clock here: the time bounds are not checked (see their `cfg(unix)`).
-#[cfg(not(unix))]
-fn thread_cpu() -> Duration {
-    Duration::ZERO
-}
-
-/// The work bound of the layout tests: the whole read, layout included, in thread CPU time.
-#[cfg(unix)]
-const LAYOUT_BOUND: Duration = Duration::from_secs(2);
 
 /// Runs `input` (the bytes, or the path of a file) as `name` and returns the result, its peak
-/// heap and the thread CPU time it used.
+/// heap, the steps of layout work it did ([`sheetlayout::work_steps`], `None` in a release
+/// build) and its wall time. The read runs on this thread, so the count is its own.
 fn layout_run(
     name: &str,
     input: Result<Vec<u8>, std::path::PathBuf>,
-) -> (RunResult, usize, Duration) {
+) -> (RunResult, usize, Option<u64>, Duration) {
     let p = sheet_pipeline();
-    let start = thread_cpu();
+    let before = sheetlayout::work_steps();
+    let start = Instant::now();
     let (result, peak) = peak_heap(|| match input {
         Ok(bytes) => p.run_bytes(name, bytes, None, &markdown_request()),
         Err(path) => p.run_path(&path, &markdown_request()),
     });
-    (result, peak, thread_cpu() - start)
+    let took = start.elapsed();
+    let steps = before.zip(sheetlayout::work_steps()).map(|(b, a)| a - b);
+    (result, peak, steps, took)
 }
 
 /// The layouts of every table block in the document, in body order.
@@ -988,9 +1092,9 @@ fn many_merges_without_values_is_bounded() {
     // The merges are occupied areas for the layout; they cost by their count, not their area.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/corpus/office/malformed/57893-many-merges.xlsx");
-    let (result, peak, used) = layout_run("57893-many-merges.xlsx", Err(path));
+    let (result, peak, steps, took) = layout_run("57893-many-merges.xlsx", Err(path));
     eprintln!(
-        "many_merges: peak heap {} MB, {used:?} CPU: {:?}",
+        "many_merges: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
         losses(&result)
     );
@@ -1002,9 +1106,7 @@ fn many_merges_without_values_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("many_merges", steps, 249_997, took);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(result.markdown_pages.join("").contains("## Sheet1"));
     assert_rss_bounded("many_merges_without_values_is_bounded");
@@ -1030,10 +1132,10 @@ fn checkerboard_sheet_hits_region_limit() {
         xml.push_str("</row>");
     }
     let book = xlsx(&[("Board", worksheet("", &xml, ""))]);
-    let (result, peak, used) = layout_run("board.xlsx", Ok(book));
+    let (result, peak, steps, took) = layout_run("board.xlsx", Ok(book));
     let regions = layouts(&result);
     eprintln!(
-        "checkerboard: {} regions, peak heap {} MB, {used:?} CPU: {:?}",
+        "checkerboard: {} regions, peak heap {} MB in {took:?}: {:?}",
         regions.len(),
         peak / MB,
         losses(&result)
@@ -1044,9 +1146,7 @@ fn checkerboard_sheet_hits_region_limit() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("checkerboard", steps, 2_507_203, took);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(
         losses(&result)
@@ -1077,9 +1177,9 @@ fn one_huge_merge_is_bounded() {
         "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Anchor</t></is></c></row><row r=\"3\"><c r=\"C3\"><v>42</v></c></row>",
         "<mergeCells count=\"1\"><mergeCell ref=\"A1:XFD1048576\"/></mergeCells>",
     );
-    let (result, peak, used) = layout_run("merge.xlsx", Ok(xlsx(&[("M", sheet)])));
+    let (result, peak, steps, took) = layout_run("merge.xlsx", Ok(xlsx(&[("M", sheet)])));
     eprintln!(
-        "one_huge_merge: peak heap {} MB, {used:?} CPU: {:?}",
+        "one_huge_merge: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
         losses(&result)
     );
@@ -1089,9 +1189,7 @@ fn one_huge_merge_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("one_huge_merge", steps, 11, took);
     assert!(peak < 64 * MB, "peak heap {peak} bytes");
     let md = result.markdown_pages.join("");
     assert!(md.contains("Anchor"), "{md}");
@@ -1106,9 +1204,10 @@ fn one_huge_merge_is_bounded() {
 }
 
 // Hostile PDFs. The files are written by hand (a classic cross-reference table, or a
-// cross-reference stream where an object stream needs one). The PDF reader works on more than
-// one thread, so memory is measured as the maximum resident set size of the process, not as
-// the heap of the calling thread.
+// cross-reference stream where an object stream needs one). The PDF reader runs on the calling
+// thread, but its barcode decoder runs on threads of its own, so memory is measured as the
+// maximum resident set size of the process, not as the heap of the calling thread. The
+// decoder threads never read the budget clock: only the calling thread does.
 
 /// Maximum resident set size of the process. It is the figure of one test only under
 /// nextest, which runs every test in its own process; under `cargo test` it covers every
@@ -1265,15 +1364,14 @@ fn packed_fill(fill: u8, n: usize) -> Vec<u8> {
 
 /// Runs a PDF through the pipeline (default limits unless `max_time`) and returns the result
 /// and its time.
-fn read_pdf(
-    bytes: Vec<u8>,
-    max_time: Option<Duration>,
-    request: &Request,
-) -> (RunResult, Duration) {
-    let p = pipeline_with(max_time);
+/// Reads `bytes` as a PDF with a [`still_clock`] and returns the result, the readings of the
+/// clock and the wall time.
+fn read_pdf(bytes: Vec<u8>, request: &Request) -> (RunResult, u64, Duration) {
+    let clock = still_clock();
+    let p = pipeline_with(None).with_clock(clock.clone());
     let start = Instant::now();
     let result = p.run_bytes("hostile.pdf", bytes, None, request);
-    (result, start.elapsed())
+    (result, clock.reads(), start.elapsed())
 }
 
 #[test]
@@ -1335,9 +1433,9 @@ fn objstm_bomb_is_bounded() {
     out.extend(&rows);
     out.extend(format!("\nendstream\nendobj\nstartxref\n{xref_at}\n%%EOF\n").as_bytes());
 
-    let (result, took) = read_pdf(out, None, &markdown_request());
+    let (result, reads, took) = read_pdf(out, &markdown_request());
     eprintln!(
-        "objstm_bomb: {:?} in {took:?}: {:?}",
+        "objstm_bomb: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1354,7 +1452,10 @@ fn objstm_bomb_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    assert!(took < Duration::from_secs(120) + SLACK, "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 68);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("objstm_bomb_is_bounded");
 }
 
@@ -1380,9 +1481,9 @@ fn content_stream_bomb_is_bounded() {
     }
     b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 2 >>"));
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
-    let (result, took) = read_pdf(b.finish(catalog), None, &markdown_request());
+    let (result, reads, took) = read_pdf(b.finish(catalog), &markdown_request());
     eprintln!(
-        "content_stream_bomb: {:?} in {took:?}: {:?}",
+        "content_stream_bomb: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1401,7 +1502,10 @@ fn content_stream_bomb_is_bounded() {
         losses(&result)
     );
     assert!(result.markdown_pages.join("").contains("The plain page."));
-    assert!(took < Duration::from_secs(120) + SLACK, "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 122);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("content_stream_bomb_is_bounded");
 }
 
@@ -1422,9 +1526,9 @@ fn page_tree_cycle_is_partial() {
         format!("<< /Type /Pages /Kids [{page} 0 R {tree} 0 R] /Count 2 >>"),
     );
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
-    let (result, took) = read_pdf(b.finish(catalog), None, &markdown_request());
+    let (result, reads, took) = read_pdf(b.finish(catalog), &markdown_request());
     eprintln!(
-        "page_tree_cycle: {:?} in {took:?}: {:?}",
+        "page_tree_cycle: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1450,7 +1554,10 @@ fn page_tree_cycle_is_partial() {
         "{:?}",
         losses(&result)
     );
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 13);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("page_tree_cycle_is_partial");
 }
 
@@ -1550,17 +1657,30 @@ fn hundred_thousand_pages_stop_in_time() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pages.pdf");
     many_pages(&path, PAGES, false);
+    // READS and READ: measured once with this step, printed below (2026-10-27, macOS,
+    // debug). Listing the pages takes 200,255 readings; the text stops at three quarters of
+    // the limit, at 208,333 readings: a margin of 8,078 readings (4 % of the listing) for the
+    // pages. A larger margin reads more pages, and their memory takes the max RSS toward its
+    // 512 MiB bound (7.1 us: 5,508 pages, 508 MiB; this step: 464 to 471 MiB). The PDF
+    // reader changes in plan 6: measure these numbers again after it merges.
+    const STEP: Duration = Duration::from_nanos(7_200);
+    const READS: u64 = 224_501;
+    const READ: usize = 4_041;
     let limit = Duration::from_secs(2);
-    let p = pipeline_with(Some(limit));
+    let clock = Clock::steps(STEP);
+    let p = pipeline_with_clock(limit, clock.clone());
     let start = Instant::now();
     let result = p.run_path(&path, &markdown_request());
     let took = start.elapsed();
     eprintln!(
-        "hundred_thousand_pages: {:?} in {took:?}: {:?}",
+        "hundred_thousand_pages: {:?}, {} clock readings, {} pages read in {took:?}: {:?}",
         result.completeness,
+        clock.reads(),
+        pages_with_text(&result),
         losses(&result)
     );
-    assert!(took < limit + SLACK, "took {took:?}");
+    assert!(took < SAFETY, "took {took:?}");
+    assert_reads(&clock, READS);
     assert_eq!(
         result.completeness,
         Completeness::Partial,
@@ -1569,6 +1689,10 @@ fn hundred_thousand_pages_stop_in_time() {
     );
     let read = pages_with_text(&result);
     assert!(read > 0 && read < PAGES, "{read} pages with text");
+    assert!(
+        read <= READ + READ / 2,
+        "{read} pages with text, measured {READ}"
+    );
     let md = result.markdown_pages.join("");
     assert!(md.contains("Line 39 of a page"));
     let timed: Vec<String> = losses(&result)
@@ -1738,9 +1862,9 @@ fn image_pixel_bomb_skips_render() {
         output_dir: Some(dir.path().to_path_buf()),
         ..markdown_request()
     };
-    let (result, took) = read_pdf(bytes, None, &request);
+    let (result, reads, took) = read_pdf(bytes, &request);
     eprintln!(
-        "image_pixel_bomb: {:?} in {took:?}: {:?}",
+        "image_pixel_bomb: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1763,7 +1887,10 @@ fn image_pixel_bomb_skips_render() {
     let bundle = dir.path().join("hostile.pdf.assets");
     let written = std::fs::read_dir(&bundle).map(|d| d.count()).unwrap_or(0);
     assert_eq!(written, 0, "no render is written");
-    assert!(took < Duration::from_secs(60), "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 20);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("image_pixel_bomb_skips_render");
 }
 
@@ -1776,9 +1903,9 @@ fn deep_array_nesting_stops_at_depth() {
         assert_eq!(n, 4);
         String::new()
     });
-    let (result, took) = read_pdf(bytes, None, &markdown_request());
+    let (result, reads, took) = read_pdf(bytes, &markdown_request());
     eprintln!(
-        "deep_array_nesting: {:?} in {took:?}: {:?}",
+        "deep_array_nesting: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1797,7 +1924,10 @@ fn deep_array_nesting_stops_at_depth() {
     );
     // The page does not depend on the deep object and is read.
     assert!(result.markdown_pages.join("").contains("Before the bomb."));
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 18);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("deep_array_nesting_stops_at_depth");
 }
 
@@ -1836,9 +1966,9 @@ fn huge_script_is_bounded() {
         b.set(names, format!("<< /Names [(Huge) {action} 0 R] >>"));
         String::new()
     });
-    let (result, took) = read_pdf(bytes, None, &markdown_request());
+    let (result, reads, took) = read_pdf(bytes, &markdown_request());
     eprintln!(
-        "huge_script: {:?} in {took:?}: {:?}",
+        "huge_script: {:?}, {reads} clock readings in {took:?}: {:?}",
         result.completeness,
         losses(&result)
     );
@@ -1862,6 +1992,9 @@ fn huge_script_is_bounded() {
     let md = result.markdown_pages.join("");
     assert!(md.contains("Before the bomb."));
     assert!(!md.contains("app.alert("));
-    assert!(took < Duration::from_secs(30), "took {took:?}");
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
+    assert_readings(reads, 123);
+    assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("huge_script_is_bounded");
 }

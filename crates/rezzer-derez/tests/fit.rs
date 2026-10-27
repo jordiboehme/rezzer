@@ -396,9 +396,11 @@ fn shapes_past_the_cap_are_skipped() {
         })
         .collect();
     let p = plan(shapes);
+    let before = rezzer_derez::work_steps();
     let started = Instant::now();
     let fitted = fit(&p, 120, 60);
     let took = started.elapsed();
+    let steps = before.zip(rezzer_derez::work_steps()).map(|(b, a)| a - b);
     match fitted {
         Ok(f) => {
             assert_starts(&f);
@@ -407,8 +409,20 @@ fn shapes_past_the_cap_are_skipped() {
         }
         Err(e) => assert_eq!(e, Refused::Crowded),
     }
-    eprintln!("100,000 shapes at 120x60: {took:?}");
-    assert!(took.as_secs() < 5, "{took:?}");
+    eprintln!("100,000 shapes at 120x60: {steps:?} steps in {took:?}");
+    if cfg!(debug_assertions) {
+        // One step per shape drawn: the first MAX_SHAPES, twice when the blocks are redrawn
+        // as outlines. The upper limit 2 * MAX_SHAPES is structural, not measured: the fit
+        // draws in at most two passes.
+        assert!(
+            steps.is_some_and(|n| (MAX_SHAPES as u64..=2 * MAX_SHAPES as u64).contains(&n)),
+            "{steps:?}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    // Only a safety stop for a hang, far above any machine.
+    assert!(took.as_secs() < 60, "{took:?}");
 }
 
 #[test]

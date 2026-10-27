@@ -25,8 +25,8 @@
 //!
 //! A part file: the frontmatter with the part keys, `# <part title>`, the unit, then
 //! `- part_of [<document title>](../<main name>)` and, from the second part on,
-//! `- follows [<title of the part before>](<its file>.md)`. Crystalline 0.29.0 reads these
-//! lines as relations and no other line of ours.
+//! `- follows [<title of the part before>](<its file>.md)`. Crystalline reads these lines as
+//! relations and no other line of ours.
 
 use rezzer_model::{Block, Completeness, Document, Inline, Loss};
 
@@ -704,11 +704,11 @@ fn item(text: &str) -> String {
 /// A title as link text or heading text: every Markdown character escaped with a backslash,
 /// so the text is at most twice as long (the part overhead counts on that), and every control
 /// character a space. With `bracket_entity`, a `]` is the character reference `&#93;`: in a
-/// list item that opens with the link, Crystalline 0.29.0 would read the text up to an
-/// escaped `\]` as an observation category.
+/// list item that opens with the link, Crystalline would read the text up to an escaped
+/// `\]` as an observation category, since a category ends at the first `]`, escaped or not.
 ///
-/// A `(` and `)` are escaped too, so `](` never stands inside the text: Crystalline reads a
-/// link up to the first `](` it finds, escaped or not.
+/// A `(` and `)` are escaped too, so `](` never stands inside the text: Crystalline ends a
+/// link text at a `](` that opens a link to a note, escaped or not.
 fn label(text: &str, bracket_entity: bool) -> String {
     let mut out = String::with_capacity(text.len() + 8);
     for c in text.chars() {
@@ -725,10 +725,12 @@ fn label(text: &str, bracket_entity: bool) -> String {
     out
 }
 
-/// A relative path as a link destination that CommonMark and Crystalline 0.29.0 read back as
+/// A relative path as a link destination that CommonMark and Crystalline read back as
 /// written: `%` and `#` encoded as in asset paths, then `<`, `>`, `\`, a backtick, `&`, `[`,
-/// `]` and control characters. A path with whitespace of any other kind (Crystalline cuts a
-/// bare destination at the first one), `(`, `)` or `<` stands in angle brackets.
+/// `]` and control characters. `[` and `]` are encoded so that no `](` stands in a path:
+/// Crystalline reads a link text up to a `](`, and a raw one would end it there. A path with
+/// an ASCII space (a bare destination ends at one), `(`, `)` or `<` stands in angle
+/// brackets. Other spaces, such as U+3000 and U+00A0, are part of a bare path.
 fn destination(path: &str) -> String {
     let mut out = String::with_capacity(path.len() + 8);
     for c in path.chars() {
@@ -751,10 +753,7 @@ fn destination(path: &str) -> String {
             c => out.push(c),
         }
     }
-    if path
-        .chars()
-        .any(|c| (c.is_whitespace() && !c.is_control()) || matches!(c, '(' | ')' | '<'))
-    {
+    if path.contains([' ', '(', ')', '<']) {
         format!("<{out}>")
     } else {
         out
@@ -790,8 +789,10 @@ mod tests {
         assert_eq!(destination("a%b>c\\d`e&f.md"), "a%25b%3Ec%5Cd%60e%26f.md");
         assert_eq!(destination("a<b.md"), "<a%3Cb.md>");
         assert_eq!(destination("a\tb.md"), "a%09b.md");
-        assert_eq!(destination("a\u{3000}b.md"), "<a\u{3000}b.md>");
-        assert_eq!(destination("a\u{a0}b.md"), "<a\u{a0}b.md>");
+        // Only an ASCII space needs the angle brackets: other spaces are part of a bare path.
+        assert_eq!(destination("a b.md"), "<a b.md>");
+        assert_eq!(destination("a\u{3000}b.md"), "a\u{3000}b.md");
+        assert_eq!(destination("a\u{a0}b.md"), "a\u{a0}b.md");
         assert_eq!(destination("[[x]].md"), "%5B%5Bx%5D%5D.md");
     }
 }

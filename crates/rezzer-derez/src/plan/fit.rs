@@ -132,6 +132,7 @@ fn draw(shapes: &[Shape], w: u16, h: u16, hollow: bool) -> Grid {
     let m = 1 + MARGIN;
     let (iw, ih) = (w - 2 * m, h - 2 * m);
     for shape in shapes {
+        crate::work::add(1);
         let Some(c) = cells(shape, iw, ih) else {
             continue;
         };

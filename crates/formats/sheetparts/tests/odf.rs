@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::io::{Cursor, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sheetparts::odf::{self, DataPilot, DatabaseRange, OdsParts, OdsSheet};
 use sheetparts::ooxml::Frozen;
@@ -11,6 +11,10 @@ use sheetparts::{CellPos, IssueKind, Limits, Look, PropValue, RowSpan};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 use zipguard::Archive;
+
+/// The wall-clock stop of the tests that time a read: far above any machine, so only a hang
+/// fails it.
+const SAFETY: Duration = Duration::from_secs(60);
 
 fn corpus(path: &str) -> Vec<u8> {
     let full = format!(
@@ -347,6 +351,10 @@ fn named_ranges_global_and_local() {
 
 #[test]
 fn huge_repeat_counts_do_not_expand() {
+    // The repeat counts ask for 17 billion cells: expanded, the read would not end in hours,
+    // so its end and the clean issues are the proof. Each read takes some milliseconds, also
+    // under load (19 ms for the whole test on 2026-10-27, load average 37); the wall time is
+    // only a safety stop.
     let start = Instant::now();
     let xml = content(
         "",
@@ -354,13 +362,14 @@ fn huge_repeat_counts_do_not_expand() {
          <table:table-cell table:number-columns-repeated=\"16384\"/></table:table-row></table:table>",
     );
     let parts = read_bytes(&package(&[("content.xml", &xml)]), &Limits::default());
-    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     assert!(parts.issues.is_empty(), "{:?}", parts.issues);
 
-    // Content in a repeated row counts its cells against the item limit.
+    // Content in a repeated row counts its cells against the item limit: the Limit issue
+    // below is the proof.
     let start = Instant::now();
     let parts = read_file("malformed/issue_594_dos.ods");
-    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     assert_eq!(parts.sheets.len(), 1);
     assert!(parts.sheets[0].cell_formats.is_empty());
     assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
@@ -572,24 +581,6 @@ fn bad_repeat_attributes_give_few_issues() {
 
 fn pos(row: u32, col: u32) -> CellPos {
     CellPos { row, col }
-}
-
-/// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
-#[cfg(unix)]
-fn thread_cpu() -> std::time::Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
-}
-
-#[cfg(not(unix))]
-fn thread_cpu() -> std::time::Duration {
-    std::time::Duration::ZERO
 }
 
 fn with_parts(extra: &[(&str, &str)], styles: &str, tables: &str) -> OdsParts {
@@ -891,29 +882,28 @@ fn frozen_pane_from_settings() {
 
 #[test]
 fn repeated_spanned_cells_do_not_expand() {
-    if !cfg!(unix) {
-        eprintln!("skipped: this platform has no thread CPU clock here");
-        return;
-    }
-    let start = thread_cpu();
+    // Expanded, the repeats would make 17 billion spanned cells and the read would not end in
+    // hours: the end of the read, the merge count under the item limit and the Limit issue are
+    // the proof. Each read takes milliseconds; the wall time is only a safety stop.
+    let start = Instant::now();
     let parts = one_sheet(
         "",
         "<table:table-row table:number-rows-repeated=\"1048576\">\
          <table:table-cell table:number-columns-repeated=\"16384\" table:number-columns-spanned=\"2\"/></table:table-row>",
     );
-    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     let s = sheet(&parts, "S");
     // The merges are bounded by the item limit, not by the sheet size.
     assert!(s.merges.len() as u64 <= Limits::default().max_items as u64);
     assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
 
-    // One spanned cell repeated across a row stays one entry per copy and is fast.
-    let start = thread_cpu();
+    // One spanned cell repeated across a row stays one entry per copy: the merge count below.
+    let start = Instant::now();
     let parts = one_sheet(
         "",
         "<table:table-row><table:table-cell table:number-columns-repeated=\"16384\" table:number-columns-spanned=\"2\"/></table:table-row>",
     );
-    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     assert_eq!(sheet(&parts, "S").merges.len(), 16384);
     assert!(parts.issues.is_empty(), "{:?}", parts.issues);
 }
@@ -948,10 +938,6 @@ fn layout_lists_count_against_the_item_limit() {
 
 #[test]
 fn long_style_chain_resolves_in_linear_time() {
-    if !cfg!(unix) {
-        eprintln!("skipped: this platform has no thread CPU clock here");
-        return;
-    }
     let n = 50_000;
     let mut styles = String::from(
         "<style:style style:name=\"s0\" style:family=\"table-cell\"><style:text-properties fo:font-weight=\"bold\"/></style:style>",
@@ -975,9 +961,26 @@ fn long_style_chain_resolves_in_linear_time() {
         ),
     );
     let bytes = package(&[("content.xml", &xml)]);
-    let start = thread_cpu();
+    let before = sheetparts::work_steps();
+    let start = Instant::now();
     let parts = read_bytes(&bytes, &Limits::default());
-    assert!(thread_cpu() - start < std::time::Duration::from_secs(1));
+    let took = start.elapsed();
+    let steps = before.zip(sheetparts::work_steps()).map(|(b, a)| a - b);
+    // The steps of style resolution ([`sheetparts::work_steps`], debug builds), measured once
+    // (2026-10-27, debug build, `--no-capture`) with half again as margin: 2,137,983, as a
+    // walk stops at the 64-level cap. Walking each style's whole chain would take about 1.25
+    // billion steps (50,000 x 50,000 / 2). The wall time is only a safety stop.
+    const STEPS: u64 = 2_137_983;
+    eprintln!("long style chain: {steps:?} steps in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|s| (STEPS / 2..=STEPS + STEPS / 2).contains(&s)),
+            "{steps:?} steps, measured {STEPS}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{took:?}");
     let s = sheet(&parts, "S");
     // Styles within the cap inherit; the chain past it is said, once.
     assert!(s.looks.iter().any(|(p, l)| p.col == 10 && l.bold));

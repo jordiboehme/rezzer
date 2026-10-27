@@ -17,12 +17,14 @@
 //! false hits.
 //!
 //! The decoder (rxing) cannot be stopped inside a call. [`decode`] runs in the calling thread
-//! and checks the time between calls. [`Worker::decode`] hands each call to one shared worker
-//! thread and stops waiting at the time limit: the call that runs then is abandoned and ends
-//! on its own, and no new thread is started for the next picture.
+//! and checks the time between calls. [`Worker::decode`] hands each call to a worker thread
+//! on one shared queue and stops waiting at the time limit: the call that runs then is left
+//! to end on its own, and a new thread takes the next call. At most two such calls run at
+//! once; past that, calls wait for them.
 
 mod prep;
 mod read;
+mod work;
 mod worker;
 
 #[cfg(feature = "encode")]
@@ -30,6 +32,7 @@ pub mod encode;
 
 use std::time::{Duration, Instant};
 
+pub use work::work_steps;
 pub use worker::Worker;
 
 /// The pixels of a picture, row by row from the top left.
@@ -261,6 +264,7 @@ fn aztec_windows(
             height: side + 2 * pad,
             aztec_only: true,
         };
+        work::add(1);
         let hits = runner.run(job, deadline)?;
         let map = |px: f32, py: f32| {
             (
@@ -357,6 +361,7 @@ pub(crate) fn scan(
                     height: ph,
                     aztec_only: false,
                 };
+                work::add(1);
                 let hits = match runner.run(job, deadline) {
                     Ok(hits) => hits,
                     Err(Stop::Time(_)) => return Err(Stop::Time(out)),

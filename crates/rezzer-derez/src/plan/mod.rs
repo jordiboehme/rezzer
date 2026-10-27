@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Grid plans: shapes in unit coordinates that [`fit`] maps to a grid of any size.
+//! Grid plans: shapes in unit coordinates that [`fit()`] maps to a grid of any size.
 
 mod builtin;
 mod fit;

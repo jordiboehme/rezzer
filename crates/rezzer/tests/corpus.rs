@@ -323,7 +323,7 @@ fn manifest_rows() -> std::collections::BTreeMap<String, String> {
 
 fn sha256_of(file: &Path) -> String {
     use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
+    rezzer_model::text::hex(&Sha256::digest(std::fs::read(file).unwrap()))
 }
 
 /// Every pipeline corpus file is listed in MANIFEST.md with its SHA-256, and every row right
@@ -1797,6 +1797,19 @@ fn arabic_not_reversed() {
     assert!(!out.markdown.contains("ibibah"));
 }
 
+/// Checks that no time limit cut the read: no loss names one. The read ends itself at its
+/// own limit (`max_time`), so the wall time is only a safety stop against a hang past it.
+#[cfg(unix)]
+fn assert_not_cut_by_time(doc: &Value, took: std::time::Duration) {
+    let timed: Vec<&Value> = list(doc, "/losses")
+        .iter()
+        .filter(|l| l["what"].as_str().is_some_and(|w| w.contains("time limit")))
+        .collect();
+    assert!(timed.is_empty(), "{timed:?}");
+    let stop = Config::default().limits.max_time + std::time::Duration::from_secs(600);
+    assert!(took < stop, "{took:?}");
+}
+
 /// The reads of the large remote files run under the default limits; their time and maximum
 /// resident set size are printed for the report (`--no-capture`).
 #[cfg(unix)]
@@ -1842,7 +1855,7 @@ fn nist_reads_under_limits() {
         out.markdown
             .contains("Security and Privacy Controls for Information Systems")
     );
-    assert!(took < Config::default().limits.max_time, "{took:?}");
+    assert_not_cut_by_time(doc, took);
     // The RSS is the figure of this test only under nextest (one process per test).
     assert!(
         std::env::var_os("NEXTEST").is_none() || rss < 1 << 30,
@@ -1897,7 +1910,7 @@ fn arxiv_tables_and_pictures() {
     let md = result.markdown_pages.join("");
     assert!(md.contains("Table 1: Runtime characteristics of Docling"));
     assert!(md.contains("Apple M3 Max"));
-    assert!(took < Config::default().limits.max_time, "{took:?}");
+    assert_not_cut_by_time(&doc, took);
     assert!(
         std::env::var_os("NEXTEST").is_none() || rss < 512 << 20,
         "max RSS {} MiB",

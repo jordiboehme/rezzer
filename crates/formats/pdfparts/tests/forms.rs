@@ -695,3 +695,70 @@ fn an_unclosed_language_escape_in_a_field_name_keeps_its_text() {
         pdf.issues()
     );
 }
+
+/// A form with one text field named by the UTF-16BE string `raw`, read with a form text budget
+/// of 1.5 times `name_bytes` (what is left of `max_object_bytes` after open).
+fn named_with_budget(raw: Vec<u8>, name_bytes: u64) -> Pdf {
+    let build = |doc: &mut Document, _: ObjectId| {
+        let f = doc.add_object(dictionary! {
+            "FT" => "Tx",
+            "T" => Object::String(raw.clone(), lopdf::StringFormat::Hexadecimal),
+        });
+        dictionary! { "Fields" => vec![f.into()] }
+    };
+    let opened = with_form(build);
+    // What open charges depends on the file only, not on `max_object_bytes` (which only caps
+    // it), so the first open sizes the budget of the second.
+    let bytes = opened.original().to_vec();
+    let tight = Limits {
+        max_object_bytes: opened.object_bytes() + name_bytes * 3 / 2,
+        ..Limits::default()
+    };
+    Pdf::open(&bytes, None, &tight, &never).unwrap()
+}
+
+/// A UTF-16BE name: ESC, then `lang` (closed by ESC when given), then 64 KiB of "a".
+fn long_escaped_name(lang: Option<&[u8]>) -> Vec<u8> {
+    let mut raw = vec![0xFE, 0xFF, 0, 0x1B];
+    if let Some(lang) = lang {
+        for b in lang {
+            raw.extend([0, *b]);
+        }
+        raw.extend([0, 0x1B]);
+    }
+    for _ in 0..64 * 1024 {
+        raw.extend([0, b'a']);
+    }
+    raw
+}
+
+/// Whether reading the form stopped at the form text budget.
+fn form_limit(pdf: &Pdf) -> bool {
+    pdf.form();
+    pdf.issues().iter().any(|i| {
+        i.kind == IssueKind::Limit && i.location == "form" && i.what.contains("form fields")
+    })
+}
+
+#[test]
+fn the_first_unclosed_name_is_charged() {
+    // The field copy and the copy kept for the unclosed-escape issue together do not fit.
+    // The name for the issue is charged first and fits, so the issue stays; the field copy
+    // after it stops the walk.
+    let pdf = named_with_budget(long_escaped_name(None), 64 * 1024);
+    assert!(form_limit(&pdf), "{:?}", pdf.issues());
+    assert!(pdf.form().unwrap().fields.is_empty());
+    let escapes = pdf
+        .issues()
+        .iter()
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("language escape"))
+        .count();
+    assert_eq!(escapes, 1, "{:?}", pdf.issues());
+}
+
+#[test]
+fn a_closed_name_of_the_same_size_fits_the_budget() {
+    let pdf = named_with_budget(long_escaped_name(Some(b"en")), 64 * 1024);
+    assert!(!form_limit(&pdf), "{:?}", pdf.issues());
+    assert_eq!(pdf.form().unwrap().fields.len(), 1);
+}

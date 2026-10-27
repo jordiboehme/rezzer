@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rezzer_limits::{Budget, Limits};
+use rezzer_limits::{Budget, CancelToken, Clock, Limits};
 use rezzer_model::{
     Block, Bytes, Completeness, Confidence, Detection, FormatId, Inline, LossReason, ReadOptions,
     Reader, SectionKind, Severity, Source,
@@ -140,6 +140,72 @@ fn one_huge_paragraph_is_time_checked() {
     let got = paragraphs(&out);
     assert_eq!(got.len(), 1);
     assert!(got[0].len() < text.len());
+}
+
+/// A budget whose step clock of 10 ms passes a limit of 25 ms at its third reading, and
+/// whose text runs hold at most `max_text_bytes`.
+fn stepped_budget(max_text_bytes: u64) -> (Budget, Clock) {
+    let clock = Clock::steps(std::time::Duration::from_millis(10));
+    let budget = Budget::with_clock(
+        Limits {
+            max_time: std::time::Duration::from_millis(25),
+            max_text_bytes,
+            ..Limits::default()
+        },
+        CancelToken::default(),
+        clock.clone(),
+    );
+    (budget, clock)
+}
+
+#[test]
+fn one_huge_line_is_time_checked_inside() {
+    // One line of about 1.5 MiB after a short paragraph: `a` and then 3-byte characters.
+    // The time is checked every 64 KiB of the line, and the third check is past the limit.
+    // 3 x 64 KiB falls inside a character, so the cut goes back to the boundary before it.
+    let mut text = String::from("Muster GmbH\n\na");
+    text.push_str(&"€".repeat(512 * 1024));
+    let (budget, clock) = stepped_budget(Limits::default().max_text_bytes);
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(clock.reads(), 3);
+    let loss = out.document.losses.last().unwrap();
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(loss.location, "paragraph 2");
+    assert_eq!(loss.what, "rest of the text not read");
+    let got = paragraphs(&out);
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0], "Muster GmbH");
+    let at = 3 * 64 * 1024;
+    assert_eq!((at - 1) % 3, 2, "the check falls inside a character");
+    assert_eq!(got[1].len(), at - 2);
+    assert!(got[1].starts_with('a'));
+    assert_eq!(
+        got[1].chars().filter(|&c| c == '€').count(),
+        (at - 2 - 1) / 3
+    );
+}
+
+#[test]
+fn a_huge_line_cut_by_time_keeps_the_text_limit() {
+    // The time runs out at 3 x 64 KiB of the line, past a text limit of 100,000 bytes: the
+    // line is kept up to the text limit, and the text limit is the stop named.
+    let text = "€".repeat(512 * 1024);
+    let (budget, clock) = stepped_budget(100_000);
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(clock.reads(), 3);
+    assert_eq!(out.document.losses.len(), 1, "{:?}", out.document.losses);
+    let loss = &out.document.losses[0];
+    assert_eq!(loss.location, "paragraph 1");
+    assert_eq!(
+        loss.what,
+        "text limit reached, rest of the paragraph and the text not read"
+    );
+    let got = paragraphs(&out);
+    assert_eq!(got.len(), 1);
+    // 100,000 rounded down to a whole character.
+    assert_eq!(got[0].len(), 99_999);
 }
 
 #[test]

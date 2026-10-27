@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,7 +13,7 @@ use rezzer_model::{
     Asset, Blob, Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions,
     ReadOutcome, Reader, Registry, Source, source_info,
 };
-use rezzer_pipeline::{Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
+use rezzer_pipeline::{CacheOs, Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
 
 const AT: &str = "2026-10-19T08:30:00Z";
 
@@ -809,26 +810,28 @@ fn config_load_uses_xdg_config_home() {
         rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), None, None),
         Some(dir.path().join("rezzer/config.toml"))
     );
-    let home = Path::new("/home/someone");
-    assert_eq!(
-        rezzer_pipeline::config_path_from(Some("".as_ref()), Some(home.as_os_str()), None),
-        Some(home.join(".config/rezzer/config.toml"))
-    );
-    assert_eq!(
-        rezzer_pipeline::config_path_from(Some("relative".as_ref()), Some(home.as_os_str()), None),
-        Some(home.join(".config/rezzer/config.toml"))
-    );
+    // A temp dir is absolute on every system, so the test holds on Windows too.
+    let home = dir.path();
+    for xdg in [None, Some(""), Some("relative")] {
+        assert_eq!(
+            rezzer_pipeline::config_path_from(xdg.map(OsStr::new), Some(home.as_os_str()), None),
+            Some(home.join(".config/rezzer/config.toml")),
+            "{xdg:?}"
+        );
+    }
     assert_eq!(rezzer_pipeline::config_path_from(None, None, None), None);
 }
 
 #[test]
 fn config_path_falls_back_to_userprofile() {
-    // Windows sets USERPROFILE, not HOME. Plain values, so the test means the same on every OS.
-    let home = Path::new("home");
-    let profile = Path::new("profile");
-    let path = |xdg: Option<&str>, home: Option<&Path>, profile: Option<&Path>| {
+    // Windows sets USERPROFILE, not HOME. Temp dirs are absolute on every system, so the test
+    // means the same on every OS.
+    let home_dir = tempfile::tempdir().unwrap();
+    let profile_dir = tempfile::tempdir().unwrap();
+    let (home, profile) = (home_dir.path(), profile_dir.path());
+    let path = |xdg: Option<&Path>, home: Option<&Path>, profile: Option<&Path>| {
         rezzer_pipeline::config_path_from(
-            xdg.map(std::ffi::OsStr::new),
+            xdg.map(Path::as_os_str),
             home.map(Path::as_os_str),
             profile.map(Path::as_os_str),
         )
@@ -843,11 +846,157 @@ fn config_path_falls_back_to_userprofile() {
     );
     let xdg = std::env::temp_dir();
     assert_eq!(
-        path(Some(xdg.to_str().unwrap()), Some(home), Some(profile)),
+        path(Some(&xdg), Some(home), Some(profile)),
         Some(xdg.join("rezzer").join("config.toml"))
     );
-    // An empty USERPROFILE counts as none.
+    // An empty USERPROFILE counts as none, and a relative one gives no path either.
     assert_eq!(path(None, None, Some(Path::new(""))), None);
+    assert_eq!(path(None, None, Some(Path::new("profile"))), None);
+    // A HOME that is set but relative is the home that was found, so there is no path: it does
+    // not fall back to USERPROFILE.
+    assert_eq!(path(None, Some(Path::new("home")), Some(profile)), None);
+}
+
+#[test]
+fn config_path_needs_an_absolute_base() {
+    // A relative or empty HOME or USERPROFILE never gives a config file in the working
+    // directory, with or without a relative XDG_CONFIG_HOME.
+    for home in [None, Some(""), Some("rel")] {
+        for profile in [None, Some(""), Some("rel")] {
+            for xdg in [None, Some(""), Some("rel")] {
+                assert_eq!(
+                    rezzer_pipeline::config_path_from(
+                        xdg.map(OsStr::new),
+                        home.map(OsStr::new),
+                        profile.map(OsStr::new)
+                    ),
+                    None,
+                    "{xdg:?} {home:?} {profile:?}"
+                );
+            }
+        }
+    }
+    // An absolute XDG_CONFIG_HOME is enough on its own.
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), Some("rel".as_ref()), None),
+        Some(dir.path().join("rezzer/config.toml"))
+    );
+}
+
+// On Unix a Windows drive path is relative, and a Unix path is relative on Windows.
+#[test]
+fn config_path_judges_absolute_by_this_system() {
+    let foreign = if cfg!(windows) {
+        "/home/a"
+    } else {
+        r"C:\Users\a"
+    };
+    assert_eq!(
+        rezzer_pipeline::config_path_from(
+            Some(foreign.as_ref()),
+            Some(foreign.as_ref()),
+            Some(foreign.as_ref())
+        ),
+        None
+    );
+}
+
+// The cache folder lookup is tested with given values only: no test sets an environment
+// variable, because they are process-wide.
+
+fn cache_dir(
+    os: CacheOs,
+    xdg: Option<&str>,
+    home: Option<&str>,
+    local_app_data: Option<&str>,
+) -> Option<PathBuf> {
+    rezzer_pipeline::cache_dir_from(
+        os,
+        xdg.map(OsStr::new),
+        home.map(OsStr::new),
+        local_app_data.map(OsStr::new),
+    )
+}
+
+#[test]
+fn cache_dir_on_linux_follows_xdg() {
+    assert_eq!(
+        cache_dir(CacheOs::Unix, Some("/x"), Some("/home/a"), None),
+        Some(PathBuf::from("/x/rezzer"))
+    );
+    let fallback = Some(PathBuf::from("/home/a/.cache/rezzer"));
+    for xdg in [None, Some("rel"), Some("")] {
+        assert_eq!(
+            cache_dir(CacheOs::Unix, xdg, Some("/home/a"), Some(r"C:\L")),
+            fallback,
+            "{xdg:?}"
+        );
+    }
+}
+
+#[test]
+fn cache_dir_on_macos_is_library_caches() {
+    let expected = Some(PathBuf::from("/Users/a/Library/Caches/rezzer"));
+    assert_eq!(
+        cache_dir(CacheOs::MacOs, None, Some("/Users/a"), None),
+        expected
+    );
+    // As in the directories crate, macOS ignores XDG_CACHE_HOME.
+    assert_eq!(
+        cache_dir(CacheOs::MacOs, Some("/x"), Some("/Users/a"), None),
+        expected
+    );
+}
+
+#[test]
+fn cache_dir_on_windows_is_local_app_data() {
+    let base = r"C:\Users\a\AppData\Local";
+    let expected = Some(PathBuf::from(base).join("rezzer").join("cache"));
+    assert_eq!(
+        cache_dir(CacheOs::Windows, None, None, Some(base)),
+        expected
+    );
+    // HOME and XDG_CACHE_HOME play no part on Windows.
+    assert_eq!(
+        cache_dir(CacheOs::Windows, Some("/x"), Some("/home/a"), Some(base)),
+        expected
+    );
+    let unc = r"\\server\share\a";
+    assert_eq!(
+        cache_dir(CacheOs::Windows, None, None, Some(unc)),
+        Some(PathBuf::from(unc).join("rezzer").join("cache"))
+    );
+    for local in [
+        None,
+        Some("rel"),
+        Some(""),
+        Some("/x"),
+        Some(r"\x"),
+        Some("C:rel"),
+    ] {
+        assert_eq!(
+            cache_dir(CacheOs::Windows, None, Some("/home/a"), local),
+            None,
+            "{local:?}"
+        );
+    }
+}
+
+#[test]
+fn cache_dir_needs_an_absolute_base() {
+    for os in [CacheOs::Unix, CacheOs::MacOs] {
+        for home in [None, Some(""), Some("rel"), Some(r"C:\Users\a")] {
+            assert_eq!(cache_dir(os, None, home, None), None, "{os:?} {home:?}");
+            // An absolute XDG_CACHE_HOME does not stand in for HOME, as in the directories
+            // crate.
+            assert_eq!(
+                cache_dir(os, Some("/x"), home, None),
+                None,
+                "{os:?} {home:?}"
+            );
+        }
+    }
 }
 
 fn panicking_detector(_: &str, _: Option<&str>, _: &[u8]) -> (FormatId, rezzer_model::Detection) {
@@ -1165,6 +1314,39 @@ fn a_second_run_with_fewer_pictures_leaves_no_old_file() {
         Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
     assert_eq!(res.completeness, Completeness::Complete);
     assert!(names_in(&assets).is_empty(), "{:?}", names_in(&assets));
+}
+
+#[test]
+fn a_name_that_copies_a_hash_keeps_its_own_pictures() {
+    use rezzer_pipeline::folder_stem;
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    // The copy in upper case shares the copy's main document on a file system that ignores
+    // case; the same content makes it the same source there, so its run still goes through
+    // and its folders are checked for real. On a file system that keeps case it has its own.
+    let copy = folder_stem("a b.txt");
+    let upper = copy.to_uppercase();
+    let sources: [(&str, &[&'static str]); 3] = [
+        ("a b.txt", &["page-1", "page-2"]),
+        (&copy, &["page-3"]),
+        (&upper, &["page-4"]),
+    ];
+    for _ in 0..2 {
+        for (name, ids) in sources {
+            let (registry, _) = pictures(ids);
+            let res =
+                Pipeline::new(config(None), registry).run_bytes(name, b"x".to_vec(), None, &req);
+            assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        }
+        let assets = |name: &str| out.path().join(format!("{name}.assets"));
+        assert_eq!(names_in(&assets(&copy)), ["page-1.png", "page-2.png"]);
+        assert_eq!(names_in(&assets(&folder_stem(&copy))), ["page-3.png"]);
+        assert_eq!(names_in(&assets(&folder_stem(&upper))), ["page-4.png"]);
+        assert!(assert_links_resolve(out.path()) >= 3);
+    }
 }
 
 #[test]
@@ -2078,7 +2260,8 @@ fn main_name_and_folder_stem_follow_decision_8() {
     );
     assert_eq!(main_name("indexes.pdf"), "indexes.pdf");
     hashed("日本", "日本");
-    hashed("...", "_..");
+    // On Windows the trailing dots of `_..` cannot be written and become `_` too.
+    hashed("...", if cfg!(windows) { "___" } else { "_.." });
     hashed(".env", "_env");
     hashed(".env.md", "_env.md");
     hashed("index", "index");
@@ -2224,7 +2407,10 @@ fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
         let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
         assert_eq!(res.completeness, Completeness::Failed, "{what}");
         let message = res.message.unwrap();
-        assert!(message.contains(&first), "{what}: {message}");
+        // The message names the file as a path of this system: `first` is the result's
+        // relative path with `/`, the message has `\` between the folders on Windows.
+        let native = first.replace('/', std::path::MAIN_SEPARATOR_STR);
+        assert!(message.contains(&native), "{what}: {message}");
         assert!(
             message.contains("is not a part Rezzer wrote"),
             "{what}: {message}"
@@ -2581,19 +2767,17 @@ fn a_part_of_another_source_stops_the_run_and_is_never_removed() {
 fn hostile_names_are_written_end_to_end() {
     let long = format!("{}.txt", "a".repeat(500));
     let wide = "日".repeat(100);
-    #[cfg_attr(windows, allow(unused_mut))]
-    let mut names = vec![
+    // On Windows `a:b.txt` and `con.txt` are written under legal names with a hash (`:`
+    // would make an NTFS alternate data stream, CON is a device); `resource` keeps the name.
+    let names = [
         "/abs/dir/report.txt",
         "a\0b.txt",
         long.as_str(),
         wide.as_str(),
         "C:\\dir\\x.txt",
+        "a:b.txt",
+        "con.txt",
     ];
-    // Known issue, fixed before the release: the main document keeps the characters Windows
-    // reserves (`:` makes an NTFS alternate data stream, `* ? " < > |` and device names such
-    // as CON cannot be written), so on Windows a:b.txt is left out until the naming fix.
-    #[cfg(not(windows))]
-    names.push("a:b.txt");
     for name in names {
         let root = tempfile::tempdir().unwrap();
         let out = root.path().join("out");
@@ -2616,6 +2800,18 @@ fn hostile_names_are_written_end_to_end() {
             assert_links_resolve(&out) >= 2 * res.parts.len(),
             "{name:?}"
         );
+        let main = res.main_file.as_deref().unwrap();
+        let file = main.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(file, format!("{}.md", rezzer_pipeline::main_name(name)));
+        if cfg!(windows) && matches!(name, "a:b.txt" | "con.txt") {
+            assert!(!file.starts_with(name), "{name:?}: {file}");
+            assert!(all_names(&out).iter().all(|n| !n.contains(':')), "{name:?}");
+        }
+        if !name.contains(['/', '\\']) {
+            let text = std::fs::read_to_string(main).unwrap();
+            let resource = format!("\nresource: {}\n", rezzer_render::frontmatter_value(name));
+            assert!(text.contains(&resource), "{name:?}: {text}");
+        }
     }
 }
 
@@ -2764,6 +2960,41 @@ fn a_failed_read_keeps_the_old_pictures() {
     let res = pipeline.run_bytes("notes.txt", SMALL.to_vec(), None, &written(out.path()));
     assert_eq!(res.completeness, Completeness::Failed);
     assert_eq!(names_in(&assets), pictures);
+}
+
+#[test]
+fn a_failed_check_creates_no_folder() {
+    // A run that cannot use its output folder makes none (ruling P5-AB): here the folder is
+    // missing and its parent is a file of the user's, so it is not taken for a missing folder.
+    let root = tempfile::tempdir().unwrap();
+    let user_file = root.path().join("notes");
+    std::fs::write(&user_file, "mine").unwrap();
+    let out = user_file.join("out");
+    let pipeline = chapters_pipeline(config(None));
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(
+        message.starts_with(&format!("cannot write {}: ", out.display())),
+        "{message}"
+    );
+    assert_eq!(std::fs::read(&user_file).unwrap(), b"mine");
+    // A part path held by a file of the user's fails the check, and a missing folder below
+    // the output folder is not made either.
+    let out = root.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let first = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(first.completeness, Completeness::Complete);
+    std::fs::remove_dir_all(out.join("notes.txt.assets")).unwrap();
+    std::fs::write(out.join(&first.parts[0].path), "# My own start\n").unwrap();
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(
+        message.contains("is in the way and is not a part Rezzer wrote"),
+        "{message}"
+    );
+    assert!(!out.join("notes.txt.assets").exists());
 }
 
 /// A text reader that records whether each read asked for page geometry.

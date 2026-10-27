@@ -635,6 +635,7 @@ fn units(layout: Option<&TableLayout>, data: &[Vec<Cell>], numbers: &[u32]) -> V
         let mut reach = start;
         let mut j = start;
         loop {
+            crate::work::add(1);
             let span = data[j]
                 .iter()
                 .map(|c| c.row_span.max(1) as usize)
@@ -644,6 +645,7 @@ fn units(layout: Option<&TableLayout>, data: &[Vec<Cell>], numbers: &[u32]) -> V
             if groups.contains(&numbers[j]) {
                 let mut k = j + 1;
                 while k < end && blanks.contains(&numbers[k]) {
+                    crate::work::add(1);
                     k += 1;
                 }
                 reach = reach.max(k.min(end));

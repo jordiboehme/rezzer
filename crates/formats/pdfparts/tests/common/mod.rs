@@ -58,34 +58,41 @@ pub fn max_rss_bytes() -> u64 {
     }
 }
 
-/// The CPU time the calling thread has used. pdfparts runs on the calling thread, so this
-/// counts its work and nothing of other tests or of a busy machine, unlike the wall clock.
-#[cfg(unix)]
-pub fn thread_cpu() -> std::time::Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
-}
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+pub const SAFETY: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// The CPU time `f` takes on the calling thread, with its result.
-#[cfg(unix)]
-pub fn cpu_time<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
-    let start = thread_cpu();
-    let out = f();
-    (out, thread_cpu() - start)
-}
-
-/// Elsewhere the wall clock stands in.
-#[cfg(not(unix))]
-pub fn cpu_time<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+/// Runs `f` and gives its result, the steps of work it did ([`pdfparts::work_steps`], `None`
+/// in a release build, which does not count them) and its wall time.
+pub fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, std::time::Duration) {
+    let before = pdfparts::work_steps();
     let start = std::time::Instant::now();
     let out = f();
-    (out, start.elapsed())
+    let took = start.elapsed();
+    let steps = before.zip(pdfparts::work_steps()).map(|(b, a)| a - b);
+    (out, steps, took)
+}
+
+/// Checks a work bound: at most the `measured` steps with half of them again as margin (in a
+/// debug build, which counts them), and the wall time under [`SAFETY`]. Each `measured` is
+/// the count of the input when the bound was set (2026-10-27, debug build, `--no-capture`):
+/// the count is the same on every machine, so a slow runner cannot fail the test, and a
+/// growth past the margin is a change in the work, not a slow machine.
+pub fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: std::time::Duration) {
+    let max = measured + measured / 2;
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        // At least half the measured count too: a count of 0 would mean the work ran where
+        // it is not counted (another thread), not that it got cheaper.
+        assert!(
+            steps.is_some_and(|n| (measured / 2..=max).contains(&n)),
+            "{what}: {steps:?} steps of work, expected {}..={max}",
+            measured / 2
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
 }
 
 /// The bound every memory test checks.

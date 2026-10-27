@@ -205,11 +205,18 @@ fn hostile_inputs_do_not_panic() {
     }
     assert_eq!(text("yyyy-mm-dd", 2e11), "####");
     assert_eq!(text("h:mm", 3e11), "####");
+    // A code over Excel's 255 characters is no format and is not parsed: the General text
+    // of the 302-character code below is the proof of that cap. The wall time is only a
+    // safety stop (the whole test took 16 ms on 2026-10-27, load average 37).
     let started = std::time::Instant::now();
     let _ = format(&format!("0.{}", "0".repeat(100_000)), 1.5);
     let _ = format(&"#,##0".repeat(50_000), 1.5);
     assert_eq!(text(&format!("0.{}", "0".repeat(300)), 1.5), "1.5");
-    assert!(started.elapsed().as_secs() < 2);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
     let long = "0".repeat(10_000);
     let _ = format(&long, 1.0);
     let _ = format(&"[".repeat(100), 1.0);

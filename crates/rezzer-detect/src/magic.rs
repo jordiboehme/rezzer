@@ -149,7 +149,7 @@ fn pdf_after_junk(bytes: &[u8]) -> Option<Found> {
     })
 }
 
-/// ASCII DXF: group code / value line pairs, starting with `0`/`SECTION`/`2`/<section name>.
+/// ASCII DXF: group code / value line pairs, starting with `0`/`SECTION`/`2`/`<section name>`.
 /// Leading `999` comment pairs are skipped.
 fn ascii_dxf(bytes: &[u8]) -> Option<Found> {
     let head = &bytes[..bytes.len().min(4096)];
