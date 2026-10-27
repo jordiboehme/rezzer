@@ -1353,10 +1353,13 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
             .iter()
             .map(|r| {
                 let rel = r["rel_type"].as_str().unwrap_or("").to_string();
-                // A relative relation names the permalink it resolved to; a wikilink one
-                // has none.
-                let to_engram = r.get("permalink").is_none_or(|p| p != "");
-                (rel, target(r), r["resolved"] == true && to_engram)
+                // A relative relation names the permalink it resolved to, which must be the
+                // permalink of the file it links; a wikilink one names none.
+                let to_target = r.get("permalink").is_none_or(|p| {
+                    read.get(&target(r))
+                        .is_some_and(|engram| engram["permalink"] == *p)
+                });
+                (rel, target(r), r["resolved"] == true && to_target)
             })
             .collect()
     };
