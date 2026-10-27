@@ -1162,7 +1162,12 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         let glued = pad_after[pos - 1]
             || p.text.ends_with(char::is_whitespace)
             || f.text[keep[pos].0..].starts_with(char::is_whitespace);
-        if !glued && f.x - p.end > WORD_GAP * f.size.max(p.size) {
+        // A gap after the run before is a word space. So is a start left of where the run
+        // before starts: a run that moves with the chain of a padded value run (see
+        // [`chain_heads`]) is put before a label drawn between its values, and the label
+        // goes on after it, never as one word with it.
+        let size = f.size.max(p.size);
+        if !glued && (f.x - p.end > WORD_GAP * size || f.x < p.x) {
             spaced[pos] = true;
         }
     }

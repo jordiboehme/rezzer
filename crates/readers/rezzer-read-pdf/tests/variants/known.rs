@@ -290,17 +290,6 @@ pub(crate) const KNOWN: &[Known] = &[
     },
     Known {
         shape: "label block and bank row",
-        variants: &[
-            "row under",
-            "scale 1.5, times labels, thick, turned 90, row under, two pages",
-            "scale 0.7, larger text, courier, dotted, turned 270, row under",
-        ],
-        broken: &[Inv::ValueOnce, Inv::ClearPairs],
-        cause: Cause::New,
-        why: "P6-X, a value glued to a label: a row of column titles under the bank row makes the block a grid of labels under their values to the reader, which refuses it with a loss (right), but its text as it stands joins a padded value run and the next label without a space (`98,76Kranken`), so the value is not a word of its own",
-    },
-    Known {
-        shape: "label block and bank row",
         variants: &["scale 0.75, smaller text, proportional, dashed, turned 90, beside"],
         broken: &[Inv::SameReading],
         cause: Cause::New,
@@ -308,10 +297,15 @@ pub(crate) const KNOWN: &[Known] = &[
     },
     Known {
         shape: "label block and bank row",
-        variants: &["scale 0.75, smaller text, proportional, dashed, row under"],
+        variants: &[
+            "row under",
+            "scale 1.5, times labels, thick, turned 90, row under, two pages",
+            "scale 0.7, larger text, courier, dotted, turned 270, row under",
+            "scale 0.75, smaller text, proportional, dashed, row under",
+        ],
         broken: &[Inv::ClearPairs],
         cause: Cause::New,
-        why: "as the other `row under` variants of this shape: the block is refused with a loss once a row of column titles stands under the bank row; here the text keeps its spaces",
+        why: "a row of column titles under the bank row makes the block a grid of labels under their values to the reader, which refuses it with a loss that names its fields: a loss where the fields are clear, never a wrong pair; its text as it stands keeps every value a word of its own",
     },
     Known {
         shape: "labels under values",
