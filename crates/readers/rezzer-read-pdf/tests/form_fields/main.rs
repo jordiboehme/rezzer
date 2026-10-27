@@ -1272,16 +1272,14 @@ const TABLE_ENDS_LEFT_OUT: [(Fill, Fill); 3] = [
 ];
 
 /// Each left-out pair of ends in ruled tables reads as its twin, a grid of labels over values
-/// (same text, same losses), in the real look and the looks with hanging dividers: the two
-/// pages are one, and the table of ends reads it one way. (Dividers that rise from the lower
-/// rule rise from the other rule of a row in the two drawings, so that look is left out.)
+/// (same text, same losses), in the real look and each of [`looks`]: the two pages are one,
+/// and the table of ends reads it one way. (With rising dividers the two drawings differ by a
+/// divider each, and each lies inside a column rule of a table: covered ink in both.)
 #[test]
 fn the_left_out_pairs_of_ends_in_tables_read_as_their_twins() {
     let mut differ = Vec::new();
     for (top, bottom) in TABLE_ENDS_LEFT_OUT {
-        for (look, g) in
-            std::iter::once(("real", REAL)).chain(looks().into_iter().filter(|l| !l.1.rising))
-        {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
             let (a, b) = (
                 read_pages(&[&between_tables(&g, top, bottom, false)]),
                 read_pages(&[&between_tables(&g, top, bottom, true)]),
