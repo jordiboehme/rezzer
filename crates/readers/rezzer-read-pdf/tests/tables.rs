@@ -1939,3 +1939,53 @@ fn calendar_grid_is_refused_with_a_loss() {
         "{losses:?}"
     );
 }
+
+/// A ruled table of a header row and three rows whose column rules run on past its first or
+/// its last horizontal rule, with no rule there (an open top or bottom), and a free rule over
+/// it (a title's underline) or under it: the open row is the table's.
+fn open_ruled_page(open_top: bool) -> Vec<u8> {
+    let rows = [
+        ["Monat", "Umsatz", "Kosten"],
+        ["Januar", "1.234,56", "234,57"],
+        ["Februar", "2.345,67", "345,68"],
+        ["Maerz", "3.456,78", "456,79"],
+    ];
+    let xs = [40.0, 200.0, 380.0, 540.0];
+    let mut c = show("F1", 10.0, 40.0, 760.0, "Muster GmbH Bericht");
+    c += "0.5 w 40 754 m 540 754 l S ";
+    // Row edges from the top; the open one has no rule.
+    let ys = [740.0, 720.0, 700.0, 680.0, 660.0];
+    for (k, y) in ys.iter().enumerate() {
+        let open = if open_top { k == 0 } else { k == ys.len() - 1 };
+        if !open {
+            c += &format!("40 {y} m 540 {y} l S ");
+        }
+    }
+    for x in xs {
+        c += &format!("{x} 660 m {x} 740 l S ");
+    }
+    if !open_top {
+        c += "40 640 m 540 640 l S ";
+    }
+    for (r, row) in rows.iter().enumerate() {
+        for (k, text) in row.iter().enumerate() {
+            c += &show("F1", 10.0, xs[k] + 5.0, ys[r] - 15.0, text);
+        }
+    }
+    c += &show("F1", 10.0, 40.0, 600.0, "A paragraph after the table.");
+    pdf(&[Page::text(c)], "")
+}
+
+/// Guard: a free rule over an open top or under an open bottom of a ruled table does not cut
+/// the open row off: it holds column titles or values, no row of fields.
+#[test]
+fn an_open_row_of_a_ruled_table_stays_its_own() {
+    for open_top in [true, false] {
+        let out = read(&open_ruled_page(open_top));
+        let found = tables(page(&out, 1));
+        assert_eq!(found.len(), 1, "{open_top}: {found:?}");
+        assert_eq!(found[0].1.len(), 4, "{open_top}: {found:?}");
+        assert_eq!(found[0].1[0], ["Monat", "Umsatz", "Kosten"], "{open_top}");
+        assert_eq!(found[0].1[3], ["Maerz", "3.456,78", "456,79"], "{open_top}");
+    }
+}

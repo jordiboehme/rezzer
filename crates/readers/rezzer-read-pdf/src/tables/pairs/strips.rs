@@ -363,6 +363,40 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
         .all(|c| matches!(parse(flow, c, how), Parsed::Fields(f) if f.iter().all(|f| short(flow, f))))
 }
 
+/// Whether the frame `fr` holds a row of fields with a value: its cells between dividers read
+/// as fields (see [`parse`]) that are short, one of them with a value. A row of column titles
+/// or a line of text under a rule holds none.
+pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bool {
+    let how = Reading {
+        one_field: false,
+        smaller: true,
+        small: i32::MAX,
+        labels: &[],
+    };
+    let ids = frame_runs(flow, by_y, fr, &|_| false);
+    if ids.is_empty() {
+        return false;
+    }
+    let mut xs = vec![fr.x0];
+    xs.extend(&fr.dividers);
+    xs.push(fr.x1);
+    let mut value = false;
+    for cell in cells_of(flow, &xs, &ids).iter().filter(|c| !c.is_empty()) {
+        let Some(parts) = parts_of(flow, cell) else {
+            return false;
+        };
+        for part in parts {
+            match parse(flow, &part, how) {
+                Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
+                    value |= f.iter().any(|f| !f.value.is_empty());
+                }
+                _ => return false,
+            }
+        }
+    }
+    value
+}
+
 /// Fields between drawn rules, in the `frames` of the page. A frame's dividers part it into
 /// cells; a cell whose first line is two labels or more over lines of values is parted further,
 /// each value going to the label it stands under (see [`parts_of`]). When the text of each

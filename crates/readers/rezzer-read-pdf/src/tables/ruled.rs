@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
 use super::pairs::{
-    Field, claim, field_cuts, field_strips, frame_tops, frames, pairs_table, taken_by_grids,
+    Field, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
+    taken_by_grids,
 };
 use super::sections::{CUT_WORK, sections};
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
@@ -145,9 +146,11 @@ pub(super) fn ruled(
             break;
         }
         let (mut xs, mut ys) = edges(&h, &v);
-        // Column rules that hang below the grid's lowest rule into a frame of fields under it
-        // part the fields, not rows of the grid: the grid ends at that rule. So do column rules
-        // that rise over its highest rule into a frame over it.
+        // Column rules that hang below the grid's lowest rule into a row of fields under it
+        // (a frame that holds fields with a value) part the fields, not rows of the grid: the
+        // grid ends at that rule. So do column rules that rise over its highest rule into a
+        // row of fields over it. Column titles or values over or under the rule are the
+        // grid's own open row.
         if let (Some(low), Some(high), Some(&l), Some(&r)) = (
             h.iter().map(|s| s.at).reduce(f32::min),
             h.iter().map(|s| s.at).reduce(f32::max),
@@ -155,9 +158,12 @@ pub(super) fn ruled(
             xs.last(),
         ) {
             let framed = |at: f32, edge: fn(&Frame) -> f32| {
-                frames
-                    .iter()
-                    .any(|f| (edge(f) - at).abs() <= SNAP && f.x0 < r && l < f.x1)
+                frames.iter().any(|f| {
+                    (edge(f) - at).abs() <= SNAP
+                        && f.x0 < r
+                        && l < f.x1
+                        && holds_values(flow, &by_y, f)
+                })
             };
             if framed(low, |f| f.top) {
                 ys.retain(|y| *y >= low - SNAP);
