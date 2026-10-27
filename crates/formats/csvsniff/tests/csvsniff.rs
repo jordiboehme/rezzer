@@ -680,17 +680,27 @@ fn sniff_looks_only_at_the_first_mebibyte() {
     let mut text = String::from("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
     text.push_str(&"x".repeat(64 * 1024 * 1024));
     text.push('\n');
-    let start = std::time::Instant::now();
+    let before = csvsniff::work_steps();
     let d = sniff(&text).expect("dialect from the start of the text");
+    let steps = before.zip(csvsniff::work_steps()).map(|(b, a)| a - b);
     assert_eq!(d.delimiter, b',');
-    assert!(
-        start.elapsed() < std::time::Duration::from_millis(150),
-        "{:?}",
-        start.elapsed()
-    );
-    // Multi-byte text cut at the cap must not panic.
+    // The bytes in reach of the five passes (the format check and four delimiters), counted
+    // in debug builds: the sample ends after the last line break in the first MiB, which here
+    // is the 24 bytes of the first four records. Measured once (2026-10-27): 5 x 24.
+    if cfg!(debug_assertions) {
+        assert_eq!(steps, Some(5 * 24));
+    } else {
+        assert_eq!(steps, None);
+    }
+    // Multi-byte text cut at the cap must not panic. Its lines are 6 bytes, so the sample is
+    // the 174,762 whole lines in the first MiB.
     let wide = "é,ö\n".repeat(400_000);
+    let before = csvsniff::work_steps();
     assert!(sniff(&wide).is_some());
+    let steps = before.zip(csvsniff::work_steps()).map(|(b, a)| a - b);
+    if cfg!(debug_assertions) {
+        assert_eq!(steps, Some(5 * 174_762 * 6));
+    }
 }
 
 #[test]

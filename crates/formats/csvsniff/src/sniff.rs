@@ -332,12 +332,14 @@ fn head(text: &str, max: usize) -> &str {
 /// flag is a heuristic: see [`Dialect::has_header`].
 pub fn sniff(text: &str) -> Option<Dialect> {
     let text = head(strip_bom(text), SNIFF_MAX_BYTES);
+    crate::work::add(text.len() as u64);
     if looks_like_other_format(text) {
         return None;
     }
     let quote = b'"';
     let mut best: Option<Pick> = None;
     for &delimiter in CANDIDATES {
+        crate::work::add(text.len() as u64);
         let mut rows: Vec<Vec<String>> = Vec::new();
         let mut quoted: Vec<Vec<bool>> = Vec::new();
         for rec in reader(text.as_bytes(), delimiter, quote)

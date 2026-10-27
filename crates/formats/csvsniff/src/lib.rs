@@ -18,8 +18,10 @@ mod derived;
 mod sniff;
 mod stop;
 mod types;
+mod work;
 
 pub use sniff::{CellClass, analyze, analyze_until, cell_class, sniff};
 pub use types::{
     Analysis, Column, ColumnKind, Derived, DerivedOp, Dialect, QuoteProblem, RaggedRow,
 };
+pub use work::work_steps;
