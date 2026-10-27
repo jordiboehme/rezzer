@@ -122,11 +122,15 @@ fn capped(text: &str) -> String {
     }
 }
 
+/// An address block holds at most this many lines.
+const ADDRESS_LINES: usize = 8;
+
 /// Whether the heading of `lines[i..j]` opens an address: its lines share one left edge and,
-/// with the lines right below it at that edge (each right below the one before, see
+/// with some of the lines right below it at that edge (each right below the one before, see
 /// [`right_below`], and not larger than the heading), have the shape of an address (see
-/// [`address_shaped`]). The lines below may be smaller than the heading: a name in bold over
-/// its street and town.
+/// [`address_shaped`]): the heading and the first lines below, three or more in all and at
+/// most [`ADDRESS_LINES`]. The lines below may be smaller than the heading: a name in bold
+/// over its street and town; a longer line after the town does not hide the address.
 fn opens_address(lines: &[Line<'_>], i: usize, j: usize) -> bool {
     let first = &lines[i];
     let at_edge = |l: &Line<'_>| (l.x - first.x).abs() <= EDGE;
@@ -135,6 +139,7 @@ fn opens_address(lines: &[Line<'_>], i: usize, j: usize) -> bool {
     }
     let mut k = j;
     while k < lines.len()
+        && k - i < ADDRESS_LINES
         && at_edge(&lines[k])
         && right_below(&lines[k - 1], &lines[k])
         && lines[k].size <= first.size + SIZE_SLACK
@@ -142,7 +147,7 @@ fn opens_address(lines: &[Line<'_>], i: usize, j: usize) -> bool {
         k += 1;
     }
     let texts: Vec<&str> = lines[i..k].iter().map(|l| l.text.as_str()).collect();
-    address_shaped(&texts)
+    (3..=texts.len()).any(|n| address_shaped(&texts[..n]))
 }
 
 /// Whether `cur` stands right below `prev`: under it, with a gap of at most [`GAP_RATIO`]
@@ -248,7 +253,9 @@ fn distinct(seen: &[Seen<'_>]) -> usize {
 
 /// The date label `before` ends with (white space and a colon after it aside), as written,
 /// when it stands as a whole: no letter, digit or hyphen right before it (`Liefer-Datum` is
-/// a word of its own).
+/// a word of its own), and no word right before it either (`Due date`, `Invoice date`: a
+/// label of a word group is none of the list). A digit or a sign before it may stand
+/// (`Kundennr. 4711 Datum`, `Ort, Datum`).
 fn label_before(before: &str) -> Option<&str> {
     let before = before.trim_end();
     let before = before.strip_suffix(':').unwrap_or(before).trim_end();
@@ -256,10 +263,16 @@ fn label_before(before: &str) -> Option<&str> {
         let n = label.chars().count();
         let start = before.char_indices().rev().nth(n - 1)?.0;
         let tail = &before[start..];
-        let alone = before[..start]
+        let rest = &before[..start];
+        let alone = rest
             .chars()
             .next_back()
-            .is_none_or(|c| !c.is_alphanumeric() && c != '-');
+            .is_none_or(|c| !c.is_alphanumeric() && c != '-')
+            && rest
+                .trim_end()
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphabetic());
         (alone && tail.to_lowercase() == *label).then_some(tail)
     })
 }
@@ -327,6 +340,8 @@ mod tests {
         assert_eq!(label_before("Datum "), Some("Datum"));
         assert_eq!(label_before("Ort, Datum:"), Some("Datum"));
         assert_eq!(label_before("Liefer-Datum:"), None);
+        assert_eq!(label_before("Due date"), None);
+        assert_eq!(label_before("Kundennr. 4711 Datum"), Some("Datum"));
         assert_eq!(label_before("Erstellt am"), Some("Erstellt am"));
         assert_eq!(label_before("Eintrittsdatum"), None);
         assert_eq!(label_before("Update"), None);

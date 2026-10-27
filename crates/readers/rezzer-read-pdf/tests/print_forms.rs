@@ -4479,3 +4479,22 @@ fn compound_date_label_is_not_the_document_date() {
     assert_eq!(front(&out, "document_date"), None);
     assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
 }
+
+#[test]
+fn compound_english_date_label_is_no_label() {
+    // `Due date` is no date label: the only date in the head is the document date.
+    for label in ["Due date", "Delivery date", "Start Date:"] {
+        let head = common::show("FL", 9.0, 400.0, 760.0, "Musterstadt, 01.02.2026")
+            + &common::show("FL", 9.0, 40.0, 200.0, &format!("{label} 15.03.2026"));
+        let out = read(&headed(&head, 9.0, 1.0, ""));
+        assert_eq!(
+            out.document
+                .properties
+                .document_date
+                .as_ref()
+                .map(|d| d.date.as_str()),
+            Some("2026-02-01"),
+            "{label}"
+        );
+    }
+}

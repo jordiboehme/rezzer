@@ -7017,3 +7017,20 @@ fn file_date_wins_over_the_found_date() {
     assert_eq!(fm_line(&md, "document_date"), None, "{md}");
     assert_eq!(fm_line(&md, "document_date_from"), None, "{md}");
 }
+
+#[test]
+fn title_from_is_only_for_the_document_title() {
+    let mut d = doc();
+    d.properties.title = Some("Rechnung".into());
+    d.properties.title_from = Some("largest heading in the top third of page 1".into());
+    let mut o = opts();
+    o.part = Some(rezzer_render::PartMeta {
+        index: 2,
+        count: 3,
+        location: "pages 3 to 4".into(),
+        title: "Rechnung: Positionen".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(fm_line(&md, "title"), Some("\"Rechnung: Positionen\""));
+    assert_eq!(fm_line(&md, "title_from"), None, "{md}");
+}

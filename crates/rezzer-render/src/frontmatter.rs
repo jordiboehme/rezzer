@@ -317,8 +317,13 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
     if let Some(v) = &p.modified {
         out.push_str(&format!("modified: {}\n", yaml_value(v, 0)));
     }
-    // What the reader found in the document's text, and where.
-    if let Some(from) = p.title_from.as_deref().filter(|f| !f.trim().is_empty()) {
+    // What the reader found in the document's text, and where. `title_from` speaks of the
+    // document's title, so it is left out where a part shows a title of its own.
+    let own_title = opts
+        .part
+        .as_ref()
+        .is_none_or(|part| part.title.trim().is_empty());
+    if own_title && let Some(from) = p.title_from.as_deref().filter(|f| !f.trim().is_empty()) {
         out.push_str(&format!("title_from: {}\n", quote(from)));
     }
     if let Some(found) = found_date(doc) {

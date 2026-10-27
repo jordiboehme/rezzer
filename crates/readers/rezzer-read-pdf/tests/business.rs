@@ -4939,3 +4939,31 @@ fn footer_heading_does_not_hide_the_title() {
         );
     }
 }
+
+#[test]
+fn recipient_name_over_a_longer_line_is_not_the_title() {
+    // A line that is no address line right under the town: the name still opens an address.
+    for b in [6.0f32, 7.0, 9.0] {
+        for scale in [0.8f32, 1.0, 1.25] {
+            let small = b * 8.0 / 7.0;
+            let step = small * 1.3;
+            let head = show("FB", b * 10.0 / 7.0, 40.0, 720.0, "Erika Mustermann")
+                + &show("FL", small, 40.0, 720.0 - step, "Musterweg 1")
+                + &show("FL", small, 40.0, 720.0 - 2.0 * step, "12345 Musterstadt")
+                + &show(
+                    "FL",
+                    small,
+                    40.0,
+                    720.0 - 3.0 * step,
+                    "Kundennummer 4711 bitte bei jeder Zahlung angeben",
+                )
+                + &show("FB", b * 9.0 / 7.0, 40.0, 640.0, "Rechnung");
+            let out = common::read(&page_with(&head, b, scale));
+            assert_eq!(
+                out.document.properties.title.as_deref(),
+                Some("Rechnung"),
+                "body {b}, scale {scale}"
+            );
+        }
+    }
+}
