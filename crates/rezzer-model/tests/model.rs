@@ -14,6 +14,7 @@ use rezzer_model::{
     RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor,
     TableLayout, TaskState, Value,
 };
+use rezzer_model::{BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox};
 
 fn src() -> SourceInfo {
     SourceInfo {
@@ -718,11 +719,13 @@ fn read_options_debug_hides_password() {
     let opts = ReadOptions {
         password: Some("secret".into()),
         extract_assets: true,
+        geometry: true,
     };
     let debug = format!("{opts:?}");
     assert!(!debug.contains("secret"));
     assert!(debug.contains("redacted"));
     assert!(debug.contains("extract_assets: true"));
+    assert!(debug.contains("geometry: true"));
 }
 
 #[test]
@@ -1109,4 +1112,90 @@ fn old_json_without_file_facts_reads() {
         );
     }
     assert_eq!(MODEL_VERSION, 1);
+}
+
+fn placed(kind: BoxKind, bounds: [f32; 4], anchor: Option<&str>) -> PlacedBox {
+    PlacedBox {
+        kind,
+        bounds,
+        anchor: anchor.map(|a| Anchor(a.into())),
+    }
+}
+
+#[test]
+fn geometry_is_not_serialized() {
+    let plain = Document::new(src());
+    let mut doc = plain.clone();
+    let mut geometry = Geometry::default();
+    assert!(geometry.add_page(1, [612.0, 792.0]));
+    assert!(geometry.push(1, placed(BoxKind::Text, [10.0, 10.0, 100.0, 40.0], None)));
+    doc.geometry = Some(Box::new(geometry));
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(!json.contains("geometry"), "{json}");
+    assert_eq!(json, serde_json::to_string(&plain).unwrap());
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert!(back.geometry.is_none());
+    assert_eq!(back, plain);
+}
+
+#[test]
+fn schema_has_no_geometry() {
+    let schema = schemars::schema_for!(Document);
+    let value = serde_json::to_value(&schema).unwrap();
+    assert!(value["properties"].get("geometry").is_none(), "{value}");
+    assert!(!value.to_string().contains("geometry"), "{value}");
+}
+
+#[test]
+fn push_caps_and_rejects_bad_bounds() {
+    let mut g = Geometry::default();
+    assert!(g.is_empty());
+    assert!(!g.add_page(1, [0.0, 792.0]));
+    assert!(!g.add_page(1, [f32::NAN, 792.0]));
+    assert!(!g.add_page(1, [612.0, f32::INFINITY]));
+    assert!(!g.add_page(1, [-1.0, 10.0]));
+    assert!(g.add_page(1, [612.0, 792.0]));
+    assert!(!g.add_page(1, [612.0, 792.0]), "a page already added");
+    let ok = [0.0, 0.0, 10.0, 10.0];
+    assert!(!g.push(2, placed(BoxKind::Rule, ok, None)), "unknown page");
+    assert!(!g.push(1, placed(BoxKind::Rule, [f32::NAN, 0.0, 1.0, 1.0], None)));
+    assert!(!g.push(
+        1,
+        placed(BoxKind::Rule, [0.0, 0.0, f32::INFINITY, 1.0], None)
+    ));
+    assert!(!g.push(1, placed(BoxKind::Rule, [5.0, 0.0, 1.0, 1.0], None)));
+    assert!(!g.push(1, placed(BoxKind::Rule, [0.0, 5.0, 1.0, 1.0], None)));
+    assert_eq!(g.len(), 0);
+    // A zero-width box is a valid rule.
+    assert!(g.push(1, placed(BoxKind::Rule, [3.0, 0.0, 3.0, 9.0], None)));
+    for _ in 1..MAX_BOXES_PER_PAGE {
+        assert!(g.push(1, placed(BoxKind::Text, ok, None)));
+    }
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE);
+    assert!(!g.push(1, placed(BoxKind::Text, ok, None)));
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE);
+    // Another page has its own cap.
+    assert!(g.add_page(2, [100.0, 100.0]));
+    assert!(g.push(2, placed(BoxKind::Heading(2), ok, None)));
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE + 1);
+}
+
+#[test]
+fn box_of_finds_anchor() {
+    let mut g = Geometry::default();
+    g.add_page(1, [612.0, 792.0]);
+    g.add_page(2, [612.0, 792.0]);
+    g.push(1, placed(BoxKind::Text, [0.0, 0.0, 1.0, 1.0], None));
+    g.push(1, placed(BoxKind::Table, [0.0, 0.0, 5.0, 5.0], Some("t1")));
+    g.push(
+        2,
+        placed(BoxKind::Picture, [1.0, 1.0, 9.0, 9.0], Some("p1")),
+    );
+    let t = g.box_of(&Anchor("t1".into())).unwrap();
+    assert_eq!(t.kind, BoxKind::Table);
+    assert_eq!(
+        g.box_of(&Anchor("p1".into())).unwrap().kind,
+        BoxKind::Picture
+    );
+    assert!(g.box_of(&Anchor("nope".into())).is_none());
 }

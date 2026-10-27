@@ -47,6 +47,8 @@ pub struct ReadOptions {
     pub password: Option<String>,
     /// Extract pictures and attachments as files (their bytes come back in `blobs`).
     pub extract_assets: bool,
+    /// Fill `Document.geometry` where the reader knows the page geometry.
+    pub geometry: bool,
 }
 
 impl fmt::Debug for ReadOptions {
@@ -55,6 +57,7 @@ impl fmt::Debug for ReadOptions {
         f.debug_struct("ReadOptions")
             .field("password", &password)
             .field("extract_assets", &self.extract_assets)
+            .field("geometry", &self.geometry)
             .finish()
     }
 }
