@@ -99,7 +99,8 @@ fn assert_readings(reads: u64, measured: u64) {
 
 /// A clock that never moves: a read on it cannot reach its time limit, also on a busy
 /// machine, and its readings count the time checks of the read, which is a count of the
-/// work, the same on every machine.
+/// work, the same on every machine. The readings the tests assert were measured once in a
+/// debug build with `--no-capture`, each run printing them.
 fn still_clock() -> Clock {
     Clock::steps(Duration::ZERO)
 }
@@ -1452,7 +1453,8 @@ fn objstm_bomb_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 68);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("objstm_bomb_is_bounded");
@@ -1501,7 +1503,8 @@ fn content_stream_bomb_is_bounded() {
         losses(&result)
     );
     assert!(result.markdown_pages.join("").contains("The plain page."));
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 122);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("content_stream_bomb_is_bounded");
@@ -1552,7 +1555,8 @@ fn page_tree_cycle_is_partial() {
         "{:?}",
         losses(&result)
     );
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 13);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("page_tree_cycle_is_partial");
@@ -1884,7 +1888,8 @@ fn image_pixel_bomb_skips_render() {
     let bundle = dir.path().join("hostile.pdf.assets");
     let written = std::fs::read_dir(&bundle).map(|d| d.count()).unwrap_or(0);
     assert_eq!(written, 0, "no render is written");
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 20);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("image_pixel_bomb_skips_render");
@@ -1920,7 +1925,8 @@ fn deep_array_nesting_stops_at_depth() {
     );
     // The page does not depend on the deep object and is read.
     assert!(result.markdown_pages.join("").contains("Before the bomb."));
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 18);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("deep_array_nesting_stops_at_depth");
@@ -1987,7 +1993,8 @@ fn huge_script_is_bounded() {
     let md = result.markdown_pages.join("");
     assert!(md.contains("Before the bomb."));
     assert!(!md.contains("app.alert("));
-    // The readings were measured once (2026-10-27).
+    // The readings were measured once (2026-10-27). They come from the PDF reader: measure
+    // them again after plan 6 merges.
     assert_readings(reads, 123);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("huge_script_is_bounded");
