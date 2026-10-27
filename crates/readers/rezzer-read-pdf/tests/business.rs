@@ -3855,3 +3855,69 @@ fn footer_columns_keep_a_line_break_between_their_lines() {
         wrong.join("\n")
     );
 }
+
+/// A page of an invented invoice of the shape of fix round 2, item 3: the sender line, the bold
+/// recipient address, the bold title beside a field list, the body and the footer of
+/// [`contact_columns`] with a bold shop name. The sender and the recipient hold none of the
+/// footer's lines.
+fn invoice_page(fonts: (&str, &str)) -> String {
+    let mut t = show(
+        fonts.0,
+        7.0,
+        40.0,
+        770.0,
+        "Beispiel AG, Beispielweg 2, 54321 Beispielstadt",
+    );
+    for (k, l) in ["Max Beispiel", "Beispielstrasse 3", "54321 Beispielstadt"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(fonts.1, 9.0, 40.0, 750.0 - 11.0 * k as f32, l);
+    }
+    t += &show(fonts.1, 14.0, 40.0, 690.0, "Rechnung");
+    for (k, [label, value]) in TITLE_FIELDS.iter().take(4).enumerate() {
+        let y = 703.0 - 8.0 * k as f32;
+        t += &show(fonts.0, 6.0, 360.0, y, label);
+        t += &show(fonts.0, 6.0, 440.0, y, value);
+    }
+    t += &body_of(7.0, 600.0, true);
+    t + &footer(fonts, &contact_columns(), Some((3, 0)), Stack::Top)
+}
+
+/// Fix round 2, item 3: on both pages of an invoice of two pages, every line of the footer
+/// columns is a running footer, each column one block, in every size and font; the title and
+/// the field list stay content.
+#[test]
+fn a_two_page_invoice_footer_is_furniture_on_both_pages() {
+    let mut wrong = Vec::new();
+    let columns = contact_columns();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            let pages: Vec<FormPage> = (1..=2)
+                .map(|_| FormPage {
+                    template: invoice_page(fonts),
+                    scale: k,
+                    ..FormPage::default()
+                })
+                .collect();
+            let out = common::read(&print_form(&pages, "", ""));
+            for n in 1..=2 {
+                for w in footer_broken(&out, n, &columns, Some("page-footer")) {
+                    wrong.push(format!("{k}x, {fonts:?}: {w}"));
+                }
+                let texts = page_texts(&out, n);
+                if texts.iter().any(|(r, t)| {
+                    r.is_some() && (t.contains("Rechnung") || t.contains("Kundennummer"))
+                }) {
+                    wrong.push(format!("{k}x, {fonts:?}: page {n} letterhead {texts:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
