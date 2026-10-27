@@ -701,8 +701,13 @@ fn bands(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Vec<(f32, 
         c += d;
         cover.push(c);
     }
+    // Only the covers some white space has make bands of their own: a level between two of
+    // them has the bands of the lower one.
+    let mut levels: Vec<i32> = cover.iter().copied().filter(|&c| c <= allowed).collect();
+    levels.sort_unstable();
+    levels.dedup();
     let mut out: Vec<(f32, f32)> = Vec::new();
-    for level in 0..=allowed {
+    for level in levels {
         let mut found: Vec<(f32, f32)> = Vec::new();
         let mut start = None;
         for (b, &c) in cover.iter().enumerate() {
