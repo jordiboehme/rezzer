@@ -71,7 +71,7 @@ The agent then has three tools: `rez` reads a file (by path, or sent along as a 
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
 
-The config file is `~/.config/rezzer/config.toml`. When `XDG_CONFIG_HOME` is set, it is `$XDG_CONFIG_HOME/rezzer/config.toml`. On Windows it is `%USERPROFILE%\.config\rezzer\config.toml`.
+The config file is `~/.config/rezzer/config.toml`. When `XDG_CONFIG_HOME` is set to a full path, it is `$XDG_CONFIG_HOME/rezzer/config.toml`. On Windows it is `%USERPROFILE%\.config\rezzer\config.toml`.
 
 ## Why
 

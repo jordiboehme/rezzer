@@ -676,8 +676,9 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 /// The prefix is removed only when the plain form names the same file: shorter than 260
 /// UTF-16 units (Windows' `MAX_PATH` with its closing NUL, counted on the result), every
 /// component non-empty (but for a trailing separator) and without `/`, none a device name
-/// (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, also with the
-/// superscript digits ¹ ² ³, in any case, with or without an extension) and none ending in
+/// (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` to `COM9`, `LPT0` to `LPT9`, also
+/// with the superscript digits ¹ ² ³, in any case, with or without an extension or a `:`
+/// suffix) and none ending in
 /// `.` or a space (which also covers `.` and `..`). Otherwise the verbatim form is kept,
 /// which stays a valid path. A path that is not valid Unicode (a lone UTF-16 surrogate on
 /// Windows, bytes that are not UTF-8 on Unix) is returned unchanged.
@@ -727,11 +728,11 @@ fn plain_components(rest: &str) -> bool {
         .all(|c| !c.is_empty() && !c.ends_with('.') && !c.ends_with(' ') && !is_device_name(c))
 }
 
-/// Whether a path component names a Windows device: the part before the first `.`, without
-/// trailing spaces, in any case.
+/// Whether a path component names a Windows device: the part before the first `.` or `:`,
+/// without trailing spaces, in any case.
 fn is_device_name(component: &str) -> bool {
     let stem = component
-        .split('.')
+        .split(['.', ':'])
         .next()
         .unwrap_or("")
         .trim_end_matches(' ');
@@ -743,11 +744,13 @@ fn is_device_name(component: &str) -> bool {
             let mut c = d.chars();
             (c.next(), c.next())
         });
-    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || matches!(
-            number,
-            Some((Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
-        )
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || matches!(
+        number,
+        Some((Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
+    )
 }
 
 /// A document for a format without a reader or an unknown format: the source facts, one
@@ -835,8 +838,21 @@ mod tests {
         }
         let superscript = "\\\\?\\C:\\a\\com\u{b9}.txt";
         assert_eq!(strip(superscript), PathBuf::from(superscript));
+        for kept in [
+            r"\\?\C:\a\com0",
+            r"\\?\C:\a\LPT0.txt",
+            r"\\?\C:\a\conin$",
+            r"\\?\C:\a\CONOUT$.log",
+            r"\\?\C:\a\nul:x",
+            r"\\?\C:\a\con:",
+            r"\\?\C:\a\aux :x",
+        ] {
+            assert_eq!(strip(kept), PathBuf::from(kept), "{kept}");
+        }
         // Not device names.
-        assert_eq!(strip(r"\\?\C:\a\com0"), PathBuf::from(r"C:\a\com0"));
+        assert_eq!(strip(r"\\?\C:\a\com10"), PathBuf::from(r"C:\a\com10"));
+        assert_eq!(strip(r"\\?\C:\a\conin"), PathBuf::from(r"C:\a\conin"));
+        assert_eq!(strip(r"\\?\C:\a\x:nul"), PathBuf::from(r"C:\a\x:nul"));
         assert_eq!(strip(r"\\?\C:\a\nullx"), PathBuf::from(r"C:\a\nullx"));
         assert_eq!(strip(r"\\?\C:\a\con1.txt"), PathBuf::from(r"C:\a\con1.txt"));
     }
