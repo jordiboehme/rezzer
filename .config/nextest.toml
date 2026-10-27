@@ -16,3 +16,9 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 [[profile.default.overrides]]
 filter = 'package(sheetlayout)'
 slow-timeout = { period = "60s", terminate-after = 2 }
+
+# The Linux allocator probe and the hostile tests print their memory figures. nextest hides the
+# output of a passing test, so these show it at once and a green CI log carries the numbers.
+[[profile.default.overrides]]
+filter = 'binary(linux_rss) | (package(rezzer) & binary(hostile))'
+success-output = "immediate"
