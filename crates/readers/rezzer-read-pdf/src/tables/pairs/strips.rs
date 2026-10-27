@@ -486,6 +486,10 @@ pub(in crate::tables) fn field_strips(
         edges.extend(&fr.dividers);
         edges.push(fr.x1);
         let cells = cells_of(flow, &edges, &ids);
+        // Column titles over rows of items are a table's body, left to the table pass.
+        if table_body(flow, &cells) {
+            continue;
+        }
         // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
         // other cells of the row still pair.
         let inner = &edges[1..edges.len() - 1];
@@ -798,6 +802,56 @@ pub(in crate::tables) fn field_strips(
         claim(claimed, tables.len(), &list);
         tables.push(p);
     }
+}
+
+/// Columns a frame's labels must head, each over this many value lines or more in the same
+/// rows, for its text to be a table's body: column titles over line items.
+const BODY_COLUMNS: usize = 3;
+const BODY_LINES: usize = 2;
+
+/// Whether the cells of a frame are a table's body, not fields: labels on a first line, each
+/// over the value lines under it (see [`parts_of`]), and [`BODY_COLUMNS`] of them or more over
+/// [`BODY_LINES`] value lines or more each, those lines in the same rows across the columns
+/// (their baselines within a third of their size). A field's value of two lines stands under
+/// one label, not under three in the same rows.
+fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
+    let mut columns: Vec<Vec<(f32, f32)>> = Vec::new();
+    for cell in cells.iter().filter(|c| !c.is_empty()) {
+        let lines = lines_of(flow, cell);
+        if first_line_labels(flow, &lines).is_none_or(|l| l.len() < 2) {
+            continue;
+        }
+        let Some(parts) = parts_of(flow, cell) else {
+            continue;
+        };
+        for part in parts {
+            let lines = lines_of(flow, &part);
+            let rows: Vec<(f32, f32)> = lines[1..]
+                .iter()
+                .map(|l| {
+                    let r = &flow.runs[l[0]];
+                    (r.y, r.size.max(1.0))
+                })
+                .collect();
+            if rows.len() >= BODY_LINES {
+                columns.push(rows);
+            }
+        }
+    }
+    if columns.len() < BODY_COLUMNS {
+        return false;
+    }
+    // The rows of the column with the most lines; every column's lines stand in them.
+    let widest = columns
+        .iter()
+        .max_by_key(|c| c.len())
+        .cloned()
+        .unwrap_or_default();
+    let in_rows = |c: &Vec<(f32, f32)>| {
+        c.iter()
+            .all(|&(y, size)| widest.iter().any(|&(w, _)| (w - y).abs() <= size / 3.0))
+    };
+    columns.iter().filter(|c| in_rows(c)).count() >= BODY_COLUMNS
 }
 
 /// Whether a field's label stands beside its value: its last label run and its first value

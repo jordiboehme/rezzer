@@ -512,3 +512,117 @@ fn quiet_grid_and_region_over_the_same_text_give_one_loss() {
         "{losses:?}"
     );
 }
+
+/// The line items of an invoice of `n` rows (1 to 5) at `k` times 8 pt text under plain column
+/// titles at `k` times 6 pt, a rule over the titles and one under the items only, drawn as
+/// `look`, with a lone upright rule far from them when `upright`.
+fn rules_only_items(k: f32, n: usize, look: Look, upright: bool) -> String {
+    let (size, ts) = (8.0 * k, 6.0 * k);
+    let y = |dy: f32| 600.0 - dy * k;
+    let mut t = rule(look, 40.0, 540.0, y(-8.0), size);
+    t += &show("FL", ts, 40.0, y(0.0), "Pos");
+    t += &show("FL", ts, 80.0, y(0.0), "Artikel");
+    t += &show("FL", ts, 300.0, y(0.0), "Menge");
+    t += &right(false, ts, 420.0, y(0.0), "Preis");
+    t += &right(false, ts, 540.0, y(0.0), "Betrag");
+    for (r, item) in ITEMS.iter().take(n).enumerate() {
+        let at = y(10.0 * (r as f32 + 1.0));
+        t += &show("FL", size, 40.0, at, item[0]);
+        t += &show("FL", size, 80.0, at, item[1]);
+        t += &show("FL", size, 300.0, at, item[2]);
+        t += &right(false, size, 420.0, at, item[3]);
+        t += &right(false, size, 540.0, at, item[4]);
+    }
+    t += &rule(look, 40.0, 540.0, y(10.0 * n as f32 + 6.0), size);
+    if upright {
+        t += "0.5 w 30 200 m 30 300 l S\n";
+    }
+    t
+}
+
+/// Line items for [`rules_only_items`].
+const ITEMS: [[&str; 5]; 5] = [
+    ["1", "Beratung", "2", "500,00", "1.000,00"],
+    ["2", "Material", "1", "200,00", "200,00"],
+    ["3", "Versand", "1", "34,56", "34,56"],
+    ["4", "Montage", "3", "10,00", "30,00"],
+    ["5", "Pruefung", "1", "99,00", "99,00"],
+];
+
+/// The table of the first `n` rows of [`ITEMS`] under their titles.
+fn items_of(n: usize) -> Vec<Vec<String>> {
+    let mut rows = vec![owned(&[&["Pos", "Artikel", "Menge", "Preis", "Betrag"]])[0].clone()];
+    rows.extend(
+        ITEMS
+            .iter()
+            .take(n)
+            .map(|r| r.iter().map(|c| (*c).to_string()).collect()),
+    );
+    rows
+}
+
+/// The reviewer's probe R3: line items under small plain column titles between a rule over
+/// the titles and one under the items, no upright rule on the page: one table of five columns,
+/// header and rows, in three sizes.
+#[test]
+fn items_between_horizontal_rules_alone_are_a_table() {
+    for k in [0.75, 1.0, 1.5] {
+        let out = common::read(&page_in(
+            &rules_only_items(k, 3, Look::Plain, false),
+            Look::Plain,
+        ));
+        let got: Vec<Vec<Vec<String>>> = tables(&out).into_iter().map(|t| t.1).collect();
+        assert_eq!(got, [items_of(3)], "{k}x: {:?}", out.document.losses);
+    }
+}
+
+/// The reviewer's probe R3b: as R3 with a lone upright rule far from the items.
+#[test]
+fn items_between_horizontal_rules_with_an_upright_rule_elsewhere_are_a_table() {
+    let out = common::read(&page_in(
+        &rules_only_items(1.0, 3, Look::Plain, true),
+        Look::Plain,
+    ));
+    let got: Vec<Vec<Vec<String>>> = tables(&out).into_iter().map(|t| t.1).collect();
+    assert_eq!(got, [items_of(3)], "{:?}", out.document.losses);
+}
+
+/// Line items of two to five rows between two horizontal rules, in three sizes and every
+/// look, with and without an upright rule elsewhere: one table, header and rows. One item row
+/// under its titles is too little for a table without rules; it reads as fields, each title
+/// with the value under it in its own column, never one of another row.
+#[test]
+fn items_between_horizontal_rules_hold_in_every_size_and_look() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            for upright in [false, true] {
+                for n in 1..=5 {
+                    let out = common::read(&page_in(&rules_only_items(k, n, look, upright), look));
+                    let got: Vec<Vec<Vec<String>>> =
+                        tables(&out).into_iter().map(|t| t.1).collect();
+                    let want = items_of(n);
+                    let ok = if n == 1 {
+                        // Each title over its own value: a table of the two lines, or pairs.
+                        got == [want.clone()]
+                            || got
+                                == [want[0]
+                                    .iter()
+                                    .cloned()
+                                    .zip(want[1].iter().cloned())
+                                    .map(|(l, v)| vec![l, v])
+                                    .collect::<Vec<_>>()]
+                    } else {
+                        got == [want]
+                    };
+                    if !ok {
+                        wrong.push(format!(
+                            "{k}x, {look:?}, upright {upright}, {n} rows: {got:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
