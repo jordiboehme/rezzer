@@ -929,6 +929,7 @@ fn thread_cpu() -> Duration {
 }
 
 /// The work bound of the layout tests: the whole read, layout included, in thread CPU time.
+#[cfg(unix)]
 const LAYOUT_BOUND: Duration = Duration::from_secs(2);
 
 /// Runs `input` (the bytes, or the path of a file) as `name` and returns the result, its peak
@@ -1153,13 +1154,11 @@ fn assert_rss_bounded(test: &str) {
 }
 
 /// A PDF being written: object `n` is `objects[n - 1]`.
-#[cfg(unix)]
 #[derive(Default)]
 struct PdfFile {
     objects: Vec<Vec<u8>>,
 }
 
-#[cfg(unix)]
 impl PdfFile {
     fn reserve(&mut self) -> u32 {
         self.objects.push(Vec::new());
@@ -1457,7 +1456,6 @@ fn page_tree_cycle_is_partial() {
 /// that its bytes are not part of the measure. With `own`, every page has its own resources,
 /// media box and content stream of one line (`Page N`); else the pages inherit their
 /// resources and media box and share one content stream of 40 lines (`Line K of a page`).
-#[cfg(unix)]
 fn many_pages(path: &std::path::Path, pages: usize, own: bool) {
     use std::io::Write;
     let mut b = PdfFile::default();

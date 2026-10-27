@@ -43,6 +43,9 @@ saphyr-parser.workspace = true
 percent-encoding.workspace = true
 tempfile.workspace = true
 zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
-libc.workspace = true
 flate2 = { workspace = true, features = ["zlib-rs"] }
 barcodes = { path = "../formats/barcodes", features = ["encode"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# Only for getrusage, wait4 and the thread CPU clock in the tests.
+libc.workspace = true

@@ -191,11 +191,9 @@ fn scans(n: usize) -> Vec<u8> {
     b.finish(catalog)
 }
 
-/// Runs the binary with `args` under a config with a memory limit of 256 MiB, and returns
-/// its exit status and the most memory it held.
-// The child is reaped with wait4, which gives its resource use; `Child::wait` does not.
-#[allow(clippy::zombie_processes)]
-fn run_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> (i32, u64) {
+/// The binary with `args` under a config with a memory limit of 256 MiB, its output
+/// dropped.
+fn command_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> std::process::Command {
     let config = dir.join("config/rezzer");
     std::fs::create_dir_all(&config).expect("config dir");
     std::fs::write(
@@ -203,14 +201,23 @@ fn run_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> (i32, u64
         "cache = false\n\n[limits]\nmax_memory_bytes = 268435456\n",
     )
     .expect("config");
-    let child = std::process::Command::new(assert_cmd::cargo::cargo_bin!("rezzer"))
+    let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin!("rezzer"));
+    command
         .args(args)
         .env("XDG_CONFIG_HOME", dir.join("config"))
         .env("HOME", dir)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn");
+        .stderr(std::process::Stdio::null());
+    command
+}
+
+/// Runs the binary with `args` under a config with a memory limit of 256 MiB, and returns
+/// its exit status and the most memory it held.
+// The child is reaped with wait4, which gives its resource use; `Child::wait` does not.
+#[cfg(unix)]
+#[allow(clippy::zombie_processes)]
+fn run_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> (i32, u64) {
+    let child = command_at_256_mib(dir, args).spawn().expect("spawn");
     let mut status = 0;
     // SAFETY: wait4 fills `status` and `usage` for the child we started.
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
@@ -223,6 +230,14 @@ fn run_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> (i32, u64
         rss * 1024
     };
     (status, rss)
+}
+
+/// No `wait4` here: the exit code with a memory figure of 0, so the run is still checked
+/// and only the memory bound is not.
+#[cfg(not(unix))]
+fn run_at_256_mib(dir: &std::path::Path, args: &[&std::ffi::OsStr]) -> (i32, u64) {
+    let status = command_at_256_mib(dir, args).status().expect("run");
+    (status.code().unwrap_or(-1), 0)
 }
 
 #[test]

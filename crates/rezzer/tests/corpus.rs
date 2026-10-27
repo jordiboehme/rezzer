@@ -31,7 +31,9 @@ use common::{
     GENERATED_AT, PIPELINE_FOLDERS, corpus_dir, corpus_files, pipeline, relative, remote_rows,
 };
 use rezzer_model::{Block, Document, plain_text};
-use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
+#[cfg(unix)]
+use rezzer_pipeline::Config;
+use rezzer_pipeline::{OutputKind, Pipeline, Request};
 use serde_json::Value;
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
@@ -1776,6 +1778,7 @@ fn arabic_not_reversed() {
 
 /// The reads of the large remote files run under the default limits; their time and maximum
 /// resident set size are printed for the report (`--no-capture`).
+#[cfg(unix)]
 fn remote_pdf(name: &str) -> PathBuf {
     let path = corpus_dir().join("pdf").join(name);
     assert!(
