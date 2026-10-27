@@ -469,10 +469,46 @@ fn logo_pages(spots: [(u32, u32); 3]) -> Vec<u8> {
     b.finish(catalog)
 }
 
+/// Every picture block of `out`, in reading order: its asset and its alt text.
+fn media_of(out: &ReadOutcome) -> Vec<(String, String)> {
+    fn walk(blocks: &[Block], found: &mut Vec<(String, String)>) {
+        for b in blocks {
+            match b {
+                Block::Section { blocks, .. } => walk(blocks, found),
+                Block::Media { asset, alt, .. } => {
+                    found.push((asset.clone(), alt.clone().unwrap_or_default()))
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(&out.document.body, &mut found);
+    found
+}
+
+/// Asserts that `out` lists one picture of page furniture once: the asset `page-1-pic-1`,
+/// which needs no vision, at one place, both with `alt`.
+fn listed_once(out: &ReadOutcome, alt: &str) {
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1"], "{:#?}", out.document.assets);
+    let a = asset(out, "page-1-pic-1");
+    assert!(!a.needs_vision, "{a:#?}");
+    assert_eq!(a.alt.as_deref(), Some(alt));
+    assert_eq!(
+        media_of(out),
+        [("page-1-pic-1".to_string(), alt.to_string())]
+    );
+}
+
 #[test]
 fn a_small_picture_on_every_page_is_furniture() {
+    // Listed once, at its first place, with its pages.
     let out = read(&logo_pages([(10, 10); 3]));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(
+        &out,
+        "logo or small picture, box 10, 10 to 130, 110, on pages 1 to 3",
+    );
     // The same pictures at other places are content.
     let out = read(&logo_pages([(10, 10), (200, 300), (400, 100)]));
     assert_eq!(out.document.assets.len(), 3, "{:#?}", out.document.assets);
@@ -572,9 +608,9 @@ fn small_square_picture_is_listed() {
 }
 
 #[test]
-fn a_small_logo_on_every_page_is_not_listed() {
-    // 30 pages with the same small picture at the same place: furniture, no asset. A page that
-    // draws it once more at another place lists that place.
+fn a_small_logo_on_every_page_is_listed_once() {
+    // 30 pages with the same small picture at the same place: furniture, listed once with its
+    // pages. A page that draws it once more at another place lists that place too.
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
@@ -603,7 +639,17 @@ fn a_small_logo_on_every_page_is_not_listed() {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let out = read(&b.finish(catalog));
     let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, ["page-7-pic-1"], "{:#?}", out.document.assets);
+    assert_eq!(
+        ids,
+        ["page-1-pic-1", "page-7-pic-1"],
+        "{:#?}",
+        out.document.assets
+    );
+    assert_eq!(
+        asset(&out, "page-1-pic-1").alt.as_deref(),
+        Some("logo or small picture, box 480, 780 to 512, 812, on pages 1 to 30")
+    );
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
     let alt = asset(&out, "page-7-pic-1").alt.clone().unwrap_or_default();
     // It is the picture drawn on every page: a logo, also at its other place.
     assert_eq!(alt, "logo or small picture, box 200, 300 to 240, 340");
@@ -638,7 +684,10 @@ fn a_repeated_logo_whose_size_changes_a_little_is_furniture() {
     b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 30 >>"));
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let out = read(&b.finish(catalog));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(
+        &out,
+        "logo or small picture, box 480, 780 to 540, 825, on pages 1 to 30",
+    );
 }
 
 /// A picture drawn on a page: x, y, width, height and its index in the pictures.
@@ -720,13 +769,26 @@ fn different_pictures_at_one_place_are_not_furniture() {
         .map(|_| vec![(480.0, 780.0, 60.0, 45.0, 0)])
         .collect();
     let out = read(&picture_pages(&draws, &logos));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
-    // One stencil object on four pages stays furniture too.
+    listed_once(
+        &out,
+        "logo or small picture, box 480, 780 to 540, 825, on pages 1 to 4",
+    );
+    // One stencil object on four pages stays furniture too. It looks like a code but gives
+    // none: listed once as such, as page furniture it needs no vision.
     let draws: Vec<_> = (0..4)
         .map(|_| vec![(400.0, 600.0, 85.0, 85.0, 0)])
         .collect();
     let out = read(&picture_pages(&draws, &codes[..1]));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    let alt = "logo or small picture, box 400, 600 to 485, 685, barcode or QR code found, \
+               not decoded, on pages 1 to 4";
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-pic-1"], "{:#?}", out.document.assets);
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    assert_eq!(asset(&out, "page-1-pic-1").alt.as_deref(), Some(alt));
+    assert_eq!(
+        media_of(&out),
+        [("page-1-pic-1".to_string(), alt.to_string())]
+    );
 }
 
 /// Pages of A4, each with a line of text and one picture drawn `draws` times at 400, 600 (85
@@ -760,6 +822,9 @@ fn copied_pages(pages: usize, draws: usize, make: &dyn Fn(&mut Builder, usize) -
     b.finish(catalog)
 }
 
+/// The alt text of the picture of [`copied_pages`] as page furniture of four pages.
+const COPIED_LOGO: &str = "logo or small picture, box 400, 600 to 485, 685, on pages 1 to 4";
+
 #[test]
 fn a_logo_copied_per_page_with_its_own_objects_is_furniture() {
     // Single-page files merged into one: each page has its own copy of the logo, and each
@@ -774,7 +839,7 @@ fn a_logo_copied_per_page_with_its_own_objects_is_furniture() {
             &[200u8; 36],
         )
     }));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(&out, COPIED_LOGO);
     // The same with its own ICC profile object per copy.
     let out = read(&copied_pages(4, 1, &|b, _| {
         let icc = b.stream("/N 3 /Alternate /DeviceRGB", &[9u8; 128]);
@@ -783,7 +848,7 @@ fn a_logo_copied_per_page_with_its_own_objects_is_furniture() {
             &[200u8; 36],
         )
     }));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(&out, COPIED_LOGO);
     // The same with its own palette object per copy.
     let out = read(&copied_pages(4, 1, &|b, _| {
         let table = b.stream("", &[10, 20, 30, 40, 50, 60]);
@@ -792,7 +857,7 @@ fn a_logo_copied_per_page_with_its_own_objects_is_furniture() {
             &[1u8; 12],
         )
     }));
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(&out, COPIED_LOGO);
 }
 
 #[test]
@@ -1101,6 +1166,51 @@ fn a_logo_beside_many_tiny_pictures_stays_a_logo() {
         .filter_map(|a| a.alt.as_deref())
         .collect();
     assert_eq!(alts, ["logo or small picture, box 500, 130 to 560, 165"]);
+}
+
+/// The status lines of page `n` that count its pictures too small to be listed.
+fn very_small(out: &ReadOutcome, n: u32) -> Vec<String> {
+    page(out, n)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Paragraph { inlines, .. } => {
+                let text = rezzer_model::plain_text(inlines);
+                text.contains("very small").then_some(text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn very_small_pictures_are_counted_on_their_page() {
+    // Three pictures of 10 by 10 points (under 1 cm2) and one of 60 by 40 mid-page: the
+    // large one is listed, the others are counted in one line.
+    let mut draws: Vec<Draw> = (0..3)
+        .map(|i| (100.0 + i as f32 * 20.0, 300.0, 10.0, 10.0, 0))
+        .collect();
+    draws.push((250.0, 400.0, 60.0, 40.0, 1));
+    let out = read(&picture_pages(
+        &[draws, vec![(100.0, 300.0, 10.0, 10.0, 0)]],
+        &[gray(10), gray(100)],
+    ));
+    assert_eq!(
+        very_small(&out, 1),
+        ["3 very small pictures (under 1 cm2) are not listed"]
+    );
+    assert_eq!(
+        very_small(&out, 2),
+        ["1 very small picture (under 1 cm2) is not listed"]
+    );
+    assert!(markdown(&out).contains("3 very small pictures (under 1 cm2) are not listed"));
+    // A page rendered whole for vision shows them: no line.
+    let mut draws: Vec<Draw> = (0..3)
+        .map(|i| (100.0 + i as f32 * 20.0, 300.0, 10.0, 10.0, 0))
+        .collect();
+    draws.push((150.0, 400.0, 300.0, 200.0, 1));
+    let out = read(&picture_pages(&[draws], &[gray(10), gray(100)]));
+    assert_eq!(needing(&out), ["page-1"]);
+    assert!(very_small(&out, 1).is_empty());
 }
 
 #[test]
@@ -2464,16 +2574,16 @@ fn a_code_in_the_page_furniture_is_named_once() {
         &[code_picture(&m, 4, 2)],
     ));
     let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, ["page-1-code-1"]);
+    assert_eq!(ids, ["page-1-pic-1"]);
     assert_eq!(
-        codes_of(&out, "page-1-code-1"),
+        codes_of(&out, "page-1-pic-1"),
         [("Data Matrix".to_string(), "DOC-ID 2026-114".to_string())]
     );
     let media: Vec<String> = (1..=4)
         .flat_map(|n| lines(page(&out, n)))
         .filter(|l| l.starts_with("[media"))
         .collect();
-    assert_eq!(media, ["[media page-1-code-1]"]);
+    assert_eq!(media, ["[media page-1-pic-1]"]);
     let alt = page(&out, 1)
         .iter()
         .find_map(|b| match b {
@@ -2481,10 +2591,7 @@ fn a_code_in_the_page_furniture_is_named_once() {
             _ => None,
         })
         .unwrap_or_default();
-    assert_eq!(
-        alt,
-        "Data Matrix, box 520, 20 to 560, 60, on pages 1, 2, 3, 4"
-    );
+    assert_eq!(alt, "Data Matrix, box 520, 20 to 560, 60, on pages 1 to 4");
 }
 
 #[test]
@@ -2560,7 +2667,10 @@ fn page_furniture_does_not_move_figure_texts() {
         Some("Figure (not matched to a picture): A chart of sales."),
         "{shown:?}"
     );
-    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    listed_once(
+        &out,
+        "logo or small picture, box 500, 790 to 530, 820, on pages 1 to 3",
+    );
 }
 
 fn page_blocks(out: &ReadOutcome, n: u32) -> &[Block] {

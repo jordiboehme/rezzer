@@ -4647,14 +4647,18 @@ fn template_logo_variant(
             }
         }
         // Every logo of a page that is not rendered whole is listed as a logo. From three
-        // pages on, logos at one place are page furniture, which is not listed unless it
-        // holds a code.
+        // pages on, logos at one place are page furniture: each is listed once, at its
+        // place on the first page, with its pages.
         let alts = media_alts(&out, n as u32);
+        let furniture = format!(", on pages 1 to {count}");
         let listed = alts
             .iter()
-            .filter(|a| a.starts_with("logo or small picture"))
+            .filter(|a| {
+                a.starts_with("logo or small picture")
+                    && (count < 3 || a.ends_with(furniture.as_str()))
+            })
             .count();
-        let want = if content || count >= 3 {
+        let want = if content || (count >= 3 && n > 1) {
             0
         } else {
             places.len()

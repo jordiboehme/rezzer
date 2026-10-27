@@ -299,9 +299,10 @@ pub(crate) struct Small {
     pub hint: bool,
     /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
-    /// It is page furniture (a picture at one place on many pages): its asset stays only when
-    /// a code is read from it, named once at its first place.
-    pub furniture: bool,
+    /// It is page furniture (a picture at one place on many pages): the index of its place
+    /// in the furniture's [`Spots`]. Its asset is named once, at its first place, with its
+    /// pages.
+    pub furniture: Option<usize>,
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
@@ -332,13 +333,13 @@ fn looks_like_code(items: &PageItems, k: usize) -> bool {
     square && items.images_code.get(k).copied().unwrap_or(false)
 }
 
-/// Pictures closer than this share of the page width and height are one figure: a picture
-/// in a logo place that is part of a figure reaching out of it is no logo.
+/// Pictures closer than this share of the page width and height (1 %) are one figure: a
+/// picture in a logo place that is part of a figure reaching out of it is no logo.
 const FIGURE_GAP: f32 = 0.01;
 
-/// Pictures of one page past which none is a logo of the template by its place: finding the
-/// figures would take too long, so the pictures count toward the share as they are. Those in
-/// a logo place are still called logos when the page does not need vision.
+/// Pictures of one page (256) past which none is a logo of the template by its place:
+/// finding the figures would take too long, so the pictures count toward the share as they
+/// are. Those in a logo place are still called logos when the page does not need vision.
 const FIGURE_PICTURES: usize = 256;
 
 /// The visible part of box `b` on a page `width` by `height` points, in square points.
@@ -352,7 +353,8 @@ fn visible_in(b: &[f32; 4], width: f32, height: f32) -> f32 {
 /// logo, and whether it is a logo of the template, which does not count toward the share of
 /// a page that needs vision. A logo of the template does not look like a code and either lies
 /// in a logo place, alone covers less than [`PICTURE_SHARE`] of the page and is no part of a
-/// figure (pictures within [`FIGURE_GAP`] of each other) that reaches out of the logo places;
+/// figure (pictures within [`FIGURE_GAP`], 1 % of the page, of each other) that reaches out
+/// of the logo places, which is looked for on pages of at most [`FIGURE_PICTURES`] (256);
 /// or it stands at one place on every page (`everywhere`) and covers less than
 /// [`FURNITURE_SHARE`]. A picture on every page somewhere is a logo too.
 fn logos(
@@ -575,7 +577,7 @@ pub(crate) fn vision(
                 how,
                 hint: code,
                 vector: false,
-                furniture: false,
+                furniture: None,
             }
         })
         .collect();
@@ -589,27 +591,40 @@ pub(crate) fn vision(
         how: Some(How::Modules(c.module)),
         hint: true,
         vector: true,
-        furniture: false,
+        furniture: None,
     }));
     let room = cap.saturating_sub(list.len());
     list.extend(furniture.into_iter().take(room).map(|k| {
         let b = items.images[k];
+        let id = items.images_id.get(k).copied().unwrap_or(0);
         Small {
             b,
             framed: items.turn.place_box(b, width, height),
-            id: items.images_id.get(k).copied().unwrap_or(0),
+            id,
             logo: true,
             mcid: items.images_mcid.get(k).copied().flatten(),
             how: items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph)),
             hint: looks_like_code(items, k),
             vector: false,
-            furniture: true,
+            furniture: skip.find(&b, id),
         }
     }));
     if list.is_empty() {
         return None;
     }
     Some(Seen::Small(list, more))
+}
+
+/// How many pictures page `info` draws, in part or whole within the page, that are smaller
+/// than [`SMALL_PICTURE`] (1 cm2, a fixed size, not a share of the page): too small to be
+/// listed one by one, they are counted.
+pub(crate) fn very_small(info: &PageInfo, items: &PageItems) -> usize {
+    items
+        .images
+        .iter()
+        .map(|b| visible_in(b, info.width, info.height))
+        .filter(|&v| v > 0.0 && v < SMALL_PICTURE)
+        .count()
 }
 
 /// The alt text for small pictures `small` of a page that needs vision as a whole: how many,
@@ -662,13 +677,17 @@ pub(crate) fn place_alt(s: &Small) -> String {
 }
 
 /// The words of one place `alt` (from [`place_alt`]) once its picture was read for codes:
-/// named after the codes read, or marked as a code not decoded or not scanned; `more` follows.
-fn reread_place(alt: &str, read: &Reread, more: &str) -> String {
+/// named after the codes read, or marked as a code not decoded or not scanned, or as it was
+/// when reading changed nothing; `more` follows.
+fn reread_place(alt: &str, read: Option<&Reread>, more: &str) -> String {
     let rest = alt.find(", box ").map_or(alt, |i| &alt[i + 2..]);
     match read {
-        Reread::Codes(name) => format!("{name}, {rest}{more}"),
-        Reread::Unread => format!("{alt}{UNREAD_WORDS}{more}"),
-        Reread::Drawing(scanned) => format!("{DRAWING}, {rest}, {}{more}", drawing_words(*scanned)),
+        Some(Reread::Codes(name)) => format!("{name}, {rest}{more}"),
+        Some(Reread::Unread) => format!("{alt}{UNREAD_WORDS}{more}"),
+        Some(Reread::Drawing(scanned)) => {
+            format!("{DRAWING}, {rest}, {}{more}", drawing_words(*scanned))
+        }
+        None => format!("{alt}{more}"),
     }
 }
 
@@ -681,6 +700,7 @@ fn drawing_words(scanned: bool) -> &'static str {
 }
 
 /// What reading a small picture for codes changed.
+#[derive(Clone)]
 enum Reread {
     /// The kinds of codes read: `QR Code`, `QR Code and Code 128`.
     Codes(String),
@@ -702,6 +722,8 @@ pub(crate) struct Places {
     count: usize,
     /// The last page a place was added on: places come in page order.
     last: u32,
+    /// Its pages follow each other without a gap.
+    running: bool,
     /// Every place is a logo: the asset needs no vision.
     pub logo: bool,
     /// It is a region of paths, not a picture.
@@ -721,6 +743,7 @@ impl Places {
             logo: true,
             vector: s.vector,
             furniture: true,
+            running: true,
             ..Places::default()
         };
         p.add(n, s);
@@ -734,6 +757,9 @@ impl Places {
             self.listed.push((n, s.framed));
         }
         if n != self.last {
+            if self.last != 0 && n != self.last + 1 {
+                self.running = false;
+            }
             if self.pages.len() < SMALL_LISTED {
                 self.pages.push(n);
             } else {
@@ -744,23 +770,24 @@ impl Places {
         self.count += 1;
         self.logo &= s.logo;
         self.hint |= s.hint;
-        self.furniture &= s.furniture;
+        self.furniture &= s.furniture.is_some();
     }
 
-    /// The asset's alt text: the place's words for one place; for more, the pages and the
-    /// box of each place listed, then how many more places there are.
-    /// The pages it is on, as words: `1, 2, 3` or `1, 2, 3 and 7 more`.
-    fn page_words(&self) -> String {
-        let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
-        if self.more_pages > 0 {
-            pages.push(format!("{} more", self.more_pages));
+    /// How many pages it is on.
+    fn page_count(&self) -> usize {
+        self.pages.len() + self.more_pages
+    }
+
+    /// The pages it is on, as words: `page 3`, `pages 1 and 2`, `pages 1 to 12` or, with
+    /// gaps, `9 of the pages 1 to 12`.
+    fn pages_words(&self) -> String {
+        let (first, last) = (self.first_page(), self.last);
+        match self.page_count() {
+            0 | 1 => format!("page {first}"),
+            2 if self.running => format!("pages {first} and {last}"),
+            _ if self.running => format!("pages {first} to {last}"),
+            n => format!("{n} of the pages {first} to {last}"),
         }
-        pages.join(", ")
-    }
-
-    /// Every place is page furniture.
-    fn furniture_pages(&self) -> bool {
-        self.furniture
     }
 
     /// The page of its first place.
@@ -783,13 +810,17 @@ impl Places {
             Some(Reread::Drawing(_)) => drawing.as_str(),
             _ => "",
         };
+        let first = self
+            .listed
+            .first()
+            .map(|(_, b)| box_words(b))
+            .unwrap_or_default();
         if self.count == 1 {
-            let b = self
-                .listed
-                .first()
-                .map(|(_, b)| box_words(b))
-                .unwrap_or_default();
-            return format!("{name}, {b}{code}");
+            return format!("{name}, {first}{code}");
+        }
+        // Page furniture stands at one place: it is named there, with its pages.
+        if self.furniture {
+            return format!("{name}, {first}{code}, on {}", self.pages_words());
         }
         let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
         if self.more_pages > 0 {
@@ -2301,7 +2332,8 @@ fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
 
 /// The new words of the places of one asset after it was read for codes.
 struct Renamed {
-    read: Reread,
+    /// What reading it for codes changed, if anything.
+    read: Option<Reread>,
     /// The page of its first place: later places point there for the codes.
     first: u32,
     /// The pages it is on, said at the first place of page furniture.
@@ -2317,7 +2349,7 @@ struct Renamed {
 /// - a drawing of paths that passed the code-shape test and gave none is listed as a drawing
 ///   that looks like a code, not decoded (or not scanned, when it was not rendered again),
 ///   and needs vision;
-/// - page furniture that gave no code is taken out with its place and file.
+/// - page furniture is named at its first place with its pages; it needs no vision.
 ///
 /// `places` are the small picture assets with their places; their alt texts are written
 /// here.
@@ -2329,9 +2361,8 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         }
         None => (HashMap::new(), HashSet::new()),
     };
-    // The new words of each place by asset id, or `None` to take it out.
-    let mut places_of: HashMap<String, Option<Renamed>> = HashMap::new();
-    let mut gone: HashSet<usize> = HashSet::new();
+    // The new words of each place by asset id.
+    let mut places_of: HashMap<String, Renamed> = HashMap::new();
     for (asset, mut p) in places {
         let f = found.remove(&asset).unwrap_or_default();
         let a = &mut out.doc.assets[asset];
@@ -2346,10 +2377,6 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
             a.needs_vision = false;
             a.codes = f.codes.clone();
             Some(Reread::Codes(names.join(" and ")))
-        } else if p.furniture {
-            places_of.insert(a.id.clone(), None);
-            gone.insert(asset);
-            continue;
         } else if p.vector {
             a.needs_vision = true;
             a.code_unread = true;
@@ -2360,24 +2387,19 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         } else {
             None
         };
-        if let Some(read) = read {
-            let again = match &read {
-                Reread::Codes(name) => Reread::Codes(name.clone()),
-                Reread::Unread => Reread::Unread,
-                Reread::Drawing(s) => Reread::Drawing(*s),
-            };
+        let pages = (p.furniture && p.page_count() > 1).then(|| p.pages_words());
+        if read.is_some() || pages.is_some() {
             places_of.insert(
                 a.id.clone(),
-                Some(Renamed {
-                    read: again,
+                Renamed {
+                    read: read.clone(),
                     first: p.first_page(),
-                    pages: (p.furniture_pages() && p.pages.len() + p.more_pages > 1)
-                        .then(|| p.page_words()),
+                    pages,
                     codes: !a.codes.is_empty(),
-                }),
+                },
             );
-            p.read = Some(read);
         }
+        p.read = read;
         a.alt = Some(p.alt());
     }
     // Pages that need vision as a whole keep it, and list their codes.
@@ -2389,22 +2411,14 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
     if places_of.is_empty() {
         return;
     }
-    fn walk(
-        blocks: &mut Vec<Block>,
-        places: &HashMap<String, Option<Renamed>>,
-        seen: &mut HashSet<String>,
-    ) {
-        blocks.retain(|b| match b {
-            Block::Media { asset, .. } => !matches!(places.get(asset), Some(None)),
-            _ => true,
-        });
+    fn walk(blocks: &mut [Block], places: &HashMap<String, Renamed>, seen: &mut HashSet<String>) {
         for b in blocks.iter_mut() {
             match b {
                 Block::Media { asset, alt, .. } => {
-                    if let (Some(Some(r)), Some(words)) = (places.get(asset), alt.as_mut()) {
+                    if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
                         let first = seen.insert(asset.clone());
                         let more = match (&r.pages, first, r.codes) {
-                            (Some(pages), true, _) => format!(", on pages {pages}"),
+                            (Some(pages), true, _) => format!(", on {pages}"),
                             (_, false, true) => {
                                 format!(
                                     ", its codes are listed at its first place on page {}",
@@ -2413,7 +2427,7 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
                             }
                             _ => String::new(),
                         };
-                        *words = reread_place(words, &r.read, &more);
+                        *words = reread_place(words, r.read.as_ref(), &more);
                     }
                 }
                 Block::Section { blocks, .. }
@@ -2429,23 +2443,6 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         }
     }
     walk(&mut out.doc.body, &places_of, &mut HashSet::new());
-    if !gone.is_empty() {
-        let ids: HashSet<String> = gone.iter().map(|&k| out.doc.assets[k].id.clone()).collect();
-        let mut k = 0;
-        out.doc.assets.retain(|_| {
-            k += 1;
-            !gone.contains(&(k - 1))
-        });
-        let mut freed = 0;
-        out.blobs.retain(|b| {
-            let keep = !ids.contains(&b.asset);
-            if !keep {
-                freed += b.bytes.len() as u64;
-            }
-            keep
-        });
-        out.blob_room += freed;
-    }
 }
 
 /// A Figure of the tag tree with an alt text: the text, and the marked content ids of its

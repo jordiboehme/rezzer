@@ -294,6 +294,41 @@ fn found_by_note(
     }
 }
 
+/// The line that says how many pictures of page `n` are too small to be listed (`count`),
+/// if any; when the limits leave no room for it, a loss says so.
+fn very_small_note(n: u32, count: usize, budget: &Budget, out: &mut Out) -> Option<Block> {
+    if count == 0 {
+        return None;
+    }
+    let text = if count == 1 {
+        "1 very small picture (under 1 cm2) is not listed".to_string()
+    } else {
+        format!("{count} very small pictures (under 1 cm2) are not listed")
+    };
+    match budget
+        .add_elements(1)
+        .and_then(|()| budget.charge_text(text.len()))
+    {
+        Ok(()) => Some(Block::Paragraph {
+            inlines: vec![Inline::Status {
+                text,
+                color: StatusColor::Grey,
+            }],
+            role: Some("pictures".into()),
+            anchor: None,
+        }),
+        Err(hit) => {
+            out.loss(
+                format!("p{n}"),
+                format!("{hit}: the count of the very small pictures of page {n} is not written"),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+            None
+        }
+    }
+}
+
 /// Reads the separators drawn as marks on `pages` with the style the file's visible text
 /// shows (each line of runs scanned whole), before the pages are laid out. A number whose
 /// separators are not read is a Warning loss and makes the read partial: it may be off by a
@@ -671,6 +706,14 @@ fn lay_out(
                 .collect();
             drop(anchored);
             let mut media: Vec<(usize, Block)> = Vec::new();
+            // Pictures too small to be listed on a page that is not rendered whole are
+            // counted, at the end of the page.
+            if !matches!(seen, Some(render::Seen::Page(_))) {
+                let tiny = render::very_small(info, &items);
+                if let Some(note) = very_small_note(n, tiny, budget, out) {
+                    media.push((blocks.len(), note));
+                }
+            }
             let here = figures.get(&n).map_or(&[][..], Vec::as_slice);
             // The Figure alt texts no picture took as its caption, with where they go.
             let mut unmatched: Vec<(usize, String)> = Vec::new();
@@ -961,12 +1004,13 @@ const PLACE_COST: u64 = std::mem::size_of::<Block>() as u64;
 /// Small pictures listed between two questions to the clock.
 const PICTURES_PER_CHECK: usize = 4_096;
 
-/// The small pictures of the document by what they are (`PageItems::images_id`), so equal
-/// pictures share one asset: the index of the asset and its places. Also the small pictures
-/// not listed: how many, on which pages, and why the first were not.
+/// The small pictures of the document by what they are (`PageItems::images_id`) and, for
+/// page furniture, its place, so equal pictures share one asset: the index of the asset and
+/// its places. Also the small pictures not listed: how many, on which pages, and why the
+/// first were not.
 #[derive(Default)]
 struct Pictures {
-    known: HashMap<u64, usize>,
+    known: HashMap<(u64, Option<usize>), usize>,
     assets: Vec<(usize, render::Places)>,
     unlisted: Option<(usize, u32, u32, String)>,
 }
@@ -1017,13 +1061,10 @@ impl Pictures {
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
-            // Page furniture is an asset of its own, apart from places of the same picture
-            // in the text: it stays only when a code is read from it.
-            let key = if p.furniture {
-                p.id ^ 0x9e37_79b9_7f4a_7c15
-            } else {
-                p.id
-            };
+            // Page furniture is an asset of its own for each of its places, apart from places
+            // of the same picture in the text.
+            let key = (p.id, p.furniture);
+            let furniture = p.furniture.is_some();
             let known = self.known.get(&key).copied();
             let checked = if k % PICTURES_PER_CHECK == PICTURES_PER_CHECK - 1 {
                 budget.check_time()
@@ -1044,23 +1085,26 @@ impl Pictures {
                 self.unlist(order.len() - k, n, hit.to_string());
                 break;
             }
-            // Page furniture is not listed unless it holds a code: it takes no Figure.
+            // Page furniture takes no Figure: it stands apart from the page's content.
             let figure = p
                 .mcid
-                .filter(|_| !p.furniture)
+                .filter(|_| !furniture)
                 .and_then(|m| by_mcid.get(&m))
                 .copied();
-            // Regions of paths and page furniture stay only as codes: they are named as codes.
-            let name = if p.vector || p.furniture {
+            // Regions of paths are named as codes, pictures as pictures. Page furniture is
+            // named at its first place only: its later places take no number.
+            let name = if p.vector {
                 codes += 1;
                 format!("page-{n}-code-{codes}")
+            } else if furniture && known.is_some() {
+                String::new()
             } else {
                 pics += 1;
                 format!("page-{n}-pic-{pics}")
             };
             let asset = match known {
                 // Page furniture is named once, at its first place.
-                Some(at) if p.furniture => {
+                Some(at) if furniture => {
                     self.assets[at].1.add(n, p);
                     continue;
                 }
@@ -1091,7 +1135,7 @@ impl Pictures {
                     ));
                     self.known.insert(key, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
-                    if !p.vector && !p.furniture {
+                    if !p.vector && !furniture {
                         new.push(asset);
                     }
                     asset
@@ -1123,7 +1167,7 @@ impl Pictures {
         }
         let first = order
             .iter()
-            .find(|&&i| !list[i].furniture)
+            .find(|&&i| list[i].furniture.is_none())
             .map(|&i| spots[i])
             // Only page furniture: the end of the page, as on a page without pictures.
             .unwrap_or(usize::MAX);
@@ -1681,7 +1725,7 @@ mod tests {
                     how: None,
                     hint: false,
                     vector: false,
-                    furniture: false,
+                    furniture: None,
                     logo: false,
                     mcid: None,
                 }
