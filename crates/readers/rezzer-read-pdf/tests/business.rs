@@ -1519,10 +1519,12 @@ fn unruled_items(
 }
 
 /// Line items without rules whose `Artikel` goes on in a second line, in the first, a middle
-/// or the last row, in every size, font and weight and with 2 to 5 rows: the line joins its
-/// cell, and every title heads the column of its values.
+/// or the last row, in every size, font and weight and with 2 to 5 rows: every title heads
+/// the column of its values. A wrap between two rows joins its cell. A wrap of the last row
+/// looks like a note under the table: it stays out of the table, its text is read, and a loss
+/// says that it may go on in the last row.
 #[test]
-fn a_wrapped_item_line_without_rules_joins_its_cell() {
+fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
     let mut wrong = Vec::new();
     let mut reads = 0;
     for k in [0.75, 1.0, 1.5] {
@@ -1530,7 +1532,12 @@ fn a_wrapped_item_line_without_rules_joins_its_cell() {
             for bold in [false, true] {
                 for n in 2..=5 {
                     for wrap in 0..n {
-                        let (t, columns) = unruled_items(k, fonts, bold, n, Some(wrap), None);
+                        let (t, mut columns) = unruled_items(k, fonts, bold, n, Some(wrap), None);
+                        let last = wrap + 1 == n;
+                        if last {
+                            let item = &mut columns[1].1[wrap];
+                            *item = item.trim_end_matches(" frei Haus").to_string();
+                        }
                         let out = common::read(&page_in(&t, Look::Plain));
                         reads += 1;
                         let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows, wrap {wrap}");
@@ -1538,8 +1545,21 @@ fn a_wrapped_item_line_without_rules_joins_its_cell() {
                         if tables(&out).len() != 1 {
                             b.push(format!("tables {:?}", tables(&out)));
                         }
-                        if !out.document.losses.is_empty() {
-                            b.push(format!("losses {:?}", out.document.losses));
+                        let losses: Vec<&str> = out
+                            .document
+                            .losses
+                            .iter()
+                            .map(|l| l.what.as_str())
+                            .collect();
+                        let want: &[&str] = if last { &[WRAP_LOSS] } else { &[] };
+                        if losses != want {
+                            b.push(format!("losses {losses:?}"));
+                        }
+                        let in_cell = tables(&out)
+                            .iter()
+                            .any(|t| t.1.iter().flatten().any(|c| c.contains("frei Haus")));
+                        if in_cell == last || !common::all_text(&out).contains("frei Haus") {
+                            b.push(format!("the wrap is in a cell: {in_cell}"));
                         }
                         wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
                     }

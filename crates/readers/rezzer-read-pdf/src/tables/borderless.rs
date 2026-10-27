@@ -494,19 +494,19 @@ struct Tail {
     marked: bool,
 }
 
-/// A line of one piece goes on in the cell above it when it starts within this many sizes
-/// of the text of that cell and ends within as many of the end of its column.
+/// A line of one piece under a table may go on in its last row when it ends within this many
+/// sizes of the end of its column.
 const WRAP_ALIGN: f32 = 0.1;
 
 /// How many of the lines under a region (`lines`, the region's first, its `pieces` the
 /// region's own) go on in its last row, and whether the first that does not may (a loss says
-/// so). A marked line (see [`Tail`]) does when each of its pieces stands over one column of
-/// the region (it crosses no gutter). A line of one piece does when it stands over one column
-/// as well, starts flush
-/// with the text over it in its column (see [`WRAP_ALIGN`]), ends within the column, stands
-/// no farther under the line over it than the lines of the region stand apart, and its
-/// column does not hold numbers (a word under a column of numbers is no wrap: it may be,
-/// so a loss says so).
+/// so).
+/// - A marked line (see [`Tail`]) does when each of its pieces stands over one column of the
+///   region (it crosses no gutter): the frame holds it.
+/// - A line of one piece never does: a wrap of the last row and a note under the table look
+///   the same. It may, when it stands over one column (it crosses no gutter), ends within the
+///   column (see [`WRAP_ALIGN`]) and stands no farther under the line over it than the lines
+///   of the region stand apart.
 fn joined_tail(
     flow: &Flow,
     lines: &[FlowLine],
@@ -523,46 +523,29 @@ fn joined_tail(
             .filter(|&c| p.x1 > columns[c].0 && p.x0 < columns[c].1)
             .collect()
     };
-    let pitch = (1..core)
-        .map(|k| lines[k - 1].y - lines[k].y)
-        .fold(0.0f32, f32::max);
-    let mut joined = 0;
-    for (t, line) in lines.iter().enumerate().skip(core) {
+    if !marked {
+        let line = &lines[core];
         let own = pieces_of(flow, line);
-        if marked {
-            // A line that crosses a gutter is no text of the frame's cells: it stays out,
-            // and the frame's loss says so.
-            if !own.iter().all(|p| over(p).len() == 1) {
-                return (joined, false);
-            }
-            joined += 1;
-            continue;
-        }
-        let ([p], size) = (own.as_slice(), line.size.max(1.0)) else {
-            return (joined, false);
+        let [p] = own.as_slice() else {
+            return (0, false);
         };
         let [c] = over(p)[..] else {
-            return (joined, false);
+            return (0, false);
         };
-        let close = lines[t - 1].y - line.y <= pitch + WRAP_ALIGN * size;
+        let pitch = (1..core)
+            .map(|k| lines[k - 1].y - lines[k].y)
+            .fold(0.0f32, f32::max);
+        let size = line.size.max(1.0);
+        let close = lines[core - 1].y - line.y <= pitch + WRAP_ALIGN * size;
         let within = p.x1 <= columns[c].1 + WRAP_ALIGN * size;
-        if !close || !within {
-            return (joined, false);
-        }
-        // The text over the line in its column: the piece of the nearest line above.
-        let above = (0..core)
-            .rev()
-            .find_map(|k| pieces[k].iter().find(|q| over(q) == [c]));
-        let flush = above.is_some_and(|q| (q.x0 - p.x0).abs() <= WRAP_ALIGN * size);
-        let texts: Vec<String> = pieces[1..core]
-            .iter()
-            .flatten()
-            .filter(|q| over(q) == [c])
-            .map(|q| text_of(flow, q.start, q.end))
-            .collect();
-        let numbers = 2 * texts.iter().filter(|t| numeric(t)).count() >= texts.len();
-        if !flush || numbers {
-            return (joined, true);
+        return (0, close && within);
+    }
+    let mut joined = 0;
+    for line in &lines[core..] {
+        // A line that crosses a gutter is no text of the frame's cells: it stays out, and the
+        // frame's loss says so.
+        if !pieces_of(flow, line).iter().all(|p| over(p).len() == 1) {
+            break;
         }
         joined += 1;
     }
