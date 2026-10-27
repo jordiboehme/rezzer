@@ -4883,7 +4883,7 @@ fn head_layouts_with_one_other_date() {
                 (
                     "H: place, comma and the article before the date",
                     title.clone() + &s(400.0, 760.0, "Musterstadt, den 01.02.2026") + &low,
-                    Nothing,
+                    Date("2026-02-01", "only date in the top third of page 1"),
                 ),
                 (
                     "I: a heading right over the date",
@@ -5087,6 +5087,112 @@ fn rereview_probes_keep_their_results() {
                         assert_eq!(unsure(&out), [two], "{case}");
                     }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn date_label_in_a_far_cell_is_the_document_date() {
+    // A field table row `Datum: | 26.10.2026`: the label and its value in two cells with a wide
+    // gap between them, in the top third. The label is a whole date label, so the date is the
+    // document date, at any distance; with the cells drawn and without.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let text = common::show(font, size, 44.0, 760.0, "Datum:")
+                + &common::show(font, size, 304.0, 760.0, "26.10.2026");
+            let cells = common::boxed(40.0, 756.0, 120.0, size * 1.6)
+                + &common::boxed(300.0, 756.0, 120.0, size * 1.6);
+            for (how, head) in [("plain", text.clone()), ("boxed", cells + &text)] {
+                let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+                let out = read(&headed(&format!("{title}{head}"), size, scale, ""));
+                let found = out.document.properties.document_date.as_ref();
+                let case = format!("{how} cells in {size} pt {font}");
+                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-10-26"), "{case}");
+                assert_eq!(
+                    found.map(|d| d.from.as_str()),
+                    Some("date label \"Datum\" on page 1"),
+                    "{case}"
+                );
+                assert_eq!(
+                    front(&out, "source_date").as_deref(),
+                    Some("2026-10-26"),
+                    "{case}"
+                );
+                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+            }
+        }
+    }
+}
+
+#[test]
+fn text_after_the_head_date_that_names_no_other_date_is_no_label() {
+    // A head line `22.10.2026 1` with the next field's label on the same line, a time after
+    // the date, or a number alone: the only date in the top third is the document date. Only
+    // an other date's name or a parenthesis right after the date labels it.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, t: &str| common::show(font, size, x, 760.0, t);
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let heads = [
+                (
+                    "next field",
+                    s(40.0, "22.10.2026 1")
+                        + &s(40.0 + size * 10.0, "Seite:")
+                        + &s(40.0 + size * 14.0, "1"),
+                ),
+                ("time", s(40.0, "22.10.2026 10:30")),
+                ("number", s(40.0, "22.10.2026 1")),
+            ];
+            for (how, head) in heads {
+                let out = read(&headed(&format!("{title}{head}"), size, scale, ""));
+                let found = out.document.properties.document_date.as_ref();
+                let case = format!("{how} in {size} pt {font}");
+                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-10-22"), "{case}");
+                assert_eq!(
+                    found.map(|d| d.from.as_str()),
+                    Some("only date in the top third of page 1"),
+                    "{case}"
+                );
+                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+            }
+            // The other date's name after its value, in parentheses or not: no document date.
+            for line in [
+                "01.01.1970 (Geburtsdatum)",
+                "01.01.1970 geboren",
+                "15.02.2026 (f\u{e4}llig)",
+            ] {
+                let out = read(&headed(
+                    &format!("{title}{}", s(40.0, line)),
+                    size,
+                    scale,
+                    "",
+                ));
+                let case = format!("{line} in {size} pt {font}");
+                assert_eq!(out.document.properties.document_date, None, "{case}");
+                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+            }
+        }
+    }
+}
+
+#[test]
+fn place_comma_and_article_before_the_head_date_is_no_label() {
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            for line in ["Musterstadt, den 01.02.2026", "MUSTERSTADT, DEN 01.02.2026"] {
+                let head = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid")
+                    + &common::show(font, size, 400.0, 760.0, line);
+                let out = read(&headed(&head, size, scale, ""));
+                let found = out.document.properties.document_date.as_ref();
+                let case = format!("{line} in {size} pt {font}");
+                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
+                assert_eq!(
+                    found.map(|d| d.from.as_str()),
+                    Some("only date in the top third of page 1"),
+                    "{case}"
+                );
+                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
             }
         }
     }

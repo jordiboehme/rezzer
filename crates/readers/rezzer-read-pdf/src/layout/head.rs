@@ -223,10 +223,11 @@ pub(crate) enum PageDate {
 
 /// Words that make the label of a date name another date than the document's (a due date, a
 /// date of birth, of delivery, of validity), accent folded: a label that holds one and is not
-/// a whole [`DATE_LABELS`] entry (`Due date`, `Geburtsdatum`, `Faellig am`, `Lieferung`).
-const OTHER_DATE_WORDS: [&str; 12] = [
-    "datum", "date", "data", "fecha", "geburt", "birth", "due", "faellig", "liefer", "delivery",
-    "valid", "gueltig",
+/// a whole [`DATE_LABELS`] entry (`Due date`, `Geburtsdatum`, `Faellig am`, `Lieferung`,
+/// `geboren`).
+const OTHER_DATE_WORDS: [&str; 14] = [
+    "datum", "date", "data", "fecha", "geburt", "geboren", "birth", "born", "due", "faellig",
+    "liefer", "delivery", "valid", "gueltig",
 ];
 
 /// A date as written: its separator and its parts.
@@ -313,12 +314,19 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 /// count, with a year of four digits.
 ///
 /// A date has a label of its own when text stands beside it or over it (see [`labels_of`]):
-/// beside, the other text of its piece (from the date before it to the date after it) or a
-/// text piece that ends to its left on its baseline, unless that text is a place followed by
-/// a comma (`Musterstadt, 01.02.2026`, see [`place_and_comma`]); over, a piece on the line
+/// beside, the text before it in its piece (from the date before it on), unless it is a place
+/// followed by a comma (`Musterstadt, 01.02.2026`, see [`place_and_comma`]), the text after
+/// it when that names another date or stands in parentheses (`01.01.1970 (Geburtsdatum)`; a
+/// number, a time or the next field's label does not), or a text piece that ends to its left
+/// on its baseline, at any distance, unless it is such a place; over, a piece on the line
 /// right above it whose x span overlaps the date's, with any alignment (a label over an
-/// indented, right aligned or centred value, a heading). Such a date is never the document
-/// date (see [`document_date`]): a label Rezzer does not know may name any date.
+/// indented, right aligned or centred value, a heading). When the date stands in the top
+/// third, the nearest piece to its left or a piece over it is a whole [`DATE_LABELS`] entry
+/// and no label names another date, the date is a labelled date as any other (`Datum: |
+/// 26.10.2026` in two cells of a field table; lower on the page a label counts within
+/// [`BESIDE_SIZES`] only, as the pair tables do).
+/// Else such a date is never the document date (see [`document_date`]): a label Rezzer does
+/// not know may name any date.
 pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
@@ -345,14 +353,24 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
                 continue;
             }
             let labels = labels_of(&all, l, own, after, d.start, d.end);
+            let other = labels.all.iter().any(|t| names_other_date(t));
+            // A whole date label at a distance counts in the head only, where the header
+            // fields of a form stand (the bound of the pair tables too).
+            let label = (in_head(l) && !other)
+                .then(|| labels.near.iter().find_map(|t| whole_label(t)))
+                .flatten();
             let seen = Seen {
                 written: (d.sep, d.parts),
                 line,
                 text: l.text[d.start..d.end].to_string(),
-                label: None,
-                named: !labels.is_empty(),
+                label,
+                named: !labels.all.is_empty(),
             };
-            if labels.iter().any(|t| names_other_date(t)) {
+            if seen.label.is_some() {
+                out.labelled.push(seen);
+                continue;
+            }
+            if other {
                 out.other.push((line, seen.written));
             }
             if in_head(l) {
@@ -363,12 +381,21 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     out
 }
 
+/// The texts that label a date of the head (see [`labels_of`]).
+struct Labels<'a> {
+    /// Every text that labels the date.
+    all: Vec<&'a str>,
+    /// The texts among them that may be the date's document-date label: the nearest text
+    /// piece that ends to its left on its baseline, and the pieces over it.
+    near: Vec<&'a str>,
+}
+
 /// The texts that label the date at bytes `start..end` of the piece `l` among the pieces
-/// `all` of the page without being a document-date label (see [`page_dates`]): `own`, the
-/// text before it in its piece, and `after`, the text after it, when either is text and not a
-/// place followed by a comma; a text piece that ends to the left of the date on its baseline,
-/// at any distance, unless it is such a place; and a piece on the line right above it (see
-/// [`right_below`]) whose x span overlaps the date's within [`SPAN_SLACK`] sizes.
+/// `all` of the page (see [`page_dates`]): `own`, the text before it in its piece, when it is
+/// text and not a place followed by a comma; `after`, the text after it, when it names another
+/// date or opens a parenthesis; a text piece that ends to the left of the date on its
+/// baseline, at any distance, unless it is such a place; and a piece on the line right above
+/// it (see [`right_below`]) whose x span overlaps the date's within [`SPAN_SLACK`] sizes.
 fn labels_of<'a>(
     all: &'a [Line<'_>],
     l: &'a Line<'_>,
@@ -376,28 +403,41 @@ fn labels_of<'a>(
     after: &'a str,
     start: usize,
     end: usize,
-) -> Vec<&'a str> {
+) -> Labels<'a> {
     let beside_text = |t: &str| is_text(t) && !place_and_comma(t);
-    let mut out: Vec<&str> = Vec::new();
+    let mut labels = Labels {
+        all: Vec::new(),
+        near: Vec::new(),
+    };
     if beside_text(own) {
-        out.push(own);
+        labels.all.push(own);
     }
-    if beside_text(after) {
-        out.push(after);
+    if names_other_date(after) || after.trim_start().starts_with('(') {
+        labels.all.push(after);
     }
     let (x0, x1) = span_of(l, start, end);
     let slack = SPAN_SLACK * l.size;
+    let mut nearest: Option<(f32, &str)> = None;
     for p in all.iter().filter(|p| !std::ptr::eq(*p, l)) {
         let right = p.runs.iter().map(|r| r.x + r.w).fold(p.x, f32::max);
         let beside =
             (p.y - l.y).abs() <= l.size / 2.0 && right <= x0 + slack && beside_text(&p.text);
         let over =
             right_below(p, l) && p.x <= x1 + slack && right >= x0 - slack && is_text(&p.text);
+        if beside && nearest.is_none_or(|(at, _)| right > at) {
+            nearest = Some((right, &p.text));
+        }
+        if over {
+            labels.near.push(&p.text);
+        }
         if beside || over {
-            out.push(&p.text);
+            labels.all.push(&p.text);
         }
     }
-    out
+    if let Some((_, text)) = nearest {
+        labels.near.push(text);
+    }
+    labels
 }
 
 /// The x spans of a date and of a piece over it may miss each other by this many sizes and
@@ -412,11 +452,17 @@ fn is_text(text: &str) -> bool {
 }
 
 /// Whether `text` is a place followed by a comma, as a letter writes it before its date
-/// (`Musterstadt,`, `Frankfurt am Main,`, `St. Gallen,`): words in letters, with a hyphen, a
-/// period, an apostrophe or a slash inside, that name no other date (see
-/// [`names_other_date`]), and a comma after them.
+/// (`Musterstadt,`, `Frankfurt am Main,`, `St. Gallen,`, `Musterstadt, den`): words in
+/// letters, with a hyphen, a period, an apostrophe or a slash inside, that name no other date
+/// (see [`names_other_date`]), and a comma after them, with the article `den` after the comma
+/// or not.
 fn place_and_comma(text: &str) -> bool {
-    let Some(place) = text.trim_end().strip_suffix(',') else {
+    let text = text.trim_end();
+    let text = match text.rsplit_once(char::is_whitespace) {
+        Some((before, last)) if fold(last) == "den" => before.trim_end(),
+        _ => text,
+    };
+    let Some(place) = text.strip_suffix(',') else {
         return false;
     };
     let place = place.trim();
@@ -732,8 +778,13 @@ mod tests {
         assert!(place_and_comma("Frankfurt am Main,"));
         assert!(place_and_comma("St. Gallen,"));
         assert!(place_and_comma("Baden-Baden, "));
-        // The article after the comma, a postcode, a colon, a number, an other date's label.
-        assert!(!place_and_comma("Musterstadt, den "));
+        // The article after the comma, in any case.
+        assert!(place_and_comma("Musterstadt, den "));
+        assert!(place_and_comma("MUSTERSTADT, DEN "));
+        assert!(place_and_comma("Dresden, "));
+        assert!(place_and_comma("Dresden, den "));
+        assert!(!place_and_comma("den "));
+        // A postcode, a colon, a number, an other date's label.
         assert!(!place_and_comma("12345 Musterstadt, "));
         assert!(!place_and_comma("Datum: Musterstadt, "));
         assert!(!place_and_comma("Nr. 4711, "));
