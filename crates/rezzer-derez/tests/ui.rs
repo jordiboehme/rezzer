@@ -193,12 +193,28 @@ fn long_label_is_shortened_so_the_tally_stays() {
 
 #[test]
 fn bidi_controls_are_cleaned() {
-    let name = "a\u{202E}b\u{200E}c\u{200F}d\u{202A}e\u{2066}f\u{2069}g";
+    let name = "a\u{202E}b\u{200E}c\u{200F}d\u{202A}e\u{2066}f\u{2069}g\u{061C}h";
     let app = App::new(rounds(name, "page\u{202D} 1"), 1, 80, 30);
     let buf = render(&app, 80, 30);
     assert_eq!(
         row(&buf, 0).trim_end(),
-        "DEREZ  a?b?c?d?e?f?g  page? 1  round 1  cleared 0  derezzed 0"
+        "DEREZ  a?b?c?d?e?f?g?h  page? 1  round 1  cleared 0  derezzed 0"
+    );
+}
+
+#[test]
+fn an_empty_label_leaves_two_spaces() {
+    let app = App::new(rounds("notes.md", ""), 1, 80, 30);
+    let buf = render(&app, 80, 30);
+    assert_eq!(
+        row(&buf, 0).trim_end(),
+        "DEREZ  notes.md  round 1  cleared 0  derezzed 0"
+    );
+    let app = App::new(rounds("", ""), 1, 80, 30);
+    let buf = render(&app, 80, 30);
+    assert_eq!(
+        row(&buf, 0).trim_end(),
+        "DEREZ  round 1  cleared 0  derezzed 0"
     );
 }
 

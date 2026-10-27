@@ -2155,6 +2155,7 @@ name = "rezzer-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "rezzer-derez",
  "rezzer-limits",
  "rezzer-mcp",
  "rezzer-model",

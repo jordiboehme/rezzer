@@ -77,7 +77,8 @@ fn status_rest(app: &App, width: u16) -> String {
     );
     let name = clean(app.name());
     let label = clean(app.label());
-    // Room for the name and the label, with the two spaces before each.
+    // Room for the name and the label, with the two spaces before each; an empty one takes
+    // no room and no spaces.
     let room = width.saturating_sub(text_width("DEREZ") + text_width(&tally));
     let name_part = if name.is_empty() {
         0
@@ -87,12 +88,19 @@ fn status_rest(app: &App, width: u16) -> String {
     let label = shorten(&label, room.saturating_sub(name_part + 2));
     let mut rest = String::new();
     if !name.is_empty() {
-        let name_room = room.saturating_sub(2 + text_width(&label) + 2);
+        let label_part = if label.is_empty() {
+            0
+        } else {
+            2 + text_width(&label)
+        };
+        let name_room = room.saturating_sub(label_part + 2);
         rest.push_str("  ");
         rest.push_str(&shorten(&name, name_room));
     }
-    rest.push_str("  ");
-    rest.push_str(&label);
+    if !label.is_empty() {
+        rest.push_str("  ");
+        rest.push_str(&label);
+    }
     rest.push_str(&tally);
     if let Some(note) = app.note() {
         let note = clean(note);
@@ -112,9 +120,13 @@ fn clean(text: &str) -> String {
         .collect()
 }
 
-/// The bidi formatting characters: marks, embeddings and overrides, and isolates.
+/// The bidi formatting characters: marks (the Arabic letter mark too), embeddings and
+/// overrides, and isolates.
 fn is_bidi(c: char) -> bool {
-    matches!(c, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    matches!(
+        c,
+        '\u{061C}' | '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 /// `text` when it fits `room` columns, else as much of it as fits with `...` at the end.
