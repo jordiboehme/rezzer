@@ -1734,6 +1734,7 @@ dependencies = [
  "saphyr-parser",
  "serde_json",
  "sha2",
+ "sheetlayout",
  "tempfile",
  "zip",
 ]

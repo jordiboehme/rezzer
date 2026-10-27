@@ -1004,46 +1004,48 @@ fn ods_content_cut_at_a_limit_names_that_limit() {
 
 // Hostile sheet layouts: many merges, many tiny regions, one merge over the whole sheet. The
 // layout works on the sparse cells and on merge intervals, never on a grid of the used area.
-// Work is bounded by the CPU time of the calling thread (every sheet reader runs on it), so a
-// busy machine does not fail the test; memory by the heap peak of that thread, with the RSS
-// of the process as a loose guard.
+// Work is bounded by the counted steps of layout work on the calling thread (every sheet
+// reader runs on it), so neither a slow nor a busy machine fails the test; memory by the heap
+// peak of that thread, with the RSS of the process as a loose guard.
 
-/// The CPU time the calling thread has used.
-#[cfg(unix)]
-fn thread_cpu() -> Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+/// Checks the layout work of a read: at most the `measured` steps of layout work
+/// ([`sheetlayout::work_steps`], counted in debug builds) with half of them again as margin,
+/// and the wall time under [`SAFETY`]. Each `measured` was taken once (2026-10-27, debug
+/// build, `--no-capture`); the count is the same on every machine, so neither a slow nor a
+/// busy machine fails the test, and a growth past the margin is a change in the work.
+fn assert_layout_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
+    eprintln!(
+        "{what}: {steps:?} layout steps (bound {})",
+        measured + measured / 2
+    );
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= measured + measured / 2),
+            "{what}: {steps:?} layout steps, measured {measured}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
 }
-
-/// No thread CPU clock here: the time bounds are not checked (see their `cfg(unix)`).
-#[cfg(not(unix))]
-fn thread_cpu() -> Duration {
-    Duration::ZERO
-}
-
-/// The work bound of the layout tests: the whole read, layout included, in thread CPU time.
-#[cfg(unix)]
-const LAYOUT_BOUND: Duration = Duration::from_secs(2);
 
 /// Runs `input` (the bytes, or the path of a file) as `name` and returns the result, its peak
-/// heap and the thread CPU time it used.
+/// heap, the steps of layout work it did ([`sheetlayout::work_steps`], `None` in a release
+/// build) and its wall time. The read runs on this thread, so the count is its own.
 fn layout_run(
     name: &str,
     input: Result<Vec<u8>, std::path::PathBuf>,
-) -> (RunResult, usize, Duration) {
+) -> (RunResult, usize, Option<u64>, Duration) {
     let p = sheet_pipeline();
-    let start = thread_cpu();
+    let before = sheetlayout::work_steps();
+    let start = Instant::now();
     let (result, peak) = peak_heap(|| match input {
         Ok(bytes) => p.run_bytes(name, bytes, None, &markdown_request()),
         Err(path) => p.run_path(&path, &markdown_request()),
     });
-    (result, peak, thread_cpu() - start)
+    let took = start.elapsed();
+    let steps = before.zip(sheetlayout::work_steps()).map(|(b, a)| a - b);
+    (result, peak, steps, took)
 }
 
 /// The layouts of every table block in the document, in body order.
@@ -1087,9 +1089,9 @@ fn many_merges_without_values_is_bounded() {
     // The merges are occupied areas for the layout; they cost by their count, not their area.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/corpus/office/malformed/57893-many-merges.xlsx");
-    let (result, peak, used) = layout_run("57893-many-merges.xlsx", Err(path));
+    let (result, peak, steps, took) = layout_run("57893-many-merges.xlsx", Err(path));
     eprintln!(
-        "many_merges: peak heap {} MB, {used:?} CPU: {:?}",
+        "many_merges: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
         losses(&result)
     );
@@ -1101,9 +1103,7 @@ fn many_merges_without_values_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("many_merges", steps, 249_997, took);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(result.markdown_pages.join("").contains("## Sheet1"));
     assert_rss_bounded("many_merges_without_values_is_bounded");
@@ -1129,10 +1129,10 @@ fn checkerboard_sheet_hits_region_limit() {
         xml.push_str("</row>");
     }
     let book = xlsx(&[("Board", worksheet("", &xml, ""))]);
-    let (result, peak, used) = layout_run("board.xlsx", Ok(book));
+    let (result, peak, steps, took) = layout_run("board.xlsx", Ok(book));
     let regions = layouts(&result);
     eprintln!(
-        "checkerboard: {} regions, peak heap {} MB, {used:?} CPU: {:?}",
+        "checkerboard: {} regions, peak heap {} MB in {took:?}: {:?}",
         regions.len(),
         peak / MB,
         losses(&result)
@@ -1143,9 +1143,7 @@ fn checkerboard_sheet_hits_region_limit() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("checkerboard", steps, 2_507_203, took);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(
         losses(&result)
@@ -1176,9 +1174,9 @@ fn one_huge_merge_is_bounded() {
         "<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Anchor</t></is></c></row><row r=\"3\"><c r=\"C3\"><v>42</v></c></row>",
         "<mergeCells count=\"1\"><mergeCell ref=\"A1:XFD1048576\"/></mergeCells>",
     );
-    let (result, peak, used) = layout_run("merge.xlsx", Ok(xlsx(&[("M", sheet)])));
+    let (result, peak, steps, took) = layout_run("merge.xlsx", Ok(xlsx(&[("M", sheet)])));
     eprintln!(
-        "one_huge_merge: peak heap {} MB, {used:?} CPU: {:?}",
+        "one_huge_merge: peak heap {} MB in {took:?}: {:?}",
         peak / MB,
         losses(&result)
     );
@@ -1188,9 +1186,7 @@ fn one_huge_merge_is_bounded() {
         "{:?}",
         losses(&result)
     );
-    // The thread CPU time is measured on unix only.
-    #[cfg(unix)]
-    assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
+    assert_layout_work("one_huge_merge", steps, 11, took);
     assert!(peak < 64 * MB, "peak heap {peak} bytes");
     let md = result.markdown_pages.join("");
     assert!(md.contains("Anchor"), "{md}");
